@@ -3607,6 +3607,7 @@ type Querier interface {
 	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 	// value to leave the column unchanged. The handler builds the diff from the request
 	// body before calling this query.
+	// #2142: theme (system | light | dark) rides the same PATCH; CHECK-constrained.
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	// Full-row update. Caller is responsible for sending every field; partial
 	// updates are not supported in lite (no PATCH semantics merge). updated_at

@@ -109,3 +109,14 @@ export function applyPersistedThemeClass(args: {
   applyThemeClass(args.target, theme, args.prefersDark);
   return theme;
 }
+
+// #2142 -- apply a theme to the live document the way the /settings picker
+// always has: `data-theme` on <html> (slice 170, read by ThemeAwareLogo) plus
+// the `dark` class against the current OS preference. Shared by the picker
+// and `<ThemeServerSync>` so the two cannot apply a theme differently.
+export function applyThemeToDocument(theme: Theme): void {
+  const html = document.documentElement;
+  html.setAttribute("data-theme", theme);
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  applyThemeClass(html, theme, prefersDark);
+}

@@ -18,7 +18,7 @@ INSERT INTO users (
 VALUES (
     $1, $2, $3, $4, $5, $6, $7
 )
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type CreateUserParams struct {
@@ -58,12 +58,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1 AND lower(email) = lower($2::text)
 `
@@ -91,12 +92,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) 
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1 AND id = $2
 `
@@ -123,6 +125,7 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (User,
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -150,7 +153,7 @@ WHERE users.tenant_id = $4
         AND u.idp_issuer = $1
         AND u.idp_subject = $2
   )
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type LinkUserIdpByEmailParams struct {
@@ -196,6 +199,7 @@ func (q *Queries) LinkUserIdpByEmail(ctx context.Context, arg LinkUserIdpByEmail
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -245,9 +249,10 @@ const updateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users
 SET display_name = $3,
     time_zone    = $4,
+    theme        = $5,
     updated_at   = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type UpdateUserProfileParams struct {
@@ -255,18 +260,21 @@ type UpdateUserProfileParams struct {
 	ID          pgtype.UUID `json:"id"`
 	DisplayName string      `json:"display_name"`
 	TimeZone    string      `json:"time_zone"`
+	Theme       string      `json:"theme"`
 }
 
 // Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
 // are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 // value to leave the column unchanged. The handler builds the diff from the request
 // body before calling this query.
+// #2142: theme (system | light | dark) rides the same PATCH; CHECK-constrained.
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
 	row := q.db.QueryRow(ctx, updateUserProfile,
 		arg.TenantID,
 		arg.ID,
 		arg.DisplayName,
 		arg.TimeZone,
+		arg.Theme,
 	)
 	var i User
 	err := row.Scan(
@@ -283,6 +291,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -300,7 +309,7 @@ DO UPDATE SET
     email = EXCLUDED.email,
     display_name = EXCLUDED.display_name,
     updated_at = now()
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type UpsertUserByIdpSubjectParams struct {
@@ -343,6 +352,7 @@ func (q *Queries) UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserById
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }

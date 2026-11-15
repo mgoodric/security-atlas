@@ -91,6 +91,7 @@ GET /v1/controls/imports/settings
 GET /v1/controls/imports/{id}
 GET /v1/controls/imports/{id}/export
 GET /v1/controls/imports/{id}/rows
+GET /v1/controls/needs-reanchoring
 POST /v1/controls/imports
 POST /v1/controls/imports/{id}/approve-clear
 POST /v1/controls/imports/{id}/rows/{row}/approve
