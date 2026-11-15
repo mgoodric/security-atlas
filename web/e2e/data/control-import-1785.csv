@@ -1,0 +1,6 @@
+Control ID,Title,Description,Tested Under,Implementation Type
+ORG-AC-01,MFA for workforce (1785),All workforce accounts require multi-factor authentication.,CC6.1; CC6.2,automated
+ORG-AC-02,Quarterly access review (1785),Privileged access is reviewed every quarter.,CC6.2,manual_periodic
+ORG-OP-01,Incident monitoring (1785),Security events are monitored and triaged daily.,CC7.1,
+ORG-HR-01,Background checks (1785),New hires pass a background check before their start date.,,manual_attested
+ORG-AC-03,,Access is removed within one day of termination.,CC6.2,

@@ -13,6 +13,7 @@
 package board
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"text/template"
@@ -21,10 +22,19 @@ import (
 // narrativeFuncs are the template helpers. Defined once, up front, so the
 // single template.Must parse below resolves every function reference.
 var narrativeFuncs = template.FuncMap{
-	"arrow":  arrowGlyph,
-	"signed": signedInt,
-	"add1":   func(i int) int { return i + 1 },
+	"arrow":      arrowGlyph,
+	"signed":     signedInt,
+	"add1":       func(i int) int { return i + 1 },
+	"pct":        formatPct,
+	"pts":        signedPts,
+	"noBaseline": func() string { return noBaselineText },
+	"legacyInt":  legacyInt,
+	"pluralize":  packSectionFuncs["pluralize"],
 }
+
+// legacyInt renders a figure from a brief stored before #2210, whose
+// integer fields now decode into the pack's float posture type.
+func legacyInt(v float64) int { return int(math.Round(v)) }
 
 // narrativeTmpl is the board-brief narrative template. Pure text/template —
 // no LLM, no inference. Parsed once at package init; a parse failure is a
@@ -39,8 +49,20 @@ _Generated {{ .GeneratedAt }}. Pinned snapshot — posture as of the report date
 
 ## Program posture
 
+{{ with .Coverage -}}
+{{ if .NoScopedFrameworks -}}
+No framework has an activated scope, so no coverage figure is reported. Activate a framework scope to report its coverage.
+{{ else -}}
+Requirement coverage averages {{ pct .CoveragePct }}% across the {{ .ScopedFrameworkCount }} {{ pluralize .ScopedFrameworkCount "framework" "frameworks" }} with an activated scope.
+{{ end }}
+{{ range $.Frameworks -}}
+- **{{ .Name }}{{ if .Version }} {{ .Version }}{{ end }}** — {{ if .ScopeNotSet }}Scope not set: no framework scope is activated, so no coverage is reported.{{ else }}{{ .State }}, {{ pct .CoveragePct }}% requirement coverage ({{ if .NoTrendHistory }}{{ noBaseline }}{{ else }}{{ arrow .TrendArrow }} {{ pts .Delta }} pts over 90 days, from {{ pct .BaselinePct }}%{{ end }}).{{ end }}
+{{ end }}
+Evidence freshness rate (tenant-wide): {{ .EvidenceFreshnessRatePct }}% of controls have fresh evidence.
+{{ else -}}
 {{ range .Frameworks -}}
-- **{{ .Name }}** — We are in {{ .State }} state for {{ .Name }} ({{ .CoveragePct }}% evidence freshness rate (tenant-wide), {{ arrow .TrendArrow }} {{ signed .Delta }} pts over 30 days). Controls with fresh evidence {{ .FreshnessPct }}% (tenant-wide).
+- **{{ .Name }}** — We are in {{ .State }} state for {{ .Name }} ({{ legacyInt .CoveragePct }}% evidence freshness rate (tenant-wide), {{ arrow .TrendArrow }} {{ signed (legacyInt .Delta) }} pts over 30 days). Controls with fresh evidence {{ legacyInt .FreshnessPct }}% (tenant-wide).
+{{ end -}}
 {{ end }}
 ## Control drift — last {{ .Drift.WindowDays }} days
 

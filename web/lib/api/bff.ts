@@ -111,3 +111,29 @@ export async function forwardMultipart(
     headers: { "Content-Type": "application/json" },
   });
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** isUUID reports whether `v` is a canonical UUID. */
+export function isUUID(v: string): boolean {
+  return UUID_RE.test(v);
+}
+
+// rejectNonUUID returns a 400 when any path id is not a UUID, else null.
+// A route that interpolates `[id]` into its upstream path calls it first:
+// encodeURIComponent leaves `..` intact, so `/api/x/%2E%2E/verb` would
+// otherwise normalise upstream to `/v1/verb` (security-atlas#2312).
+export function rejectNonUUID(
+  ids: Record<string, string>,
+): NextResponse | null {
+  for (const [name, v] of Object.entries(ids)) {
+    if (!isUUID(v)) {
+      return NextResponse.json(
+        { error: `${name} must be a UUID` },
+        { status: 400 },
+      );
+    }
+  }
+  return null;
+}

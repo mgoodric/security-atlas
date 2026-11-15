@@ -212,7 +212,7 @@ func (s *Service) GenerateSection(ctx context.Context, section SectionKey, p Gen
 	// guardrail, via the reusable numeric library (slice 501). Every number in
 	// the draft must be a value THIS section's deterministic rollup produced; a
 	// single mismatch auto-rejects the draft BEFORE the operator sees it.
-	if !VerifyNumbers(res.Text, rollup.AllowedNumbers(), rollup.PeriodEnd) {
+	if !rollup.verifyDraftNumbers(res.Text) {
 		out.Suppressed = true
 		out.Reason = ReasonNumericMismatch
 		return out, nil

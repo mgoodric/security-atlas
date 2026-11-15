@@ -106,6 +106,7 @@ func fixedRollup(periodEnd, ctrlID string) boardnarrative.Rollup {
 	b := board.Brief{
 		PeriodEnd:  periodEnd,
 		Frameworks: []board.FrameworkPosture{{Slug: "soc2", Name: "SOC 2", CoveragePct: 84, FreshnessPct: 91, Delta: -3}},
+		Coverage:   &board.CoverageSummary{CoveragePct: 84, ScopedFrameworkCount: 1, EvidenceFreshnessRatePct: 91},
 		Drift:      board.DriftSummary{WindowDays: 30, Delta: -3, FlippedOutCount: 3},
 	}
 	r, _ := boardnarrative.RollupFromBrief(b, []boardnarrative.Excerpt{
