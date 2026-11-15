@@ -5463,7 +5463,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug or id, refused when unknown or archived
+      summary: PATCH /v1/risks/{id} — edit a risk's record fields and placement; body {title?, description?, category?, methodology?, inherent_score?, treatment_owner?, review_due_at?, instrument_reference?, level?, org_unit_id?}; category is a slug or id, refused when unknown or archived; treatment and acceptance fields are refused (400); each change is audit-logged
       tags: [risks]
       operationId: patch-v1-risks-id
       security:
@@ -5506,6 +5506,26 @@ paths:
       summary: GET /v1/risks/{id}/aggregation
       tags: [risks]
       operationId: get-v1-risks-id-aggregation
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/audit-log:
+    get:
+      summary: GET /v1/risks/{id}/audit-log — the risk's change history, newest first; each field change, category move and placement move with actor, time, before and after
+      tags: [risks]
+      operationId: get-v1-risks-id-audit-log
       security:
         - bearer: []
       parameters:

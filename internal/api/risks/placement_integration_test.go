@@ -265,7 +265,8 @@ func TestPlacement_PatchRejects(t *testing.T) {
 		"level differs from new unit":     `{"level":"org","org_unit_id":"` + team.String() + `"}`,
 		"unknown unit":                    `{"org_unit_id":"` + uuid.NewString() + `"}`,
 		"unknown level":                   `{"level":"division"}`,
-		"other field":                     `{"title":"renamed"}`,
+		"unknown field":                   `{"nickname":"renamed"}`,
+		"treatment field":                 `{"treatment":"avoid"}`,
 		"empty body":                      `{}`,
 	}
 	for name, raw := range bad {

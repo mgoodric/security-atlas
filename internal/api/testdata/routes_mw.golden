@@ -184,6 +184,7 @@ GET /v1/risks/theme-heatmap 8
 GET /v1/risks/{id} 8
 GET /v1/risks/{id}/action-plans 8
 GET /v1/risks/{id}/aggregation 8
+GET /v1/risks/{id}/audit-log 8
 GET /v1/risks/{id}/children 8
 GET /v1/risks/{id}/parents 8
 GET /v1/samples/{id} 8

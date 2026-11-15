@@ -4,7 +4,8 @@
 //	POST   /v1/risks           create
 //	GET    /v1/risks           list (optional ?treatment=&category=&methodology= filters)
 //	GET    /v1/risks/{id}      get one
-//	PATCH  /v1/risks/{id}      move between levels and org units (#1749)
+//	PATCH  /v1/risks/{id}      edit record fields (#2104); move between levels and org units (#1749)
+//	GET    /v1/risks/{id}/audit-log the risk's change history (#2104)
 //	DELETE /v1/risks/{id}      delete
 //	GET    /v1/risks/heatmap   5x5 grid for nist_800_30 + qualitative_5x5
 //	GET    /v1/risks/categories the tenant's risk categories (#1809)
@@ -15,9 +16,11 @@
 package risks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -448,15 +451,40 @@ type patchReq struct {
 	// Category moves the risk onto another of the tenant's categories, by
 	// slug or id (#1812).
 	Category *string `json:"category"`
+	// The record fields (#2104). An omitted field keeps its value.
+	Title               *string         `json:"title"`
+	Description         *string         `json:"description"`
+	Methodology         *string         `json:"methodology"`
+	InherentScore       json.RawMessage `json:"inherent_score"`
+	TreatmentOwner      *string         `json:"treatment_owner"`
+	ReviewDueAt         json.RawMessage `json:"review_due_at"`
+	InstrumentReference *string         `json:"instrument_reference"`
 }
 
-// PatchRisk handles PATCH /v1/risks/{id} (#1749): move a risk between
-// hierarchy levels and org units, and (#1812) onto another category. Only
-// `level`, `org_unit_id` and `category` are accepted; any other field is a
-// 400, so a caller never mistakes this for a general update. Each change
-// writes one risk_audit_log row naming the caller. A level that differs
-// from the target unit's level is a 400, as is an unknown or archived
-// category; a risk already on an archived category can be moved off it.
+// patchRefusedFields are the risk fields PATCH does not change (#2104):
+// treatment and acceptance are decisions with their own rules, and the
+// residual score and control links are derived or linked elsewhere. Each
+// is named in the 400 rather than reported as an unknown field.
+var patchRefusedFields = []string{
+	"treatment", "acceptance_status", "accepted_until", "accepter",
+	"residual_score", "linked_control_ids",
+}
+
+// patchFieldList names the fields PATCH /v1/risks/{id} accepts.
+const patchFieldList = "level, org_unit_id, category, title, description, methodology, " +
+	"inherent_score, treatment_owner, review_due_at, instrument_reference"
+
+// PatchRisk handles PATCH /v1/risks/{id}: move a risk between hierarchy
+// levels and org units (#1749), onto another category (#1812), and change
+// its record fields (#2104): title, description, methodology,
+// inherent_score, treatment_owner, review_due_at, instrument_reference.
+// A treatment or acceptance field is a 400 naming it, as is any other
+// unknown field. Each change writes one risk_audit_log row naming the
+// caller, with the before and after values; a PATCH that changes nothing
+// writes none. A level that differs from the target unit's level is a
+// 400, as is an unknown or archived category, an empty title, or an
+// inherent score that does not fit the methodology; a risk already on an
+// archived category can be moved off it.
 func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
@@ -479,10 +507,11 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, risk.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
-		case risk.IsPlacementValidation(err), risk.IsCategoryRefusal(err):
+		case risk.IsPlacementValidation(err), risk.IsCategoryRefusal(err),
+			risk.IsRecordValidation(err):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
-			httperr.WriteInternal(w, r, "update risk placement", err)
+			httperr.WriteInternal(w, r, "update risk", err)
 		}
 		return
 	}
@@ -492,11 +521,24 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 // decodePatch parses a PATCH /v1/risks/{id} body into a PlacementInput. A
 // non-empty message is the 400 to return.
 func decodePatch(r *http.Request) (risk.PlacementInput, string) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return risk.PlacementInput{}, "invalid JSON body"
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(body, &keys); err != nil {
+		return risk.PlacementInput{}, "invalid JSON body: want an object"
+	}
+	for _, f := range patchRefusedFields {
+		if _, ok := keys[f]; ok {
+			return risk.PlacementInput{}, f + " cannot be changed by PATCH /v1/risks/{id}: treatment and acceptance are not record fields"
+		}
+	}
 	var req patchReq
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		return risk.PlacementInput{}, "invalid JSON body: only level, org_unit_id and category can be changed"
+		return risk.PlacementInput{}, "invalid JSON body: " + patchDecodeMessage(err)
 	}
 	var in risk.PlacementInput
 	if req.Level != nil {
@@ -525,10 +567,43 @@ func decodePatch(r *http.Request) (risk.PlacementInput, string) {
 		}
 		in.CategoryRef = *req.Category
 	}
-	if req.Level == nil && !in.OrgUnitSet && req.Category == nil {
-		return risk.PlacementInput{}, "body must set level, org_unit_id and/or category"
+	f := &in.Fields
+	f.Title, f.Description = req.Title, req.Description
+	f.TreatmentOwner, f.InstrumentReference = req.TreatmentOwner, req.InstrumentReference
+	if req.Methodology != nil {
+		m := dbx.RiskMethodology(*req.Methodology)
+		f.Methodology = &m
+	}
+	if req.InherentScore != nil {
+		if string(req.InherentScore) == "null" {
+			return risk.PlacementInput{}, "inherent_score cannot be null"
+		}
+		f.InherentScore = req.InherentScore
+	}
+	if req.ReviewDueAt != nil {
+		var t time.Time
+		if string(req.ReviewDueAt) == "null" || json.Unmarshal(req.ReviewDueAt, &t) != nil {
+			return risk.PlacementInput{}, "review_due_at must be an RFC 3339 timestamp"
+		}
+		f.ReviewDueAt = &t
+	}
+	if req.Level == nil && !in.OrgUnitSet && req.Category == nil && f.Empty() {
+		return risk.PlacementInput{}, "body must set at least one of: " + patchFieldList
 	}
 	return in, ""
+}
+
+// patchDecodeMessage turns a strict-decode error into the 400 text: an
+// unknown field lists the fields PATCH accepts.
+func patchDecodeMessage(err error) string {
+	if msg := err.Error(); strings.HasPrefix(msg, "json: unknown field") {
+		return strings.TrimPrefix(msg, "json: ") + "; PATCH accepts " + patchFieldList
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && typeErr.Field != "" {
+		return typeErr.Field + " has the wrong type"
+	}
+	return "malformed body"
 }
 
 // actorFrom names the caller on the audit row: the credential's id, or a

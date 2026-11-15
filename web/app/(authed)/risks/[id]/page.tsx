@@ -20,7 +20,9 @@
 //
 // Slice 681 made this page read-only. #1748 adds one write surface: the
 // Parents / Children sections attach and detach child risks
-// (RiskHierarchyLinks). Edit and delete of the risk itself stay elsewhere.
+// (RiskHierarchyLinks). #2104 renders the page through the shared
+// DetailHeader, whose Edit links to `/risks/[id]/edit`, and adds the
+// History section (the risk audit trail).
 // The roll-up from the children sits beside the assessed severity and never
 // replaces it.
 
@@ -35,6 +37,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
+import { RiskHistory } from "@/components/risks/risk-history";
+import { DetailHeader } from "@/components/detail/detail-header";
 import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
 import {
@@ -56,11 +60,15 @@ import {
   severityBand,
   severityClasses,
 } from "../filters";
+import { utcDay } from "../new/form-state";
 import { SeverityPill } from "../severity-pill";
 
+// The UTC calendar day, as the edit form and History read it (#2104): the
+// platform renders timestamps in its own zone, so slicing the string
+// would show a different day from the one saved.
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return iso.slice(0, 10);
+  return utcDay(iso) || iso.slice(0, 10);
 }
 
 export default function RiskDetailPage({
@@ -148,63 +156,69 @@ export default function RiskDetailPage({
   const residualN = isFair ? null : residualSeverity(risk.residual_score);
 
   return (
-    <PageShell
+    <DetailHeader
       data-testid="risk-detail"
-      actions={<BackLink />}
-      title={<span data-testid="risk-detail-title">{risk.title}</span>}
-      subtitle={
-        <div className="mt-2 space-y-3" data-testid="risk-detail-header">
-          <div className="flex flex-wrap items-center gap-2">
+      titleTestId="risk-detail-title"
+      headerTestId="risk-detail-header"
+      back={<BackLink />}
+      title={risk.title}
+      edit={{
+        href: `/risks/${encodeURIComponent(id)}/edit`,
+        "data-testid": "risk-detail-edit",
+      }}
+      status={
+        <>
+          <Badge
+            variant="secondary"
+            data-testid="risk-detail-treatment"
+            className="capitalize"
+          >
+            {treatmentLabel(risk)}
+          </Badge>
+          <span
+            className="text-xs text-muted-foreground"
+            data-testid="risk-detail-category"
+          >
+            {category.name}
+          </span>
+          {category.archived ? (
             <Badge
-              variant="secondary"
-              data-testid="risk-detail-treatment"
-              className="capitalize"
+              variant="outline"
+              data-testid="risk-detail-category-archived"
+              title="This category is archived. It stays on the risks that have it but takes no new risks."
             >
-              {treatmentLabel(risk)}
+              archived category
             </Badge>
-            <span
-              className="text-xs text-muted-foreground"
-              data-testid="risk-detail-category"
+          ) : null}
+        </>
+      }
+      subtitle={
+        <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+          <div>
+            <dt className="inline text-muted-foreground">Owner </dt>
+            <dd
+              className="inline text-foreground"
+              data-testid="risk-detail-owner"
             >
-              {category.name}
-            </span>
-            {category.archived ? (
-              <Badge
-                variant="outline"
-                data-testid="risk-detail-category-archived"
-                title="This category is archived. It stays on the risks that have it but takes no new risks."
-              >
-                archived category
-              </Badge>
-            ) : null}
+              {risk.treatment_owner.trim() || "unassigned"}
+            </dd>
           </div>
-          <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-            <div>
-              <dt className="inline text-muted-foreground">Owner </dt>
-              <dd
-                className="inline text-foreground"
-                data-testid="risk-detail-owner"
-              >
-                {risk.treatment_owner.trim() || "unassigned"}
-              </dd>
-            </div>
-            <div>
-              <dt className="inline text-muted-foreground">Methodology </dt>
-              <dd className="inline text-foreground">{risk.methodology}</dd>
-            </div>
-            <div>
-              <dt className="inline text-muted-foreground">Review due </dt>
-              <dd
-                className="inline font-mono text-foreground"
-                data-testid="risk-detail-review-due"
-              >
-                {reviewDuePending(risk.review_due_at)
-                  ? "Not set"
-                  : formatDate(risk.review_due_at)}
-              </dd>
-            </div>
-          </dl>
-        </div>
+          <div>
+            <dt className="inline text-muted-foreground">Methodology </dt>
+            <dd className="inline text-foreground">{risk.methodology}</dd>
+          </div>
+          <div>
+            <dt className="inline text-muted-foreground">Review due </dt>
+            <dd
+              className="inline font-mono text-foreground"
+              data-testid="risk-detail-review-due"
+            >
+              {reviewDuePending(risk.review_due_at)
+                ? "Not set"
+                : formatDate(risk.review_due_at)}
+            </dd>
+          </div>
+        </dl>
       }
     >
       {patternNoLongerMet(risk.inherent_score) ? (
@@ -365,7 +379,10 @@ export default function RiskDetailPage({
           View in hierarchy →
         </Link>
       </div>
-    </PageShell>
+
+      {/* ============ HISTORY (#2104) ============ */}
+      <RiskHistory riskId={id} />
+    </DetailHeader>
   );
 }
 

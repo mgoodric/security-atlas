@@ -1,0 +1,83 @@
+// #2104 — the risk History section's text, from GET /v1/risks/{id}/audit-log.
+//
+// Pure, so vitest pins how each entry reads. An entry becomes one line per
+// changed field: "<field>: <before> -> <after>". For fields_changed the
+// before/after objects already hold only the changed fields; placement
+// and category entries carry their whole small state, so unchanged keys
+// (and the category id behind the slug) are dropped.
+
+import type { RiskAuditEntry } from "@/lib/api/risks";
+
+export type HistoryChange = { field: string; before: string; after: string };
+
+const FIELD_LABELS: Record<string, string> = {
+  title: "Title",
+  description: "Description",
+  methodology: "Methodology",
+  inherent_score: "Inherent score",
+  residual_score: "Residual score",
+  treatment_owner: "Treatment owner",
+  review_due_at: "Review due",
+  instrument_reference: "Instrument reference",
+  category: "Category",
+  level: "Level",
+  org_unit_id: "Org unit",
+};
+
+// Keys an entry carries that are not a change a reader needs to see.
+const HIDDEN_KEYS = new Set(["category_id"]);
+
+export function historyActionLabel(action: string): string {
+  switch (action) {
+    case "fields_changed":
+      return "Edited";
+    case "category_changed":
+      return "Category changed";
+    case "placement_changed":
+      return "Moved";
+    default:
+      return action;
+  }
+}
+
+/** One value as History shows it. */
+export function formatHistoryValue(field: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "none";
+  if (field === "review_due_at" && typeof v === "string") {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? v : d.toISOString().slice(0, 10);
+  }
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if (typeof o.likelihood === "number" && typeof o.impact === "number") {
+      return `likelihood ${o.likelihood} × impact ${o.impact}`;
+    }
+    if (Object.keys(o).length === 0) return "pending evaluation";
+    return JSON.stringify(o);
+  }
+  return String(v);
+}
+
+/** The changed fields of one audit entry, in a stable order. */
+export function historyChanges(entry: RiskAuditEntry): HistoryChange[] {
+  const before = entry.before ?? {};
+  const after = entry.after ?? {};
+  const keys = Array.from(
+    new Set([...Object.keys(before), ...Object.keys(after)]),
+  ).filter((k) => !HIDDEN_KEYS.has(k));
+  const order = Object.keys(FIELD_LABELS);
+  keys.sort((a, b) => {
+    const ia = order.indexOf(a);
+    const ib = order.indexOf(b);
+    return (ia < 0 ? order.length : ia) - (ib < 0 ? order.length : ib);
+  });
+  const out: HistoryChange[] = [];
+  for (const k of keys) {
+    const b = formatHistoryValue(k, before[k]);
+    const a = formatHistoryValue(k, after[k]);
+    if (a === b) continue;
+    out.push({ field: FIELD_LABELS[k] ?? k, before: b, after: a });
+  }
+  return out;
+}

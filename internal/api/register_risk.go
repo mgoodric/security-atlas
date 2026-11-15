@@ -80,6 +80,9 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	root.Post("/v1/risks/{id}/children", risksH.LinkChildren)
 	root.Delete("/v1/risks/{id}/children/{child_id}", risksH.UnlinkChild)
 	root.Get("/v1/risks/{id}/parents", risksH.ListParents)
+	// #2104: the risk's change history. Literal-suffix route declared
+	// before the generic /v1/risks/{id}.
+	root.Get("/v1/risks/{id}/audit-log", risksH.ListAuditLog)
 	// Slice 384: read-only "Linked Action Plans" section on /risks/{id}
 	// (AC-25). Literal-suffix route declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps it ahead.
