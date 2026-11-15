@@ -10,8 +10,8 @@ description: |
   deficiencies communicated within 5 business days, high within 10, medium
   within 30, low within 90.
 
-scf_anchor_id: AAA-12
-control_family: AAA
+scf_anchor_id: MON-05.1
+control_family: MON
 implementation_type: manual_periodic
 owner_role: ciso
 lifecycle_state: active
