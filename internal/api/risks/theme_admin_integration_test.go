@@ -263,7 +263,22 @@ func TestThemeAdmin_DeleteRefusedWhileInUse(t *testing.T) {
 	f := seedThemeFixture(t, admin)
 	env := taxServer(t, dbtest.NewAppPool(t), f.tenant)
 
-	status, body := taxCall(t, env, http.MethodDelete, "/v1/themes/"+orgTheme, env.admin, nil)
+	// The list carries the same usage the refusal reports (#1818), for the
+	// organisation's theme and for a built-in alike.
+	status, body := taxCall(t, env, http.MethodGet, "/v1/themes", env.viewer, nil)
+	if status != http.StatusOK {
+		t.Fatalf("list themes: status %d (%v)", status, body)
+	}
+	usage := map[string][2]float64{}
+	for _, item := range body["themes"].([]any) {
+		th := item.(map[string]any)
+		usage[th["name"].(string)] = [2]float64{th["risk_count"].(float64), th["rule_count"].(float64)}
+	}
+	if usage[orgTheme] != [2]float64{2, 1} || usage["ownership"] != [2]float64{2, 0} {
+		t.Fatalf("listed usage = %v, want %s 2/1 and ownership 2/0", usage, orgTheme)
+	}
+
+	status, body = taxCall(t, env, http.MethodDelete, "/v1/themes/"+orgTheme, env.admin, nil)
 	if status != http.StatusConflict {
 		t.Fatalf("delete used theme: status %d (%v), want 409", status, body)
 	}
