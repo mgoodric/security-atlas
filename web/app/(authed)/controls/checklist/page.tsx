@@ -40,6 +40,7 @@ import {
   disclosureText,
   showCloudBanner,
 } from "@/lib/checklist/checklist-view";
+import { pageTitle } from "@/lib/page-titles";
 
 async function postJSON(path: string): Promise<ChecklistResponse> {
   const res = await fetch(path, { method: "POST" });
@@ -101,7 +102,7 @@ export default function ChecklistPage() {
   return (
     <PageShell
       data-testid="checklist-page"
-      title="Role-scoped implementation checklist"
+      title={pageTitle("/controls/checklist")}
       subtitle={
         <p className="max-w-2xl">
           Generate a per-team to-do checklist from your in-scope controls. Each

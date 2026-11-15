@@ -111,6 +111,7 @@ import {
   POLICIES_SCAFFOLD_FUTURE_BODY,
   POLICIES_SCAFFOLD_FUTURE_TESTID,
 } from "./scaffold-future";
+import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof PolicyFilters)[] = [
   "status",
@@ -612,7 +613,7 @@ function PoliciesPageInner() {
   if (policiesQ.isLoading) {
     return (
       <ListPage
-        title="Policy library"
+        title={pageTitle("/policies")}
         subtitle="Versioned policies · acknowledgment tracked against the current version"
         actions={actions}
         filterRow={
@@ -627,7 +628,7 @@ function PoliciesPageInner() {
   if (policiesQ.isError) {
     return (
       <ListPage
-        title="Policy library"
+        title={pageTitle("/policies")}
         subtitle="Versioned policies · acknowledgment tracked against the current version"
         actions={actions}
       >
@@ -711,7 +712,7 @@ function PoliciesPageInner() {
 
   return (
     <ListPage
-      title="Policy library"
+      title={pageTitle("/policies")}
       titleAdornment={titleAdornment}
       subtitle="Versioned policies · acknowledgment tracked against the current version"
       actions={actions}

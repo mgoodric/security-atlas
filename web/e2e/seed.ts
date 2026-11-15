@@ -113,7 +113,10 @@ export type FixtureName =
   | "framework-scope-diff"
   // #2089 — one manual_attested control so attest.spec.ts can load the
   // real attest form (the base control is automated).
-  | "attest";
+  | "attest"
+  // #2081 — a dedicated tenant with `board.reporting` + `oscal.export`
+  // on, for the sidebar's flag-on case (sidebar-nav.spec.ts).
+  | "sidebar-nav";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

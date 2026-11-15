@@ -26,15 +26,10 @@ export async function AppShell({
   children: ReactNode;
   bleed?: boolean;
 }) {
-  // Slice 277 — resolve the nav list ONCE per request server-side. The
-  // desktop `<Sidebar>` renders its own copy from the same source via
-  // `getAuthedNav()` (called inside the component); we pass a serialized
-  // {href,label} array to the client `<MobileSidebar>` so the drawer
-  // doesn't re-run the admin-role probe. Both surfaces honor the slice
-  // 186 admin-role gate identically (no behavior drift between desktop
-  // and mobile).
+  // Slice 277 — resolve the nav groups server-side and hand them to the
+  // client `<MobileSidebar>`, so the drawer applies exactly the gates the
+  // desktop `<Sidebar>` does (#2081: both render `getAuthedNav()`).
   const nav = await getAuthedNav();
-  const mobileNav = nav.map(({ href, label }) => ({ href, label }));
 
   return (
     <div className="flex h-screen flex-col">
@@ -49,7 +44,7 @@ export async function AppShell({
       >
         Skip to main content
       </a>
-      <TopBar mobileSidebar={<MobileSidebar nav={mobileNav} />} />
+      <TopBar mobileSidebar={<MobileSidebar nav={nav} />} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         {/* min-w-0: without it this flex item's minimum width is its

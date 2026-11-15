@@ -31,6 +31,7 @@ import { CascadeTree } from "@/components/dashboards-metrics/cascade-tree";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMetricsCatalog } from "@/lib/api/metrics";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function MetricsDashboardPage() {
   const boardQuery = useQuery({
@@ -45,7 +46,7 @@ export default function MetricsDashboardPage() {
 
   return (
     <PageShell
-      title="Metrics"
+      title={pageTitle("/dashboards/metrics")}
       subtitle="Board-level KPIs and the cascading program and team metrics that feed them. Click a card to walk its cascade."
       data-testid="metrics-dashboard"
     >
