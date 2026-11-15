@@ -3452,7 +3452,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}/applicability/diff:
     get:
-      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision
+      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision; implementation-reference-only edits are listed apart in reference_changes; the baseline is always the currently activated revision, so a superseded revision is compared against its successor
       tags: [framework-scopes]
       operationId: get-v1-framework-scopes-id-applicability-diff
       security:
