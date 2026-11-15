@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -20,7 +23,7 @@ const maxSettingsBody = 4 * 1024
 // (controlimport.Store in production).
 type SettingsStore interface {
 	GetSettings(ctx context.Context) (controlimport.Settings, error)
-	SetSettings(ctx context.Context, in controlimport.Settings, updatedBy string) (controlimport.Settings, error)
+	SetSettings(ctx context.Context, in controlimport.Settings, updatedBy string, actor uuid.UUID) (controlimport.Settings, error)
 }
 
 // WithSettings serves GET and PUT /v1/controls/imports/settings (#2079).
@@ -48,7 +51,7 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 
 // PutSettings replaces the tenant's control import settings. Turning
 // llm_rerank_local on lets a tenant not routed to a cloud LLM have its import
-// candidates reranked on its local Ollama.
+// candidates reranked on its local Ollama. Each change is audited (#2224).
 func (h *Handler) PutSettings(w http.ResponseWriter, r *http.Request) {
 	if !requireTenantAdmin(w, r) {
 		return
@@ -61,7 +64,10 @@ func (h *Handler) PutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cred, _ := authctx.CredentialFromContext(r.Context())
-	s, err := h.settings.SetSettings(r.Context(), controlimport.Settings{LLMRerankLocal: *body.LLMRerankLocal}, cred.ID)
+	// The audit row names the user; a caller that is not one (a bootstrap
+	// key) is recorded as uuid.Nil, with cred.ID still in updated_by.
+	actor, _ := credstore.CallerUserID(cred)
+	s, err := h.settings.SetSettings(r.Context(), controlimport.Settings{LLMRerankLocal: *body.LLMRerankLocal}, cred.ID, actor)
 	if err != nil {
 		httperr.WriteInternal(w, r, "controlimports", err)
 		return
