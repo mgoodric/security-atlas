@@ -351,6 +351,20 @@ func bindScopeCells(ctx context.Context, q *dbx.Queries, tenantID, vendorID uuid
 	return nil
 }
 
+// InitialReviewDays returns the tenant's vendor initial-review window
+// (#2061): a vendor that has never been reviewed is due for its first review
+// this many days after it was created. Set via PATCH /v1/tenants/{id}
+// vendor_initial_review_days (#2201).
+func (s *Store) InitialReviewDays(ctx context.Context) (int, error) {
+	var days int
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		d, err := initialReviewDays(ctx, q, tenantID)
+		days = d
+		return err
+	})
+	return days, err
+}
+
 // initialReviewDays reads the tenant's vendor initial-review window (#2061).
 // A tenant with no `tenants` row gets DefaultInitialReviewDays, the same
 // default the overdue SQL COALESCEs to.

@@ -3566,6 +3566,12 @@ type Querier interface {
 	// their review dates: the cadence is read only when a risk is inserted.
 	UpdateTenantRiskReviewCadence(ctx context.Context, arg UpdateTenantRiskReviewCadenceParams) (UpdateTenantRiskReviewCadenceRow, error)
 	UpdateTenantTheme(ctx context.Context, arg UpdateTenantThemeParams) (OrgTheme, error)
+	// #2201: set the caller-tenant's vendor initial-review window in days. RLS
+	// gates this to the caller's own row; `tenants_vendor_initial_review_days_chk`
+	// bounds it to 1..365 (defense in depth atop the handler's check). The window
+	// is read whenever a never-reviewed vendor is read, so a change moves the
+	// first review date of every vendor that has not been reviewed yet.
+	UpdateTenantVendorInitialReviewDays(ctx context.Context, arg UpdateTenantVendorInitialReviewDaysParams) (UpdateTenantVendorInitialReviewDaysRow, error)
 	// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
 	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 	// value to leave the column unchanged. The handler builds the diff from the request

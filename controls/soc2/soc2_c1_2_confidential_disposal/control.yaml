@@ -9,7 +9,7 @@ description: |
   disposal method. Pairs with CC6.5 (asset disposal) — this control is the
   data-level view; CC6.5 is the hardware-level view.
 
-scf_anchor_id: AST-09
+scf_anchor_id: AST-22
 control_family: AST
 implementation_type: manual_periodic
 owner_role: it-operations

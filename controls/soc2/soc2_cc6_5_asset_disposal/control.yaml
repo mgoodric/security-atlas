@@ -10,7 +10,7 @@ description: |
   orgs the bulk of this evidence is the storage-deletion log from the
   cloud provider.
 
-scf_anchor_id: AST-09
+scf_anchor_id: AST-22
 control_family: AST
 implementation_type: semi_automated
 owner_role: it-operations

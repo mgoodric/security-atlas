@@ -270,6 +270,10 @@ export function TenantSection() {
             ) : null}
             <GatePolicyControl tenantId={currentTenant.id} noun={noun} />
             <RiskReviewCadenceControl tenantId={currentTenant.id} noun={noun} />
+            <VendorInitialReviewControl
+              tenantId={currentTenant.id}
+              noun={noun}
+            />
           </>
         )}
       </CardContent>
@@ -525,6 +529,159 @@ function RiskReviewCadenceControl({
       {current.error || mut.error ? (
         <Alert variant="destructive">
           <AlertDescription data-testid="settings-tenant-risk-review-cadence-error">
+            {((mut.error ?? current.error) as Error).message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
+// #2201: the organisation vendor initial-review window. A vendor that has
+// never been reviewed is due for its first review this many days after it
+// was created. Reads the current value from
+// `GET /api/vendors/initial-review-window` and writes through the same
+// `PATCH /api/tenants/[id]` route as the risk review cadence (admin or
+// super_admin upstream; each change is audited).
+async function fetchVendorInitialReviewDays(): Promise<number> {
+  const res = await fetch("/api/vendors/initial-review-window", {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`read vendor initial review window: ${res.status}`);
+  }
+  const body = (await res.json()) as { vendor_initial_review_days?: unknown };
+  if (typeof body.vendor_initial_review_days !== "number") {
+    throw new Error("read vendor initial review window: malformed response");
+  }
+  return body.vendor_initial_review_days;
+}
+
+async function patchVendorInitialReviewDays(
+  id: string,
+  vendor_initial_review_days: number,
+): Promise<number> {
+  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vendor_initial_review_days }),
+  });
+  if (!res.ok) {
+    let parsed: { error?: string } = {};
+    try {
+      parsed = JSON.parse(await res.text()) as { error?: string };
+    } catch {
+      // body might be plaintext; fall through
+    }
+    throw new Error(
+      parsed.error ?? `set vendor initial review window: ${res.status}`,
+    );
+  }
+  const json = (await res.json()) as {
+    tenant?: { vendor_initial_review_days?: unknown };
+  };
+  const days = json.tenant?.vendor_initial_review_days;
+  return typeof days === "number" ? days : vendor_initial_review_days;
+}
+
+function VendorInitialReviewControl({
+  tenantId,
+  noun,
+}: {
+  tenantId: string;
+  noun: string;
+}) {
+  const qc = useQueryClient();
+  const current = useQuery({
+    queryKey: ["vendors", "initial-review-window"],
+    queryFn: fetchVendorInitialReviewDays,
+  });
+  // null: the operator has not edited the field, so it shows the stored
+  // window.
+  const [edited, setEdited] = useState<string | null>(null);
+  const draft =
+    edited ?? (current.data === undefined ? "" : String(current.data));
+  const [saved, setSaved] = useState(false);
+
+  const mut = useMutation({
+    mutationFn: (days: number) => patchVendorInitialReviewDays(tenantId, days),
+    onSuccess: (days) => {
+      qc.setQueryData(["vendors", "initial-review-window"], days);
+      setEdited(null);
+      setSaved(true);
+    },
+  });
+
+  const days = Number(draft);
+  const valid = Number.isInteger(days) && days >= 1 && days <= 365;
+  const dirty = current.data !== undefined && days !== current.data;
+
+  return (
+    <div
+      className="space-y-3 border-t border-border pt-4"
+      data-testid="settings-tenant-vendor-initial-review"
+    >
+      <div>
+        <div className="text-sm font-medium text-foreground">
+          Vendor first review window
+        </div>
+        <p className="text-xs text-muted-foreground">
+          A vendor in this {noun} that has never been reviewed is due for its
+          first review this many days after it is added, and is overdue only
+          after that day. Changing the window moves the first review date of
+          every vendor not yet reviewed.
+        </p>
+      </div>
+      {current.isLoading ? (
+        <Skeleton className="h-8 w-32" />
+      ) : (
+        <div className="flex items-center gap-3">
+          <Input
+            type="number"
+            min={1}
+            max={365}
+            className="w-28"
+            value={draft}
+            disabled={mut.isPending || current.isError}
+            onChange={(e) => {
+              setEdited(e.target.value);
+              setSaved(false);
+            }}
+            aria-label="Vendor first review window in days"
+            data-testid="settings-tenant-vendor-initial-review-input"
+          />
+          <span className="text-sm text-muted-foreground">days</span>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setSaved(false);
+              mut.mutate(days);
+            }}
+            disabled={!valid || !dirty || mut.isPending}
+            data-testid="settings-tenant-vendor-initial-review-save"
+          >
+            {mut.isPending ? "Saving…" : "Save window"}
+          </Button>
+          {saved && !dirty ? (
+            <span
+              className="text-xs text-muted-foreground"
+              data-testid="settings-tenant-vendor-initial-review-saved"
+            >
+              Unreviewed vendors are due {current.data} days after they are
+              added.
+            </span>
+          ) : null}
+        </div>
+      )}
+      {!valid && draft !== "" ? (
+        <p className="text-xs text-destructive">
+          Enter a whole number of days from 1 to 365.
+        </p>
+      ) : null}
+      {current.error || mut.error ? (
+        <Alert variant="destructive">
+          <AlertDescription data-testid="settings-tenant-vendor-initial-review-error">
             {((mut.error ?? current.error) as Error).message}
           </AlertDescription>
         </Alert>
