@@ -352,13 +352,16 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, "invalid tenant_id")
 		return
 	}
-	result, err := h.oidc.HandleCallback(ctx, r, tenantID)
+	result, err := h.oidc.HandleCallback(ctx, r, tenantID, h.secureCookies)
 	if err != nil {
+		// #2177: a refused flow is over, so its cookies go with the 400.
 		if errors.Is(err, oidc.ErrStateMismatch) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
 			writeAuthError(w, http.StatusBadRequest, "state mismatch (CSRF guard tripped)")
 			return
 		}
 		if errors.Is(err, oidc.ErrTenantMismatch) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
 			writeAuthError(w, http.StatusBadRequest, "tenant does not match the login flow")
 			return
 		}
