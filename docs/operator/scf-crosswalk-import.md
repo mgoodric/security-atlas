@@ -345,3 +345,42 @@ can act on it:
 ```text
 edge upgraded onto rejected tier CC6.1->IAC-01: source_attribution community_draft -> scf_official; mapping_tier stays rejected
 ```
+
+## Retiring edges
+
+An import retires the edges of its framework version that it no longer
+lists. That stops a mapping that moved from leaving the old edge counting as
+coverage. The mapping might have moved to another anchor (an SCF renumbering),
+or to a new SCF release's anchor row: edges are matched by requirement row and
+anchor row, not by code.
+
+A retired edge is not deleted. It keeps its row and its tier history, and
+the import adds a tier-transition row noting the retirement. It drops out of
+coverage, traversal, the catalog export and the tier workflow. If a later
+import lists the same pair again, the edge is restored, with another
+transition row.
+
+An import retires only edges it wrote. Each edge records its source in
+`crosswalk_source`:
+
+| Import                     | Source                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| YAML crosswalk             | `yaml:<file name>`                                                             |
+| SCF workbook, wide columns | `scf-workbook:<columns>`, e.g. `scf-workbook:ISO 27001 2022+ISO 27002 2022=A.` |
+| SCF OLIR STRM workbook     | `scf-olir:<sheet>`                                                             |
+
+So the ISO preset above and `iso27001-2022.yaml` can share `iso27001` / `2022`:
+re-importing either one leaves the other's edges alone. An edge written
+before sources were recorded has none. A YAML import treats such an edge as
+its own; a workbook import never retires it. An unlisted edge with a
+`source_attribution` the import does not write is also kept.
+
+Each retired edge, restored edge and kept unlisted edge is printed, with a
+count of retired edges per source:
+
+```text
+edge retired 164.308(a)(5)(ii)(D)->IAC-10: no longer in the crosswalk (source=(none) source_attribution=community_draft mapping_tier=draft)
+edges retired by source[(none)]=1
+edge restored CC6.1->IAC-01: listed again (mapping_tier=verified)
+edge kept A.5.15->IAC-37: not in the crosswalk, but written by another source (source=scf-workbook:ISO 27001 2022+ISO 27002 2022=A. source_attribution=community_draft)
+```

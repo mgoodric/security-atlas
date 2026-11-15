@@ -102,7 +102,7 @@ or --auth-mode in-cluster. The token never appears in a log line or a record.`,
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.authMode, "auth-mode", "kubeconfig-token", "auth mode: kubeconfig-token | in-cluster")
 	cmd.Flags().StringVar(&f.apiServer, "api-server", "", "Kubernetes API server URL (env: KUBERNETES_API_SERVER)")
-	cmd.Flags().StringVar(&f.rbacControl, "rbac-control", "scf:IAC-21", "control_id to attach to k8s.rbac_binding.v1 records")
+	cmd.Flags().StringVar(&f.rbacControl, "rbac-control", "scf:IAC-10", "control_id to attach to k8s.rbac_binding.v1 records")
 	cmd.Flags().StringVar(&f.workloadControl, "workload-control", "scf:CFG-02", "control_id to attach to k8s.workload_security_context.v1 records")
 	cmd.Flags().BoolVar(&f.skipRBAC, "skip-rbac", false, "do not watch RBAC bindings")
 	cmd.Flags().BoolVar(&f.skipWorkload, "skip-workload", false, "do not watch workloads")

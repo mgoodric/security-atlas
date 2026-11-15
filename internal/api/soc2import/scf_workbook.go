@@ -213,6 +213,7 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 		SourceAttribution:   "community_draft",
 		Requirements:        requirements,
 		Mappings:            mappings,
+		Source:              wideWorkbookSource(headers, columns),
 
 		PointsOfFocusRollUp: rollUp,
 	}
@@ -223,6 +224,22 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 		return nil, err
 	}
 	return cw, nil
+}
+
+// wideWorkbookSource names a wide-workbook import by the columns it read,
+// with their prefixes, so a re-import of the same columns retires its own
+// stale edges while a separate import of other columns into the same
+// framework version is a different source and is left alone (#1971).
+func wideWorkbookSource(headers []string, columns []workbookColumn) string {
+	parts := make([]string, 0, len(columns))
+	for _, col := range columns {
+		part := normalizeHeader(headers[col.Index])
+		if col.Prefix != "" {
+			part += "=" + col.Prefix
+		}
+		parts = append(parts, part)
+	}
+	return "scf-workbook:" + strings.Join(parts, "+")
 }
 
 // focalDocumentsSheet finds the focal-document metadata sheet, published as
@@ -313,6 +330,7 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 			SourceAttribution:   "community_draft",
 			Requirements:        requirements,
 			Mappings:            mappings,
+			Source:              "scf-olir:" + sheet,
 
 			PointsOfFocusRollUp: rollUp,
 		}

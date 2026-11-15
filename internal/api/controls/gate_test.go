@@ -26,7 +26,7 @@ import (
 const jsonpathManifest = `bundle_schema_version: "1"
 bundle_id: gate_jsonpath_control
 title: "Encrypted buckets"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -332,7 +332,7 @@ func TestRunGate_SQLWithNoRunnerBlocks(t *testing.T) {
 	const sqlManifest = `bundle_schema_version: "1"
 bundle_id: gate_sql_control
 title: "SQL control"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -369,7 +369,7 @@ evidence_queries:
 const allowStyleManifest = `bundle_schema_version: "1"
 bundle_id: gate_allow_style_control
 title: "Allow-style rego"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -419,7 +419,7 @@ func TestDryRunQueries_AcceptsWorkingQueries(t *testing.T) {
 const runawayRegoManifest = `bundle_schema_version: "1"
 bundle_id: gate_runaway_rego
 title: "Runaway Rego"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -439,7 +439,7 @@ evidence_queries:
 const dryRunSQLManifest = `bundle_schema_version: "1"
 bundle_id: gate_dry_run_sql
 title: "SQL control"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:

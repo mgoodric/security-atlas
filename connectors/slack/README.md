@@ -12,7 +12,7 @@ It follows the slice-004 AWS connector pattern: register-per-run, stable
 
 | Kind                          | Profile | Source                          | Default SCF anchors |
 | ----------------------------- | ------- | ------------------------------- | ------------------- |
-| `slack.workspace_member.v1`   | pull    | `users.list` (admin users)      | `IAC-01`, `IAC-06`  |
+| `slack.workspace_member.v1`   | pull    | `users.list` (admin users)      | `IAC-01`, `IAC-37`  |
 | `slack.admin_audit_event.v1`  | pull    | audit-logs API `/audit/v1/logs` | `MON-01`            |
 | `slack.retention_settings.v1` | pull    | `team.preferences.list`         | `DCH-01`, `DCH-03`  |
 

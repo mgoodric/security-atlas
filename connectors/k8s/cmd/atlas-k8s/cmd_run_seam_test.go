@@ -107,7 +107,7 @@ func okFlags() runFlags {
 		cluster:         "cluster-1",
 		environment:     "prod",
 		authMode:        "kubeconfig-token",
-		rbacControl:     "scf:IAC-21",
+		rbacControl:     "scf:IAC-10",
 		workloadControl: "scf:CFG-02",
 		netpolControl:   "scf:NET-04",
 		pssControl:      "scf:CFG-02",

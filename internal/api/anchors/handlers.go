@@ -316,7 +316,7 @@ func includesState(r *http.Request) bool {
 }
 
 // getAnchor returns one anchor. `:id` may be a UUID or an scf_id
-// (e.g., "IAC-06").
+// (e.g., "IAC-37").
 //
 // #1770: `?scf_release=<label>` resolves the scf_id within that SCF
 // release; without it the scf_id resolves in the current release (a UUID

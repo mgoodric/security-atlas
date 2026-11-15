@@ -4,7 +4,7 @@
   "x-evidence-kind": "slack.workspace_member.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-01", "IAC-06"],
+  "x-default-scf-anchors": ["IAC-01", "IAC-37"],
   "title": "Slack workspace member access state",
   "description": "Per-member access METADATA from the Slack admin users API — one record per workspace member per run. Membership/role/2FA metadata ONLY; the connector never reads message content, DMs, or channel history (slice 443 threat-model I). Feeds access-control evidence (who has workspace access, who is admin/owner) plus 2FA-enforcement coverage.",
   "type": "object",

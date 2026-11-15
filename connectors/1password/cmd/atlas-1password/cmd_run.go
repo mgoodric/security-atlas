@@ -55,7 +55,7 @@ path is preferred so the secret never appears in shell history.`,
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.opBaseURL, "1password-base-url", "https://api.1password.com", "1Password public API base URL")
 	cmd.Flags().StringVar(&f.serviceToken, "token", "", "1Password Service Account token (env: ONEPASSWORD_SERVICE_ACCOUNT_TOKEN preferred so the token never appears in shell history)")
-	cmd.Flags().StringVar(&f.controlID, "org-policy-control", "scf:IAC-10", "control_id to attach to 1password.org_policy.v1 records")
+	cmd.Flags().StringVar(&f.controlID, "org-policy-control", "scf:IAC-14", "control_id to attach to 1password.org_policy.v1 records")
 	return cmd
 }
 

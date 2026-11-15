@@ -4,7 +4,7 @@
   "x-evidence-kind": "personnel_security.workflow.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["HRS-01", "IAC-06", "IAC-15"],
+  "x-default-scf-anchors": ["HRS-01", "IAC-37", "IAC-12"],
   "title": "Personnel security workflow completion",
   "description": "Evidence that a joiner or leaver personnel-security checklist item was completed.",
   "type": "object",
