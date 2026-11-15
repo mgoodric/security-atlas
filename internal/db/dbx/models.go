@@ -800,65 +800,6 @@ func AllRiskAcceptanceStatusValues() []RiskAcceptanceStatus {
 	}
 }
 
-type RiskCategory string
-
-const (
-	RiskCategoryConfidentiality RiskCategory = "confidentiality"
-	RiskCategoryIntegrity       RiskCategory = "integrity"
-	RiskCategoryAvailability    RiskCategory = "availability"
-	RiskCategoryPrivacy         RiskCategory = "privacy"
-	RiskCategoryRegulatory      RiskCategory = "regulatory"
-	RiskCategoryOperational     RiskCategory = "operational"
-	RiskCategoryFinancial       RiskCategory = "financial"
-)
-
-func (e *RiskCategory) Scan(src interface{}) error {
-	switch s := src.(type) {
-	case []byte:
-		*e = RiskCategory(s)
-	case string:
-		*e = RiskCategory(s)
-	default:
-		return fmt.Errorf("unsupported scan type for RiskCategory: %T", src)
-	}
-	return nil
-}
-
-type NullRiskCategory struct {
-	RiskCategory RiskCategory `json:"risk_category"`
-	Valid        bool         `json:"valid"` // Valid is true if RiskCategory is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (ns *NullRiskCategory) Scan(value interface{}) error {
-	if value == nil {
-		ns.RiskCategory, ns.Valid = "", false
-		return nil
-	}
-	ns.Valid = true
-	return ns.RiskCategory.Scan(value)
-}
-
-// Value implements the driver Valuer interface.
-func (ns NullRiskCategory) Value() (driver.Value, error) {
-	if !ns.Valid {
-		return nil, nil
-	}
-	return string(ns.RiskCategory), nil
-}
-
-func AllRiskCategoryValues() []RiskCategory {
-	return []RiskCategory{
-		RiskCategoryConfidentiality,
-		RiskCategoryIntegrity,
-		RiskCategoryAvailability,
-		RiskCategoryPrivacy,
-		RiskCategoryRegulatory,
-		RiskCategoryOperational,
-		RiskCategoryFinancial,
-	}
-}
-
 type RiskLevel string
 
 const (
@@ -3050,7 +2991,6 @@ type Risk struct {
 	TenantID            pgtype.UUID           `json:"tenant_id"`
 	Title               string                `json:"title"`
 	Description         string                `json:"description"`
-	Category            RiskCategory          `json:"category"`
 	Methodology         RiskMethodology       `json:"methodology"`
 	InherentScore       []byte                `json:"inherent_score"`
 	Treatment           RiskTreatment         `json:"treatment"`

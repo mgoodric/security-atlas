@@ -115,11 +115,11 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, residualJ
 	updated := anchor.UTC().Add(-time.Duration(updatedDaysAgo) * 24 * time.Hour)
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, treatment,
+			id, tenant_id, title, description, category_id, treatment,
 			inherent_score, residual_score, updated_at, created_at
 		)
 		VALUES (
-			$1, $2, $3, 'slice 283 test risk', 'operational'::risk_category, 'mitigate'::risk_treatment,
+			$1, $2, $3, 'slice 283 test risk', risk_category_id($2, 'operational'), 'mitigate'::risk_treatment,
 			$4::jsonb, $5::jsonb, $6, $6
 		)
 	`, id, tenant, title, inherentJSON, residualJSON, updated); err != nil {

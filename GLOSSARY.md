@@ -95,6 +95,22 @@ Risks roll up through the `risk_aggregations` join table (parent → child, many
 
 **Roll-up severity** — the parent's severity computed from its children with a severity function (`max`, `weighted_max`, `sum`): the one stored on the parent's `inherent_score`, else `max`. It is computed on read and never stored. It sits beside the parent's **assessed severity**, the score the parent was given itself (`inherent_score`), which linking and unlinking never change. When the roll-up is higher than the assessed severity, the API sets `exceeds_assessed` and the risk detail page flags the parent for review. Children without a 5x5 score do not count toward the roll-up.
 
+## Risk category (#1745)
+
+**Risk category** — the organisation's own classification of a risk, one per risk. Categories are **organisation-owned**: each tenant has its own set in `org_risk_categories` (RLS-isolated), and a risk references one of its own tenant's categories through `risks.category_id`. That reference is the only record of a risk's category; the fixed `risk_category` enum it replaced was dropped in #1819. Every tenant starts with seven seeded categories whose slugs are the old enum values (`confidentiality`, `integrity`, `availability`, `privacy`, `regulatory`, `operational`, `financial`), so a client sending one of those slugs behaves as before. The API takes a category by slug, id, or display name. The slug is immutable; the name and description can be renamed.
+
+**Archived category** — a category taken out of use without losing history. Risks already on it keep it and read normally, and can be moved off it, but no new risk or move can be assigned to it. Archived categories are hidden from pickers and lists unless `include_archived` is asked for. The default cannot be archived. A category in use is archived, not deleted: delete is only for a category no risk or rule uses.
+
+**Default category** — the one category per tenant (`is_default`) that an aggregation meta-risk falls back to when none of its scored children has an active category. Exactly one exists per tenant; `operational` is the seeded default, and any active category, custom ones included, can be made the default. The risk form opens on it.
+
+## Theme (#1811)
+
+**Theme** — a free-form tag on a risk (`risks.themes`, lowercase slugs) that cuts across categories and org units, such as `access-control`. Aggregation rules target a theme to roll matching risks into a meta-risk. A risk can carry several themes.
+
+**Built-in theme** — one of the ten platform defaults (`ownership`, `tech-debt`, `access-control`, ...), stored once with no tenant (`org_themes.tenant_id` NULL) and visible to every tenant. Built-ins cannot be renamed or deleted.
+
+**Organisation theme** — a theme a tenant adds beside the built-ins, visible only to that tenant. Its name must be unique across the built-ins and the tenant's own themes. A rename rewrites the name on every one of the tenant's risks and aggregation rules in one transaction; a delete is refused while any risk or rule uses it.
+
 ## Exception (slice 021)
 
 A time-bounded, scope-bounded waiver of a control's normal evaluation. Always:

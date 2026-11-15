@@ -227,7 +227,7 @@ func (q *Queries) ListFrameworksForTenant(ctx context.Context, tenantID pgtype.U
 }
 
 const listRisksForBoardBrief = `-- name: ListRisksForBoardBrief :many
-SELECT r.id, r.tenant_id, r.title, r.description, r.category, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id FROM risks r
+SELECT r.id, r.tenant_id, r.title, r.description, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id FROM risks r
 WHERE r.tenant_id = $1
   AND r.created_at <= $2
   AND NOT EXISTS (
@@ -274,7 +274,6 @@ func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBo
 			&i.TenantID,
 			&i.Title,
 			&i.Description,
-			&i.Category,
 			&i.Methodology,
 			&i.InherentScore,
 			&i.Treatment,

@@ -647,11 +647,6 @@ func riskWireFrom(r risk.Risk) riskWire {
 		CreatedAt:           r.CreatedAt,
 		UpdatedAt:           r.UpdatedAt,
 	}
-	if w.Category == "" {
-		// A Risk built outside the Store (a test fake) has no category
-		// names; fall back to the dual-written enum.
-		w.Category = string(r.Category)
-	}
 	if r.CategoryID != uuid.Nil {
 		w.CategoryID = r.CategoryID.String()
 	}

@@ -119,7 +119,7 @@ func (s *Store) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRow, e
 
 // riskRowsFromDB projects board-query risks into riskRows, reading each
 // risk's category slug and name from the tenant's own category it
-// references (#1814), not from the dual-written enum. Shared by the brief
+// references (#1814). Shared by the brief
 // and pack stores.
 func riskRowsFromDB(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, rows []dbx.Risk) ([]riskRow, error) {
 	cats, err := q.ListRiskCategories(ctx, pgUUID(tenantID))
@@ -135,7 +135,6 @@ func riskRowsFromDB(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row
 		rr := riskRow{
 			ID:            uuid.UUID(r.ID.Bytes),
 			Title:         r.Title,
-			Category:      string(r.Category),
 			Treatment:     treatmentLabel(r),
 			ResidualScore: r.ResidualScore,
 			InherentScore: r.InherentScore,

@@ -132,13 +132,10 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 	err := s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		// Lock order (#1867, #2204): the vocabulary first, then the rules'
 		// advisory locks, then the row, as AssignThemes and Delete do.
-		var (
-			category     Category
-			categoryEnum dbx.RiskCategory
-		)
+		var category Category
 		if in.CategoryRef != "" {
 			var err error
-			category, categoryEnum, err = ResolveCategoryTx(ctx, q, tenantID, in.CategoryRef)
+			category, err = ResolveCategoryTx(ctx, q, tenantID, in.CategoryRef)
 			if err != nil {
 				return err
 			}
@@ -225,7 +222,6 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 				TenantID:   pgUUID(tenantID),
 				ID:         pgUUID(riskID),
 				CategoryID: pgUUID(category.ID),
-				Category:   categoryEnum,
 			})
 			if err != nil {
 				return fmt.Errorf("update risk category: %w", err)

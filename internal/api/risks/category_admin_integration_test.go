@@ -102,9 +102,9 @@ func taxSeedRisk(t *testing.T, admin *pgxpool.Pool, tenant, category string, the
 	id := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score, themes
-		) VALUES ($1, $2, 'taxonomy fixture', '', $3::risk_category, 'qualitative_5x5',
+		) VALUES ($1, $2, 'taxonomy fixture', '', risk_category_id($2, $3), 'qualitative_5x5',
 		          '{"likelihood":3,"impact":3}'::jsonb, 'untreated', '', '{}'::jsonb, $4)
 	`, id, tenant, category, themes); err != nil {
 		t.Fatalf("seed %s risk: %v", category, err)
@@ -177,13 +177,12 @@ func TestCategoryAdmin_AddThenRenameKeepsSlug(t *testing.T) {
 		t.Fatalf("created = %v", created)
 	}
 
-	// Until #1745's contract step a new category cannot hold risks: a 400,
-	// not a 500.
+	// Since #1745's contract step (#1819) a new category holds risks.
 	if status, body := taxCall(t, env, http.MethodPost, "/v1/risks", env.admin, map[string]any{
 		"title": "in a new category", "category": "cloud-security",
 		"inherent_score": map[string]int{"likelihood": 2, "impact": 2},
-	}); status != http.StatusBadRequest {
-		t.Fatalf("risk in new category: status %d (%v), want 400", status, body)
+	}); status != http.StatusCreated || body["risk"].(map[string]any)["category"] != "cloud-security" {
+		t.Fatalf("risk in new category: status %d (%v), want 201 in cloud-security", status, body)
 	}
 
 	// A duplicate slug is a conflict.
@@ -241,7 +240,9 @@ func TestCategoryAdmin_ArchiveAndUnarchive(t *testing.T) {
 	// Kept on the existing risk, refused for a new one.
 	var stillPrivacy int
 	if err := admin.QueryRow(context.Background(),
-		`SELECT count(*) FROM risks WHERE tenant_id = $1 AND category = 'privacy'`, env.tenant).Scan(&stillPrivacy); err != nil || stillPrivacy != 1 {
+		`SELECT count(*) FROM risks r
+		 JOIN org_risk_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
+		 WHERE r.tenant_id = $1 AND c.slug = 'privacy'`, env.tenant).Scan(&stillPrivacy); err != nil || stillPrivacy != 1 {
 		t.Fatalf("existing privacy risks = %d (%v), want 1", stillPrivacy, err)
 	}
 	if status, body := taxCall(t, env, http.MethodPost, "/v1/risks", env.admin, map[string]any{
