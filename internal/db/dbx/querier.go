@@ -3258,15 +3258,6 @@ type Querier interface {
 	// Citation-resolution gate: does this id name a tenant-owned policy? Used when
 	// a generated item cites a linked policy id. Cross-tenant ids are RLS-invisible.
 	ResolveChecklistPolicy(ctx context.Context, arg ResolveChecklistPolicyParams) (pgtype.UUID, error)
-	// #1815: the tenant's categories whose display name matches name, case-
-	// insensitively on the trimmed value, archived included. Active names are
-	// unique per tenant, but an archived category can share one, so a caller
-	// gets every match and refuses more than one as ambiguous.
-	ResolveRiskCategoriesByName(ctx context.Context, arg ResolveRiskCategoriesByNameParams) ([]OrgRiskCategory, error)
-	// Find one of the tenant's categories by slug or by id (its text form).
-	// Slugs cannot be UUID-shaped strings that collide with another row's id
-	// in practice, and the tenant predicate keeps both arms tenant-local.
-	ResolveRiskCategory(ctx context.Context, arg ResolveRiskCategoryParams) (OrgRiskCategory, error)
 	// The resolver's core lookup: the DISTINCT set of roles a tenant's mappings
 	// grant for a given source (idp_config_id) and group-set. idp_config_id is
 	// matched with IS NOT DISTINCT FROM so NULL (SCIM) only matches NULL mappings
@@ -3413,6 +3404,21 @@ type Querier interface {
 	// new review's reviewed_at is the most-recent on file. updated_at is bumped so
 	// the detail page's "last updated" reflects the change. RLS scopes the write.
 	SetVendorLastReviewDate(ctx context.Context, arg SetVendorLastReviewDateParams) error
+	// #1815: the tenant's categories whose display name matches name, case-
+	// insensitively on the trimmed value, archived included, each held FOR
+	// SHARE as ShareLockRiskCategory does (#2233). Active names are unique per
+	// tenant, but an archived category can share one, so a caller gets every
+	// match and picks the single active one.
+	ShareLockRiskCategoriesByName(ctx context.Context, arg ShareLockRiskCategoriesByNameParams) ([]OrgRiskCategory, error)
+	// Find one of the tenant's categories by slug or by id (its text form) and
+	// hold it FOR SHARE for the rest of the transaction (#2233). Every caller
+	// is about to assign a risk to the row: the share lock makes a concurrent
+	// archive (LockRiskCategory, FOR UPDATE) wait for this write to commit, or
+	// this read wait for the archive and see archived = true. Share locks do
+	// not conflict with each other, so concurrent risk writes do not queue.
+	// Slugs cannot be UUID-shaped strings that collide with another row's id
+	// in practice, and the tenant predicate keeps both arms tenant-local.
+	ShareLockRiskCategory(ctx context.Context, arg ShareLockRiskCategoryParams) (OrgRiskCategory, error)
 	// backup_runs — slice 510 automated-backup status/audit ledger.
 	//
 	// DEPLOYMENT-scope (no tenant_id): a backup is a full cross-tenant operation.
