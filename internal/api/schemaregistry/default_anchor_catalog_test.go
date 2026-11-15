@@ -148,7 +148,7 @@ func TestAnchorExistsInCatalog_RejectsDanglingAnchor(t *testing.T) {
 		// Present anchors (sanity that the helper resolves real ones).
 		{"present_MON-02", "MON-02", true},
 		{"present_IRO-09", "IRO-09", true},
-		{"present_CFG-02", "CFG-02", true},
+		{"present_CFG-04", "CFG-04", true},
 		// Deliberately-dangling fake anchor — MUST be rejected.
 		{"dangling_ZZZ-99", "ZZZ-99", false},
 		// The historical real-but-absent anchors this slice remapped away.

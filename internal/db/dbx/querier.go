@@ -3040,6 +3040,10 @@ type Querier interface {
 	// pattern keeps the query plan stable and lets sqlc emit a *VendorCriticality
 	// parameter so callers can pass nil for "no filter".
 	ListVendors(ctx context.Context, arg ListVendorsParams) ([]Vendor, error)
+	// The visible vocabulary (defaults + the tenant's own) with each theme's
+	// usage (#1818): how many of the tenant's risks carry it, and how many of
+	// its aggregation rules target it. Same counts as ThemeUsage.
+	ListVisibleThemesWithUsage(ctx context.Context, tenantID pgtype.UUID) ([]ListVisibleThemesWithUsageRow, error)
 	// AC-3 + AC-6: returns the sorted sha256_hash strings for the hash-input
 	// computation. Sorted at the DB so a verifier's re-compute matches the
 	// writer's commitment without trusting a Go-side sort.

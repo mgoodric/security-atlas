@@ -10,10 +10,9 @@ metrics:
     category: risk
     name: Exception expiration runway
     description: |
-      Count of active exceptions whose expires_at falls inside the
-      next 30 days. Each is a forced re-decision (canvas §6.3
-      "Auto-renewal forbidden"); a stacked-up runway means real work
-      coming.
+      Active exceptions that expire in the next 30 days. Exceptions
+      never renew on their own, so each one needs a fresh decision; a
+      long runway means real work coming.
     unit: count
     cadence: weekly
     compute_strategy: computed

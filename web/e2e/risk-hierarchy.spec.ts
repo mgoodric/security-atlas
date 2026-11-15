@@ -83,6 +83,8 @@ test.describe("risk hierarchy view", () => {
     //    await expect(page.getByTestId("heatmap-cell-side-panel")).toBeVisible();
     // The side panel names the missing contributing-risk endpoint
     // honestly — it never fabricates a risk list (AC-4, P0-1).
+    // Retired by #2082: the panel now shows a ComingSoon line and names
+    // no endpoint; assert on getByTestId("coming-soon") instead.
     //    await expect(page.getByTestId("heatmap-cell-side-panel")).toContainText(
     //      "/v1/risks/theme-heatmap",
     //    );

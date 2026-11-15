@@ -279,9 +279,8 @@ export default function AdminTenantsPage() {
         <CardHeader>
           <CardTitle>Current tenants</CardTitle>
           <CardDescription>
-            All tenant identity rows on the platform. The bootstrap row (
-            <code>is_bootstrap_tenant=true</code>) was provisioned at first
-            install via the OIDC sign-in path (slice 198).
+            Every tenant on this deployment. The bootstrap tenant was created by
+            the first sign-in after install.
           </CardDescription>
         </CardHeader>
         <CardContent>

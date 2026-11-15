@@ -141,7 +141,7 @@ func okFlags() runFlags {
 		subscriptionID:  "sub-1",
 		entraControl:    "scf:IAC-10",
 		storageControl:  "scf:CRY-04",
-		aksControl:      "scf:CFG-02",
+		aksControl:      "scf:CFG-04",
 		nsgControl:      "scf:NET-04",
 		keyvaultControl: "scf:CRY-09",
 		firewallControl: "scf:NET-04",

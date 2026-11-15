@@ -43,7 +43,7 @@ Coverage queries hit three routes:
 
 All three accept optional `?framework_version=slug:version` to pin historical mappings. `?as-of=<timestamp>` is accepted-and-no-op in v1; slice 012 will activate it.
 
-`?scf_release=<version>` is live on `GET /v1/anchors/{id}`, `GET /v1/anchors/{id}/requirements` and `GET /v1/requirements/{id}/coverage` (#1770), and the response's `scf_release` names the release used. On the anchor reads an SCF code resolves in that release, or in the current release when the parameter is absent; an unknown release and a code missing from the release are distinct 404s. Requirement coverage pins its anchors to the named release; without the parameter it stays unpinned and echoes `scf_release: null` until the crosswalk re-bind (#1971) lets it default to the current release. Control bundles name their release the same way, with `scf_release` in `control.yaml`; without it, upload binds in the current release and returns a deprecation warning.
+`?scf_release=<version>` is live on `GET /v1/anchors/{id}`, `GET /v1/anchors/{id}/requirements` and `GET /v1/requirements/{id}/coverage` (#1770), and the response's `scf_release` names the release used. On the anchor reads an SCF code resolves in that release, or in the current release when the parameter is absent; an unknown release and a code missing from the release are distinct 404s. Requirement coverage pins its anchors to the named release, or to the current release when the parameter is absent (#2203); an edge left on a legacy release on purpose is read only with `?scf_release=<that release>`. Control bundles name their release the same way, with `scf_release` in `control.yaml`; without it, upload binds in the current release and returns a deprecation warning.
 
 **RLS interaction:** the catalog tables (`framework_requirements`, `fw_to_scf_edges`, `scf_anchors`) have no `tenant_id` and no RLS — they're platform-bundled and global. Only `controls` is tenant-scoped. A traversal across tenant boundaries returns the (global) requirement + anchors but an empty controls list — this is the correct shape (canvas §3.5) and is enforced by Postgres RLS, not by app code. The handler MUST NOT add `WHERE tenant_id = ?` to any query (constitutional invariant 6).
 
@@ -261,7 +261,7 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 | `access-control-policy.md`       | Access Control Policy       | `IAC-01`, `IAC-04`, `IAC-22` |
 | `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-01`, `TPM-03`, `TPM-04` |
 | `incident-response-plan.md`      | Incident Response Plan      | `IRO-04`, `IRO-01`, `IRO-02` |
-| `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-02`, `CHG-04` |
+| `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-04`, `CHG-04` |
 
 Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes in the SCF release each file declares (`scf_release`, #1772) to the controls bound to those anchors, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
 
