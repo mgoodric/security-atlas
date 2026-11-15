@@ -5250,7 +5250,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks:
     get:
-      summary: GET /v1/risks — the register; ?category= takes one or more category slugs or ids (repeated or comma-separated, archived included), an unknown one is a 400 naming the valid slugs; each risk carries category (slug), category_id and category_name
+      summary: GET /v1/risks — the register; ?category= takes one or more category slugs or ids (repeated or comma-separated, archived included), an unknown one is a 400 naming the valid slugs; each risk carries category (slug), category_id and category_name; roll-ups (risks with at least one child linked) are left out unless ?include_rollups=true, and an included roll-up carries child_count
       tags: [risks]
       operationId: get-v1-risks
       security:
