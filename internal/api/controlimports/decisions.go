@@ -142,7 +142,8 @@ func writeDecisionError(w http.ResponseWriter, r *http.Request, err error) {
 		httpresp.WriteError(w, http.StatusNotFound, "staged row not found in this import batch")
 	case errors.Is(err, controlimport.ErrRowDecided),
 		errors.Is(err, controlimport.ErrBundleIDTaken),
-		errors.Is(err, controlimport.ErrNoBatchRelease):
+		errors.Is(err, controlimport.ErrNoBatchRelease),
+		errors.Is(err, controlimport.ErrApproveClearRunning):
 		httpresp.WriteError(w, http.StatusConflict, msg)
 	case errors.Is(err, controlimport.ErrApproverRequired):
 		httpresp.WriteError(w, http.StatusForbidden, msg)

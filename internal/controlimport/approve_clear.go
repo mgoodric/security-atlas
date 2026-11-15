@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // #1783: approve-clear approves, in one action, every pending row of a batch
@@ -15,10 +16,24 @@ import (
 // tested criteria, with that candidate. Each row goes through ApproveRow in
 // its own transaction, so it gets the same approver check, control creation,
 // duplicate handling and audit row as a single approval, and a collision on
-// one row never rolls back another's control. The batch row is locked for
-// the whole run, so two approve-clears of one batch run one after the other;
-// a concurrent single approval of a row is serialised by the row lock and
-// counted here as skipped.
+// one row never rolls back another's control. The batch row is locked
+// NOWAIT for the whole run: a second approve-clear of the batch is refused at
+// once (ErrApproveClearRunning) rather than holding a connection while it
+// waits. A concurrent single approval of a row is serialised by the row lock
+// and counted here as skipped. Each audit row carries reason
+// BulkAuditReason.
+
+// ErrApproveClearRunning is an approve-clear of a batch another
+// approve-clear is still running on.
+var ErrApproveClearRunning = errors.New("controlimport: approve-clear already running for this batch")
+
+// BulkAuditReason is the reason on the audit row of every decision an
+// approve-clear makes.
+const BulkAuditReason = "approve-clear"
+
+// pgLockNotAvailable is SQLSTATE 55P03, raised by FOR UPDATE NOWAIT when the
+// row is locked.
+const pgLockNotAvailable = "55P03"
 
 // ApproveClearInput approves the clear rows of one batch.
 type ApproveClearInput struct {
@@ -76,10 +91,14 @@ func (s *Store) ApproveClear(ctx context.Context, in ApproveClearInput) (Approve
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ string) error {
 		var id string
 		err := tx.QueryRow(ctx, `
-			SELECT id::text FROM control_import_batches WHERE id = $1::uuid FOR UPDATE
+			SELECT id::text FROM control_import_batches WHERE id = $1::uuid FOR UPDATE NOWAIT
 		`, in.BatchID).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrBatchNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgLockNotAvailable {
+			return ErrApproveClearRunning
 		}
 		if err != nil {
 			return fmt.Errorf("controlimport: lock batch: %w", err)
@@ -95,6 +114,7 @@ func (s *Store) ApproveClear(ctx context.Context, in ApproveClearInput) (Approve
 		for _, r := range rows {
 			d, err := s.ApproveRow(ctx, ApproveRowInput{
 				BatchID: in.BatchID, RowID: r.ID, Approver: in.Approver, CandidateRank: 1,
+				auditReason: BulkAuditReason,
 			})
 			switch {
 			case err == nil && d.Status == RowStatusDuplicate:

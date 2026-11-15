@@ -17,7 +17,12 @@ must approve, the bundle-ID race guard, binding in the batch's SCF release,
 the `c-` prefix for uuid-shaped IDs, duplicate marking and the audit row.
 Bulk approval inherits all of it. Each approved row writes its own `approve`
 audit row with the same actor, so the audit log shows a bulk approval as N
-approvals. No new audit action and no migration were needed.
+approvals. Each of those rows, and each `duplicate` row the run marks, carries
+`reason = 'approve-clear'` (`BulkAuditReason`), so an auditor can tell which
+decisions came from one bulk action. The reason is set through an unexported
+`ApproveRowInput` field, so the API's single approve cannot claim it. The
+column already allows a reason on any action, so no new audit action and no
+migration were needed. This was required at review.
 
 ## D2 — One transaction per row
 
@@ -32,21 +37,35 @@ the error stay approved, each with its control and audit row.
 "AC-01") would roll back the whole batch. The response reports approved,
 duplicate and skipped rows separately, with per-row reasons.
 
-## D3 — The batch is locked for the run
+## D3 — The batch is locked NOWAIT for the run
 
 **Decision.** The outer transaction takes `SELECT ... FROM
-control_import_batches ... FOR UPDATE` before it reads the clear rows. It
-holds the lock while the per-row approvals run on other connections.
-`ApproveRow` never writes the batch row, so the lock cannot block it.
+control_import_batches ... FOR UPDATE NOWAIT` before it reads the clear rows.
+It holds the lock while the per-row approvals run on other connections. If the
+lock is already held, the request fails at once: SQLSTATE 55P03 maps to
+`ErrApproveClearRunning`, and the API returns 409 "approve-clear already
+running for this batch". `ApproveRow` never writes the batch row, so the lock
+cannot block it.
 
-**Why.** Two approve-clears of one batch run one after the other. The second
-reads the clear rows only after the first commits, so it finds none left. A
-concurrent single approval is not blocked by the batch lock. It is serialised
-by `lockPendingRow`'s row lock instead, and whichever approval comes second
-sees the row decided. For approve-clear that row is `skipped`; for the single
-approval it is a 409. The integration test runs two approve-clears and one
-single approval at once and checks for exactly one control per row and one
-audit row per approval.
+**Why.** The first cut waited on the lock (`FOR UPDATE`). Review required
+NOWAIT, because waiting approve-clears each hold a pool connection and could
+starve the pool. With NOWAIT, a second approve-clear holds nothing and the
+caller retries. A concurrent single approval is not blocked by the batch
+lock. It is serialised by `lockPendingRow`'s row lock instead, and whichever
+approval comes second sees the row decided. For approve-clear that row is
+`skipped`; for the single approval it is a 409.
+
+The outer transaction still lives as long as the run, since it is what holds
+the lock. It does no writes, and only one can exist per batch.
+
+Tests:
+
+- `TestApproveClearRefusedWhileAnotherRuns` holds the batch lock from another
+  transaction and expects a 409 with every row left pending. It also checks
+  that a single approval still goes through during the lock.
+- The race test runs two approve-clears and one single approval at once. It
+  accepts either a 409 or a sequential run for the second approve-clear, and
+  checks for exactly one control per row and one audit row per approval.
 
 ## D4 — What qualifies
 

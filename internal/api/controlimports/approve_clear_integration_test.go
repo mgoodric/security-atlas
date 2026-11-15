@@ -131,12 +131,12 @@ func TestApproveClearApprovesOnlyClearRows(t *testing.T) {
 	}
 	var audits int
 	if err := admin.QueryRow(context.Background(),
-		`SELECT count(*) FROM control_import_audit_log WHERE batch_id = $1::uuid AND action = 'approve' AND actor = $2`,
-		b.ID, env.user.String()).Scan(&audits); err != nil {
+		`SELECT count(*) FROM control_import_audit_log WHERE batch_id = $1::uuid AND action = 'approve' AND actor = $2 AND reason = $3`,
+		b.ID, env.user.String(), controlimport.BulkAuditReason).Scan(&audits); err != nil {
 		t.Fatalf("count audit rows: %v", err)
 	}
 	if audits != 2 {
-		t.Errorf("%d approve audit rows, want 2", audits)
+		t.Errorf("%d approve audit rows marked %q, want 2", audits, controlimport.BulkAuditReason)
 	}
 
 	// A second run finds nothing left to approve.
@@ -217,6 +217,32 @@ func TestApproveClearMatchesSingleApproval(t *testing.T) {
 			t.Errorf("%s: single control %+v\nbulk control %+v", orgID, sp, bp)
 		}
 	}
+
+	// Only the bulk approvals' audit rows carry the approve-clear reason.
+	for _, tc := range []struct {
+		batch, want string
+	}{{sb.ID, ""}, {bb.ID, controlimport.BulkAuditReason}} {
+		rows, err := admin.Query(context.Background(),
+			`SELECT COALESCE(reason, '') FROM control_import_audit_log WHERE batch_id = $1::uuid AND action = 'approve'`, tc.batch)
+		if err != nil {
+			t.Fatalf("read audit rows: %v", err)
+		}
+		n := 0
+		for rows.Next() {
+			var reason string
+			if err := rows.Scan(&reason); err != nil {
+				t.Fatalf("scan audit row: %v", err)
+			}
+			n++
+			if reason != tc.want {
+				t.Errorf("batch %s audit reason = %q, want %q", tc.batch, reason, tc.want)
+			}
+		}
+		rows.Close()
+		if n != 2 {
+			t.Errorf("batch %s has %d approve audit rows, want 2", tc.batch, n)
+		}
+	}
 }
 
 // ----- AC: approve-clear without an approver is refused -----
@@ -239,6 +265,52 @@ func TestApproveClearNeedsAPerson(t *testing.T) {
 		if s != "pending" {
 			t.Errorf("%s status = %s after refused approve-clear, want pending", id, s)
 		}
+	}
+}
+
+// ----- concurrency: a running approve-clear refuses a second at once -----
+
+func TestApproveClearRefusedWhileAnotherRuns(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	cat := seedCatalog(t, admin)
+	tenant := freshTenant(t, admin)
+	env := decisionServer(t, app, tenant)
+	b := stageClear(t, env.testEnv, cat.framework)
+
+	// Stand in for a running approve-clear: hold the batch row lock.
+	ctx := context.Background()
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM control_import_batches WHERE id = $1::uuid FOR UPDATE`, b.ID); err != nil {
+		t.Fatalf("lock batch: %v", err)
+	}
+
+	status, raw := approveClear(t, env.testEnv, env.bearer, b.ID)
+	if status != http.StatusConflict || !strings.Contains(string(raw), "approve-clear already running") {
+		t.Fatalf("approve-clear while locked = %d %s, want 409 already running", status, raw)
+	}
+	for id, s := range rowStatuses(t, admin, b.ID) {
+		if s != "pending" {
+			t.Errorf("%s status = %s after refused approve-clear, want pending", id, s)
+		}
+	}
+
+	// A single approval is not held up by a running approve-clear.
+	status, raw = doPost(t, env.testEnv, env.bearer, decisionPath(b.ID, rowByOrgID(t, b, "CLR-01").ID, "approve"),
+		map[string]any{"candidate_rank": 1})
+	if status != http.StatusOK {
+		t.Fatalf("single approve while batch locked = %d %s", status, raw)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("release lock: %v", err)
+	}
+	status, raw = approveClear(t, env.testEnv, env.bearer, b.ID)
+	if status != http.StatusOK || decodeClear(t, raw).ApprovedCount != 1 {
+		t.Errorf("approve-clear after release = %d %s, want 200 approving CLR-02 only", status, raw)
 	}
 }
 
@@ -279,9 +351,19 @@ func TestApproveClearConcurrentWithSingleApproveAndItself(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	approved := 0
+	// The approve-clears either overlap (one is refused with 409) or run
+	// one after the other (the second finds less, or nothing, to approve).
+	approved, ran := 0, 0
 	for i, c := range clears {
-		if c.status != http.StatusOK {
+		switch c.status {
+		case http.StatusOK:
+			ran++
+		case http.StatusConflict:
+			if !strings.Contains(string(c.raw), "approve-clear already running") {
+				t.Errorf("approve-clear %d = 409 %s, want already running", i, c.raw)
+			}
+			continue
+		default:
 			t.Fatalf("approve-clear %d = %d; body=%s", i, c.status, c.raw)
 		}
 		res := decodeClear(t, c.raw)
@@ -291,6 +373,9 @@ func TestApproveClearConcurrentWithSingleApproveAndItself(t *testing.T) {
 				t.Errorf("approve-clear %d skipped %+v, want only CLR-02 decided by the single approval", i, s)
 			}
 		}
+	}
+	if ran == 0 {
+		t.Fatal("both approve-clears were refused, want at least one to run")
 	}
 	switch single.status {
 	case http.StatusOK:
