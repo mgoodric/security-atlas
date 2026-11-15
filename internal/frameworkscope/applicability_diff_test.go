@@ -55,6 +55,40 @@ func TestDiffDecisions(t *testing.T) {
 	if got[1].Before == nil || got[1].After != nil {
 		t.Errorf("removed: before %v after %v", got[1].Before, got[1].After)
 	}
+
+	// #2214: the reference-only edit is listed apart, and only it.
+	refs := DiffReferences(base, target)
+	if len(refs) != 1 || refs[0].RequirementID != ids[5] || refs[0].Kind != ChangeReferenceChanged {
+		t.Fatalf("reference changes = %+v, want F only", refs)
+	}
+	if refs[0].Before.ImplementationRef != "wiki/a" || refs[0].After.ImplementationRef != "wiki/b" {
+		t.Errorf("reference sides = %+v -> %+v", refs[0].Before, refs[0].After)
+	}
+}
+
+// #2214: a revision whose only edit is an implementation reference has no
+// change of any of the four kinds, so their counts stay zero, and one
+// reference change.
+func TestDiffDecisions_ReferenceOnlyLeavesKindsUnchanged(t *testing.T) {
+	t.Parallel()
+	id := uuid.New()
+	base := []RequirementApplicability{{RequirementID: id, Decision: &Decision{Decision: DecisionApplicable, ImplementationRef: "wiki/a"}}}
+	target := []RequirementApplicability{{RequirementID: id, Decision: &Decision{Decision: DecisionApplicable, ImplementationRef: "wiki/b"}}}
+	if got := DiffDecisions(base, target); len(got) != 0 {
+		t.Fatalf("changes = %+v, want none", got)
+	}
+	if got := DiffReferences(base, target); len(got) != 1 || got[0].Kind != ChangeReferenceChanged {
+		t.Fatalf("reference changes = %+v, want one", got)
+	}
+	// A reference edit alongside a decision change is the decision change,
+	// not also a reference row.
+	target[0].Decision = &Decision{Decision: DecisionExcluded, Justification: "x", ImplementationRef: "wiki/b"}
+	if got := DiffReferences(base, target); len(got) != 0 {
+		t.Fatalf("reference changes with a decision change = %+v, want none", got)
+	}
+	if empty := DiffReferences(nil, nil); empty == nil {
+		t.Fatal("empty reference diff is nil, want non-nil empty")
+	}
 }
 
 func TestDiffDecisions_NoBaselineEveryDecisionAdded(t *testing.T) {
