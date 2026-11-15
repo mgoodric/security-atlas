@@ -1,0 +1,252 @@
+// Issue #1802 — the "audited under" report page (/catalog/audited-under).
+//
+//   * the report lists the fixture gap; Add overlay edge with a rationale
+//     posts the edge (criterion -> the control's anchor, source pre-filled
+//     from the tested-under note) and the row disappears;
+//   * a refusal (403) shows as a toast and the row stays;
+//   * candidate anchors are shown for the row;
+//   * the CSV export downloads, carrying the framework filter.
+//
+// HERMETIC: the report, overlay POST and export BFFs are route-mocked
+// (slice 594 convention), so the spec pins the page. The report's rule
+// (which criteria are reached, candidate release, RLS) is pinned by
+// internal/api/mappingoverlays/audited_under_integration_test.go, and the
+// overlay POST's role guard and validation by that package's tests.
+
+import type { Page, Route } from "@playwright/test";
+
+import type {
+  AuditedUnderReport,
+  AuditedUnderRow,
+} from "../lib/api/audited-under";
+
+import { expect, test } from "./fixtures";
+
+const REPORT = "**/api/mapping-overlays/audited-under";
+const EXPORT = "**/api/mapping-overlays/audited-under/export**";
+const OVERLAY = "**/api/mapping-overlays";
+
+// Neutral test strings only (P0-A9 / GitGuardian).
+const GAP: AuditedUnderRow = {
+  control_id: "c1802000-0000-4000-8000-000000000001",
+  control_bundle_id: "ctrl-1802-nda",
+  control_title: "Confidentiality agreements (1802)",
+  anchor_id: "a1802000-0000-4000-8000-000000000001",
+  anchor_code: "IAC-06",
+  anchor_scf_release: "test-2026.3",
+  anchor_fit: "partial",
+  anchor_fit_note: "IAC-06 covers MFA, not NDAs.",
+  framework: "soc2",
+  framework_version: "2017",
+  requirement_id: "f1802000-0000-4000-8000-000000000001",
+  requirement_code: "CC1.4",
+  requirement_title: "Commitment to competence",
+  tested_under_note: "FY25 report s4",
+  candidate_anchors: [
+    {
+      anchor_id: "a1802000-0000-4000-8000-0000000000c1",
+      anchor_code: "HRS-06",
+      anchor_title: "Confidentiality agreements",
+      relationship_type: "subset_of",
+      strength: 0.7,
+    },
+    {
+      anchor_id: "a1802000-0000-4000-8000-0000000000c2",
+      anchor_code: "GOV-01",
+      anchor_title: "Cybersecurity governance program",
+      relationship_type: "intersects_with",
+      strength: 0.4,
+    },
+  ],
+};
+
+const OTHER: AuditedUnderRow = {
+  ...GAP,
+  control_id: "c1802000-0000-4000-8000-000000000002",
+  control_bundle_id: "ctrl-1802-backup",
+  control_title: "Backups are tested (1802)",
+  anchor_code: "BCD-11",
+  anchor_fit: "exact",
+  anchor_fit_note: undefined,
+  framework: "iso27001",
+  framework_version: "2022",
+  requirement_id: "f1802000-0000-4000-8000-000000000002",
+  requirement_code: "A.8.13",
+  requirement_title: "Information backup",
+  tested_under_note: undefined,
+  candidate_anchors: [],
+};
+
+function report(rows: AuditedUnderRow[]): AuditedUnderReport {
+  return { rows, count: rows.length, candidate_scf_release: "test-2026.3" };
+}
+
+// mockReport serves the report; once `closed` holds the gap's key, later
+// reads leave that row out (the platform's view after the edge lands).
+async function mockReport(page: Page, closed: Set<string>) {
+  await page.route(REPORT, async (route: Route) => {
+    const rows = [GAP, OTHER].filter(
+      (r) => !closed.has(`${r.control_id}:${r.requirement_id}`),
+    );
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(report(rows)),
+    });
+  });
+}
+
+test.describe("Audited under report", () => {
+  test("lists the fixture gap; Add overlay edge with a rationale closes it", async ({
+    authedPage: page,
+  }) => {
+    const closed = new Set<string>();
+    await mockReport(page, closed);
+    const posted: unknown[] = [];
+    await page.route(OVERLAY, async (route: Route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      posted.push(route.request().postDataJSON());
+      closed.add(`${GAP.control_id}:${GAP.requirement_id}`);
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ overlay_edge: { id: "e1" } }),
+      });
+    });
+
+    await page.goto("/catalog/audited-under");
+    await expect(page).toHaveTitle(/Audited under/);
+    const rows = page.getByTestId("audited-under-row");
+    await expect(rows).toHaveCount(2);
+    const gap = rows.filter({ hasText: "CC1.4" });
+    await expect(gap).toContainText("IAC-06@test-2026.3");
+    await expect(gap.getByTestId("audited-under-fit")).toHaveText("Partial");
+    await expect(gap).toContainText("IAC-06 covers MFA, not NDAs.");
+
+    await gap.getByTestId("audited-under-add-edge").click();
+    const form = page.getByTestId("audited-under-edge-form");
+    await expect(page.getByTestId("audited-under-edge-source")).toHaveValue(
+      "FY25 report s4",
+    );
+    const submit = page.getByTestId("audited-under-edge-submit");
+    // The rationale is required.
+    await expect(submit).toBeDisabled();
+    await page
+      .getByTestId("audited-under-edge-rationale")
+      .fill("The FY25 auditor tested CC1.4 against this control.");
+    await submit.click();
+
+    await expect(form).toHaveCount(0);
+    await expect(rows).toHaveCount(1);
+    await expect(rows.filter({ hasText: "CC1.4" })).toHaveCount(0);
+    await expect(page.getByTestId("toast")).toContainText(
+      "Overlay edge added: soc2 CC1.4 to IAC-06",
+    );
+    expect(posted).toEqual([
+      {
+        framework: "soc2",
+        framework_version: "2017",
+        requirement_code: "CC1.4",
+        scf_release: "test-2026.3",
+        anchor_code: "IAC-06",
+        relationship_type: "intersects_with",
+        strength: 0.5,
+        rationale: "The FY25 auditor tested CC1.4 against this control.",
+        source_ref: "FY25 report s4",
+      },
+    ]);
+  });
+
+  test("a refusal shows as a toast and the row stays", async ({
+    authedPage: page,
+  }) => {
+    await mockReport(page, new Set());
+    await page.route(OVERLAY, async (route: Route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "forbidden" }),
+      });
+    });
+
+    await page.goto("/catalog/audited-under");
+    const gap = page
+      .getByTestId("audited-under-row")
+      .filter({ hasText: "CC1.4" });
+    await gap.getByTestId("audited-under-add-edge").click();
+    await page.getByTestId("audited-under-edge-rationale").fill("Relied on.");
+    await page.getByTestId("audited-under-edge-submit").click();
+
+    await expect(page.getByTestId("toast")).toContainText(
+      "Overlay edge not added: forbidden",
+    );
+    await expect(page.getByTestId("audited-under-edge-error")).toHaveText(
+      "forbidden",
+    );
+    await expect(gap).toHaveCount(1);
+  });
+
+  test("candidate anchors are shown for the row", async ({
+    authedPage: page,
+  }) => {
+    await mockReport(page, new Set());
+    await page.goto("/catalog/audited-under");
+    const gap = page
+      .getByTestId("audited-under-row")
+      .filter({ hasText: "CC1.4" });
+    const candidates = gap.getByTestId("audited-under-candidate");
+    await expect(candidates).toHaveCount(2);
+    await expect(candidates.nth(0)).toContainText("HRS-06");
+    await expect(candidates.nth(0)).toContainText(
+      "Confidentiality agreements (subset of, 0.7)",
+    );
+    await expect(
+      candidates.nth(0).getByRole("link", { name: "HRS-06" }),
+    ).toHaveAttribute(
+      "href",
+      `/catalog/scf/${GAP.candidate_anchors[0].anchor_id}`,
+    );
+    await expect(candidates.nth(1)).toContainText("GOV-01");
+    await expect(page.getByTestId("audited-under-count")).toContainText(
+      "candidates from SCF test-2026.3",
+    );
+  });
+
+  test("filters by framework, and the CSV export downloads", async ({
+    authedPage: page,
+  }) => {
+    await mockReport(page, new Set());
+    const exportURLs: string[] = [];
+    await page.route(EXPORT, async (route: Route) => {
+      exportURLs.push(route.request().url());
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="audited-under-e2e.csv"',
+        },
+        body: "framework,requirement_code,anchor_code\nsoc2,CC1.4,IAC-06\n",
+      });
+    });
+
+    await page.goto("/catalog/audited-under");
+    await expect(page.getByTestId("audited-under-row")).toHaveCount(2);
+    await page.getByTestId("audited-under-framework").selectOption("soc2");
+    await expect(page.getByTestId("audited-under-row")).toHaveCount(1);
+    await expect(page.getByTestId("audited-under-row")).toContainText("CC1.4");
+
+    const download = page.waitForEvent("download");
+    await page.getByTestId("audited-under-export-csv").click();
+    const csv = await download;
+    expect(csv.suggestedFilename()).toBe("audited-under-e2e.csv");
+    const chunks: Buffer[] = [];
+    for await (const chunk of await csv.createReadStream()) {
+      chunks.push(chunk as Buffer);
+    }
+    expect(Buffer.concat(chunks).toString("utf8")).toContain(
+      "soc2,CC1.4,IAC-06",
+    );
+    expect(new URL(exportURLs[0]).searchParams.get("framework")).toBe("soc2");
+  });
+});
