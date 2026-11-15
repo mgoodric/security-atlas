@@ -55,6 +55,12 @@ func newSDKClient() (*sdk.Client, error) {
 func newAdminClient() (adminv1.AdminCredentialsServiceClient, *grpc.ClientConn, error) {
 	var transport grpc.DialOption
 	if common.insecure {
+		// #2165: --insecure is loopback-only. The push path inherits the
+		// SDK's WithInsecure guard; the admin client dials directly, so it
+		// applies the same check here.
+		if !sdk.IsLoopbackEndpoint(common.endpoint) {
+			return nil, nil, fmt.Errorf("--insecure refuses non-loopback endpoint %q (allowed: localhost, 127.0.0.0/8, ::1)", common.endpoint)
+		}
 		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
 	} else {
 		transport = grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12}))

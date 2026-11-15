@@ -37,6 +37,7 @@ import { usePathname } from "next/navigation";
 
 import { derivePageName } from "@/lib/page-names";
 import { useCurrentTenantName } from "@/lib/auth/use-current-tenant-name";
+import { cn } from "@/lib/utils";
 
 // pickCurrentTenantName is re-exported from the shared resolver
 // (`web/lib/auth/current-tenant.ts`, slice 674) so the existing
@@ -45,7 +46,7 @@ import { useCurrentTenantName } from "@/lib/auth/use-current-tenant-name";
 // directly.
 export { pickCurrentTenantName } from "@/lib/auth/current-tenant";
 
-export function Breadcrumb() {
+export function Breadcrumb({ className }: { className?: string } = {}) {
   const pathname = usePathname() ?? "";
   // Slice 674 — route through the shared `useCurrentTenantName` hook,
   // which re-fetches on the slice-199 `tenant-switched` broadcast. The
@@ -64,7 +65,10 @@ export function Breadcrumb() {
     <nav
       data-testid="breadcrumb"
       aria-label="Breadcrumb"
-      className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+      className={cn(
+        "flex min-w-0 items-center gap-1 text-xs text-muted-foreground",
+        className,
+      )}
     >
       <span data-testid="breadcrumb-tenant" className="truncate">
         {tenantName}
