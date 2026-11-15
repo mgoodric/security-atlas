@@ -102,13 +102,17 @@ test.describe("mobile-responsive baseline (slice 277)", () => {
     // Drawer visible after click; the same nav items render.
     const drawer = page.getByTestId("mobile-sidebar-drawer");
     await expect(drawer).toBeVisible();
-    await expect(drawer.getByText("Dashboard")).toBeVisible();
-    await expect(drawer.getByText("Controls")).toBeVisible();
-    await expect(drawer.getByText("Risks")).toBeVisible();
-    await expect(drawer.getByText("Settings")).toBeVisible();
+    // #2081 — by testid: the drawer's group headings ("Controls",
+    // "Risks", "Settings & admin") share text with the entries.
+    await expect(
+      drawer.getByTestId("mobile-nav-link-_dashboard"),
+    ).toBeVisible();
+    await expect(drawer.getByTestId("mobile-nav-link-_controls")).toBeVisible();
+    await expect(drawer.getByTestId("mobile-nav-link-_risks")).toBeVisible();
+    await expect(drawer.getByTestId("mobile-nav-link-_settings")).toBeVisible();
 
     // Click a nav link; the router navigates AND the drawer closes.
-    await drawer.getByText("Settings").click();
+    await drawer.getByTestId("mobile-nav-link-_settings").click();
     await expect(page).toHaveURL(/\/settings/);
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeHidden();
   });

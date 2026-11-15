@@ -218,3 +218,48 @@ export async function fetchDemoSeedEnabled(bearer: string): Promise<boolean> {
   }
   return (parsed as { enabled?: unknown }).enabled === true;
 }
+
+// The catalog slug of NIST CSF. Mirrors internal/csfassessment
+// CSFFrameworkSlug: the CSF assessment refuses any other framework.
+const CSF_FRAMEWORK_SLUG = "nist_csf";
+
+/**
+ * csfVersionFromFrameworks picks the loaded NIST CSF framework version
+ * out of a `GET /v1/frameworks` body: the `nist_csf` framework's
+ * `latest_version_id`, or `null` when the framework is absent, has no
+ * version, or the body is malformed. Exported for vitest coverage.
+ */
+export function csfVersionFromFrameworks(parsed: unknown): string | null {
+  if (parsed === null || typeof parsed !== "object") {
+    return null;
+  }
+  const list = (parsed as { frameworks?: unknown }).frameworks;
+  if (!Array.isArray(list)) {
+    return null;
+  }
+  for (const f of list) {
+    if (f === null || typeof f !== "object") continue;
+    const { slug, latest_version_id: id } = f as {
+      slug?: unknown;
+      latest_version_id?: unknown;
+    };
+    if (slug === CSF_FRAMEWORK_SLUG && typeof id === "string" && id !== "") {
+      return id;
+    }
+  }
+  return null;
+}
+
+/**
+ * fetchCsfVersionId reads the framework catalog (`GET /v1/frameworks`)
+ * and returns the loaded NIST CSF version id, or `null` (#2081). The
+ * sidebar lists CSF assessment only when this is non-null, so a failure
+ * hides the entry rather than linking to a version that is not there.
+ */
+export async function fetchCsfVersionId(
+  bearer: string,
+): Promise<string | null> {
+  return csfVersionFromFrameworks(
+    await fetchPlatformJSON("/v1/frameworks", bearer),
+  );
+}

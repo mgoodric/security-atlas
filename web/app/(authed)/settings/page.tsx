@@ -76,6 +76,7 @@ import { NotificationsSection } from "./_tabs/notifications";
 import { ProfileSection } from "./_tabs/profile";
 import { SessionsSection } from "./_tabs/sessions";
 import { TenantSection } from "./_tabs/tenant";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function SettingsPage() {
   const meQuery = useQuery({
@@ -86,7 +87,7 @@ export default function SettingsPage() {
 
   return (
     <PageShell
-      title="Settings"
+      title={pageTitle("/settings")}
       width="reading"
       data-testid="settings-page"
       subtitle={
