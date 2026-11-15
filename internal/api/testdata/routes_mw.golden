@@ -89,6 +89,7 @@ GET /v1/controls/export 8
 GET /v1/controls/history/export 8
 GET /v1/controls/imports/settings 8
 GET /v1/controls/imports/{id} 8
+GET /v1/controls/imports/{id}/export 8
 GET /v1/controls/imports/{id}/rows 8
 GET /v1/controls/needs-reanchoring 8
 POST /v1/controls/imports 8

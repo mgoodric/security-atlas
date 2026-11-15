@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  OrgMappingBadge,
+  OrgMappingDetails,
+} from "@/components/mappings/org-mapping";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -25,8 +29,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { type AnchorDetail } from "@/lib/api/anchors";
+import { type AnchorDetail, type AnchorRequirement } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
+import { isOrgMapping } from "@/lib/api/org-mapping";
 import {
   ALL_CURRENT,
   buildVersionOptions,
@@ -132,20 +137,24 @@ export default function SCFAnchorDetailPage() {
   );
 }
 
+// #1800 — rows are the platform's flat requirementForAnchorWire. A row whose
+// `origin` is "overlay" is the tenant's own org mapping: it is listed after
+// the catalog rows of its framework version, labelled, with its rationale,
+// source, author and date.
 function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
   const byFramework = new Map<
     string,
-    { framework: string; version: string; rows: typeof detail.requirements }
+    { framework: string; version: string; rows: AnchorRequirement[] }
   >();
   for (const r of detail.requirements) {
-    const key = r.framework_version.id;
+    const key = r.framework_version_id;
     const existing = byFramework.get(key);
     if (existing) {
       existing.rows.push(r);
     } else {
       byFramework.set(key, {
-        framework: r.framework_version.framework,
-        version: r.framework_version.version,
+        framework: r.framework_name,
+        version: r.framework_version,
         rows: [r],
       });
     }
@@ -153,42 +162,73 @@ function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
 
   return (
     <div className="space-y-6">
-      {[...byFramework.values()].map((group) => (
-        <Card key={group.framework + group.version}>
-          <CardHeader>
-            <CardTitle>{group.framework}</CardTitle>
-            <CardDescription>{group.version}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-24">Code</TableHead>
-                  <TableHead>Requirement</TableHead>
-                  <TableHead className="w-32">STRM type</TableHead>
-                  <TableHead className="w-24">Strength</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {group.rows.map((r) => (
-                  <TableRow key={r.requirement.id}>
-                    <TableCell className="font-mono text-xs">
-                      {r.requirement.code}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {r.requirement.text}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{r.strm_type}</Badge>
-                    </TableCell>
-                    <TableCell>{r.strength.toFixed(2)}</TableCell>
+      {[...byFramework.entries()].map(([fvID, group]) => {
+        const rows = [
+          ...group.rows.filter((r) => !isOrgMapping(r)),
+          ...group.rows.filter((r) => isOrgMapping(r)),
+        ];
+        return (
+          <Card key={fvID}>
+            <CardHeader>
+              <CardTitle>{group.framework}</CardTitle>
+              <CardDescription>{group.version}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-24">Code</TableHead>
+                    <TableHead>Requirement</TableHead>
+                    <TableHead className="w-32">STRM type</TableHead>
+                    <TableHead className="w-24">Strength</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ))}
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r) => {
+                    const org = isOrgMapping(r);
+                    return (
+                      <TableRow
+                        key={r.edge_id}
+                        data-testid="anchor-requirement-row"
+                        data-origin={org ? "overlay" : "catalog"}
+                      >
+                        <TableCell className="font-mono text-xs">
+                          <Link
+                            href={`/requirements/${encodeURIComponent(
+                              r.requirement_id,
+                            )}`}
+                            className="hover:underline"
+                          >
+                            {r.code}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div>{r.title}</div>
+                          {org ? (
+                            <div className="mt-1">
+                              <OrgMappingBadge />
+                              <OrgMappingDetails
+                                rationale={r.rationale}
+                                overlay={r.overlay}
+                              />
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">
+                            {r.relationship_type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{r.strength.toFixed(2)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        );
+      })}
 
       {detail.requirements.length === 0 ? (
         <Alert>

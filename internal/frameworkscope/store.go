@@ -212,6 +212,7 @@ func copyDecisions(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, sour
 			carriedFrom: &carrySource{
 				FrameworkVersionID:     src.FrameworkVersionID,
 				FrameworkScopeID:       src.ID,
+				FrameworkScopeState:    src.State,
 				FrameworkRequirementID: r.RequirementID,
 			},
 		})

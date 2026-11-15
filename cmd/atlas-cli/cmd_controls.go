@@ -246,33 +246,81 @@ func newControlsValidateCmd() *cobra.Command {
 			"declares (scf_release). With --scf-catalog (repeatable; the same JSON catalogs " +
 			"`catalog import-scf` loads), also flags a scf_anchor_id whose meaning changed in " +
 			"a release later than the declared one: renamed, split, reused for another control, " +
-			"renumbered or withdrawn. Flags are warnings; they do not fail validation.",
+			"renumbered or withdrawn. Flags are warnings; they do not fail validation. " +
+			"A directory with no control.yaml of its own validates every bundle directory " +
+			"directly under it, as `controls import export` writes them.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
-			path := args[0]
-			bundle, err := loadBundleFromPath(path)
+			paths, err := bundlePathsUnder(args[0])
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(out, "OK bundle_id=%s title=%q implementation_type=%s manifest_hash=%s\n",
-				bundle.Manifest.BundleID,
-				bundle.Manifest.Title,
-				bundle.Manifest.ImplementationType,
-				bundle.ManifestHashHex,
-			)
-			if len(bundle.Manifest.EvidenceQueries) > 0 {
-				_, _ = fmt.Fprintf(out, "    evidence_queries=%d\n", len(bundle.Manifest.EvidenceQueries))
+			for _, p := range paths {
+				if err := validateBundle(out, p, catalogs); err != nil {
+					if len(paths) > 1 {
+						return fmt.Errorf("%s: %w", p, err)
+					}
+					return err
+				}
 			}
-			if err := bundle.ValidateApplicabilityExpr(); err != nil {
-				return err
-			}
-			return reportSCFRelease(out, &bundle.Manifest, catalogs)
+			return nil
 		},
 	}
 	cmd.Flags().StringArrayVar(&catalogs, "scf-catalog", nil,
 		"SCF catalog JSON (repeatable); flags scf_anchor_id codes whose meaning changed in a release later than the bundle's scf_release")
 	return cmd
+}
+
+func validateBundle(out io.Writer, path string, catalogs []string) error {
+	bundle, err := loadBundleFromPath(path)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "OK bundle_id=%s title=%q implementation_type=%s manifest_hash=%s\n",
+		bundle.Manifest.BundleID,
+		bundle.Manifest.Title,
+		bundle.Manifest.ImplementationType,
+		bundle.ManifestHashHex,
+	)
+	if len(bundle.Manifest.EvidenceQueries) > 0 {
+		_, _ = fmt.Fprintf(out, "    evidence_queries=%d\n", len(bundle.Manifest.EvidenceQueries))
+	}
+	if err := bundle.ValidateApplicabilityExpr(); err != nil {
+		return err
+	}
+	return reportSCFRelease(out, &bundle.Manifest, catalogs)
+}
+
+// bundlePathsUnder returns path itself unless it is a directory without a
+// control.yaml; then it returns each directory directly under it that has
+// one, in name order (#1784), and refuses a directory with none.
+func bundlePathsUnder(path string) ([]string, error) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return []string{path}, nil
+	}
+	if _, err := os.Stat(filepath.Join(path, "control.yaml")); err == nil {
+		return []string{path}, nil
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(path, e.Name())
+		if _, err := os.Stat(filepath.Join(p, "control.yaml")); err == nil {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s has no control.yaml, and no bundle directory under it has one", path)
+	}
+	return out, nil
 }
 
 func newControlsUploadCmd() *cobra.Command {

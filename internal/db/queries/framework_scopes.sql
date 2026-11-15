@@ -29,6 +29,16 @@ SELECT *
 FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: LockOpenFrameworkScope :one
+-- The applicability carry-over's target (#2179): a draft or review revision
+-- of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
+-- (approved, activated, superseded) or unknown revision.
+SELECT *
+FROM framework_scopes
+WHERE tenant_id = $1 AND id = $2
+  AND state IN ('draft', 'review')
+FOR UPDATE;
+
 -- name: ListFrameworkScopes :many
 -- Newest first. Caller filters by framework_version + state in the
 -- application layer because sqlc-static optional WHERE is noisy; the row
