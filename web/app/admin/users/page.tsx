@@ -16,7 +16,9 @@
 //   - Assign-to-tenant: a dialog (user_id + tenant_id + role checkboxes)
 //     posts to /api/admin/users; on success the list refetches and the
 //     inline result surfaces (AC-2).
-//   - Revoke: a per-row action behind a confirm dialog (AC-3).
+//   - Revoke: a per-row action behind a confirm dialog (AC-3), in the
+//     row menu; withheld, with the reason, from a tenant's only active
+//     admin (#2090).
 //   - Self-assign: "Add me to a tenant" for super_admins; on success the
 //     UI explains a re-auth (full re-login) is needed before the new
 //     tenant appears in the switcher, and links to the sign-in flow
@@ -72,7 +74,9 @@ import {
   ROLES,
   type Role,
 } from "@/components/admin/roles";
+import { lastAdminReason } from "@/components/admin/last-holder";
 import { MintedKeysWarning } from "@/components/admin/minted-keys-warning";
+import { RowActions } from "@/components/ui/row-actions";
 import type {
   AdminUserRow,
   AdminUserListResult,
@@ -428,17 +432,29 @@ export default function UsersPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        data-testid={`revoke-user-${u.id}`}
-                        onClick={() => {
-                          setRevokeError(null);
-                          setRevokeTarget(u);
-                        }}
-                      >
-                        Revoke roles
-                      </Button>
+                      {/* #2090: Revoke roles opens the confirm dialog
+                          below. It is withheld, with the reason, from a
+                          tenant's only active admin. */}
+                      <RowActions
+                        label={`Actions for ${u.display_name || u.email}`}
+                        data-testid={`user-actions-${u.id}`}
+                        items={[
+                          {
+                            id: "revoke",
+                            label: "Revoke roles",
+                            disabledReason: lastAdminReason(
+                              u,
+                              items,
+                              !data?.next_cursor,
+                            ),
+                            onSelect: () => {
+                              setRevokeError(null);
+                              setRevokeTarget(u);
+                            },
+                            "data-testid": `revoke-user-${u.id}`,
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

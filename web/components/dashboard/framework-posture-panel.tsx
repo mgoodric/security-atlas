@@ -14,6 +14,7 @@
 // See `docs/audit-log/147-dashboard-placeholders-decisions.md` D1+D2.
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
+import { Term } from "@/components/help/term";
 import type {
   FrameworkPostureReport,
   FrameworkPostureRow,
@@ -74,7 +75,8 @@ function PostureTile({ row }: { row: FrameworkPostureRow }) {
         className="mt-1 text-xs text-muted-foreground"
         data-testid="framework-tile-freshness"
       >
-        freshness {row.freshness_composite.toFixed(1)}%
+        <Term id="evidence-freshness">freshness</Term>{" "}
+        {row.freshness_composite.toFixed(1)}%
       </div>
       {row.covered_by_exception_pct > 0 ? (
         <div
@@ -97,7 +99,11 @@ export function FrameworkPosturePanel({
 }) {
   return (
     <PanelCard
-      title="Framework posture"
+      title={
+        <>
+          Framework <Term id="posture">posture</Term>
+        </>
+      }
       description="Coverage and 90-day trend per active framework version"
       state={state}
       skeletonClassName="h-32 w-full"

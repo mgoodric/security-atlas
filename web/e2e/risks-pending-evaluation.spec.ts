@@ -257,8 +257,13 @@ test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
     await expect(
       desktop.getByText("Inherent severity", { exact: true }),
     ).toBeVisible();
+    // #2144: "Residual" is now a <Term> beside the sort button, so the
+    // axis name is read from the term and the sort button's label.
+    await expect(desktop.getByTestId("term-residual-risk-trigger")).toHaveText(
+      "Residual",
+    );
     await expect(
-      desktop.getByText("Residual (after controls)", { exact: true }),
-    ).toBeVisible();
+      desktop.getByTestId("risks-sort-residual"),
+    ).toHaveAccessibleName(/^Residual \(after controls\), /);
   });
 });
