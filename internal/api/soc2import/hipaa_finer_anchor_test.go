@@ -44,10 +44,10 @@ var hipaaResidualRows = []hipaaResidualRow{
 	{"164.308(a)(7)(ii)(E)", "RSK-08", "equal", 0.85, "re-point"},           // Applications & Data Criticality Analysis
 	{"164.310(a)(2)(iv)", "MNT-02", "intersects_with", 0.7, "re-point"},     // Maintenance Records
 	{"164.310(b)", "HRS-12", "intersects_with", 0.75, "re-point"},           // Workstation Use
-	{"164.310(d)(2)(iii)", "DCH-07", "subset_of", 0.75, "re-point"},         // Accountability (media custody)
+	{"164.310(d)(2)(iii)", "DCH-16", "subset_of", 0.75, "re-point"},         // Accountability (media custody)
 	{"164.312(a)(2)(ii)", "IAC-11", "equal", 0.8, "re-point"},               // Emergency Access Procedure
 	{"164.312(a)(2)(iii)", "CFG-04.5", "equal", 0.85, "re-point"},           // Automatic Logoff
-	{"164.312(c)(1)", "DCH-05", "subset_of", 0.8, "re-point"},               // Integrity
+	{"164.312(c)(1)", "MON-27", "subset_of", 0.7, "re-point"},               // Integrity (FIM; 0.80 -> 0.70 in #1977)
 	{"164.312(c)(2)", "CRY-14", "subset_of", 0.8, "re-point"},               // Mechanism to Authenticate ePHI
 	{"164.312(e)(2)(i)", "CRY-06", "subset_of", 0.85, "re-point"},           // Integrity Controls (Transmission)
 	{"164.314(b)(2)(i)", "TPM-14", "intersects_with", 0.65, "re-point"},     // Plan Safeguards
@@ -58,7 +58,7 @@ var hipaaResidualRows = []hipaaResidualRow{
 	// --- Checked against the grown palette, deliberately NOT re-pointed (3) ---
 	{"164.310(a)(2)(i)", "BCD-04", "intersects_with", 0.6, "left as-is"},   // Contingency Operations
 	{"164.314(b)(2)(ii)", "TPM-02", "intersects_with", 0.55, "left as-is"}, // Adequate Separation
-	{"164.316(b)(2)(i)", "DCH-03", "intersects_with", 0.6, "left as-is"},   // Time Limit
+	{"164.316(b)(2)(i)", "DCH-27", "intersects_with", 0.6, "left as-is"},   // Time Limit
 
 	// --- Held permanently: HIPAA regulatory arrangements, no control analog (2) ---
 	{"164.314(a)(2)(ii)", "TPM-02", "intersects_with", 0.65, "hold"}, // Other Arrangements
@@ -74,7 +74,7 @@ var hipaaFinerAnchorsAddedBy567 = []string{
 	"IAC-14", "IAC-11", "CFG-04.5", // authenticator mgmt, break-glass, session termination
 	"RSK-08",           // business impact analysis
 	"MNT-02",           // controlled maintenance
-	"DCH-05", "DCH-07", // data integrity, media custody
+	"MON-27", "DCH-16", // file integrity monitoring, media transportation
 	"CRY-14", "CRY-06", // cryptographic hash + integrity of data in transit
 	"TPM-14",           // third-party contract requirements
 	"GOV-02", "GOV-03", // publishing + periodic review of documentation

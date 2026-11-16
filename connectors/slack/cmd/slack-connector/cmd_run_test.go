@@ -88,7 +88,7 @@ func okRunFlags() runFlags {
 		slackToken:         "xoxb-test-token",
 		memberControlID:    "scf:IAC-01",
 		auditControlID:     "scf:MON-02",
-		retentionControlID: "scf:DCH-01",
+		retentionControlID: "scf:DCH-04",
 	}
 }
 
