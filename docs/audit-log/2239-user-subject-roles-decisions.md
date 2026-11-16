@@ -67,6 +67,14 @@ affected. An API key bound to a disabled user drops to its derived role, which
 is narrower than before, so the dry run counts those users (query 4). The
 admin disable path already revokes such keys (#1915).
 
+Schema facts the check relies on: `users.status` is `NOT NULL DEFAULT
+'active'` with `CHECK (status IN ('active', 'disabled'))`
+(`20260511000012_users_sessions_api_keys.sql`), so `status <> 'active'` never
+meets a NULL. `user_roles.user_id` is TEXT with no foreign key to `users`, so
+nothing cascades. No production path hard-deletes a `users` row (users are
+disabled, not deleted). If one ever did, its orphaned role rows would find no
+`users` row and apply again; that path would have to delete `user_roles` too.
+
 ### D4 — `/v1/activity/unified` matches the caller by uuid
 
 `ActivityList` compared `me_audit_log.actor_id` (a bare uuid) to the raw
