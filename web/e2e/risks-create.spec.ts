@@ -31,6 +31,7 @@
 // tokens.
 
 import { expect, test } from "./fixtures";
+import { pickFirstUser } from "./owner-picker";
 
 const NEW_RISK_TITLE = "E2E test risk — unauthorized data export";
 const CREATED_RISK_ID = "00000000-0000-0000-0000-0000000r1s01";
@@ -126,7 +127,7 @@ test.describe("/risks/new risk-create form", () => {
     });
 
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     // treatment=accept avoids the mitigate-requires-linked-control
     // client-side validation rule (validateRiskForm). The form has no
     // accepter / expiry inputs, so it posts a proposed acceptance (#1746).
@@ -232,7 +233,7 @@ test.describe("/risks/new risk-create form", () => {
 
     // Fill only the required fields and submit the default flow.
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
 
     const createResp = page.waitForResponse(
       (r) =>
@@ -278,8 +279,8 @@ test.describe("/risks/new risk-create form", () => {
       timeout: 30_000,
     });
 
-    // Leave title empty; fill owner + pick a no-link treatment. Submit.
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    // Leave title empty; pick an owner + a no-link treatment. Submit.
+    const owner = await pickFirstUser(page, "risks-create-owner");
     await page.getByTestId("risks-create-treatment").selectOption("accept");
     await page.getByTestId("risks-create-submit").click();
 
@@ -301,9 +302,7 @@ test.describe("/risks/new risk-create form", () => {
     ).toBe(true);
 
     // Form state preserved (owner not cleared) — honest UX.
-    await expect(page.getByTestId("risks-create-treatment-owner")).toHaveValue(
-      "e2e-owner",
-    );
+    await expect(page.getByTestId("risks-create-owner")).toHaveValue(owner);
     // Stayed on the create form; no server round-trip happened.
     await expect(page).toHaveURL(/\/risks\/new$/);
     expect(postFired).toBe(false);

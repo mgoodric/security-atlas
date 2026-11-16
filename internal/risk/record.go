@@ -32,6 +32,11 @@ var ErrRecordFieldInvalid = errors.New("risk: invalid record field")
 // that score and would overwrite the edit on its next evaluation.
 var ErrRuleGeneratedScore = errors.New("risk: a rule-generated meta-risk's score and methodology are set by its aggregation rule")
 
+// ErrOwnerNotActiveUser is returned when an owner_user_id does not name an
+// active user of the risk's own tenant (#2129). The HTTP layer renders it
+// as a 422.
+var ErrOwnerNotActiveUser = errors.New("risk: owner is not an active user in this tenant")
+
 // IsRecordValidation reports whether err is a caller error in a record
 // field, which the HTTP layer renders as a 400.
 func IsRecordValidation(err error) bool {
@@ -51,13 +56,18 @@ type RecordFields struct {
 	TreatmentOwner      *string
 	ReviewDueAt         *time.Time
 	InstrumentReference *string
+	// OwnerUserSet marks an owner change (#2129); OwnerUserID is the new
+	// owner, nil to clear it. Picking an owner clears the free-text
+	// treatment_owner, which only ever shows as "Owner (unlinked)".
+	OwnerUserSet bool
+	OwnerUserID  *uuid.UUID
 }
 
 // Empty reports whether no record field is set.
 func (f RecordFields) Empty() bool {
 	return f.Title == nil && f.Description == nil && f.Methodology == nil &&
 		f.InherentScore == nil && f.TreatmentOwner == nil &&
-		f.ReviewDueAt == nil && f.InstrumentReference == nil
+		f.ReviewDueAt == nil && f.InstrumentReference == nil && !f.OwnerUserSet
 }
 
 // recordDiff is the changed-fields half of a fields_changed audit row.
@@ -84,6 +94,12 @@ func applyRecordFields(current Risk, in RecordFields) (Risk, recordDiff, recordD
 	}
 	if in.TreatmentOwner != nil {
 		next.TreatmentOwner = strings.TrimSpace(*in.TreatmentOwner)
+	}
+	if in.OwnerUserSet {
+		next.OwnerUserID = in.OwnerUserID
+		if in.OwnerUserID != nil {
+			next.TreatmentOwner = ""
+		}
 	}
 	if in.InstrumentReference != nil {
 		next.InstrumentReference = strings.TrimSpace(*in.InstrumentReference)
@@ -134,6 +150,9 @@ func applyRecordFields(current Risk, in RecordFields) (Risk, recordDiff, recordD
 	diffString("title", current.Title, next.Title)
 	diffString("description", current.Description, next.Description)
 	diffString("treatment_owner", current.TreatmentOwner, next.TreatmentOwner)
+	if !sameUserID(current.OwnerUserID, next.OwnerUserID) {
+		before["owner_user_id"], after["owner_user_id"] = userIDValue(current.OwnerUserID), userIDValue(next.OwnerUserID)
+	}
 	diffString("instrument_reference", current.InstrumentReference, next.InstrumentReference)
 	diffString("methodology", string(current.Methodology), string(next.Methodology))
 	if !sameTime(current.ReviewDueAt, next.ReviewDueAt) {
@@ -167,6 +186,7 @@ func updateRecordTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, nex
 		Accepter:            next.Accepter,
 		InstrumentReference: next.InstrumentReference,
 		AcceptanceStatus:    NullAcceptanceStatus(next.AcceptanceStatus),
+		OwnerUserID:         pgUUIDPtr(next.OwnerUserID),
 	})
 	if err != nil {
 		return Risk{}, fmt.Errorf("update risk record: %w", err)
@@ -195,6 +215,40 @@ func SetTreatmentOwnerTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 	}
 	_, err = updateRecordTx(ctx, q, tenantID, next, actor, before, after)
 	return err
+}
+
+// checkOwnerUser refuses an owner that is not an active user of tenantID
+// (#2129). A nil owner clears it and needs no check.
+func checkOwnerUser(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, owner *uuid.UUID) error {
+	if owner == nil {
+		return nil
+	}
+	ok, err := q.UserExistsInTenant(ctx, dbx.UserExistsInTenantParams{
+		TenantID: pgUUID(tenantID),
+		ID:       pgUUID(*owner),
+	})
+	if err != nil {
+		return fmt.Errorf("check owner: %w", err)
+	}
+	if !ok {
+		return ErrOwnerNotActiveUser
+	}
+	return nil
+}
+
+func sameUserID(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+// userIDValue is an owner id as the audit row holds it: the id, or null.
+func userIDValue(u *uuid.UUID) any {
+	if u == nil {
+		return nil
+	}
+	return u.String()
 }
 
 func sameTime(a, b *time.Time) bool {

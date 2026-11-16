@@ -52,6 +52,11 @@ export type RiskFormForValidation = {
   // the check; "" means none is chosen (the list has not loaded, or the
   // organisation has no active category).
   category?: string;
+  // #2129: the owner is a user, picked by id ("" for none). A risk whose
+  // free-text owner matched no user keeps that text as treatment_owner,
+  // shown as "Owner (unlinked)"; it stands in for an owner until one is
+  // picked, so an edit of another field is not blocked on it.
+  owner_user_id: string;
   treatment_owner: string;
   treatment: RiskTreatment;
   linked_control_ids: string[];
@@ -60,7 +65,7 @@ export type RiskFormForValidation = {
 export type FieldErrors = Partial<{
   title: string;
   category: string;
-  treatment_owner: string;
+  owner: string;
   linked_control_ids: string;
 }>;
 
@@ -80,8 +85,8 @@ export function validateRiskForm(s: RiskFormForValidation): FieldErrors {
   if (s.category !== undefined && !s.category.trim()) {
     errors.category = "Category is required.";
   }
-  if (!s.treatment_owner.trim()) {
-    errors.treatment_owner = "Treatment owner is required.";
+  if (!s.owner_user_id && !s.treatment_owner.trim()) {
+    errors.owner = "Owner is required.";
   }
   if (s.treatment === "mitigate" && s.linked_control_ids.length === 0) {
     errors.linked_control_ids =

@@ -37,6 +37,32 @@ describe("risk edit form state (#2104)", () => {
     expect(s.review_due).toBe("2027-04-01");
   });
 
+  // #2129: the owner is a user; free text is the unlinked owner.
+  test("opens on the owner user, or the unlinked text", () => {
+    const uid = "a1a1a1a1-0000-4000-8000-000000002129";
+    const linked = riskToFormState({
+      ...RISK,
+      owner_user_id: uid,
+      owner_unlinked: "",
+    });
+    expect(linked.owner_user_id).toBe(uid);
+    expect(linked.treatment_owner).toBe("");
+    const unlinked = riskToFormState({
+      ...RISK,
+      owner_user_id: null,
+      owner_unlinked: "Finance",
+    });
+    expect(unlinked.treatment_owner).toBe("Finance");
+    // An older response without owner_unlinked: treatment_owner is the text.
+    const older = riskToFormState({ ...RISK, treatment_owner: "owner-a" });
+    expect(older.treatment_owner).toBe("owner-a");
+    expect(toPatchInput(unlinked, { ...unlinked, owner_user_id: uid })).toEqual(
+      {
+        owner_user_id: uid,
+      },
+    );
+  });
+
   test("an untouched form sends nothing", () => {
     const s = riskToFormState(RISK);
     expect(toPatchInput(s, { ...s })).toEqual({});

@@ -17,7 +17,8 @@ import {
 
 const baseValid = {
   title: "Vendor data breach exposure",
-  treatment_owner: "alice",
+  owner_user_id: "a1a1a1a1-0000-4000-8000-000000002129",
+  treatment_owner: "",
   treatment: "mitigate" as const,
   linked_control_ids: ["00000000-0000-0000-0000-000000000010"],
 };
@@ -105,20 +106,31 @@ describe("validateRiskForm — carry-over required fields", () => {
     expect(e.title).toMatch(/required/i);
   });
 
-  test("fails when treatment_owner is empty", () => {
-    const e = validateRiskForm({ ...baseValid, treatment_owner: "" });
-    expect(e.treatment_owner).toMatch(/required/i);
+  // #2129: the owner is a picked user.
+  test("fails when no owner is picked and there is no unlinked owner", () => {
+    const e = validateRiskForm({ ...baseValid, owner_user_id: "" });
+    expect(e.owner).toMatch(/required/i);
+  });
+
+  test("an unlinked free-text owner stands in until a user is picked", () => {
+    const e = validateRiskForm({
+      ...baseValid,
+      owner_user_id: "",
+      treatment_owner: "Someone in Finance",
+    });
+    expect(e.owner).toBeUndefined();
   });
 
   test("aggregates multiple errors", () => {
     const e = validateRiskForm({
       title: "",
+      owner_user_id: "",
       treatment_owner: "",
       treatment: "mitigate",
       linked_control_ids: [],
     });
     expect(e.title).toBeDefined();
-    expect(e.treatment_owner).toBeDefined();
+    expect(e.owner).toBeDefined();
     expect(e.linked_control_ids).toBeDefined();
     expect(hasErrors(e)).toBe(true);
   });
@@ -145,6 +157,7 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
     // must return no errors so the create flow does not dead-end.
     const e = validateRiskForm({
       title: "First program risk",
+      owner_user_id: "",
       treatment_owner: "security-lead",
       treatment: DEFAULT_TREATMENT,
       linked_control_ids: [],
@@ -158,6 +171,7 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
     // canvas §6.1 invariant.
     const e = validateRiskForm({
       title: "First program risk",
+      owner_user_id: "",
       treatment_owner: "security-lead",
       treatment: "mitigate",
       linked_control_ids: [],
