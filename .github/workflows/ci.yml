@@ -183,6 +183,8 @@ jobs:
               - 'buf.yaml'
               - 'buf.gen.yaml'
               - 'scripts/**'
+              # #2148 — the exported lifecycles the help diagram check reads.
+              - 'docs/lifecycles/**'
 
       # #2099 — tier classification. A separate step because
       # `predicate-quantifier` is per step, and the `code` filter above must
@@ -251,6 +253,9 @@ jobs:
               # fails when a backend enum value has no display label (#2083).
               - 'internal/db/dbx/models.go'
               - 'internal/featureflag/seed.go'
+              # #2148: exported by cmd/atlas-lifecycles (Go) and checked
+              # against the help diagrams by web/lib/help/diagrams.test.ts.
+              - 'docs/lifecycles/**'
               - 'migrations/**'
               - 'sql/**'
               - 'atlas.hcl'
@@ -1197,6 +1202,11 @@ jobs:
         run: npm run typecheck --workspace @security-atlas/web
       - name: Build web workspace
         run: npm run build --workspace @security-atlas/web --if-present
+      # #2148 — lifecycle diagrams are pre-rendered SVGs; Mermaid is a
+      # devDependency only. Fails when a client asset carries its runtime.
+      - name: Bundle check (no Mermaid runtime in the browser bundle)
+        working-directory: web
+        run: node scripts/check-no-mermaid-bundle.mjs
       - name: Build sdk-typescript workspace
         run: npm run build --workspace @security-atlas/sdk --if-present
 

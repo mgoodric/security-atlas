@@ -13,6 +13,14 @@ here (`web/lib/help/modules.ts` `helpDocsHref`).
 
 The front matter is the small YAML subset `web/lib/help/modules.ts`
 parses; PyYAML (an mkdocs dependency) reads it here.
+
+A lifecycle diagram (#2148) is a ```mermaid block in the body. The app
+pre-renders it to a light and a dark SVG (`web/scripts/render-help-diagrams.mjs`)
+and checks it against the backend's lifecycle (`web/lib/help/diagrams.test.ts`).
+This hook replaces the block with those two SVGs, shown per Material colour
+scheme through `#only-light` / `#only-dark`, and the same list of states and
+transitions the panel gives as the diagram's text alternative, so the docs
+site ships no Mermaid either.
 """
 
 from __future__ import annotations
@@ -60,8 +68,13 @@ def on_pre_build(config: dict[str, Any], **kwargs: Any) -> None:
                     f"#2143 help file {src.name}: bad diagram file name {diagram.get('src')!r}"
                 )
             shutil.copyfile(_SRC_DIAGRAMS / diagram["src"], _DEST_DIR / "diagrams" / diagram["src"])
+        body, lifecycles = split_lifecycles(body)
+        for lifecycle in lifecycles:
+            for theme in ("light", "dark"):
+                name = lifecycle_file(meta["id"], lifecycle["name"], theme)
+                shutil.copyfile(_SRC_DIAGRAMS / name, _DEST_DIR / "diagrams" / name)
         (_DEST_DIR / f"{meta['id']}.md").write_text(
-            render_help_page(meta, body, terms), encoding="utf-8"
+            render_help_page(meta, body, terms, lifecycles), encoding="utf-8"
         )
 
 
@@ -74,7 +87,78 @@ def split_front_matter(source: str) -> tuple[dict[str, Any], str]:
     return yaml.safe_load("\n".join(lines[1:end])) or {}, "\n".join(lines[end + 1 :]).strip()
 
 
-def render_help_page(meta: dict[str, Any], body: str, terms: dict[str, dict[str, str]]) -> str:
+_LIFECYCLE_LINE = re.compile(r"%%\s*lifecycle:\s*([a-z][a-z0-9_]*)\s*")
+_EDGE = re.compile(r"(\[\*\]|[a-z][a-z0-9_]*)\s*-->\s*(\[\*\]|[a-z][a-z0-9_]*)(?:\s*:\s*(.+))?")
+
+
+def lifecycle_file(module_id: str, lifecycle: str, theme: str) -> str:
+    """The pre-rendered SVG's name, as `lifecycleDiagramFile` in the app."""
+    return f"{module_id}-{lifecycle.replace('_', '-')}-{theme}.svg"
+
+
+def split_lifecycles(body: str) -> tuple[str, list[dict[str, Any]]]:
+    """Lift the lifecycle ```mermaid blocks out of a help body.
+
+    Returns the body without them and, per block, its lifecycle name and
+    the text alternative's lines. The app's parser (and its check) is the
+    strict one; this reads only the edges it already accepted.
+    """
+    lines = body.split("\n")
+    kept: list[str] = []
+    found: list[dict[str, Any]] = []
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() != "```mermaid":
+            kept.append(lines[i])
+            i += 1
+            continue
+        end = lines.index("```", i + 1)
+        inner = lines[i + 1 : end]
+        named = _LIFECYCLE_LINE.fullmatch(inner[0].strip()) if inner else None
+        if not named:
+            raise ValueError("#2148 a mermaid block must open with '%% lifecycle: <name>'")
+        states: list[str] = []
+        marks: dict[str, list[str]] = {}
+        transitions: list[str] = []
+        for line in inner:
+            edge = _EDGE.fullmatch(line.strip())
+            if not edge:
+                continue
+            src, dst, label = edge.groups()
+            for s in (src, dst):
+                if s != "[*]" and s not in states:
+                    states.append(s)
+            if src == "[*]":
+                marks.setdefault(dst, []).append(f"starts here on {label.replace('_', ' ')}")
+            elif dst == "[*]":
+                marks.setdefault(src, []).append("final")
+            else:
+                system = label.endswith(" (system)")
+                action = label.removesuffix(" (system)").replace("_", " ")
+                transitions.append(
+                    f"{src.replace('_', ' ')} to {dst.replace('_', ' ')}: {action}"
+                    + (", done automatically by the system" if system else "")
+                )
+        found.append(
+            {
+                "name": named.group(1),
+                "states": [
+                    s.replace("_", " ") + (f" ({'; '.join(marks[s])})" if s in marks else "")
+                    for s in states
+                ],
+                "transitions": transitions,
+            }
+        )
+        i = end + 1
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip(), found
+
+
+def render_help_page(
+    meta: dict[str, Any],
+    body: str,
+    terms: dict[str, dict[str, str]],
+    lifecycles: list[dict[str, Any]] | None = None,
+) -> str:
     """Return the docs page Markdown for one module's help."""
     lines = [
         f"# {meta['title']}",
@@ -89,6 +173,20 @@ def render_help_page(meta: dict[str, Any], body: str, terms: dict[str, dict[str,
     ]
     for diagram in meta.get("diagrams") or []:
         lines += [f"![{diagram['alt']}](diagrams/{diagram['src']})", ""]
+    for lc in lifecycles or []:
+        name = lc["name"].replace("_", " ")
+        alt = (
+            f"{name.capitalize()} lifecycle: {len(lc['states'])} states and"
+            f" {len(lc['transitions'])} transitions, listed below."
+        )
+        for theme in ("light", "dark"):
+            src = lifecycle_file(meta["id"], lc["name"], theme)
+            lines += [f"![{alt}](diagrams/{src}#only-{theme})"]
+        lines += ["", f"**{name.capitalize()} states**", ""]
+        lines += [f"- {s}" for s in lc["states"]]
+        lines += ["", f"**{name.capitalize()} transitions**", ""]
+        lines += [f"- {t}" for t in lc["transitions"]]
+        lines += [""]
     known = [terms[t] for t in meta.get("terms") or [] if t in terms]
     if known:
         lines += ["## Key terms", ""]

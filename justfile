@@ -249,6 +249,14 @@ openapi-drift-check:
 lifecycles-export:
     go run ./cmd/atlas-lifecycles --out docs/lifecycles
 
+# Pre-render the lifecycle diagrams in web/help/modules/*.md to light and
+# dark SVGs under web/public/help/diagrams/ (#2148), with the pinned Mermaid
+# devDependency in the Playwright Chromium (`npx playwright install
+# chromium` once). Commit the SVGs. web/lib/help/diagrams.test.ts fails
+# `just test` when one is stale or draws something docs/lifecycles/ does not.
+help-diagrams:
+    cd web && node --no-warnings=MODULE_TYPELESS_PACKAGE_JSON scripts/render-help-diagrams.mjs
+
 # Reproduce the config-reference drift guard locally. Slice 430 — exits
 # non-zero when docs-site/docs/configuration.md and
 # deploy/docker/.env.example disagree (a key in the template missing from

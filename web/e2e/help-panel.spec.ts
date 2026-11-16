@@ -82,6 +82,76 @@ test.describe("How this works panel (#2143)", () => {
     expect(results.violations).toEqual([]);
   });
 
+  // #2148 — the exception lifecycle diagram in the Controls help: the
+  // pre-rendered SVG for the current theme loads and shows, the other is
+  // hidden, and the image is described by the list of its states and
+  // transitions, which a screen reader reaches.
+  for (const theme of ["light", "dark"] as const) {
+    test(`the lifecycle diagram renders in ${theme} mode with its text alternative`, async ({
+      authedPage: page,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.addInitScript(
+        ([key, value]) => window.localStorage.setItem(key, value),
+        ["security-atlas.settings.theme", theme] as const,
+      );
+      await page.goto("/controls");
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            document.documentElement.classList.contains("dark"),
+          ),
+        )
+        .toBe(theme === "dark");
+      await page.getByTestId("help-button").click();
+
+      const figure = page.locator(
+        '[data-testid="help-lifecycle"][data-lifecycle="exception"]',
+      );
+      const shown = figure.getByTestId(`help-lifecycle-${theme}`);
+      const hidden = figure.getByTestId(
+        `help-lifecycle-${theme === "dark" ? "light" : "dark"}`,
+      );
+      await expect(shown).toBeVisible();
+      await expect(hidden).toBeHidden();
+      await expect(shown).toHaveAttribute(
+        "src",
+        `/help/diagrams/controls-exception-${theme}.svg`,
+      );
+      // The SVG actually loaded and laid out, not a broken image.
+      await expect
+        .poll(() =>
+          shown.evaluate((img: HTMLImageElement) =>
+            img.complete ? img.naturalWidth : 0,
+          ),
+        )
+        .toBeGreaterThan(0);
+
+      // Assistive technology: the visible image is an img with a name, and
+      // its description is the full list of states and transitions.
+      await expect(
+        page.getByRole("img", { name: "Exception lifecycle" }),
+      ).toHaveCount(1);
+      await expect(shown).toHaveAccessibleName(
+        "Exception lifecycle: 6 states and 5 transitions, listed below.",
+      );
+      await expect(shown).toHaveAccessibleDescription(
+        /requested \(starts here on request\).*active to expired: expire, done automatically by the system.*active to revoked: revoke/,
+      );
+
+      // The same list is one click away for sighted users.
+      await figure.getByText("The diagram as text").click();
+      await expect(figure.getByTestId("help-lifecycle-text")).toContainText(
+        "approved to active: activate",
+      );
+
+      const results = await new AxeBuilder({ page })
+        .include('[data-testid="help-panel"]')
+        .analyze();
+      expect(results.violations).toEqual([]);
+    });
+  }
+
   test("a page with no help module shows no ?", async ({
     authedPage: page,
   }) => {
