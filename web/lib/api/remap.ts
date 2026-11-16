@@ -13,8 +13,7 @@
 // admin / grc_engineer, edge proposals are super-admin (a tenant admin
 // gets 403, which the page reads as "hide the edge section").
 
-import { APIError } from "./base";
-import { bffControlFetch } from "./_shared";
+import { bffControlFetch, bffPostJSON } from "./_shared";
 
 export const REMAP_CLASSES = [
   "unchanged",
@@ -140,25 +139,6 @@ export function searchAnchors(
   );
 }
 
-async function postJSON<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
-    throw new APIError(res.status, msg);
-  }
-  return (await res.json()) as T;
-}
-
 export type RemapAction = "approve" | "reject" | "keep-legacy";
 
 /**
@@ -171,7 +151,7 @@ export function decideRemap(
   action: RemapAction,
   body: { scf_id?: string; reason?: string } = {},
 ): Promise<RemapDecision> {
-  return postJSON<RemapDecision>(
+  return bffPostJSON<RemapDecision>(
     `/api/controls/remap-proposals/${encodeURIComponent(proposalId)}/${action}`,
     body,
   );
@@ -179,7 +159,7 @@ export function decideRemap(
 
 /** bulkApproveUnchanged calls the platform's bulk endpoint once. */
 export function bulkApproveUnchanged(): Promise<RemapBulkResult> {
-  return postJSON<RemapBulkResult>(
+  return bffPostJSON<RemapBulkResult>(
     "/api/controls/remap-proposals/approve-unchanged",
   );
 }

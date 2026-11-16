@@ -8,5 +8,5 @@
 import { forwardJSON } from "@/lib/api/bff";
 
 export function GET() {
-  return forwardJSON(`/v1/admin/crosswalk-edge-remap-proposals?status=open`);
+  return forwardJSON(`/v1/admin/crosswalk-edge-remap-proposals`);
 }

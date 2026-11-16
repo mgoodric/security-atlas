@@ -15,7 +15,9 @@ A tab counts the proposals a reviewer can still decide: `open`, and `rejected` (
 
 ## D3 — Edge proposals: hide on 403, the platform is the gate
 
-The edge remap API is super-admin only, in the handler and in OPA. The BFF (`/api/admin/crosswalk-edge-remap-proposals`) forwards the caller's own bearer and passes the platform's status through, so a tenant admin gets the same 403 from the BFF. The page reads that 403 as "not a super-admin" and renders no edge section. It does not consult `/api/admin/me` first: a second, client-side role check could only drift from the platform's answer. Any other failure shows an inline error, so a broken read does not pass for "not a super-admin". The BFF asks for `status=open` only.
+The edge remap API is super-admin only, in the handler and in OPA. The BFF (`/api/admin/crosswalk-edge-remap-proposals`) forwards the caller's own bearer and passes the platform's status through, so a tenant admin gets the same 403 from the BFF. The page reads that 403 as "not a super-admin" and renders no edge section. It does not consult `/api/admin/me` first: a second, client-side role check could only drift from the platform's answer. Any other failure shows an inline error, so a broken read does not pass for "not a super-admin".
+
+The BFF reads every status and the page keeps the pending ones (open or rejected), the same rule as the control tabs. An edge proposal appears beside the control proposal on the same legacy `code@release`; an edge whose anchor has no control proposal in the caller's tenant does not appear here, and edges are shown, not decided, on this page. The ticket asks to show edge proposals to super-admins, not to decide them here; deciding them stays with `atlas-cli` and the admin API (#1777).
 
 ## D4 — An explicit anchor for split, no_successor and reused_id
 
@@ -28,3 +30,15 @@ The page always sends `scf_id` for these three classes, and Approve stays disabl
 ## D6 — Bulk approve is one call
 
 The Approve-all button calls `POST /v1/controls/remap-proposals/approve-unchanged` once; the spec asserts exactly one bulk call and no single approves. Skipped proposals from the result are listed inline.
+
+## D7 — The Playwright spec shapes the BFF with page.route
+
+`web/testing.md` describes e2e as traversing the BFF, platform and Postgres, and `web/e2e/README.md` puts seed data in `fixtures/e2e/*.sql`. An A -> B remap fixture through the real stack needs two SCF releases imported and a release switch at bring-up, which the docker-compose seed does not do today; building that harness is bigger than this page. The spec follows the `needs-reanchoring.spec.ts` precedent instead: an in-memory A -> B fixture behind `page.route`, typed against the producer types in `web/lib/api/remap.ts`, which goes stale if they change.
+
+What the mocked spec cannot show is covered where it runs for real:
+
+- The approve re-anchoring the control as a superseding revision: the #1776 Go integration tests (`internal/api/scfimport/remap_decide_integration_test.go`).
+- The edge read's super-admin gate: #1777's handler and OPA tests.
+- Every BFF route forwarding the caller's own bearer, passing the platform's status through, and refusing bad ids, codes and releases before any upstream call: the vitest route tests next to each route.
+
+A real-stack remap spec belongs with a seed harness that imports two releases; #2392 (history and the list flag) is the natural place to add one, since it needs real decisions to render.

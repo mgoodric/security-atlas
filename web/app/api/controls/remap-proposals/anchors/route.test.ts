@@ -49,13 +49,17 @@ describe("GET /api/controls/remap-proposals/anchors", () => {
   test("lookup maps a code the release lacks to null", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(async (url) =>
-        String(url).includes("/v1/anchors/IAC-10")
+      .mockImplementation(async (url) => {
+        const u = String(url);
+        if (u.endsWith("/v1/frameworks/scf/versions")) {
+          return json({ versions: [{ id: "v-b", version: "B" }] });
+        }
+        return u.includes("/v1/anchors/IAC-10")
           ? json({
               anchor: { scf_id: "IAC-10", name: "Authenticator Management" },
             })
-          : json({ error: "not found" }, 404),
-      );
+          : json({ error: "not found" }, 404);
+      });
     const res = await get("release=B&codes=IAC-10,IAC-99");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { anchors: Record<string, unknown> };
@@ -87,9 +91,21 @@ describe("GET /api/controls/remap-proposals/anchors", () => {
     expect(body.anchors.map((a) => a.scf_id)).toEqual(["IAC-10"]);
   });
 
-  test("search on an unknown release is a 404", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ versions: [] }));
-    const res = await get("release=Z&q=iac");
-    expect(res.status).toBe(404);
+  test.each([["release=Z&q=iac"], ["release=Z&codes=IAC-10"]])(
+    "an unknown release is a 404, not a null anchor (%s)",
+    async (qs) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(json({ versions: [] }));
+      const res = await get(qs);
+      expect(res.status).toBe(404);
+    },
+  );
+
+  test("a network failure is a generic 502, not its raw message", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("connect ECONNREFUSED 10.0.0.1:8080"),
+    );
+    const res = await get("release=B&q=iac");
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "upstream error" });
   });
 });

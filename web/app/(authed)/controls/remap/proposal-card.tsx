@@ -28,6 +28,14 @@ import {
 } from "@/lib/api/remap";
 import { REMAP_CLASS_LABELS, needsExplicitAnchor } from "@/lib/remap-review";
 
+// A lookup entry is undefined while loading and null when the release has
+// no anchor with that code; the two must not read the same.
+function anchorName(a: SCFAnchor | null | undefined): string {
+  if (a === undefined) return "…";
+  if (a === null) return "(not in this release)";
+  return a.name;
+}
+
 function AnchorText({
   code,
   release,
@@ -201,14 +209,14 @@ export function ProposalCard({
               <p>
                 {p.legacy_scf_id} is a reused ID. In {p.legacy_release} it meant{" "}
                 <strong data-testid="remap-reused-old">
-                  {legacy?.name ?? "…"}
+                  {anchorName(legacy)}
                 </strong>
                 .
               </p>
               <p>
                 In {p.target_release} it means{" "}
                 <strong data-testid="remap-reused-new">
-                  {reusedNow?.name ?? "…"}
+                  {anchorName(reusedNow)}
                 </strong>
                 {reusedNow?.legacy_scf_id
                   ? `, which continues ${reusedNow.legacy_scf_id}`

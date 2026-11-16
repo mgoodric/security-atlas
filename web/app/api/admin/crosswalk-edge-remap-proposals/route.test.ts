@@ -47,7 +47,7 @@ describe("GET /api/admin/crosswalk-edge-remap-proposals", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.proposals).toBeUndefined();
     expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
-      "http://atlas:8080/v1/admin/crosswalk-edge-remap-proposals?status=open",
+      "http://atlas:8080/v1/admin/crosswalk-edge-remap-proposals",
     );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;

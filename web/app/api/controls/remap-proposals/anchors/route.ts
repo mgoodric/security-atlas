@@ -15,6 +15,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiFetch } from "@/lib/api/_shared";
+import { APIError } from "@/lib/api/base";
 import type {
   AnchorLookupResponse,
   AnchorSearchResponse,
@@ -37,11 +38,25 @@ function bad(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status });
 }
 
+// resolveRelease returns the SCF framework_version id for a release label,
+// or throws a 404 APIError, so an unknown release never passes for "this
+// code is not in the release".
+async function resolveRelease(bearer: string, release: string) {
+  const vres = await apiFetch(`/v1/frameworks/scf/versions`, bearer);
+  const { versions } = (await vres.json()) as {
+    versions: { id: string; version: string }[];
+  };
+  const v = versions.find((x) => x.version === release);
+  if (!v) throw new APIError(404, "unknown SCF release");
+  return v.id;
+}
+
 async function lookup(
   bearer: string,
   release: string,
   codes: string[],
 ): Promise<AnchorLookupResponse> {
+  await resolveRelease(bearer, release);
   const entries = await Promise.all(
     codes.map(async (code): Promise<[string, SCFAnchor | null]> => {
       try {
@@ -67,20 +82,13 @@ async function search(
   release: string,
   q: string,
 ): Promise<AnchorSearchResponse> {
-  const vres = await apiFetch(`/v1/frameworks/scf/versions`, bearer);
-  const { versions } = (await vres.json()) as {
-    versions: { id: string; version: string }[];
-  };
-  const v = versions.find((x) => x.version === release);
-  if (!v) {
-    throw Object.assign(new Error("unknown SCF release"), { status: 404 });
-  }
+  const versionID = await resolveRelease(bearer, release);
   const matches: SCFAnchor[] = [];
   let truncated = false;
   for (let page = 0; page < MAX_PAGES; page++) {
     const res = await apiFetch(
       `/v1/anchors?framework_version_id=${encodeURIComponent(
-        v.id,
+        versionID,
       )}&limit=${PAGE}&offset=${page * PAGE}`,
       bearer,
     );
@@ -124,7 +132,9 @@ export async function GET(req: Request) {
     }
     return NextResponse.json(await search(bearer, release, q));
   } catch (err) {
-    const e = err as { status?: number; message?: string };
-    return bad(e.message ?? "upstream error", e.status ?? 500);
+    // Only a platform status reaches the client; anything else (a network
+    // failure, a malformed body) is a generic 502, never its raw message.
+    if (err instanceof APIError) return bad(err.message, err.status);
+    return bad("upstream error", 502);
   }
 }

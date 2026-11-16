@@ -55,19 +55,22 @@ describe("needsExplicitAnchor", () => {
 });
 
 describe("edgesFor", () => {
-  test("matches on legacy code and release", () => {
-    const e = (id: string, code: string, rel: string) =>
+  test("matches pending edges on legacy code and release", () => {
+    const e = (id: string, code: string, rel: string, status = "open") =>
       ({
         id,
         legacy_scf_id: code,
         legacy_release: rel,
+        status,
       }) as EdgeRemapProposal;
     const edges = [
       e("1", "IAC-01", "A"),
       e("2", "IAC-01", "Z"),
       e("3", "X", "A"),
+      e("4", "IAC-01", "A", "rejected"),
+      e("5", "IAC-01", "A", "approved"),
     ];
-    expect(edgesFor(proposal({}), edges).map((x) => x.id)).toEqual(["1"]);
+    expect(edgesFor(proposal({}), edges).map((x) => x.id)).toEqual(["1", "4"]);
   });
 });
 

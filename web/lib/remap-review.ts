@@ -44,21 +44,26 @@ export function needsExplicitAnchor(c: RemapClass): boolean {
   return c === "split" || c === "no_successor" || c === "reused_id";
 }
 
-/** edgesFor returns the edge proposals on the same legacy anchor. */
+/**
+ * edgesFor returns the pending edge proposals on the same legacy anchor,
+ * by the same open-or-rejected rule as the control tabs.
+ */
 export function edgesFor(
   p: Pick<RemapProposal, "legacy_scf_id" | "legacy_release">,
   edges: EdgeRemapProposal[],
 ): EdgeRemapProposal[] {
   return edges.filter(
     (e) =>
+      isPending(e) &&
       e.legacy_scf_id === p.legacy_scf_id &&
       e.legacy_release === p.legacy_release,
   );
 }
 
 // SCF codes ("IAC-21", "GOV-01.1") and release labels ("2025.2",
-// "test-2026.3"). Both reach an upstream path segment, so the BFF rejects
-// anything else, including a bare "..".
+// "test-2026.3"). A code reaches an upstream path segment and a release
+// an upstream query string, so the BFF rejects anything else, including a
+// bare "..".
 const SCF_CODE_RE = /^[A-Za-z][A-Za-z0-9.-]{0,31}$/;
 const RELEASE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
