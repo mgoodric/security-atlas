@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const assignAuditor = `-- name: AssignAuditor :exec
+const assignAuditor = `-- name: AssignAuditor :execrows
 
 
 INSERT INTO auditor_assignments (
@@ -37,15 +37,19 @@ type AssignAuditorParams struct {
 // ===== auditor_assignments =====
 // Insert an (tenant, user, period) assignment. ON CONFLICT DO NOTHING makes
 // repeated calls idempotent -- granting the same auditor to the same period
-// twice is a no-op rather than an error.
-func (q *Queries) AssignAuditor(ctx context.Context, arg AssignAuditorParams) error {
-	_, err := q.db.Exec(ctx, assignAuditor,
+// twice is a no-op rather than an error. The row count says whether the
+// grant is new (#2118 logs only new grants).
+func (q *Queries) AssignAuditor(ctx context.Context, arg AssignAuditorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, assignAuditor,
 		arg.TenantID,
 		arg.UserID,
 		arg.AuditPeriodID,
 		arg.GrantedBy,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const createAuditNote = `-- name: CreateAuditNote :one
@@ -280,6 +284,34 @@ func (q *Queries) GetAuditPeriodIDsForUser(ctx context.Context, arg GetAuditPeri
 	return items, nil
 }
 
+const isActiveTenantAuditor = `-- name: IsActiveTenantAuditor :one
+SELECT EXISTS (
+    SELECT 1
+    FROM users u
+    JOIN user_roles ur
+      ON ur.tenant_id = u.tenant_id
+     AND ur.user_id   = u.id::text
+    WHERE u.tenant_id = $1
+      AND u.id        = $2
+      AND u.status    = 'active'
+      AND ur.role     = 'auditor'
+) AS ok
+`
+
+type IsActiveTenantAuditorParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #2118: whether user_id is an active user of this tenant holding the
+// auditor role. The assign route refuses anyone else.
+func (q *Queries) IsActiveTenantAuditor(ctx context.Context, arg IsActiveTenantAuditorParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isActiveTenantAuditor, arg.TenantID, arg.ID)
+	var ok bool
+	err := row.Scan(&ok)
+	return ok, err
+}
+
 const listAuditNotesForAuthorAndPeriod = `-- name: ListAuditNotesForAuthorAndPeriod :many
 SELECT id, tenant_id, audit_period_id, author_user_id, scope_type, scope_id, body, visibility, created_at, updated_at, parent_note_id FROM audit_notes
 WHERE tenant_id        = $1
@@ -392,6 +424,120 @@ func (q *Queries) ListAuditorAssignmentsForUser(ctx context.Context, arg ListAud
 			&i.Status,
 			&i.FrozenAt,
 			&i.PeriodCreatedAt,
+			&i.GrantedAt,
+			&i.GrantedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditorCandidatesForPeriod = `-- name: ListAuditorCandidatesForPeriod :many
+SELECT
+    u.id::text     AS user_id,
+    u.display_name AS display_name,
+    u.email        AS email
+FROM users u
+JOIN user_roles ur
+  ON ur.tenant_id = u.tenant_id
+ AND ur.user_id   = u.id::text
+WHERE u.tenant_id = $1
+  AND u.status    = 'active'
+  AND ur.role     = 'auditor'
+  AND NOT EXISTS (
+      SELECT 1 FROM auditor_assignments aa
+      WHERE aa.tenant_id       = u.tenant_id
+        AND aa.user_id         = u.id::text
+        AND aa.audit_period_id = $2
+  )
+ORDER BY u.display_name ASC, u.email ASC
+`
+
+type ListAuditorCandidatesForPeriodParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+type ListAuditorCandidatesForPeriodRow struct {
+	UserID      string `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+}
+
+// #2118: the picker's choices: active users of this tenant holding the
+// auditor role and not yet assigned to the period. Tenant-scoped here, so
+// a super-admin caller sees only the current tenant's users.
+func (q *Queries) ListAuditorCandidatesForPeriod(ctx context.Context, arg ListAuditorCandidatesForPeriodParams) ([]ListAuditorCandidatesForPeriodRow, error) {
+	rows, err := q.db.Query(ctx, listAuditorCandidatesForPeriod, arg.TenantID, arg.AuditPeriodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditorCandidatesForPeriodRow
+	for rows.Next() {
+		var i ListAuditorCandidatesForPeriodRow
+		if err := rows.Scan(&i.UserID, &i.DisplayName, &i.Email); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditorsForPeriod = `-- name: ListAuditorsForPeriod :many
+SELECT
+    aa.user_id                       AS user_id,
+    COALESCE(u.display_name, '')::text AS display_name,
+    COALESCE(u.email, '')::text      AS email,
+    aa.granted_at                    AS granted_at,
+    aa.granted_by                    AS granted_by
+FROM auditor_assignments aa
+LEFT JOIN users u
+  ON u.tenant_id = aa.tenant_id
+ AND u.id::text  = aa.user_id
+WHERE aa.tenant_id       = $1
+  AND aa.audit_period_id = $2
+ORDER BY aa.granted_at ASC, aa.user_id ASC
+`
+
+type ListAuditorsForPeriodParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+type ListAuditorsForPeriodRow struct {
+	UserID      string             `json:"user_id"`
+	DisplayName string             `json:"display_name"`
+	Email       string             `json:"email"`
+	GrantedAt   pgtype.Timestamptz `json:"granted_at"`
+	GrantedBy   string             `json:"granted_by"`
+}
+
+// #2118: the auditors assigned to one period, with the display fields
+// GET /v1/admin/users already shows an admin. user_id is the bare user
+// uuid (20261021000000); a row whose user no longer resolves still lists,
+// with empty name and email, so an admin can remove it.
+func (q *Queries) ListAuditorsForPeriod(ctx context.Context, arg ListAuditorsForPeriodParams) ([]ListAuditorsForPeriodRow, error) {
+	rows, err := q.db.Query(ctx, listAuditorsForPeriod, arg.TenantID, arg.AuditPeriodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditorsForPeriodRow
+	for rows.Next() {
+		var i ListAuditorsForPeriodRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.DisplayName,
+			&i.Email,
 			&i.GrantedAt,
 			&i.GrantedBy,
 		); err != nil {
@@ -573,4 +719,27 @@ func (q *Queries) ListThreadForScope(ctx context.Context, arg ListThreadForScope
 		return nil, err
 	}
 	return items, nil
+}
+
+const removeAuditor = `-- name: RemoveAuditor :execrows
+DELETE FROM auditor_assignments
+WHERE tenant_id       = $1
+  AND user_id         = $2
+  AND audit_period_id = $3
+`
+
+type RemoveAuditorParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	UserID        string      `json:"user_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+// #2118: drop one (tenant, user, period) assignment. Returns the row
+// count so the caller logs only a removal that happened.
+func (q *Queries) RemoveAuditor(ctx context.Context, arg RemoveAuditorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeAuditor, arg.TenantID, arg.UserID, arg.AuditPeriodID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

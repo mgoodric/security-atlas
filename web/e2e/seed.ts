@@ -128,7 +128,10 @@ export type FixtureName =
   // #1800 — a requirement with a catalog edge and a demo-tenant overlay
   // edge, a control behind the overlay, and a second tenant
   // (org-mapping.spec.ts).
-  | "org-mapping";
+  | "org-mapping"
+  // #2118 — an open audit period and an auditor user of its own, with
+  // no assignment, for period-auditors.spec.ts.
+  | "period-auditors";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
