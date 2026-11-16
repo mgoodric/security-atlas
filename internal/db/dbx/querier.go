@@ -1067,6 +1067,11 @@ type Querier interface {
 	// Lookup a SCIM-provisioned user by the IdP's externalId within the tenant.
 	GetSCIMUserByExternalID(ctx context.Context, arg GetSCIMUserByExternalIDParams) (User, error)
 	GetSampleByID(ctx context.Context, arg GetSampleByIDParams) (Sample, error)
+	// #2157: the audit period a sample belongs to, through its population. The
+	// authz hydrator puts it on input.resource.attrs.audit_period_id so the
+	// auditor rules in audit_periods.rego / auditor.rego can match it. NULL
+	// when the population is attached to no period.
+	GetSamplePopulationPeriod(ctx context.Context, arg GetSamplePopulationPeriodParams) (pgtype.UUID, error)
 	// Look up a cell by its dimensions hash. Used by the "create or get" path so
 	// a re-seed call does not 409 on the existing default cell.
 	GetScopeCellByHash(ctx context.Context, arg GetScopeCellByHashParams) (ScopeCell, error)
@@ -2583,6 +2588,10 @@ type Querier interface {
 	//
 	// Sort by title ASC, created_at DESC for deterministic ordering.
 	ListPendingAcksForUser(ctx context.Context, arg ListPendingAcksForUserParams) ([]ListPendingAcksForUserRow, error)
+	// #2157: the populations on one control that are attached to an audit
+	// period. The authz hydrator tests an evidence record (or a control and
+	// scope cell) against each one to find the periods it belongs to.
+	ListPeriodPopulationsForControl(ctx context.Context, arg ListPeriodPopulationsForControlParams) ([]Population, error)
 	ListPersonnelChecklistItems(ctx context.Context, arg ListPersonnelChecklistItemsParams) ([]PersonnelSecurityChecklistItem, error)
 	// OE-663: the checklist-index read behind GET /v1/personnel-security/
 	// checklists. Optional filters compose via the sqlc.narg NULL-collapse
