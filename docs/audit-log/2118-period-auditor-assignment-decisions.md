@@ -74,6 +74,12 @@ bare uuid → 200). The fix changes every role for every `user:` session, so
 Matt wants it rolled out with a before/after dry run (#2239). Until #2239
 lands, an assigned auditor reaches the period only on a bare-uuid session.
 
+**Removed by #2239.** The resolver now reads a `user:<uuid>` subject as the
+bare uuid, and the Playwright spec signs the auditor in with `user:<uuid>`.
+`TestPeriodAuditors2239_RealLoginAndLeftoverAssignment` covers a real-login
+auditor, and an auditor who loses the role or is disabled after assignment
+(see `2239-user-subject-roles-decisions.md` D3).
+
 ## D6 — Removal takes effect on the next request
 
 **Decision.** No cache. The OPA attrs resolver reads `auditor_assignments` per
