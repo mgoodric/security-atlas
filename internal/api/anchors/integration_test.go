@@ -255,7 +255,7 @@ func TestAnchorsForRequirement_ResolvesSOC2CC66BySlugVersionCode(t *testing.T) {
 		t.Fatalf("requirement.code = %q; want CC6.6", got.Requirement["code"])
 	}
 	if len(got.Anchors) == 0 {
-		t.Fatal("expected at least one anchor for CC6.6 (NET-04, IAC-37 per crosswalk)")
+		t.Fatal("expected at least one anchor for CC6.6 (NET-03, IAC-37 per crosswalk)")
 	}
 	for _, a := range got.Anchors {
 		if a.SCFID == "" {

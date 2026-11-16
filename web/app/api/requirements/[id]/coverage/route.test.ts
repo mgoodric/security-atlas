@@ -68,7 +68,7 @@ describe("GET /api/requirements/[id]/coverage", () => {
           anchors: [
             {
               id: "00000000-0000-0000-0000-0000000000a1",
-              scf_id: "NET-04",
+              scf_id: "NET-03",
               family: "NET",
               name: "Boundary protection",
               relationship_type: "subset_of",
@@ -97,7 +97,7 @@ describe("GET /api/requirements/[id]/coverage", () => {
     };
     // Existing fields survive (additive only — P0-482-5).
     expect(body.requirement.code).toBe("CC6.6");
-    expect(body.anchors[0].scf_id).toBe("NET-04");
+    expect(body.anchors[0].scf_id).toBe("NET-03");
     expect(body.anchors[0].strength).toBe(0.8);
     // The new rollup fields pass through unchanged.
     expect(body.coverage_strength).toBe(0.7);

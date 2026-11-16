@@ -89,7 +89,7 @@ func TestBuildNetpolRecord_Shape(t *testing.T) {
 		},
 		Result: netpol.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildNetpolRecord(c, "cluster-1", "prod", "scf:NET-04")
+	rec, err := buildNetpolRecord(c, "cluster-1", "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNetpolRecord: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestBuildNetpolRecord_OmitsEmptyPolicies(t *testing.T) {
 		Namespace: "dev", PolicyCount: 0, Result: netpol.ResultFail,
 		ObservedAt: time.Now().UTC(),
 	}
-	rec, err := buildNetpolRecord(c, "c", "prod", "scf:NET-04")
+	rec, err := buildNetpolRecord(c, "c", "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNetpolRecord: %v", err)
 	}

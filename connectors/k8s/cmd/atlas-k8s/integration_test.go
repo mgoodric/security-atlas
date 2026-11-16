@@ -186,7 +186,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if prodCov == nil || prodCov.Result != netpol.ResultPass || !prodCov.DefaultDenyIngress {
 		t.Fatalf("prod namespace should PASS with default-deny ingress; got %+v", prodCov)
 	}
-	npRec, err := buildNetpolRecord(*prodCov, "cluster-1", "prod", "scf:NET-04")
+	npRec, err := buildNetpolRecord(*prodCov, "cluster-1", "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNetpolRecord: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 		}},
 	}}
 	covs, _ := netpol.Assess(context.Background(), npAPI, fixed)
-	npRec, _ := buildNetpolRecord(covs[0], "cluster-1", "prod", "scf:NET-04")
+	npRec, _ := buildNetpolRecord(covs[0], "cluster-1", "prod", "scf:NET-03")
 
 	// PSS admission: the faked namespace carries unrelated labels + annotations
 	// (via the client boundary) — but the RawNamespace the assessment consumes
