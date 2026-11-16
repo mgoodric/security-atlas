@@ -53,6 +53,20 @@ export type FrameworkScopePatchResponse = {
   approval_invalidated: boolean;
 };
 
+// #2115: the platform's `{"error": "..."}` message, so a refusal (the
+// approval rule's "the submitter cannot approve their own scope", a frozen
+// revision) reaches the page as the platform words it, else the status line.
+async function upstreamError(res: Response): Promise<APIError> {
+  let msg = `${res.status} ${res.statusText}`;
+  try {
+    const j = (await res.json()) as { error?: string };
+    if (j.error) msg = j.error;
+  } catch {
+    // body not JSON — keep the status line
+  }
+  return new APIError(res.status, msg);
+}
+
 export async function listFrameworkScopes(
   bearer: string,
   filter: {
@@ -84,8 +98,7 @@ export async function createFrameworkScope(
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok)
-    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  if (!res.ok) throw await upstreamError(res);
   const decoded = (await res.json()) as { framework_scope: FrameworkScope };
   return decoded.framework_scope;
 }
@@ -106,8 +119,7 @@ export async function patchFrameworkScopePredicate(
       body: JSON.stringify({ predicate }),
     },
   );
-  if (!res.ok)
-    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  if (!res.ok) throw await upstreamError(res);
   return (await res.json()) as FrameworkScopePatchResponse;
 }
 
@@ -130,8 +142,7 @@ export async function transitionFrameworkScope(
       body: body ? JSON.stringify(body) : undefined,
     },
   );
-  if (!res.ok)
-    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  if (!res.ok) throw await upstreamError(res);
   const decoded = (await res.json()) as { framework_scope: FrameworkScope };
   return decoded.framework_scope;
 }
