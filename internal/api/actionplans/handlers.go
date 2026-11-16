@@ -93,14 +93,17 @@ type linkageWire struct {
 }
 
 type planWire struct {
-	ID              string    `json:"id"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description"`
-	TriggeringEvent string    `json:"triggering_event"`
-	OwnerID         string    `json:"owner_id"`
-	DueDate         *string   `json:"due_date,omitempty"`
-	Status          string    `json:"status"`
-	AuditPeriodID   *string   `json:"audit_period_id,omitempty"`
+	ID              string  `json:"id"`
+	Title           string  `json:"title"`
+	Description     string  `json:"description"`
+	TriggeringEvent string  `json:"triggering_event"`
+	OwnerID         string  `json:"owner_id"`
+	DueDate         *string `json:"due_date,omitempty"`
+	Status          string  `json:"status"`
+	AuditPeriodID   *string `json:"audit_period_id,omitempty"`
+	// ControlsFailing: completed, and the linked controls do not all pass
+	// their latest evaluation (#2109). Set on the single-plan read.
+	ControlsFailing bool      `json:"controls_failing"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -453,14 +456,15 @@ func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, fn func
 		return
 	}
 	type refWire struct {
-		ID      string  `json:"id"`
-		Title   string  `json:"title"`
-		Status  string  `json:"status"`
-		DueDate *string `json:"due_date,omitempty"`
+		ID              string  `json:"id"`
+		Title           string  `json:"title"`
+		Status          string  `json:"status"`
+		DueDate         *string `json:"due_date,omitempty"`
+		ControlsFailing bool    `json:"controls_failing"`
 	}
 	out := make([]refWire, len(refs))
 	for i, ref := range refs {
-		rw := refWire{ID: ref.ID.String(), Title: ref.Title, Status: ref.Status}
+		rw := refWire{ID: ref.ID.String(), Title: ref.Title, Status: ref.Status, ControlsFailing: ref.ControlsFailing}
 		if ref.DueDate != nil {
 			d := ref.DueDate.Format("2006-01-02")
 			rw.DueDate = &d
@@ -554,6 +558,7 @@ func planWireFrom(p actionplan.ActionPlan) planWire {
 		TriggeringEvent: p.TriggeringEvent,
 		OwnerID:         p.OwnerID.String(),
 		Status:          p.Status,
+		ControlsFailing: p.ControlsFailing,
 		CreatedAt:       p.CreatedAt,
 		UpdatedAt:       p.UpdatedAt,
 	}

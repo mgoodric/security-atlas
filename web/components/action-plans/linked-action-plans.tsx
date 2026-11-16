@@ -12,6 +12,10 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import {
+  planStatusLabel,
+  statusPillClass,
+} from "@/app/(authed)/action-plans/status";
+import {
   fetchActionPlansForControl,
   fetchActionPlansForRisk,
   type ActionPlanRef,
@@ -24,21 +28,6 @@ type Props = {
   // The create form, pre-linked to the target; absent, no add link.
   addHref?: string;
 };
-
-function pillClass(status: string): string {
-  switch (status) {
-    case "verified":
-      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
-    case "completed":
-      return "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300";
-    case "in_progress":
-      return "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
-    case "blocked":
-      return "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300";
-    default:
-      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
-  }
-}
 
 export function LinkedActionPlans({ target, targetId, addHref }: Props) {
   const q = useQuery<ActionPlansRefListResponse>({
@@ -85,7 +74,11 @@ export function LinkedActionPlans({ target, targetId, addHref }: Props) {
       ) : (
         <ul className="space-y-1" data-testid="linked-action-plans-list">
           {rows.map((p) => (
-            <li key={p.id} className="flex items-center gap-2 text-sm">
+            <li
+              key={p.id}
+              className="flex items-center gap-2 text-sm"
+              data-testid="linked-action-plan"
+            >
               <Link
                 href={`/action-plans/${encodeURIComponent(p.id)}`}
                 className="text-primary hover:underline"
@@ -95,10 +88,11 @@ export function LinkedActionPlans({ target, targetId, addHref }: Props) {
               <span
                 className={
                   "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-                  pillClass(p.status)
+                  statusPillClass(p.status)
                 }
+                data-testid="linked-action-plan-status"
               >
-                {p.status}
+                {planStatusLabel(p.status, p.controls_failing)}
               </span>
               {p.due_date ? (
                 <span className="text-xs text-muted-foreground">
