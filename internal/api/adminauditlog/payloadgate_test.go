@@ -81,6 +81,7 @@ var kindSourcePath = map[unifiedlog.Kind]string{
 	unifiedlog.KindTaxonomy:        "/v1/risks/categories",
 	unifiedlog.KindMappingOverlay:  "/v1/mapping-overlays",
 	unifiedlog.KindControlImport:   "/v1/controls",
+	unifiedlog.KindRisk:            "/v1/risks/00000000-0000-0000-0000-000000000001/audit-log",
 	unifiedlog.KindPostureTarget:   "/v1/framework-scopes/posture-targets/00000000-0000-0000-0000-000000000001",
 }
 

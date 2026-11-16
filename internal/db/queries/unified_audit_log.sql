@@ -296,7 +296,41 @@ WITH unified AS (
 
     UNION ALL
 
-    -- 14. framework_posture_target_audit_log (#2136): a framework
+    -- 14. risk_audit_log (#1954): a risk moved between org units or
+    -- levels, moved onto another category, or its record fields edited.
+    -- The action is the row's action_type (placement_changed,
+    -- category_changed, fields_changed).
+    --
+    -- The payload names the changed fields and never carries their
+    -- values: auditors and control owners read this log but are denied
+    -- /v1/risks, and before_state / after_state hold titles,
+    -- descriptions, scores and the treatment owner. The values stay on
+    -- GET /v1/risks/{id}/audit-log, behind the risk read policy.
+    SELECT
+        created_at     AS occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'risk'::text   AS kind,
+        'risk'::text   AS target_type,
+        risk_id::text  AS target_id,
+        action_type    AS action,
+        id             AS row_id,
+        subject_module,
+        jsonb_build_object(
+            'id', ra.id,
+            -- The CASE keeps jsonb_object_keys off a non-object state,
+            -- which would fail the whole query.
+            'changed_fields', COALESCE(CASE WHEN jsonb_typeof(ra.after_state) = 'object' THEN (
+                SELECT jsonb_agg(k ORDER BY k)
+                FROM jsonb_object_keys(ra.after_state) AS k
+                WHERE ra.before_state -> k IS DISTINCT FROM ra.after_state -> k
+            ) END, '[]'::jsonb)
+        ) AS payload_json
+    FROM risk_audit_log ra
+
+    UNION ALL
+
+    -- 15. framework_posture_target_audit_log (#2136): a framework
     -- version's posture target set, before -> after.
     SELECT
         occurred_at,

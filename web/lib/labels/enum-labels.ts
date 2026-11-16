@@ -226,6 +226,7 @@ export const ENUM_LABELS = {
     taxonomy: "Taxonomy",
     mapping_overlay: "Mapping overlay",
     control_import: "Control import",
+    risk: "Risk",
     posture_target: "Posture target",
   },
   // Checklist item kinds are CHECK-constrained text, not a Postgres enum,

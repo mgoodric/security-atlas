@@ -38,6 +38,8 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 	unifiedlog.KindMappingOverlay: "mapping-overlays",
 	// Control import rows are read with the controls they create.
 	unifiedlog.KindControlImport: "controls",
+	// Risk rows (#1954) are read at /v1/risks/{id}/audit-log.
+	unifiedlog.KindRisk: "risks",
 	// Posture targets are set and read under /v1/framework-scopes.
 	unifiedlog.KindPostureTarget: "framework-scopes",
 }

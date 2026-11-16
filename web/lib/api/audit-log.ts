@@ -33,6 +33,7 @@ export const AUDIT_LOG_KINDS = [
   "taxonomy",
   "mapping_overlay",
   "control_import",
+  "risk",
   "posture_target",
 ] as const;
 
