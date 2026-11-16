@@ -35,6 +35,7 @@ import { FeatureFlag, FeatureFlagListResponse } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 
 import { groupByModule } from "./group";
+import { Term } from "@/components/help/term";
 
 async function fetchFlags(): Promise<FeatureFlag[]> {
   const res = await fetch(`/api/admin/features`);
@@ -90,9 +91,10 @@ export default function FeaturesPage() {
       title="Features"
       subtitle={
         <>
-          Per-tenant feature flags. Disabling a gated module hides its nav entry
-          and makes its routes unreachable; data is preserved and you can
-          re-enable at any time.
+          Per-tenant feature flags. <Term id="switched-off">Disabling</Term> a
+          gated <Term id="module">module</Term> hides its nav entry and makes
+          its routes unreachable; data is preserved and you can re-enable at any
+          time.
         </>
       }
     >
