@@ -190,6 +190,17 @@ An approval made by the person who requested it: the submitter of a policy or fr
 
 An organisation may turn on **Allow self-approval** (`tenants.allow_self_approval`; admin-only; every change written to the audit log). While it is on, the requester may approve their own record, and the record is flagged `self_approved` and shown as **Self-approved** in the UI, the exports and the audit log. The setting relaxes only "same person": a machine credential still never approves. One rule decides every approval (`internal/approval`); see [ADR 0024](docs/adr/0024-approvals-require-a-second-person.md).
 
+## Action plan: Completed and Verified (#2108, #2109)
+
+An action plan moves `draft → in_progress (⇄ blocked) → completed → verified`. The last two states say different things:
+
+- **Completed** — the plan's owner says the work is done. A person sets it (`PATCH /v1/action-plans/{id}`, Mark complete) and can reopen it to `in_progress`. Completed is a claim, not proof.
+- **Verified** — the work is shown to have closed the gap. How a plan gets there depends on whether it has linked controls:
+  - **With linked controls**, the platform verifies it. After every control evaluation, a completed plan whose linked controls all pass their latest evaluation becomes verified, and a verified plan with a linked control that no longer passes returns to completed. "Passes" means every cell of the control's most recent evaluation run is `pass`; `excepted` is not a pass, and a control never evaluated does not pass. No person or API key makes either move: the audit row names the system actor `system:action-plan-verification`, and the database refuses `verified → completed` outside the evaluation path.
+  - **With no linked controls**, an approver verifies it by hand (`POST /v1/action-plans/{id}/verify`); the plan's owner never can.
+
+**Completed · linked controls still failing** is how the plan page and the controls' and risks' linked-plan lists show a completed plan whose linked controls do not all pass yet (`controls_failing: true` in the API). It is still `completed`; the next evaluation in which they all pass verifies it.
+
 ## Decision Log (slice 055)
 
 A **Decision** captures a non-compliance operational or architectural

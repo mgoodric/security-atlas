@@ -31,6 +31,20 @@ export function statusLabel(status: string): string {
   return ACTION_PLAN_STATUS_LABELS[status as ActionPlanStatus] ?? status;
 }
 
+/**
+ * The status a plan shows, given whether its linked controls still fail
+ * (#2109): a completed plan waiting on its controls says so.
+ */
+export function planStatusLabel(
+  status: string,
+  controlsFailing?: boolean,
+): string {
+  if (status === "completed" && controlsFailing) {
+    return "Completed · linked controls still failing";
+  }
+  return statusLabel(status);
+}
+
 /** Format an ISO date/timestamp as YYYY-MM-DD; "—" for empty/malformed. */
 export function dateLabel(iso?: string | null): string {
   if (!iso) return "—";
