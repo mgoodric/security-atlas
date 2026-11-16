@@ -155,4 +155,22 @@ describe("policy write BFF routes (#2116)", () => {
     expect(res.status).toBe(401);
     expect(calls).toHaveLength(0);
   });
+
+  test("a body that is not JSON is 400 without an upstream call", async () => {
+    const calls = captureFetch(200, {});
+    const bad = () => new Request("http://x", { method: "POST", body: "{" });
+    expect((await create(bad())).status).toBe(400);
+    expect(
+      (await edit(bad() as never, { params: Promise.resolve({ id: ID }) }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await transition(bad(), {
+          params: Promise.resolve({ id: ID, action: "publish" }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(calls).toHaveLength(0);
+  });
 });
