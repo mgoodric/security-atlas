@@ -143,7 +143,11 @@ export type FixtureName =
   | "feature-flag-gating"
   // #2085: a named user who owns an action plan, created an audit
   // period and completed a personnel item, for person-names.spec.ts.
-  | "person-names";
+  | "person-names"
+  // #2136 — two framework versions, one with an activated scope and no
+  // posture target (reset each run), one with no scope, for
+  // posture-targets.spec.ts.
+  | "posture-targets";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

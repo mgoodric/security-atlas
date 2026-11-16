@@ -82,6 +82,9 @@ const (
 	// KindRisk is risk_audit_log (#1954): a risk's placement, category
 	// and record-field changes.
 	KindRisk Kind = "risk"
+	// KindPostureTarget is framework_posture_target_audit_log (#2136): a
+	// framework version's posture target set.
+	KindPostureTarget Kind = "posture_target"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -115,6 +118,7 @@ var AllKinds = []Kind{
 	KindMappingOverlay,
 	KindControlImport,
 	KindRisk,
+	KindPostureTarget,
 }
 
 // IsCanonical reports whether k is one of the canonical kinds in [AllKinds].
