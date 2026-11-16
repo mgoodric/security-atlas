@@ -9,8 +9,6 @@ import {
   type Predicate,
 } from "@/components/scope/scope-picker-model";
 
-import { APIError } from "./base";
-
 export type Requirement = { code: string; requirement_id: string };
 
 export type CandidateSource = "crosswalk" | "keyword" | "llm";
@@ -244,22 +242,6 @@ export function rowPath(batchID: string, rowID: string, verb: string): string {
   return `${batchPath(batchID)}/rows/${encodeURIComponent(rowID)}/${verb}`;
 }
 
-/** postJSON posts to a control-import BFF route and returns the parsed
- *  body, or throws an APIError carrying the platform's status and error
- *  message (409 "already running", 400 "reason is required", ...). */
-export async function postJSON<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers:
-      body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const parsed = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) {
-    throw new APIError(
-      res.status,
-      parsed.error ?? `request failed (${res.status})`,
-    );
-  }
-  return parsed as T;
-}
+// postJSON moved to _shared.ts as bffPostJSON (#1778), shared with the
+// remap review client.
+export { bffPostJSON as postJSON } from "./_shared";

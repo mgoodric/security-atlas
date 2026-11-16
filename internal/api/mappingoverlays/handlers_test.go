@@ -26,6 +26,12 @@ func TestRefusalStatus_CoversEveryClassifiedCode(t *testing.T) {
 		mappingoverlay.ErrDuplicateOverlay,
 		mappingoverlay.ErrAlreadyRetired,
 		mappingoverlay.ErrNotFound,
+		&mappingoverlay.InvalidRemapError{Reason: "x"},
+		mappingoverlay.ErrRemapNotFound,
+		mappingoverlay.ErrRemapDecided,
+		mappingoverlay.ErrRemapAnchorRequired,
+		mappingoverlay.ErrRemapAnchorNotInRelease,
+		mappingoverlay.ErrRemapEdgeChanged,
 	} {
 		code, _, ok := mappingoverlay.Classify(err)
 		if !ok || refusalStatus[code] == 0 {

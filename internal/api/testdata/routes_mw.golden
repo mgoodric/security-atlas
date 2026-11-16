@@ -142,6 +142,7 @@ GET /v1/mapping-overlays 9
 GET /v1/mapping-overlays/audited-under 9
 GET /v1/mapping-overlays/audited-under/export 9
 GET /v1/mapping-overlays/export 9
+GET /v1/mapping-overlays/remap-proposals 9
 GET /v1/mcp/write-proposals 9
 GET /v1/mcp/write-proposals/{id} 9
 GET /v1/me 9
@@ -330,6 +331,9 @@ POST /v1/incidents/{id}/close 9
 POST /v1/install/mark-first-signin 9
 POST /v1/mapping-overlays 9
 POST /v1/mapping-overlays/import 9
+POST /v1/mapping-overlays/remap-proposals/{id}/approve 9
+POST /v1/mapping-overlays/remap-proposals/{id}/keep-legacy 9
+POST /v1/mapping-overlays/remap-proposals/{id}/reject 9
 POST /v1/mapping-overlays/{id}/retire 9
 POST /v1/mcp/write-proposals 9
 POST /v1/mcp/write-proposals/{id}/confirm 9

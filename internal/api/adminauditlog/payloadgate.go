@@ -38,6 +38,8 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 	unifiedlog.KindMappingOverlay: "mapping-overlays",
 	// Control import rows are read with the controls they create.
 	unifiedlog.KindControlImport: "controls",
+	// Risk rows (#1954) are read at /v1/risks/{id}/audit-log.
+	unifiedlog.KindRisk: "risks",
 }
 
 // payloadGate decides, per row, whether the caller sees payload_json. It

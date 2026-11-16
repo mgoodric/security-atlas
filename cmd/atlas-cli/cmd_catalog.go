@@ -96,6 +96,14 @@ func newCatalogImportSCFCmd() *cobra.Command {
 				return err
 			}
 			printEdgeRemapCounts(os.Stdout, edges)
+
+			// #1804: queue every tenant's active overlay edge left on an
+			// older release's anchor for that tenant's writers.
+			overlays, err := scfimport.QueueOverlayRemapProposals(ctx, pool)
+			if err != nil {
+				return err
+			}
+			printOverlayRemapCounts(os.Stdout, overlays)
 			return nil
 		},
 	}
@@ -266,7 +274,17 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 // printEdgeRemapCounts writes how many crosswalk-edge remap proposals
 // (#1777) an SCF import queued, by class.
 func printEdgeRemapCounts(w io.Writer, counts map[scfimport.RemapClass]int) {
-	_, _ = fmt.Fprint(w, "edge_remap_proposals")
+	printRemapCounts(w, "edge_remap_proposals", counts)
+}
+
+// printOverlayRemapCounts writes how many overlay-edge remap proposals
+// (#1804) an SCF import queued across every tenant, by class.
+func printOverlayRemapCounts(w io.Writer, counts map[scfimport.RemapClass]int) {
+	printRemapCounts(w, "overlay_remap_proposals", counts)
+}
+
+func printRemapCounts(w io.Writer, label string, counts map[scfimport.RemapClass]int) {
+	_, _ = fmt.Fprint(w, label)
 	for _, class := range scfimport.RemapClasses {
 		_, _ = fmt.Fprintf(w, " %s=%d", class, counts[class])
 	}
