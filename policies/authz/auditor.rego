@@ -217,3 +217,14 @@ allow if {
     input.resource.type == "calendar"
     input.request.path == "/v1/calendar/subscription"
 }
+
+# #2381: the dashboard's Evidence freshness panel, the same narrow admit
+# as viewer.rego. Counts per freshness class only; /v1/evidence and
+# /v1/evidence/{id} stay denied to auditor until #2157 repairs the
+# audit-period ABAC rules.
+allow if {
+    has_role("auditor")
+    is_read
+    input.resource.type == "evidence"
+    input.request.path == "/v1/evidence/freshness"
+}

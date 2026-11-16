@@ -77,3 +77,14 @@ allow if {
     input.resource.type == "calendar"
     input.request.path == "/v1/calendar/subscription"
 }
+
+# #2381: the dashboard's Evidence freshness panel. GET
+# /v1/evidence/freshness returns per-freshness-class counts only (no
+# evidence rows, ids or titles; internal/api/freshnessdrift). Exact path:
+# /v1/evidence and /v1/evidence/{id} stay denied to viewer.
+allow if {
+    has_role("viewer")
+    is_read
+    input.resource.type == "evidence"
+    input.request.path == "/v1/evidence/freshness"
+}
