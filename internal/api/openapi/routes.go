@@ -278,6 +278,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/action-plans", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "POST /v1/action-plans"},
 	{Method: "POST", Path: "/v1/action-plans/{id}/controls/{control_id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "POST /v1/action-plans/{id}/controls/{control_id}"},
 	{Method: "POST", Path: "/v1/action-plans/{id}/risks/{risk_id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "POST /v1/action-plans/{id}/risks/{risk_id}"},
+	{Method: "POST", Path: "/v1/action-plans/{id}/verify", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "POST /v1/action-plans/{id}/verify"},
 	{Method: "POST", Path: "/v1/admin/authz-bundle/reload", Tag: "admin-authz-bundle", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/authz-bundle/reload"},
 	{Method: "POST", Path: "/v1/admin/credentials", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials"},
 	{Method: "POST", Path: "/v1/admin/credentials/{id}/revoke", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials/{id}/revoke"},

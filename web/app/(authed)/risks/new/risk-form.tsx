@@ -43,8 +43,9 @@ import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { EntityPicker } from "@/components/ui/entity-picker";
+import { EntityMultiPicker, EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
+import type { EntityKind } from "@/lib/entity-picker";
 import Link from "next/link";
 
 import { enumLabel } from "@/lib/labels/enum-labels";
@@ -56,7 +57,6 @@ import {
   type RiskPatchInput,
 } from "@/lib/api/risks";
 
-import { ControlMultiSelect } from "./control-multi-select";
 import {
   fairNumbers,
   type FormState,
@@ -97,6 +97,8 @@ const TREATMENT_LABELS: Record<(typeof TREATMENTS)[number], string> = {
 };
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
+
+const CONTROL_KINDS: readonly EntityKind[] = ["control"];
 
 // #2059: the organisation risk review cadence, read so the form can show
 // the review date the platform will set. Falls back to the platform
@@ -513,16 +515,37 @@ export function RiskForm(props: Props) {
         )}
       </div>
 
-      {/* Slice 151: Control-link multi-select. Renders ONLY when
-          treatment === 'mitigate' (D-151-Q8): toggling treatment away
-          hides the picker but the selection persists in form state so
-          toggling back restores it. Editing links controls from the risk
-          page, not here (#2104). */}
+      {/* Slice 151: Control-link multi-select (the shared entity
+          picker since #2087). Renders ONLY when treatment === 'mitigate'
+          (D-151-Q8): toggling treatment away hides the picker but the
+          selection persists in form state so toggling back restores it.
+          Editing links controls from the risk page, not here (#2104). */}
       {!editing && state.treatment === "mitigate" && (
-        <ControlMultiSelect
-          selectedIds={state.linked_control_ids}
+        <EntityMultiPicker
+          kinds={CONTROL_KINDS}
+          legend="Linked controls"
+          required
+          description={
+            <>
+              Required when treatment is{" "}
+              <span className="font-mono">mitigate</span>. Select one or more
+              controls that mitigate this risk.
+            </>
+          }
+          searchPlaceholder="Search by title, SCF code, family, or bundle id"
+          testId="risks-create-control-multi-select"
+          value={state.linked_control_ids}
           onChange={(ids) => update("linked_control_ids", ids)}
-          showRequiredError={Boolean(fieldErrors.linked_control_ids)}
+          error={fieldErrors.linked_control_ids}
+          emptyHint={
+            <>
+              No active controls in this tenant yet. Import your controls from
+              the SCF catalog, or switch treatment to{" "}
+              <span className="font-mono">accept</span> /{" "}
+              <span className="font-mono">transfer</span> /{" "}
+              <span className="font-mono">avoid</span>.
+            </>
+          }
         />
       )}
 

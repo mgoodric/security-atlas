@@ -209,7 +209,7 @@ test.describe("framework scope · Statement of Applicability tab (#1794)", () =>
 
     await page.goto(`/framework-scopes/${FV}`);
     await page
-      .getByRole("button", { name: "Submit for review", exact: true })
+      .getByRole("button", { name: "Submit for approval", exact: true })
       .click();
     await page.getByRole("button", { name: "Approve", exact: true }).click();
     await expect(page.getByTestId("framework-scope-self-approved")).toHaveText(

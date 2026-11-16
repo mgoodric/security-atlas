@@ -487,6 +487,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/action-plans/{id}/verify:
+    post:
+      summary: POST /v1/action-plans/{id}/verify
+      tags: [action-plans]
+      operationId: post-v1-action-plans-id-verify
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/activity:
     get:
       summary: GET /v1/activity

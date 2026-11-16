@@ -1,10 +1,10 @@
 // Slice 151 — Playwright E2E for the /risks/new control-link
-// multi-select.
+// multi-select. Since #2087 the picker is the shared
+// `EntityMultiPicker` (components/ui/entity-picker.tsx).
 //
 // Un-quarantined by slice 351 (AC-4, disposition (a)). The legacy
 // `test.skip(!PLAYWRIGHT_RUN_QUARANTINED)` + commented bodies were the
-// slice-082-era placeholder. The `ControlMultiSelect` component +
-// validation ship; no underlying product bug. Rewritten as a LIVE
+// slice-082-era placeholder. The control picker + validation ship; no underlying product bug. Rewritten as a LIVE
 // mocked spec per the `questionnaires.spec.ts` `route.fulfill`
 // convention (anti-criterion P0-4).
 //
@@ -202,17 +202,18 @@ test.describe("/risks/new control-link multi-select", () => {
     // so the control picker renders.
     await page.getByTestId("risks-create-treatment").selectOption("mitigate");
 
-    // Picker is now visible. Wait for the controls list.
-    await expect(
-      page.getByTestId("risks-create-control-multi-select"),
-    ).toBeVisible({ timeout: 30_000 });
+    // Picker is now visible: the shared entity picker (#2087), listing
+    // controls. Wait for the controls list.
+    const picker = page.getByTestId("risks-create-control-multi-select");
+    await expect(picker).toBeVisible({ timeout: 30_000 });
+    await expect(picker).toHaveAttribute("data-entity-picker", "control");
     await expect(
       page.getByTestId("risks-create-control-multi-select-list"),
     ).toBeVisible({ timeout: 30_000 });
 
     // Filter narrows to the "access" control only.
     await page
-      .getByTestId("risks-create-control-multi-select-filter")
+      .getByTestId("risks-create-control-multi-select-search")
       .fill("access");
     await expect(
       page.getByTestId(
