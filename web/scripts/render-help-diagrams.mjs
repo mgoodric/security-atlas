@@ -26,17 +26,18 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 import {
+  assertSafeSvg,
   diagramStamp,
   MERMAID_THEME_MAP,
   readStamp,
   readThemeTokens,
-  sanitizeSvg,
   withStamp,
 } from "../lib/help/diagram-build.ts";
 import {
   extractLifecycleBlocks,
   lifecycleDiagramFile,
 } from "../lib/help/lifecycle-diagram.ts";
+import { stripActiveSvg } from "../lib/help/svg-strip.ts";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MODULES = join(WEB, "help", "modules");
@@ -157,9 +158,12 @@ try {
         font: FONT,
       },
     );
+    // Strip in the page, with the browser's XML parser; Node then refuses
+    // anything still active.
+    const clean = await page.evaluate(stripActiveSvg, svg);
     await writeFile(
       join(OUT, job.out),
-      withStamp(sanitizeSvg(svg), job.from, job.stamp),
+      withStamp(assertSafeSvg(clean), job.from, job.stamp),
     );
     console.log(`rendered ${job.out}`);
   }

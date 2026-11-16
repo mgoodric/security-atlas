@@ -75,10 +75,21 @@ list.
 
 The SVGs are static files served through `<img>`, never inlined: no
 `dangerouslySetInnerHTML`. The renderer runs Mermaid with
-`securityLevel: "strict"` and `htmlLabels: false`, then `sanitizeSvg` strips
-`<script>`, `on*` handlers and any link that is not a same-document fragment,
-and refuses `<foreignObject>`. The check runs `unsafeSvgParts` over every
-committed SVG, and a unit test feeds the sanitiser a hostile SVG.
+`securityLevel: "strict"` and `htmlLabels: false`. Then, in the same page,
+`stripActiveSvg` (`web/lib/help/svg-strip.ts`) parses the SVG with the
+browser's `DOMParser` and removes `<script>` elements, `on*` handlers and any
+link that is not a same-document fragment, then serialises it again. Node's
+`assertSafeSvg` refuses to write anything still active, including
+`<foreignObject>`. The check runs `unsafeSvgParts` over every committed SVG.
+`e2e/help-svg-strip.spec.ts` gives the stripper hostile SVGs in a real
+browser.
+
+The first version stripped with regex replacements on the text. CodeQL
+flagged it (`js/incomplete-multi-character-sanitization`) even as a
+fixed-point loop: a text-level removal can rejoin fragments into a new tag.
+Parsing is the sound version, and Node is left with only a refusal, which has
+no such failure mode. `RENDER_PIPELINE` in the stamp was bumped so the
+committed files were re-rendered through it.
 
 ## D7 — the bundle check matches Mermaid runtime signatures, not the word
 

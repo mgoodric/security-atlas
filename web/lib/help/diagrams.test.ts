@@ -13,10 +13,10 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  assertSafeSvg,
   diagramStamp,
   readStamp,
   readThemeTokens,
-  sanitizeSvg,
   unsafeSvgParts,
   withStamp,
 } from "./diagram-build";
@@ -257,31 +257,30 @@ describe("the pre-rendered SVGs", () => {
   });
 });
 
-describe("sanitizeSvg", () => {
-  it("strips scripts, event handlers and non-fragment links", () => {
-    const dirty =
-      '<svg onload="alert(1)"><script>alert(2)</script><script src="x.js"/>' +
-      '<g ONCLICK=\'go()\' class="node"><a xlink:href="javascript:alert(3)"><text>a</text></a>' +
-      '<a href="https://evil.example">b</a><use href="#arrow"/></g></svg>';
-    const clean = sanitizeSvg(dirty);
-    expect(unsafeSvgParts(clean)).toEqual([]);
-    expect(clean).toBe(
-      '<svg><g class="node"><a><text>a</text></a><a>b</a><use href="#arrow"/></g></svg>',
-    );
+// The stripping runs in the browser (svg-strip.ts) and is tested there, in
+// e2e/help-svg-strip.spec.ts. This is the Node gate after it.
+describe("assertSafeSvg", () => {
+  it("passes a clean SVG through unchanged", () => {
+    const svg = '<svg><use href="#arrow"/><text>a</text></svg>';
+    expect(assertSafeSvg(svg)).toBe(svg);
   });
 
-  it("removes a script that a first pass would reassemble, and odd end tags", () => {
-    const clean = sanitizeSvg(
-      '<svg><scr<script>x</script>ipt>alert(1)</script\t\n bar><g o onclick="a()"nclick="b()"/></svg>',
-    );
-    expect(unsafeSvgParts(clean)).toEqual([]);
-    expect(clean).not.toMatch(/script|onclick/i);
-  });
-
-  it("refuses an SVG with HTML labels", () => {
-    expect(() =>
-      sanitizeSvg("<svg><foreignObject><div>x</div></foreignObject></svg>"),
-    ).toThrow(/foreignObject/);
+  it.each([
+    ["a script", "<svg><script>alert(1)</script></svg>", /<script>/],
+    ["an event handler", '<svg onload="x()"></svg>', /event-handler/],
+    [
+      "a javascript: link",
+      '<svg><a href="javascript:x()"/></svg>',
+      /javascript/,
+    ],
+    [
+      "an external link",
+      '<svg><a href="https://e.example"/></svg>',
+      /external/,
+    ],
+    ["HTML labels", "<svg><foreignObject/></svg>", /foreignObject/],
+  ])("refuses %s", (_, svg, why) => {
+    expect(() => assertSafeSvg(svg)).toThrow(why);
   });
 
   it("stamps and reads back a rendered file", () => {

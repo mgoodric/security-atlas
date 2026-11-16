@@ -70,6 +70,10 @@ export function readThemeTokens(
   return { light: read("light"), dark: read("dark") };
 }
 
+/** Bumped when the render pipeline changes how it writes a file (the
+ *  stripping step, the stamp format), so every committed SVG goes stale. */
+export const RENDER_PIPELINE = "2148.2";
+
 export function diagramStamp(input: {
   mermaidVersion: string;
   theme: DiagramTheme;
@@ -79,6 +83,7 @@ export function diagramStamp(input: {
   return createHash("sha256")
     .update(
       JSON.stringify([
+        RENDER_PIPELINE,
         input.mermaidVersion,
         input.theme,
         THEME_TOKENS.map((t) => [t, input.tokens[t]]),
@@ -102,32 +107,18 @@ export function readStamp(svg: string): string | undefined {
 }
 
 /**
- * Remove everything active from a rendered SVG: `<script>` elements,
- * `on*` event-handler attributes, and links that are not same-document
- * fragments. Mermaid can emit handlers (its click directive), and the
- * diagram check runs `unsafeSvgParts` over every committed file as well.
- *
- * The removals repeat until nothing changes, so a removal cannot join two
- * fragments into a new `<script` or handler, and anything still unsafe
- * afterwards throws rather than being written.
+ * The last gate before a rendered SVG is written: returns it unchanged, or
+ * throws when anything active is left. The stripping itself happens in the
+ * browser, with a real XML parser (`svg-strip.ts`); this only refuses, so a
+ * gap in the stripping fails the render instead of shipping. The diagram
+ * check runs `unsafeSvgParts` over every committed file as well.
  */
-export function sanitizeSvg(svg: string): string {
-  let clean = svg;
-  let previous: string;
-  do {
-    previous = clean;
-    clean = clean
-      .replace(/<script\b[^>]*\/>/gi, "")
-      .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, "")
-      .replace(/<\/?script\b[^>]*>?/gi, "")
-      .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-      .replace(/\s+(?:xlink:)?href\s*=\s*("(?!#)[^"]*"|'(?!#)[^']*')/gi, "");
-  } while (clean !== previous);
-  const left = unsafeSvgParts(clean);
+export function assertSafeSvg(svg: string): string {
+  const left = unsafeSvgParts(svg);
   if (left.length > 0) {
-    throw new Error(`rendered SVG is still unsafe: ${left.join(", ")}`);
+    throw new Error(`rendered SVG is unsafe: ${left.join(", ")}`);
   }
-  return clean;
+  return svg;
 }
 
 /** What makes an SVG unsafe to serve: empty when it is clean. */
