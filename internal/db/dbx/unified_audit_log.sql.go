@@ -272,6 +272,24 @@ WITH unified AS (
             ) END, '[]'::jsonb)
         ) AS payload_json
     FROM risk_audit_log ra
+
+    UNION ALL
+
+    -- 15. framework_posture_target_audit_log (#2136): a framework
+    -- version's posture target set, before -> after.
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'posture_target'::text AS kind,
+        'framework_version'::text AS target_type,
+        framework_version_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(pt) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'framework_version_id' - 'subject_module')::jsonb AS payload_json
+    FROM framework_posture_target_audit_log pt
 )
 SELECT
     unified.occurred_at,

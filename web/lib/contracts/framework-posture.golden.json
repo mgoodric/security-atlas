@@ -18,6 +18,15 @@
           "framework_version_id": "44444444-4444-4444-8444-444444444444",
           "freshness_composite": 0.92,
           "scope_set": true,
+          "target": {
+            "critical_threshold": 60,
+            "direction": "higher_is_better",
+            "framework_version_id": "44444444-4444-4444-8444-444444444444",
+            "target_value": 90,
+            "updated_at": "2026-11-15T12:00:00Z",
+            "updated_by": "contract-recorder",
+            "warning_threshold": 80
+          },
           "trend_delta_90d": 3
         },
         {
@@ -29,6 +38,7 @@
           "framework_version_id": "55555555-5555-4555-8555-555555555555",
           "freshness_composite": null,
           "scope_set": false,
+          "target": null,
           "trend_delta_90d": null
         }
       ]

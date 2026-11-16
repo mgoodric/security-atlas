@@ -40,6 +40,8 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 	unifiedlog.KindControlImport: "controls",
 	// Risk rows (#1954) are read at /v1/risks/{id}/audit-log.
 	unifiedlog.KindRisk: "risks",
+	// Posture targets are set and read under /v1/framework-scopes.
+	unifiedlog.KindPostureTarget: "framework-scopes",
 }
 
 // payloadGate decides, per row, whether the caller sees payload_json. It
