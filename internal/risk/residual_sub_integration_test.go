@@ -111,7 +111,7 @@ func TestResidualSubscriber_RecomputesOnEvidenceIngest(t *testing.T) {
 	store := risk.NewStore(app)
 	// Link with weights isolating operational so the ingested pass evidence
 	// visibly moves residual.
-	if err := store.LinkControl(ctx, risk.LinkControlInput{
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:          riskID,
 		ControlID:       ctrlID,
 		DesignScore:     0.0,
@@ -180,7 +180,7 @@ func TestResidualSubscriber_RedeliveryIsIdempotent(t *testing.T) {
 	riskID := seedNistRisk(t, migrate, tenant, 4, 4) // inherent 16
 	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
-	if err := store.LinkControl(ctx, risk.LinkControlInput{
+	if err := store.LinkControl(ctx, risk.LinkControlInput{Actor: "test",
 		RiskID:          riskID,
 		ControlID:       ctrlID,
 		DesignScore:     0.0,
