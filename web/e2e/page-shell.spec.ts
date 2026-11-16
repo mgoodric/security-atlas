@@ -7,7 +7,7 @@
 //   2. The audit log, the auditor workspace and the 404 page render
 //      inside the app shell (top bar + sidebar + main column). Before
 //      #2080 the first and last rendered bare and the workspace had only
-//      the top bar.
+//      the top bar. Since #2093 /audit-log redirects to Activity.
 //   3. The version tag appears only in the sidebar footer, not in the
 //      top bar or as a fixed overlay.
 
@@ -72,8 +72,10 @@ test.describe("PageShell (#2080)", () => {
       await expect(page.locator("main")).toHaveCount(1);
 
       if (body === "heading") {
+        // #2093: /audit-log redirects to Activity, the one audit-log page.
+        await expect(page).toHaveURL(/\/activity$/);
         await expect(
-          main.getByRole("heading", { level: 1, name: "Audit log" }),
+          main.getByRole("heading", { level: 1, name: "Activity" }),
         ).toBeVisible();
       } else if (body === "workspace") {
         // Either the assigned period's workspace or the no-period state,
