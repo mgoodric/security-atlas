@@ -220,6 +220,32 @@ Approval leaves the legacy edge untouched. Default coverage reads the current
 release, so it counts the new edge. `?scf_release=<old>` still reads the old
 one. A tenant admin who isn't a super-admin gets 403 on every route.
 
+### Overlay edges left on an older release (#1804)
+
+The same import also queues every tenant's **active** overlay edge
+(`/v1/mapping-overlays`) still on an anchor of an older release, and prints
+`overlay_remap_proposals unchanged=… renamed=… split=… reused_id=… no_successor=…`
+with the counts across every tenant. Retired overlay edges are not queued, and
+queueing changes no edge.
+
+Overlay edges belong to a tenant, so each tenant's own writers (admin,
+grc_engineer) review them under `/v1/mapping-overlays/remap-proposals`. No
+super-admin is involved, and a tenant never sees or decides another tenant's
+proposals:
+
+- **List:** `GET /v1/mapping-overlays/remap-proposals?class=&status=`.
+- **Approve:** `POST …/{id}/approve` with `{"scf_id"?, "reason"?}`. A split or
+  no-successor proposal needs `scf_id`. Approval creates an overlay edge on that
+  anchor in the new release, keeping the requirement, relationship, strength,
+  rationale and source, and retires the old overlay edge with reason
+  `remapped`. Both show in the overlay audit trail. An approval onto a pair the
+  tenant already holds, or that a live catalog edge already joins, is refused
+  with 409.
+- **Reject:** `POST …/{id}/reject`. The proposal can be revisited later.
+- **Keep legacy:** `POST …/{id}/keep-legacy`. This is final.
+
+A person must decide: a machine credential gets 403.
+
 All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
 reviewed or verified is a human governance step.
