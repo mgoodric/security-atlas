@@ -48,6 +48,42 @@ a JWT user. It cannot narrow anyone. The one way to lose a match is a
 matching; role assignment writes the bare uuid, and the dry run counts any
 such rows (query 3), expected 0.
 
+### D3 — an inactive user's role rows are ignored
+
+Found by the leftover-assignment test the #2372 review asked for
+(`TestPeriodAuditors2239_RealLoginAndLeftoverAssignment`). The admin API's
+revoke deletes `user_roles` (and with `remove_membership` also disables the
+user and revokes sessions and keys), but a SCIM deactivation only sets
+`users.status = 'disabled'` and keeps the rows. An access JWT minted before
+the deactivation stays valid until it expires. Before this fix that token
+missed `user_roles` anyway. With D1 it would have picked up the auditor role
+again, and through it every leftover `auditor_assignments` row: the test saw
+200 on `/v1/me/audit-periods` and 201 on a note.
+
+So `RolesFor` returns no rows when the key names a `users` row whose status
+isn't `active` (`NOT EXISTS` on `users.id`, which uses the primary key). It
+fails closed. A principal that names no user has no `users` row and isn't
+affected. An API key bound to a disabled user drops to its derived role, which
+is narrower than before, so the dry run counts those users (query 4). The
+admin disable path already revokes such keys (#1915).
+
+### D4 — `/v1/activity/unified` matches the caller by uuid
+
+`ActivityList` compared `me_audit_log.actor_id` (a bare uuid) to the raw
+`cred.UserID`. A JWT caller never saw their own me-rows, and the meta-audit
+row the query writes was recorded under the nil uuid. The caller now resolves
+through `credstore.CallerUserID`, which strips `user:` and still treats an
+unbound key as a non-user. Covered by `TestActivity2239_JWTCallerSeesOwnMeRows`.
+
+### D5 — #2381 is not folded in
+
+#2381 is about JWT viewers and auditors being able to write evidence,
+artifacts and walkthroughs. That comes from `jwtmw` putting the role claim in
+`OwnerRoles`, which `BuildInput` derives as `control_owner`. This PR keeps the
+union with the derived role (D2), so that write access remains. Closing it
+means narrowing derivation, which removes access and is a separate decision.
+Left to #2381.
+
 ## Blast radius
 
 Who changes: **active users holding at least one `user_roles` row, on a JWT
@@ -82,6 +118,13 @@ Also:
 - Revoking an assignment now takes effect for the assigned role on the next
   request, since the resolver reads live rows. The `control_owner` derived
   from the JWT claim still lasts until the token expires, as before.
+- A disabled user's role rows no longer apply anywhere (D3). The only
+  narrowing in this PR is an API key bound to a disabled user (dry-run
+  query 4).
+- `/v1/activity/unified` shows a JWT caller their own me-rows and records
+  their query under their uuid (D4).
+- The #2118 Playwright auditor now signs in with a `user:<uuid>` token,
+  replacing the bare-uuid workaround (#2118 D5).
 
 The dry run (`scripts/dry-run-2239-roles.sql`) prints these changes as counts
 per tenant and (before, after) role set, with no user ids or emails. Matt runs

@@ -36,6 +36,13 @@ func NewDBRolesResolver(pool *pgxpool.Pool) *DBRolesResolver {
 // shape as it is (#2239). Before that, JWT users matched no row and
 // decided on credential-derived roles alone.
 //
+// A user whose users row is not 'active' gets no rows (#2239). A SCIM
+// deactivation flips users.status and keeps user_roles, and an access token
+// minted before it stays valid until it expires; without this check the
+// resolver would hand that token the user's roles, and with the auditor role
+// any leftover auditor_assignments row. A principal that names no user
+// (a key or machine id) has no users row and is unaffected.
+//
 // The SELECT runs inside a transaction that first applies the
 // `app.current_tenant` GUC via tenancy.ApplyTenant. user_roles carries
 // FORCE ROW LEVEL SECURITY; without the GUC the tenant_read policy
@@ -56,7 +63,18 @@ func (r *DBRolesResolver) RolesFor(ctx context.Context, tenantID, userID string)
 	const q = `
 		SELECT role FROM user_roles
 		WHERE tenant_id = $1::uuid AND user_id = $2
+		  AND NOT EXISTS (
+		      SELECT 1 FROM users
+		      WHERE id = $3::uuid AND tenant_id = $1::uuid AND status <> 'active'
+		  )
 	`
+	key := identity.RolesKey(userID)
+	// $3 is the users(id) the key names, or NULL when it names none, which
+	// makes the NOT EXISTS vacuously true.
+	var user any
+	if u, ok := identity.UserID(key); ok {
+		user = u.String()
+	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -68,7 +86,7 @@ func (r *DBRolesResolver) RolesFor(ctx context.Context, tenantID, userID string)
 		return nil, fmt.Errorf("authz: apply tenant to user_roles tx: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, q, tenantID, identity.RolesKey(userID))
+	rows, err := tx.Query(ctx, q, tenantID, key, user)
 	if err != nil {
 		return nil, fmt.Errorf("authz: query user_roles: %w", err)
 	}

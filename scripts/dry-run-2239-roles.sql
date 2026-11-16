@@ -62,4 +62,15 @@ SELECT count(*) AS prefixed_rows_that_stop_matching
 FROM user_roles
 WHERE user_id LIKE 'user:%';
 
+-- 4. Users who are not active but still hold user_roles rows (a SCIM
+--    deactivation keeps them). The resolver now ignores these rows. Their JWT
+--    sessions are unchanged (they never matched); an API key bound to such a
+--    user drops to its credential-derived role.
+SELECT ur.tenant_id, count(DISTINCT u.id) AS inactive_users_with_roles
+FROM user_roles ur
+JOIN users u ON u.tenant_id = ur.tenant_id AND u.id::text = ur.user_id
+WHERE u.status <> 'active'
+GROUP BY 1
+ORDER BY 1;
+
 ROLLBACK;

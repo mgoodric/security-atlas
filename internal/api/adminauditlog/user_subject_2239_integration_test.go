@@ -8,6 +8,7 @@ package adminauditlog_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -88,5 +89,63 @@ func TestUnified2239_JWTSubjectResolvesAssignedRole(t *testing.T) {
 		if got := unifiedStatus2239(t, tenant, c.credID, c.userID); got != c.want {
 			t.Errorf("%s: status %d, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// TestActivity2239_JWTCallerSeesOwnMeRows: a non-privileged JWT caller
+// ("user:<uuid>") sees their own me-rows on /v1/activity/unified, and the
+// meta-audit row the query writes is recorded under their uuid, not the nil
+// uuid. Before #2239 the predicate compared actor_id to the raw subject and
+// matched none of them.
+func TestActivity2239_JWTCallerSeesOwnMeRows(t *testing.T) {
+	tenant := uuid.New()
+	self := uuid.New()
+	other := uuid.New()
+	cleanupUnifiedTables(t, tenant)
+	seedMeRowForActor(t, tenant, self, "profile.update")
+	seedMeRowForActor(t, tenant, other, "profile.update")
+
+	from := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	to := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	url := fmt.Sprintf("/v1/activity/unified?from=%s&to=%s", from, to)
+	r := newActivityRouter(t, tenant, "user:"+self.String(), false)
+
+	query := func() (ownProfile, otherRows, ownMeta int) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+		}
+		var resp adminauditlog.UnifiedListResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		for _, e := range resp.Entries {
+			if e.Kind != "me" {
+				continue
+			}
+			switch {
+			case e.ActorID == self.String() && e.Action == "profile.update":
+				ownProfile++
+			case e.ActorID == self.String():
+				ownMeta++
+			default:
+				otherRows++
+			}
+		}
+		return
+	}
+
+	query() // writes the first meta-audit row under the caller
+	own, others, meta := query()
+	if own != 1 {
+		t.Errorf("own profile.update me-rows = %d; want 1", own)
+	}
+	if others != 0 {
+		t.Errorf("me-rows of another actor (or the nil uuid) = %d; want 0", others)
+	}
+	if meta < 1 {
+		t.Errorf("own meta-audit me-rows = %d; want at least 1, recorded under the caller's uuid", meta)
 	}
 }
