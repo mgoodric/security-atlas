@@ -52,11 +52,13 @@ export function deltaTone(
 }
 
 // deltaToneClass maps a tone to its text colour. Neutral and flat share
-// the muted foreground: no target, no verdict.
+// the muted foreground: no target, no verdict. Improving is emerald-700:
+// the deltas render at 12px, where emerald-600 (#009966) is 3.5:1 on the
+// card and fails WCAG AA; emerald-700 clears 4.5:1 (#2136).
 export function deltaToneClass(tone: DeltaTone): string {
   switch (tone) {
     case "improving":
-      return "text-emerald-600 dark:text-emerald-400";
+      return "text-emerald-700 dark:text-emerald-400";
     case "worsening":
       return "text-destructive";
     default:
