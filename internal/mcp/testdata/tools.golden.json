@@ -254,10 +254,9 @@
         "additionalProperties": false,
         "properties": {
           "acceptance_status": {
-            "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off.",
+            "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off. A risk cannot be created already approved; approve the acceptance afterwards.",
             "enum": [
-              "proposed",
-              "approved"
+              "proposed"
             ],
             "type": "string"
           },

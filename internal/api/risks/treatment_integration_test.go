@@ -58,9 +58,15 @@ func TestCreateRisk_TreatmentStates(t *testing.T) {
 
 	for name, extra := range map[string]map[string]any{
 		"approved accept without accepter or expiry": {"treatment": "accept", "acceptance_status": "approved"},
-		"accept without acceptance status":           {"treatment": "accept"},
-		"mitigate with no control or action plan":    {"treatment": "mitigate"},
-		"acceptance status on untreated":             {"acceptance_status": "proposed"},
+		// #2371: create never approves an acceptance, even fully signed.
+		"approved accept with accepter and expiry": {
+			"treatment": "accept", "acceptance_status": "approved",
+			"accepter": "ciso@example.com", "accepted_until": "2027-06-30",
+		},
+		"proposed accept with accepter":           {"treatment": "accept", "acceptance_status": "proposed", "accepter": "ciso@example.com"},
+		"accept without acceptance status":        {"treatment": "accept"},
+		"mitigate with no control or action plan": {"treatment": "mitigate"},
+		"acceptance status on untreated":          {"acceptance_status": "proposed"},
 	} {
 		resp, body := post(t, env, "/v1/risks", base(extra), env.bearer)
 		if resp.StatusCode != http.StatusBadRequest {

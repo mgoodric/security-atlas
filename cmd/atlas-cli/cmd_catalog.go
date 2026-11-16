@@ -88,6 +88,14 @@ func newCatalogImportSCFCmd() *cobra.Command {
 				return err
 			}
 			printRebindReport(os.Stdout, rebind)
+
+			// #1777: queue every catalog crosswalk edge left on an older
+			// release's anchor for a super-admin's review.
+			edges, err := scfimport.QueueEdgeRemapProposals(ctx, pool)
+			if err != nil {
+				return err
+			}
+			printEdgeRemapCounts(os.Stdout, edges)
 			return nil
 		},
 	}
@@ -253,6 +261,16 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allowCodeTitles, "allow-code-titles", false, "let SCF workbook requirements that no title source covers import titled with their code")
 	cmd.Flags().StringVar(&scfRelease, "scf-release", "", "SCF release the crosswalk's SCF codes belong to; the only way to declare it for an OLIR STRM workbook, which names none (a wide workbook takes it from its \"SCF <release>\" sheet, a YAML file from scf_release)")
 	return cmd
+}
+
+// printEdgeRemapCounts writes how many crosswalk-edge remap proposals
+// (#1777) an SCF import queued, by class.
+func printEdgeRemapCounts(w io.Writer, counts map[scfimport.RemapClass]int) {
+	_, _ = fmt.Fprint(w, "edge_remap_proposals")
+	for _, class := range scfimport.RemapClasses {
+		_, _ = fmt.Fprintf(w, " %s=%d", class, counts[class])
+	}
+	_, _ = fmt.Fprintln(w)
 }
 
 // printRebindReport writes the control re-binding outcome of an SCF import

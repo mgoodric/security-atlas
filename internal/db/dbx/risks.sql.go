@@ -144,35 +144,39 @@ INSERT INTO risks (
     id, tenant_id, title, description, category_id, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
-    acceptance_status, level, org_unit_id
+    acceptance_status, level, org_unit_id,
+    acceptance_proposed_by, acceptance_proposed_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15, $16, $17
+    $15, $16, $17,
+    $18, $19
 )
 RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved
 `
 
 type CreateRiskParams struct {
-	ID                  pgtype.UUID           `json:"id"`
-	TenantID            pgtype.UUID           `json:"tenant_id"`
-	Title               string                `json:"title"`
-	Description         string                `json:"description"`
-	CategoryID          pgtype.UUID           `json:"category_id"`
-	Methodology         RiskMethodology       `json:"methodology"`
-	InherentScore       []byte                `json:"inherent_score"`
-	Treatment           RiskTreatment         `json:"treatment"`
-	TreatmentOwner      string                `json:"treatment_owner"`
-	ResidualScore       []byte                `json:"residual_score"`
-	ReviewDueAt         pgtype.Timestamptz    `json:"review_due_at"`
-	AcceptedUntil       pgtype.Date           `json:"accepted_until"`
-	Accepter            string                `json:"accepter"`
-	InstrumentReference string                `json:"instrument_reference"`
-	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
-	Level               RiskLevel             `json:"level"`
-	OrgUnitID           pgtype.UUID           `json:"org_unit_id"`
+	ID                   pgtype.UUID           `json:"id"`
+	TenantID             pgtype.UUID           `json:"tenant_id"`
+	Title                string                `json:"title"`
+	Description          string                `json:"description"`
+	CategoryID           pgtype.UUID           `json:"category_id"`
+	Methodology          RiskMethodology       `json:"methodology"`
+	InherentScore        []byte                `json:"inherent_score"`
+	Treatment            RiskTreatment         `json:"treatment"`
+	TreatmentOwner       string                `json:"treatment_owner"`
+	ResidualScore        []byte                `json:"residual_score"`
+	ReviewDueAt          pgtype.Timestamptz    `json:"review_due_at"`
+	AcceptedUntil        pgtype.Date           `json:"accepted_until"`
+	Accepter             string                `json:"accepter"`
+	InstrumentReference  string                `json:"instrument_reference"`
+	AcceptanceStatus     *RiskAcceptanceStatus `json:"acceptance_status"`
+	Level                RiskLevel             `json:"level"`
+	OrgUnitID            pgtype.UUID           `json:"org_unit_id"`
+	AcceptanceProposedBy string                `json:"acceptance_proposed_by"`
+	AcceptanceProposedAt pgtype.Timestamptz    `json:"acceptance_proposed_at"`
 }
 
 // Insert a new risk. The application validates methodology-specific
@@ -198,6 +202,8 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		arg.AcceptanceStatus,
 		arg.Level,
 		arg.OrgUnitID,
+		arg.AcceptanceProposedBy,
+		arg.AcceptanceProposedAt,
 	)
 	var i Risk
 	err := row.Scan(
