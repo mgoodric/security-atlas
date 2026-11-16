@@ -352,6 +352,65 @@ export type RiskCreateInput = {
   linked_control_ids?: string[];
 };
 
+// ----- #2104: risk record editing + audit trail -----
+//
+// `RiskPatchInput` is the record-field half of `patchReq`
+// (`internal/api/risks/handlers.go`). Treatment and acceptance are not
+// on it: the platform refuses them on PATCH. An omitted field keeps its
+// value, so the edit form sends only the fields the user changed.
+
+export type RiskPatchInput = {
+  title?: string;
+  description?: string;
+  category?: string;
+  methodology?: string;
+  inherent_score?: unknown;
+  treatment_owner?: string;
+  review_due_at?: string;
+  instrument_reference?: string;
+};
+
+// One row of GET /v1/risks/{id}/audit-log, newest first. For
+// fields_changed, before/after hold only the fields that changed.
+export type RiskAuditEntry = {
+  id: string;
+  actor: string;
+  action: "fields_changed" | "category_changed" | "placement_changed" | string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  created_at: string;
+};
+
+export type RiskAuditLogResponse = {
+  entries: RiskAuditEntry[];
+  count: number;
+};
+
+/** PATCH a risk's record fields through the BFF. */
+export async function updateRisk(
+  id: string,
+  body: RiskPatchInput,
+): Promise<Risk> {
+  const decoded = (await hierarchyRequest<{ risk: Risk }>(
+    `/api/risks/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  )) as { risk: Risk };
+  return decoded.risk;
+}
+
+/** The risk's change history through the BFF. */
+export async function fetchRiskAuditLog(
+  id: string,
+): Promise<RiskAuditLogResponse> {
+  return (await hierarchyRequest<RiskAuditLogResponse>(
+    `/api/risks/${encodeURIComponent(id)}/audit-log`,
+  )) as RiskAuditLogResponse;
+}
+
 export type RiskCreatedResponse = {
   risk: Risk;
 };

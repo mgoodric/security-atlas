@@ -1,6 +1,6 @@
 "use client";
 
-// Slice 105 — risk-create form.
+// Slice 105 — risk-create form; #2104 adds its edit mode (see Props).
 //
 // Bound DIRECTLY to the slice-019 `createReq` wire shape
 // (`internal/api/risks/handlers.go`). No invented fields per P0-A4. The
@@ -44,14 +44,26 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import Link from "next/link";
+
 import { enumLabel } from "@/lib/labels/enum-labels";
 import {
   fetchRiskCategories,
+  type Risk,
   type RiskCategory,
   RiskCreateInput,
+  type RiskPatchInput,
 } from "@/lib/api/risks";
 
 import { ControlMultiSelect } from "./control-multi-select";
+import {
+  fairNumbers,
+  type FormState,
+  inherentScoreOf,
+  initialState,
+  riskToFormState,
+  toPatchInput,
+} from "./form-state";
 import {
   DEFAULT_REVIEW_CADENCE_DAYS,
   defaultReviewDueDate,
@@ -85,48 +97,6 @@ const TREATMENT_LABELS: Record<(typeof TREATMENTS)[number], string> = {
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
 
-type FormState = {
-  title: string;
-  description: string;
-  // The category slug; "" until the user picks one, meaning the
-  // organisation default the picker shows.
-  category: string;
-  methodology: (typeof OFFERED_METHODOLOGIES)[number];
-  treatment: (typeof TREATMENTS)[number];
-  treatment_owner: string;
-  likelihood: number;
-  impact: number;
-  loss_event_frequency: string;
-  loss_magnitude: string;
-  // Slice 151: linked_control_ids drives the ControlMultiSelect picker.
-  // The form keeps the selection in state even when the picker is
-  // hidden (treatment !== mitigate) so toggling treatment back to
-  // mitigate does NOT wipe the user's prior selection (D-151-Q8).
-  linked_control_ids: string[];
-  // #2059: the review date the user picked, YYYY-MM-DD. Empty until they
-  // touch the field; the field shows the computed default meanwhile.
-  review_due: string;
-};
-
-function initialState(): FormState {
-  return {
-    title: "",
-    description: "",
-    category: "",
-    methodology: "nist_800_30",
-    // #1746: open on "untreated" (no decision yet, no required fields).
-    // See validate.ts DEFAULT_TREATMENT.
-    treatment: DEFAULT_TREATMENT,
-    treatment_owner: "",
-    likelihood: 3,
-    impact: 3,
-    loss_event_frequency: "1",
-    loss_magnitude: "50000",
-    linked_control_ids: [],
-    review_due: "",
-  };
-}
-
 // #2059: the organisation risk review cadence, read so the form can show
 // the review date the platform will set. Falls back to the platform
 // default when the read fails; the platform applies the real cadence
@@ -141,25 +111,11 @@ async function fetchReviewCadenceDays(): Promise<number> {
     : DEFAULT_REVIEW_CADENCE_DAYS;
 }
 
-function fairNumbers(s: FormState) {
-  const lossEventFrequency = Number(s.loss_event_frequency);
-  const lossMagnitude = Number(s.loss_magnitude);
-  const annualizedLossExposure = lossEventFrequency * lossMagnitude;
-  return { lossEventFrequency, lossMagnitude, annualizedLossExposure };
-}
-
 function toCreateInput(
   s: FormState,
   reviewDueDefault: string,
 ): RiskCreateInput {
-  const inherentScore =
-    s.methodology === "fair"
-      ? {
-          loss_event_frequency: fairNumbers(s).lossEventFrequency,
-          loss_magnitude: fairNumbers(s).lossMagnitude,
-          annualized_loss_exposure: fairNumbers(s).annualizedLossExposure,
-        }
-      : { likelihood: s.likelihood, impact: s.impact };
+  const inherentScore = inherentScoreOf(s);
   const body: RiskCreateInput = {
     title: s.title.trim(),
     description: s.description.trim(),
@@ -185,9 +141,20 @@ function toCreateInput(
   return body;
 }
 
-type Props = {
-  onSubmit: (body: RiskCreateInput) => Promise<void>;
-};
+// #2104: with `initial`, the form edits that risk. It opens on the risk as
+// stored, hides treatment and the control picker (treatment and acceptance
+// are not record fields; PATCH refuses them), adds the instrument
+// reference, and hands `onSave` only the fields the user changed.
+type Props =
+  | {
+      initial?: undefined;
+      onSubmit: (body: RiskCreateInput) => Promise<void>;
+    }
+  | {
+      initial: Risk;
+      onSave: (body: RiskPatchInput) => Promise<void>;
+      onCancelHref: string;
+    };
 
 // Plain Tailwind-styled select — shadcn does not ship a Select primitive
 // in this repo yet, and the vendor-form precedent uses native controls.
@@ -207,8 +174,13 @@ function formatDollars(n: number): string {
   }).format(n);
 }
 
-export function RiskForm({ onSubmit }: Props) {
-  const [state, setState] = useState<FormState>(initialState());
+export function RiskForm(props: Props) {
+  const editing = props.initial !== undefined;
+  // The risk as the edit form opened on it; the PATCH sends what differs.
+  const [opening] = useState<FormState | null>(() =>
+    props.initial ? riskToFormState(props.initial) : null,
+  );
+  const [state, setState] = useState<FormState>(opening ?? initialState());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Slice 151: field-level errors from validateRiskForm. Empty object
@@ -224,14 +196,35 @@ export function RiskForm({ onSubmit }: Props) {
     queryFn: fetchReviewCadenceDays,
     staleTime: 60_000,
   });
+  // Editing reads archived categories too, so a risk on one shows it; the
+  // picker still offers no other archived category (#2104).
   const categoriesQ = useQuery<RiskCategory[]>({
-    queryKey: ["risks", "categories", "active"],
-    queryFn: () => fetchRiskCategories(false),
+    queryKey: editing
+      ? ["risks", "categories", "with-archived"]
+      : ["risks", "categories", "active"],
+    queryFn: () => fetchRiskCategories(editing),
     staleTime: 60_000,
   });
   // Upstream already leaves archived categories out without
   // include_archived; filter again so the picker never offers one.
-  const categories = (categoriesQ.data ?? []).filter((c) => !c.archived);
+  const categories = (categoriesQ.data ?? []).filter(
+    (c) => !c.archived || c.slug === opening?.category,
+  );
+  const methodologies: readonly string[] =
+    opening &&
+    !(OFFERED_METHODOLOGIES as readonly string[]).includes(opening.methodology)
+      ? [...OFFERED_METHODOLOGIES, opening.methodology]
+      : OFFERED_METHODOLOGIES;
+
+  // Editing leaves treatment and control links alone, so the mitigate
+  // rule (a new risk needs a control) does not apply to it.
+  function validate(s: FormState) {
+    return validateRiskForm({
+      ...s,
+      category: s.category || defaultCategory,
+      treatment: editing ? DEFAULT_TREATMENT : s.treatment,
+    });
+  }
   // Until the user picks one, the picker shows the organisation default
   // (else the first listed category) and that is what gets posted.
   const defaultCategory =
@@ -246,12 +239,7 @@ export function RiskForm({ onSubmit }: Props) {
       if (submitAttempted) {
         // Re-validate live after the first submit attempt so cleared
         // errors disappear immediately as the user fixes the field.
-        setFieldErrors(
-          validateRiskForm({
-            ...next,
-            category: next.category || defaultCategory,
-          }),
-        );
+        setFieldErrors(validate(next));
       }
       return next;
     });
@@ -260,7 +248,7 @@ export function RiskForm({ onSubmit }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitAttempted(true);
-    const errs = validateRiskForm({ ...state, category });
+    const errs = validate(state);
     setFieldErrors(errs);
     if (hasErrors(errs)) {
       // Surface the inline field errors and stop. Server is not even
@@ -270,9 +258,17 @@ export function RiskForm({ onSubmit }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(toCreateInput({ ...state, category }, reviewDueDefault));
+      if (props.initial && opening) {
+        await props.onSave(toPatchInput(opening, { ...state, category }));
+      } else if (!props.initial) {
+        await props.onSubmit(
+          toCreateInput({ ...state, category }, reviewDueDefault),
+        );
+      }
     } catch (err) {
-      const msg = (err as Error).message ?? "failed to create risk";
+      const msg =
+        (err as Error).message ??
+        (editing ? "failed to save risk" : "failed to create risk");
       setError(msg);
     } finally {
       setSubmitting(false);
@@ -289,11 +285,13 @@ export function RiskForm({ onSubmit }: Props) {
       onSubmit={handleSubmit}
       noValidate
       className="space-y-6"
-      data-testid="risks-create-form"
+      data-testid={editing ? "risks-edit-form" : "risks-create-form"}
     >
       {error && (
         <Alert variant="destructive" data-testid="risks-create-error">
-          <AlertTitle>Could not create risk</AlertTitle>
+          <AlertTitle>
+            {editing ? "Could not save risk" : "Could not create risk"}
+          </AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
@@ -403,7 +401,7 @@ export function RiskForm({ onSubmit }: Props) {
             className={SELECT_CLASS}
             data-testid="risks-create-methodology"
           >
-            {OFFERED_METHODOLOGIES.map((m) => (
+            {methodologies.map((m) => (
               <option key={m} value={m}>
                 {enumLabel("RiskMethodology", m)}
               </option>
@@ -416,27 +414,47 @@ export function RiskForm({ onSubmit }: Props) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className={LABEL_CLASS} htmlFor="risk-treatment">
-            Treatment
-          </label>
-          <select
-            id="risk-treatment"
-            name="treatment"
-            value={state.treatment}
-            onChange={(e) =>
-              update("treatment", e.target.value as FormState["treatment"])
-            }
-            className={SELECT_CLASS}
-            data-testid="risks-create-treatment"
-          >
-            {TREATMENTS.map((t) => (
-              <option key={t} value={t}>
-                {TREATMENT_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </div>
+        {editing ? (
+          <div>
+            <label className={LABEL_CLASS} htmlFor="risk-instrument-reference">
+              Instrument reference
+            </label>
+            <Input
+              id="risk-instrument-reference"
+              name="instrument_reference"
+              value={state.instrument_reference}
+              onChange={(e) => update("instrument_reference", e.target.value)}
+              placeholder="Policy number or SOW for a transferred risk"
+              data-testid="risks-edit-instrument-reference"
+            />
+            <p className={HELP_CLASS} data-testid="risks-edit-treatment-note">
+              Treatment ({enumLabel("RiskTreatment", state.treatment)}) is not
+              changed here.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className={LABEL_CLASS} htmlFor="risk-treatment">
+              Treatment
+            </label>
+            <select
+              id="risk-treatment"
+              name="treatment"
+              value={state.treatment}
+              onChange={(e) =>
+                update("treatment", e.target.value as FormState["treatment"])
+              }
+              className={SELECT_CLASS}
+              data-testid="risks-create-treatment"
+            >
+              {TREATMENTS.map((t) => (
+                <option key={t} value={t}>
+                  {TREATMENT_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <label className={LABEL_CLASS} htmlFor="risk-treatment-owner">
@@ -482,18 +500,21 @@ export function RiskForm({ onSubmit }: Props) {
           onChange={(e) => update("review_due", e.target.value)}
           data-testid="risks-create-review-due"
         />
-        <p className={HELP_CLASS} data-testid="risks-create-review-due-help">
-          Defaults to {cadenceDays} days from today, your organisation&apos;s
-          risk review cadence. Change it for this risk if it needs an earlier or
-          later review.
-        </p>
+        {editing ? null : (
+          <p className={HELP_CLASS} data-testid="risks-create-review-due-help">
+            Defaults to {cadenceDays} days from today, your organisation&apos;s
+            risk review cadence. Change it for this risk if it needs an earlier
+            or later review.
+          </p>
+        )}
       </div>
 
       {/* Slice 151: Control-link multi-select. Renders ONLY when
           treatment === 'mitigate' (D-151-Q8): toggling treatment away
           hides the picker but the selection persists in form state so
-          toggling back restores it. */}
-      {state.treatment === "mitigate" && (
+          toggling back restores it. Editing links controls from the risk
+          page, not here (#2104). */}
+      {!editing && state.treatment === "mitigate" && (
         <ControlMultiSelect
           selectedIds={state.linked_control_ids}
           onChange={(ids) => update("linked_control_ids", ids)}
@@ -621,13 +642,29 @@ export function RiskForm({ onSubmit }: Props) {
         <Button
           type="submit"
           disabled={submitting}
-          data-testid="risks-create-submit"
+          data-testid={editing ? "risks-edit-submit" : "risks-create-submit"}
         >
-          {submitting ? "Creating…" : "Create risk"}
+          {editing
+            ? submitting
+              ? "Saving…"
+              : "Save changes"
+            : submitting
+              ? "Creating…"
+              : "Create risk"}
         </Button>
-        <span className="text-xs text-muted-foreground">
-          On success you land on the new risk.
-        </span>
+        {props.initial ? (
+          <Link
+            href={props.onCancelHref}
+            className="text-sm text-muted-foreground hover:underline"
+            data-testid="risks-edit-cancel"
+          >
+            Cancel
+          </Link>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            On success you land on the new risk.
+          </span>
+        )}
       </div>
     </form>
   );

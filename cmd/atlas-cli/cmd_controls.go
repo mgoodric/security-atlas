@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/control/bundletest"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -58,6 +59,9 @@ func acquireControlsBearer(ctx context.Context) (string, error) {
 		ClientID:     controlsAuth.clientID,
 		ClientSecret: controlsAuth.clientSecret,
 		IssuerURL:    controlsAuth.issuer,
+		// #2257: the client secret goes to the issuer; cmdhttp refuses a
+		// non-loopback http:// issuer before it is sent.
+		HTTPClient: cmdhttp.Client(oauth.DefaultHTTPTimeout),
 	})
 	if err != nil {
 		return "", fmt.Errorf("oauth client: %w", err)
@@ -417,8 +421,8 @@ func uploadBundleHTTP(path string) error {
 	}
 	req.Header.Set(sdk.MetadataAuthorization, sdk.BearerPrefix+bearer)
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	// #2257: cmdhttp refuses plain http:// to a non-loopback endpoint.
+	resp, err := cmdhttp.Client(30 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("upload: %w", err)
 	}
