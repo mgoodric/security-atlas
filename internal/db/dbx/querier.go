@@ -702,6 +702,10 @@ type Querier interface {
 	// The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 	// $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
 	FrameworkPosture(ctx context.Context, arg FrameworkPostureParams) ([]FrameworkPostureRow, error)
+	// Whether the caller can see the framework version (a catalog version, or
+	// one of its tenant's: framework_versions' tenant_or_catalog RLS policy
+	// decides) and whether its tenant has an activated scope for it.
+	FrameworkVersionScopeState(ctx context.Context, arg FrameworkVersionScopeStateParams) (FrameworkVersionScopeStateRow, error)
 	// AC-2 + AC-6: flip status open->frozen, stamp the freeze metadata. The
 	// `WHERE status='open'` guard means re-freezing a frozen row matches zero
 	// rows (RETURNING returns nothing) and the application surfaces 409
@@ -866,6 +870,10 @@ type Querier interface {
 	// application falls back to the seed default in that case.
 	GetFeatureFlag(ctx context.Context, arg GetFeatureFlagParams) (FeatureFlag, error)
 	GetFrameworkByID(ctx context.Context, id pgtype.UUID) (Framework, error)
+	GetFrameworkPostureTarget(ctx context.Context, arg GetFrameworkPostureTargetParams) (FrameworkPostureTarget, error)
+	// The current row, locked, so the before half of the audit row is the
+	// state the upsert replaces.
+	GetFrameworkPostureTargetForUpdate(ctx context.Context, arg GetFrameworkPostureTargetForUpdateParams) (FrameworkPostureTarget, error)
 	// Same as above but uses the framework's "current" version. Convenience
 	// query so callers can omit the version (e.g., "soc2::CC6.6").
 	GetFrameworkRequirementByCurrentVersion(ctx context.Context, arg GetFrameworkRequirementByCurrentVersionParams) (FrameworkRequirement, error)
@@ -1278,6 +1286,7 @@ type Querier interface {
 	// precision and truncates sub-us nanos), so the verify walk reconstructs the
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
+	InsertFrameworkPostureTargetAudit(ctx context.Context, arg InsertFrameworkPostureTargetAuditParams) error
 	// ===== framework_scope_workflow_log (issue #1786) =====
 	//
 	// Append-only history of framework_scopes changes. Written by
@@ -2345,6 +2354,10 @@ type Querier interface {
 	// application merges this against the seed defaults so the response
 	// shape includes never-toggled flags too.
 	ListFeatureFlags(ctx context.Context, tenantID pgtype.UUID) ([]FeatureFlag, error)
+	// #2136: posture targets per framework version. Every query runs under
+	// tenancy.ApplyTenant as atlas_app; the explicit tenant_id predicate is the
+	// primary guarantee and RLS the second leg.
+	ListFrameworkPostureTargets(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkPostureTarget, error)
 	ListFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]FrameworkRequirement, error)
 	// Every requirement of the framework version, with the revision's decision
 	// when one exists. A NULL framework_scope_id (no revision in force) returns
@@ -3768,6 +3781,7 @@ type Querier interface {
 	// deterministic id derived from the slug; ON CONFLICT (id) DO UPDATE then
 	// handles re-imports cleanly.
 	UpsertFramework(ctx context.Context, arg UpsertFrameworkParams) (Framework, error)
+	UpsertFrameworkPostureTarget(ctx context.Context, arg UpsertFrameworkPostureTargetParams) (FrameworkPostureTarget, error)
 	// Insert or update a framework_requirements row. Deterministic id derived
 	// from (framework_version_id, code) so re-imports are idempotent without
 	// relying on NULLs-distinct gotchas on the UNIQUE constraint.
