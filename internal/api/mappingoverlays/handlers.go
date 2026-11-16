@@ -8,7 +8,8 @@
 //
 // The tenant comes from the credential (tenancy middleware); RLS binds every
 // read and write. Writes need admin or grc_engineer: the OPA middleware is
-// the primary gate (resource `mapping-overlays`), and requireOverlayWrite is
+// the primary gate (resource `mapping-overlays`), and requireOverlayWrite
+// (authz.IsTenantApprover: the flags or the live tenant role, #2447) is
 // its defense-in-depth twin and the testable enforcement point.
 package mappingoverlays
 
@@ -22,9 +23,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
-	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -220,24 +221,9 @@ var refusalStatus = map[string]int{
 	"remap_edge_changed":          http.StatusConflict,
 }
 
-// hasOverlayWrite reports whether the credential may change the tenant's
-// overlay edges: admin or grc_engineer, by flag or by JWT tenant role.
-// control_owner, auditor, viewer and a bare credential are refused.
-func hasOverlayWrite(c credstore.Credential) bool {
-	if c.IsAdmin || c.IsApprover {
-		return true
-	}
-	for _, role := range c.OwnerRoles {
-		if role == "admin" || role == "grc_engineer" {
-			return true
-		}
-	}
-	return false
-}
-
 func requireOverlayWrite(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || !hasOverlayWrite(cred) {
+	if !ok || !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "role does not grant mapping overlay management")
 		return false
 	}

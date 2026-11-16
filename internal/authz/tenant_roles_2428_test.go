@@ -70,6 +70,24 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/walkthroughs", tenantApproverGate},
 	{http.MethodPost, "/v1/walkthroughs/" + id2428 + "/attachments", tenantApproverGate},
 	{http.MethodPost, "/v1/walkthroughs/" + id2428 + ":finalize", tenantApproverGate},
+	// #2447: the taxonomy, posture-target and overlay gates, which read the
+	// JWT role claim until then.
+	{http.MethodPost, "/v1/risks/categories", tenantApproverGate},
+	{http.MethodPatch, "/v1/risks/categories/c1", tenantApproverGate},
+	{http.MethodDelete, "/v1/risks/categories/c1", tenantApproverGate},
+	{http.MethodPost, "/v1/risks/categories/c1/archive", tenantApproverGate},
+	{http.MethodPost, "/v1/risks/categories/c1/unarchive", tenantApproverGate},
+	{http.MethodPost, "/v1/risks/categories/c1/set-default", tenantApproverGate},
+	{http.MethodPost, "/v1/themes", tenantApproverGate},
+	{http.MethodPatch, "/v1/themes/t1", tenantApproverGate},
+	{http.MethodDelete, "/v1/themes/t1", tenantApproverGate},
+	{http.MethodPut, "/v1/framework-scopes/posture-targets/" + id2428, tenantApproverGate},
+	{http.MethodPost, "/v1/mapping-overlays", tenantApproverGate},
+	{http.MethodPost, "/v1/mapping-overlays/" + id2428 + "/retire", tenantApproverGate},
+	{http.MethodPost, "/v1/mapping-overlays/import", tenantApproverGate},
+	{http.MethodPost, "/v1/mapping-overlays/remap-proposals/" + id2428 + "/approve", tenantApproverGate},
+	{http.MethodPost, "/v1/mapping-overlays/remap-proposals/" + id2428 + "/reject", tenantApproverGate},
+	{http.MethodPost, "/v1/mapping-overlays/remap-proposals/" + id2428 + "/keep-legacy", tenantApproverGate},
 
 	// Approve gates on resources OPA admits for admin only.
 	{http.MethodPost, "/v1/oscal/component-claims/" + id2428 + ":accept", tenantAdminGate},

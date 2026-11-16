@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -26,6 +27,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
@@ -450,13 +452,45 @@ func TestOverlayRemap_RLSKeepsEachTenantToItsOwnProposals(t *testing.T) {
 
 // --- through the API server ---
 
+// writerRoles stands in for user_roles: the live tenant roles of each
+// writer subject, which authzmw stamps on the credential the overlay gate
+// reads (#2447). A JWT's role claim alone no longer passes that gate.
+type writerRoles struct {
+	mu    sync.Mutex
+	roles map[[2]string][]authz.Role
+}
+
+func (w *writerRoles) RolesFor(_ context.Context, tenant, user string) ([]authz.Role, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.roles[[2]string{tenant, user}], nil
+}
+
+// overlayServer is edgeServer with the authz middleware attached, resolving
+// live roles from the returned writerRoles.
+func overlayServer(t *testing.T, app *pgxpool.Pool) (*api.Server, *writerRoles) {
+	t.Helper()
+	roles := &writerRoles{roles: map[[2]string][]authz.Role{}}
+	engine, err := authz.NewEngine(context.Background(), roles)
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	srv := edgeServer(t, app)
+	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
+	return srv, roles
+}
+
 // writerBearer is a tenant admin who is a person (a users(id) subject) and
-// not a super-admin: tenant writers decide overlay remaps.
-func writerBearer(t *testing.T, srv *api.Server, tenant uuid.UUID) string {
+// not a super-admin: tenant writers decide overlay remaps. The admin role
+// is granted live in roles as well as carried in the claim.
+func writerBearer(t *testing.T, srv *api.Server, roles *writerRoles, tenant uuid.UUID) string {
 	t.Helper()
 	c := testjwt.AdminFor(tenant)
 	c.SuperAdmin = false
 	c.Subject = uuid.NewString()
+	roles.mu.Lock()
+	roles.roles[[2]string{tenant.String(), c.Subject}] = []authz.Role{authz.RoleAdmin}
+	roles.mu.Unlock()
 	return srv.IssueTestJWT(t, c)
 }
 
@@ -469,9 +503,9 @@ type overlayProposalList struct {
 
 func TestOverlayRemapAPI_TenantBCannotSeeOrDecideTenantAsProposals(t *testing.T) {
 	f := setupOverlayRemap(t)
-	srv := edgeServer(t, f.app)
-	aBearer := writerBearer(t, srv, f.a)
-	bBearer := writerBearer(t, srv, f.b)
+	srv, roles := overlayServer(t, f.app)
+	aBearer := writerBearer(t, srv, roles, f.a)
+	bBearer := writerBearer(t, srv, roles, f.b)
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 
@@ -598,8 +632,8 @@ implementation_type: manual_attested
 			newOverlay(overlayPair{"R-05", "TRM-01", "equal", 1}), "seed-1804"); err != nil {
 			t.Fatalf("overlay: %v", err)
 		}
-		srv := edgeServer(t, app)
-		bearer = writerBearer(t, srv, tenant)
+		srv, roles := overlayServer(t, app)
+		bearer = writerBearer(t, srv, roles, tenant)
 		ts = httptest.NewServer(srv.HTTPHandlerForTests())
 		t.Cleanup(ts.Close)
 		before = read()
