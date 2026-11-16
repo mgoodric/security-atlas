@@ -4,7 +4,7 @@
 //     parser (internal/control.ParseDirectory).
 //  2. Every bundle's scf_anchor_id exists in the slice-006 SCF catalog
 //     fixture (migrations/fixtures/scf-sample.json).
-//  3. The 43 unique TSC requirement codes in the slice-007 crosswalk
+//  3. The unique TSC requirement codes in the slice-007 crosswalk
 //     (data/crosswalks/soc2-tsc-2017.yaml) are each covered by at least
 //     one bundle (graph traversal: bundle → scf_anchor_id → STRM edge →
 //     tsc_code). Coverage ratio is printed.
