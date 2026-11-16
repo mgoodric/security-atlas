@@ -208,21 +208,21 @@ mappings:
     strength: 0.6
     rationale: "Minimizing account-data storage via retention overlaps with Data Classification & Handling; PCI's retention-minimization emphasis is narrower (CDE-specific)."
   - requirement_code: 3.5.1
-    scf_anchor: CRY-01
+    scf_anchor: CRY-02
     relationship_type: equal
     strength: 0.9
     rationale: "Rendering stored PAN unreadable via strong cryptography maps to SCF Use of Cryptographic Controls (data-at-rest protection)."
   - requirement_code: 3.6.1
-    scf_anchor: CRY-09
+    scf_anchor: CRY-10
     relationship_type: equal
     strength: 0.9
     rationale: "Protecting cryptographic keys for stored account data maps to SCF Cryptographic Key Management."
   # --- Req 4: Protect CHD in transmission ---
   - requirement_code: 4.2.1
-    scf_anchor: CRY-08
+    scf_anchor: CRY-05
     relationship_type: equal
     strength: 0.9
-    rationale: "Strong cryptography for PAN in transit maps to SCF Encryption In Transit — shared with SOC 2 CC6.7 and ISO A.8.24."
+    rationale: "Strong cryptography for PAN in transit maps to SCF Encrypting Data In Transit — shared with SOC 2 CC6.7 and ISO A.8.24."
   # --- Req 5: Anti-malware ---
   - requirement_code: 5.2.1
     scf_anchor: END-07

@@ -11,7 +11,7 @@ description: |
   (load balancer / CDN config). NOTE: This is a JUDGMENT CALL — see review
   log for the alternative scoping.
 
-scf_anchor_id: CRY-08
+scf_anchor_id: CRY-05
 control_family: CRY
 implementation_type: automated
 owner_role: security-engineering

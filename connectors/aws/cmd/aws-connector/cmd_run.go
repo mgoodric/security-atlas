@@ -75,7 +75,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.roleARN, "role-arn", "", "IAM role ARN to assume [required]")
 	cmd.Flags().StringVar(&f.region, "region", "", "primary AWS region [required]")
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag; fallback when Organizations:DescribeAccount is not available")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:CRY-04", "control id to attach to each record")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:CRY-07", "control id to attach to each record")
 	return cmd
 }
 

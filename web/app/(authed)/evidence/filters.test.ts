@@ -108,7 +108,7 @@ describe("evidence filters", () => {
       },
       {
         id: "22222222-2222-2222-2222-222222222222",
-        scf_id: "SCF:CRY-04",
+        scf_id: "SCF:CRY-07",
         family: "CRY",
         name: "Encryption at rest",
         description: "",
@@ -120,7 +120,7 @@ describe("evidence filters", () => {
     expect(opts[0]).toEqual({ value: NONE, label: "All controls" });
     // Sorted alphabetically by scf_id (CRY before IAC).
     expect(opts[1]?.value).toBe("22222222-2222-2222-2222-222222222222");
-    expect(opts[1]?.label).toBe("SCF:CRY-04 · Encryption at rest");
+    expect(opts[1]?.label).toBe("SCF:CRY-07 · Encryption at rest");
     expect(opts[2]?.value).toBe("11111111-1111-1111-1111-111111111111");
   });
 
