@@ -78,10 +78,10 @@ func seedNistRisk(t *testing.T, admin *pgxpool.Pool, tenant string, likelihood, 
 	inherent, _ := json.Marshal(map[string]int{"likelihood": likelihood, "impact": impact})
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score
 		)
-		VALUES ($1, $2, 'slice 020 api test risk', '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, 'slice 020 api test risk', '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        $3::jsonb, 'avoid', 'owner', '{}'::jsonb)
 	`, riskID, tenant, string(inherent)); err != nil {
 		t.Fatalf("seed nist risk: %v", err)

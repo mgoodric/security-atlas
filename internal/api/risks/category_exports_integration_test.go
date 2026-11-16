@@ -70,9 +70,9 @@ func TestRiskCategoryExports_ShowRenamedCategory(t *testing.T) {
 	riskID := uuid.New()
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score, themes
-		) VALUES ($1, $2, 'Customer data leak', '', 'privacy', 'qualitative_5x5',
+		) VALUES ($1, $2, 'Customer data leak', '', risk_category_id($2, 'privacy'), 'qualitative_5x5',
 		          '{"likelihood":4,"impact":4}'::jsonb, 'mitigate', 'owner', '{}'::jsonb, '{}')
 	`, riskID, tenant); err != nil {
 		t.Fatalf("seed risk: %v", err)

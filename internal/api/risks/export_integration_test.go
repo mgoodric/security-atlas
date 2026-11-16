@@ -91,11 +91,11 @@ func seedRiskForExport(t *testing.T, tenant uuid.UUID, title, category string) u
 	inherent, _ := json.Marshal(map[string]int{"likelihood": 3, "impact": 4})
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			accepter, instrument_reference
 		)
-		VALUES ($1, $2, $3, 'test risk description', $4, 'nist_800_30',
+		VALUES ($1, $2, $3, 'test risk description', risk_category_id($2, $4), 'nist_800_30',
 		        $5::jsonb, 'mitigate', 'test-owner', '{}'::jsonb,
 		        'accepter-X', 'pol-001')
 	`, id, tenant, title, category, string(inherent)); err != nil {

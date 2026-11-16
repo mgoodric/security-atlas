@@ -212,18 +212,16 @@ func writeRisks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
 		// is nil-safe: nullableUUID passes NULL when the org tree is empty.
 		if _, err := tx.Exec(ctx,
 			// category_id is the tenant's own category, looked up by slug
-			// (#1816). The enum is still dual-written until the contract
-			// step drops it; the sync trigger rejects a mismatched pair.
+			// (#1816, #1819); risk_category_id raises on an unknown slug.
 			`INSERT INTO risks
-			 (id, tenant_id, title, description, category, category_id, treatment, treatment_owner,
+			 (id, tenant_id, title, description, category_id, treatment, treatment_owner,
 			  inherent_score, residual_score, review_due_at, org_unit_id, themes)
-			 VALUES ($1, $2, $3, $4, $5::risk_category,
-			         (SELECT id FROM org_risk_categories WHERE tenant_id = $2 AND slug = $13),
+			 VALUES ($1, $2, $3, $4, risk_category_id($2, $5),
 			         $6::risk_treatment, $7, $8::jsonb, $9::jsonb, $10, $11, $12)`,
 			r.ID, fs.tenant.ID, r.Title, r.Description,
 			r.Category, r.Treatment, r.TreatmentOwner,
 			r.InherentScoreJ, r.ResidualScoreJ, r.ReviewDueAt,
-			nullableUUID(r.OrgUnitID), r.Themes, r.Category,
+			nullableUUID(r.OrgUnitID), r.Themes,
 		); err != nil {
 			return 0, fmt.Errorf("demoseed: insert risk %s: %w", r.Title, err)
 		}

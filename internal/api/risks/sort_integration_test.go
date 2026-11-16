@@ -40,11 +40,11 @@ func seedRiskWithResidual(t *testing.T, admin *pgxpool.Pool, tenant, title strin
 	residual, _ := json.Marshal(map[string]int{"likelihood": likelihood, "impact": impact})
 	if _, err := admin.Exec(t.Context(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			created_at
 		)
-		VALUES ($1, $2, $3, '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, $3, '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        '{"likelihood":5,"impact":5}'::jsonb, 'mitigate', 'owner',
 		        $4::jsonb, $5)
 	`, riskID, tenant, title, string(residual), createdAt); err != nil {

@@ -307,8 +307,8 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 		// default treatment='accept' requires accepted_until + accepter; the
 		// simplest survivor is treatment='avoid', which has no extra fields.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO risks (id, tenant_id, title, category, treatment)
-			VALUES ($1, $2, 'Unauthorized access to PHI', 'confidentiality', 'avoid')
+			INSERT INTO risks (id, tenant_id, title, category_id, treatment)
+			VALUES ($1, $2, 'Unauthorized access to PHI', risk_category_id($2, 'confidentiality'), 'avoid')
 		`, uuid.NewString(), tenant); err != nil {
 			t.Fatalf("INSERT risks: %v", err)
 		}

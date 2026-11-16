@@ -459,7 +459,7 @@ func (e *Engine) createMetaRisk(
 	ruleID uuid.UUID,
 	inherent []byte,
 	childCount int,
-	category dbx.RiskCategory,
+	category pgtype.UUID,
 	themes []string,
 	childIDs []uuid.UUID,
 ) (uuid.UUID, error) {
@@ -469,7 +469,7 @@ func (e *Engine) createMetaRisk(
 		TenantID:            pgUUID(tenantID),
 		Title:               rule.Title(),
 		Description:         fmt.Sprintf("Rule-generated aggregation (%s) of %d child risks via %s.", rule.RuleID, childCount, rule.SeverityFunction),
-		Category:            category,
+		CategoryID:          category,
 		Methodology:         dbx.RiskMethodologyQualitative5x5,
 		InherentScore:       inherent,
 		Treatment:           dbx.RiskTreatmentUntreated,

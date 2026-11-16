@@ -256,10 +256,10 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
 	riskID := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, treatment,
+			id, tenant_id, title, category_id, treatment,
 			residual_score
 		)
-		VALUES ($1, $2, 'slice 294 test risk', 'operational', 'mitigate',
+		VALUES ($1, $2, 'slice 294 test risk', risk_category_id($2, 'operational'), 'mitigate',
 		        '{"likelihood": 3, "impact": 4}'::jsonb)
 	`, riskID, tenant); err != nil {
 		t.Fatalf("seed risk: %v", err)
@@ -515,13 +515,13 @@ func TestOpenRiskFinancialExposure_TreatmentStates(t *testing.T) {
 	}
 
 	for _, ins := range []string{
-		`INSERT INTO risks (id, tenant_id, title, category, residual_score)
-		 VALUES ($1, $2, 'untreated risk', 'operational', '{"likelihood": 2, "impact": 3}'::jsonb)`,
-		`INSERT INTO risks (id, tenant_id, title, category, treatment, acceptance_status, residual_score)
-		 VALUES ($1, $2, 'proposed accept', 'operational', 'accept', 'proposed', '{"likelihood": 1, "impact": 5}'::jsonb)`,
-		`INSERT INTO risks (id, tenant_id, title, category, treatment, acceptance_status,
+		`INSERT INTO risks (id, tenant_id, title, category_id, residual_score)
+		 VALUES ($1, $2, 'untreated risk', risk_category_id($2, 'operational'), '{"likelihood": 2, "impact": 3}'::jsonb)`,
+		`INSERT INTO risks (id, tenant_id, title, category_id, treatment, acceptance_status, residual_score)
+		 VALUES ($1, $2, 'proposed accept', risk_category_id($2, 'operational'), 'accept', 'proposed', '{"likelihood": 1, "impact": 5}'::jsonb)`,
+		`INSERT INTO risks (id, tenant_id, title, category_id, treatment, acceptance_status,
 		                    accepted_until, accepter, residual_score)
-		 VALUES ($1, $2, 'approved accept', 'operational', 'accept', 'approved',
+		 VALUES ($1, $2, 'approved accept', risk_category_id($2, 'operational'), 'accept', 'approved',
 		         CURRENT_DATE + 30, 'ciso', '{"likelihood": 4, "impact": 4}'::jsonb)`,
 	} {
 		if _, err := admin.Exec(ctx, ins, uuid.New(), tenant); err != nil {

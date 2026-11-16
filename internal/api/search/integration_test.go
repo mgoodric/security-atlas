@@ -128,10 +128,10 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title, desc string) uui
 	id := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			treatment
 		)
-		VALUES ($1, $2, $3, $4, 'confidentiality', 'nist_800_30', 'avoid')
+		VALUES ($1, $2, $3, $4, risk_category_id($2, 'confidentiality'), 'nist_800_30', 'avoid')
 	`, id, tenant, title, desc); err != nil {
 		t.Fatalf("seed risk: %v", err)
 	}
