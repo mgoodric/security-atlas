@@ -91,13 +91,17 @@ func (h *Handler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	var req createCategoryReq
 	if !decodeStrict(w, r, &req) {
 		return
 	}
 	created, err := h.store.CreateCategory(ctx, risk.NewCategory{
 		Slug: req.Slug, Name: req.Name, Description: req.Description,
-	}, actorFrom(r))
+	}, actor)
 	if err != nil {
 		writeCategoryErr(w, r, "create risk category", err)
 		return
@@ -124,6 +128,10 @@ func (h *Handler) RenameCategory(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	var req renameCategoryReq
 	if !decodeStrict(w, r, &req) {
 		return
@@ -134,7 +142,7 @@ func (h *Handler) RenameCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := h.store.RenameCategory(ctx, chi.URLParam(r, "ref"), risk.CategoryText{
 		Name: req.Name, Description: req.Description,
-	}, actorFrom(r))
+	}, actor)
 	if err != nil {
 		writeCategoryErr(w, r, "rename risk category", err)
 		return
@@ -170,7 +178,11 @@ func (h *Handler) categoryTransition(
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	updated, err := apply(ctx, chi.URLParam(r, "ref"), actorFrom(r))
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
+	updated, err := apply(ctx, chi.URLParam(r, "ref"), actor)
 	if err != nil {
 		writeCategoryErr(w, r, op, err)
 		return
@@ -189,7 +201,11 @@ func (h *Handler) DeleteCategory(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if err := h.store.DeleteCategory(ctx, chi.URLParam(r, "ref"), actorFrom(r)); err != nil {
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
+	if err := h.store.DeleteCategory(ctx, chi.URLParam(r, "ref"), actor); err != nil {
 		writeCategoryErr(w, r, "delete risk category", err)
 		return
 	}

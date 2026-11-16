@@ -238,6 +238,26 @@ WITH unified AS (
         (to_jsonb(ci) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'row_id' - 'subject_module')::jsonb AS payload_json
     FROM control_import_audit_log ci
+
+    UNION ALL
+
+    -- 14. risk_audit_log (#1954): a risk moved between org units or
+    -- levels, moved onto another category, or its record fields edited.
+    -- The action is the row's action_type (placement_changed,
+    -- category_changed, fields_changed).
+    SELECT
+        created_at     AS occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'risk'::text   AS kind,
+        'risk'::text   AS target_type,
+        risk_id::text  AS target_id,
+        action_type    AS action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ra) - 'tenant_id' - 'created_at' - 'actor'
+            - 'action_type' - 'risk_id' - 'subject_module')::jsonb AS payload_json
+    FROM risk_audit_log ra
 )
 SELECT
     unified.occurred_at,

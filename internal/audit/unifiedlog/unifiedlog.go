@@ -75,6 +75,9 @@ const (
 	// KindControlImport is control_import_audit_log (#1782): control
 	// import approvals, rejections and duplicates.
 	KindControlImport Kind = "control_import"
+	// KindRisk is risk_audit_log (#1954): a risk's placement, category
+	// and record-field changes.
+	KindRisk Kind = "risk"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -107,9 +110,10 @@ var AllKinds = []Kind{
 	KindTaxonomy,
 	KindMappingOverlay,
 	KindControlImport,
+	KindRisk,
 }
 
-// IsCanonical reports whether k is one of the nine canonical kinds.
+// IsCanonical reports whether k is one of the canonical kinds in [AllKinds].
 func IsCanonical(k Kind) bool {
 	for _, candidate := range AllKinds {
 		if candidate == k {
