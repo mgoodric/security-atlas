@@ -14,7 +14,7 @@ seeds 50% coverage and walks red, amber and green. A unit case in
 ## D1 — Keyed by framework version, not framework
 
 **Decision.** One row per (tenant, framework version):
-`framework_posture_targets` (migration `20261211000000`).
+`framework_posture_targets` (migration `20261214000000`).
 
 **Why.** The tile, the coverage number and the activated scope are all per
 framework version. A target on the framework would have to say which

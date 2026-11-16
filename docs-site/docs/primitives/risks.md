@@ -74,6 +74,27 @@ risks it rolls up to.
   `{"child_risk_ids": [...]}`, `DELETE /v1/risks/{id}/children/{child_id}`,
   and `GET` on `/v1/risks/{id}/children` and `/v1/risks/{id}/parents`.
 
+### Bulk writes queue up per organisation
+
+Attaching children, and any risk write whose themes an active
+aggregation rule targets, take one lock per organisation so two links
+cannot build a cycle between them. The lock is per organisation, not per
+theme: a write on `ownership` waits for one on `patching` if both themes
+have rules. Writes whose themes no rule targets skip it.
+
+For a bulk importer or a connector this means:
+
+- Parallel requests for one organisation that match a rule run one at a
+  time. Sending them concurrently gains nothing and holds connections
+  while they wait. Send them in sequence, or keep concurrency low.
+- Each request holds the lock for the length of its rule evaluation, so
+  a large import into rule-targeted themes is slower than one into
+  themes with no rule. Activate rules after the import when that
+  matters: activation does not re-fire on risks written before it.
+- A link and a risk delete that deadlock against each other are retried
+  by the server, up to three attempts, before a 500. A `link_child_risks`
+  MCP proposal that hits one stays pending; confirm it again.
+
 ## Linking risks to controls
 
 A risk without linked controls is a risk you are not treating. A

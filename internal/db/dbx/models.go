@@ -3440,6 +3440,13 @@ type UserNotificationPreference struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserOnboardingHintDismissal struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Module      string             `json:"module"`
+	DismissedAt pgtype.Timestamptz `json:"dismissed_at"`
+}
+
 type UserRole struct {
 	TenantID  pgtype.UUID        `json:"tenant_id"`
 	UserID    string             `json:"user_id"`
