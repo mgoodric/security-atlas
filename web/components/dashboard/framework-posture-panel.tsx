@@ -6,7 +6,8 @@
 // 066 backend reads — see `docs/audit-log/066-...-decisions.md` D3 for
 // the spine-walk aggregation). Each tile renders one active framework
 // version: a coverage percentage, a freshness composite percentage, and
-// a signed 90-day trend delta.
+// a signed 90-day trend delta. #2095: no traffic-light colour without a
+// target; the tile says "No target set".
 //
 // Slice 040 originally shipped this as a `MissingEndpointPanel`
 // (slice 041/060 precedent) — slice 066 then shipped the backend
@@ -17,32 +18,30 @@ import Link from "next/link";
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import { Term } from "@/components/help/term";
+import {
+  deltaAriaLabel,
+  deltaArrow,
+  deltaTone,
+  deltaToneClass,
+} from "@/lib/charts/delta-tone";
+import { frameworkLabel } from "@/lib/labels/framework-label";
 import type {
   FrameworkPostureReport,
   FrameworkPostureRow,
 } from "@/lib/api/dashboard";
 
-// trendBadgeClass colours the trend arrow: green for growth, destructive
-// for regression, muted for flat. The +/- prefix is rendered in the
-// label so a screen reader speaks the sign.
-function trendBadgeClass(delta: number): string {
-  if (delta > 0) return "text-emerald-600 dark:text-emerald-400";
-  if (delta < 0) return "text-destructive";
-  return "text-muted-foreground";
-}
+// #2095: posture has no target yet (framework posture targets are
+// #2341), so a tile has nothing to grade against. Coverage renders in
+// the neutral foreground and the 90-day delta is toned by `deltaTone`
+// with no target, which is always neutral: a rising number is not "good"
+// until there is a target that says which way good is. The arrow and the
+// aria-label carry the direction, not the colour.
+const POSTURE_TARGET = null;
 
 function trendLabel(delta: number): string {
   if (delta > 0) return `+${delta.toFixed(1)}`;
   if (delta < 0) return delta.toFixed(1);
   return "0.0";
-}
-
-// coverageBadgeClass mirrors the slice-040 freshness bar palette:
-// green at 90%+, amber at 70-89%, destructive below 70%.
-function coverageBadgeClass(pct: number): string {
-  if (pct >= 90) return "text-emerald-600 dark:text-emerald-400";
-  if (pct >= 70) return "text-amber-600 dark:text-amber-400";
-  return "text-destructive";
 }
 
 // ScopeNotSetTile (#2114): the version has no activated framework scope,
@@ -55,7 +54,7 @@ function ScopeNotSetTile({ row }: { row: FrameworkPostureRow }) {
       className="rounded-xl bg-muted/40 p-4 ring-1 ring-foreground/5"
     >
       <div className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-        {row.framework_version}
+        {frameworkLabel(row.framework_name, row.framework_version)}
       </div>
       <Link
         href={`/framework-scopes/${encodeURIComponent(
@@ -83,32 +82,45 @@ function PostureTile({ row }: { row: FrameworkPostureRow }) {
   ) {
     return <ScopeNotSetTile row={row} />;
   }
+  const trendTone = deltaTone(
+    row.coverage_pct,
+    row.trend_delta_90d,
+    POSTURE_TARGET,
+  );
   return (
     <div
       data-testid="framework-tile"
       className="rounded-xl bg-muted/40 p-4 ring-1 ring-foreground/5"
     >
       <div className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-        {row.framework_version}
+        {frameworkLabel(row.framework_name, row.framework_version)}
       </div>
       <div className="mt-2 flex items-baseline gap-2">
         <span
-          className={`font-mono text-2xl font-semibold ${coverageBadgeClass(
-            row.coverage_pct,
-          )}`}
+          className="font-mono text-2xl font-semibold text-foreground"
           data-testid="framework-tile-coverage"
+          data-tone="neutral"
         >
           {row.coverage_pct.toFixed(1)}%
         </span>
         <span
-          className={`font-mono text-xs ${trendBadgeClass(
-            row.trend_delta_90d,
-          )}`}
+          className={`font-mono text-xs ${deltaToneClass(trendTone)}`}
           data-testid="framework-tile-trend"
+          data-tone={trendTone}
           title="90-day coverage delta"
+          aria-label={`90-day coverage change ${deltaAriaLabel(
+            trendTone,
+            trendLabel(row.trend_delta_90d),
+          )}`}
         >
-          {trendLabel(row.trend_delta_90d)}
+          {deltaArrow(row.trend_delta_90d)} {trendLabel(row.trend_delta_90d)}
         </span>
+      </div>
+      <div
+        className="mt-1 text-xs text-muted-foreground"
+        data-testid="framework-tile-no-target"
+      >
+        No target set
       </div>
       <div
         className="mt-1 text-xs text-muted-foreground"

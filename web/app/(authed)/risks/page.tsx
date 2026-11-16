@@ -121,6 +121,7 @@ import {
 import { SeverityPill } from "./severity-pill";
 import { SortableHeader } from "./sortable-header";
 import { pageTitle } from "@/lib/page-titles";
+import { enumOptions } from "@/lib/labels/enum-labels";
 
 // Slice 244 — six filter keys. Order mirrors the mockup
 // (Plans/_archive/mockups/risks.html lines 126-173) with one local deviation:
@@ -213,11 +214,7 @@ const PENDING_EVAL_TOOLTIP =
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
-  { value: "untreated", label: "untreated" },
-  { value: "mitigate", label: "mitigate" },
-  { value: "transfer", label: "transfer" },
-  { value: "accept", label: "accept" },
-  { value: "avoid", label: "avoid" },
+  ...enumOptions("RiskTreatment"),
 ];
 
 const SEVERITY_OPTIONS: { value: string; label: string }[] = [
@@ -230,14 +227,10 @@ const SEVERITY_OPTIONS: { value: string; label: string }[] = [
 
 // Decision D2: the mockup shows `five_by_five` but the wire enum
 // `risk_methodology` carries `qualitative_5x5` for the same concept.
-// All five wire values are exposed.
+// All five wire values are exposed, under their labels (#2083).
 const METHODOLOGY_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All methodologies" },
-  { value: "nist_800_30", label: "nist_800_30" },
-  { value: "fair", label: "fair" },
-  { value: "cis_ram", label: "cis_ram" },
-  { value: "iso_27005", label: "iso_27005" },
-  { value: "qualitative_5x5", label: "qualitative_5x5" },
+  ...enumOptions("RiskMethodology"),
 ];
 
 function RisksPageInner() {
@@ -541,18 +534,6 @@ function RisksPageInner() {
   );
 
   const columns: ListColumn<Risk>[] = [
-    {
-      id: "id",
-      header: "ID",
-      cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          data-testid="risks-row-id"
-        >
-          {row.id.slice(0, 8)}
-        </span>
-      ),
-    },
     {
       id: "title",
       header: "Title",

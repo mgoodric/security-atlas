@@ -12,14 +12,14 @@ var Lifecycle = lifecycle.Table{
 	Title:  "Exception",
 	Entity: "exceptions",
 	Column: "status",
-	States: []string{StateRequested, StateApproved, StateDenied, StateActive, StateExpired},
+	States: []string{StateRequested, StateApproved, StateDenied, StateActive, StateExpired, StateRevoked},
 	Initial: []lifecycle.Entry{{
 		State:  StateRequested,
 		Action: "request",
 		Routes: []string{"POST /v1/exceptions"},
 		Roles:  []string{"admin", "grc_engineer"},
 	}},
-	Terminal: []string{StateDenied, StateExpired},
+	Terminal: []string{StateDenied, StateExpired, StateRevoked},
 	Transitions: []lifecycle.Transition{
 		{
 			From: StateRequested, To: StateApproved, Action: "approve",
@@ -48,6 +48,14 @@ var Lifecycle = lifecycle.Table{
 			From: StateActive, To: StateExpired, Action: "expire",
 			Actor: lifecycle.ActorSystem,
 			Note:  "The expiry sweep (daily by default) expires an active exception once its expires_at has passed.",
+		},
+		{
+			From: StateActive, To: StateRevoked, Action: "revoke",
+			Actor:            lifecycle.ActorPerson,
+			Routes:           []string{"PATCH /v1/exceptions/{id}/revoke"},
+			Roles:            []string{"admin", "grc_engineer"},
+			RequiresApprover: true,
+			Note:             "An approver ends an active exception before it expires, with a reason (#2113). The control returns to normal evaluation on its next evaluation.",
 		},
 	},
 }

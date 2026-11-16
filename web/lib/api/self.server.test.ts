@@ -175,12 +175,14 @@ describe("OE-549: server-side probes under a containerized topology", () => {
         name: "Questionnaires",
         state: "switched_off",
         pages: ["/questionnaires"],
+        features: [],
       },
       {
         key: "board_reporting",
         name: "Board reporting",
         state: "on",
         pages: ["/board-packs"],
+        features: [],
       },
     ];
     const { urls } = containerNetwork({
@@ -323,7 +325,31 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
           null,
         ],
       }),
-    ).toEqual([good]);
+    ).toEqual([{ ...good, features: [] }]);
+  });
+
+  test("normalizeEffectiveModules keeps well-formed features and drops the rest (#2171)", () => {
+    const feature = {
+      key: "f",
+      name: "F",
+      state: "switched_off",
+      pages: ["/f"],
+    };
+    expect(
+      normalizeEffectiveModules({
+        modules: [
+          {
+            key: "m",
+            name: "M",
+            state: "on",
+            pages: ["/m"],
+            features: [feature, { key: "bad" }, null],
+          },
+        ],
+      }),
+    ).toEqual([
+      { key: "m", name: "M", state: "on", pages: ["/m"], features: [feature] },
+    ]);
   });
 
   test("demo-seed probe admits only on a literal enabled:true", async () => {

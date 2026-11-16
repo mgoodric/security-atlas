@@ -1,7 +1,7 @@
 // Slice 660 + #2092 + #2170 — Playwright e2e for module nav + route
 // gating.
 //
-// Both gating flags (`board.reporting`, `oscal.export`) ship OFF. The
+// Both gating flags (`board.reporting`, `vendor.claims`) ship OFF. The
 // demo tenant has them turned ON by global-setup so the module specs can
 // render the pages; this spec signs in to a SEPARATE tenant that nobody
 // toggles, so both flags stay at the seed default (off) and the spec does
@@ -304,5 +304,68 @@ test.describe("#2170 — Questionnaires switched off", () => {
     await signIn(page, baseURL, "viewer", QUESTIONNAIRES_OFF_TENANT);
     await page.goto(`/questionnaires/${QUESTIONNAIRES_OFF_TENANT}`);
     await expect(page.getByTestId("feature-off-state")).toBeVisible();
+  });
+});
+
+// #2171 — Admin › Features groups switches by module, from the server's
+// module registry. Read-only, against the flags-off tenant, so it races
+// no other spec over a flag row.
+test.describe("#2171 — Admin › Features grouped by module", () => {
+  test("each module's switch heads its card, with its features nested under it", async ({
+    page,
+    baseURL,
+  }) => {
+    await signIn(page, baseURL, "admin");
+    await page.goto("/admin/features");
+
+    const risk = page.getByTestId("module-group-risk");
+    await expect(risk).toBeVisible();
+    await expect(risk).toContainText("Risk");
+    await expect(risk.getByTestId("flag-row-risk.enabled")).toContainText(
+      "Module switch",
+    );
+    const riskFeatures = risk.getByTestId("module-features-risk");
+    for (const key of ["risk.hierarchy", "risk.themes", "decisions.log"]) {
+      await expect(riskFeatures.getByTestId(`flag-row-${key}`)).toBeVisible();
+    }
+    // The module switch is not one of its own features.
+    await expect(riskFeatures.getByTestId("flag-row-risk.enabled")).toHaveCount(
+      0,
+    );
+
+    // Vendor claims are a feature of Third-party risk.
+    const tpr = page.getByTestId("module-group-third_party_risk");
+    await expect(tpr.getByTestId("flag-row-vendor.enabled")).toContainText(
+      "Module switch",
+    );
+    await expect(
+      tpr
+        .getByTestId("module-features-third_party_risk")
+        .getByTestId("flag-row-vendor.claims"),
+    ).toContainText("Vendor claims");
+
+    // Every optional module has a card with its switch.
+    for (const [module, key] of [
+      ["policies", "policy.enabled"],
+      ["questionnaires", "questionnaires.enabled"],
+      ["personnel_security", "personnel.enabled"],
+      ["exceptions", "exceptions.enabled"],
+      ["board_reporting", "board.reporting"],
+    ]) {
+      await expect(
+        page
+          .getByTestId(`module-group-${module}`)
+          .getByTestId(`flag-row-${key}`),
+      ).toContainText("Module switch");
+    }
+
+    // A core module has no switch: its card says so and lists only its
+    // features, such as the OSCAL SSP and POA&M export.
+    const audit = page.getByTestId("module-group-audit_periods");
+    await expect(audit).toContainText("Core module, always on.");
+    await expect(audit).not.toContainText("Module switch");
+    await expect(
+      audit.getByTestId("flag-row-audit.oscal_export"),
+    ).toContainText("OSCAL SSP and POA&M export");
   });
 });

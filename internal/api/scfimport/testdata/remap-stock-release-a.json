@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-stock-remap-a",
+  "release_date": "2026-01-01",
+  "attribution": "Synthetic test catalog for #1776 (a stock control's approved re-anchor survives the boot seed); not SCF content.",
+  "controls": [
+    {
+      "scf_id": "CHG-02",
+      "family": "CHG",
+      "title": "Change Control Process",
+      "description": "Control changes."
+    }
+  ]
+}

@@ -6,7 +6,8 @@
 // legacy IDs as unchanged, renamed, split, reused_id or no_successor. A
 // proposal moves nothing; its status says whether the #1971 D3 upgrade
 // re-bound the control in place ("rebound") or left it for a person
-// ("open"). This endpoint lists the bearer tenant's proposals, filterable
+// ("open"); a reviewer's decision (#1776) makes it approved, rejected or
+// kept_legacy. This endpoint lists the bearer tenant's proposals, filterable
 // by ?class= and ?status=.
 //
 // Authz: the path resolves to resource "controls", action "read", the same
@@ -19,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +28,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
+	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -65,7 +68,7 @@ type remapProposalsResp struct {
 	Count     int                 `json:"count"`
 }
 
-var remapStatuses = []string{scfimport.ProposalOpen, scfimport.ProposalRebound}
+var remapStatuses = control.RemapStatuses
 
 // filterParam reads an optional query filter; an empty value means any, and
 // a value outside allowed is rejected.
@@ -98,7 +101,7 @@ func (h *RemapProposalsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	status, ok := filterParam(r, "status", remapStatuses)
 	if !ok {
-		httpresp.WriteError(w, http.StatusBadRequest, "status must be one of open, rebound")
+		httpresp.WriteError(w, http.StatusBadRequest, "status must be one of "+strings.Join(remapStatuses, ", "))
 		return
 	}
 	rows, err := h.store.ListRemapProposals(r.Context(), class, status)

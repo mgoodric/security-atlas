@@ -260,7 +260,7 @@ test.describe("control detail view", () => {
     //     placeholder pattern — visible copy + tooltip + aria-label
     //     read the same line). They are NOT `<a href="#">` (slice 178
     //     anti-pattern).
-    //   - Request exception is a real link to /exceptions?control_id=<id>,
+    //   - Request exception is a real link to /exceptions/new?control_id=<id>,
     //     which is a merged URL-driven filter on the existing
     //     /exceptions list page.
     //

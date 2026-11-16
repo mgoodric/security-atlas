@@ -413,10 +413,10 @@ mappings:
     strength: 0.7
     rationale: "Understanding stakeholder cybersecurity expectations is a governance-context activity within SCF Information Security Governance."
   - requirement_code: "GV.OC-03"
-    scf_anchor: "CPL-01"
+    scf_anchor: "CPL-02"
     relationship_type: "subset_of"
     strength: 0.85
-    rationale: "Understanding legal/regulatory/contractual security requirements maps to SCF Compliance Management."
+    rationale: "Understanding legal/regulatory/contractual security requirements maps to SCF Statutory, Regulatory & Contractual Compliance."
   - requirement_code: "GV.OC-04"
     scf_anchor: "GOV-01"
     relationship_type: "intersects_with"
@@ -493,7 +493,7 @@ mappings:
     strength: 0.75
     rationale: "Periodic policy review/update/communication is part of maintaining SCF Information Security Governance."
   - requirement_code: "GV.OV-01"
-    scf_anchor: "CPL-03"
+    scf_anchor: "CPL-07.1"
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Reviewing strategy outcomes overlaps the SCF Internal Audit Function; explicit gap on strategy-adjustment governance (LOW)."
@@ -503,57 +503,57 @@ mappings:
     strength: 0.65
     rationale: "Reviewing the risk-management strategy for coverage of org risks/requirements overlaps the SCF Risk Management Program; strategy-review specificity is the residual gap (LOW)."
   - requirement_code: "GV.OV-03"
-    scf_anchor: "CPL-03"
+    scf_anchor: "CPL-07.1"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Evaluating/adjusting risk-management performance overlaps the SCF Internal Audit Function; performance-metric specificity is the residual gap (LOW)."
   - requirement_code: "GV.SC-01"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "A cyber supply-chain risk-management program is a subset of SCF Third-Party Management."
   - requirement_code: "GV.SC-02"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Establishing supplier/third-party security roles and responsibilities is part of SCF Third-Party Management."
   - requirement_code: "GV.SC-03"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Integrating supply-chain risk into cybersecurity/enterprise risk management spans SCF Third-Party Management and the Risk Management Program; the integration seam is the residual gap."
   - requirement_code: "GV.SC-04"
-    scf_anchor: "TPM-04"
+    scf_anchor: "TPM-10"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Prioritizing suppliers by criticality overlaps with SCF Third-Party Risk Assessments."
+    rationale: "Prioritizing suppliers by criticality overlaps with SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: "GV.SC-05"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Establishing supply-chain security requirements in supplier contracts is part of SCF Third-Party Management."
   - requirement_code: "GV.SC-06"
-    scf_anchor: "TPM-04"
+    scf_anchor: "TPM-10"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Pre-engagement supplier due diligence maps to SCF Third-Party Risk Assessments."
+    rationale: "Pre-engagement supplier due diligence maps to SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: "GV.SC-07"
-    scf_anchor: "TPM-04"
+    scf_anchor: "TPM-10"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Ongoing monitoring of supplier risk over the relationship maps to SCF Third-Party Risk Assessments."
+    rationale: "Ongoing monitoring of supplier risk over the relationship maps to SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: "GV.SC-08"
     scf_anchor: "IRO-04"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Including relevant suppliers in incident response overlaps SCF Incident Response Plan; the supplier-coordination facet is the residual gap (LOW)."
   - requirement_code: "GV.SC-09"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Integrating supply-chain security across the technology lifecycle overlaps SCF Third-Party Management; lifecycle-integration specificity is the residual gap."
   - requirement_code: "GV.SC-10"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Post-relationship (offboarding) supply-chain risk provisions overlap SCF Third-Party Management; termination-specific handling is a residual gap (LOW)."
@@ -575,7 +575,7 @@ mappings:
     strength: 0.65
     rationale: "Maintaining authorized network-communication/data-flow representations overlaps SCF Network Security; data-flow-diagram specificity is a residual gap (LOW)."
   - requirement_code: "ID.AM-04"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Maintaining an inventory of supplier-provided services is part of SCF Third-Party Management."
@@ -660,12 +660,12 @@ mappings:
     strength: 0.75
     rationale: "Assessing hardware/software authenticity and integrity before use is governed by SCF Technology Development & Acquisition."
   - requirement_code: "ID.RA-10"
-    scf_anchor: "TPM-04"
+    scf_anchor: "TPM-10"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Assessing critical suppliers prior to acquisition maps to SCF Third-Party Risk Assessments."
+    rationale: "Assessing critical suppliers prior to acquisition maps to SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: "ID.IM-01"
-    scf_anchor: "CPL-03"
+    scf_anchor: "CPL-07.1"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Identifying improvements from process evaluations overlaps the SCF Internal Audit Function; continuous-improvement specificity is the residual gap (LOW)."
@@ -816,10 +816,10 @@ mappings:
     strength: 0.7
     rationale: "Monitoring personnel activity overlaps SCF Anomalous Behavior."
   - requirement_code: "DE.CM-06"
-    scf_anchor: "TPM-04"
+    scf_anchor: "TPM-10"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Monitoring external service-provider activity overlaps SCF Third-Party Risk Assessments; continuous-provider-monitoring specificity is a residual gap (LOW)."
+    rationale: "Monitoring external service-provider activity overlaps SCF Third-Party Risk Assessments & Approvals; continuous-provider-monitoring specificity is a residual gap (LOW)."
   - requirement_code: "DE.CM-09"
     scf_anchor: "MON-02"
     relationship_type: "subset_of"

@@ -2,7 +2,6 @@ package featureflag
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -108,78 +107,6 @@ func TestEnabledFallsBackToSeedDefaultOnDBError(t *testing.T) {
 type errAny struct{}
 
 func (errAny) Error() string { return "simulated DB failure" }
-
-// TestGateDisabledReturns404 asserts the middleware short-circuits with
-// 404 when the flag is off. AC-5 + AC-22 + AC-23.
-func TestGateDisabledReturns404(t *testing.T) {
-	looker := &fakeLooker{
-		answers: map[string]Flag{
-			"oscal.export": {Key: "oscal.export", Enabled: false},
-		},
-	}
-	handler := Gate(looker, "oscal.export")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatalf("inner handler reached on disabled flag")
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/oscal/export/ssp", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d; want 404", rec.Code)
-	}
-	if got := rec.Header().Get("X-Feature-Disabled"); got != "oscal.export" {
-		t.Errorf("X-Feature-Disabled = %q; want %q", got, "oscal.export")
-	}
-	var body map[string]string
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body["error"] != "feature disabled" {
-		t.Errorf("body.error = %q; want %q", body["error"], "feature disabled")
-	}
-}
-
-// TestGateEnabledPassesThrough asserts the middleware does not interfere
-// when the flag is on. AC-5 happy path.
-func TestGateEnabledPassesThrough(t *testing.T) {
-	looker := &fakeLooker{
-		answers: map[string]Flag{
-			"risk.enabled": {Key: "risk.enabled", Enabled: true},
-		},
-	}
-	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	})
-	handler := Gate(looker, "risk.enabled")(inner)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/risks", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d; want 200 (gate should pass through)", rec.Code)
-	}
-	if rec.Header().Get("X-Feature-Disabled") != "" {
-		t.Errorf("X-Feature-Disabled header set on enabled gate; should be absent")
-	}
-}
-
-// TestGateUnknownKeyReturns500 asserts a misconfigured Gate(key) call
-// surfaces as a server error rather than silently allowing or denying.
-func TestGateUnknownKeyReturns500(t *testing.T) {
-	looker := &fakeLooker{answers: map[string]Flag{}}
-	handler := Gate(looker, "nonexistent.feature")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/nope", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d; want 500 (unknown gate key is a code bug)", rec.Code)
-	}
-}
 
 // TestCacheMiddlewareAttachesCache asserts the middleware wires the
 // per-request cache so downstream handlers see memoization.

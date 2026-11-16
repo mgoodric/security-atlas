@@ -54,6 +54,7 @@ const DEMO_TENANT_LABELS = [
   "Personnel security",
   "Questionnaires",
   "SCF catalog",
+  "Audited under",
   "Settings",
 ];
 

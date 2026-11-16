@@ -2381,6 +2381,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/approve-unchanged:
+    post:
+      summary: POST /v1/controls/remap-proposals/approve-unchanged — approve every open unchanged SCF remap proposal with its single successor, re-anchoring each control as a new revision; a person must approve (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-approve-unchanged
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/{id}/approve:
+    post:
+      summary: POST /v1/controls/remap-proposals/{id}/approve — re-anchor the control on a successor (scf_id required for split and no_successor) as a superseding revision and record the anchor history; a person must approve (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-id-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/{id}/keep-legacy:
+    post:
+      summary: POST /v1/controls/remap-proposals/{id}/keep-legacy — keep the control on its legacy SCF anchor for good; a person must decide (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-id-keep-legacy
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/{id}/reject:
+    post:
+      summary: POST /v1/controls/remap-proposals/{id}/reject — reject a remap proposal; the control stays on its legacy anchor and the proposal can be revisited (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-id-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/action-plans:
     get:
       summary: GET /v1/controls/{id}/action-plans
@@ -3225,6 +3299,26 @@ paths:
       summary: PATCH /v1/exceptions/{id}/deny
       tags: [exceptions]
       operationId: patch-v1-exceptions-id-deny
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/exceptions/{id}/revoke:
+    patch:
+      summary: PATCH /v1/exceptions/{id}/revoke
+      tags: [exceptions]
+      operationId: patch-v1-exceptions-id-revoke
       security:
         - bearer: []
       parameters:

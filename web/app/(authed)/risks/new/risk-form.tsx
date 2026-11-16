@@ -44,6 +44,7 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import {
   fetchRiskCategories,
   type RiskCategory,
@@ -75,11 +76,11 @@ const TREATMENTS = [
 // #1746: the option text says what each value records, so the opening
 // "untreated" reads as "no decision yet" rather than a choice.
 const TREATMENT_LABELS: Record<(typeof TREATMENTS)[number], string> = {
-  untreated: "untreated (not yet decided)",
-  mitigate: "mitigate",
-  transfer: "transfer",
-  accept: "accept (proposed, pending approval)",
-  avoid: "avoid",
+  untreated: "Untreated (not yet decided)",
+  mitigate: enumLabel("RiskTreatment", "mitigate"),
+  transfer: enumLabel("RiskTreatment", "transfer"),
+  accept: "Accept (proposed, pending approval)",
+  avoid: enumLabel("RiskTreatment", "avoid"),
 };
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
@@ -404,7 +405,7 @@ export function RiskForm({ onSubmit }: Props) {
           >
             {OFFERED_METHODOLOGIES.map((m) => (
               <option key={m} value={m}>
-                {m}
+                {enumLabel("RiskMethodology", m)}
               </option>
             ))}
           </select>

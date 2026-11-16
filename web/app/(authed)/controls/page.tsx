@@ -135,6 +135,7 @@ import {
   sanitizeFilters,
   type SavedView,
 } from "./saved-views";
+import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
 import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof ControlFilters)[] = [
@@ -190,11 +191,7 @@ const PAGE_PARAM = "page";
 
 const RESULT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All states" },
-  { value: "pass", label: "pass" },
-  { value: "fail", label: "fail" },
-  { value: "insufficient_evidence", label: "insufficient_evidence" },
-  { value: "not_applicable", label: "not_applicable" },
-  { value: "excepted", label: "Excepted" },
+  ...enumOptions("EvaluationState"),
 ];
 
 // Slice <NNN> — map the control evaluation `result` enum (the real wire
@@ -229,16 +226,11 @@ const RESULT_BADGE_VARIANT: Record<string, StatusBadgeVariant> = {
   excepted: "info",
 };
 
-// #2112 — display text for a result. The raw enum value stays the visible
-// text (and the data-result attribute) except where a value is named for a
-// person: `excepted` reads "Excepted", so a waived control can never be
-// mistaken for a passing one.
-const RESULT_LABEL: Record<string, string> = {
-  excepted: "Excepted",
-};
-
+// #2112, #2083 — display text for a result. `excepted` reads "Excepted",
+// so a waived control can never be mistaken for a passing one; the raw
+// value stays on the data-result attribute.
 function resultLabel(result: string): string {
-  return RESULT_LABEL[result] ?? result;
+  return enumLabel("EvaluationState", result);
 }
 
 function resultBadgeVariant(result: string): StatusBadgeVariant {
@@ -249,9 +241,7 @@ function resultBadgeVariant(result: string): StatusBadgeVariant {
 
 const FRESHNESS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All" },
-  { value: "fresh", label: "fresh" },
-  { value: "stale", label: "stale" },
-  { value: "expired", label: "expired" },
+  ...enumOptions("FreshnessState"),
 ];
 
 const FRAMEWORK_OPTIONS: { value: string; label: string }[] = [
@@ -975,7 +965,7 @@ function ControlsPageInner() {
       cell: (row) =>
         row.state ? (
           <span className="text-xs text-muted-foreground">
-            {row.state.freshness_status}
+            {enumLabel("FreshnessState", row.state.freshness_status)}
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>

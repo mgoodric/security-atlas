@@ -217,6 +217,7 @@ PATCH /v1/decisions/{id}
 PATCH /v1/exceptions/{id}/activate
 PATCH /v1/exceptions/{id}/approve
 PATCH /v1/exceptions/{id}/deny
+PATCH /v1/exceptions/{id}/revoke
 PATCH /v1/framework-scopes/{id}
 PATCH /v1/framework-scopes/{id}/activate
 PATCH /v1/framework-scopes/{id}/approve
@@ -291,6 +292,10 @@ POST /v1/controls/imports
 POST /v1/controls/imports/{id}/approve-clear
 POST /v1/controls/imports/{id}/rows/{row}/approve
 POST /v1/controls/imports/{id}/rows/{row}/reject
+POST /v1/controls/remap-proposals/approve-unchanged
+POST /v1/controls/remap-proposals/{id}/approve
+POST /v1/controls/remap-proposals/{id}/keep-legacy
+POST /v1/controls/remap-proposals/{id}/reject
 POST /v1/controls/{id}/attestations
 POST /v1/controls/{id}/owner
 POST /v1/controls:bulk-assign-owner

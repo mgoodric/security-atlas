@@ -2304,6 +2304,8 @@ type Exception struct {
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	SelfApproved         bool               `json:"self_approved"`
+	RevokedBy            *string            `json:"revoked_by"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type ExceptionAuditLog struct {
@@ -3107,6 +3109,25 @@ type ScfAnchor struct {
 	LegacyScfID        *string            `json:"legacy_scf_id"`
 }
 
+type ScfRemapDecision struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ProposalID      pgtype.UUID        `json:"proposal_id"`
+	Decision        string             `json:"decision"`
+	Bulk            bool               `json:"bulk"`
+	LegacyControlID pgtype.UUID        `json:"legacy_control_id"`
+	LegacyAnchorID  pgtype.UUID        `json:"legacy_anchor_id"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	NewControlID    pgtype.UUID        `json:"new_control_id"`
+	NewAnchorID     pgtype.UUID        `json:"new_anchor_id"`
+	NewScfID        *string            `json:"new_scf_id"`
+	NewRelease      *string            `json:"new_release"`
+	Reason          *string            `json:"reason"`
+	DecidedBy       string             `json:"decided_by"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
 type ScfRemapProposal struct {
 	ID                       pgtype.UUID        `json:"id"`
 	TenantID                 pgtype.UUID        `json:"tenant_id"`
@@ -3121,6 +3142,8 @@ type ScfRemapProposal struct {
 	Status                   string             `json:"status"`
 	SuccessorScfIds          []string           `json:"successor_scf_ids"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetAnchorID           pgtype.UUID        `json:"target_anchor_id"`
+	Source                   string             `json:"source"`
 }
 
 type ScimAuditLog struct {

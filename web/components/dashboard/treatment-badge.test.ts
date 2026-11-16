@@ -4,21 +4,21 @@ import { treatmentBadge } from "./treatment-badge";
 
 describe("treatmentBadge", () => {
   it.each([
-    [{ treatment: "mitigate" }, "mitigate", "progress"],
+    [{ treatment: "mitigate" }, "Mitigate", "progress"],
     [
       { treatment: "accept", acceptance_status: "approved" as const },
-      "accept (approved)",
+      "Accept (approved)",
       "secondary",
     ],
     [
       { treatment: "accept", acceptance_status: "proposed" as const },
-      "accept (proposed)",
+      "Accept (proposed)",
       "warning",
     ],
     // An accept row with no status is not presented as signed off.
-    [{ treatment: "accept" }, "accept", "warning"],
-    [{ treatment: "avoid" }, "avoid", "outline"],
-    [{ treatment: "untreated" }, "untreated", "outline"],
+    [{ treatment: "accept" }, "Accept", "warning"],
+    [{ treatment: "avoid" }, "Avoid", "outline"],
+    [{ treatment: "untreated" }, "Untreated", "outline"],
   ])("%o -> %s / %s", (risk, label, variant) => {
     expect(treatmentBadge(risk)).toEqual({ label, variant });
   });

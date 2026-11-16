@@ -55,7 +55,11 @@
 // as `lib/feature-nav.server.ts`). Never import this from a client
 // component.
 
-import type { EffectiveModule, EffectiveModules } from "@/lib/feature-nav";
+import type {
+  EffectiveFeature,
+  EffectiveModule,
+  EffectiveModules,
+} from "@/lib/feature-nav";
 
 import { apiBaseURL } from "./base";
 
@@ -101,7 +105,8 @@ export function normalizeAdminMe(parsed: unknown): AdminMe {
 /**
  * normalizeEffectiveModules coerces an upstream `/v1/me/modules` body
  * into the module list. Anything that is not an array-valued `modules`
- * field is `null` (unknown); an entry missing a field is dropped.
+ * field is `null` (unknown); an entry missing a field is dropped, and so
+ * is a malformed feature inside a module.
  */
 export function normalizeEffectiveModules(parsed: unknown): EffectiveModules {
   if (parsed === null || typeof parsed !== "object") {
@@ -111,16 +116,29 @@ export function normalizeEffectiveModules(parsed: unknown): EffectiveModules {
   if (!Array.isArray(body.modules)) {
     return null;
   }
-  return body.modules.filter(
-    (m): m is EffectiveModule =>
-      typeof m === "object" &&
-      m !== null &&
-      typeof (m as EffectiveModule).key === "string" &&
-      typeof (m as EffectiveModule).name === "string" &&
-      ((m as EffectiveModule).state === "on" ||
-        (m as EffectiveModule).state === "switched_off") &&
-      Array.isArray((m as EffectiveModule).pages) &&
-      (m as EffectiveModule).pages.every((p) => typeof p === "string"),
+  return body.modules.filter(isEntry).map(
+    (m): EffectiveModule => ({
+      key: m.key,
+      name: m.name,
+      state: m.state,
+      pages: m.pages,
+      features: Array.isArray((m as EffectiveModule).features)
+        ? ((m as EffectiveModule).features as unknown[]).filter(isEntry)
+        : [],
+    }),
+  );
+}
+
+function isEntry(m: unknown): m is EffectiveFeature {
+  return (
+    typeof m === "object" &&
+    m !== null &&
+    typeof (m as EffectiveFeature).key === "string" &&
+    typeof (m as EffectiveFeature).name === "string" &&
+    ((m as EffectiveFeature).state === "on" ||
+      (m as EffectiveFeature).state === "switched_off") &&
+    Array.isArray((m as EffectiveFeature).pages) &&
+    (m as EffectiveFeature).pages.every((p) => typeof p === "string")
   );
 }
 
