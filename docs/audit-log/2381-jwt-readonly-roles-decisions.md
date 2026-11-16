@@ -89,6 +89,24 @@ and mints the token for that user, the shape a real login produces. The
 issuer itself is unchanged: making it write role rows would hide exactly
 the stale-claim case D1 closes.
 
+### D7 — viewer and auditor keep the dashboard's Evidence freshness panel
+
+Matt's call (2026-11-16, via review): viewers and auditors keep the
+dashboard's freshness panel. `viewer.rego` and `auditor.rego` each admit
+`GET /v1/evidence/freshness` by exact path, and nothing else under
+`evidence`. The handler (`internal/api/freshnessdrift.Freshness`) returns
+only counts per freshness class (`bucket`, `buckets[{freshness_class, total,
+fresh, stale}]`, `total`, `total_stale`): no evidence rows, ids or titles.
+`/v1/evidence` and `/v1/evidence/{id}` stay denied to both roles until #2157.
+`TestDecide2381_EvidenceFreshnessOnly` pins both sides of that line, plus
+the admit being GET only.
+
+## Follow-ups
+
+- #2401 (P1): a JWT with an empty role claim derives `grc_engineer`.
+- #2402: API keys whose `owner_roles` name only viewer/auditor still derive
+  `control_owner` (D3).
+
 ## Rollout
 
 `scripts/dry-run-2381-roles.sql` is read-only and prints counts only: per

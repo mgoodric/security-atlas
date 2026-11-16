@@ -5,6 +5,7 @@
 package authz_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,6 +44,47 @@ func TestBuildInput2381_DerivedRoles(t *testing.T) {
 		for i := range got {
 			if got[i] != tc.want[i] {
 				t.Errorf("%s: roles %v; want %v", tc.name, got, tc.want)
+			}
+		}
+	}
+}
+
+// TestDecide2381_EvidenceFreshnessOnly pins both sides of the line the
+// dashboard needs: viewer and auditor read the freshness aggregate (counts
+// per class, no evidence rows) and stay denied the evidence list and a
+// single record until #2157. The admit is GET only.
+func TestDecide2381_EvidenceFreshnessOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := authz.NewEngine(ctx, authz.NoopRolesResolver{})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	decide := func(role authz.Role, method, path string) bool {
+		req := httptest.NewRequest(method, path, nil)
+		req = req.WithContext(authctx.WithCredential(req.Context(), credstore.Credential{
+			ID: "jwt:f", TenantID: "t", UserID: "user:u", OwnerRoles: []string{string(role)},
+		}))
+		in := authz.BuildInput(req, nil)
+		in.User.Roles = []authz.Role{role}
+		d, err := e.Decide(ctx, in)
+		if err != nil {
+			t.Fatalf("Decide %s %s: %v", method, path, err)
+		}
+		return d.Allow
+	}
+	for _, role := range []authz.Role{authz.RoleViewer, authz.RoleAuditor} {
+		for _, tc := range []struct {
+			method, path string
+			want         bool
+		}{
+			{http.MethodGet, "/v1/evidence/freshness", true},
+			{http.MethodGet, "/v1/evidence", false},
+			{http.MethodGet, "/v1/evidence/6f1c2a9e-1d2b-4c3d-8e4f-5a6b7c8d9e0f", false},
+			{http.MethodPost, "/v1/evidence/freshness", false},
+		} {
+			if got := decide(role, tc.method, tc.path); got != tc.want {
+				t.Errorf("%s %s %s: allow=%v, want %v", role, tc.method, tc.path, got, tc.want)
 			}
 		}
 	}

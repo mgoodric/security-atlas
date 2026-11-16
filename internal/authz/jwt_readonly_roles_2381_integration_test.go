@@ -38,6 +38,8 @@ var writes2381 = []route2239{
 
 var routes2381 = append(append([]route2239{}, routes2239...), append(writes2381,
 	route2239{http.MethodGet, "/v1/evidence"},
+	route2239{http.MethodGet, "/v1/evidence/6f1c2a9e-1d2b-4c3d-8e4f-5a6b7c8d9e0f"},
+	route2239{http.MethodGet, "/v1/evidence/freshness"},
 	route2239{http.MethodGet, "/v1/artifacts/a1"},
 	route2239{http.MethodGet, "/v1/walkthroughs"},
 	route2239{http.MethodGet, "/v1/calendar"},
