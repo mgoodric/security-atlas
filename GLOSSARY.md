@@ -285,7 +285,7 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 
 | File                             | Title                       | Linked SCF anchors           |
 | -------------------------------- | --------------------------- | ---------------------------- |
-| `information-security-policy.md` | Information Security Policy | `GOV-01`, `GOV-04`, `RSK-01` |
+| `information-security-policy.md` | Information Security Policy | `GOV-02`, `GOV-05`, `RSK-01` |
 | `access-control-policy.md`       | Access Control Policy       | `IAC-01`, `IAC-04`, `IAC-22` |
 | `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-02`, `TPM-03`, `TPM-10` |
 | `incident-response-plan.md`      | Incident Response Plan      | `IRO-04`, `IRO-01`, `IRO-02` |
@@ -327,7 +327,7 @@ An affirmative, per-user attestation that a published policy version has been re
 
 - **Per-(user × policy_version_id)** — the FK targets the policies row id, not a "logical id". When publish creates a new row with a new id, acks of the prior row do not satisfy the new row (anti-criterion P0-3). Each policy publish forces re-acknowledgment.
 - **Annual recurrence** — an ack older than 365 days is treated as expired; the task reappears in `/v1/me/acknowledgments`. Computed at read time (no cron). Canvas §2.3's `annual` evidence freshness class (400 d) governs _evidence_ `valid_until`; 365 d governs _task reappearance_, which is canvas §2.6's "attest annually" reading.
-- **First-class evidence** — every ack emits one `policy.acknowledgment.v1` evidence record through the slice-013 ingest service (invariant 9). The record's `control_id` is the non-UUID string `policy:<policy_id>:v<version_id>` so the ledger stores it as `control_ref` only; SCF anchor for the kind is `GOV-04` (matching `manual.attestation.v1`).
+- **First-class evidence** — every ack emits one `policy.acknowledgment.v1` evidence record through the slice-013 ingest service (invariant 9). The record's `control_id` is the non-UUID string `policy:<policy_id>:v<version_id>` so the ledger stores it as `control_ref` only; SCF anchor for the kind is `GOV-05` (matching `manual.attestation.v1`).
 - **Role-gated** — a user sees a policy in their pending list iff their credential's `OwnerRoles[]` intersects the policy's `acknowledgment_required_roles[]` OR the credential is `IsAdmin`. The slice-035-future OPA-RBAC graduation will replace this stand-in.
 - **Rate at read time** — `GET /v1/policies/{id}/acknowledgment-rate` returns `{numerator, denominator, percent}`. Denominator = distinct `api_keys.issued_by` user_ids in the tenant whose `owner_roles && policy.acknowledgment_required_roles OR is_admin = true`, excluding `revoked_at IS NOT NULL`. Numerator = denominator users with a fresh ack (≤365 d) of the current published version. `percent = null` when denominator = 0 (vs returning `0` which would mis-imply non-compliance).
 - **Idempotency** — the ack endpoint derives an idempotency key over `(user_id, policy_version_id, day_bucket)`; double-clicks within a day deduplicate; a re-ack 365 days later produces a fresh evidence record.

@@ -329,10 +329,10 @@ requirements:
 mappings:
   # ===== ADMINISTRATIVE SAFEGUARDS (§164.308) → SCF =====
   - requirement_code: "164.308(a)(1)(i)"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "The Security Management Process (prevent/detect/contain/correct) is a facet of SCF Information Security Governance."
+    rationale: "The Security Management Process (prevent/detect/contain/correct) is a facet of SCF Security, Compliance & Resilience Program (SCRP)."
   - requirement_code: "164.308(a)(1)(ii)(A)"
     scf_anchor: "RSK-04"
     relationship_type: "equal"
@@ -344,40 +344,40 @@ mappings:
     strength: 0.8
     rationale: "HIPAA Risk Management (reduce risks to reasonable level) is governed by the SCF Risk Management Program."
   - requirement_code: "164.308(a)(1)(ii)(C)"
-    scf_anchor: "HRS-07"
+    scf_anchor: "HRS-10"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Slice 567 re-point (was HRS-01 @ 0.60). Sanction Policy (apply appropriate sanctions against workforce members who fail to comply) is the disciplinary-process control itself, not the HR-security program that contains it; HRS-07 Personnel Sanctions is the dedicated anchor and HRS-01 over-covered the requirement. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 1."
+    rationale: "Slice 567 re-point (was HRS-02 @ 0.60). Sanction Policy (apply appropriate sanctions against workforce members who fail to comply) is the disciplinary-process control itself, not the HR-security program that contains it; HRS-10 Personnel Sanctions is the dedicated anchor and HRS-02 over-covered the requirement. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 1."
   - requirement_code: "164.308(a)(1)(ii)(D)"
     scf_anchor: "MON-05.1"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Information System Activity Review (regularly review audit logs, access reports, incident tracking) maps directly to SCF Centralized Event Log & Security-Relevant Telemetry Review & Analysis."
   - requirement_code: "164.308(a)(2)"
-    scf_anchor: "GOV-04"
+    scf_anchor: "GOV-05"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Assigning the security official maps directly to SCF Information Security Roles & Responsibilities."
+    rationale: "Assigning the security official maps directly to SCF Assigned Security, Compliance & Resilience Responsibilities."
   - requirement_code: "164.308(a)(3)(i)"
-    scf_anchor: "HRS-01"
+    scf_anchor: "HRS-02"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Workforce Security (appropriate access, prevent unauthorized access) is covered by SCF Human Resources Security."
+    rationale: "Workforce Security (appropriate access, prevent unauthorized access) is covered by SCF Human Resources Security Management."
   - requirement_code: "164.308(a)(3)(ii)(A)"
     scf_anchor: "IAC-04"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Authorization and/or Supervision (authorize and supervise workforce that handles ePHI) overlaps SCF User Provisioning & De-Provisioning; the supervision facet is broader than provisioning (MEDIUM)."
   - requirement_code: "164.308(a)(3)(ii)(B)"
-    scf_anchor: "HRS-01"
+    scf_anchor: "HRS-02"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Workforce Clearance Procedure (determine workforce access is appropriate) is covered by SCF Human Resources Security."
+    rationale: "Workforce Clearance Procedure (determine workforce access is appropriate) is covered by SCF Human Resources Security Management."
   - requirement_code: "164.308(a)(3)(ii)(C)"
-    scf_anchor: "HRS-09"
+    scf_anchor: "HRS-12"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Termination Procedures map directly to the SCF Personnel Termination Process."
+    rationale: "Termination Procedures map directly to the SCF Personnel Termination."
   - requirement_code: "164.308(a)(4)(i)"
     scf_anchor: "IAC-04"
     relationship_type: "subset_of"
@@ -399,15 +399,15 @@ mappings:
     strength: 0.7
     rationale: "Access Establishment and Modification (establish/review/modify access rights) overlaps SCF Account Review; provisioning facet sits elsewhere (MEDIUM)."
   - requirement_code: "164.308(a)(5)(i)"
-    scf_anchor: "HRS-04"
+    scf_anchor: "SAT-04"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Security Awareness and Training maps directly to SCF Security Awareness Training."
+    rationale: "Security Awareness and Training maps directly to SCF Security, Compliance & Resilience Awareness Training."
   - requirement_code: "164.308(a)(5)(ii)(A)"
-    scf_anchor: "HRS-04"
+    scf_anchor: "SAT-04"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Security Reminders (periodic updates/reminders) are an ongoing-reinforcement facet of SCF Security Awareness Training."
+    rationale: "Security Reminders (periodic updates/reminders) are an ongoing-reinforcement facet of SCF Security, Compliance & Resilience Awareness Training."
   - requirement_code: "164.308(a)(5)(ii)(B)"
     scf_anchor: "END-04"
     relationship_type: "equal"
@@ -506,10 +506,10 @@ mappings:
     strength: 0.7
     rationale: "Slice 567 re-point (was PES-08 @ 0.55). Maintenance Records (document repairs and modifications to the physical components of a facility which are related to security) is maintenance record-keeping, not physical access control; MNT-02 Controlled Maintenance carries the record-retention obligation. The fit stays partial because HIPAA scopes it to security-related facility components. Lift 0.55 -> 0.70 (LOW -> MEDIUM). See decisions log D6 row 6."
   - requirement_code: "164.310(b)"
-    scf_anchor: "HRS-12"
+    scf_anchor: "HRS-06.1"
     relationship_type: "intersects_with"
     strength: 0.75
-    rationale: "Slice 567 re-point (was PES-08 @ 0.60; flagged in slice 481 D7 and re-confirmed in 516 D5). Workstation Use specifies the proper functions, the manner of performance, and the physical surroundings of a workstation — an acceptable-use / rules-of-behavior control. PES-08 covered only the surroundings clause. HRS-12 Rules of Behavior carries the use-policy body; the physical-surroundings clause keeps the relationship partial. Lift 0.60 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 7."
+    rationale: "Slice 567 re-point (was PES-08 @ 0.60; flagged in slice 481 D7 and re-confirmed in 516 D5). Workstation Use specifies the proper functions, the manner of performance, and the physical surroundings of a workstation — an acceptable-use / rules-of-behavior control. PES-08 covered only the surroundings clause. HRS-06.1 Rules of Behavior carries the use-policy body; the physical-surroundings clause keeps the relationship partial. Lift 0.60 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 7."
   - requirement_code: "164.310(c)"
     scf_anchor: "PES-08"
     relationship_type: "subset_of"
@@ -653,10 +653,10 @@ mappings:
   # ===== POLICIES, PROCEDURES, AND DOCUMENTATION (§164.316) → SCF =====
   # New in slice 516. Program-governance + documentation-retention obligations.
   - requirement_code: "164.316(a)"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Policies and Procedures (implement policies/procedures to comply with the Security Rule) is the policy-framework facet of SCF Information Security Governance."
+    rationale: "Policies and Procedures (implement policies/procedures to comply with the Security Rule) is the policy-framework facet of SCF Security, Compliance & Resilience Program (SCRP)."
   - requirement_code: "164.316(b)(1)"
     scf_anchor: "CPL-02"
     relationship_type: "subset_of"
@@ -668,12 +668,12 @@ mappings:
     strength: 0.6
     rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Time Limit (retain the required documentation six years) is a retention-period obligation applied to compliance documentation. Retention is one control concept; splitting compliance-records retention from data retention would mint a distinction the catalog does not draw, to serve one row. DCH-27 stays at 0.60 (LOW). See decisions log D6 row 19."
   - requirement_code: "164.316(b)(2)(ii)"
-    scf_anchor: "GOV-02"
+    scf_anchor: "GOV-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Slice 567 re-point (was CPL-01 @ 0.60). Availability (make documentation available to those persons responsible for implementing the procedures to which it pertains) is documentation DISSEMINATION, not compliance management. GOV-02 Publishing Security Documentation is the on-point anchor. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 20."
+    rationale: "Slice 567 re-point (was CPL-01 @ 0.60). Availability (make documentation available to those persons responsible for implementing the procedures to which it pertains) is documentation DISSEMINATION, not compliance management. GOV-04 Publishing Security, Compliance & Resilience Documentation is the on-point anchor. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 20."
   - requirement_code: "164.316(b)(2)(iii)"
-    scf_anchor: "GOV-03"
+    scf_anchor: "GOV-04.1"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Slice 567 re-point (was GOV-01 @ 0.60). Updates (review documentation periodically and update it in response to environmental or operational changes) is the periodic review-and-update control, a specific governance-maintenance obligation rather than the governance program head. GOV-03 Periodic Review & Update of Security Documentation is the on-point anchor. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 21."
+    rationale: "Slice 567 re-point (was GOV-02 @ 0.60). Updates (review documentation periodically and update it in response to environmental or operational changes) is the periodic review-and-update control, a specific governance-maintenance obligation rather than the governance program head. GOV-04.1 Periodic Review & Update of Security, Compliance & Resilience Program is the on-point anchor. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 21."

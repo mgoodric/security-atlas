@@ -11,7 +11,7 @@
 //
 // The fix is to make the guard CATALOG-COMPLETENESS-aware rather than
 // row-count-aware, using the exact resolution path the SOC 2 importer uses:
-// "is the sentinel anchor GOV-01 resolvable in the CURRENT SCF framework
+// "is the sentinel anchor GOV-02 resolvable in the CURRENT SCF framework
 // version?" If yes, the catalog is fully seeded and seeding is a no-op. If
 // no, the catalog is absent OR partial, so we do a full clean reseed
 // (wipe the SCF + SOC 2 platform-layer rows, then reimport both fixtures).
@@ -40,17 +40,18 @@ import (
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
-// SentinelAnchor is the SCF code the completeness guard probes for. GOV-01
-// is the canonical sentinel because it is the anchor whose absence produced
-// the original slice 461 failure signature
+// SentinelAnchor is the SCF code the completeness guard probes for. GOV-02
+// is the canonical sentinel because it is the governance-program anchor whose
+// absence produced the original slice 461 failure signature
 // (`crosswalk: scf_anchor "GOV-01" not found` — the loader error prefix was
-// generalized from `soc2import:` to `crosswalk:` in slice 438), and it is
+// generalized from `soc2import:` to `crosswalk:` in slice 438; the anchor
+// moved from GOV-01 to GOV-02 in the SCF 2026.3 remap, #1979), and it is
 // present in the
 // committed sample fixture (migrations/fixtures/scf-sample.json). If the
-// sample fixture is ever reshaped to drop GOV-01, IsCatalogComplete will
+// sample fixture is ever reshaped to drop GOV-02, IsCatalogComplete will
 // (correctly) report incomplete and force a reseed — so the worst failure
 // mode of a stale sentinel is a redundant reseed, never a false "complete".
-const SentinelAnchor = "GOV-01"
+const SentinelAnchor = "GOV-02"
 
 // fixturePaths are resolved once, lazily, relative to THIS source file via
 // runtime.Caller, so callers at any directory depth resolve the same files

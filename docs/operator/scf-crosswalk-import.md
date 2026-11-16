@@ -366,7 +366,7 @@ requirements:
     title: COSO Principle 1
     points_of_focus:
       - code: CC1.1-POF1
-        scf_anchors: [GOV-01]
+        scf_anchors: [GOV-02]
 ```
 
 ## Provenance Precedence

@@ -400,28 +400,28 @@ requirements:
 mappings:
   # ===== GOVERN (GV) → SCF governance / risk / third-party families =====
   # AC-5 (slice 480): GOVERN has no SOC 2 analog; these rows prove the graph
-  # handles a Function with no v1-framework overlap. GV.RR-02 → GOV-04 is the
+  # handles a Function with no v1-framework overlap. GV.RR-02 → GOV-05 is the
   # asserted no-analog anchor (governance family) in the integration test.
   - requirement_code: "GV.OC-01"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Mission-informed cybersecurity objectives are a facet of SCF Information Security Governance."
+    rationale: "Mission-informed cybersecurity objectives are a facet of SCF Security, Compliance & Resilience Program (SCRP)."
   - requirement_code: "GV.OC-02"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Understanding stakeholder cybersecurity expectations is a governance-context activity within SCF Information Security Governance."
+    rationale: "Understanding stakeholder cybersecurity expectations is a governance-context activity within SCF Security, Compliance & Resilience Program (SCRP)."
   - requirement_code: "GV.OC-03"
     scf_anchor: "CPL-02"
     relationship_type: "subset_of"
     strength: 0.85
     rationale: "Understanding legal/regulatory/contractual security requirements maps to SCF Statutory, Regulatory & Contractual Compliance."
   - requirement_code: "GV.OC-04"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Communicating critical objectives and dependent services overlaps SCF Information Security Governance; BIA-style dependency mapping is a residual gap (LOW)."
+    rationale: "Communicating critical objectives and dependent services overlaps SCF Security, Compliance & Resilience Program (SCRP); BIA-style dependency mapping is a residual gap (LOW)."
   - requirement_code: "GV.OC-05"
     scf_anchor: "BCD-04"
     relationship_type: "intersects_with"
@@ -463,35 +463,35 @@ mappings:
     strength: 0.6
     rationale: "Characterizing strategic opportunities (positive risk) overlaps the SCF Risk Management Program; upside-risk treatment is a residual gap (LOW)."
   - requirement_code: "GV.RR-01"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Leadership accountability for security risk is part of overall security governance."
   - requirement_code: "GV.RR-02"
-    scf_anchor: "GOV-04"
+    scf_anchor: "GOV-05"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Establishing and communicating security roles/responsibilities maps directly to SCF GOV-04."
+    rationale: "Establishing and communicating security roles/responsibilities maps directly to SCF GOV-05."
   - requirement_code: "GV.RR-03"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Allocating resources commensurate with the security strategy overlaps SCF Information Security Governance; budget/resourcing specificity is a residual gap (LOW)."
+    rationale: "Allocating resources commensurate with the security strategy overlaps SCF Security, Compliance & Resilience Program (SCRP); budget/resourcing specificity is a residual gap (LOW)."
   - requirement_code: "GV.RR-04"
-    scf_anchor: "HRS-01"
+    scf_anchor: "HRS-02"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Including cybersecurity in HR practices maps to SCF Human Resources Security."
+    rationale: "Including cybersecurity in HR practices maps to SCF Human Resources Security Management."
   - requirement_code: "GV.PO-01"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "An organizational cybersecurity policy is an instrument of security governance."
   - requirement_code: "GV.PO-02"
-    scf_anchor: "GOV-01"
+    scf_anchor: "GOV-02"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Periodic policy review/update/communication is part of maintaining SCF Information Security Governance."
+    rationale: "Periodic policy review/update/communication is part of maintaining SCF Security, Compliance & Resilience Program (SCRP)."
   - requirement_code: "GV.OV-01"
     scf_anchor: "CPL-07.1"
     relationship_type: "intersects_with"
@@ -719,15 +719,15 @@ mappings:
     strength: 0.85
     rationale: "Managing/monitoring/enforcing physical access to assets maps directly to SCF Physical Access Control."
   - requirement_code: "PR.AT-01"
-    scf_anchor: "HRS-04"
+    scf_anchor: "SAT-04"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Security awareness and training maps directly to SCF Security Awareness Training."
+    rationale: "Security awareness and training maps directly to SCF Security, Compliance & Resilience Awareness Training."
   - requirement_code: "PR.AT-02"
-    scf_anchor: "HRS-04"
+    scf_anchor: "SAT-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Role-based training for specialized/privileged roles is a subset of SCF Security Awareness Training."
+    rationale: "Role-based training for specialized/privileged roles is a subset of SCF Security, Compliance & Resilience Awareness Training."
   - requirement_code: "PR.DS-01"
     scf_anchor: "CRY-07"
     relationship_type: "subset_of"
