@@ -181,7 +181,7 @@ func record(t *testing.T, opts ...recordOpt) *evidencev1.EvidenceRecord {
 		IdempotencyKey: "ci-" + uuid.NewString()[:8],
 		EvidenceKind:   "sast.scan_result.v1",
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:VPM-04",
+		ControlId:      "scf:VPM-06",
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "environment", Values: []string{"prod"}},
 		},
@@ -657,7 +657,7 @@ func pushBody(t *testing.T, idempotencyKey string) string {
         "idempotency_key":"%s",
         "evidence_kind":"sast.scan_result.v1",
         "schema_version":"1.0.0",
-        "control_id":"scf:VPM-04",
+        "control_id":"scf:VPM-06",
         "scope":[{"key":"environment","values":["prod"]}],
         "observed_at":"%s",
         "result":"pass",
