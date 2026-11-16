@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/actionplan"
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -324,10 +325,17 @@ func TestStateMachine_Transitions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Create: %v", err)
 			}
+			// #2108: a plan reaches verified through Verify, by someone other
+			// than its owner.
+			verifier := seedUser(t, admin, tenant)
 			var lastErr error
 			for i, status := range tc.path {
 				s := status
-				_, lastErr = store.Update(ctx, plan.ID, actionplan.UpdateInput{Status: &s, Actor: owner})
+				if s == actionplan.StatusVerified {
+					_, lastErr = store.Verify(ctx, plan.ID, approval.Approver{UserID: verifier.String()})
+				} else {
+					_, lastErr = store.Update(ctx, plan.ID, actionplan.UpdateInput{Status: &s, Actor: owner})
+				}
 				// All but the final step in a wantError path must succeed.
 				if tc.wantError && i < len(tc.path)-1 && lastErr != nil {
 					t.Fatalf("prefix step %d (%s) failed unexpectedly: %v", i, status, lastErr)

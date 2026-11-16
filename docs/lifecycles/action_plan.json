@@ -112,15 +112,16 @@
       "action": "verify",
       "actor": "person",
       "routes": [
-        "PATCH /v1/action-plans/{id}"
+        "POST /v1/action-plans/{id}/verify"
       ],
       "roles": [
         "admin"
       ],
-      "requires_approver": false,
-      "people_only": false,
-      "second_person": false,
-      "self_approval_opt_in": false
+      "requires_approver": true,
+      "people_only": true,
+      "second_person": true,
+      "self_approval_opt_in": false,
+      "note": "Only for a plan with no linked controls, and never by the plan's owner, whatever the self-approval setting."
     },
     {
       "from": "completed",

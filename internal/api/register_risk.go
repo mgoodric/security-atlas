@@ -115,6 +115,7 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	root.Get("/v1/action-plans", actionPlansH.ListActionPlans)
 	root.Get("/v1/action-plans/{id}", actionPlansH.GetActionPlan)
 	root.Patch("/v1/action-plans/{id}", actionPlansH.UpdateActionPlan)
+	root.Post("/v1/action-plans/{id}/verify", actionPlansH.VerifyActionPlan)
 	root.Delete("/v1/action-plans/{id}", actionPlansH.DeleteActionPlan)
 	root.Post("/v1/action-plans/{id}/risks/{risk_id}", actionPlansH.LinkRisk)
 	root.Delete("/v1/action-plans/{id}/risks/{risk_id}", actionPlansH.UnlinkRisk)
