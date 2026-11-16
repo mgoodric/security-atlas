@@ -6,6 +6,7 @@ import { signOut } from "@/app/login/actions";
 import { TenantSwitcher } from "@/components/auth/tenant-switcher";
 import { Button } from "@/components/ui/button";
 import { AccountMenu } from "@/components/shell/account-menu";
+import { SignOutForm } from "@/components/shell/sign-out-form";
 import { Breadcrumb } from "@/components/shell/breadcrumb";
 import { GlobalSearch } from "@/components/shell/global-search";
 import { InProgressAuditPill } from "@/components/shell/in-progress-audit-pill";
@@ -95,7 +96,7 @@ import { UserAvatar, fetchUserIdentity } from "@/components/shell/user-avatar";
 export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
   const identity = await fetchUserIdentity();
   const signOutForm = (
-    <form action={signOut}>
+    <SignOutForm action={signOut}>
       <Button
         type="submit"
         variant="ghost"
@@ -104,7 +105,7 @@ export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
       >
         Sign out
       </Button>
-    </form>
+    </SignOutForm>
   );
 
   return (

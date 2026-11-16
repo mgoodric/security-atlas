@@ -19,8 +19,8 @@ export interface DirectoryUser {
 
 export interface DirectoryApiKey {
   id: string;
-  // users(id) of the key's owner (the admin who minted it); absent when
-  // no user minted it.
+  // users(id) of the key's owner (api_keys.issued_by); absent when the
+  // key has none. The minting admin is never a stand-in.
   owner_id?: string;
 }
 

@@ -4,14 +4,21 @@
 // credential ID) as a person, through the one resolver
 // (`resolvePerson`, `lib/person.ts`).
 //
-// The tenant's directory is fetched once per page through `/api/people`
-// and shared by every <Person> on the page via the query cache. A caller
+// The tenant's directory is fetched once per page visit through
+// `/api/people` and shared by every <Person> on the page via the query
+// cache, which is dropped on a tenant switch or sign-out. A caller
 // the endpoint refuses, or a failed fetch, resolves every reference to
 // "Unknown"; the ID stays in the tooltip and never becomes visible text.
 // Names render as React text only.
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 
+import {
+  PEOPLE_QUERY_KEY,
+  PEOPLE_STALE_MS,
+  forgetPeopleOnTenantSwitch,
+} from "@/lib/people-cache";
 import {
   buildDirectory,
   resolvePerson,
@@ -25,8 +32,6 @@ interface PeopleResponse {
   api_keys?: DirectoryApiKey[];
 }
 
-export const PEOPLE_QUERY_KEY = ["people"] as const;
-
 async function fetchPeopleDirectory(): Promise<PersonDirectory | null> {
   const res = await fetch("/api/people", { cache: "no-store" });
   if (!res.ok) return null;
@@ -35,11 +40,13 @@ async function fetchPeopleDirectory(): Promise<PersonDirectory | null> {
 }
 
 export function usePeopleDirectory() {
+  const qc = useQueryClient();
+  // A tenant switch in any tab drops the directory (lib/people-cache.ts).
+  useEffect(() => forgetPeopleOnTenantSwitch(qc), [qc]);
   return useQuery({
     queryKey: PEOPLE_QUERY_KEY,
     queryFn: fetchPeopleDirectory,
-    // One fetch per page render; names do not change under a viewer.
-    staleTime: Infinity,
+    staleTime: PEOPLE_STALE_MS,
     retry: false,
   });
 }

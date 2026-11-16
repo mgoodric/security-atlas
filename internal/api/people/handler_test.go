@@ -3,12 +3,15 @@
 package people
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestDisplayName(t *testing.T) {
@@ -56,6 +59,19 @@ func TestResponseFields(t *testing.T) {
 	}
 	if k := keys(got["api_keys"][0]); !reflect.DeepEqual(k, []string{"id", "owner_id"}) {
 		t.Errorf("api key fields = %v", k)
+	}
+}
+
+// A list fetched with LIMIT maxRows+1 is truncated only when it overflows.
+func TestTruncated(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tid := uuid.New()
+	if truncated(ctx, maxRows, "users", tid) {
+		t.Error("exactly maxRows reported as truncated")
+	}
+	if !truncated(ctx, maxRows+1, "users", tid) {
+		t.Error("maxRows+1 not reported as truncated")
 	}
 }
 

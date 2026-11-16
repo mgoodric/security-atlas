@@ -39,13 +39,15 @@ func seedPeopleUser(t *testing.T, migrate *pgxpool.Pool, tenant, email, displayN
 	return id
 }
 
-func seedPeopleKey(t *testing.T, migrate *pgxpool.Pool, tenant string, mintedBy uuid.UUID) uuid.UUID {
+// seedPeopleKey inserts an API key owned by issuedBy and minted by
+// mintedBy; either may be nil.
+func seedPeopleKey(t *testing.T, migrate *pgxpool.Pool, tenant string, issuedBy, mintedBy *uuid.UUID) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	hash := sha256.Sum256([]byte(id.String()))
 	if _, err := migrate.Exec(context.Background(),
-		`INSERT INTO api_keys (id, tenant_id, token_hash, last4, minted_by) VALUES ($1, $2, $3, 'zz99', $4)`,
-		id, tenant, hash[:], mintedBy); err != nil {
+		`INSERT INTO api_keys (id, tenant_id, token_hash, last4, issued_by, minted_by) VALUES ($1, $2, $3, 'zz99', $4, $5)`,
+		id, tenant, hash[:], issuedBy, mintedBy); err != nil {
 		t.Fatalf("seed api key: %v", err)
 	}
 	return id
@@ -60,9 +62,12 @@ func TestPeople2085_TenantScopedNoEmail(t *testing.T) {
 	alice := seedPeopleUser(t, migrate, tenantA, "alice-2085@example.invalid", "Alice 2085", "active")
 	noName := seedPeopleUser(t, migrate, tenantA, "nameless-2085@example.invalid", "", "active")
 	former := seedPeopleUser(t, migrate, tenantA, "former-2085@example.invalid", "Former 2085", "disabled")
-	keyA := seedPeopleKey(t, migrate, tenantA, alice)
+	// The owner is issued_by; minted_by is attribution and never stands in
+	// for a missing owner.
+	keyA := seedPeopleKey(t, migrate, tenantA, &alice, &former)
+	ownerless := seedPeopleKey(t, migrate, tenantA, nil, &alice)
 	bobB := seedPeopleUser(t, migrate, tenantB, "bob-2085@example.invalid", "Bob Other Tenant", "active")
-	keyB := seedPeopleKey(t, migrate, tenantB, bobB)
+	keyB := seedPeopleKey(t, migrate, tenantB, &bobB, &bobB)
 
 	tid := uuid.MustParse(tenantA)
 	// AdminFor carries SuperAdmin=true: the super-admin case.
@@ -135,17 +140,19 @@ func TestPeople2085_TenantScopedNoEmail(t *testing.T) {
 			if u := users[former.String()]; u.Status != "disabled" {
 				t.Errorf("former user = %+v", u)
 			}
-			var found bool
+			keys := map[string]people.APIKey{}
 			for _, k := range got.APIKeys {
-				if k.ID == keyA.String() {
-					found = true
-					if k.OwnerID != alice.String() {
-						t.Errorf("key owner = %q, want %s", k.OwnerID, alice)
-					}
-				}
+				keys[k.ID] = k
 			}
-			if !found {
+			if k, ok := keys[keyA.String()]; !ok {
 				t.Errorf("tenant A's key %s missing from %s", keyA, body)
+			} else if k.OwnerID != alice.String() {
+				t.Errorf("key owner = %q, want issued_by %s (not minted_by)", k.OwnerID, alice)
+			}
+			if k, ok := keys[ownerless.String()]; !ok {
+				t.Errorf("ownerless key %s missing from %s", ownerless, body)
+			} else if k.OwnerID != "" {
+				t.Errorf("ownerless key owner = %q, want none (no minted_by fallback)", k.OwnerID)
 			}
 		})
 	}

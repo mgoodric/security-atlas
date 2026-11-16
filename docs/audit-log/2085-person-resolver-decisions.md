@@ -1,12 +1,15 @@
 # #2085 — `<Person>` resolver: decisions
 
-detection_tier_actual: integration
-detection_tier_target: unit
+detection_tier_actual: manual_review
+detection_tier_target: integration
 
-The integration test caught `/v1/people` belonging to no module
-(`featureflag.Modules`), which the module gate turns into a deny. The
-unit-tier `TestEveryRouteBelongsToAModule` guard caught it as well, once
-it ran; it should have been run before the integration tier.
+Review caught the wrong owner column (B1, `minted_by` for `issued_by`)
+and the directory cache outliving a tenant switch (S1). The integration
+test, which seeded only `minted_by`, should have pinned the owner column;
+it now seeds both and asserts a key with no `issued_by` has no owner.
+Earlier, the integration test caught `/v1/people` belonging to no module
+(`featureflag.Modules`); the unit-tier `TestEveryRouteBelongsToAModule`
+guard catches that too.
 
 ## D1 — a new tenant-scoped `GET /v1/people`, not the admin lists
 
@@ -24,18 +27,28 @@ over every tenant. Matt approved a new read (via the dispatcher):
 - users as `{id, display_name, status}`, with a blank display name falling
   back to the email's local part on the server, so no email address
   leaves;
-- API keys as `{id, owner_id}` (`minted_by`); no token, prefix or last4.
+- API keys as `{id, owner_id}`, the owner being `api_keys.issued_by`;
+  no token, prefix or last4.
 
 The admin endpoints are unchanged. Each list is bounded at 5000 rows. A
 tenant is a 50-150-person company, so the bound keeps the scan finite
-without paginating a directory the page needs whole.
+without paginating a directory the page needs whole. Each list is read
+with `LIMIT 5001`; one that overflows is trimmed and logged
+(`people list truncated`), since past the bound some actors read
+"Unknown".
 
 ## D2 — API keys render as "API key (owner: Name)"
 
 Keys have no label column. The ticket's "API key '<name>'" has nothing
 to fill it, and last4 is part of the secret, so it is not a name. A key
-reads "API key (owner: <name>)", or "API key" when its minter does not
+reads "API key (owner: <name>)", or "API key" when its owner does not
 resolve. Labels are #2384.
+
+The owner is `api_keys.issued_by`. `minted_by` records the admin who
+minted the key for attribution, and `apikeystore.IssueInput` documents
+that it is not the owner, so a key with no `issued_by` reads plain "API
+key"; `minted_by` is never a fallback. The first cut read `minted_by`;
+review caught it (B1).
 
 ## D3 — resolution rules
 
@@ -54,12 +67,26 @@ case without a DOM (vitest is node-only, Q-3):
 A user whose membership was revoked (row deleted) reads "Unknown", not
 "Former user": nothing distinguishes a deleted row from a foreign ID.
 
-## D4 — one fetch per page
+## D4 — one fetch per visit, dropped on a tenant switch or sign-out
 
 `<Person>` reads the directory through TanStack Query under one key with
-`staleTime: Infinity`, so every `<Person>` on a page shares one request.
-While it loads, the component shows "…", never the ID. Names render as
-React text.
+a 30-second `staleTime` (`lib/people-cache.ts`), so every `<Person>` on
+a page shares one request and the next visit fetches again. While it
+loads, the component shows "…", never the ID. Names render as React text.
+
+The browser QueryClient is a singleton that outlives both a tenant switch
+(the switcher only calls `router.refresh()`) and a sign-out (a server
+action that redirects in place), so a cached directory could resolve
+names against the previous tenant. Review caught it (S1). The directory
+is now dropped:
+
+- on an in-tab switch, in the switcher's `onPick`;
+- on a sibling tab's switch, in the switcher's broadcast handler, and in
+  every mounted `<Person>`'s subscription to the same broadcast;
+- on sign-out, by `SignOutForm` on submit.
+
+`lib/people-cache.test.ts` pins that a broadcast tenant switch, or a
+forget, makes the next read fetch again.
 
 ## D5 — scope split
 

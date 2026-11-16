@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -29,8 +30,19 @@ import (
 )
 
 // maxRows bounds each list. A tenant is a 50-150-person company; the
-// bound keeps the scan finite, not paginated.
+// bound keeps the scan finite, not paginated. A list that reaches it is
+// truncated and logged (see truncated).
 const maxRows = 5000
+
+// truncated reports whether a list fetched with LIMIT maxRows+1 overflowed
+// the bound, and logs it: past the bound, some actors read "Unknown".
+func truncated(ctx context.Context, n int, list string, tenantID uuid.UUID) bool {
+	if n <= maxRows {
+		return false
+	}
+	slog.WarnContext(ctx, "people list truncated", "list", list, "max_rows", maxRows, "tenant_id", tenantID.String())
+	return true
+}
 
 // User is one person in the caller's tenant.
 type User struct {
@@ -39,8 +51,10 @@ type User struct {
 	Status      string `json:"status"`
 }
 
-// APIKey is one API key in the caller's tenant: its id and the user who
-// minted it, nothing else.
+// APIKey is one API key in the caller's tenant: its id and its owner
+// (api_keys.issued_by), nothing else. A key with no owner has no owner_id;
+// minted_by (the admin who minted it) is attribution, not ownership
+// (apikeystore.IssueInput), so it is never a fallback.
 type APIKey struct {
 	ID      string `json:"id"`
 	OwnerID string `json:"owner_id,omitempty"`
@@ -116,7 +130,7 @@ func (h *Handler) list(ctx context.Context, tenantID uuid.UUID) (Response, error
 		   FROM users
 		  WHERE tenant_id = $1
 		  ORDER BY id
-		  LIMIT $2`, tenantID, maxRows)
+		  LIMIT $2`, tenantID, maxRows+1)
 	if err != nil {
 		return out, fmt.Errorf("query users: %w", err)
 	}
@@ -135,35 +149,41 @@ func (h *Handler) list(ctx context.Context, tenantID uuid.UUID) (Response, error
 	if err := rows.Err(); err != nil {
 		return out, fmt.Errorf("users rows: %w", err)
 	}
+	if truncated(ctx, len(out.Users), "users", tenantID) {
+		out.Users = out.Users[:maxRows]
+	}
 
 	// Revoked keys stay listed: they still name the actor on older records.
 	krows, err := tx.Query(ctx,
-		`SELECT id, minted_by
+		`SELECT id, issued_by
 		   FROM api_keys
 		  WHERE tenant_id = $1
 		  ORDER BY id
-		  LIMIT $2`, tenantID, maxRows)
+		  LIMIT $2`, tenantID, maxRows+1)
 	if err != nil {
 		return out, fmt.Errorf("query api keys: %w", err)
 	}
 	for krows.Next() {
 		var (
 			id       uuid.UUID
-			mintedBy pgtype.UUID
+			issuedBy pgtype.UUID
 		)
-		if err := krows.Scan(&id, &mintedBy); err != nil {
+		if err := krows.Scan(&id, &issuedBy); err != nil {
 			krows.Close()
 			return out, fmt.Errorf("scan api key: %w", err)
 		}
 		k := APIKey{ID: id.String()}
-		if mintedBy.Valid {
-			k.OwnerID = uuid.UUID(mintedBy.Bytes).String()
+		if issuedBy.Valid {
+			k.OwnerID = uuid.UUID(issuedBy.Bytes).String()
 		}
 		out.APIKeys = append(out.APIKeys, k)
 	}
 	krows.Close()
 	if err := krows.Err(); err != nil {
 		return out, fmt.Errorf("api keys rows: %w", err)
+	}
+	if truncated(ctx, len(out.APIKeys), "api_keys", tenantID) {
+		out.APIKeys = out.APIKeys[:maxRows]
 	}
 	return out, tx.Commit(ctx)
 }
