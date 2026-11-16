@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
 	auditnotesapi "github.com/mgoodric/security-atlas/internal/api/auditnotes"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
@@ -24,6 +25,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	walkthroughsapi "github.com/mgoodric/security-atlas/internal/api/walkthroughs"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	atlasaudit "github.com/mgoodric/security-atlas/internal/audit"
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
@@ -216,10 +218,15 @@ func (s *Server) buildRouter() *chi.Mux {
 		// #2193: POST /v1/audit-notes carries its audit_period_id in the
 		// body; the hydrator puts it on input.resource.attrs (after checking
 		// the period is in the caller's tenant) for the auditor.rego write
-		// rule.
+		// rule. #2157: the population, sample and evidence routes get the
+		// audit period(s) they belong to, for the auditor rules in
+		// audit_periods.rego.
 		var resourceAttrs authzmw.ResourceAttrsFunc
 		if s.dbPool != nil {
-			resourceAttrs = auditnotesapi.PeriodResourceAttrs(auditperiod.NewStore(s.dbPool))
+			resourceAttrs = authzmw.ChainResourceAttrs(
+				auditnotesapi.PeriodResourceAttrs(auditperiod.NewStore(s.dbPool)),
+				auditapi.ResourceAttrs(atlasaudit.NewStore(s.dbPool)),
+			)
 		}
 		root.Use(authzmw.MiddlewareWithResourceAttrs(s.authzEngine, s.authzAudit, resourceAttrs, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
 	}
