@@ -17,10 +17,9 @@
 //
 //   - BFF URL is `/api/activity` instead of `/api/audit-log/unified`.
 //   - `router.replace` target is `/activity` instead of `/audit-log`.
-//   - The actor filter accepts the literal `me` sentinel (slice 270
-//     D5) which the BFF resolves server-side to the caller's user_id.
-//     The input box shows `me` with a friendlier `(your activity)`
-//     label so the operator does not see a UUID they did not type.
+//   - The actor filter offers "You", the literal `me` sentinel (slice
+//     270 D5) which the BFF resolves server-side to the caller's
+//     user_id, so the operator does not see a UUID they did not type.
 //   - No export bar — slice 270 does not ship export (out of scope).
 //
 // A follow-on slice can extract a shared `<UnifiedAuditTable>`
@@ -36,7 +35,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
+import type { EntityKind, EntityOption } from "@/lib/entity-picker";
 import { Timestamp } from "@/components/ui/timestamp";
 import {
   Table,
@@ -204,8 +205,8 @@ export function ActivityPageClient() {
   const toggleIncludeReads = () => {
     replaceWith({ ...filters, includeReads: !filters.includeReads });
   };
-  const applyActor = (draft: string) => {
-    replaceWith({ ...filters, actor: draft.trim() });
+  const applyActor = (actor: string) => {
+    replaceWith({ ...filters, actor: actor.trim() });
   };
   const clearActor = () => {
     replaceWith({ ...filters, actor: "" });
@@ -300,7 +301,7 @@ function parseFilters(searchParams: URLSearchParams): Filters {
 
 type FilterBarProps = {
   filters: Filters;
-  onActorApply: (draft: string) => void;
+  onActorApply: (actor: string) => void;
   onActorClear: () => void;
   onFromChange: (v: string) => void;
   onToChange: (v: string) => void;
@@ -427,14 +428,18 @@ function FilterBar({
   );
 }
 
-// ActorFilterInput owns its own draft so the parent can re-render on
-// every keystroke without forcing a refetch. Parent commits via
-// onApply(draft) when the user presses Enter or clicks Apply.
+// ActorFilterInput picks the actor by name (#2086): a person, an API key,
+// or "You". Picking one applies the filter; a pasted user or API key ID
+// is checked on entry and applied when valid.
 //
-// Slice 270 D5: the literal string `me` is a sentinel the BFF resolves
-// server-side to the caller's user_id. When the URL value is `me`, the
-// input renders the friendlier "(your activity)" label next to the
-// input so the operator does not see a UUID they did not type.
+// Slice 270 D5: "You" is the literal `me` sentinel the BFF resolves
+// server-side to the caller's user_id, so the operator never sees a UUID
+// they did not type.
+const ACTOR_KINDS: readonly EntityKind[] = ["user", "credential"];
+const ACTOR_ME_OPTION: readonly EntityOption[] = [
+  { value: ACTOR_ME_SENTINEL, label: "You", hint: "Your activity" },
+];
+
 function ActorFilterInput({
   initial,
   onApply,
@@ -442,11 +447,10 @@ function ActorFilterInput({
   hasCommittedValue,
 }: {
   initial: string;
-  onApply: (draft: string) => void;
+  onApply: (actor: string) => void;
   onClear: () => void;
   hasCommittedValue: boolean;
 }) {
-  const [draft, setDraft] = useState<string>(initial);
   const isMeSentinel = initial === ACTOR_ME_SENTINEL;
   return (
     <div>
@@ -454,7 +458,7 @@ function ActorFilterInput({
         htmlFor="activity-actor"
         className="block text-xs font-medium text-muted-foreground"
       >
-        Actor (UUID, credential id, or `me`)
+        Actor
         {isMeSentinel ? (
           <span
             className="ml-2 text-foreground"
@@ -465,26 +469,17 @@ function ActorFilterInput({
         ) : null}
       </label>
       <div className="flex gap-2">
-        <Input
-          id="activity-actor"
-          data-testid="activity-actor"
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onApply(draft);
-          }}
-          placeholder="me, 00000000-0000-0000-0000-000000001111, key_..."
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          data-testid="activity-actor-apply"
-          onClick={() => onApply(draft)}
-        >
-          Apply
-        </Button>
+        <div className="min-w-0 flex-1">
+          <EntityPicker
+            kinds={ACTOR_KINDS}
+            id="activity-actor"
+            testId="activity-actor"
+            placeholder="Search people and API keys, or paste an ID"
+            value={initial}
+            extraOptions={ACTOR_ME_OPTION}
+            onChange={(actor) => (actor ? onApply(actor) : onClear())}
+          />
+        </div>
         {hasCommittedValue ? (
           <Button
             type="button"
