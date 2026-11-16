@@ -1,16 +1,15 @@
 package auditnotes
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -49,8 +48,7 @@ func PeriodResourceAttrs(periods periodGetter) func(*http.Request) (map[string]a
 		if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 			return nil, nil
 		}
-		peek, err := io.ReadAll(io.LimitReader(r.Body, maxPeriodPeekBytes))
-		r.Body = readCloser{io.MultiReader(bytes.NewReader(peek), r.Body), r.Body}
+		peek, err := authzmw.PeekBody(r, maxPeriodPeekBytes)
 		if err != nil {
 			return nil, fmt.Errorf("audit-notes period attrs: read body: %w", err)
 		}
@@ -73,10 +71,4 @@ func PeriodResourceAttrs(periods periodGetter) func(*http.Request) (map[string]a
 		}
 		return map[string]any{"audit_period_id": id.String()}, nil
 	}
-}
-
-// readCloser reads from the replayed body and closes the original one.
-type readCloser struct {
-	io.Reader
-	io.Closer
 }
