@@ -162,7 +162,10 @@ func TestApplyRiskTreatment_UntreatedDefaultAndValidation(t *testing.T) {
 		t.Fatalf("Create approval proposal: %v", err)
 	}
 	cred := "jwt:" + uuid.NewString()
-	if _, err := store.ConfirmAs(ctx, created.ID, cred, approval.Approver{UserID: owner.String(), CredentialID: cred}); err != nil {
+	if _, err := store.ConfirmAs(ctx, created.ID, cred, writeproposals.Confirmer{
+		Approver:  approval.Approver{UserID: owner.String(), CredentialID: cred},
+		Principal: owner.String(),
+	}); err != nil {
 		t.Fatalf("approval confirmed by a person: %v", err)
 	}
 	if _, st := readTreatment(t, admin, riskID); st == nil || *st != "approved" {
@@ -177,5 +180,78 @@ func TestApplyRiskTreatment_UntreatedDefaultAndValidation(t *testing.T) {
 	}
 	if tr, st := readTreatment(t, admin, riskID); tr != "accept" || st == nil || *st != "approved" {
 		t.Fatalf("after refused avoid: treatment=%q status=%v; want accept/approved", tr, st)
+	}
+}
+
+// TestApplyCreateRisk_ProposedAcceptanceRecordsConfirmer pins #2371 on the
+// MCP surface: create_risk refuses an approved acceptance, records the
+// confirming person as the proposer of a proposed one, and that person
+// cannot then approve it while a different person can.
+func TestApplyCreateRisk_ProposedAcceptanceRecordsConfirmer(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := treatmentTenant(t, admin)
+	store := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(app), nil)
+	ctx := ctxFor(t, tenant)
+
+	people := make([]uuid.UUID, 2)
+	for i := range people {
+		people[i] = uuid.New()
+		if _, err := admin.Exec(context.Background(), `
+			INSERT INTO users (id, tenant_id, email, display_name, status)
+			VALUES ($1, $2, $3, 'Person', 'active')
+		`, people[i], tenant, people[i].String()+"@example.com"); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+	confirmAs := func(tool, input string, person uuid.UUID) (writeproposals.Proposal, error) {
+		t.Helper()
+		created, err := store.Create(ctx, writeproposals.CreateInput{
+			ToolName:       tool,
+			ToolInput:      json.RawMessage(input),
+			AIModelName:    "llama3.1:8b-instruct-q5",
+			AIModelVersion: "2026-05-01",
+			CreatedBy:      "jwt:" + uuid.NewString(),
+		})
+		if err != nil {
+			t.Fatalf("Create %s proposal: %v", tool, err)
+		}
+		cred := "jwt:" + uuid.NewString()
+		return store.ConfirmAs(ctx, created.ID, cred, writeproposals.Confirmer{
+			Approver:  approval.Approver{UserID: person.String(), CredentialID: cred},
+			Principal: person.String(),
+		})
+	}
+
+	_, err := confirmAs(writeproposals.ToolCreateRisk,
+		`{"title":"Approved at create","category":"operational","treatment":"accept","acceptance_status":"approved"}`, people[0])
+	if !risk.IsTreatmentValidation(err) {
+		t.Fatalf("create_risk with an approved acceptance: want treatment validation, got %v", err)
+	}
+
+	applied, err := confirmAs(writeproposals.ToolCreateRisk,
+		`{"title":"Proposed at create","category":"operational","treatment":"accept","acceptance_status":"proposed"}`, people[0])
+	if err != nil {
+		t.Fatalf("create_risk with a proposed acceptance: %v", err)
+	}
+	riskID := *applied.AppliedSubject
+	var proposedBy string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT acceptance_proposed_by FROM risks WHERE id = $1`, riskID).Scan(&proposedBy); err != nil {
+		t.Fatalf("read proposer: %v", err)
+	}
+	if proposedBy != people[0].String() {
+		t.Fatalf("acceptance_proposed_by = %q; want the confirming person %s", proposedBy, people[0])
+	}
+
+	approve := `{"risk_id":"` + riskID + `","treatment":"accept","acceptance_status":"approved","accepted_until":"2099-06-30"}`
+	if _, err := confirmAs(writeproposals.ToolUpdateRiskTreatment, approve, people[0]); !errors.Is(err, risk.ErrAcceptanceSelfApproval) {
+		t.Fatalf("approval by the proposer: want self-approval refusal, got %v", err)
+	}
+	if _, err := confirmAs(writeproposals.ToolUpdateRiskTreatment, approve, people[1]); err != nil {
+		t.Fatalf("approval by a different person: %v", err)
+	}
+	if _, st := readTreatment(t, admin, riskID); st == nil || *st != "approved" {
+		t.Fatalf("after approval: status=%v; want approved", st)
 	}
 }

@@ -378,11 +378,12 @@ export async function fetchRiskDetail(id: string): Promise<RiskDetailResponse> {
 // `{likelihood, impact}` for the 5x5 case because that is what
 // `severityOf()` reads downstream.
 //
-// Optional fields (review_due_at, accepted_until, accepter,
-// instrument_reference, linked_control_ids, residual_score, description)
-// are NOT enumerated in the slice-105 AC list — the form omits them
-// rather than invent UI for them. The wire shape carries them for the
-// future slice that adds the richer editor.
+// Optional fields (review_due_at, instrument_reference,
+// linked_control_ids, residual_score, description) are NOT enumerated in
+// the slice-105 AC list — the form omits them rather than invent UI for
+// them. The wire shape carries them for the future slice that adds the
+// richer editor. accepted_until and accepter are left out on purpose:
+// `createReq` still decodes them only to refuse them (#2371).
 
 export type RiskCreateInput = {
   title: string;
@@ -391,12 +392,13 @@ export type RiskCreateInput = {
   methodology?: string;
   inherent_score?: unknown;
   treatment?: string;
-  acceptance_status?: "proposed" | "approved";
+  // #2371: create may only propose an acceptance. The API refuses
+  // approved, accepter and accepted_until at create: the approval records
+  // them.
+  acceptance_status?: "proposed";
   treatment_owner?: string;
   residual_score?: unknown;
   review_due_at?: string | null;
-  accepted_until?: string | null;
-  accepter?: string;
   instrument_reference?: string;
   linked_control_ids?: string[];
 };

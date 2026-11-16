@@ -240,6 +240,11 @@ type CreateInput struct {
 	// is ErrLevelMismatch.
 	Level     dbx.RiskLevel
 	OrgUnitID *uuid.UUID
+	// Proposer is the creator's principal (credstore.PrincipalOf), recorded
+	// as the acceptance's proposer when the risk is created with a proposed
+	// acceptance, so the approval rule can refuse them as approver (#2371).
+	// Required with acceptance_status=proposed.
+	Proposer string
 }
 
 // Create inserts a new risk row plus its control links. Methodology defaults
@@ -273,6 +278,18 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			in.ResidualScore = normalizedResidual
 		}
 	}
+	if err := ValidateCreateAcceptance(in.AcceptanceStatus, in.Accepter, in.AcceptedUntil != nil); err != nil {
+		return Risk{}, err
+	}
+	var proposedBy string
+	var proposedAt *time.Time
+	if in.AcceptanceStatus == dbx.RiskAcceptanceStatusProposed {
+		if in.Proposer == "" {
+			return Risk{}, fmt.Errorf("%w: a proposed acceptance requires its proposer", ErrTransitionInput)
+		}
+		now := time.Now().UTC()
+		proposedBy, proposedAt = in.Proposer, &now
+	}
 	if err := ValidateTreatment(TreatmentInput{
 		Treatment:            in.Treatment,
 		AcceptanceStatus:     in.AcceptanceStatus,
@@ -300,23 +317,25 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		}
 		id := uuid.New()
 		row, err := q.CreateRisk(ctx, dbx.CreateRiskParams{
-			ID:                  pgUUID(id),
-			TenantID:            pgUUID(tenantID),
-			Title:               in.Title,
-			Description:         in.Description,
-			CategoryID:          pgUUID(category.ID),
-			Methodology:         in.Methodology,
-			InherentScore:       in.InherentScore,
-			Treatment:           in.Treatment,
-			TreatmentOwner:      in.TreatmentOwner,
-			ResidualScore:       defaultResidual(in.ResidualScore),
-			ReviewDueAt:         pgTimestamptzPtr(in.ReviewDueAt),
-			AcceptedUntil:       pgDatePtr(in.AcceptedUntil),
-			Accepter:            in.Accepter,
-			InstrumentReference: in.InstrumentReference,
-			AcceptanceStatus:    NullAcceptanceStatus(in.AcceptanceStatus),
-			Level:               level,
-			OrgUnitID:           pgUUIDPtr(in.OrgUnitID),
+			ID:                   pgUUID(id),
+			TenantID:             pgUUID(tenantID),
+			Title:                in.Title,
+			Description:          in.Description,
+			CategoryID:           pgUUID(category.ID),
+			Methodology:          in.Methodology,
+			InherentScore:        in.InherentScore,
+			Treatment:            in.Treatment,
+			TreatmentOwner:       in.TreatmentOwner,
+			ResidualScore:        defaultResidual(in.ResidualScore),
+			ReviewDueAt:          pgTimestamptzPtr(in.ReviewDueAt),
+			AcceptedUntil:        pgDatePtr(in.AcceptedUntil),
+			Accepter:             in.Accepter,
+			InstrumentReference:  in.InstrumentReference,
+			AcceptanceStatus:     NullAcceptanceStatus(in.AcceptanceStatus),
+			Level:                level,
+			OrgUnitID:            pgUUIDPtr(in.OrgUnitID),
+			AcceptanceProposedBy: proposedBy,
+			AcceptanceProposedAt: pgTimestamptzPtr(proposedAt),
 		})
 		if err != nil {
 			return fmt.Errorf("create risk: %w", err)

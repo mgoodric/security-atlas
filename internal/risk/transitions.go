@@ -70,6 +70,13 @@ var (
 	// credential belongs to no user (an API key, an OAuth client, the
 	// bootstrap admin). Only people approve.
 	ErrAcceptanceApproverNotPerson = errors.New("risk: only a person can approve an acceptance")
+	// ErrAcceptanceProposerUnknown is returned when the acceptance names no
+	// proposer a person can be compared with: none was recorded (proposed
+	// before #2105) or a session was (pre-#1807). No approver can be shown
+	// to differ from the proposer, so, as a framework scope with no
+	// submitter, it must be proposed again first (#2371). It wraps
+	// ErrTransitionState, so REST and the MCP confirm surface render a 409.
+	ErrAcceptanceProposerUnknown = fmt.Errorf("%w: the acceptance has no recorded proposer, so a second approver cannot be verified; reject it and propose it again", ErrTransitionState)
 )
 
 // IsTransitionInput reports whether err is a caller error in a transition
@@ -274,13 +281,8 @@ func ApproveAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 	if err != nil {
 		return Risk{}, err
 	}
-	self, err := approval.Check(current.Acceptance.ProposedBy, in.Approver, allowSelf)
-	switch {
-	case errors.Is(err, approval.ErrNotPerson):
-		return Risk{}, ErrAcceptanceApproverNotPerson
-	case errors.Is(err, approval.ErrSelfApproval), errors.Is(err, approval.ErrRequesterUnknown):
-		return Risk{}, ErrAcceptanceSelfApproval
-	case err != nil:
+	self, err := checkAcceptanceApprover(current.Acceptance.ProposedBy, in.Approver, allowSelf)
+	if err != nil {
 		return Risk{}, err
 	}
 	until := dateOnly(in.AcceptedUntil)
@@ -298,6 +300,29 @@ func ApproveAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 		"self_approved":     self,
 	}
 	return writeTreatment(ctx, q, tenantID, next, in.Approver.UserID, ActionAcceptanceApproved, before, after)
+}
+
+// checkAcceptanceApprover applies the shared approval rule to an
+// acceptance and maps its errors onto this package's. An acceptance with
+// no comparable proposer is refused rather than admitted: approval.Check
+// would let anyone approve it, its creator included (#2371).
+func checkAcceptanceApprover(proposer string, a approval.Approver, allowSelf bool) (selfApproved bool, err error) {
+	if a.UserID == "" {
+		return false, ErrAcceptanceApproverNotPerson
+	}
+	if proposer == "" {
+		return false, ErrAcceptanceProposerUnknown
+	}
+	self, err := approval.Check(proposer, a, allowSelf)
+	switch {
+	case errors.Is(err, approval.ErrNotPerson):
+		return false, ErrAcceptanceApproverNotPerson
+	case errors.Is(err, approval.ErrRequesterUnknown):
+		return false, ErrAcceptanceProposerUnknown
+	case errors.Is(err, approval.ErrSelfApproval):
+		return false, ErrAcceptanceSelfApproval
+	}
+	return self, err
 }
 
 // RejectAcceptanceTx rejects a proposed acceptance. The risk returns to

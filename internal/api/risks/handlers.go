@@ -233,6 +233,11 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		Level:               dbx.RiskLevel(req.Level),
 		OrgUnitID:           orgUnitID,
 	}
+	// A create proposing an acceptance records its creator as the proposer,
+	// as the propose transition does, so they cannot approve it (#2371).
+	if cred, ok := authctx.CredentialFromContext(r.Context()); ok {
+		in.Proposer = credstore.PrincipalOf(cred)
+	}
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
 		switch {
