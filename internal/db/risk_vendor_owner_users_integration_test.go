@@ -1,6 +1,6 @@
 //go:build integration
 
-// #2129 — 20261216000000_risk_vendor_owner_users.sql links free-text risk and
+// #2129 — 20261218000000_risk_vendor_owner_users.sql links free-text risk and
 // vendor owners to users. Asserts against a live Postgres:
 //
 //  1. Text equal to one active user's name or email, ignoring case and
@@ -31,8 +31,8 @@ import (
 
 const (
 	ownerUsersPrior = "../../migrations/sql/20261120000000_llm_settings_audit.sql"
-	ownerUsersUp    = "../../migrations/sql/20261216000000_risk_vendor_owner_users.sql"
-	ownerUsersDown  = "../../migrations/sql/20261216000000_risk_vendor_owner_users.down.sql"
+	ownerUsersUp    = "../../migrations/sql/20261218000000_risk_vendor_owner_users.sql"
+	ownerUsersDown  = "../../migrations/sql/20261218000000_risk_vendor_owner_users.down.sql"
 )
 
 type ownerCase struct {
@@ -167,11 +167,11 @@ func TestRiskVendorOwnerUsersMigration_LinksUnambiguousOwnersAndLosesNothing(t *
 	// The CHECK takes the new action and keeps every earlier one.
 	for _, a := range append(meAuditActions(t, ownerUsersPrior), "vendor_owner_update") {
 		if !insertsAction(ctx, t, tx, a) {
-			t.Errorf("me_audit_log refuses action %q after 20261216000000", a)
+			t.Errorf("me_audit_log refuses action %q after 20261218000000", a)
 		}
 	}
 	if got, want := len(meAuditActions(t, ownerUsersUp)), len(meAuditActions(t, ownerUsersPrior))+1; got != want {
-		t.Errorf("20261216000000 lists %d actions, want %d", got, want)
+		t.Errorf("20261218000000 lists %d actions, want %d", got, want)
 	}
 
 	// The down migration refuses while a vendor_owner_update row exists.

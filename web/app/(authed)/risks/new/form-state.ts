@@ -105,7 +105,11 @@ export function riskToFormState(risk: Risk): FormState {
   s.methodology = risk.methodology;
   s.treatment = risk.treatment as RiskTreatment;
   s.owner_user_id = risk.owner_user_id ?? "";
-  s.treatment_owner = risk.owner_user_id ? "" : risk.owner_unlinked ?? "";
+  // A response without owner_unlinked (an older platform) carries the
+  // unlinked text in treatment_owner alone.
+  s.treatment_owner = risk.owner_user_id
+    ? ""
+    : (risk.owner_unlinked ?? risk.treatment_owner ?? "").trim();
   s.instrument_reference = risk.instrument_reference;
   s.linked_control_ids = risk.linked_control_ids;
   s.review_due = utcDay(risk.review_due_at);

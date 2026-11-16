@@ -27,7 +27,7 @@ import (
 var ErrOwnerNotActiveUser = errors.New("vendor: owner is not an active user in this tenant")
 
 // auditActionOwnerUpdate is the me_audit_log action for an owner change.
-// The CHECK constraint (20261216000000_risk_vendor_owner_users.sql) lists it.
+// The CHECK constraint (20261218000000_risk_vendor_owner_users.sql) lists it.
 const auditActionOwnerUpdate = "vendor_owner_update"
 
 // ownerState is one side of a vendor_owner_update row.
