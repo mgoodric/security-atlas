@@ -73,6 +73,7 @@ import { getSessionMe } from "@/lib/api/board";
 import { ApiTokensSection } from "./_tabs/api-tokens";
 import { AppearanceSection } from "./_tabs/appearance";
 import { NotificationsSection } from "./_tabs/notifications";
+import { OnboardingSection } from "./_tabs/onboarding";
 import { ProfileSection } from "./_tabs/profile";
 import { SessionsSection } from "./_tabs/sessions";
 import { TenantSection } from "./_tabs/tenant";
@@ -114,6 +115,7 @@ export default function SettingsPage() {
       <ProfileSection isAdmin={isAdmin} />
       {isAdmin ? <TenantSection /> : null}
       <AppearanceSection />
+      <OnboardingSection />
       <NotificationsSection />
       <ApiTokensSection isAdmin={isAdmin} />
       <SessionsSection />

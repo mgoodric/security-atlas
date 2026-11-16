@@ -17,7 +17,13 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { getMyPreferences, patchMyPreferences } from "./me";
+import {
+  dismissHint,
+  getMyDismissedHints,
+  getMyPreferences,
+  patchMyPreferences,
+  resetOnboardingHints,
+} from "./me";
 
 const realFetch = globalThis.fetch;
 
@@ -110,5 +116,42 @@ describe("patchMyPreferences", () => {
     await expect(
       patchMyPreferences({ control_drift: { slack: false } }),
     ).rejects.toThrow("invalid channel");
+  });
+});
+
+// #2145 — onboarding hint dismissals ride /v1/me/preferences.
+describe("onboarding hints", () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test("getMyDismissedHints reads dismissed_hints, defaulting to []", async () => {
+    mockFetch(async () =>
+      jsonResponse({ preferences: {}, dismissed_hints: ["controls"] }),
+    );
+    expect(await getMyDismissedHints()).toEqual(["controls"]);
+    mockFetch(async () => jsonResponse({ preferences: {} }));
+    expect(await getMyDismissedHints()).toEqual([]);
+  });
+
+  test("getMyDismissedHints throws for a credential with no preferences", async () => {
+    mockFetch(async () => jsonResponse({ error: "no preferences" }, 404));
+    await expect(getMyDismissedHints()).rejects.toThrow();
+  });
+
+  test("dismissHint and resetOnboardingHints PATCH the hint fields only", async () => {
+    const bodies: unknown[] = [];
+    mockFetch(async (_url, init) => {
+      expect(init?.method).toBe("PATCH");
+      bodies.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ preferences: {}, dismissed_hints: [] });
+    });
+    await dismissHint("controls");
+    await resetOnboardingHints();
+    expect(bodies).toEqual([
+      { dismissed_hints: { controls: true } },
+      { reset_hints: true },
+    ]);
   });
 });
