@@ -203,7 +203,15 @@ test.describe("#2172 — module access for each member", () => {
     });
 
     await signInAs(page, admin);
-    await page.goto("/activity");
+    // An explicit window around now: the page's default `to` is today's
+    // 00:00 UTC, which the server reads as exclusive, so events from today
+    // fall outside the default view.
+    const day = 24 * 60 * 60 * 1000;
+    const from = new Date(Date.now() - day).toISOString();
+    const to = new Date(Date.now() + day).toISOString();
+    await page.goto(
+      `/activity?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    );
     const access = page.locator(
       '[data-testid="activity-row"][data-kind="module_access"]',
     );
