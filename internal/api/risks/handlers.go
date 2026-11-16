@@ -500,6 +500,10 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
@@ -510,7 +514,7 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	in.Actor = actorFrom(r)
+	in.Actor = actor
 	updated, err := h.store.UpdatePlacement(ctx, id, in)
 	if err != nil {
 		switch {
@@ -615,15 +619,15 @@ func patchDecodeMessage(err error) string {
 	return "malformed body"
 }
 
-// actorFrom names the caller on the audit row: the credential's id, or a
-// non-empty sentinel when no credential is in context (unit-test servers),
-// so the audit log's actor CHECK never trips. Same rule as the aggregation
-// rules handler.
-func actorFrom(r *http.Request) string {
+// actorFrom names the caller on the audit row: the credential's id. With
+// no credential (or one without an id) in context it writes a 401 and
+// returns false, so a write is never recorded without an actor (#1954).
+func actorFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if cred, ok := authctx.CredentialFromContext(r.Context()); ok && cred.ID != "" {
-		return cred.ID
+		return cred.ID, true
 	}
-	return "system"
+	httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
+	return "", false
 }
 
 // DeleteRisk handles DELETE /v1/risks/{id}.
