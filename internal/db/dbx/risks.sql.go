@@ -31,7 +31,7 @@ func (q *Queries) CountRiskControlLinks(ctx context.Context, arg CountRiskContro
 
 const createAggregateRisk = `-- name: CreateAggregateRisk :one
 INSERT INTO risks (
-    id, tenant_id, title, description, category, methodology,
+    id, tenant_id, title, description, category_id, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     accepter, instrument_reference, level, org_unit_id, themes
 )
@@ -40,7 +40,7 @@ VALUES (
     $7, $8, $9, $10,
     $11, $12, $13, $14, $15::text[]
 )
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 `
 
 type CreateAggregateRiskParams struct {
@@ -48,7 +48,7 @@ type CreateAggregateRiskParams struct {
 	TenantID            pgtype.UUID     `json:"tenant_id"`
 	Title               string          `json:"title"`
 	Description         string          `json:"description"`
-	Category            RiskCategory    `json:"category"`
+	CategoryID          pgtype.UUID     `json:"category_id"`
 	Methodology         RiskMethodology `json:"methodology"`
 	InherentScore       []byte          `json:"inherent_score"`
 	Treatment           RiskTreatment   `json:"treatment"`
@@ -72,7 +72,7 @@ func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRi
 		arg.TenantID,
 		arg.Title,
 		arg.Description,
-		arg.Category,
+		arg.CategoryID,
 		arg.Methodology,
 		arg.InherentScore,
 		arg.Treatment,
@@ -90,7 +90,6 @@ func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRi
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -113,18 +112,18 @@ func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRi
 
 const createRisk = `-- name: CreateRisk :one
 INSERT INTO risks (
-    id, tenant_id, title, description, category, methodology,
+    id, tenant_id, title, description, category_id, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
-    acceptance_status, level, org_unit_id, category_id
+    acceptance_status, level, org_unit_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15, $16, $17, $18
+    $15, $16, $17
 )
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 `
 
 type CreateRiskParams struct {
@@ -132,7 +131,7 @@ type CreateRiskParams struct {
 	TenantID            pgtype.UUID           `json:"tenant_id"`
 	Title               string                `json:"title"`
 	Description         string                `json:"description"`
-	Category            RiskCategory          `json:"category"`
+	CategoryID          pgtype.UUID           `json:"category_id"`
 	Methodology         RiskMethodology       `json:"methodology"`
 	InherentScore       []byte                `json:"inherent_score"`
 	Treatment           RiskTreatment         `json:"treatment"`
@@ -145,7 +144,6 @@ type CreateRiskParams struct {
 	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
 	Level               RiskLevel             `json:"level"`
 	OrgUnitID           pgtype.UUID           `json:"org_unit_id"`
-	CategoryID          pgtype.UUID           `json:"category_id"`
 }
 
 // Insert a new risk. The application validates methodology-specific
@@ -158,7 +156,7 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		arg.TenantID,
 		arg.Title,
 		arg.Description,
-		arg.Category,
+		arg.CategoryID,
 		arg.Methodology,
 		arg.InherentScore,
 		arg.Treatment,
@@ -171,7 +169,6 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		arg.AcceptanceStatus,
 		arg.Level,
 		arg.OrgUnitID,
-		arg.CategoryID,
 	)
 	var i Risk
 	err := row.Scan(
@@ -179,7 +176,6 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -216,7 +212,7 @@ func (q *Queries) DeleteRisk(ctx context.Context, arg DeleteRiskParams) error {
 }
 
 const getRiskByAggregationKey = `-- name: GetRiskByAggregationKey :one
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 FROM risks
 WHERE tenant_id = $1
   AND inherent_score->>'aggregation_key' = $2::text
@@ -244,7 +240,6 @@ func (q *Queries) GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggr
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -266,7 +261,7 @@ func (q *Queries) GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggr
 }
 
 const getRiskByID = `-- name: GetRiskByID :one
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 FROM risks
 WHERE tenant_id = $1 AND id = $2
 `
@@ -284,7 +279,6 @@ func (q *Queries) GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk,
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -670,7 +664,7 @@ func (q *Queries) ListRiskIDsLinkedToControl(ctx context.Context, arg ListRiskID
 }
 
 const listRisks = `-- name: ListRisks :many
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 FROM risks
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -693,7 +687,6 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 			&i.TenantID,
 			&i.Title,
 			&i.Description,
-			&i.Category,
 			&i.Methodology,
 			&i.InherentScore,
 			&i.Treatment,
@@ -722,7 +715,7 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 }
 
 const listRisksByIDs = `-- name: ListRisksByIDs :many
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 FROM risks
 WHERE tenant_id = $1 AND id = ANY($2::uuid[])
 ORDER BY id ASC
@@ -750,7 +743,6 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 			&i.TenantID,
 			&i.Title,
 			&i.Description,
-			&i.Category,
 			&i.Methodology,
 			&i.InherentScore,
 			&i.Treatment,
@@ -779,7 +771,7 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 }
 
 const lockRiskByID = `-- name: LockRiskByID :one
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 FROM risks
 WHERE tenant_id = $1 AND id = $2
 FOR NO KEY UPDATE
@@ -803,7 +795,6 @@ func (q *Queries) LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Ris
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -844,20 +835,19 @@ const updateRisk = `-- name: UpdateRisk :one
 UPDATE risks
 SET title = $3,
     description = $4,
-    category = $5,
-    methodology = $6,
-    inherent_score = $7,
-    treatment = $8,
-    treatment_owner = $9,
-    residual_score = $10,
-    review_due_at = $11,
-    accepted_until = $12,
-    accepter = $13,
-    instrument_reference = $14,
-    acceptance_status = $15,
+    methodology = $5,
+    inherent_score = $6,
+    treatment = $7,
+    treatment_owner = $8,
+    residual_score = $9,
+    review_due_at = $10,
+    accepted_until = $11,
+    accepter = $12,
+    instrument_reference = $13,
+    acceptance_status = $14,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 `
 
 type UpdateRiskParams struct {
@@ -865,7 +855,6 @@ type UpdateRiskParams struct {
 	ID                  pgtype.UUID           `json:"id"`
 	Title               string                `json:"title"`
 	Description         string                `json:"description"`
-	Category            RiskCategory          `json:"category"`
 	Methodology         RiskMethodology       `json:"methodology"`
 	InherentScore       []byte                `json:"inherent_score"`
 	Treatment           RiskTreatment         `json:"treatment"`
@@ -880,14 +869,14 @@ type UpdateRiskParams struct {
 
 // Full-update path (PATCH handler reads existing, mutates fields, writes).
 // updated_at is set explicitly so the schema's per-row default doesn't
-// silently keep stale values.
+// silently keep stale values. The category moves only through
+// UpdateRiskCategory, which the caller audit-logs (#1812).
 func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error) {
 	row := q.db.QueryRow(ctx, updateRisk,
 		arg.TenantID,
 		arg.ID,
 		arg.Title,
 		arg.Description,
-		arg.Category,
 		arg.Methodology,
 		arg.InherentScore,
 		arg.Treatment,
@@ -905,7 +894,6 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -929,37 +917,28 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 const updateRiskCategory = `-- name: UpdateRiskCategory :one
 UPDATE risks
 SET category_id = $1,
-    category = $2,
     updated_at = now()
-WHERE tenant_id = $3 AND id = $4
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+WHERE tenant_id = $2 AND id = $3
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 `
 
 type UpdateRiskCategoryParams struct {
-	CategoryID pgtype.UUID  `json:"category_id"`
-	Category   RiskCategory `json:"category"`
-	TenantID   pgtype.UUID  `json:"tenant_id"`
-	ID         pgtype.UUID  `json:"id"`
+	CategoryID pgtype.UUID `json:"category_id"`
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	ID         pgtype.UUID `json:"id"`
 }
 
-// #1812: move a risk onto another of the tenant's categories. Dual-writes
-// the reference and the matching risk_category enum value until #1745's
-// contract step drops the enum. The caller holds the row via LockRiskByID
-// and has resolved the category as assignable.
+// #1812: move a risk onto another of the tenant's categories. The caller
+// holds the row via LockRiskByID and has resolved the category as
+// assignable.
 func (q *Queries) UpdateRiskCategory(ctx context.Context, arg UpdateRiskCategoryParams) (Risk, error) {
-	row := q.db.QueryRow(ctx, updateRiskCategory,
-		arg.CategoryID,
-		arg.Category,
-		arg.TenantID,
-		arg.ID,
-	)
+	row := q.db.QueryRow(ctx, updateRiskCategory, arg.CategoryID, arg.TenantID, arg.ID)
 	var i Risk
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -986,7 +965,7 @@ SET level = $3,
     org_unit_id = $4,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 `
 
 type UpdateRiskPlacementParams struct {
@@ -1012,7 +991,6 @@ func (q *Queries) UpdateRiskPlacement(ctx context.Context, arg UpdateRiskPlaceme
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -1038,7 +1016,7 @@ UPDATE risks
 SET residual_score = $3::jsonb,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 `
 
 type UpdateRiskResidualParams struct {
@@ -1060,7 +1038,6 @@ func (q *Queries) UpdateRiskResidual(ctx context.Context, arg UpdateRiskResidual
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,
@@ -1086,7 +1063,7 @@ UPDATE risks
 SET themes = $3::text[],
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
 `
 
 type UpdateRiskThemesParams struct {
@@ -1107,7 +1084,6 @@ func (q *Queries) UpdateRiskThemes(ctx context.Context, arg UpdateRiskThemesPara
 		&i.TenantID,
 		&i.Title,
 		&i.Description,
-		&i.Category,
 		&i.Methodology,
 		&i.InherentScore,
 		&i.Treatment,

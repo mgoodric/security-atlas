@@ -197,10 +197,10 @@ func seedAttentionTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label
 		id := uuid.New()
 		exec("risk "+title, `
 			INSERT INTO risks (
-				id, tenant_id, title, category, treatment, treatment_owner,
+				id, tenant_id, title, category_id, treatment, treatment_owner,
 				inherent_score, residual_score, review_due_at
 			)
-			VALUES ($1, $2, $3, 'operational'::risk_category, 'mitigate'::risk_treatment, $4,
+			VALUES ($1, $2, $3, risk_category_id($2, 'operational'), 'mitigate'::risk_treatment, $4,
 			        '{"likelihood": 3, "impact": 4}'::jsonb, '{"likelihood": 2, "impact": 3}'::jsonb, $5)
 		`, id, at.ID, at.riskTitlePrefix+title, owner, reviewDue)
 		return id

@@ -65,16 +65,6 @@ CREATE TYPE control_lifecycle_state AS ENUM (
     'retired'
 );
 
-CREATE TYPE risk_category AS ENUM (
-    'confidentiality',
-    'integrity',
-    'availability',
-    'privacy',
-    'regulatory',
-    'operational',
-    'financial'
-);
-
 CREATE TYPE risk_methodology AS ENUM (
     'nist_800_30',
     'fair',

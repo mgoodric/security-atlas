@@ -35,10 +35,10 @@ func seedLeveledRisk(t *testing.T, admin *pgxpool.Pool, tenant, level, title str
 	inherent, _ := json.Marshal(map[string]int{"likelihood": likelihood, "impact": impact})
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score, level
 		)
-		VALUES ($1, $2, $3, '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, $3, '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        $4::jsonb, 'untreated', '', '{}'::jsonb, $5::risk_level)
 	`, id, tenant, title, string(inherent), level); err != nil {
 		t.Fatalf("seed %s risk: %v", level, err)

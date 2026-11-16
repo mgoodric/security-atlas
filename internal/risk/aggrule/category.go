@@ -6,33 +6,28 @@
 // archived category takes no new assignments (#1810), and a meta-risk is a
 // new risk, so an archived child category is passed over rather than
 // copied. There is no hard-coded fallback: the default is whatever the
-// tenant has set.
-//
-// Until #1745's contract step the risk row still carries the risk_category
-// enum, so the chosen category must be one the enum can hold. Set-default
-// refuses a custom category for that reason; a tenant that set one before
-// that refusal existed gets the first scored child's category, archived or
-// not, rather than a value the column cannot hold.
+// tenant has set, custom categories included since the contract step
+// (#1819). A tenant with no default gets the first scored child's
+// category, archived or not.
 package aggrule
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
 // metaRiskCategories is the tenant's category state as the engine needs it:
-// which categories are archived, and the default's enum value.
+// which categories are archived, and which is the default.
 type metaRiskCategories struct {
 	archived map[uuid.UUID]bool
-	// fallback is the default category's enum value; empty when the tenant
-	// has no default the enum can hold.
-	fallback dbx.RiskCategory
+	// fallback is the default category; invalid when the tenant has none.
+	fallback pgtype.UUID
 }
 
 // loadCategories reads the tenant's categories. It is a plain read: the
@@ -49,8 +44,8 @@ func categoriesFromRows(rows []dbx.OrgRiskCategory) metaRiskCategories {
 	cats := metaRiskCategories{archived: make(map[uuid.UUID]bool, len(rows))}
 	for _, r := range rows {
 		cats.archived[uuid.UUID(r.ID.Bytes)] = r.Archived
-		if r.IsDefault && slices.Contains(dbx.AllRiskCategoryValues(), dbx.RiskCategory(r.Slug)) {
-			cats.fallback = dbx.RiskCategory(r.Slug)
+		if r.IsDefault {
+			cats.fallback = r.ID
 		}
 	}
 	return cats
@@ -64,17 +59,17 @@ var errNoMetaRiskCategory = errors.New("no scored child and no default risk cate
 
 // pick chooses the meta-risk's category from its scored children, in
 // candidate order.
-func (c metaRiskCategories) pick(scored []dbx.Risk) (dbx.RiskCategory, error) {
+func (c metaRiskCategories) pick(scored []dbx.Risk) (pgtype.UUID, error) {
 	for _, r := range scored {
 		if r.CategoryID.Valid && !c.archived[uuid.UUID(r.CategoryID.Bytes)] {
-			return r.Category, nil
+			return r.CategoryID, nil
 		}
 	}
-	if c.fallback != "" {
+	if c.fallback.Valid {
 		return c.fallback, nil
 	}
-	if len(scored) > 0 {
-		return scored[0].Category, nil
+	if len(scored) > 0 && scored[0].CategoryID.Valid {
+		return scored[0].CategoryID, nil
 	}
-	return "", errNoMetaRiskCategory
+	return pgtype.UUID{}, errNoMetaRiskCategory
 }

@@ -1,13 +1,12 @@
 package risk
 
-// #1809: organisation-owned risk categories, the expand step of #1745.
+// #1809: organisation-owned risk categories (#1745).
 //
 // Each tenant owns its categories (org_risk_categories). The seven seeded
-// ones carry the old risk_category enum values as slugs, so a caller that
-// sends `operational` behaves exactly as before. A risk carries both the
-// enum and a reference to its tenant's category until the contract step
-// drops the enum; the risks_category_sync trigger keeps the pair in
-// agreement on every write path.
+// ones carry the retired risk_category enum's values as slugs, so a caller
+// that sends `operational` behaves exactly as before. A risk carries only a
+// reference to its tenant's category: the contract step (#1819) dropped the
+// enum column.
 
 import (
 	"context"
@@ -108,15 +107,14 @@ func (s *Store) ReviewCadenceDays(ctx context.Context) (int, error) {
 }
 
 // resolveCategory finds the tenant's category named by ref, a slug or an id,
-// and returns it with the enum value the risk row still carries. An unknown
-// ref is an UnknownCategoryError naming the tenant's slugs.
-func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, dbx.RiskCategory, error) {
+// An unknown ref is an UnknownCategoryError naming the tenant's slugs.
+func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, error) {
 	return ResolveCategoryTx(ctx, q, tenantID, ref)
 }
 
 // IsCategoryRefusal reports whether err is a category the caller named but
-// cannot assign to a new risk: unknown, archived, or one that cannot hold
-// risks yet. Callers map it to a client error.
+// cannot assign to a new risk: unknown, ambiguous or archived. Callers map
+// it to a client error.
 func IsCategoryRefusal(err error) bool {
 	var (
 		archived  *ArchivedCategoryError
@@ -131,19 +129,17 @@ func IsCategoryRefusal(err error) bool {
 // of the tenant's categories inside the caller's tenant-scoped transaction,
 // for writers outside Store such as the MCP create_risk applier (#1810). A
 // slug or id match wins; otherwise ref is matched against display names,
-// case-insensitively on the trimmed value (#1815). It returns the category
-// with the enum value the risk row still carries, or an error that
-// IsCategoryRefusal recognises when the category is unknown, ambiguous,
-// archived, or cannot hold risks yet.
+// case-insensitively on the trimmed value (#1815). An unknown, ambiguous or
+// archived category is an error that IsCategoryRefusal recognises.
 //
 // Every caller assigns a risk to the result, so the matched rows are held
 // FOR SHARE until the caller's transaction ends (#2233): an ArchiveCategory
 // racing the write either waits for it to commit, or commits first and is
 // seen here as archived. Category admin takes only the category row lock
 // and never a risk row lock, so the share lock adds no deadlock cycle.
-func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, dbx.RiskCategory, error) {
+func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, error) {
 	if err := q.SeedRiskCategories(ctx, pgUUID(tenantID)); err != nil {
-		return Category{}, "", fmt.Errorf("seed risk categories: %w", err)
+		return Category{}, fmt.Errorf("seed risk categories: %w", err)
 	}
 	row, err := q.ShareLockRiskCategory(ctx, dbx.ShareLockRiskCategoryParams{
 		TenantID: pgUUID(tenantID),
@@ -152,25 +148,17 @@ func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, 
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		if row, err = resolveCategoryByName(ctx, q, tenantID, ref); err != nil {
-			return Category{}, "", err
+			return Category{}, err
 		}
 	case err != nil:
-		return Category{}, "", fmt.Errorf("resolve risk category: %w", err)
+		return Category{}, fmt.Errorf("resolve risk category: %w", err)
 	}
 	if row.Archived {
 		// #1810: archived categories stay on the risks that have them but
 		// take no new assignments.
-		return Category{}, "", &ArchivedCategoryError{Slug: row.Slug}
+		return Category{}, &ArchivedCategoryError{Slug: row.Slug}
 	}
-	enum := dbx.RiskCategory(row.Slug)
-	if !slices.Contains(dbx.AllRiskCategoryValues(), enum) {
-		// A category added through the management API (#1810) has no enum
-		// value until #1745's contract step drops the enum column; refuse
-		// rather than write a value the column cannot hold.
-		return Category{}, "", &InvalidCategoryError{Reason: fmt.Sprintf(
-			"category %q cannot hold risks until the risk_category enum is retired (#1745)", row.Slug)}
-	}
-	return categoryFromRow(row), enum, nil
+	return categoryFromRow(row), nil
 }
 
 // resolveCategoryByName finds the tenant category whose display name is ref
@@ -239,7 +227,7 @@ func categoryFromRow(r dbx.OrgRiskCategory) Category {
 
 // categoriesByID returns the tenant's categories, archived included, keyed
 // by id. A risk's category slug and name are read from here (#1812): the
-// reference is the source of truth, the enum only a dual-written copy.
+// reference is the only source of truth.
 func categoriesByID(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (map[uuid.UUID]Category, error) {
 	rows, err := q.ListRiskCategories(ctx, pgUUID(tenantID))
 	if err != nil {

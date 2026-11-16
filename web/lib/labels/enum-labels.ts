@@ -102,15 +102,6 @@ export const ENUM_LABELS = {
     proposed: "Proposed",
     approved: "Approved",
   },
-  RiskCategory: {
-    confidentiality: "Confidentiality",
-    integrity: "Integrity",
-    availability: "Availability",
-    privacy: "Privacy",
-    regulatory: "Regulatory",
-    operational: "Operational",
-    financial: "Financial",
-  },
   RiskLevel: {
     company: "Company",
     org: "Organisation",

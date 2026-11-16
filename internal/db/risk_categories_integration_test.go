@@ -1,15 +1,18 @@
 //go:build integration
 
-// #1809 — organisation-owned risk categories, expand step of #1745.
-// Asserts against a live Postgres:
+// #1809 / #1819 — organisation-owned risk categories, the expand and
+// contract steps of #1745. Asserts against a live Postgres:
 //
-//  1. The migration seeds every existing tenant with its own seven
+//  1. The expand migration seeds every existing tenant with its own seven
 //     categories and points every existing risk at its own tenant's
 //     category whose slug equals the risk's enum value; per-tenant counts
-//     match.
+//     match. The contract migration then drops the enum column and type
+//     and leaves every reference as it was.
 //  2. Tenant B cannot read tenant A's categories (RLS).
-//  3. A write that sends only the enum gets the matching reference, and a
-//     reference that disagrees with the enum is refused.
+//  3. The contract migration refuses to drop the enum while any risk's
+//     reference disagrees with its enum value.
+//  4. risk_category_id(tenant, slug) seeds a bare tenant and resolves a
+//     slug to that tenant's category, and refuses an unknown slug.
 //
 // Lives in internal/db/ so the local `just test-integration` package set
 // runs it as well as CI.
@@ -19,8 +22,10 @@ package db_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +39,33 @@ import (
 const (
 	riskCategoriesUp   = "../../migrations/sql/20260923000000_risk_categories.sql"
 	riskCategoriesDown = "../../migrations/sql/20260923000000_risk_categories.down.sql"
+	dropEnumUp         = "../../migrations/sql/20261125000000_drop_risk_category_enum.sql"
+	dropEnumDown       = "../../migrations/sql/20261125000000_drop_risk_category_enum.down.sql"
 )
+
+func readMigration(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration %s: %v", path, err)
+	}
+	return string(b)
+}
+
+// riskCategoryColumnExists reports whether risks still has the enum column.
+func riskCategoryColumnExists(ctx context.Context, t *testing.T, tx pgx.Tx) bool {
+	t.Helper()
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM information_schema.columns
+		    WHERE table_schema = current_schema()
+		      AND table_name = 'risks' AND column_name = 'category')`,
+	).Scan(&exists); err != nil {
+		t.Fatalf("read risks columns: %v", err)
+	}
+	return exists
+}
 
 var seededCategorySlugs = []string{
 	"availability", "confidentiality", "financial", "integrity",
@@ -85,14 +116,8 @@ func TestRiskCategoriesMigration_BackfillsEveryRiskToItsTenantsCategory(t *testi
 	if adminPool == nil {
 		t.Skip("DATABASE_URL not set; the migration test needs the migrate role")
 	}
-	up, err := os.ReadFile(riskCategoriesUp)
-	if err != nil {
-		t.Fatalf("read up migration: %v", err)
-	}
-	down, err := os.ReadFile(riskCategoriesDown)
-	if err != nil {
-		t.Fatalf("read down migration: %v", err)
-	}
+	up := readMigration(t, riskCategoriesUp)
+	down := readMigration(t, riskCategoriesDown)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -104,8 +129,12 @@ func TestRiskCategoriesMigration_BackfillsEveryRiskToItsTenantsCategory(t *testi
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Back to the pre-#1809 schema: risks carry only the enum.
-	if _, err := tx.Exec(ctx, string(down)); err != nil {
+	// Back to the pre-#1809 schema: undo the contract step, then the
+	// expand step, so risks carry only the enum.
+	if _, err := tx.Exec(ctx, readMigration(t, dropEnumDown)); err != nil {
+		t.Fatalf("apply contract down migration: %v", err)
+	}
+	if _, err := tx.Exec(ctx, down); err != nil {
 		t.Fatalf("apply down migration: %v", err)
 	}
 	fixture := []categoryFixtureTenant{
@@ -118,7 +147,7 @@ func TestRiskCategoriesMigration_BackfillsEveryRiskToItsTenantsCategory(t *testi
 		seedCategoryFixture(ctx, t, tx, ft)
 	}
 
-	if _, err := tx.Exec(ctx, string(up)); err != nil {
+	if _, err := tx.Exec(ctx, up); err != nil {
 		t.Fatalf("apply up migration: %v", err)
 	}
 
@@ -211,6 +240,49 @@ func TestRiskCategoriesMigration_BackfillsEveryRiskToItsTenantsCategory(t *testi
 				ft.id, tagged, ft.theme, rules, wantTagged)
 		}
 	}
+
+	// #1819: the contract step drops the enum and keeps every reference.
+	if _, err := tx.Exec(ctx, readMigration(t, dropEnumUp)); err != nil {
+		t.Fatalf("apply contract migration: %v", err)
+	}
+	if riskCategoryColumnExists(ctx, t, tx) {
+		t.Error("risks.category still exists after the contract migration")
+	}
+	var typeExists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'risk_category')`,
+	).Scan(&typeExists); err != nil {
+		t.Fatalf("read pg_type: %v", err)
+	}
+	if typeExists {
+		t.Error("type risk_category still exists after the contract migration")
+	}
+	for _, ft := range fixture {
+		want := map[string]int{}
+		for _, c := range ft.categories {
+			want[c]++
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT c.slug, count(*) FROM risks r
+			JOIN org_risk_categories c ON c.id = r.category_id AND c.tenant_id = r.tenant_id
+			WHERE r.tenant_id = $1 GROUP BY c.slug`, ft.id)
+		if err != nil {
+			t.Fatalf("group risks after contract: %v", err)
+		}
+		got := map[string]int{}
+		for rows.Next() {
+			var slug string
+			var n int
+			if err := rows.Scan(&slug, &n); err != nil {
+				t.Fatalf("scan group: %v", err)
+			}
+			got[slug] = n
+		}
+		rows.Close()
+		if !maps.Equal(got, want) {
+			t.Errorf("tenant %s per-category counts after contract = %v, want %v", ft.id, got, want)
+		}
+	}
 }
 
 func TestRiskCategories_RLSIsolatesTenants(t *testing.T) {
@@ -250,61 +322,126 @@ func TestRiskCategories_RLSIsolatesTenants(t *testing.T) {
 	})
 }
 
-func TestRiskCategories_DualWriteKeepsReferenceAndEnumInAgreement(t *testing.T) {
+// #1819: the contract migration refuses to drop the enum while a risk's
+// reference and enum value disagree, and drops nothing in that case.
+func TestDropRiskCategoryEnum_RefusesADisagreeingRisk(t *testing.T) {
+	if adminPool == nil {
+		t.Skip("DATABASE_URL not set; the migration test needs the migrate role")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tx, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("admin Begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Back to the dual-written schema, with one risk whose enum says
+	// privacy while its reference says financial. The sync trigger refuses
+	// that pair, so it is disabled for the one write: the state the guard
+	// exists for is one the trigger should never have let through.
+	if _, err := tx.Exec(ctx, readMigration(t, dropEnumDown)); err != nil {
+		t.Fatalf("apply contract down migration: %v", err)
+	}
+	// The down step gives a risk on a custom category (another test's, in
+	// this shared database) the placeholder `operational`, which disagrees
+	// with its reference. Point those at their tenant's `operational`
+	// category so that the only disagreement is the one made below.
+	if _, err := tx.Exec(ctx, `
+		UPDATE risks r SET category_id = c.id
+		FROM org_risk_categories c, org_risk_categories cur
+		WHERE c.tenant_id = r.tenant_id AND c.slug = r.category::text
+		  AND cur.tenant_id = r.tenant_id AND cur.id = r.category_id
+		  AND cur.slug <> r.category::text`); err != nil {
+		t.Fatalf("normalise placeholder risks: %v", err)
+	}
+	tenant := uuid.NewString()
+	riskID := uuid.NewString()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO risks (id, tenant_id, title, category, treatment)
+		VALUES ($1, $2, 'disagreeing', 'privacy', 'avoid')`, riskID, tenant); err != nil {
+		t.Fatalf("INSERT risk: %v", err)
+	}
+	// With every pair in agreement the guard lets the drop through.
+	if err := inSavepoint(ctx, t, tx, func(sp pgx.Tx) error {
+		_, err := sp.Exec(ctx, readMigration(t, dropEnumUp))
+		return err
+	}); err != nil {
+		t.Fatalf("contract migration over agreeing risks: %v", err)
+	}
+	// Under a role RLS binds, the guard would see no rows and pass
+	// vacuously; it refuses instead. The role switch is undone with the
+	// savepoint.
+	err = inSavepoint(ctx, t, tx, func(sp pgx.Tx) error {
+		if _, err := sp.Exec(ctx, `SET LOCAL ROLE atlas_app`); err != nil {
+			t.Fatalf("SET ROLE atlas_app: %v", err)
+		}
+		_, err := sp.Exec(ctx, readMigration(t, dropEnumUp))
+		return err
+	})
+	var roleErr *pgconn.PgError
+	if !errors.As(err, &roleErr) || roleErr.Code != "42501" || !strings.Contains(roleErr.Message, "needs BYPASSRLS") {
+		t.Fatalf("contract migration as atlas_app: want SQLSTATE 42501 naming BYPASSRLS, got %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE risks DISABLE TRIGGER risks_category_sync_trg`); err != nil {
+		t.Fatalf("disable sync trigger: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE risks SET category_id =
+		    (SELECT id FROM org_risk_categories WHERE tenant_id = $2 AND slug = 'financial')
+		WHERE id = $1`, riskID, tenant); err != nil {
+		t.Fatalf("UPDATE category_id: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE risks ENABLE TRIGGER risks_category_sync_trg`); err != nil {
+		t.Fatalf("enable sync trigger: %v", err)
+	}
+
+	err = inSavepoint(ctx, t, tx, func(sp pgx.Tx) error {
+		_, err := sp.Exec(ctx, readMigration(t, dropEnumUp))
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgErrCheckViolation {
+		t.Fatalf("contract migration over a disagreeing risk: want SQLSTATE %s, got %v", pgErrCheckViolation, err)
+	}
+	if !strings.Contains(pgErr.Message, "refusing to drop risks.category: 1 risk(s)") || !strings.Contains(pgErr.Message, riskID) {
+		t.Errorf("guard message = %q, want it to name the one disagreeing risk %s", pgErr.Message, riskID)
+	}
+	if !riskCategoryColumnExists(ctx, t, tx) {
+		t.Error("risks.category was dropped despite the guard")
+	}
+}
+
+// #1819: a SQL writer names a category by slug through risk_category_id,
+// which seeds a bare tenant's categories on the way, as the dropped sync
+// trigger did.
+func TestRiskCategoryID_ResolvesASlugForABareTenant(t *testing.T) {
 	tenant := uuid.NewString()
 	withTenantTx(t, tenant, false, func(ctx context.Context, tx pgx.Tx) {
-		// Enum only: a bare tenant with no categories is seeded and the
-		// risk gets the matching reference.
 		riskID := uuid.NewString()
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO risks (id, tenant_id, title, category, treatment)
-			VALUES ($1, $2, 'enum only', 'privacy', 'avoid')`, riskID, tenant); err != nil {
-			t.Fatalf("INSERT enum-only risk: %v", err)
+			INSERT INTO risks (id, tenant_id, title, category_id, treatment)
+			VALUES ($1, $2, 'by slug', risk_category_id($2, 'privacy'), 'avoid')`, riskID, tenant); err != nil {
+			t.Fatalf("INSERT risk by slug: %v", err)
 		}
-		assertRiskCategory(ctx, t, tx, riskID, "privacy")
-
-		// Changing the enum moves the reference.
-		if _, err := tx.Exec(ctx,
-			`UPDATE risks SET category = 'financial' WHERE id = $1`, riskID); err != nil {
-			t.Fatalf("UPDATE category: %v", err)
+		var slug string
+		if err := tx.QueryRow(ctx, `
+			SELECT c.slug FROM risks r
+			JOIN org_risk_categories c ON c.id = r.category_id AND c.tenant_id = r.tenant_id
+			WHERE r.id = $1`, riskID).Scan(&slug); err != nil {
+			t.Fatalf("read risk category: %v", err)
 		}
-		assertRiskCategory(ctx, t, tx, riskID, "financial")
-
-		// Changing the reference moves the enum.
-		if _, err := tx.Exec(ctx, `
-			UPDATE risks SET category_id =
-			    (SELECT id FROM org_risk_categories WHERE tenant_id = $2 AND slug = 'integrity')
-			WHERE id = $1`, riskID, tenant); err != nil {
-			t.Fatalf("UPDATE category_id: %v", err)
+		if slug != "privacy" {
+			t.Errorf("risk category slug = %s, want privacy", slug)
 		}
-		assertRiskCategory(ctx, t, tx, riskID, "integrity")
 
-		// A disagreeing pair is refused.
 		err := inSavepoint(ctx, t, tx, func(sp pgx.Tx) error {
-			_, err := sp.Exec(ctx, `
-				INSERT INTO risks (id, tenant_id, title, category, treatment, category_id)
-				VALUES ($1, $2, 'mismatch', 'privacy', 'avoid',
-				    (SELECT id FROM org_risk_categories WHERE tenant_id = $2 AND slug = 'financial'))`,
-				uuid.NewString(), tenant)
+			_, err := sp.Exec(ctx, `SELECT risk_category_id($1, 'no-such-category')`, tenant)
 			return err
 		})
 		var pgErr *pgconn.PgError
-		if !errors.As(err, &pgErr) || pgErr.Code != pgErrCheckViolation {
-			t.Fatalf("disagreeing category pair: want SQLSTATE %s, got %v", pgErrCheckViolation, err)
+		if !errors.As(err, &pgErr) || pgErr.Code != pgErrForeignKeyViolation {
+			t.Fatalf("unknown slug: want SQLSTATE %s, got %v", pgErrForeignKeyViolation, err)
 		}
 	})
-}
-
-func assertRiskCategory(ctx context.Context, t *testing.T, tx pgx.Tx, riskID, wantSlug string) {
-	t.Helper()
-	var enum, slug string
-	if err := tx.QueryRow(ctx, `
-		SELECT r.category::text, c.slug FROM risks r
-		JOIN org_risk_categories c ON c.id = r.category_id AND c.tenant_id = r.tenant_id
-		WHERE r.id = $1`, riskID).Scan(&enum, &slug); err != nil {
-		t.Fatalf("read risk category: %v", err)
-	}
-	if enum != wantSlug || slug != wantSlug {
-		t.Errorf("risk category enum=%s reference slug=%s, want both %s", enum, slug, wantSlug)
-	}
 }

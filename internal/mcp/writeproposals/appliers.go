@@ -108,8 +108,8 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 
 	// #1810: resolve the category here, as the risk API does, so an
 	// unknown, archived or deleted category is a client error naming the
-	// problem rather than a constraint violation from the sync trigger.
-	category, categoryEnum, err := risk.ResolveCategoryTx(ctx, dbx.New(tx), p.TenantID, in.Category)
+	// problem rather than a foreign-key violation.
+	category, err := risk.ResolveCategoryTx(ctx, dbx.New(tx), p.TenantID, in.Category)
 	if err != nil {
 		if risk.IsCategoryRefusal(err) {
 			return "", fmt.Errorf("%w: apply create_risk: %s", ErrInvalidInput, err.Error())
@@ -120,12 +120,12 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	id := uuid.New()
 	_, err = tx.Exec(ctx, `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, category_id, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			accepted_until, accepter, instrument_reference, acceptance_status
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}'::jsonb, NULL, '', '', $11)
-	`, id, p.TenantID, in.Title, in.Description, categoryEnum, category.ID, methodology,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NULL, '', '', $10)
+	`, id, p.TenantID, in.Title, in.Description, category.ID, methodology,
 		[]byte(inherent), treatment, in.TreatmentOwner, risk.NullAcceptanceStatus(status))
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)

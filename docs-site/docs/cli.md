@@ -162,7 +162,7 @@ credential's tenant: a `--tenant` naming another tenant is refused, and
 `rotate` or `revoke` of another tenant's key reports it as unknown.
 
 `credentials issue --reset-bootstrap --force` is the first-login recovery
-path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way.
+path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way. An admin API key `--token` (such as `ATLAS_BOOTSTRAP_TOKEN`, single-tenant installs only) resets over gRPC at `--endpoint`; a super_admin JWT resets over HTTP at `--http-endpoint`.
 
 ## catalog
 

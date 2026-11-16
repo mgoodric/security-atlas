@@ -569,7 +569,6 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 			ID:             uuid.UUID(r.ID.Bytes),
 			Title:          r.Title,
 			Description:    r.Description,
-			Category:       string(r.Category),
 			Methodology:    string(r.Methodology),
 			InherentScore:  r.InherentScore,
 			Treatment:      string(r.Treatment),

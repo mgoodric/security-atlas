@@ -3589,12 +3589,12 @@ type Querier interface {
 	UpdateQuestionAnchor(ctx context.Context, arg UpdateQuestionAnchorParams) (QuestionnaireQuestion, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).
 	// updated_at is set explicitly so the schema's per-row default doesn't
-	// silently keep stale values.
+	// silently keep stale values. The category moves only through
+	// UpdateRiskCategory, which the caller audit-logs (#1812).
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
-	// #1812: move a risk onto another of the tenant's categories. Dual-writes
-	// the reference and the matching risk_category enum value until #1745's
-	// contract step drops the enum. The caller holds the row via LockRiskByID
-	// and has resolved the category as assignable.
+	// #1812: move a risk onto another of the tenant's categories. The caller
+	// holds the row via LockRiskByID and has resolved the category as
+	// assignable.
 	UpdateRiskCategory(ctx context.Context, arg UpdateRiskCategoryParams) (Risk, error)
 	// Rename: name and description only. The slug is immutable (trigger).
 	UpdateRiskCategoryText(ctx context.Context, arg UpdateRiskCategoryTextParams) (OrgRiskCategory, error)

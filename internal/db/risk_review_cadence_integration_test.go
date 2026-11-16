@@ -36,8 +36,8 @@ func insertRiskAt(ctx context.Context, t *testing.T, tx pgx.Tx, tenant string, c
 	t.Helper()
 	id := uuid.NewString()
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO risks (id, tenant_id, title, category, treatment, created_at, review_due_at)
-		VALUES ($1, $2, 'review cadence 2059', 'operational', 'avoid', $3, $4)
+		INSERT INTO risks (id, tenant_id, title, category_id, treatment, created_at, review_due_at)
+		VALUES ($1, $2, 'review cadence 2059', risk_category_id($2, 'operational'), 'avoid', $3, $4)
 	`, id, tenant, createdAt, reviewDue); err != nil {
 		t.Fatalf("INSERT risks: %v", err)
 	}

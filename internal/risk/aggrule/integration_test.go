@@ -91,11 +91,11 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, likelihoo
 	score, _ := json.Marshal(map[string]int{"likelihood": likelihood, "impact": impact})
 	_, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, methodology, inherent_score,
+			id, tenant_id, title, category_id, methodology, inherent_score,
 			treatment, treatment_owner, residual_score, accepter,
 			instrument_reference, level, org_unit_id, themes, created_at
 		) VALUES (
-			$1, $2, $3, 'operational', 'nist_800_30', $4,
+			$1, $2, $3, risk_category_id($2, 'operational'), 'nist_800_30', $4,
 			'avoid', '', '{}', '', '', 'team', $5, $6, $7
 		)`, id, tenant, title, score, orgUnit, themes, createdAt)
 	if err != nil {
