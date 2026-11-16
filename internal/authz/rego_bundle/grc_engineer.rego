@@ -13,6 +13,7 @@ package authz
 allow if {
     has_role("grc_engineer")
     input.action == "read"
+    not super_admin_only_resource
 }
 
 # Write + state transitions on the GRC operator surface.

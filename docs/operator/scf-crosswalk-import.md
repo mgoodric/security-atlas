@@ -194,6 +194,30 @@ A crosswalk that declares no release still binds in the current SCF release and
 prints a deprecation warning. The declaration becomes required in a later
 release.
 
+### Edges left on an older release (#1777)
+
+`atlas-cli catalog import-scf` queues every live edge still on an anchor of an
+older SCF release for review, and prints the counts as
+`edge_remap_proposals unchanged=… renamed=… split=… reused_id=… no_successor=…`.
+The classes are the same as for controls. Queueing changes no edge.
+
+Edges are global, so only a super-admin reviews them, through
+`/v1/admin/crosswalk-edge-remap-proposals`:
+
+- **List:** `GET /v1/admin/crosswalk-edge-remap-proposals?class=&status=`.
+- **Approve:** `POST …/{id}/approve` with `{"scf_id"?, "reason"?}`. A split or
+  no-successor proposal needs `scf_id`. Approval creates a copy of the edge on
+  that anchor in the new release, keeping its relationship, strength,
+  rationale, source attribution and tier.
+- **Reject:** `POST …/{id}/reject`. The proposal can be revisited later.
+- **Keep legacy:** `POST …/{id}/keep-legacy`. This is final.
+- **Bulk-approve:** `POST …/approve-unchanged` approves every open `unchanged`
+  proposal.
+
+Approval leaves the legacy edge untouched. Default coverage reads the current
+release, so it counts the new edge. `?scf_release=<old>` still reads the old
+one. A tenant admin who isn't a super-admin gets 403 on every route.
+
 All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
 reviewed or verified is a human governance step.

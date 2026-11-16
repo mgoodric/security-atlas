@@ -33,3 +33,14 @@ func TestPrintRebindReport(t *testing.T) {
 		t.Fatalf("output =\n%s\nwant\n%s", got, want)
 	}
 }
+
+// #1777: the SCF import reports the crosswalk-edge remap queue by class.
+func TestPrintEdgeRemapCounts(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	printEdgeRemapCounts(&buf, map[scfimport.RemapClass]int{scfimport.RemapRenamed: 2, scfimport.RemapNoSuccessor: 1})
+	want := "edge_remap_proposals unchanged=0 renamed=2 split=0 reused_id=0 no_successor=1\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
