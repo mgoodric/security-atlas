@@ -28,6 +28,7 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Person } from "@/components/ui/person";
 import {
   ACTION_PLAN_STATUSES,
   fetchActionPlansList,
@@ -118,13 +119,11 @@ function ActionPlansPageInner() {
       id: "owner_id",
       header: "Owner",
       cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          title={row.owner_id}
-          data-testid="action-plans-row-owner"
-        >
-          {row.owner_id.slice(0, 8)}…
-        </span>
+        <Person
+          id={row.owner_id}
+          className="text-xs text-muted-foreground"
+          testId="action-plans-row-owner"
+        />
       ),
     },
     {
