@@ -16,11 +16,15 @@
 
 CREATE TABLE IF NOT EXISTS user_onboarding_hint_dismissals (
     tenant_id     UUID NOT NULL,
-    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id       UUID NOT NULL,
     module        TEXT NOT NULL,
     dismissed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT user_onboarding_hint_dismissals_pk
         PRIMARY KEY (tenant_id, user_id, module),
+    -- Composite FK: the user must belong to the row's tenant.
+    CONSTRAINT user_onboarding_hint_dismissals_user_fk
+        FOREIGN KEY (tenant_id, user_id)
+        REFERENCES users (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT user_onboarding_hint_dismissals_module_check
         CHECK (module IN ('controls'))
 );

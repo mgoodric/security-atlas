@@ -44,7 +44,11 @@ export type HelpModule = {
   body: string;
 };
 
-/** Every module help file, by file name. A new file is added here. */
+/** Every module help file, by file name. A new file is added here.
+ *  A new module also gets a first-visit hint (#2145), so add its id to
+ *  `userprefs.HintModules` (internal/auth/userprefs/hints.go) and widen the
+ *  `user_onboarding_hint_dismissals` module CHECK in a new migration;
+ *  until then the hint shows but its dismissal is refused with a 400. */
 export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "controls.md": controlsSource,
 };
