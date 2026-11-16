@@ -1,6 +1,7 @@
 package soc2import_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,8 +26,9 @@ func TestLoad_ShippedDraftCrosswalkParses(t *testing.T) {
 	if cw.FrameworkVersion != "2017" {
 		t.Fatalf("framework_version = %q; want 2017", cw.FrameworkVersion)
 	}
-	if len(cw.Requirements) < 5 {
-		t.Fatalf("expected >=5 SOC 2 TSC requirements; got %d", len(cw.Requirements))
+	// 33 CC + 3 A + 2 C + 5 PI + 18 P (#1753).
+	if len(cw.Requirements) != 61 {
+		t.Fatalf("expected 61 SOC 2 TSC requirements; got %d", len(cw.Requirements))
 	}
 	if len(cw.Mappings) < 30 {
 		t.Fatalf("expected >=30 drafted mappings; got %d", len(cw.Mappings))
@@ -35,6 +37,63 @@ func TestLoad_ShippedDraftCrosswalkParses(t *testing.T) {
 	// signal an auditor reading the DB sees.
 	if cw.SourceAttribution != "community_draft" {
 		t.Fatalf("crosswalk-level source_attribution = %q; want community_draft", cw.SourceAttribution)
+	}
+}
+
+// #1753: all 18 Privacy criteria ship, each with a title, a body and at
+// least one mapping to an anchor the SCF sample carries.
+func TestLoad_ShippedCrosswalkCarriesPrivacyCriteria(t *testing.T) {
+	t.Parallel()
+	cw, err := soc2import.Load(filepath.Join("..", "..", "..", "data", "crosswalks", "soc2-tsc-2017.yaml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "migrations", "fixtures", "scf-sample.json"))
+	if err != nil {
+		t.Fatalf("read sample: %v", err)
+	}
+	var sample struct {
+		Controls []struct {
+			SCFID string `json:"scf_id"`
+		} `json:"controls"`
+	}
+	if err := json.Unmarshal(b, &sample); err != nil {
+		t.Fatalf("parse sample: %v", err)
+	}
+	inSample := map[string]bool{}
+	for _, c := range sample.Controls {
+		inSample[c.SCFID] = true
+	}
+	mapped := map[string]int{}
+	for _, m := range cw.Mappings {
+		if !inSample[m.SCFAnchor] {
+			t.Errorf("%s maps to %s, which the SCF sample does not carry", m.RequirementCode, m.SCFAnchor)
+		}
+		mapped[m.RequirementCode]++
+	}
+	want := []string{
+		"P1.1", "P2.1", "P3.1", "P3.2", "P4.1", "P4.2", "P4.3", "P5.1", "P5.2",
+		"P6.1", "P6.2", "P6.3", "P6.4", "P6.5", "P6.6", "P6.7", "P7.1", "P8.1",
+	}
+	got := map[string]soc2import.Requirement{}
+	for _, r := range cw.Requirements {
+		if strings.HasPrefix(r.Code, "P") && !strings.HasPrefix(r.Code, "PI") {
+			got[r.Code] = r
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("privacy criteria = %d; want %d", len(got), len(want))
+	}
+	for _, code := range want {
+		r, ok := got[code]
+		switch {
+		case !ok:
+			t.Errorf("%s missing", code)
+		case r.Title == "" || r.Body == "":
+			t.Errorf("%s has an empty title or body", code)
+		case mapped[code] == 0:
+			t.Errorf("%s has no SCF mapping", code)
+		}
 	}
 }
 
