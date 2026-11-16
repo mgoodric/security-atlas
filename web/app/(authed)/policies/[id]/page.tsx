@@ -32,6 +32,7 @@ import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 import { APIError } from "@/lib/api/base";
 import { fetchPolicyDetail } from "@/lib/api/policies";
 import { Markdown } from "@/components/markdown";
@@ -47,11 +48,6 @@ function statusPillVariant(
     default:
       return "secondary";
   }
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return iso.slice(0, 10);
 }
 
 // #1747 — the import validates source_url as an absolute http(s) URL;
@@ -176,13 +172,13 @@ export default function PolicyDetailPage({
             <div>
               <dt className="inline text-muted-foreground">Effective </dt>
               <dd className="inline font-mono text-foreground">
-                {formatDate(policy.effective_date)}
+                <Timestamp value={policy.effective_date} style="date" />
               </dd>
             </div>
             <div>
               <dt className="inline text-muted-foreground">Published </dt>
               <dd className="inline font-mono text-foreground">
-                {formatDate(policy.published_at)}
+                <Timestamp value={policy.published_at} style="date" />
               </dd>
             </div>
             {policy.next_review_at ? (
@@ -198,7 +194,7 @@ export default function PolicyDetailPage({
                   className="inline font-mono text-foreground"
                   data-testid="policy-detail-next-review"
                 >
-                  {formatDate(policy.next_review_at)}
+                  <Timestamp value={policy.next_review_at} style="date" />
                 </dd>
               </div>
             ) : null}
@@ -225,7 +221,10 @@ export default function PolicyDetailPage({
                   className="inline font-mono text-foreground"
                   data-testid="policy-detail-historical-approved-at"
                 >
-                  {formatDate(policy.historical_approved_at)}
+                  <Timestamp
+                    value={policy.historical_approved_at}
+                    style="date"
+                  />
                 </dd>
               </div>
               {sourceHref ? (
