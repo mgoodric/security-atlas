@@ -105,7 +105,9 @@ export function planTransitions(
         return pick("verify", "reopen");
       }
       return [{ ...T.reopen, primary: false }];
-    case "verified":
+    default:
+      // verified is terminal; a status the page does not know (a newer
+      // platform, a test fixture) offers nothing rather than crashing.
       return [];
   }
 }

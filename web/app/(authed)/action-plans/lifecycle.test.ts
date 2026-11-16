@@ -19,6 +19,10 @@ describe("planTransitions", () => {
     expect(ids("verified")).toEqual([]);
   });
 
+  it("offers nothing for a status it does not know", () => {
+    expect(ids("open" as never)).toEqual([]);
+  });
+
   it("marks exactly one primary where there is a forward step", () => {
     for (const s of ACTION_PLAN_STATUSES) {
       const primaries = planTransitions(s, verifier).filter((t) => t.primary);
