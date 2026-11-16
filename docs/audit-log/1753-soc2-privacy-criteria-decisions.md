@@ -13,26 +13,26 @@ AICPA SOC 2 text is never quoted (`data/crosswalks/README.md`, #2404; #1732 clos
 
 The candidates in the issue's prep comment were used where they fit. Titles in the table are verbatim from the 2026.3 pin.
 
-| Criterion | Anchor(s) (strength)                                                                                                       | Confidence |
-| --------- | -------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| P1.1      | PRI-21 Data Privacy Notice (0.9)                                                                                           | high       |
-| P2.1      | PRI-24 Data Subject Consent (0.9); PRI-27 Data Subject Opt-In Consent (0.6)                                                | high       |
-| P3.1      | PRI-31 Personal Data (PD) Collection Methods (0.8); PRI-12 Authority To Collect, Process, Store & Share PD (0.7)           | high       |
-| P3.2      | PRI-27 Data Subject Opt-In Consent (0.8)                                                                                   | high       |
-| P4.1      | PRI-29 Usage Restrictions of Personal Data (PD) (0.9)                                                                      | high       |
-| P4.2      | PRI-30 Personal Data (PD) Retention & Disposal (0.8)                                                                       | high       |
-| P4.3      | PRI-30 (0.8); AST-22 Secure Disposal, Destruction or Re-Use of Equipment (0.5)                                             | high / low |
-| P5.1      | PRI-39 Data Subject Rights Management (0.8); PRI-38 Data Subject Authentication (0.6)                                      | high       |
-| P5.2      | PRI-39 (0.7); PRI-08 Updating Personal Data (PD) Process (0.7)                                                             | high       |
-| P6.1      | PRI-16 Information Sharing With Third Parties (0.8); PRI-17 Limiting Personal Data (PD) Disclosures (0.7)                  | high       |
-| P6.2      | PRI-17.1 Accounting of Disclosures (0.9)                                                                                   | high       |
-| P6.3      | IRO-22 Data Breach (0.6)                                                                                                   | low        |
-| P6.4      | PRI-14 Data Privacy Requirements for Contractors & Service Providers (0.9); TPM-14 Third-Party Contract Requirements (0.6) | high       |
-| P6.5      | PRI-14 (0.6); TPM-14 (0.5)                                                                                                 | medium     |
-| P6.6      | IRO-22 Data Breach (0.8)                                                                                                   | high       |
-| P6.7      | PRI-17.1 Accounting of Disclosures (0.8)                                                                                   | high       |
-| P7.1      | PRI-35 Personal Data (PD) Accuracy & Integrity (0.9); PRI-08 (0.6)                                                         | high       |
-| P8.1      | PRI-11 Personal Data (PD) Control Testing, Training & Monitoring (0.6); PRI-37 Data Subject Communications (0.5)           | low        |
+| Criterion | Anchor(s) (strength)                                                                                                             | Confidence |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| P1.1      | PRI-21 Data Privacy Notice (0.9)                                                                                                 | high       |
+| P2.1      | PRI-24 Data Subject Consent (0.9); PRI-27 Data Subject Opt-In Consent (0.6)                                                      | high       |
+| P3.1      | PRI-31 Personal Data (PD) Collection Methods (0.8); PRI-12 Authority To Collect, Process, Store & Share Personal Data (PD) (0.7) | high       |
+| P3.2      | PRI-27 Data Subject Opt-In Consent (0.8)                                                                                         | high       |
+| P4.1      | PRI-29 Usage Restrictions of Personal Data (PD) (0.9)                                                                            | high       |
+| P4.2      | PRI-30 Personal Data (PD) Retention & Disposal (0.8)                                                                             | high       |
+| P4.3      | PRI-30 (0.8); AST-22 Secure Disposal, Destruction or Re-Use of Equipment (0.5)                                                   | high / low |
+| P5.1      | PRI-39 Data Subject Rights Management (0.8); PRI-38 Data Subject Authentication (0.6)                                            | high       |
+| P5.2      | PRI-39 (0.7); PRI-08 Updating Personal Data (PD) Process (0.7)                                                                   | high       |
+| P6.1      | PRI-16 Information Sharing With Third Parties (0.8); PRI-17 Limiting Personal Data (PD) Disclosures (0.7)                        | high       |
+| P6.2      | PRI-17.1 Accounting of Disclosures (0.9)                                                                                         | high       |
+| P6.3      | IRO-22 Data Breach (0.6)                                                                                                         | low        |
+| P6.4      | PRI-14 Data Privacy Requirements for Contractors & Service Providers (0.9); TPM-14 Third-Party Contract Requirements (0.6)       | high       |
+| P6.5      | PRI-14 (0.6); TPM-14 (0.5)                                                                                                       | medium     |
+| P6.6      | IRO-22 Data Breach (0.8)                                                                                                         | high       |
+| P6.7      | PRI-17.1 Accounting of Disclosures (0.8)                                                                                         | high       |
+| P7.1      | PRI-35 Personal Data (PD) Accuracy & Integrity (0.9); PRI-08 (0.6)                                                               | high       |
+| P8.1      | PRI-11 Personal Data (PD) Control Testing, Training & Monitoring (0.6); PRI-37 Data Subject Communications (0.5)                 | low        |
 
 Departures from the prep comment's list:
 
@@ -61,4 +61,4 @@ Test: `TestImport_FrozenSOC2VersionGainsPrivacyCriteria` imports the bundled fil
 
 ## D5 — Stock controls: none added
 
-No stock control under `controls/soc2/` anchors to the new PRI rows, so `go run ./cmd/scripts/coverage-check` (not wired into CI) now reports 44 / 61 TSC criteria reachable from a stock bundle, below its 80% gate (it was 43 / 43). A Privacy control kit is a separate piece of work; the ticket scopes the crosswalk only.
+No stock control under `controls/soc2/` anchors to the new PRI rows, so `go run ./cmd/scripts/coverage-check` (not wired into CI) now reports 44 / 61 TSC criteria reachable from a stock bundle, below its 80% gate (it was 43 / 43). A Privacy control kit is a separate piece of work, tracked in #2426; this ticket scopes the crosswalk only. Until #2426 lands, the self-host smoke test (`deploy/docker/test-self-host-bundle.sh` assertion 8b) carries a temporary exception: it expects exactly the 17 Privacy codes other than P4.3 to be unreached by stock controls. #2426 removes it.

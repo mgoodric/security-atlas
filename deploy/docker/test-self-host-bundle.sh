@@ -656,6 +656,10 @@ SOC2_WITH_EDGES="$(db_count "SELECT count(DISTINCT fr.id)
 [ "${SOC2_WITH_EDGES}" = "${SOC2_WANT}" ] \
     || fail "SOC 2 requirements with edges = ${SOC2_WITH_EDGES:-?}, want ${SOC2_WANT} (every requirement in soc2-tsc-2017.yaml)"
 #
+# TEMPORARY until security-atlas#2426 (stock SOC 2 Privacy control kit)
+# lands: remove SOC2_UNMAPPED_WANT and restore the reach-every-requirement
+# assertion (stock controls map to every SOC 2 requirement with edges).
+#
 # security-atlas#1753: the Privacy criteria P1.1-P8.1 have edges but no
 # stock control yet (the Privacy control kit is a follow-up); only P4.3
 # is reached, through AST-22. So the requirements the stock controls do
