@@ -315,6 +315,8 @@ func (h *Handler) Annotate(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusNotFound, "sample not found")
 		case errors.Is(err, audit.ErrInvalidAnnotation):
 			httpresp.WriteError(w, http.StatusBadRequest, "invalid annotation result")
+		case errors.Is(err, audit.ErrRecordNotInSample):
+			httpresp.WriteError(w, http.StatusBadRequest, "evidence_record_id is not in this sample")
 		default:
 			httperr.WriteInternal(w, r, "annotate sample", err)
 		}
