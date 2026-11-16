@@ -522,6 +522,11 @@ The mechanics:
 - Conventional Commit messages, DCO `Signed-off-by` (`git commit -s`) plus
   `Co-Authored-By` on AI-assisted commits — see "Style" above for the exact
   trailer rules.
+- A user-visible change adds a changelog fragment,
+  `changelog.d/<pr-or-issue>.<type>.md`, and never edits `CHANGELOG.md`.
+  A PR with nothing user-visible takes the `no-changelog` label instead. The
+  `changelog-fragment` check enforces it; `changelog.d/README.md` has the
+  format.
 - Push the branch and open a PR to `main`. Nothing auto-merges past the checks.
 - Merge is squash-merge, gated on the four required checks (see "Testing
   discipline"): `Go · build + test`, `Go · integration (Postgres RLS)`,
@@ -590,6 +595,11 @@ Before claiming completion:
    the completion receipt.
 
 ## Gotchas
+
+- **Never edit the top of `CHANGELOG.md`.** Every PR that did conflicted with
+  every other PR in flight, at the cost of a re-merge and a full CI cycle each
+  (#2357). Add `changelog.d/<pr-or-issue>.<type>.md`; the fragments are
+  assembled into `CHANGELOG.md` only at release time.
 
 - **`docs/issues/` is history.** Slice docs, `_STATUS.md`, `_INDEX.md`,
   `_events.jsonl` and `Plans/prompts/` record a retired workflow. They are

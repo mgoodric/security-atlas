@@ -1,0 +1,1 @@
+- **chromedp WS-URL fan-out (slice 341):** `WSURLReadTimeout(60s)` applied to `internal/board/pdf.go`, `internal/board/pack_pdf.go`, `internal/questionnaire/pdf.go`, `internal/audit/walkthrough/export.go` — preventive measure following slice 340's diagnostic.

@@ -1,0 +1,1 @@
+- test(dbtest): migrate internal authz + evidence-ingest + vendor integration suites to the slice-435 dbtest harness (742 drain batch 22).
