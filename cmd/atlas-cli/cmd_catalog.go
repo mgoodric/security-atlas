@@ -25,6 +25,7 @@ func newCatalogCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newCatalogImportSCFCmd())
 	cmd.AddCommand(newCatalogImportCrosswalkCmd())
+	cmd.AddCommand(newCatalogConvergeCrosswalksCmd())
 	cmd.AddCommand(newCatalogRemapCmd())
 	return cmd
 }
