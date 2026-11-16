@@ -86,3 +86,29 @@ super_admin_actions := {
     "write",
     "revoke",
 }
+
+# Super_admin ONLY surfaces (#1777): global catalog review queues whose
+# writes change rows shared by every tenant (#1757). Unlike the surfaces
+# above, a tenant admin is refused here: admin.rego's blanket allow
+# excludes them (`not super_admin_only_resource`), so only this rule
+# admits, and only for a super_admin. The handler checks the claim again.
+super_admin_only_resource if {
+    input.resource.type == "admin"
+    super_admin_only_segments[input.resource.id]
+}
+
+super_admin_only_segments := {
+    "crosswalk-edge-remap-proposals",
+}
+
+allow if {
+    is_super_admin
+    super_admin_only_resource
+    super_admin_only_actions[input.action]
+}
+
+super_admin_only_actions := {
+    "read",
+    "write",
+    "approve",
+}
