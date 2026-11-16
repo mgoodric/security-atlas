@@ -334,12 +334,12 @@ mappings:
     strength: 0.75
     rationale: "The Security Management Process (prevent/detect/contain/correct) is a facet of SCF Security, Compliance & Resilience Program (SCRP)."
   - requirement_code: "164.308(a)(1)(ii)(A)"
-    scf_anchor: "RSK-04"
+    scf_anchor: "RSK-13"
     relationship_type: "equal"
     strength: 0.9
     rationale: "HIPAA Risk Analysis maps directly to SCF Risk Assessment."
   - requirement_code: "164.308(a)(1)(ii)(B)"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "HIPAA Risk Management (reduce risks to reasonable level) is governed by the SCF Risk Management Program."
@@ -424,15 +424,15 @@ mappings:
     strength: 0.85
     rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Password Management (procedures for creating, changing, and safeguarding passwords) IS authenticator management; IAC-01 is the domain policy head that sits above it. IAC-14 Authenticator Management is the requirement's direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 3."
   - requirement_code: "164.308(a)(6)(i)"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Security Incident Procedures (policies to address incidents) are governed by the SCF Incident Response Plan."
+    rationale: "Security Incident Procedures (policies to address incidents) are governed by the SCF Incident Response Plan (IRP)."
   - requirement_code: "164.308(a)(6)(ii)"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Response and Reporting (respond, mitigate, document) maps directly to SCF Incident Response Plan execution."
+    rationale: "Response and Reporting (respond, mitigate, document) maps directly to SCF Incident Response Plan (IRP) execution."
   - requirement_code: "164.308(a)(7)(i)"
     scf_anchor: "BCD-04"
     relationship_type: "subset_of"
@@ -501,10 +501,10 @@ mappings:
     strength: 0.8
     rationale: "Access Control and Validation Procedures (control/validate person access by role, visitor control) are covered by SCF Physical Access Control."
   - requirement_code: "164.310(a)(2)(iv)"
-    scf_anchor: "MNT-02"
+    scf_anchor: "MNT-03"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Slice 567 re-point (was PES-08 @ 0.55). Maintenance Records (document repairs and modifications to the physical components of a facility which are related to security) is maintenance record-keeping, not physical access control; MNT-02 Controlled Maintenance carries the record-retention obligation. The fit stays partial because HIPAA scopes it to security-related facility components. Lift 0.55 -> 0.70 (LOW -> MEDIUM). See decisions log D6 row 6."
+    rationale: "Slice 567 re-point (was PES-08 @ 0.55). Maintenance Records (document repairs and modifications to the physical components of a facility which are related to security) is maintenance record-keeping, not physical access control; MNT-03 Controlled Maintenance carries the record-retention obligation. The fit stays partial because HIPAA scopes it to security-related facility components. Lift 0.55 -> 0.70 (LOW -> MEDIUM). See decisions log D6 row 6."
   - requirement_code: "164.310(b)"
     scf_anchor: "HRS-06.1"
     relationship_type: "intersects_with"

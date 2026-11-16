@@ -10,7 +10,7 @@ description: |
   obligations. Evidence is the URI of the live disclosure policy plus a
   sample log of inbound reports triaged in the period.
 
-scf_anchor_id: IRO-09
+scf_anchor_id: IRO-16
 control_family: IRO
 implementation_type: manual_periodic
 owner_role: security-engineering

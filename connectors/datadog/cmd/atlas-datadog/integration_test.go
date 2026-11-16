@@ -269,7 +269,7 @@ func TestRun_PushesSIEMSignalRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	rec, err := siemsignals.Build(signals[0], "scf:IRO-09", actorID("siemsignals"), "datadog", "prod")
+	rec, err := siemsignals.Build(signals[0], "scf:IRO-16", actorID("siemsignals"), "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestSIEMSignalEmittedRecords_NoBodyOrPII(t *testing.T) {
 			TriagerHandle: "victim@fixture.invalid"}, // email-shaped triager: dropped
 	}}
 	signals, _ := siemsignals.Collect(context.Background(), api, time.Hour, fixed)
-	rec, _ := siemsignals.Build(signals[0], "scf:IRO-09", actorID("siemsignals"), "datadog", "prod")
+	rec, _ := siemsignals.Build(signals[0], "scf:IRO-16", actorID("siemsignals"), "datadog", "prod")
 
 	allowed := map[string]bool{
 		"signal_id": true, "rule_id": true, "rule_name": true, "severity": true,
