@@ -12,13 +12,12 @@
 // `listPolicies` (web/lib/api.ts) — the BFF forwards verbatim. Mirrors
 // slice 104's hard-coded `?include=state` for anchors.
 //
-// Per slice 101 P0-A4 the list is read-only: the BFF only exposes GET.
-// Policy create / update / publish remain on the existing
-// `/v1/policies/...` routes for whichever surface owns the CRUD flow.
+// Slice 101 exposed GET only; #2116 adds POST, the create form's draft.
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { forwardJSON, noStore } from "@/lib/api/bff";
 import { listPolicies } from "@/lib/api/policies";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
@@ -38,4 +37,19 @@ export async function GET(): Promise<Response> {
       { status: e.status ?? 500 },
     );
   }
+}
+
+// #2116 — POST creates a draft (the /policies/new form, and "Create new
+// version" with a predecessor_id). The platform validates every field and
+// owns the 409 for a predecessor that already has a draft successor.
+export async function POST(req: Request): Promise<Response> {
+  let body: unknown;
+  try {
+    body = JSON.parse(await req.text());
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  return noStore(
+    await forwardJSON("/v1/policies", { method: "POST", jsonBody: body }),
+  );
 }

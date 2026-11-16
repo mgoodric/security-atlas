@@ -205,3 +205,96 @@ export async function fetchPolicyDetail(
   }
   return (await res.json()) as PolicyDetailResponse;
 }
+
+// ----- #2116: create, edit and the workflow from the app -----
+//
+// Browser-side calls to the policy BFF. The platform enforces every rule
+// (the draft-only edit and discard, the approval rule, the publish block
+// on a policy with no linked control); these only carry the request and
+// surface the platform's message.
+
+/** The fields a draft's author sets; version is fixed at create. */
+export type PolicyDraftInput = {
+  title: string;
+  body_md: string;
+  owner_role: string;
+  approver_role: string;
+  linked_control_ids: string[];
+  acknowledgment_required_roles: string[];
+};
+
+export type CreatePolicyInput = PolicyDraftInput & {
+  version: string;
+  /** Set by "Create new version": the published policy this revises. */
+  predecessor_id?: string;
+};
+
+export type PublishPolicyInput = {
+  new_version: string;
+  /** YYYY-MM-DD; omitted publishes effective today. */
+  effective_date?: string;
+  /** YYYY-MM-DD; omitted publishes with no review date. */
+  next_review_at?: string;
+};
+
+async function parsePolicy(res: Response): Promise<Policy> {
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return ((await res.json()) as { policy: Policy }).policy;
+}
+
+function jsonInit(method: string, body?: unknown): RequestInit {
+  return body === undefined
+    ? { method }
+    : {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      };
+}
+
+export async function createPolicy(input: CreatePolicyInput): Promise<Policy> {
+  return parsePolicy(await fetch("/api/policies", jsonInit("POST", input)));
+}
+
+export async function updatePolicyDraft(
+  id: string,
+  input: PolicyDraftInput,
+): Promise<Policy> {
+  return parsePolicy(
+    await fetch(
+      `/api/policies/${encodeURIComponent(id)}`,
+      jsonInit("PATCH", input),
+    ),
+  );
+}
+
+export async function discardPolicyDraft(id: string): Promise<void> {
+  const res = await fetch(`/api/policies/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) await parsePolicy(res);
+}
+
+export type PolicyTransition = "submit" | "approve" | "publish";
+
+export async function transitionPolicy(
+  id: string,
+  action: PolicyTransition,
+  body?: PublishPolicyInput,
+): Promise<Policy> {
+  return parsePolicy(
+    await fetch(
+      `/api/policies/${encodeURIComponent(id)}/${action}`,
+      jsonInit("POST", body),
+    ),
+  );
+}

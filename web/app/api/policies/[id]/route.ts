@@ -7,9 +7,9 @@
 // #6) — this route MUST NOT accept or forward a client-supplied
 // tenant_id; the only tenant context is the cookie session.
 //
-// Read-only: only GET is exposed. Policy submit / approve / publish stay
-// on their existing `/v1/policies/{id}/...` routes (out of scope for the
-// detail page per slice 672 anti-criteria).
+// #2116 adds PATCH (edit a draft) and DELETE (discard a draft); the
+// workflow transitions proxy through `./[action]/route.ts`. The platform
+// refuses either on a policy that has left draft (409).
 //
 // Error mapping (slice 367 — never leak an internal error to the user):
 //   - missing bearer cookie         -> 401 { error: "unauthenticated" }
@@ -24,6 +24,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { APIError } from "@/lib/api/base";
+import { forwardJSON, noStore, rejectNonUUID } from "@/lib/api/bff";
 import { getPolicy, getPolicyAckRate } from "@/lib/api/policies";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
@@ -63,4 +64,39 @@ export async function GET(
       { status: e.status ?? 500 },
     );
   }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
+  let body: unknown;
+  try {
+    body = JSON.parse(await req.text());
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  return noStore(
+    await forwardJSON(`/v1/policies/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      jsonBody: body,
+    }),
+  );
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
+  return noStore(
+    await forwardJSON(`/v1/policies/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  );
 }
