@@ -52,3 +52,24 @@ export async function bffControlFetch<T>(path: string): Promise<T> {
   }
   return (await res.json()) as T;
 }
+
+// bffPostJSON posts to a BFF route and returns the parsed body, or throws
+// an APIError carrying the platform's status and `{error}` message (409
+// "already running", 400 "reason is required", ...). Moved here from
+// control-imports.ts (#1778) so the remap review client shares it.
+export async function bffPostJSON<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers:
+      body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const parsed = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    throw new APIError(
+      res.status,
+      parsed.error ?? `request failed (${res.status})`,
+    );
+  }
+  return parsed as T;
+}
