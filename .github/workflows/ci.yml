@@ -3641,6 +3641,59 @@ jobs:
         run: bash scripts/check-migration-timestamps.sh
 
   # ====================================================================
+  # #2357 — changelog fragments (HARD FAIL).
+  #
+  # Unreleased changes live in changelog.d/<pr-or-issue>.<type>.md, not
+  # at the top of CHANGELOG.md, so parallel PRs stop conflicting on it.
+  # Every event validates the fragments. On a pull_request, a PR that
+  # changes code must also add one, unless it carries the `no-changelog`
+  # label, changes only docs, or comes from Dependabot or release-please.
+  #
+  # Labels are read from the API at run time, not from the event
+  # payload, so adding the label and re-running this job is enough; the
+  # workflow does not trigger on `labeled`, which would re-run all of CI.
+  #
+  # Local repro: `bash scripts/changelog.sh check`
+  #   self-test: `bash scripts/changelog_test.sh`
+  # ====================================================================
+  changelog-fragment:
+    name: changelog-fragment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run changelog self-test
+        run: bash scripts/changelog_test.sh
+
+      - name: Validate fragments
+        run: bash scripts/changelog.sh check
+
+      - name: Require a fragment on user-visible PRs
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
+          export PR_LABELS
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' >"$RUNNER_TEMP/files.txt"
+          bash scripts/changelog.sh require <"$RUNNER_TEMP/files.txt"
+
+  # ====================================================================
   # #1887 — merge-gate needs-completeness (HARD FAIL).
   #
   # Refuses a job that runs on every PR (no job-level `if:`) but is not in
@@ -4031,6 +4084,7 @@ jobs:
       - integration-enrolment-check # integration-enrolment-check (unconditional, #1887)
       - merge-gate-needs-check # merge-gate-needs-check (unconditional, #1887)
       - stub-twin-check # stub-twin-check (unconditional, #2099)
+      - changelog-fragment # changelog-fragment (unconditional, #2357)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
