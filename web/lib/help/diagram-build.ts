@@ -106,13 +106,23 @@ export function readStamp(svg: string): string | undefined {
  * `on*` event-handler attributes, and links that are not same-document
  * fragments. Mermaid can emit handlers (its click directive), and the
  * diagram check runs `unsafeSvgParts` over every committed file as well.
+ *
+ * The removals repeat until nothing changes, so a removal cannot join two
+ * fragments into a new `<script` or handler, and anything still unsafe
+ * afterwards throws rather than being written.
  */
 export function sanitizeSvg(svg: string): string {
-  const clean = svg
-    .replace(/<script\b[^>]*\/>/gi, "")
-    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, "")
-    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/\s+(?:xlink:)?href\s*=\s*("(?!#)[^"]*"|'(?!#)[^']*')/gi, "");
+  let clean = svg;
+  let previous: string;
+  do {
+    previous = clean;
+    clean = clean
+      .replace(/<script\b[^>]*\/>/gi, "")
+      .replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, "")
+      .replace(/<\/?script\b[^>]*>?/gi, "")
+      .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      .replace(/\s+(?:xlink:)?href\s*=\s*("(?!#)[^"]*"|'(?!#)[^']*')/gi, "");
+  } while (clean !== previous);
   const left = unsafeSvgParts(clean);
   if (left.length > 0) {
     throw new Error(`rendered SVG is still unsafe: ${left.join(", ")}`);

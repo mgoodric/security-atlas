@@ -270,6 +270,14 @@ describe("sanitizeSvg", () => {
     );
   });
 
+  it("removes a script that a first pass would reassemble, and odd end tags", () => {
+    const clean = sanitizeSvg(
+      '<svg><scr<script>x</script>ipt>alert(1)</script\t\n bar><g o onclick="a()"nclick="b()"/></svg>',
+    );
+    expect(unsafeSvgParts(clean)).toEqual([]);
+    expect(clean).not.toMatch(/script|onclick/i);
+  });
+
   it("refuses an SVG with HTML labels", () => {
     expect(() =>
       sanitizeSvg("<svg><foreignObject><div>x</div></foreignObject></svg>"),
