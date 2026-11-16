@@ -74,6 +74,9 @@ func (s *Server) registerGraph(root *chi.Mux) {
 	// #1801: the "audited under" report.
 	root.Get("/v1/mapping-overlays/audited-under", overlaysH.AuditedUnder)
 	root.Get("/v1/mapping-overlays/audited-under/export", overlaysH.AuditedUnderExport)
+	// #1804: overlay edges left on an older SCF release's anchor, queued by
+	// the SCF import, decided by the tenant's own writers.
+	overlaysH.RegisterRemapRoutes(root)
 	// Slice 013: evidence ledger write API. Only mounted when an ingest
 	// service has been wired in (DB-backed). Unit-only servers leave it
 	// nil and exclusively use the slice-003 gRPC fallback path.

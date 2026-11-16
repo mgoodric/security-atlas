@@ -345,6 +345,7 @@ func Classify(err error) (code, reason string, ok bool) {
 	var (
 		invalid *InvalidEdgeError
 		catalog *CatalogEdgeExistsError
+		remap   *InvalidRemapError
 	)
 	switch {
 	case errors.As(err, &invalid):
@@ -366,6 +367,18 @@ func Classify(err error) (code, reason string, ok bool) {
 		return "already_retired", "the overlay edge is already retired", true
 	case errors.Is(err, ErrNotFound):
 		return "not_found", "overlay edge not found", true
+	case errors.As(err, &remap):
+		return "invalid_remap_decision", remap.Reason, true
+	case errors.Is(err, ErrRemapNotFound):
+		return "remap_proposal_not_found", "remap proposal not found", true
+	case errors.Is(err, ErrRemapDecided):
+		return "remap_proposal_decided", "the remap proposal is already decided", true
+	case errors.Is(err, ErrRemapAnchorRequired):
+		return "remap_anchor_required", "choose the successor anchor (scf_id) to approve this proposal", true
+	case errors.Is(err, ErrRemapAnchorNotInRelease):
+		return "remap_anchor_not_in_release", "the chosen anchor is not in the target SCF release", true
+	case errors.Is(err, ErrRemapEdgeChanged):
+		return "remap_edge_changed", "the overlay edge changed since the proposal was queued", true
 	}
 	return "", "", false
 }

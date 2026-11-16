@@ -44,3 +44,14 @@ func TestPrintEdgeRemapCounts(t *testing.T) {
 		t.Fatalf("output = %q; want %q", got, want)
 	}
 }
+
+// #1804: the SCF import reports the overlay-edge remap queue by class.
+func TestPrintOverlayRemapCounts(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	printOverlayRemapCounts(&buf, map[scfimport.RemapClass]int{scfimport.RemapSplit: 3})
+	want := "overlay_remap_proposals unchanged=0 renamed=0 split=3 reused_id=0 no_successor=0\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
