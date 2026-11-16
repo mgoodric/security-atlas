@@ -101,8 +101,9 @@ type Querier interface {
 	// ===== auditor_assignments =====
 	// Insert an (tenant, user, period) assignment. ON CONFLICT DO NOTHING makes
 	// repeated calls idempotent -- granting the same auditor to the same period
-	// twice is a no-op rather than an error.
-	AssignAuditor(ctx context.Context, arg AssignAuditorParams) error
+	// twice is a no-op rather than an error. The row count says whether the
+	// grant is new (#2118 logs only new grants).
+	AssignAuditor(ctx context.Context, arg AssignAuditorParams) (int64, error)
 	// AC-4: stamp populations.audit_period_id with the period id. The
 	// populations.frozen_at column gets stamped in a sibling statement
 	// (SetPopulationFrozenAt) when the period is frozen at the time of
@@ -1453,6 +1454,9 @@ type Querier interface {
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
+	// #2118: whether user_id is an active user of this tenant holding the
+	// auditor role. The assign route refuses anyone else.
+	IsActiveTenantAuditor(ctx context.Context, arg IsActiveTenantAuditorParams) (bool, error)
 	// Issue #1776: whether a control row is the revision a person's approved SCF
 	// remap decision created. The upload path keeps such a revision when the
 	// boot seed re-uploads the stock manifest it replaced, so a reviewed
@@ -1884,6 +1888,15 @@ type Querier interface {
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.
 	ListAuditorAssignmentsForUser(ctx context.Context, arg ListAuditorAssignmentsForUserParams) ([]ListAuditorAssignmentsForUserRow, error)
+	// #2118: the picker's choices: active users of this tenant holding the
+	// auditor role and not yet assigned to the period. Tenant-scoped here, so
+	// a super-admin caller sees only the current tenant's users.
+	ListAuditorCandidatesForPeriod(ctx context.Context, arg ListAuditorCandidatesForPeriodParams) ([]ListAuditorCandidatesForPeriodRow, error)
+	// #2118: the auditors assigned to one period, with the display fields
+	// GET /v1/admin/users already shows an admin. user_id is the bare user
+	// uuid (20261021000000); a row whose user no longer resolves still lists,
+	// with empty name and email, so an admin can remove it.
+	ListAuditorsForPeriod(ctx context.Context, arg ListAuditorsForPeriodParams) ([]ListAuditorsForPeriodRow, error)
 	// Enumerate every brief for the tenant, newest report-date first.
 	ListBoardBriefs(ctx context.Context, tenantID pgtype.UUID) ([]BoardBrief, error)
 	// Enumerate every pack for the tenant, newest report-date first.
@@ -3271,6 +3284,9 @@ type Querier interface {
 	// Clears every member of a group (Replace `members`, or Delete soft-disable).
 	// Returns affected-row count.
 	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)
+	// #2118: drop one (tenant, user, period) assignment. Returns the row
+	// count so the caller logs only a removal that happened.
+	RemoveAuditor(ctx context.Context, arg RemoveAuditorParams) (int64, error)
 	// Removes a single (group, user) membership edge. Returns affected-row count.
 	RemoveSCIMGroupMember(ctx context.Context, arg RemoveSCIMGroupMemberParams) (int64, error)
 	// Replace a theme name in every one of the tenant's risk theme arrays,

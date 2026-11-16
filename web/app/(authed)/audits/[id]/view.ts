@@ -8,6 +8,32 @@ import type {
 } from "@/lib/api/audit-periods";
 import { APIError } from "@/lib/api/base";
 
+/** #2118: the name an admin sees for an assigned auditor or a candidate:
+ *  the display name, else the email, else the bare id (a grant whose user
+ *  has since been deleted still lists, so it can be removed). */
+export function auditorLabel(a: {
+  user_id: string;
+  display_name: string;
+  email: string;
+}): string {
+  if (a.display_name && a.email) return `${a.display_name} (${a.email})`;
+  return a.display_name || a.email || a.user_id;
+}
+
+/** #2118: the toast for a failed assign or remove. */
+export function auditorChangeErrorMessage(err: unknown): string {
+  if (err instanceof APIError) {
+    if (err.status === 403) {
+      return "Only an admin can change this period's auditors.";
+    }
+    if (err.status === 404) {
+      return "That auditor is no longer assigned to this period.";
+    }
+    return `Could not change the auditors: ${err.message}`;
+  }
+  return "Could not change the auditors.";
+}
+
 /** The freeze confirm's prompt. Freezing is irreversible, and the text
  *  says so before the operator commits. */
 export const FREEZE_CONFIRM_PROMPT =
