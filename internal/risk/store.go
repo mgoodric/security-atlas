@@ -157,13 +157,10 @@ type Risk struct {
 	TenantID    uuid.UUID
 	Title       string
 	Description string
-	Category    dbx.RiskCategory
-	// CategoryID references the tenant's own category (#1809), the one
-	// whose slug equals Category.
+	// CategoryID references the tenant's own category (#1809).
 	CategoryID uuid.UUID
 	// CategorySlug and CategoryName are read from the category CategoryID
-	// references (#1812), not from the enum. Every Store read that returns
-	// a Risk sets them.
+	// references (#1812). Every Store read that returns a Risk sets them.
 	CategorySlug  string
 	CategoryName  string
 	Methodology   dbx.RiskMethodology
@@ -197,10 +194,9 @@ type Risk struct {
 type CreateInput struct {
 	Title       string
 	Description string
-	Category    dbx.RiskCategory
-	// CategoryRef names the risk's category by slug or by id (#1809). When
-	// empty, Category is used as the slug. Either way the risk is written
-	// with both the tenant's category reference and the matching enum.
+	// CategoryRef names the risk's category by slug, id or display name
+	// (#1809, #1815). The seeded slugs are the retired risk_category enum's
+	// values, so a client sending `operational` still works.
 	CategoryRef   string
 	Methodology   dbx.RiskMethodology
 	InherentScore []byte
@@ -275,11 +271,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		if err != nil {
 			return err
 		}
-		categoryRef := in.CategoryRef
-		if categoryRef == "" {
-			categoryRef = string(in.Category)
-		}
-		category, categoryEnum, err := resolveCategory(ctx, q, tenantID, categoryRef)
+		category, err := resolveCategory(ctx, q, tenantID, in.CategoryRef)
 		if err != nil {
 			return err
 		}
@@ -289,7 +281,6 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			TenantID:            pgUUID(tenantID),
 			Title:               in.Title,
 			Description:         in.Description,
-			Category:            categoryEnum,
 			CategoryID:          pgUUID(category.ID),
 			Methodology:         in.Methodology,
 			InherentScore:       in.InherentScore,
@@ -815,7 +806,6 @@ func riskFromRow(r dbx.Risk) Risk {
 		TenantID:            uuid.UUID(r.TenantID.Bytes),
 		Title:               r.Title,
 		Description:         r.Description,
-		Category:            r.Category,
 		CategoryID:          uuid.UUID(r.CategoryID.Bytes),
 		Methodology:         r.Methodology,
 		InherentScore:       r.InherentScore,

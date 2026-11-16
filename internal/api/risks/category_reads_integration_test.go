@@ -7,7 +7,7 @@
 // theme, and the meta-risk the rule produced.
 //
 //   - the risk response carries the category's slug, id and name, read from
-//     the reference (a rename shows up without touching the enum);
+//     the reference (a rename shows up on every risk in the category);
 //   - ?category= takes one slug or several, per tenant;
 //   - an archived category is refused for a new risk and for a move onto
 //     it, while a risk already on it reads fine and can be moved off it;
@@ -29,11 +29,13 @@ import (
 )
 
 // riskIDsByCategory reads the tenant's risk ids in one category straight
-// from the table, by the enum the fixture wrote.
+// from the table, by the slug of the category each references.
 func riskIDsByCategory(t *testing.T, admin *pgxpool.Pool, tenant, category string) []string {
 	t.Helper()
-	rows, err := admin.Query(context.Background(),
-		`SELECT id::text FROM risks WHERE tenant_id = $1 AND category = $2::risk_category ORDER BY id`,
+	rows, err := admin.Query(context.Background(), `
+		SELECT r.id::text FROM risks r
+		JOIN org_risk_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
+		WHERE r.tenant_id = $1 AND c.slug = $2 ORDER BY r.id`,
 		tenant, category)
 	if err != nil {
 		t.Fatalf("read %s risks: %v", category, err)
@@ -223,9 +225,8 @@ func TestRiskCategoryReads_ArchivedCategoryRefusedForNewAssignments(t *testing.T
 	if got := body["risk"].(map[string]any); got["category"] != "operational" || got["category_name"] != "Operational" {
 		t.Fatalf("move off archived category: category=%v category_name=%v", got["category"], got["category_name"])
 	}
-	enum, slug, _, _ := storedCategory(t, admin, riskID)
-	if enum != "operational" || slug != "operational" {
-		t.Fatalf("after move: stored enum=%s reference slug=%s, want both operational", enum, slug)
+	if slug, _, _ := storedCategory(t, admin, riskID); slug != "operational" {
+		t.Fatalf("after move: stored reference slug=%s, want operational", slug)
 	}
 	var audited int
 	if err := admin.QueryRow(context.Background(), `

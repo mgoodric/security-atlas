@@ -2,7 +2,7 @@
 
 // #1810: a create_risk proposal resolves its category the way POST
 // /v1/risks does. A deleted or archived category is a 400 on confirm, not a
-// 500 from the category sync trigger, and nothing is written; a valid one
+// 500 from a foreign-key violation, and nothing is written; a valid one
 // stores the tenant's category reference.
 
 package mcpwriteproposals_test
@@ -68,15 +68,15 @@ func TestHTTP_ConfirmCreateRisk_ResolvesCategory(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("confirm create_risk in operational: %d %s", resp.StatusCode, raw)
 	}
-	var enum, slug string
+	var slug string
 	if err := admin.QueryRow(ctx, `
-		SELECT r.category::text, c.slug FROM risks r
+		SELECT c.slug FROM risks r
 		JOIN org_risk_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
-		WHERE r.tenant_id = $1`, tenant).Scan(&enum, &slug); err != nil {
+		WHERE r.tenant_id = $1`, tenant).Scan(&slug); err != nil {
 		t.Fatalf("read created risk: %v", err)
 	}
-	if enum != "operational" || slug != "operational" {
-		t.Fatalf("created risk category enum=%s ref=%s, want operational for both", enum, slug)
+	if slug != "operational" {
+		t.Fatalf("created risk category ref=%s, want operational", slug)
 	}
 }
 

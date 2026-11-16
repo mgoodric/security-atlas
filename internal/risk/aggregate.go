@@ -214,13 +214,12 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 		// decision (#1746); untreated needs no linked controls or side
 		// fields. Category derived from the first child's category.
 		parentID := uuid.New()
-		category := childRows[0].Category
 		row, err := q.CreateAggregateRisk(ctx, dbx.CreateAggregateRiskParams{
 			ID:                  pgUUID(parentID),
 			TenantID:            pgUUID(tenantID),
 			Title:               in.ParentTitle,
 			Description:         fmt.Sprintf("Manual aggregation of %d child risks via %s.", len(dedupedChildren), in.SeverityFunction),
-			Category:            category,
+			CategoryID:          childRows[0].CategoryID,
 			Methodology:         dbx.RiskMethodologyQualitative5x5,
 			InherentScore:       inherentBytes,
 			Treatment:           dbx.RiskTreatmentUntreated,

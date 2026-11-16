@@ -67,12 +67,12 @@ BEGIN;
 SET LOCAL app.current_tenant = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
 -- The risk carries its category reference, looked up by slug in this
--- tenant's own categories (#1816); the enum is dual-written until the
--- contract step drops it. seed_risk_categories is idempotent.
+-- tenant's own categories (#1816); the risk_category enum is gone (#1819).
+-- seed_risk_categories is idempotent.
 SELECT seed_risk_categories('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 INSERT INTO risks (
-    id, tenant_id, title, description, category, category_id, treatment,
+    id, tenant_id, title, description, category_id, treatment,
     treatment_owner, inherent_score, residual_score
 )
 VALUES (
@@ -80,7 +80,6 @@ VALUES (
     'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     'Tenant-A-only cross-tenant-leak canary risk',
     'A risk seeded only in tenant A. The slice 389 e2e spec asserts this row is invisible from tenant B through real PostgreSQL RLS.',
-    'confidentiality',
     (SELECT id FROM org_risk_categories
      WHERE tenant_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND slug = 'confidentiality'),
     'mitigate',

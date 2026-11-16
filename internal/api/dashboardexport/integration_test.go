@@ -132,12 +132,12 @@ func seedRisk(t *testing.T, tenant uuid.UUID, titleHint string) (uuid.UUID, stri
 	title := titleHint + "-" + uuid.NewString()[:8]
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score
 		)
 		VALUES (
 			$1, $2, $3, 'slice 269 seeded risk',
-			'operational', 'nist_800_30',
+			risk_category_id($2, 'operational'), 'nist_800_30',
 			'{"likelihood":3,"impact":4,"value":12}'::jsonb,
 			'mitigate', 'platform-eng',
 			'{"likelihood":2,"impact":3,"value":6}'::jsonb

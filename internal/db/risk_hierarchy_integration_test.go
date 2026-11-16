@@ -338,10 +338,10 @@ func TestRisks_NewColumnsRoundTrip(t *testing.T) {
 		// path the slice-002 helper exercises).
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO risks (
-				id, tenant_id, title, category, treatment,
+				id, tenant_id, title, category_id, treatment,
 				level, org_unit_id, themes
 			)
-			VALUES ($1, $2, 'Themed company risk', 'operational', 'avoid',
+			VALUES ($1, $2, 'Themed company risk', risk_category_id($2, 'operational'), 'avoid',
 				'company', $3, ARRAY['ownership','tech-debt']::text[])
 		`, riskID, tenant, orgUnitID); err != nil {
 			t.Fatalf("INSERT risks with new cols: %v", err)
@@ -444,8 +444,8 @@ func mustInsertOrgUnit(ctx context.Context, t *testing.T, tx pgx.Tx, tenant, org
 func mustInsertRisk(ctx context.Context, t *testing.T, tx pgx.Tx, tenant, riskID, title, category string) {
 	t.Helper()
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO risks (id, tenant_id, title, category, treatment)
-		VALUES ($1, $2, $3, $4::risk_category, 'avoid')
+		INSERT INTO risks (id, tenant_id, title, category_id, treatment)
+		VALUES ($1, $2, $3, risk_category_id($2, $4), 'avoid')
 	`, riskID, tenant, title, category); err != nil {
 		t.Fatalf("INSERT risks: %v", err)
 	}

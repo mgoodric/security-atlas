@@ -97,7 +97,7 @@ func seedPopulationWithSample(t *testing.T, tx pgx.Tx, tenant, control uuid.UUID
 func seedRisk(t *testing.T, tx pgx.Tx, tenant uuid.UUID) {
 	t.Helper()
 	if _, err := tx.Exec(context.Background(),
-		`INSERT INTO risks (id, tenant_id, title, category) VALUES ($1, $2, 'unbound-rows test', 'operational')`,
+		`INSERT INTO risks (id, tenant_id, title, category_id) VALUES ($1, $2, 'unbound-rows test', risk_category_id($2, 'operational'))`,
 		uuid.New(), tenant,
 	); err != nil {
 		t.Fatalf("insert risk: %v", err)
