@@ -14,15 +14,37 @@ binaries — build the target explicitly, or use `go run ./cmd/atlas-cli`.
 
 Every subcommand that talks to a running platform accepts these:
 
-| Flag         | Env var                   | Notes                                     |
-| ------------ | ------------------------- | ----------------------------------------- |
-| `--endpoint` | `SECURITY_ATLAS_ENDPOINT` | **gRPC** endpoint, e.g. `localhost:50051` |
-| `--token`    | `SECURITY_ATLAS_TOKEN`    | Bearer token                              |
-| `--insecure` | —                         | Disable TLS. Loopback endpoints only.     |
+| Flag                    | Env var                   | Notes                                                      |
+| ----------------------- | ------------------------- | ---------------------------------------------------------- |
+| `--endpoint`            | `SECURITY_ATLAS_ENDPOINT` | **gRPC** endpoint, e.g. `localhost:50051`                  |
+| `--token`               | `SECURITY_ATLAS_TOKEN`    | Bearer token                                               |
+| `--insecure`            | —                         | Disable TLS. Loopback endpoints only.                      |
+| `--allow-insecure-http` | —                         | Let REST commands use plain `http://` to any host. Unsafe. |
 
 `--insecure` is refused unless the endpoint's host is `localhost`, an address
-in `127.0.0.0/8`, or `::1`. The host is parsed, not prefix-matched, so
-`localhost.example.com` is refused too.
+in `127.0.0.0/8` (including `::ffff:127.0.0.1`), or `::1`. The host is parsed,
+not prefix-matched, so `localhost.example.com` is refused too. The check is
+literal and never consults DNS: a name that resolves to loopback, such as
+`127.0.0.1.nip.io`, is refused, and so is the fully qualified `localhost.`.
+Every connector applies the same rule to its own `--insecure`, on the
+registry dial as well as the push path.
+
+### Plain `http://` for REST commands
+
+The REST commands (`controls upload`, `controls import` and its subcommands
+including `export`, `features`, `taxonomy`, `mappings`, `credentials
+reset-bootstrap`, `policy import`, `login`, and the OAuth token request behind
+`controls upload --client-id`) refuse to send to an `http://` URL whose host
+is not loopback, by the same rule as `--insecure`. The refusal happens before
+anything is sent, so the bearer, the client secret or the device-flow token
+never crosses the wire in the clear. It applies to every redirect hop as
+well, so an `https://` endpoint that redirects to a non-loopback `http://`
+URL is refused at the redirect.
+
+`https://` is unaffected, and so is `http://localhost:8080` for local
+development. To send to a non-loopback `http://` URL anyway, for example
+inside a private network you trust, pass `--allow-insecure-http`; the CLI
+prints a warning on stderr every time it is set.
 
 Commands that write directly to Postgres (`catalog`, `policy seed-stock`,
 `demo`, `evidence verify`) take a `--dsn` / `--database-url` instead and read

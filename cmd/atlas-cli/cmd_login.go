@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 )
 
 // LoginCredentialsPath is the on-disk location the device-code flow
@@ -127,7 +129,9 @@ type tokenResponse struct {
 // integration tests exercise the full end-to-end path).
 func runDeviceCodeLogin(ctx context.Context, w io.Writer, issuerURL, clientID string) error {
 	issuerURL = strings.TrimRight(issuerURL, "/")
-	httpClient := &http.Client{Timeout: 30 * time.Second}
+	// #2257: cmdhttp refuses a non-loopback http:// issuer, so neither the
+	// device code nor the token it redeems for crosses the wire in clear.
+	httpClient := cmdhttp.Client(30 * time.Second)
 
 	// Step 1: initiate the device-authorization flow.
 	auth, err := postDeviceAuthorization(ctx, httpClient, issuerURL, clientID)

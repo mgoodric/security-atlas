@@ -2,19 +2,18 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -26,6 +25,19 @@ var common struct {
 	endpoint string
 	token    string
 	insecure bool
+	// allowInsecureHTTP is --allow-insecure-http: the opt-out from the
+	// REST commands' refusal to send to a non-loopback http:// URL.
+	allowInsecureHTTP bool
+}
+
+// applyAllowInsecureHTTP hands --allow-insecure-http to cmdhttp, whose
+// transport guard every REST call goes through, and warns when it is set
+// (#2257).
+func applyAllowInsecureHTTP(w io.Writer) {
+	cmdhttp.SetAllowInsecureHTTP(common.allowInsecureHTTP)
+	if common.allowInsecureHTTP {
+		_, _ = fmt.Fprintln(w, "WARNING: --allow-insecure-http is set: REST requests to a non-loopback http:// URL are sent unencrypted, bearer token included")
+	}
 }
 
 func resolveCommon() error {
@@ -53,19 +65,16 @@ func newSDKClient() (*sdk.Client, error) {
 }
 
 func newAdminClient() (adminv1.AdminCredentialsServiceClient, *grpc.ClientConn, error) {
-	var transport grpc.DialOption
-	if common.insecure {
-		// #2165: --insecure is loopback-only. The push path inherits the
-		// SDK's WithInsecure guard; the admin client dials directly, so it
-		// applies the same check here.
-		if !sdk.IsLoopbackEndpoint(common.endpoint) {
-			return nil, nil, fmt.Errorf("--insecure refuses non-loopback endpoint %q (allowed: localhost, 127.0.0.0/8, ::1)", common.endpoint)
-		}
-		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
-	} else {
-		transport = grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12}))
+	// #2165: --insecure is loopback-only. The admin client dials through
+	// sdk.Dial, the same dial and WithInsecure guard as the push path.
+	if common.insecure && !sdk.IsLoopbackEndpoint(common.endpoint) {
+		return nil, nil, fmt.Errorf("--insecure refuses non-loopback endpoint %q (allowed: localhost, 127.0.0.0/8, ::1)", common.endpoint)
 	}
-	conn, err := grpc.NewClient(common.endpoint, transport)
+	opts := []sdk.Option{}
+	if common.insecure {
+		opts = append(opts, sdk.WithInsecure())
+	}
+	conn, err := sdk.Dial(common.endpoint, opts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial: %w", err)
 	}
@@ -126,6 +135,11 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().StringVar(&common.endpoint, "endpoint", "", "gRPC endpoint (env: SECURITY_ATLAS_ENDPOINT)")
 	root.PersistentFlags().StringVar(&common.token, "token", "", "bearer token (env: SECURITY_ATLAS_TOKEN)")
 	root.PersistentFlags().BoolVar(&common.insecure, "insecure", false, "disable TLS (loopback endpoints only)")
+	root.PersistentFlags().BoolVar(&common.allowInsecureHTTP, "allow-insecure-http", false,
+		"send REST requests, and the bearer they carry, over plain http:// to a non-loopback host (unsafe)")
+	root.PersistentPreRun = func(cmd *cobra.Command, _ []string) {
+		applyAllowInsecureHTTP(cmd.ErrOrStderr())
+	}
 
 	root.AddCommand(newEvidenceCmd())
 	root.AddCommand(newCredentialsCmd())
