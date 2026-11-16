@@ -25,6 +25,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -101,10 +102,17 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "ttl_seconds must be between 0 (no expiry) and 9223372036")
 		return
 	}
+	// The predicate is stored as JSONB and enforced at push (#2435); a
+	// malformed one is refused here, not at the insert.
+	predicate, err := scope.NormalizeCredentialPredicate(req.ScopePredicate)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// requireAdmin returning true guarantees the credential is in context.
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	in := apikeystore.IssueInput{
-		ScopePredicate: req.ScopePredicate,
+		ScopePredicate: predicate,
 		AllowedKinds:   req.AllowedKinds,
 		TTL:            time.Duration(req.TTLSeconds) * time.Second,
 		IsAdmin:        req.IsAdmin,
