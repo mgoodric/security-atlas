@@ -343,6 +343,7 @@ FROM (
         NULL::text                                                    AS cadence
     FROM risks r
     WHERE r.tenant_id = $1
+      AND r.status = 'open'
       AND r.review_due_at IS NOT NULL
       AND r.review_due_at >= sqlc.arg(from_ts)::timestamptz
       AND r.review_due_at <  sqlc.arg(to_ts)::timestamptz

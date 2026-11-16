@@ -173,11 +173,13 @@ func (q *Queries) ListRiskAggregationParents(ctx context.Context, arg ListRiskAg
 }
 
 const listRiskChildCountsForTenant = `-- name: ListRiskChildCountsForTenant :many
-SELECT parent_risk_id, COUNT(*)::int AS child_count
-FROM risk_aggregations
-WHERE tenant_id = $1
-GROUP BY parent_risk_id
-ORDER BY parent_risk_id ASC
+SELECT ra.parent_risk_id, COUNT(*)::int AS child_count
+FROM risk_aggregations ra
+JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+WHERE ra.tenant_id = $1
+  AND c.status = 'open'
+GROUP BY ra.parent_risk_id
+ORDER BY ra.parent_risk_id ASC
 `
 
 type ListRiskChildCountsForTenantRow struct {
@@ -189,6 +191,10 @@ type ListRiskChildCountsForTenantRow struct {
 // A risk with no row here is not a roll-up. The register leaves roll-ups
 // out of its rows and counts by default, so a parent never reads as a
 // duplicate of the children it summarises.
+//
+// Only open children count (#2107): the register leaves closed risks out,
+// so a parent whose children are all closed summarises nothing the
+// register shows. It is not a roll-up, and it stays listed.
 func (q *Queries) ListRiskChildCountsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListRiskChildCountsForTenantRow, error) {
 	rows, err := q.db.Query(ctx, listRiskChildCountsForTenant, tenantID)
 	if err != nil {

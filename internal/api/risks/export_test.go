@@ -178,15 +178,16 @@ func TestRiskExportFilenamePrefix(t *testing.T) {
 // column positions hold.
 func TestRisksToRowIter_NoParentsRendersBlank(t *testing.T) {
 	header := riskExportHeader()
-	// #1814 appended category_name after parent_risk_ids.
-	if got := header[len(header)-2]; got != "parent_risk_ids" {
-		t.Fatalf("second-to-last column = %q; want parent_risk_ids", got)
+	// #1814 appended category_name after parent_risk_ids, and #2107
+	// appended status and closure_reason after that.
+	if got := header[len(header)-4]; got != "parent_risk_ids" {
+		t.Fatalf("fourth-to-last column = %q; want parent_risk_ids", got)
 	}
-	if got := header[len(header)-3]; got != "acceptance_status" {
-		t.Fatalf("third-to-last column = %q; want acceptance_status", got)
+	if got := header[len(header)-5]; got != "acceptance_status" {
+		t.Fatalf("fifth-to-last column = %q; want acceptance_status", got)
 	}
 	for cells := range risksToRowIter([]riskRow{{ID: uuid.New()}}) {
-		if got := cells[len(header)-2]; got != "" {
+		if got := cells[len(header)-4]; got != "" {
 			t.Errorf("parent_risk_ids for a risk with no parents = %q; want empty string", got)
 		}
 		break
@@ -200,7 +201,33 @@ func TestRiskExportHeader_CategorySlugAndName(t *testing.T) {
 	if got := header[3]; got != "category" {
 		t.Errorf("header[3] = %q; want category (slug, position unchanged)", got)
 	}
-	if got := header[len(header)-1]; got != "category_name" {
-		t.Errorf("last column = %q; want category_name", got)
+	if got := header[len(header)-3]; got != "category_name" {
+		t.Errorf("third-to-last column = %q; want category_name", got)
+	}
+}
+
+// #2107: the export carries every risk with its status and, for a closed
+// risk, its closure reason, appended last so existing positions hold.
+func TestRiskExportHeader_StatusAndClosureReason(t *testing.T) {
+	header := riskExportHeader()
+	if got := header[len(header)-2]; got != "status" {
+		t.Errorf("second-to-last column = %q; want status", got)
+	}
+	if got := header[len(header)-1]; got != "closure_reason" {
+		t.Errorf("last column = %q; want closure_reason", got)
+	}
+	rows := []riskRow{
+		{ID: uuid.New(), Status: "open"},
+		{ID: uuid.New(), Status: "closed", ClosureReason: "merged"},
+	}
+	var got [][2]string
+	for cells := range risksToRowIter(rows) {
+		got = append(got, [2]string{cells[len(header)-2], cells[len(header)-1]})
+	}
+	want := [][2]string{{"open", ""}, {"closed", "merged"}}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d status, closure_reason = %v; want %v", i, got[i], want[i])
+		}
 	}
 }
