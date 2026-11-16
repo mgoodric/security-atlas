@@ -501,6 +501,35 @@ func applyScopeFilter(
 		return out, nil
 	}
 
+	universe, err := listCellUniverse(ctx, q, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := matchingCellIDs(predicate, universe)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]uuid.UUID, 0, len(candidates))
+	for _, c := range candidates {
+		// Evidence with a NULL scope_id falls outside every predicate by
+		// definition; predicate-scoped populations exclude unsotred
+		// evidence. Auditors who want everything can pass an empty
+		// predicate (handled by isTrivialPredicate above).
+		if !c.ScopeID.Valid {
+			continue
+		}
+		scopeID := uuid.UUID(c.ScopeID.Bytes)
+		if _, ok := allowed[scopeID]; ok {
+			out = append(out, uuid.UUID(c.ID.Bytes))
+		}
+	}
+	return out, nil
+}
+
+// listCellUniverse loads the tenant's scope cells as the scope.Evaluate
+// universe a population predicate is tested against.
+func listCellUniverse(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) ([]scope.Cell, error) {
 	cellRows, err := q.ListScopeCells(ctx, pgUUID(tenantID))
 	if err != nil {
 		return nil, fmt.Errorf("list scope cells: %w", err)
@@ -520,6 +549,11 @@ func applyScopeFilter(
 		}
 		universe[i] = c
 	}
+	return universe, nil
+}
+
+// matchingCellIDs is the set of cells in universe that predicate selects.
+func matchingCellIDs(predicate []byte, universe []scope.Cell) (map[uuid.UUID]struct{}, error) {
 	matching, err := scope.Evaluate(predicate, universe)
 	if err != nil {
 		return nil, fmt.Errorf("evaluate scope predicate: %w", err)
@@ -528,22 +562,7 @@ func applyScopeFilter(
 	for _, m := range matching {
 		allowed[m.ID] = struct{}{}
 	}
-
-	out := make([]uuid.UUID, 0, len(candidates))
-	for _, c := range candidates {
-		// Evidence with a NULL scope_id falls outside every predicate by
-		// definition; predicate-scoped populations exclude unsotred
-		// evidence. Auditors who want everything can pass an empty
-		// predicate (handled by isTrivialPredicate above).
-		if !c.ScopeID.Valid {
-			continue
-		}
-		scopeID := uuid.UUID(c.ScopeID.Bytes)
-		if _, ok := allowed[scopeID]; ok {
-			out = append(out, uuid.UUID(c.ID.Bytes))
-		}
-	}
-	return out, nil
+	return allowed, nil
 }
 
 // isTrivialPredicate detects the "match every cell" shapes: nil, empty,

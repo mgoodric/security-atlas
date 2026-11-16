@@ -127,3 +127,24 @@ FROM sample_audit_log
 WHERE tenant_id = $1
 ORDER BY occurred_at DESC, id ASC
 LIMIT $2;
+
+-- name: GetSamplePopulationPeriod :one
+-- #2157: the audit period a sample belongs to, through its population. The
+-- authz hydrator puts it on input.resource.attrs.audit_period_id so the
+-- auditor rules in audit_periods.rego / auditor.rego can match it. NULL
+-- when the population is attached to no period.
+SELECT p.audit_period_id
+FROM samples s
+JOIN populations p
+    ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+WHERE s.tenant_id = $1 AND s.id = $2;
+
+-- name: ListPeriodPopulationsForControl :many
+-- #2157: the populations on one control that are attached to an audit
+-- period. The authz hydrator tests an evidence record (or a control and
+-- scope cell) against each one to find the periods it belongs to.
+SELECT * FROM populations
+WHERE tenant_id = $1
+  AND control_id = $2
+  AND audit_period_id IS NOT NULL
+ORDER BY id;

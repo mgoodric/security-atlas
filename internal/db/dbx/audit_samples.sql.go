@@ -206,6 +206,30 @@ func (q *Queries) GetSampleByID(ctx context.Context, arg GetSampleByIDParams) (S
 	return i, err
 }
 
+const getSamplePopulationPeriod = `-- name: GetSamplePopulationPeriod :one
+SELECT p.audit_period_id
+FROM samples s
+JOIN populations p
+    ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+WHERE s.tenant_id = $1 AND s.id = $2
+`
+
+type GetSamplePopulationPeriodParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #2157: the audit period a sample belongs to, through its population. The
+// authz hydrator puts it on input.resource.attrs.audit_period_id so the
+// auditor rules in audit_periods.rego / auditor.rego can match it. NULL
+// when the population is attached to no period.
+func (q *Queries) GetSamplePopulationPeriod(ctx context.Context, arg GetSamplePopulationPeriodParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getSamplePopulationPeriod, arg.TenantID, arg.ID)
+	var audit_period_id pgtype.UUID
+	err := row.Scan(&audit_period_id)
+	return audit_period_id, err
+}
+
 const insertSampleEvidence = `-- name: InsertSampleEvidence :exec
 INSERT INTO sample_evidence (
     sample_id, tenant_id, evidence_record_id, ordinal
@@ -228,6 +252,54 @@ func (q *Queries) InsertSampleEvidence(ctx context.Context, arg InsertSampleEvid
 		arg.Ordinal,
 	)
 	return err
+}
+
+const listPeriodPopulationsForControl = `-- name: ListPeriodPopulationsForControl :many
+SELECT id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at, audit_period_id FROM populations
+WHERE tenant_id = $1
+  AND control_id = $2
+  AND audit_period_id IS NOT NULL
+ORDER BY id
+`
+
+type ListPeriodPopulationsForControlParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ControlID pgtype.UUID `json:"control_id"`
+}
+
+// #2157: the populations on one control that are attached to an audit
+// period. The authz hydrator tests an evidence record (or a control and
+// scope cell) against each one to find the periods it belongs to.
+func (q *Queries) ListPeriodPopulationsForControl(ctx context.Context, arg ListPeriodPopulationsForControlParams) ([]Population, error) {
+	rows, err := q.db.Query(ctx, listPeriodPopulationsForControl, arg.TenantID, arg.ControlID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Population
+	for rows.Next() {
+		var i Population
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ScopePredicate,
+			&i.TimeWindowStart,
+			&i.TimeWindowEnd,
+			&i.FrozenAt,
+			&i.RowCount,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.AuditPeriodID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPopulationEvidenceIDs = `-- name: ListPopulationEvidenceIDs :many

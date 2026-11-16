@@ -68,7 +68,7 @@ keys, device contents, or owner personal contact detail.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.softwareControl, "software-control", "scf:VPM-04", "control_id to attach to endpoint.software_inventory.v1 records")
+	cmd.Flags().StringVar(&f.softwareControl, "software-control", "scf:VPM-06", "control_id to attach to endpoint.software_inventory.v1 records")
 	cmd.Flags().StringVar(&f.tenantID, "tenant-id", "", "Entra tenant id override (env: INTUNE_TENANT_ID)")
 	return cmd
 }
