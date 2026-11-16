@@ -15,6 +15,7 @@ import (
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
 // Service implements adminv1.AdminCredentialsServiceServer.
@@ -73,7 +74,13 @@ func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv
 	if ttl < 0 {
 		return nil, status.Error(codes.InvalidArgument, "ttl must not be negative")
 	}
-	cred, bearer, err := s.store.IssueMinted(tenant, req.GetScopePredicate(), req.GetKinds(), ttl, credstore.MinterUserID(caller))
+	// The predicate is persisted as JSONB and enforced at push (#2435);
+	// a legacy key=value form is converted, a malformed one refused.
+	predicate, err := scope.NormalizeCredentialPredicate(req.GetScopePredicate())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	cred, bearer, err := s.store.IssueMinted(tenant, predicate, req.GetKinds(), ttl, credstore.MinterUserID(caller))
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}

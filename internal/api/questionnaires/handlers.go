@@ -34,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
@@ -380,8 +381,9 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 // customer; not approved). Constitutional invariants (no fabricated coverage,
 // no cross-tenant bleed, local-only) are enforced by the qaisuggest.Service.
 //
-// Role-gated: questionnaire-response is a grc_engineer (IsApprover) / admin
-// capability (AC-9, threat-model S). A bare read role cannot generate a draft
+// Role-gated: questionnaire-response is a tenant admin capability (AC-9,
+// threat-model S; authz.IsTenantAdmin, the role set OPA admits on
+// "questionnaires", #2428). A bare read role cannot generate a draft
 // that will become a customer-facing answer.
 func (h *Handler) AISuggest(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCred(r)
@@ -389,8 +391,8 @@ func (h *Handler) AISuggest(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to generate an AI answer suggestion")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to generate an AI answer suggestion")
 		return
 	}
 	if h.suggest == nil {
@@ -432,8 +434,8 @@ func (h *Handler) AIApprove(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve an AI answer")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to approve an AI answer")
 		return
 	}
 	if h.suggest == nil {
@@ -487,8 +489,8 @@ func (h *Handler) AIReject(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to reject an AI answer")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to reject an AI answer")
 		return
 	}
 	if h.suggest == nil {
@@ -537,8 +539,8 @@ func (h *Handler) StartAnswerRun(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to start a questionnaire answer run")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to start a questionnaire answer run")
 		return
 	}
 	if h.answerRuns == nil {
@@ -603,8 +605,8 @@ func (h *Handler) CancelAnswerRun(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to cancel a questionnaire answer run")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to cancel a questionnaire answer run")
 		return
 	}
 	if h.answerRuns == nil {
@@ -650,8 +652,8 @@ func (h *Handler) MappingSuggest(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to suggest an SCF mapping")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to suggest an SCF mapping")
 		return
 	}
 	if h.mappingSuggest == nil {
@@ -690,8 +692,8 @@ func (h *Handler) MappingApprove(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve an SCF mapping")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to approve an SCF mapping")
 		return
 	}
 	if h.mappingSuggest == nil {
@@ -726,8 +728,8 @@ func (h *Handler) MappingReject(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to reject an SCF mapping")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to reject an SCF mapping")
 		return
 	}
 	if h.mappingSuggest == nil {

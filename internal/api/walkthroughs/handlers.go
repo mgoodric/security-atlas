@@ -42,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -437,21 +438,14 @@ func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Cred
 	return r.Context(), cred, true
 }
 
-// canWrite returns true when the credential is an admin or carries the
-// grc_engineer owner role. Mirrors the slice-028 (audit_periods)
+// canWrite returns true when the credential is a tenant admin or
+// grc_engineer, by flag or by live tenant role (authz.IsTenantApprover,
+// #2428). Mirrors the slice-028 (audit_periods)
 // defense-in-depth check. The slice-035 OPA middleware is the primary
 // gate; this handler-local check returns 403 even when the OPA
 // middleware is not wired (unit-test servers).
 func canWrite(cred credstore.Credential) bool {
-	if cred.IsAdmin {
-		return true
-	}
-	for _, role := range cred.OwnerRoles {
-		if role == "grc_engineer" {
-			return true
-		}
-	}
-	return false
+	return authz.IsTenantApprover(cred)
 }
 
 func toWire(wt walkthrough.Walkthrough) walkthroughWire {

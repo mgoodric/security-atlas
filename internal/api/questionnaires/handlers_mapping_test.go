@@ -109,7 +109,7 @@ func mappingHandler(reader qmapsuggest.Reader, store qmapsuggest.ProposalStore) 
 }
 
 func grcCred() *credstore.Credential {
-	return &credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	return &credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 }
 
 // guardCases exercises the shared guard ladder (401 / 403 / 503) that all

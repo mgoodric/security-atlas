@@ -44,7 +44,7 @@ func run(h http.HandlerFunc, r *http.Request) *httptest.ResponseRecorder {
 }
 
 func approverCred() *credstore.Credential {
-	return &credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	return &credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 }
 
 func TestGenerate_MissingTenantOrCred(t *testing.T) {

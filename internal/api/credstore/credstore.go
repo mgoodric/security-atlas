@@ -81,6 +81,12 @@ type Credential struct {
 	// bundle manifest). IsAdmin acts as a wildcard: an admin holds every
 	// owner role implicitly. Slice 035 graduates this to OPA-driven RBAC.
 	OwnerRoles []string
+	// TenantRoles is the caller's live user_roles for the current tenant,
+	// as authzmw resolved them for this request's decision (#2428). It is
+	// in memory only: never persisted, never set by authentication, and
+	// empty for a request that did not pass authzmw. Handler gates read it
+	// through authz.IsTenantAdmin / authz.IsTenantApprover, never directly.
+	TenantRoles []string
 	// Purpose marks a key minted for a specific job rather than an
 	// ordinary issue. PurposeBootstrapRecovery is the only value: the admin
 	// key reset-bootstrap mints. Persisted in api_keys.purpose, so the

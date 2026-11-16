@@ -64,29 +64,31 @@ describe("viewerCanVerify", () => {
   const other = "b2b2b2b2-0000-4000-8000-000000002108";
 
   it("lets an approver who is not the owner verify", () => {
-    expect(viewerCanVerify({ user_id: other, is_admin: true }, owner)).toBe(
-      true,
-    );
+    expect(
+      viewerCanVerify({ user_id: other, is_tenant_admin: true }, owner),
+    ).toBe(true);
   });
 
   it("never lets the owner verify, whatever the id's prefix or case", () => {
-    expect(viewerCanVerify({ user_id: owner, is_admin: true }, owner)).toBe(
-      false,
-    );
+    expect(
+      viewerCanVerify({ user_id: owner, is_tenant_admin: true }, owner),
+    ).toBe(false);
     expect(
       viewerCanVerify(
-        { user_id: "user:" + owner.toUpperCase(), is_admin: true },
+        { user_id: "user:" + owner.toUpperCase(), is_tenant_admin: true },
         owner,
       ),
     ).toBe(false);
   });
 
   it("refuses a non-approver, an unknown viewer and one with no user id", () => {
-    expect(viewerCanVerify({ user_id: other, is_admin: false }, owner)).toBe(
+    expect(
+      viewerCanVerify({ user_id: other, is_tenant_admin: false }, owner),
+    ).toBe(false);
+    expect(viewerCanVerify(undefined, owner)).toBe(false);
+    expect(viewerCanVerify({ user_id: "", is_tenant_admin: true }, owner)).toBe(
       false,
     );
-    expect(viewerCanVerify(undefined, owner)).toBe(false);
-    expect(viewerCanVerify({ user_id: "", is_admin: true }, owner)).toBe(false);
   });
 
   it("strips the JWT subject prefix", () => {
