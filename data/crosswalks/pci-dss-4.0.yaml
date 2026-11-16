@@ -236,22 +236,22 @@ mappings:
     rationale: "Keeping anti-malware current and active overlaps with SCF Endpoint Protection Measures (managed-agent currency facet)."
   # --- Req 6: Secure development ---
   - requirement_code: 6.2.1
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: equal
     strength: 0.9
-    rationale: "Secure development of bespoke/custom software maps to SCF Secure Software Development — shared with SOC 2 PI mappings and ISO A.8.25."
+    rationale: "Secure development of bespoke/custom software maps to SCF Secure Software Development Practices (SSDP) — shared with SOC 2 PI mappings and ISO A.8.25."
   - requirement_code: 6.3.1
     scf_anchor: VPM-01
     relationship_type: equal
     strength: 0.9
     rationale: "Identifying and ranking security vulnerabilities maps to SCF Vulnerability & Patch Management Policy — shared with SOC 2 CC7.1 and ISO A.8.8."
   - requirement_code: 6.3.3
-    scf_anchor: VPM-04
+    scf_anchor: VPM-06
     relationship_type: equal
     strength: 0.9
     rationale: "Patching system components against known vulnerabilities maps to SCF Software Patching — shared with SOC 2 CC7.1."
   - requirement_code: 6.4.1
-    scf_anchor: SEA-01
+    scf_anchor: SEA-05
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Protecting public-facing web apps (WAF / review) overlaps with Secure Engineering Principles; SCF sample lacks a dedicated WAF anchor (LOW CONFIDENCE)."
@@ -316,7 +316,7 @@ mappings:
     strength: 0.7
     rationale: "Internal vulnerability scanning is a subset/instance of the Vulnerability & Patch Management Policy anchor (scanning facet)."
   - requirement_code: 11.4.1
-    scf_anchor: VPM-04
+    scf_anchor: VPM-06
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Penetration testing partially overlaps with Software Patching/VPM; SCF sample lacks a dedicated pen-test anchor (LOW CONFIDENCE)."

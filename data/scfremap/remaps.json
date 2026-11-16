@@ -392,6 +392,48 @@
       "from": "RSK-04",
       "to": "RSK-13",
       "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "PRI-01",
+      "to": "PRI-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "PRI-04",
+      "to": "PRI-39",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "SEA-01",
+      "to": "SEA-05",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "SEA-05",
+      "to": "TDA-05",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TDA-01",
+      "to": "TDA-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "VPM-04",
+      "to": "VPM-06",
+      "basis": "concept"
     }
   ]
 }
