@@ -545,6 +545,10 @@ type Querier interface {
 	// Removes a mapping by id within the tenant. Returns affected-row count so the
 	// handler can 404 a missing id.
 	DeleteGroupRoleMapping(ctx context.Context, arg DeleteGroupRoleMappingParams) (int64, error)
+	// #2145: show one module's hint again.
+	DeleteOnboardingHintDismissal(ctx context.Context, arg DeleteOnboardingHintDismissalParams) error
+	// #2145: "Show onboarding hints again" clears every dismissal for the caller.
+	DeleteOnboardingHintDismissals(ctx context.Context, arg DeleteOnboardingHintDismissalsParams) error
 	// ON DELETE SET NULL on risks.org_unit_id keeps risks alive after their
 	// binding org_unit is removed (canvas §6.4: child risk lifecycle is
 	// independent of parent).
@@ -1391,6 +1395,8 @@ type Querier interface {
 	// (atlas_app pool + tenancy GUC). The source string distinguishes
 	// 'evaluator:<name>' from 'manual:<user-uuid>' provenance.
 	InsertMetricObservation(ctx context.Context, arg InsertMetricObservationParams) (MetricObservation, error)
+	// #2145: dismissing twice is a no-op.
+	InsertOnboardingHintDismissal(ctx context.Context, arg InsertOnboardingHintDismissalParams) error
 	// #1797: tenant overlay edges (create, list, retire). Every query runs under
 	// the caller's tenant (RLS); tenant_id is also passed explicitly as a second
 	// leg, the house style for tenant tables.
@@ -2511,6 +2517,8 @@ type Querier interface {
 	// $3 is the limit and $4 the offset for paging.
 	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]Notification, error)
 	ListOidcIdpConfigsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpConfig, error)
+	// #2145: the modules whose first-visit hint the caller has dismissed.
+	ListOnboardingHintDismissals(ctx context.Context, arg ListOnboardingHintDismissalsParams) ([]string, error)
 	// Direct children only (single hop). Recursive descent is the caller's
 	// responsibility; for tree walks the application uses a recursive CTE
 	// generated in code (no static sqlc query yet — see slice 056).

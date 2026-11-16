@@ -673,7 +673,7 @@ var demoSCFAnchors = []demoSCFAnchor{
 	{"TPM-04", "Third-Party Management", "Supply Chain Risk Management (SCRM)"},
 	{"MON-02", "Continuous Monitoring", "Continuous Monitoring"},
 	{"VPM-02", "Vulnerability & Patch Management", "Vulnerability Remediation"},
-	{"IRO-04", "Incident Response", "Incident Handling"},
+	{"IRO-06", "Incident Response", "Incident Handling"},
 }
 
 // writeFrameworkPostureSpine builds the SCF-anchor coverage spine

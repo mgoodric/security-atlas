@@ -7,13 +7,9 @@
 // are: name, framework_version_id (UUID), period_start (RFC3339),
 // period_end (RFC3339).
 //
-// FrameworkVersion picker (D-149-1): there is NO public list endpoint
-// for FrameworkVersion as of slice 149. The form accepts a pasted UUID
-// — the operator copies it from the audits-list page (the
-// `framework-version` column renders the first 8 chars of the UUID with
-// the full value in the title attribute) or from the catalog admin
-// area. A future spillover slice files a dedicated framework-version
-// picker endpoint + dropdown; this UI swaps in without page rework.
+// FrameworkVersion picker (#2086): the framework version is picked by
+// name and version from `<EntityPicker>`; a pasted version ID is still
+// accepted and checked on entry.
 //
 // Date inputs (D-149-2): native `<input type="date">` returns a
 // YYYY-MM-DD value. The backend `createReq` expects `time.Time` which
@@ -28,9 +24,13 @@ import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
+import type { EntityKind } from "@/lib/entity-picker";
 
 import type { AuditPeriodCreateInput } from "./actions";
+
+const FRAMEWORK_KINDS: readonly EntityKind[] = ["framework"];
 
 type FormState = {
   name: string;
@@ -168,29 +168,19 @@ export function AuditPeriodForm({ onSubmit }: Props) {
         <label className={LABEL_CLASS} htmlFor="audit-period-framework">
           Framework version <span className="text-destructive">*</span>
         </label>
-        <Input
+        <EntityPicker
+          kinds={FRAMEWORK_KINDS}
           id="audit-period-framework"
-          name="framework_version_id"
-          required
           value={state.framework_version_id}
-          onChange={(e) => update("framework_version_id", e.target.value)}
-          placeholder="00000000-0000-0000-0000-000000000000"
-          className="font-mono"
-          data-testid="audits-create-framework-version-id"
-          {...errorProps(
-            "audits-create-framework-version-id-error",
-            fieldErrors.framework_version_id,
-          )}
+          onChange={(id) => update("framework_version_id", id)}
+          placeholder="Search frameworks, or paste a version ID"
+          testId="audits-create-framework-version-id"
+          errorId="audits-create-framework-version-id-error"
+          error={fieldErrors.framework_version_id}
+          describedBy="audit-period-framework-help"
         />
-        <FieldError
-          id="audits-create-framework-version-id-error"
-          message={fieldErrors.framework_version_id}
-        />
-        <p className={HELP_CLASS}>
-          Paste the FrameworkVersion UUID. Copy it from the audits list (the
-          framework-version column shows the first 8 chars; hover for the full
-          UUID), or from the catalog admin. A dedicated picker is a future
-          enhancement.
+        <p id="audit-period-framework-help" className={HELP_CLASS}>
+          The framework and version this audit is against.
         </p>
       </div>
 

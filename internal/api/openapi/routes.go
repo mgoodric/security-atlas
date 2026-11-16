@@ -160,7 +160,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/framework-scopes/{id}", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}/applicability", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}/applicability — list a revision's applicability decisions"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}/applicability/diff", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision; implementation-reference-only edits are listed apart in reference_changes; the baseline is always the currently activated revision, so a superseded revision is compared against its successor"},
-	{Method: "GET", Path: "/v1/frameworks", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks"},
+	{Method: "GET", Path: "/v1/frameworks", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks — the global framework catalog; ?include=versions adds each framework's versions (#2086)"},
 	{Method: "GET", Path: "/v1/frameworks/posture", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks/posture — per-version coverage, freshness and 90-day trend; scope_set=false with null percentages when no framework scope is activated (#2114)"},
 	{Method: "GET", Path: "/v1/frameworks/scf/versions", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks/scf/versions"},
 	{Method: "GET", Path: "/v1/install-state", Tag: "system", Tier: "none", Internal: true, Summary: "GET /v1/install-state"},

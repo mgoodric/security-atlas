@@ -9,7 +9,7 @@ description: |
   targets, regulatory obligations) and that those objectives are linked to
   specific risks in the register.
 
-scf_anchor_id: RSK-01
+scf_anchor_id: RSK-02
 control_family: RSK
 implementation_type: manual_attested
 owner_role: ciso

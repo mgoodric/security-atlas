@@ -305,9 +305,15 @@ func filteredAnchorTotal(c dbx.CountSCFAnchorsLatestRow, hasControl *bool) int64
 // ignored — they are NOT errors (slice 094 calendar precedent: additive
 // query params don't break the caller).
 func includesState(r *http.Request) bool {
+	return includes(r, "state")
+}
+
+// includes reports whether `?include=` names token, as a repeated param
+// or in a comma-separated list.
+func includes(r *http.Request, token string) bool {
 	for _, v := range r.URL.Query()["include"] {
 		for _, tok := range strings.Split(v, ",") {
-			if strings.TrimSpace(tok) == "state" {
+			if strings.TrimSpace(tok) == token {
 				return true
 			}
 		}
@@ -344,21 +350,45 @@ func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 }
 
 // listFrameworks returns the framework catalog (global only).
+//
+// #2086: `?include=versions` (additive) adds each framework's global
+// versions, newest first, so a picker can label a framework version by
+// name and version. The catalog is a handful of frameworks, so one
+// versions query per framework stays bounded.
 func (h *Handler) listFrameworks(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.q.ListFrameworks(r.Context())
+	ctx := r.Context()
+	rows, err := h.q.ListFrameworks(ctx)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list frameworks", err)
 		return
 	}
+	withVersions := includes(r, "versions")
 	out := make([]frameworkWire, 0, len(rows))
 	for _, f := range rows {
-		out = append(out, frameworkWire{
+		fw := frameworkWire{
 			ID:              uuidStr(f.ID),
 			Name:            f.Name,
 			Slug:            f.Slug,
 			Issuer:          f.Issuer,
 			LatestVersionID: uuidStr(f.LatestVersionID),
-		})
+		}
+		if withVersions {
+			vs, err := h.q.ListFrameworkVersionsBySlug(ctx, f.Slug)
+			if err != nil {
+				httperr.WriteInternal(w, r, "list framework versions", err)
+				return
+			}
+			fw.Versions = make([]frameworkVersionWire, 0, len(vs))
+			for _, v := range vs {
+				fw.Versions = append(fw.Versions, frameworkVersionWire{
+					ID:            uuidStr(v.ID),
+					Version:       v.Version,
+					Status:        string(v.Status),
+					EffectiveFrom: dateStr(v.EffectiveFrom),
+				})
+			}
+		}
+		out = append(out, fw)
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
 }
@@ -521,6 +551,8 @@ type frameworkWire struct {
 	Slug            string `json:"slug"`
 	Issuer          string `json:"issuer"`
 	LatestVersionID string `json:"latest_version_id,omitempty"`
+	// Set only for `?include=versions` (#2086).
+	Versions []frameworkVersionWire `json:"versions,omitempty"`
 }
 
 type frameworkVersionWire struct {

@@ -11,6 +11,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteOnboardingHintDismissal = `-- name: DeleteOnboardingHintDismissal :exec
+DELETE FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2 AND module = $3
+`
+
+type DeleteOnboardingHintDismissalParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+	Module   string      `json:"module"`
+}
+
+// #2145: show one module's hint again.
+func (q *Queries) DeleteOnboardingHintDismissal(ctx context.Context, arg DeleteOnboardingHintDismissalParams) error {
+	_, err := q.db.Exec(ctx, deleteOnboardingHintDismissal, arg.TenantID, arg.UserID, arg.Module)
+	return err
+}
+
+const deleteOnboardingHintDismissals = `-- name: DeleteOnboardingHintDismissals :exec
+DELETE FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2
+`
+
+type DeleteOnboardingHintDismissalsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// #2145: "Show onboarding hints again" clears every dismissal for the caller.
+func (q *Queries) DeleteOnboardingHintDismissals(ctx context.Context, arg DeleteOnboardingHintDismissalsParams) error {
+	_, err := q.db.Exec(ctx, deleteOnboardingHintDismissals, arg.TenantID, arg.UserID)
+	return err
+}
+
 const insertMeAuditLog = `-- name: InsertMeAuditLog :exec
 INSERT INTO me_audit_log (
     tenant_id, user_id, action, before, after, subject_module
@@ -43,6 +76,57 @@ func (q *Queries) InsertMeAuditLog(ctx context.Context, arg InsertMeAuditLogPara
 		arg.After,
 	)
 	return err
+}
+
+const insertOnboardingHintDismissal = `-- name: InsertOnboardingHintDismissal :exec
+INSERT INTO user_onboarding_hint_dismissals (tenant_id, user_id, module)
+VALUES ($1, $2, $3)
+ON CONFLICT (tenant_id, user_id, module) DO NOTHING
+`
+
+type InsertOnboardingHintDismissalParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+	Module   string      `json:"module"`
+}
+
+// #2145: dismissing twice is a no-op.
+func (q *Queries) InsertOnboardingHintDismissal(ctx context.Context, arg InsertOnboardingHintDismissalParams) error {
+	_, err := q.db.Exec(ctx, insertOnboardingHintDismissal, arg.TenantID, arg.UserID, arg.Module)
+	return err
+}
+
+const listOnboardingHintDismissals = `-- name: ListOnboardingHintDismissals :many
+SELECT module
+FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2
+ORDER BY module ASC
+`
+
+type ListOnboardingHintDismissalsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// #2145: the modules whose first-visit hint the caller has dismissed.
+func (q *Queries) ListOnboardingHintDismissals(ctx context.Context, arg ListOnboardingHintDismissalsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listOnboardingHintDismissals, arg.TenantID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var module string
+		if err := rows.Scan(&module); err != nil {
+			return nil, err
+		}
+		items = append(items, module)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUserNotificationPreferences = `-- name: ListUserNotificationPreferences :many

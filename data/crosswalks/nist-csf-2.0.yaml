@@ -428,37 +428,37 @@ mappings:
     strength: 0.6
     rationale: "Understanding the capabilities/services the org depends on overlaps SCF Business Continuity & Disaster Recovery (BC/DR) Plans (dependency analysis); broader organizational-context gap (LOW)."
   - requirement_code: "GV.RM-01"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Agreed risk-management objectives are governed by the SCF Risk Management Program."
   - requirement_code: "GV.RM-02"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Risk appetite/tolerance statements are established within the SCF Risk Management Program."
   - requirement_code: "GV.RM-03"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Integrating cybersecurity risk into enterprise risk management is part of the SCF Risk Management Program."
   - requirement_code: "GV.RM-04"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Strategic direction for risk-response options overlaps the SCF Risk Management Program; response-strategy specificity is a residual gap."
   - requirement_code: "GV.RM-05"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "subset_of"
     strength: 0.7
     rationale: "Establishing risk-communication lines is part of operating the SCF Risk Management Program."
   - requirement_code: "GV.RM-06"
-    scf_anchor: "RSK-04"
+    scf_anchor: "RSK-13"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "A standardized risk-calculation/prioritization method is part of SCF Risk Assessment."
   - requirement_code: "GV.RM-07"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Characterizing strategic opportunities (positive risk) overlaps the SCF Risk Management Program; upside-risk treatment is a residual gap (LOW)."
@@ -498,7 +498,7 @@ mappings:
     strength: 0.6
     rationale: "Reviewing strategy outcomes overlaps the SCF Internal Audit Function; explicit gap on strategy-adjustment governance (LOW)."
   - requirement_code: "GV.OV-02"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Reviewing the risk-management strategy for coverage of org risks/requirements overlaps the SCF Risk Management Program; strategy-review specificity is the residual gap (LOW)."
@@ -543,10 +543,10 @@ mappings:
     strength: 0.8
     rationale: "Ongoing monitoring of supplier risk over the relationship maps to SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: "GV.SC-08"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Including relevant suppliers in incident response overlaps SCF Incident Response Plan; the supplier-coordination facet is the residual gap (LOW)."
+    rationale: "Including relevant suppliers in incident response overlaps SCF Incident Response Plan (IRP); the supplier-coordination facet is the residual gap (LOW)."
   - requirement_code: "GV.SC-09"
     scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
@@ -610,7 +610,7 @@ mappings:
     strength: 0.9
     rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-03) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-08 placeholder above (MON-16 since the SCF 2026.3 remap) stays as a secondary anomaly-detection overlap; THR-03 is now the primary dedicated anchor. Added by slice 646."
   - requirement_code: "ID.RA-03"
-    scf_anchor: "RSK-04"
+    scf_anchor: "RSK-13"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Identifying and recording internal/external threats is part of SCF Risk Assessment."
@@ -618,24 +618,24 @@ mappings:
     scf_anchor: "THR-09"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "ID.RA-03 'internal and external threats are identified and recorded' is the threat-cataloging activity; Threat Catalog (slice 641 THR-09) is the dedicated record of identified threats — a subset of ID.RA-03 alongside the RSK-04 risk-assessment edge. Added by slice 646."
+    rationale: "ID.RA-03 'internal and external threats are identified and recorded' is the threat-cataloging activity; Threat Catalog (slice 641 THR-09) is the dedicated record of identified threats — a subset of ID.RA-03 alongside the RSK-13 risk-assessment edge. Added by slice 646."
   - requirement_code: "ID.RA-03"
     scf_anchor: "THR-10"
     relationship_type: "subset_of"
     strength: 0.6
     rationale: "ID.RA-03's 'identified' half (distinct from the 'recorded' half THR-09 carries) is the threat-analysis activity that surfaces internal/external threats; Threat Analysis (slice 641 THR-10) is the dedicated anchor for that analysis. Partial — ID.RA-03 spans both analysis (THR-10) and cataloging (THR-09). Added by slice 646."
   - requirement_code: "ID.RA-04"
-    scf_anchor: "RSK-04"
+    scf_anchor: "RSK-13"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Determining impacts and likelihoods is part of SCF Risk Assessment."
   - requirement_code: "ID.RA-05"
-    scf_anchor: "RSK-04"
+    scf_anchor: "RSK-13"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Prioritizing risk from threat/vuln/impact maps directly to SCF Risk Assessment."
   - requirement_code: "ID.RA-06"
-    scf_anchor: "RSK-01"
+    scf_anchor: "RSK-02"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Choosing, tracking, and communicating risk responses is part of the SCF Risk Management Program."
@@ -680,10 +680,10 @@ mappings:
     strength: 0.6
     rationale: "Improvements from operational-process execution overlap SCF Continuous Monitoring; operational-improvement specificity is the residual gap (LOW)."
   - requirement_code: "ID.IM-04"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Establishing/maintaining/improving incident-response, continuity, and recovery plans is anchored by the SCF Incident Response Plan."
+    rationale: "Establishing/maintaining/improving incident-response, continuity, and recovery plans is anchored by the SCF Incident Response Plan (IRP)."
 
   # ===== PROTECT (PR) =====
   # PR.AA-01 → IAC-01 is the FOUR-FRAMEWORK shared anchor (invariant #1, AC-4):
@@ -836,15 +836,15 @@ mappings:
     strength: 0.75
     rationale: "Correlating event information from multiple sources is part of SCF Centralized Event Log & Security-Relevant Telemetry Review & Analysis (multi-source log analysis)."
   - requirement_code: "DE.AE-04"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Understanding the estimated impact/scope of adverse events overlaps the SCF Incident Response Plan (impact triage); pre-incident impact-estimation specificity is the residual gap (LOW)."
+    rationale: "Understanding the estimated impact/scope of adverse events overlaps the SCF Incident Response Plan (IRP) (impact triage); pre-incident impact-estimation specificity is the residual gap (LOW)."
   - requirement_code: "DE.AE-06"
-    scf_anchor: "IRO-09"
+    scf_anchor: "IRO-16"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Providing adverse-event information to authorized staff/tools is part of SCF Incident Reporting."
+    rationale: "Providing adverse-event information to authorized staff/tools is part of SCF Incident Stakeholder Reporting."
   - requirement_code: "DE.AE-07"
     scf_anchor: "MON-16"
     relationship_type: "intersects_with"
@@ -856,42 +856,42 @@ mappings:
     strength: 0.7
     rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-01, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-08 (MON-16 since the SCF 2026.3 remap) '(LOW)' placeholder above as the primary anchor. Added by slice 646."
   - requirement_code: "DE.AE-08"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Declaring incidents when events meet defined criteria is part of executing the SCF Incident Response Plan."
+    rationale: "Declaring incidents when events meet defined criteria is part of executing the SCF Incident Response Plan (IRP)."
 
   # ===== RESPOND (RS) =====
   - requirement_code: "RS.MA-01"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Executing the incident response plan maps directly to SCF Incident Response Plan."
+    rationale: "Executing the incident response plan maps directly to SCF Incident Response Plan (IRP)."
   - requirement_code: "RS.MA-02"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Triaging and validating incident reports is part of SCF Incident Response Plan execution."
+    rationale: "Triaging and validating incident reports is part of SCF Incident Response Plan (IRP) execution."
   - requirement_code: "RS.MA-03"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Categorizing and prioritizing incidents is part of SCF Incident Response Plan execution."
+    rationale: "Categorizing and prioritizing incidents is part of SCF Incident Response Plan (IRP) execution."
   - requirement_code: "RS.MA-04"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Escalating/elevating incidents is part of SCF Incident Response Plan execution."
+    rationale: "Escalating/elevating incidents is part of SCF Incident Response Plan (IRP) execution."
   - requirement_code: "RS.MA-05"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Applying recovery-initiation criteria is part of the SCF Incident Response Plan (response-to-recovery handoff)."
+    rationale: "Applying recovery-initiation criteria is part of the SCF Incident Response Plan (IRP) (response-to-recovery handoff)."
   - requirement_code: "RS.AN-03"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Incident root-cause analysis overlaps SCF Incident Response Plan; forensic-analysis specificity gap (LOW). The sample fixture has no dedicated forensic-analysis anchor (slice-480 D7 revisit; closest covering anchor retained)."
+    rationale: "Incident root-cause analysis overlaps SCF Incident Response Plan (IRP); forensic-analysis specificity gap (LOW). The sample fixture has no dedicated forensic-analysis anchor (slice-480 D7 revisit; closest covering anchor retained)."
   - requirement_code: "RS.AN-06"
     scf_anchor: "MON-04"
     relationship_type: "intersects_with"
@@ -903,30 +903,30 @@ mappings:
     strength: 0.6
     rationale: "Collecting incident data/metadata with preserved integrity/provenance overlaps SCF Event Log & Security-Relevant Telemetry Retention; forensic-preservation specificity is absent from the fixture (LOW)."
   - requirement_code: "RS.AN-08"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Estimating and validating an incident's magnitude is part of SCF Incident Response Plan execution."
+    rationale: "Estimating and validating an incident's magnitude is part of SCF Incident Response Plan (IRP) execution."
   - requirement_code: "RS.CO-02"
-    scf_anchor: "IRO-09"
+    scf_anchor: "IRO-16"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Notifying stakeholders of incidents maps directly to SCF Incident Reporting."
+    rationale: "Notifying stakeholders of incidents maps directly to SCF Incident Stakeholder Reporting."
   - requirement_code: "RS.CO-03"
-    scf_anchor: "IRO-09"
+    scf_anchor: "IRO-16"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Sharing information with designated stakeholders during response is part of SCF Incident Reporting."
+    rationale: "Sharing information with designated stakeholders during response is part of SCF Incident Stakeholder Reporting."
   - requirement_code: "RS.MI-01"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Containing incidents is part of executing the SCF Incident Response Plan."
+    rationale: "Containing incidents is part of executing the SCF Incident Response Plan (IRP)."
   - requirement_code: "RS.MI-02"
-    scf_anchor: "IRO-04"
+    scf_anchor: "IRO-08"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Eradicating incidents is part of executing the SCF Incident Response Plan."
+    rationale: "Eradicating incidents is part of executing the SCF Incident Response Plan (IRP)."
 
   # ===== RECOVER (RC) =====
   - requirement_code: "RC.RP-01"
@@ -965,7 +965,7 @@ mappings:
     strength: 0.6
     rationale: "Communicating recovery progress overlaps SCF Business Continuity & Disaster Recovery (BC/DR) Plans; stakeholder-comms specificity gap (LOW). The fixture has no dedicated recovery-communications anchor (slice-480 D7 revisit; closest covering anchor retained)."
   - requirement_code: "RC.CO-04"
-    scf_anchor: "IRO-09"
+    scf_anchor: "IRO-16"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Sharing approved public updates on recovery overlaps SCF Incident Reporting (external communications); public-messaging specificity is a residual gap (LOW)."
+    rationale: "Sharing approved public updates on recovery overlaps SCF Incident Stakeholder Reporting (external communications); public-messaging specificity is a residual gap (LOW)."

@@ -8,7 +8,7 @@ description: |
   identified gaps, and remediation items filed. Tabletops are the
   auditor-canonical recovery-capability evidence absent real incidents.
 
-scf_anchor_id: IRO-04
+scf_anchor_id: IRO-08
 control_family: IRO
 implementation_type: manual_attested
 owner_role: security-engineering

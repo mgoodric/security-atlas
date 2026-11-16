@@ -46,7 +46,8 @@ import {
   DialogPortal,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { EntityPicker } from "@/components/ui/entity-picker";
+import type { EntityKind } from "@/lib/entity-picker";
 import {
   Table,
   TableBody,
@@ -61,6 +62,8 @@ import type { SuperAdminRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
+
+const GRANT_KINDS: readonly EntityKind[] = ["user"];
 
 function formatGrantedAt(iso: string): string {
   try {
@@ -193,9 +196,10 @@ export default function SuperAdminsPage() {
         <CardHeader>
           <CardTitle>Grant super admin</CardTitle>
           <CardDescription>
-            Enter the target user&rsquo;s UUID. The user must already exist in
-            some tenant (provisioned via local create or SSO login). Granting is
-            idempotent — re-granting an existing super admin is a no-op.
+            Pick a person in this tenant, or paste the user ID of someone in
+            another tenant. The user must already exist (provisioned via local
+            create or SSO login). Granting is idempotent — re-granting an
+            existing super admin is a no-op.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -204,7 +208,7 @@ export default function SuperAdminsPage() {
             onSubmit={(e) => {
               e.preventDefault();
               if (grantUserID.trim() === "") {
-                setGrantError("user_id is required");
+                setGrantError("Pick a user to grant super admin to.");
                 return;
               }
               setGrantError(null);
@@ -216,17 +220,19 @@ export default function SuperAdminsPage() {
                 htmlFor="grant-user-id"
                 className="text-xs font-medium text-muted-foreground"
               >
-                User UUID
+                User
               </label>
-              <Input
+              <EntityPicker
+                kinds={GRANT_KINDS}
                 id="grant-user-id"
-                data-testid="grant-user-id-input"
-                placeholder="00000000-0000-0000-0000-000000000000"
+                testId="grant-user-id-input"
+                placeholder="Search people, or paste a user ID"
                 value={grantUserID}
-                onChange={(e) => setGrantUserID(e.target.value)}
-                spellCheck={false}
-                autoComplete="off"
-                aria-describedby={grantErrorId}
+                onChange={(id) => {
+                  setGrantUserID(id);
+                  setGrantError(null);
+                }}
+                describedBy={grantErrorId}
               />
             </div>
             <Button

@@ -147,7 +147,7 @@ func TestAnchorExistsInCatalog_RejectsDanglingAnchor(t *testing.T) {
 	}{
 		// Present anchors (sanity that the helper resolves real ones).
 		{"present_MON-02", "MON-02", true},
-		{"present_IRO-09", "IRO-09", true},
+		{"present_IRO-16", "IRO-16", true},
 		{"present_CFG-04", "CFG-04", true},
 		// Deliberately-dangling fake anchor — MUST be rejected.
 		{"dangling_ZZZ-99", "ZZZ-99", false},
@@ -167,7 +167,7 @@ func TestAnchorExistsInCatalog_RejectsDanglingAnchor(t *testing.T) {
 
 	// The guard must FAIL when fed a dangling anchor: assert danglingAnchors
 	// flags the fake one in a mixed list (the negative-fixture proof).
-	mixed := []string{"MON-02", "ZZZ-99", "IRO-09"}
+	mixed := []string{"MON-02", "ZZZ-99", "IRO-16"}
 	bad := danglingAnchors(mixed, catalog)
 	if len(bad) != 1 || bad[0] != "ZZZ-99" {
 		t.Fatalf("danglingAnchors(%v) = %v; want exactly [ZZZ-99] — the guard must catch a deliberately-dangling anchor", mixed, bad)

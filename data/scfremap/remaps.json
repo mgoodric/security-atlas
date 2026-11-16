@@ -357,6 +357,41 @@
       "from": "HRS-12",
       "to": "HRS-06.1",
       "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IRO-04",
+      "to": "IRO-08",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IRO-09",
+      "to": "IRO-16",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "MNT-02",
+      "to": "MNT-03",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "RSK-01",
+      "to": "RSK-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "RSK-04",
+      "to": "RSK-13",
+      "basis": "legacy"
     }
   ]
 }

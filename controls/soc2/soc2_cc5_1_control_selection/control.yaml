@@ -10,7 +10,7 @@ description: |
   profile (i.e. controls outside applicability have a documented
   `applicability_expr` excluding them).
 
-scf_anchor_id: RSK-01
+scf_anchor_id: RSK-02
 control_family: RSK
 implementation_type: manual_attested
 owner_role: ciso
