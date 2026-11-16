@@ -1,0 +1,1 @@
+- test(dbtest): migrate internal metrics-eval + metrics-scheduler + backup + checklist integration suites to the slice-435 dbtest harness (742 drain batch 17).
