@@ -49,6 +49,10 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	if !requireOverlayWrite(w, r) || !requireTenant(w, r) {
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	partial := false
 	if p := r.URL.Query().Get("partial"); p != "" {
 		v, err := strconv.ParseBool(p)
@@ -80,7 +84,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	rows, err := parse(bytes.NewReader(body))
 	if err == nil {
 		var res mappingoverlay.ImportResult
-		res, err = h.store.Import(r.Context(), rows, partial, actorFrom(r))
+		res, err = h.store.Import(r.Context(), rows, partial, actor)
 		if err == nil {
 			writeImportResult(w, res, partial)
 			return
