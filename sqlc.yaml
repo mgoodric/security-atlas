@@ -136,6 +136,8 @@ sql:
       - "migrations/sql/20261127000000_exception_revoke.sql"
       - "migrations/sql/20261128000000_scf_remap_proposals_rebind_record.sql"
       - "migrations/sql/20261201000000_scf_remap_decisions.sql"
+      # #1803: overlay edges carry over with an approved framework-version migration.
+      - "migrations/sql/20261204000000_overlay_edges_version_carry_over.sql"
     queries: "internal/db/queries"
     gen:
       go:
