@@ -379,7 +379,7 @@ mappings:
     strength: 0.7
     rationale: "A.5.7 collects and analyzes threat information to produce intelligence; Threat Intelligence Feeds (slice 641 THR-03) are a subset mechanism of that program — the ingest side of producing threat intelligence. Sits alongside the A.5.7=THR-01 program equal. Added by slice 646."
   - requirement_code: A.5.8
-    scf_anchor: SEA-01
+    scf_anchor: SEA-05
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Security in project management overlaps with Secure Engineering Principles for project-phase security gates."
@@ -529,15 +529,15 @@ mappings:
     strength: 0.6
     rationale: "Retention and protection of log/audit records is the Event Log & Security-Relevant Telemetry Retention (MON-13) facet of record protection."
   - requirement_code: A.5.34
-    scf_anchor: PRI-01
+    scf_anchor: PRI-02
     relationship_type: equal
     strength: 0.9
-    rationale: "Privacy and PII protection maps directly to Privacy Governance (PRI-01)."
+    rationale: "Privacy and PII protection maps directly to Data Privacy Program (PRI-02)."
   - requirement_code: A.5.34
-    scf_anchor: PRI-04
+    scf_anchor: PRI-39
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Honoring data-subject requests is the Data Subject Rights (PRI-04) facet of PII protection."
+    rationale: "Honoring data-subject requests is the Data Subject Rights Management (PRI-39) facet of PII protection."
   - requirement_code: A.5.35
     scf_anchor: CPL-07.1
     relationship_type: equal
@@ -732,10 +732,10 @@ mappings:
     strength: 0.6
     rationale: "Managing read/write access to source code is an access-provisioning control (IAC-04)."
   - requirement_code: A.8.4
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Source-code access governance is part of Secure Software Development (SEA-05)."
+    rationale: "Source-code access governance is part of Secure Software Development Practices (SSDP) (TDA-05)."
   - requirement_code: A.8.5
     scf_anchor: IAC-37
     relationship_type: subset_of
@@ -902,50 +902,50 @@ mappings:
     strength: 0.8
     rationale: "A.8.24 explicitly spans cryptographic key management; Cryptographic Key Management (CRY-10) is the dedicated key-lifecycle anchor — the key-management half of the slice-467 A.8.24 split that the slice-438 decisions log flagged for completion."
   - requirement_code: A.8.25
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: equal
     strength: 0.9
-    rationale: "Secure development life cycle maps to SCF Secure Software Development — shared with SOC 2 CC8.1/PI mappings."
+    rationale: "Secure development life cycle maps to SCF Secure Software Development Practices (SSDP) — shared with SOC 2 CC8.1/PI mappings."
   - requirement_code: A.8.26
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: equal
     strength: 0.8
-    rationale: "Defining application security requirements in development maps to Secure Software Development (SEA-05)."
+    rationale: "Defining application security requirements in development maps to Secure Software Development Practices (SSDP) (TDA-05)."
   - requirement_code: A.8.26
-    scf_anchor: TDA-01
+    scf_anchor: TDA-02
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Security requirements during acquisition are part of Technology Development & Acquisition (TDA-01)."
+    rationale: "Security requirements during acquisition are part of Technology Development & Acquisition (TDA-02)."
   - requirement_code: A.8.27
-    scf_anchor: SEA-01
+    scf_anchor: SEA-05
     relationship_type: equal
     strength: 0.9
     rationale: "Secure system architecture & engineering principles map to SCF Secure Engineering Principles — shared with SOC 2 CC8.1."
   - requirement_code: A.8.28
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: equal
     strength: 0.9
-    rationale: "Secure coding practices map to Secure Software Development (SEA-05)."
+    rationale: "Secure coding practices map to Secure Software Development Practices (SSDP) (TDA-05)."
   - requirement_code: A.8.29
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Security testing within the SDLC is a Secure Software Development (SEA-05) activity."
+    rationale: "Security testing within the SDLC is a Secure Software Development Practices (SSDP) (TDA-05) activity."
   - requirement_code: A.8.29
-    scf_anchor: VPM-04
+    scf_anchor: VPM-06
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Pre-release security testing that drives remediation relates to the Vulnerability Remediation Process (VPM-04)."
+    rationale: "Pre-release security testing that drives remediation relates to the Vulnerability Remediation Process (VPM-06)."
   - requirement_code: A.8.30
     scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.7
     rationale: "Governing outsourced development providers maps to Third-Party Management (TPM-02)."
   - requirement_code: A.8.30
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Outsourced work must still meet Secure Software Development (SEA-05) standards."
+    rationale: "Outsourced work must still meet Secure Software Development Practices (SSDP) (TDA-05) standards."
   - requirement_code: A.8.31
     scf_anchor: CFG-04
     relationship_type: intersects_with

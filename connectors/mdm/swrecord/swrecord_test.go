@@ -23,7 +23,7 @@ func sampleDevice() swinventory.Device {
 
 func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleDevice(), "scf:VPM-04", "connector:jamf:software@dev", "jamf", "prod")
+	rec, err := Build(sampleDevice(), "scf:VPM-06", "connector:jamf:software@dev", "jamf", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 	if rec.GetIdempotencyKey() == "" {
 		t.Error("idempotency key empty")
 	}
-	if rec.GetControlId() != "scf:VPM-04" {
+	if rec.GetControlId() != "scf:VPM-06" {
 		t.Errorf("control = %q", rec.GetControlId())
 	}
 	scope := map[string]string{}
@@ -57,7 +57,7 @@ func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 // keys — no file path, usage telemetry, or license key reaches a record.
 func TestBuild_PayloadAndItemsCarrySoftwareFieldsOnly(t *testing.T) {
 	t.Parallel()
-	rec, _ := Build(sampleDevice(), "scf:VPM-04", "connector:jamf:software@dev", "jamf", "prod")
+	rec, _ := Build(sampleDevice(), "scf:VPM-06", "connector:jamf:software@dev", "jamf", "prod")
 	pm := rec.GetPayload().AsMap()
 
 	for _, k := range []string{"source_mdm", "device_id", "software_count", "software"} {
@@ -100,7 +100,7 @@ func TestBuild_PayloadAndItemsCarrySoftwareFieldsOnly(t *testing.T) {
 func TestBuild_OptionalItemFieldsOmittedWhenEmpty(t *testing.T) {
 	t.Parallel()
 	d := sampleDevice() // second item has no version/identifier/install_date
-	rec, _ := Build(d, "scf:VPM-04", "connector:jamf:software@dev", "jamf", "prod")
+	rec, _ := Build(d, "scf:VPM-06", "connector:jamf:software@dev", "jamf", "prod")
 	items := rec.GetPayload().AsMap()["software"].([]any)
 	openssl := items[1].(map[string]any)
 	if openssl["name"] != "openssl" {
@@ -117,7 +117,7 @@ func TestBuild_EmptySoftwareListEmitsZeroCount(t *testing.T) {
 	t.Parallel()
 	d := sampleDevice()
 	d.Software = nil
-	rec, err := Build(d, "scf:VPM-04", "connector:jamf:software@dev", "jamf", "prod")
+	rec, err := Build(d, "scf:VPM-06", "connector:jamf:software@dev", "jamf", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -132,8 +132,8 @@ func TestBuild_EmptySoftwareListEmitsZeroCount(t *testing.T) {
 
 func TestBuild_SameDeviceSameHourSameKey(t *testing.T) {
 	t.Parallel()
-	r1, _ := Build(sampleDevice(), "scf:VPM-04", "a", "jamf", "prod")
-	r2, _ := Build(sampleDevice(), "scf:VPM-04", "a", "jamf", "prod")
+	r1, _ := Build(sampleDevice(), "scf:VPM-06", "a", "jamf", "prod")
+	r2, _ := Build(sampleDevice(), "scf:VPM-06", "a", "jamf", "prod")
 	if r1.GetIdempotencyKey() != r2.GetIdempotencyKey() {
 		t.Error("same device + hour should yield same idempotency key")
 	}
@@ -143,7 +143,7 @@ func TestBuild_IdempotencyKeyDistinctFromPostureKind(t *testing.T) {
 	t.Parallel()
 	// The software-inventory key must not collide with the device-posture key for
 	// the same device + hour (different evidence-kind namespace).
-	rec, _ := Build(sampleDevice(), "scf:VPM-04", "a", "jamf", "prod")
+	rec, _ := Build(sampleDevice(), "scf:VPM-06", "a", "jamf", "prod")
 	if rec.GetIdempotencyKey() == "" {
 		t.Fatal("empty key")
 	}
@@ -154,7 +154,7 @@ func TestBuild_IdempotencyKeyDistinctFromPostureKind(t *testing.T) {
 
 func TestBuild_ResultIsInconclusive(t *testing.T) {
 	t.Parallel()
-	rec, _ := Build(sampleDevice(), "scf:VPM-04", "a", "jamf", "prod")
+	rec, _ := Build(sampleDevice(), "scf:VPM-06", "a", "jamf", "prod")
 	if rec.GetResult().String() != "RESULT_INCONCLUSIVE" {
 		t.Errorf("result = %s; want RESULT_INCONCLUSIVE", rec.GetResult())
 	}

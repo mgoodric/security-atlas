@@ -42,7 +42,7 @@ func twoDevicesSoftware() []swinventory.RawDeviceSoftware {
 }
 
 func okSoftwareFlags() runSoftwareFlags {
-	return runSoftwareFlags{environment: "prod", softwareControl: "scf:VPM-04"}
+	return runSoftwareFlags{environment: "prod", softwareControl: "scf:VPM-06"}
 }
 
 func TestDoRunSoftware_PushSuccess(t *testing.T) {
