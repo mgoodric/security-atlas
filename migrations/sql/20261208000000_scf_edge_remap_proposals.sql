@@ -126,6 +126,13 @@ CREATE INDEX IF NOT EXISTS idx_scf_edge_remap_decisions_proposal
 --   edge-remap: anchor not in release
 --   edge-remap: edge changed      legacy edge retired or moved since queued
 --   edge-remap: edge exists       requirement already mapped to that anchor
+--   edge-remap: refused under a tenant context
+--                                 app.current_tenant is set (#2362's guard;
+--                                 also on scf_edge_remap_lock_open_unchanged)
+--
+-- Two proposals approved onto the same (requirement, anchor) at once can
+-- both pass the EXISTS check; the loser hits fw_to_scf_edges' unique
+-- constraint (23505), which the store reports as "edge exists" too.
 --
 -- The new edge copies every content column of the legacy one, including
 -- mapping_tier, and records crosswalk_source 'scf-remap:<proposal id>': a
@@ -153,6 +160,12 @@ DECLARE
     reason   TEXT := NULLIF(btrim(COALESCE(p_reason, '')), '');
     d        scf_edge_remap_decisions%ROWTYPE;
 BEGIN
+    -- A catalog act, as in #2362: a caller in a tenant context has no
+    -- business here. The super-admin store never sets one.
+    IF coalesce(current_setting('app.current_tenant', true), '') <> '' THEN
+        RAISE EXCEPTION 'edge-remap: refused under a tenant context'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
     IF p_decision NOT IN ('approved', 'rejected', 'kept_legacy') THEN
         RAISE EXCEPTION 'edge-remap: unknown decision %', p_decision USING ERRCODE = 'check_violation';
     END IF;
@@ -235,14 +248,21 @@ $$;
 -- it cannot take a FOR UPDATE lock directly.
 CREATE OR REPLACE FUNCTION scf_edge_remap_lock_open_unchanged()
 RETURNS SETOF UUID
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-    SELECT id FROM scf_edge_remap_proposals
-    WHERE class = 'unchanged' AND status = 'open'
-    ORDER BY legacy_scf_id, id
-    FOR UPDATE NOWAIT
+BEGIN
+    IF coalesce(current_setting('app.current_tenant', true), '') <> '' THEN
+        RAISE EXCEPTION 'edge-remap: refused under a tenant context'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN QUERY
+        SELECT p.id FROM scf_edge_remap_proposals p
+        WHERE p.class = 'unchanged' AND p.status = 'open'
+        ORDER BY p.legacy_scf_id, p.id
+        FOR UPDATE NOWAIT;
+END;
 $$;
 
 REVOKE ALL ON FUNCTION scf_edge_remap_lock_open_unchanged() FROM PUBLIC;

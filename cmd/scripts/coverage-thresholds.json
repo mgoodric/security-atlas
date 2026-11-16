@@ -269,7 +269,7 @@
     "internal/control/bundletest": 85,
     "internal/controlimport": 83,
     "internal/crosswalkconflict": 95,
-    "internal/crosswalkremap": 71,
+    "internal/crosswalkremap": 79,
     "internal/crosswalktier": 29,
     "internal/csfassessment": 80,
     "internal/decision": 70,

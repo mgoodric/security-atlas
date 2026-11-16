@@ -446,6 +446,41 @@ func TestEdgeRemap_AppRoleCannotWriteAroundTheDecideFunction(t *testing.T) {
 	}
 }
 
+// Both catalog functions refuse a caller in a tenant context (#2362's
+// guard): a tenant-scoped transaction has no business deciding global
+// edges, whatever role it runs as.
+func TestEdgeRemap_FunctionsRefuseATenantContext(t *testing.T) {
+	admin, app := setupEdgeRemap(t, nil)
+	ctx := context.Background()
+	id := edgeProposals(t, admin)["R-01"].id
+	for name, call := range map[string]string{
+		"scf_edge_remap_decide":              `SELECT 1 FROM scf_edge_remap_decide($1::uuid, 'approved', '', '', 'someone', false)`,
+		"scf_edge_remap_lock_open_unchanged": `SELECT 1 FROM scf_edge_remap_lock_open_unchanged() WHERE $1::uuid IS NOT NULL`,
+	} {
+		tx, err := app.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.current_tenant', $1, true)`, uuid.NewString()); err != nil {
+			t.Fatalf("set tenant: %v", err)
+		}
+		_, err = tx.Exec(ctx, call, id)
+		_ = tx.Rollback(ctx)
+		if err == nil || !strings.Contains(err.Error(), "refused under a tenant context") {
+			t.Errorf("%s under a tenant context: err=%v; want a refusal", name, err)
+		}
+	}
+	if p := edgeProposals(t, admin)["R-01"]; p.status != "open" {
+		t.Fatalf("proposal status = %s after the refused calls; want open", p.status)
+	}
+	// Without a tenant context the same call goes through.
+	if _, err := crosswalkremap.NewStore(app).Decide(ctx, crosswalkremap.DecideInput{
+		ProposalID: id, Decision: crosswalkremap.StatusApproved, DecidedBy: uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("approve without a tenant context: %v", err)
+	}
+}
+
 // --- through the API server: authz and coverage ---
 
 func edgeServer(t *testing.T, app *pgxpool.Pool) *api.Server {

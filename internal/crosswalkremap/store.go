@@ -66,7 +66,15 @@ var (
 	ErrDeciderRequired = errors.New("edge remap: a deciding person is required")
 	// ErrReasonTooLong: the reason exceeds maxReason characters.
 	ErrReasonTooLong = fmt.Errorf("edge remap: reason exceeds %d characters", maxReason)
+	// ErrTenantContext: the transaction carries app.current_tenant. A catalog
+	// decision never runs in one, so this is a caller bug (HTTP 500).
+	ErrTenantContext = errors.New("edge remap: refused under a tenant context")
 )
+
+// pgUniqueViolation is SQLSTATE 23505. Two proposals approved onto the same
+// (requirement, anchor) at once can both pass the function's existence
+// check; the second insert then hits fw_to_scf_edges' unique constraint.
+const pgUniqueViolation = "23505"
 
 // dbErrors maps the stable message prefixes scf_edge_remap_decide raises.
 var dbErrors = []struct {
@@ -80,6 +88,7 @@ var dbErrors = []struct {
 	{"edge-remap: edge changed", ErrEdgeChanged},
 	{"edge-remap: edge exists", ErrEdgeExists},
 	{"edge-remap: decider required", ErrDeciderRequired},
+	{"edge-remap: refused under a tenant context", ErrTenantContext},
 }
 
 // Proposal is one queued edge remap with what a reviewer needs to decide it.
@@ -340,6 +349,9 @@ func mapDBErr(err error) error {
 				return fmt.Errorf("%w (%s)", m.err, pgErr.Message)
 			}
 		}
+		if pgErr.Code == pgUniqueViolation {
+			return fmt.Errorf("%w (%s)", ErrEdgeExists, pgErr.Message)
+		}
 	}
 	return fmt.Errorf("edge remap: decide: %w", err)
 }
@@ -351,6 +363,9 @@ func lockErr(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgLockNotAvailable {
 		return ErrBulkRunning
+	}
+	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Message, "edge-remap: refused under a tenant context") {
+		return fmt.Errorf("%w (%s)", ErrTenantContext, pgErr.Message)
 	}
 	return fmt.Errorf("edge remap: lock unchanged proposals: %w", err)
 }

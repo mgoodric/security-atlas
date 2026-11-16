@@ -208,7 +208,9 @@ Edges are global, so only a super-admin reviews them, through
 - **Approve:** `POST …/{id}/approve` with `{"scf_id"?, "reason"?}`. A split or
   no-successor proposal needs `scf_id`. Approval creates a copy of the edge on
   that anchor in the new release, keeping its relationship, strength,
-  rationale, source attribution and tier.
+  rationale, source attribution and tier. The tier is copied as it is: a
+  `verified` edge stays `verified` on the new anchor, so review the anchor
+  choice before approving.
 - **Reject:** `POST …/{id}/reject`. The proposal can be revisited later.
 - **Keep legacy:** `POST …/{id}/keep-legacy`. This is final.
 - **Bulk-approve:** `POST …/approve-unchanged` approves every open `unchanged`
