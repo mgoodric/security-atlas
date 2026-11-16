@@ -27,3 +27,23 @@ func TestUserID(t *testing.T) {
 		}
 	}
 }
+
+func TestRolesKey(t *testing.T) {
+	t.Parallel()
+	u := uuid.New()
+	for in, want := range map[string]string{
+		"user:" + u.String():         u.String(),
+		u.String():                   u.String(),
+		"key_abc":                    "key_abc",
+		"bootstrap-admin":            "bootstrap-admin",
+		"oauth_client:ci-runner":     "oauth_client:ci-runner",
+		"oauth_client:" + u.String(): "oauth_client:" + u.String(),
+		"user:not-a-uuid":            "user:not-a-uuid",
+		"user:" + uuid.Nil.String():  "user:" + uuid.Nil.String(),
+		"":                           "",
+	} {
+		if got := RolesKey(in); got != want {
+			t.Errorf("RolesKey(%q) = %q; want %q", in, got, want)
+		}
+	}
+}
