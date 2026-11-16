@@ -167,6 +167,9 @@ type riskWire struct {
 	// Acceptance is the proposed or approved acceptance's record (#2105):
 	// present when treatment=accept, omitted otherwise.
 	Acceptance *acceptanceWire `json:"acceptance,omitempty"`
+	// Status is open | closed (#2107). Closure is present when closed.
+	Status  string       `json:"status"`
+	Closure *closureWire `json:"closure,omitempty"`
 }
 
 // CreateRisk handles POST /v1/risks (AC-1..AC-5).
@@ -317,6 +320,14 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filter.IncludeRollUps = include
+	}
+	if raw := r.URL.Query().Get("include_closed"); raw != "" {
+		include, perr := strconv.ParseBool(raw)
+		if perr != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "include_closed must be true or false")
+			return
+		}
+		filter.IncludeClosed = include
 	}
 	risks, err := h.lister.List(ctx, filter)
 	if err != nil {
@@ -630,8 +641,16 @@ func actorFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return "", false
 }
 
-// DeleteRisk handles DELETE /v1/risks/{id}.
+// DeleteRisk handles DELETE /v1/risks/{id}. Hard delete is admin-only
+// (#2107); everyone else closes a risk instead. The OPA policy refuses it
+// to grc_engineer as well; this is the testable twin. The delete writes a
+// deleted row to the risk's audit trail, which outlives the risk.
 func (h *Handler) DeleteRisk(w http.ResponseWriter, r *http.Request) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok || !isTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "only an admin can delete a risk; close it instead")
+		return
+	}
 	ctx, ok := h.tenantContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
@@ -642,7 +661,7 @@ func (h *Handler) DeleteRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	if err := h.store.Delete(ctx, id); err != nil {
+	if err := h.store.Delete(ctx, id, credstore.PrincipalOf(cred)); err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
 			return
@@ -761,6 +780,10 @@ func riskWireFrom(r risk.Risk) riskWire {
 	w.ChildCount = r.ChildCount
 	if r.Treatment == dbx.RiskTreatmentAccept {
 		w.Acceptance = acceptanceWireFrom(r.Acceptance)
+	}
+	w.Status = string(r.Status)
+	if r.Status == dbx.RiskStatusClosed {
+		w.Closure = closureWireFrom(r.Closure)
 	}
 	return w
 }

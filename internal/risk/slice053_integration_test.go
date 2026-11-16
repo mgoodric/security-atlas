@@ -477,7 +477,7 @@ func TestAggregate_EndToEnd_AC5_AC6_AC8_AC22(t *testing.T) {
 
 	// AC-8: delete one child (the highest-severity one). Parent severity
 	// must drop from 15 to 12 (next max), parent row stays alive.
-	if err := store.Delete(ctx, r1); err != nil {
+	if err := store.Delete(ctx, r1, "test-actor"); err != nil {
 		t.Fatalf("delete child: %v", err)
 	}
 

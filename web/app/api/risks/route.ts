@@ -35,9 +35,11 @@ export async function GET(req: Request): Promise<Response> {
   }
   try {
     // #2060: roll-ups stay out unless the register's toggle asks for them.
-    const includeRollups =
-      new URL(req.url).searchParams.get("include_rollups") === "true";
-    const risks = await listRisks(bearer, includeRollups);
+    // #2107: closed risks likewise, unless "Show closed" asks for them.
+    const params = new URL(req.url).searchParams;
+    const includeRollups = params.get("include_rollups") === "true";
+    const includeClosed = params.get("include_closed") === "true";
+    const risks = await listRisks(bearer, includeRollups, includeClosed);
     return NextResponse.json({ risks });
   } catch (err) {
     const e = err as { status?: number; message?: string };

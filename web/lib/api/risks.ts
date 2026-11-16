@@ -54,6 +54,24 @@ export type Risk = {
   // treatment is accept. The approved expiry and approver are
   // accepted_until and accepter above.
   acceptance?: RiskAcceptance;
+  // #2107: open | closed. A closed risk carries its closure and is left
+  // out of the register unless "Show closed" is on.
+  status?: RiskStatus;
+  closure?: RiskClosure;
+};
+
+export type RiskStatus = "open" | "closed";
+
+export type RiskClosureReason =
+  | "not_applicable"
+  | "merged"
+  | "realised_and_handled";
+
+export type RiskClosure = {
+  reason: RiskClosureReason;
+  note?: string;
+  closed_at?: string;
+  closed_by: string;
 };
 
 export type RiskAcceptance = {
@@ -190,12 +208,18 @@ export type RisksListResponse = {
 // owns filter state client-side. The one exception is roll-ups (#2060):
 // upstream leaves them out unless asked, so a parent never counts beside
 // the children it summarises.
+//
+// #2107: closed risks are left out the same way unless includeClosed.
 export async function listRisks(
   bearer: string,
   includeRollups = false,
+  includeClosed = false,
 ): Promise<Risk[]> {
+  const qs = new URLSearchParams();
+  if (includeRollups) qs.set("include_rollups", "true");
+  if (includeClosed) qs.set("include_closed", "true");
   const res = await apiFetch(
-    includeRollups ? "/v1/risks?include_rollups=true" : "/v1/risks",
+    qs.size ? `/v1/risks?${qs.toString()}` : "/v1/risks",
     bearer,
   );
   const body = (await res.json()) as { risks: Risk[]; count: number };
@@ -213,6 +237,18 @@ export async function fetchRisksList(): Promise<RisksListResponse> {
 // roll-up is a valid choice.
 export async function fetchRisksListWithRollUps(): Promise<RisksListResponse> {
   return fetchRisks(`/api/risks?include_rollups=true`);
+}
+
+// fetchRegisterRisks is the register's read: roll-ups and closed risks
+// each kept only when its toggle is on (#2060, #2107).
+export async function fetchRegisterRisks(opts: {
+  rollups: boolean;
+  closed: boolean;
+}): Promise<RisksListResponse> {
+  const qs = new URLSearchParams();
+  if (opts.rollups) qs.set("include_rollups", "true");
+  if (opts.closed) qs.set("include_closed", "true");
+  return fetchRisks(qs.size ? `/api/risks?${qs.toString()}` : "/api/risks");
 }
 
 async function fetchRisks(url: string): Promise<RisksListResponse> {
@@ -399,6 +435,8 @@ export type RiskAuditEntry = {
     | "acceptance_approved"
     | "acceptance_rejected"
     | "acceptance_revoked"
+    | "closed"
+    | "reopened"
     | string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
@@ -438,7 +476,9 @@ export type RiskTransition =
   | "acceptance/propose"
   | "acceptance/approve"
   | "acceptance/reject"
-  | "acceptance/revoke";
+  | "acceptance/revoke"
+  | "close"
+  | "reopen";
 
 export type RiskTransitionBody = {
   treatment?: string;
@@ -447,6 +487,8 @@ export type RiskTransitionBody = {
   proposed_until?: string;
   accepted_until?: string;
   reason?: string;
+  // #2107: close takes a reason and an optional note.
+  note?: string;
 };
 
 /** Run one treatment or acceptance transition through the BFF. */
