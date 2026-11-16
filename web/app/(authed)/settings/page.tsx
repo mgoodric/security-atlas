@@ -78,6 +78,7 @@ import { ProfileSection } from "./_tabs/profile";
 import { SessionsSection } from "./_tabs/sessions";
 import { TenantSection } from "./_tabs/tenant";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 export default function SettingsPage() {
   const meQuery = useQuery({
@@ -93,8 +94,8 @@ export default function SettingsPage() {
       data-testid="settings-page"
       subtitle={
         <>
-          Your personal preferences and credentials. Tenant-wide settings live
-          in{" "}
+          Your personal preferences and credentials.{" "}
+          <Term id="tenant">Tenant</Term>-wide settings live in{" "}
           {isAdmin ? (
             <a
               href="/admin"
