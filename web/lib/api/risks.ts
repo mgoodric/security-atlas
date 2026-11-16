@@ -435,6 +435,8 @@ export type RiskAuditEntry = {
     | "acceptance_approved"
     | "acceptance_rejected"
     | "acceptance_revoked"
+    | "closed"
+    | "reopened"
     | string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
