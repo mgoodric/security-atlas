@@ -52,6 +52,17 @@ describe("postureTileColor", () => {
     expect(postureTileColor(60, higher)).toBe("red");
   });
 
+  test("a value at the critical threshold is red, even when it meets the target", () => {
+    const flat = {
+      ...higher,
+      target_value: 0,
+      warning_threshold: 0,
+      critical_threshold: 0,
+    };
+    expect(postureTileColor(0, flat)).toBe("red");
+    expect(postureTileColor(0.5, flat)).toBe("green");
+  });
+
   test("a target below the value is never red", () => {
     expect(
       postureTileColor(50, {

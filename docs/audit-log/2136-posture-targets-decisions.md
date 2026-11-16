@@ -3,10 +3,13 @@
 An organisation sets a posture target per framework version; the dashboard's
 posture tiles colour coverage against it and offer "Set target".
 
-- `detection_tier_actual`: none
-- `detection_tier_target`: none
+- `detection_tier_actual`: playwright
+- `detection_tier_target`: unit
 
-No bug surfaced during the work.
+The first Playwright run set 0 / 0 / 0 on a 0.0% tile and expected green; the
+shared rule reads a value at critical as red (D3). The spec's fixture now
+seeds 50% coverage and walks red, amber and green. A unit case in
+`posture-targets.test.ts` would have caught the expectation; one is added.
 
 ## D1 — Keyed by framework version, not framework
 
@@ -44,8 +47,10 @@ table has the same rules as CHECK constraints, and the dialog checks it first.
 **Why.** The tile's colour rule (`thresholdBadgeColor`, shared with metric
 tiles) reads all four. `metric_targets` allows nulls, which leaves the rule
 to guess bands; a posture target is set by a person in one dialog, so
-asking for all four costs nothing. Equal bounds are allowed, so "anything
-below 90 is critical" is 90 / 90 / 90.
+asking for all four costs nothing. Equal bounds are allowed. The shared rule
+checks critical first and counts a value AT the critical threshold as
+critical, so 90 / 90 / 90 means "above 90 is on target, 90 or below is
+critical".
 
 ## D4 — A version must have an activated scope (409)
 

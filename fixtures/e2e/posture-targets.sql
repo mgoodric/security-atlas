@@ -4,9 +4,10 @@
 -- One synthetic catalog framework with two current versions, each label
 -- unique so the spec can find its tile:
 --
---   2136-scoped-e2e    two requirements, no crosswalk edges (coverage 0%),
---                      and an ACTIVATED framework scope for the demo
---                      tenant, so the tile shows a percentage.
+--   2136-scoped-e2e    two requirements, one covered by a demo-tenant
+--                      control (coverage 50%), and an ACTIVATED framework
+--                      scope for the demo tenant, so the tile shows a
+--                      percentage.
 --   2136-unscoped-e2e  one requirement and no scope: the tile says
 --                      "Scope not set".
 --
@@ -45,6 +46,38 @@ VALUES
     ('e2e21360-0000-0000-0000-00000000b001', 'e2e21360-0000-0000-0000-0000000f0002', 'PT-01', 'Posture target requirement one', ''),
     ('e2e21360-0000-0000-0000-00000000b002', 'e2e21360-0000-0000-0000-0000000f0002', 'PT-02', 'Posture target requirement two', ''),
     ('e2e21360-0000-0000-0000-00000000b003', 'e2e21360-0000-0000-0000-0000000f0003', 'PT-01', 'Posture target requirement one', '')
+ON CONFLICT (id) DO NOTHING;
+
+-- PT-01 of the scoped version is covered: an edge to anchor A1 on a legacy
+-- spine version, and a demo-tenant control anchored there. PT-02 is not,
+-- so the tile reads 1/2 = 50.0%.
+INSERT INTO framework_versions (id, tenant_id, framework_id, version, effective_from, status)
+VALUES ('e2e21360-0000-0000-0000-0000000f0004', NULL,
+        'e2e21360-0000-0000-0000-0000000f0001', 'scf-2136-e2e', '2026-01-01', 'legacy')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description)
+VALUES ('e2e21360-0000-0000-0000-00000000a001', 'e2e21360-0000-0000-0000-0000000f0004',
+        'PT-E2E-A1', 'IAC', 'Posture target e2e anchor A1', '')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO fw_to_scf_edges
+    (id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale)
+VALUES ('e2e21360-0000-0000-0000-00000000e001', 'e2e21360-0000-0000-0000-00000000b001',
+        'e2e21360-0000-0000-0000-00000000a001', 'equal', 1.0, 'community_draft', '')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO controls (
+    id, tenant_id, bundle_id, version, scf_id, scf_anchor_id, title, description,
+    control_family, implementation_type, owner_role, lifecycle_state, applicability_expr,
+    evidence_queries, manual_evidence_schema, linked_policy_ids,
+    freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
+    bundle_uploaded_at, bundle_uploaded_by
+)
+VALUES ('e2e21360-0000-0000-0000-00000000d001', '00000000-0000-0000-0000-00000000d3a0',
+        'posture_2136_e2e_c1', 1, 'PT-E2E-A1', 'e2e21360-0000-0000-0000-00000000a001',
+        'Posture target e2e control', '', 'access_control', 'automated', 'security', 'active', '',
+        '[]'::jsonb, NULL, ARRAY[]::TEXT[], NULL, '', '', now(), 'e2e')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO framework_scopes
