@@ -1,13 +1,16 @@
 // Slice 108: GET /v1/me/preferences + PATCH /v1/me/preferences. Per-event-per-channel
 // notification matrix over user_notification_preferences. Defaults to enabled for
-// every (event, channel) cell when no row exists.
+// every (event, channel) cell when no row exists. #2145 adds the caller's dismissed
+// onboarding hints (user_onboarding_hint_dismissals) to the same resource.
 package me
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,7 +67,51 @@ func (h *PreferencesHandler) GetPreferences(w http.ResponseWriter, r *http.Reque
 		httperr.WriteInternal(w, r, "get preferences", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"preferences": preferencesWire(out)})
+	hints, err := h.prefs.DismissedHints(ctx, tenantUUID, userUUID)
+	if err != nil {
+		httperr.WriteInternal(w, r, "get dismissed hints", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"preferences":     preferencesWire(out),
+		"dismissed_hints": hints,
+	})
+}
+
+// patchBody is the wrapped PATCH shape. Every field is optional, but at least
+// one must change something. #2145 added the two hint fields: dismissed_hints
+// maps a module to dismissed (true) or shown again (false); reset_hints clears
+// every dismissal ("Show onboarding hints again").
+type patchBody struct {
+	Preferences    userprefs.Preferences `json:"preferences"`
+	DismissedHints map[string]bool       `json:"dismissed_hints"`
+	ResetHints     bool                  `json:"reset_hints"`
+}
+
+// parsePatchBody accepts the wrapped shape, or the slice 108 bare matrix: an
+// object whose top-level keys are events.
+func parsePatchBody(body []byte) (patchBody, string) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return patchBody{}, "invalid JSON body"
+	}
+	_, wrappedPrefs := raw["preferences"]
+	_, wrappedHints := raw["dismissed_hints"]
+	_, wrappedReset := raw["reset_hints"]
+	var out patchBody
+	if wrappedPrefs || wrappedHints || wrappedReset {
+		dec := json.NewDecoder(bytes.NewReader(body))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&out); err != nil {
+			return patchBody{}, "body must be {preferences, dismissed_hints, reset_hints}"
+		}
+	} else if err := json.Unmarshal(body, &out.Preferences); err != nil {
+		return patchBody{}, "body must be a preferences matrix"
+	}
+	if len(out.Preferences) == 0 && len(out.DismissedHints) == 0 && !out.ResetHints {
+		return patchBody{}, "preferences body must contain at least one event or hint"
+	}
+	return out, ""
 }
 
 // PatchPreferences handles PATCH /v1/me/preferences. Accepts a partial matrix;
@@ -95,27 +142,14 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 		httpresp.WriteError(w, http.StatusBadRequest, "empty body")
 		return
 	}
-	// Accept the matrix either as a bare object (preferences map at top level) or
-	// wrapped under {"preferences": ...}. The wrapped shape mirrors the GET response.
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(body, &raw); err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	in, msg := parsePatchBody(body)
+	if msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	var matrix userprefs.Preferences
-	if inner, ok := raw["preferences"]; ok {
-		if err := json.Unmarshal(inner, &matrix); err != nil {
-			httpresp.WriteError(w, http.StatusBadRequest, "preferences must be an object")
-			return
-		}
-	} else {
-		if err := json.Unmarshal(body, &matrix); err != nil {
-			httpresp.WriteError(w, http.StatusBadRequest, "body must be a preferences matrix")
-			return
-		}
-	}
-	if len(matrix) == 0 {
-		httpresp.WriteError(w, http.StatusBadRequest, "preferences body must contain at least one event")
+	hintChange := userprefs.HintChange{Reset: in.ResetHints, Dismissed: in.DismissedHints}
+	if err := hintChange.Validate(); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Snapshot prior state for audit-log diff (before-image).
@@ -124,16 +158,27 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 		httperr.WriteInternal(w, r, "load preferences before patch", err)
 		return
 	}
-	if err := h.prefs.Upsert(ctx, tenantUUID, userUUID, matrix); err != nil {
-		if errors.Is(err, userprefs.ErrUnknownEvent) {
-			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	hintsBefore, err := h.prefs.DismissedHints(ctx, tenantUUID, userUUID)
+	if err != nil {
+		httperr.WriteInternal(w, r, "load dismissed hints before patch", err)
+		return
+	}
+	if len(in.Preferences) > 0 {
+		if err := h.prefs.Upsert(ctx, tenantUUID, userUUID, in.Preferences); err != nil {
+			if errors.Is(err, userprefs.ErrUnknownEvent) {
+				httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if errors.Is(err, userprefs.ErrUnknownChannel) {
+				httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			httperr.WriteInternal(w, r, "upsert preferences", err)
 			return
 		}
-		if errors.Is(err, userprefs.ErrUnknownChannel) {
-			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		httperr.WriteInternal(w, r, "upsert preferences", err)
+	}
+	if err := h.prefs.ApplyHints(ctx, tenantUUID, userUUID, hintChange); err != nil {
+		httperr.WriteInternal(w, r, "apply hint dismissals", err)
 		return
 	}
 	after, err := h.prefs.Get(ctx, tenantUUID, userUUID)
@@ -141,13 +186,26 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 		httperr.WriteInternal(w, r, "load preferences after patch", err)
 		return
 	}
-	// Audit-log: only the cells the patch touched.
+	hintsAfter, err := h.prefs.DismissedHints(ctx, tenantUUID, userUUID)
+	if err != nil {
+		httperr.WriteInternal(w, r, "load dismissed hints after patch", err)
+		return
+	}
+	// Audit-log: only the cells the patch touched, and only the hints whose
+	// state changed. One row per PATCH, none when nothing changed.
 	auditBefore := map[string]any{}
 	auditAfter := map[string]any{}
-	for ev, channels := range matrix {
+	for ev, channels := range in.Preferences {
 		for ch := range channels {
 			auditBefore[ev+"."+ch] = before[ev][ch]
 			auditAfter[ev+"."+ch] = after[ev][ch]
+		}
+	}
+	for _, m := range userprefs.HintModules {
+		was, now := slices.Contains(hintsBefore, m), slices.Contains(hintsAfter, m)
+		if was != now {
+			auditBefore["hint_dismissed."+m] = was
+			auditAfter["hint_dismissed."+m] = now
 		}
 	}
 	if !mapsEqual(auditBefore, auditAfter) {
@@ -156,7 +214,10 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 		ah := &ProfileHandler{pool: h.pool}
 		_ = ah.writeAuditLog(ctx, tenantUUID, userUUID, "preferences.update", auditBefore, auditAfter)
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"preferences": preferencesWire(after)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"preferences":     preferencesWire(after),
+		"dismissed_hints": hintsAfter,
+	})
 }
 
 func mapsEqual(a, b map[string]any) bool {

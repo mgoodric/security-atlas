@@ -164,7 +164,7 @@ approver_role: security_lead
 linked_control_ids:
   - GOV-02
   - GOV-05
-  - RSK-01
+  - RSK-02
 acknowledgment_required_roles:
   - employee
 source_attribution: community_draft

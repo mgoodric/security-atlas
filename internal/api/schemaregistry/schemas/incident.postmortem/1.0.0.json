@@ -4,9 +4,9 @@
   "x-evidence-kind": "incident.postmortem.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IRO-09"],
+  "x-default-scf-anchors": ["IRO-16"],
   "title": "Incident postmortem",
-  "description": "Evidence that an incident in the incident register was closed with a postmortem, one record per linked IR control. Written by the incident register through ingest at close (#1830). IRO-09 Incident Reporting is the closest anchor present in the bundled SCF catalog fixture, as for pagerduty.postmortem_summary.",
+  "description": "Evidence that an incident in the incident register was closed with a postmortem, one record per linked IR control. Written by the incident register through ingest at close (#1830). IRO-16 Incident Stakeholder Reporting is the closest anchor present in the bundled SCF catalog fixture, as for pagerduty.postmortem_summary.",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -337,7 +337,7 @@ mappings:
     strength: 0.9
     rationale: "Managing third-party service providers handling account data maps to SCF Third-Party Management — shared with SOC 2 CC9.2 and ISO A.5.19."
   - requirement_code: 12.10.1
-    scf_anchor: IRO-04
+    scf_anchor: IRO-08
     relationship_type: equal
     strength: 0.9
-    rationale: "An incident response plan ready to activate maps to SCF Incident Response Plan — shared with SOC 2 CC7.3/CC7.4 and ISO A.5.24."
+    rationale: "An incident response plan ready to activate maps to SCF Incident Response Plan (IRP) — shared with SOC 2 CC7.3/CC7.4 and ISO A.5.24."

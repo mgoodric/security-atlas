@@ -222,12 +222,12 @@ pass/fail per `(control, scope)`.
 The bundled schemas carry default SCF-anchor hints, flagged for maintainer
 accuracy recheck:
 
-- `pagerduty.oncall_coverage.v1` → `IRO-04` (Incident Response Plan), `IRO-07`
+- `pagerduty.oncall_coverage.v1` → `IRO-08` (Incident Response Plan (IRP)), `IRO-07`
   (Incident Response Team) — proves an IR capability exists and is staffed.
-- `pagerduty.incident_summary.v1` → `IRO-02` (Incident Handling), `IRO-09`
-  (Incident Reporting) — proves incidents are detected, handled, and resolved.
-- `pagerduty.postmortem_summary.v1` → `IRO-13` (Root-Cause Analysis), `IRO-09`
-  (Incident Reporting) — proves incidents are reviewed and corrective actions
+- `pagerduty.incident_summary.v1` → `IRO-02` (Incident Handling), `IRO-16`
+  (Incident Stakeholder Reporting) — proves incidents are detected, handled, and resolved.
+- `pagerduty.postmortem_summary.v1` → `IRO-13` (Root-Cause Analysis), `IRO-16`
+  (Incident Stakeholder Reporting) — proves incidents are reviewed and corrective actions
   tracked (SOC 2 CC7.5; the slice-372 IR continuous-improvement loop).
 - `pagerduty.response_metrics.v1` → `IRO-02` (Incident Handling), `MON-02`
   (Continuous Monitoring) — proves incidents are acknowledged and resolved within

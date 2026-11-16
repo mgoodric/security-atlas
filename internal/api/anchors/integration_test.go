@@ -196,6 +196,49 @@ func TestListFrameworks_IncludesSCF(t *testing.T) {
 	}
 }
 
+// #2086: `?include=versions` lists each framework's versions; without it
+// the response carries none.
+func TestListFrameworks_IncludeVersions(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	type fw struct {
+		Slug     string              `json:"slug"`
+		Versions []map[string]string `json:"versions"`
+	}
+	list := func(path string) []fw {
+		resp, body := get(t, ts, path, bearer)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d; want 200; body=%s", path, resp.StatusCode, body)
+		}
+		var got struct {
+			Frameworks []fw `json:"frameworks"`
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return got.Frameworks
+	}
+	for _, f := range list("/v1/frameworks") {
+		if f.Versions != nil {
+			t.Fatalf("%s: versions present without include=versions", f.Slug)
+		}
+	}
+	var scf *fw
+	all := list("/v1/frameworks?include=versions")
+	for i := range all {
+		if all[i].Slug == "scf" {
+			scf = &all[i]
+		}
+	}
+	if scf == nil || len(scf.Versions) == 0 {
+		t.Fatalf("SCF with versions not in list: %+v", all)
+	}
+	for _, v := range scf.Versions {
+		if v["id"] == "" || v["version"] == "" {
+			t.Fatalf("SCF version missing id or version: %+v", v)
+		}
+	}
+}
+
 func TestListSCFVersions_HasCurrent(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
 	resp, body := get(t, ts, "/v1/frameworks/scf/versions", bearer)

@@ -359,10 +359,10 @@ mappings:
     strength: 0.8
     rationale: "Management's duty to direct personnel toward security policy compliance is the Assigned Security, Compliance & Resilience Responsibilities concept."
   - requirement_code: A.5.5
-    scf_anchor: IRO-04
+    scf_anchor: IRO-08
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Maintaining authority contacts is primarily an incident-response readiness concern; IRO-04 (Incident Response Plan) carries the external-notification/escalation-contact element."
+    rationale: "Maintaining authority contacts is primarily an incident-response readiness concern; IRO-08 (Incident Response Plan (IRP)) carries the external-notification/escalation-contact element."
   - requirement_code: A.5.6
     scf_anchor: THR-01
     relationship_type: intersects_with
@@ -469,30 +469,30 @@ mappings:
     strength: 0.9
     rationale: "Information security for cloud services maps to SCF Cloud Services."
   - requirement_code: A.5.24
-    scf_anchor: IRO-04
+    scf_anchor: IRO-08
     relationship_type: equal
     strength: 0.9
-    rationale: "Incident management planning & preparation maps to SCF Incident Response Plan — shared with SOC 2 CC7.3/CC7.4."
+    rationale: "Incident management planning & preparation maps to SCF Incident Response Plan (IRP) — shared with SOC 2 CC7.3/CC7.4."
   - requirement_code: A.5.25
-    scf_anchor: IRO-04
+    scf_anchor: IRO-08
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Triage and categorization of events into incidents is a defined step of the Incident Response Plan (IRO-04)."
+    rationale: "Triage and categorization of events into incidents is a defined step of the Incident Response Plan (IRP) (IRO-08)."
   - requirement_code: A.5.26
-    scf_anchor: IRO-04
+    scf_anchor: IRO-08
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Response to incidents is a subset of the broader Incident Response Plan anchor."
+    rationale: "Response to incidents is a subset of the broader Incident Response Plan (IRP) anchor."
   - requirement_code: A.5.27
-    scf_anchor: IRO-04
+    scf_anchor: IRO-08
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Post-incident learning and control improvement is the lessons-learned phase of the Incident Response Plan (IRO-04)."
+    rationale: "Post-incident learning and control improvement is the lessons-learned phase of the Incident Response Plan (IRP) (IRO-08)."
   - requirement_code: A.5.28
-    scf_anchor: IRO-04
+    scf_anchor: IRO-08
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Evidence collection and preservation is the forensic-readiness facet of incident response (IRO-04)."
+    rationale: "Evidence collection and preservation is the forensic-readiness facet of incident response (IRO-08)."
   - requirement_code: A.5.28
     scf_anchor: MON-04
     relationship_type: intersects_with
@@ -605,10 +605,10 @@ mappings:
     strength: 0.5
     rationale: "Remote-access protection of the network boundary is the Boundary Protection (NET-03) facet."
   - requirement_code: A.6.8
-    scf_anchor: IRO-09
+    scf_anchor: IRO-16
     relationship_type: equal
     strength: 0.9
-    rationale: "A personnel event-reporting mechanism maps to Incident Reporting (IRO-09)."
+    rationale: "A personnel event-reporting mechanism maps to Incident Stakeholder Reporting (IRO-16)."
   # --- A.7 Physical ---
   - requirement_code: A.7.1
     scf_anchor: PES-08

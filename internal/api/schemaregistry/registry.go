@@ -190,8 +190,8 @@ func DefaultSeed() []KindVersion {
 		// monitoring.alert_config.v1. Slice 488 reads which alerts are CONFIGURED
 		// (CC7.2); this reads what actually FIRED and resolved (CC7.3/CC7.4): one
 		// record per firing event (rule_id, vendor, fired_at, resolved_at, state,
-		// routing-target HANDLE). Anchors MON-02 + IRO-09 (the spec candidate
-		// IRO-02 is absent from the bundled SCF fixture; IRO-09 is the closest
+		// routing-target HANDLE). Anchors MON-02 + IRO-16 (the spec candidate
+		// IRO-02 is absent from the bundled SCF fixture; IRO-16 is the closest
 		// present incident anchor — decisions-log D3). Read-only (Datadog
 		// events_read GET /api/v1/events; Grafana Viewer GET /api/v1/rules/history),
 		// bounded PULL over a look-back window (NOT continuous monitoring, NOT
@@ -212,7 +212,7 @@ func DefaultSeed() []KindVersion {
 		// slice-533 CC7.3 sibling. Slice 533 reads detection-rule CONFIGURATION
 		// (CC7.2: which rules exist); this reads what FIRED and how it was TRIAGED
 		// (CC7.3 incident response: rules fired + were triaged over the audit
-		// period, when, by whom): THR-01 + IRO-09. Read-only
+		// period, when, by whom): THR-01 + IRO-16. Read-only
 		// (security_monitoring_signals_read), bounded PULL over a look-back window
 		// (NOT continuous monitoring, NOT event-driven). Triage METADATA only —
 		// never the signal message body, matched log/event samples, the
@@ -240,7 +240,7 @@ func DefaultSeed() []KindVersion {
 		// the deliberate slice-489 over-collection follow-on (P0-489-7). Proves
 		// incidents are reviewed + corrective actions tracked (SOC 2 CC7.5; the
 		// slice-372 IR continuous-improvement loop): SCF IRO-13 Root-Cause
-		// Analysis / IRO-09 Incident Reporting. META-ONLY — existence, status,
+		// Analysis / IRO-16 Incident Stakeholder Reporting. META-ONLY — existence, status,
 		// timestamps, and the corrective-action COUNT + completed/open rollup;
 		// NEVER the postmortem narrative / timeline / root-cause prose, an
 		// action-item title, customer data, or responder PII (the struct has no

@@ -149,7 +149,7 @@ func TestSeed_NoopResolver_AllInsertedAllOrphan(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	policies := validStockPolicies(t, []string{"GOV-02", "GOV-05", "RSK-01"})
+	policies := validStockPolicies(t, []string{"GOV-02", "GOV-05", "RSK-02"})
 
 	report, err := seed.Seed(context.Background(), app, tenant, policies, seed.NoopAnchorResolver{})
 	if err != nil {
@@ -348,7 +348,7 @@ approver_role: security_lead
 linked_control_ids:
   - GOV-02
   - GOV-05
-  - RSK-01
+  - RSK-02
 acknowledgment_required_roles:
   - employee
 ---
