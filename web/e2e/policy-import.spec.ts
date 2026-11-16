@@ -130,9 +130,9 @@ test.describe("imported policies (#1747)", () => {
     ).toHaveText("Jane Doe");
     await expect(
       page.getByTestId("policy-detail-historical-approved-at"),
-    ).toHaveText("2025-03-01");
+    ).toHaveText("Mar 1, 2025");
     await expect(page.getByTestId("policy-detail-next-review")).toHaveText(
-      "2026-03-01",
+      "Mar 1, 2026",
     );
     const link = page.getByTestId("policy-detail-source-link");
     await expect(link).toHaveAttribute("href", SOURCE_URL);

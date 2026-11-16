@@ -37,6 +37,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   Table,
   TableBody,
@@ -92,14 +93,6 @@ function rangeIsValid(from: string, to: string): boolean {
   if (t <= f) return false;
   const days = (t - f) / (24 * 60 * 60 * 1000);
   return days <= MAX_WINDOW_DAYS;
-}
-
-function formatLocal(s: string): string {
-  try {
-    return new Date(s).toLocaleString();
-  } catch {
-    return s;
-  }
 }
 
 type Filters = {
@@ -564,7 +557,6 @@ function RowsTable({
 
 function Row({ row }: { row: ActivityEntry }) {
   const [open, setOpen] = useState(false);
-  const utcLabel = row.occurred_at;
   return (
     <>
       <TableRow
@@ -582,9 +574,7 @@ function Row({ row }: { row: ActivityEntry }) {
           </span>
         </TableCell>
         <TableCell>
-          <time dateTime={utcLabel} title={`${utcLabel} (UTC)`}>
-            {formatLocal(row.occurred_at)}
-          </time>
+          <Timestamp value={row.occurred_at} />
         </TableCell>
         <TableCell>
           <span

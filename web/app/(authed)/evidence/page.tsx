@@ -88,7 +88,6 @@ import {
 import {
   hashPrefix,
   ledgerSubtitleSuffix,
-  observedAtLabel,
   recordCountMeta,
   scopeLabel,
   sourceSummary,
@@ -99,6 +98,7 @@ import {
   PUSH_CTA_SUBTITLE_PREFIX,
 } from "./push-cta";
 import { pageTitle } from "@/lib/page-titles";
+import { Timestamp } from "@/components/ui/timestamp";
 
 // URL parameter names mirror the upstream + BFF FORWARD_PARAMS so the
 // browser URL is a faithful echo of the request that the BFF will
@@ -514,12 +514,11 @@ function EvidencePageInner() {
       id: "observed_at",
       header: "Observed",
       cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          data-testid="evidence-row-observed-at"
-        >
-          {observedAtLabel(row.observed_at)}
-        </span>
+        <Timestamp
+          value={row.observed_at}
+          className="text-xs text-muted-foreground"
+          testId="evidence-row-observed-at"
+        />
       ),
     },
     {
