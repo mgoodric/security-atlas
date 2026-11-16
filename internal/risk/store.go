@@ -636,11 +636,18 @@ func (s *Store) Heatmap(ctx context.Context) ([]HeatmapCell, error) {
 
 // Delete removes a risk by id and writes a deleted row to its audit trail,
 // naming actor. ErrNotFound if no row was matched. Only an admin reaches
-// it over HTTP (#2107); closing is how anyone else retires a risk.
+// it over HTTP (#2107); closing is how anyone else retires a risk. A
+// deadlock against a concurrent link is retried in a fresh transaction
+// (retryOnDeadlock). The audit row is written inside that transaction, so
+// a rolled-back attempt leaves none and a retry writes exactly one.
 func (s *Store) Delete(ctx context.Context, id uuid.UUID, actor string) error {
 	if actor == "" {
 		return fmt.Errorf("%w: actor is required", ErrTransitionInput)
 	}
+	return retryOnDeadlock(ctx, func() error { return s.deleteOnce(ctx, id, actor) })
+}
+
+func (s *Store) deleteOnce(ctx context.Context, id uuid.UUID, actor string) error {
 	return s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		// Check existence first so we can return ErrNotFound rather than a
 		// silent success on a missing row.
