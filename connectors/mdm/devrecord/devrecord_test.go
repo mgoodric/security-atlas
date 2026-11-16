@@ -27,7 +27,7 @@ func sampleDevice() devposture.Device {
 
 func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleDevice(), "scf:END-04", "connector:jamf:devices@dev", "jamf", "prod")
+	rec, err := Build(sampleDevice(), "scf:END-03", "connector:jamf:devices@dev", "jamf", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 	if rec.GetIdempotencyKey() == "" {
 		t.Error("idempotency key empty")
 	}
-	if rec.GetControlId() != "scf:END-04" {
+	if rec.GetControlId() != "scf:END-03" {
 		t.Errorf("control = %q", rec.GetControlId())
 	}
 	scope := map[string]string{}
@@ -59,7 +59,7 @@ func TestBuild_SetsKindAndIdempotencyAndScope(t *testing.T) {
 
 func TestBuild_PayloadCarriesPostureSummaryOnly(t *testing.T) {
 	t.Parallel()
-	rec, _ := Build(sampleDevice(), "scf:END-04", "connector:jamf:devices@dev", "jamf", "prod")
+	rec, _ := Build(sampleDevice(), "scf:END-03", "connector:jamf:devices@dev", "jamf", "prod")
 	pm := rec.GetPayload().AsMap()
 	// Required posture-summary fields present.
 	for _, k := range []string{"source_mdm", "device_id", "disk_encryption_enabled", "screen_lock_enabled", "managed", "enrolled", "compliance_result"} {
@@ -89,7 +89,7 @@ func TestBuild_StableOptionalFieldsOmittedWhenEmpty(t *testing.T) {
 	d.Platform = ""
 	d.OwnerAssignmentID = ""
 	d.OwnerDisplayName = ""
-	rec, _ := Build(d, "scf:END-04", "connector:jamf:devices@dev", "jamf", "prod")
+	rec, _ := Build(d, "scf:END-03", "connector:jamf:devices@dev", "jamf", "prod")
 	pm := rec.GetPayload().AsMap()
 	for _, k := range []string{"device_name", "os_version", "platform", "owner_assignment_id", "owner_display_name"} {
 		if _, ok := pm[k]; ok {
@@ -100,8 +100,8 @@ func TestBuild_StableOptionalFieldsOmittedWhenEmpty(t *testing.T) {
 
 func TestBuild_SameDeviceSameHourSameKey(t *testing.T) {
 	t.Parallel()
-	r1, _ := Build(sampleDevice(), "scf:END-04", "connector:jamf:devices@dev", "jamf", "prod")
-	r2, _ := Build(sampleDevice(), "scf:END-04", "connector:jamf:devices@dev", "jamf", "prod")
+	r1, _ := Build(sampleDevice(), "scf:END-03", "connector:jamf:devices@dev", "jamf", "prod")
+	r2, _ := Build(sampleDevice(), "scf:END-03", "connector:jamf:devices@dev", "jamf", "prod")
 	if r1.GetIdempotencyKey() != r2.GetIdempotencyKey() {
 		t.Error("same device + hour should yield same idempotency key")
 	}
@@ -109,7 +109,7 @@ func TestBuild_SameDeviceSameHourSameKey(t *testing.T) {
 
 func TestBuild_ResultIsInconclusive(t *testing.T) {
 	t.Parallel()
-	rec, _ := Build(sampleDevice(), "scf:END-04", "connector:jamf:devices@dev", "jamf", "prod")
+	rec, _ := Build(sampleDevice(), "scf:END-03", "connector:jamf:devices@dev", "jamf", "prod")
 	if rec.GetResult().String() != "RESULT_INCONCLUSIVE" {
 		t.Errorf("result = %s; want RESULT_INCONCLUSIVE (evaluator decides)", rec.GetResult())
 	}

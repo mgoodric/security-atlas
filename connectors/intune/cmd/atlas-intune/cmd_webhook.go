@@ -98,7 +98,7 @@ valid certificate — terminate TLS at a reverse proxy in front of this process.
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.deviceControl, "device-control", "scf:END-04", "control_id to attach to endpoint.device_posture.v1 records")
+	cmd.Flags().StringVar(&f.deviceControl, "device-control", "scf:END-03", "control_id to attach to endpoint.device_posture.v1 records")
 	cmd.Flags().StringVar(&f.listen, "listen", "127.0.0.1:8477", "address to bind the receiver (loopback default; terminate TLS at a reverse proxy)")
 	cmd.Flags().StringVar(&f.path, "path", "/webhooks/intune", "URL path the receiver listens on")
 	return cmd

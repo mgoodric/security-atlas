@@ -561,7 +561,7 @@ func TestDoRun_FleetMode_FailsOnUnreachableFleet(t *testing.T) {
 		environment:    "prod",
 		fleetBaseURL:   srv.URL,
 		token:          "fleet-test",
-		hostPostureCtl: "scf:END-04",
+		hostPostureCtl: "scf:END-03",
 	})
 	if err == nil {
 		t.Fatal("expected doRun fleet-pull error against closed server")
@@ -590,7 +590,7 @@ func TestDoRun_InvalidMode(t *testing.T) {
 		org:            "example",
 		environment:    "prod",
 		token:          "fleet-test",
-		hostPostureCtl: "scf:END-04",
+		hostPostureCtl: "scf:END-03",
 	})
 	if err == nil {
 		t.Fatal("expected unreachable-mode error from doRun")
@@ -615,7 +615,7 @@ func TestDoRun_AuthResolveFails(t *testing.T) {
 		org:            "example",
 		environment:    "prod",
 		fleetBaseURL:   "https://fleet.example.invalid",
-		hostPostureCtl: "scf:END-04",
+		hostPostureCtl: "scf:END-03",
 	})
 	if err == nil {
 		t.Fatal("expected auth.Resolve error from doRun")
@@ -637,7 +637,7 @@ func TestBuildHostPostureRecord_HostnameFallback(t *testing.T) {
 		Platform:   "darwin",
 		ObservedAt: time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	rec, err := buildHostPostureRecord(state, "example", "prod", "scf:END-04")
+	rec, err := buildHostPostureRecord(state, "example", "prod", "scf:END-03")
 	if err != nil {
 		t.Fatalf("buildHostPostureRecord: %v", err)
 	}

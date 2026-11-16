@@ -9,7 +9,7 @@ description: |
   ufw on Linux, Windows Defender Firewall on Windows). The osquery query
   reads the firewall-state table and asserts coverage.
 
-scf_anchor_id: NET-04
+scf_anchor_id: NET-03
 control_family: NET
 implementation_type: automated
 owner_role: security-engineering

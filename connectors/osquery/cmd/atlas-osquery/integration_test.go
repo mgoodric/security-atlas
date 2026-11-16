@@ -150,7 +150,7 @@ func TestRun_PushesHostPosture(t *testing.T) {
 		t.Fatalf("rows = %d", len(rows))
 	}
 
-	rec, err := buildHostPostureRecord(rows[0], "example", "prod", "scf:END-04")
+	rec, err := buildHostPostureRecord(rows[0], "example", "prod", "scf:END-03")
 	if err != nil {
 		t.Fatalf("buildHostPostureRecord: %v", err)
 	}
@@ -204,13 +204,13 @@ func TestRun_DedupesOnSameHourReplay(t *testing.T) {
 		Result:                osqueryposture.ResultPass,
 		ObservedAt:            time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	r1, err := buildHostPostureRecord(state, "example", "prod", "scf:END-04")
+	r1, err := buildHostPostureRecord(state, "example", "prod", "scf:END-03")
 	if err != nil {
 		t.Fatalf("buildHostPostureRecord r1: %v", err)
 	}
 	state2 := state
 	state2.ObservedAt = time.Date(2026, 5, 11, 12, 30, 0, 0, time.UTC) // same hour
-	r2, err := buildHostPostureRecord(state2, "example", "prod", "scf:END-04")
+	r2, err := buildHostPostureRecord(state2, "example", "prod", "scf:END-03")
 	if err != nil {
 		t.Fatalf("buildHostPostureRecord r2: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestBuildHostPostureRecord_RejectsMissingHostUUID(t *testing.T) {
 		Platform:   "darwin",
 		ObservedAt: time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	if _, err := buildHostPostureRecord(state, "example", "prod", "scf:END-04"); err == nil {
+	if _, err := buildHostPostureRecord(state, "example", "prod", "scf:END-03"); err == nil {
 		t.Fatal("expected error on missing host_uuid; got nil")
 	}
 }
@@ -256,7 +256,7 @@ func TestBuildHostPostureRecord_DataClassificationFromMDM(t *testing.T) {
 	}
 	managed := base
 	managed.MDMEnrolled = true
-	r, err := buildHostPostureRecord(managed, "o", "e", "scf:END-04")
+	r, err := buildHostPostureRecord(managed, "o", "e", "scf:END-03")
 	if err != nil {
 		t.Fatalf("managed: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestBuildHostPostureRecord_DataClassificationFromMDM(t *testing.T) {
 
 	unmanaged := base
 	unmanaged.MDMEnrolled = false
-	r2, err := buildHostPostureRecord(unmanaged, "o", "e", "scf:END-04")
+	r2, err := buildHostPostureRecord(unmanaged, "o", "e", "scf:END-03")
 	if err != nil {
 		t.Fatalf("unmanaged: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestRun_LocalModeNotWiredYet(t *testing.T) {
 		org:            "example",
 		environment:    "prod",
 		osqueryDSocket: "/var/osquery/osquery.em",
-		hostPostureCtl: "scf:END-04",
+		hostPostureCtl: "scf:END-03",
 	})
 	if err == nil {
 		t.Fatal("expected ErrLocalSocketNotWired; got nil")

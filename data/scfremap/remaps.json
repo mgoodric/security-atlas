@@ -252,6 +252,48 @@
       "from": "DCH-07",
       "to": "DCH-16",
       "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "END-04",
+      "to": "END-03",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "END-07",
+      "to": "END-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "NET-01",
+      "to": "NET-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "NET-04",
+      "to": "NET-03",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "NET-08",
+      "to": "NET-24",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "PES-04",
+      "to": "PES-08",
+      "basis": "concept"
     }
   ]
 }
