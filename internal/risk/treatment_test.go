@@ -192,6 +192,39 @@ func TestIsOpenTreatment(t *testing.T) {
 	}
 }
 
+// TestValidateCreateAcceptance pins #2371: a create may propose an
+// acceptance but never approve one, name an accepter or set its expiry.
+func TestValidateCreateAcceptance(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		status       dbx.RiskAcceptanceStatus
+		accepter     string
+		untilPresent bool
+		wantErr      bool
+	}{
+		{"no acceptance", "", "", false, false},
+		{"proposed", dbx.RiskAcceptanceStatusProposed, "", false, false},
+		{"approved", dbx.RiskAcceptanceStatusApproved, "", false, true},
+		{"approved with accepter and expiry", dbx.RiskAcceptanceStatusApproved, "ciso@example.com", true, true},
+		{"proposed with accepter", dbx.RiskAcceptanceStatusProposed, "ciso@example.com", false, true},
+		{"proposed with expiry", dbx.RiskAcceptanceStatusProposed, "", true, true},
+		{"accepter without acceptance", "", "ciso@example.com", false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			err := risk.ValidateCreateAcceptance(c.status, c.accepter, c.untilPresent)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if err != nil && !risk.IsTreatmentValidation(err) {
+				t.Fatalf("err = %v, want a treatment validation error (400)", err)
+			}
+		})
+	}
+}
+
 func TestTreatmentLabel(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
