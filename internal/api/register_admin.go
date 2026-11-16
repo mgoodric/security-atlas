@@ -240,7 +240,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Get("/v1/admin/demo/status", adminDemoH.Status)
 	root.Post("/v1/admin/demo/seed", adminDemoH.Seed)
 	root.Post("/v1/admin/demo/teardown", adminDemoH.Teardown)
-	auditLogH := adminauditlog.New(s.dbPool)
+	auditLogH := adminauditlog.New(s.dbPool).WithAuthz(s.authzEngine)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
 	// Slice 124: unified audit-log aggregation read across all nine
 	// per-domain audit-log tables (decision/evidence/exception/sample/

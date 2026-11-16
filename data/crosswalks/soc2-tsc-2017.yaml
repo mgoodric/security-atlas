@@ -358,7 +358,7 @@ mappings:
     strength: 0.7
     rationale: "MFA is the canonical external-threat authentication control."
   - tsc_code: CC6.7
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Data classification governs transmission/movement restrictions."
@@ -498,17 +498,17 @@ mappings:
   # C1 — Confidentiality — anchors to DCH-* + AST-*
   # =====================================================================
   - tsc_code: C1.1
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: equal
     strength: 1.0
-    rationale: "Data Classification & Handling is the direct STRM equivalent of C1.1."
+    rationale: "Data & Asset Classification is the direct STRM equivalent of C1.1."
   - tsc_code: C1.2
     scf_anchor: AST-22
     relationship_type: equal
     strength: 0.9
     rationale: "Secure Disposal, Destruction or Re-Use of Equipment covers secure disposal of confidential information."
   - tsc_code: C1.2
-    scf_anchor: DCH-03
+    scf_anchor: DCH-27
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Data Retention defines when confidential info should be disposed."
@@ -537,7 +537,7 @@ mappings:
     strength: 0.4
     rationale: "Output integrity is software-development-adjacent. LOW CONFIDENCE — review."
   - tsc_code: PI1.5
-    scf_anchor: DCH-03
+    scf_anchor: DCH-27
     relationship_type: intersects_with
     strength: 0.4
     rationale: "Storage integrity overlaps data retention; partial fit. LOW CONFIDENCE — review."

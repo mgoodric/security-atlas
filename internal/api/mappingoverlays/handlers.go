@@ -97,6 +97,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if !requireOverlayWrite(w, r) || !requireTenant(w, r) {
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	var req createReq
 	if !decodeStrict(w, r, &req) {
 		return
@@ -115,7 +119,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Strength:         *req.Strength,
 		Rationale:        req.Rationale,
 		SourceRef:        req.SourceRef,
-	}, actorFrom(r))
+	}, actor)
 	if err != nil {
 		writeErr(w, r, "create overlay edge", err)
 		return
@@ -155,6 +159,10 @@ func (h *Handler) Retire(w http.ResponseWriter, r *http.Request) {
 	if !requireOverlayWrite(w, r) || !requireTenant(w, r) {
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
@@ -164,7 +172,7 @@ func (h *Handler) Retire(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, &req) {
 		return
 	}
-	edge, err := h.store.Retire(r.Context(), id, req.Reason, actorFrom(r))
+	edge, err := h.store.Retire(r.Context(), id, req.Reason, actor)
 	if err != nil {
 		writeErr(w, r, "retire overlay edge", err)
 		return
@@ -237,11 +245,15 @@ func requireTenant(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func actorFrom(r *http.Request) string {
+// actorFrom names the caller on the audit row: the credential's id. With
+// no credential (or one without an id) in context it writes a 401 and
+// returns false, so a write is never recorded without an actor (#2375).
+func actorFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if cred, ok := authctx.CredentialFromContext(r.Context()); ok && cred.ID != "" {
-		return cred.ID
+		return cred.ID, true
 	}
-	return "system"
+	httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
+	return "", false
 }
 
 // decodeStrict decodes a JSON body, refusing unknown fields. On failure it

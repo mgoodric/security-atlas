@@ -170,28 +170,22 @@
     },
 
     {
-      "scf_id": "DCH-01",
+      "scf_id": "DCH-04",
       "family": "DCH",
-      "title": "Data Classification & Handling",
+      "title": "Data & Asset Classification",
       "description": "Mechanisms exist to facilitate the implementation of data classification and handling."
     },
     {
-      "scf_id": "DCH-03",
+      "scf_id": "DCH-16",
       "family": "DCH",
-      "title": "Data Retention",
-      "description": "Mechanisms exist to define and govern data retention."
-    },
-    {
-      "scf_id": "DCH-05",
-      "family": "DCH",
-      "title": "Data Integrity",
-      "description": "Mechanisms exist to protect data from improper alteration or destruction, and to detect unauthorized modification of stored data."
-    },
-    {
-      "scf_id": "DCH-07",
-      "family": "DCH",
-      "title": "Media Transportation & Custody",
+      "title": "Media Transportation",
       "description": "Mechanisms exist to protect and control digital and non-digital media during transport outside of controlled areas, recording the movement of media and the personnel accountable for it."
+    },
+    {
+      "scf_id": "DCH-27",
+      "family": "DCH",
+      "title": "Media & Data Retention",
+      "description": "Mechanisms exist to define and govern data retention."
     },
 
     {
@@ -312,6 +306,12 @@
       "family": "MON",
       "title": "Anomalous Behavior",
       "description": "Mechanisms exist to detect anomalous behavior."
+    },
+    {
+      "scf_id": "MON-27",
+      "family": "MON",
+      "title": "File Integrity Monitoring (FIM)",
+      "description": "Mechanisms exist to detect unauthorized modification of stored data, so that improper alteration or destruction is found and acted on."
     },
 
     {

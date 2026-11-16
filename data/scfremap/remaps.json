@@ -224,6 +224,34 @@
       "from": "CRY-12",
       "to": "CRY-06",
       "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-01",
+      "to": "DCH-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-03",
+      "to": "DCH-27",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-05",
+      "to": "MON-27",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "DCH-07",
+      "to": "DCH-16",
+      "basis": "legacy"
     }
   ]
 }
