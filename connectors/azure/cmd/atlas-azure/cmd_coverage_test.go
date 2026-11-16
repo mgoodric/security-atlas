@@ -504,7 +504,7 @@ func TestBuildNSGRecord_Shape(t *testing.T) {
 		},
 		Result: nsg.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildNSGRecord(g, "prod", "scf:NET-04")
+	rec, err := buildNSGRecord(g, "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNSGRecord: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestBuildNSGRecord_OmitsEmptyOptionals(t *testing.T) {
 		Rules:  []nsg.SecurityRule{{Name: "deny", Direction: "inbound", Access: "deny"}},
 		Result: nsg.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildNSGRecord(g, "prod", "scf:NET-04")
+	rec, _ := buildNSGRecord(g, "prod", "scf:NET-03")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location"} {
 		if _, ok := pl[k]; ok {
@@ -607,7 +607,7 @@ func TestBuildFirewallRecord_Shape(t *testing.T) {
 		},
 		Result: firewall.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildFirewallRecord(p, "prod", "scf:NET-04")
+	rec, err := buildFirewallRecord(p, "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildFirewallRecord: %v", err)
 	}
@@ -694,7 +694,7 @@ func TestBuildFirewallRecord_OmitsEmptyOptionals(t *testing.T) {
 		},
 		Result: firewall.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildFirewallRecord(p, "prod", "scf:NET-04")
+	rec, _ := buildFirewallRecord(p, "prod", "scf:NET-03")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location"} {
 		if _, ok := pl[k]; ok {

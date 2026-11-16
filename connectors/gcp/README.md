@@ -14,7 +14,7 @@ It follows the slice-004 AWS connector pattern: register-per-run, stable
 | Kind                           | Profile | Source                                                  | Default SCF anchors |
 | ------------------------------ | ------- | ------------------------------------------------------- | ------------------- |
 | `gcp.iam_policy_binding.v1`    | pull    | Resource Manager `getIamPolicy` + IAM `serviceAccounts` | `IAC-10`, `IAC-12`  |
-| `gcp.storage_bucket_config.v1` | pull    | Cloud Storage `buckets.list` (`projection=noAcl`)       | `CRY-07`, `NET-04`  |
+| `gcp.storage_bucket_config.v1` | pull    | Cloud Storage `buckets.list` (`projection=noAcl`)       | `CRY-07`, `NET-03`  |
 
 - **iam_policy_binding** — one record per project-IAM `(role, member)` binding,
   enriched with service-account inventory facts (is the member a service

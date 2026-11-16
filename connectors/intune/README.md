@@ -171,7 +171,7 @@ posture; the platform evaluator owns the final pass/fail per `(control, scope)`.
 The bundled schema carries default SCF-anchor hints, flagged for maintainer
 accuracy recheck:
 
-- `endpoint.device_posture.v1` → `END-04` (Endpoint Security), `CFG-04` (Secure
+- `endpoint.device_posture.v1` → `END-03` (Endpoint Protection Mechanisms), `CFG-04` (Secure
   Baseline Configurations) — consistent with the existing
   `osquery.host_posture.v1` anchors.
 - `endpoint.software_inventory.v1` → `VPM-04` (Vulnerability Remediation

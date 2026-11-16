@@ -48,7 +48,7 @@ func installWebhookSeams(t *testing.T, newClient func(string, string, ...sdk.Opt
 }
 
 func okWebhookFlags() webhookFlags {
-	return webhookFlags{environment: "prod", deviceControl: "scf:END-04", listen: "127.0.0.1:0", path: "/webhooks/intune"}
+	return webhookFlags{environment: "prod", deviceControl: "scf:END-03", listen: "127.0.0.1:0", path: "/webhooks/intune"}
 }
 
 func TestDoWebhook_Success(t *testing.T) {

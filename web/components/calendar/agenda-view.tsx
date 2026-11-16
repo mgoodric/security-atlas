@@ -138,6 +138,7 @@ export function AgendaView({ events, truncated }: Props) {
               const rowBody = (
                 <>
                   <span
+                    role="img"
                     aria-label={
                       isOverdue ? "Overdue" : TYPE_LABEL[ev.type] ?? ev.type
                     }
