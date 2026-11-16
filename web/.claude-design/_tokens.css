@@ -40,15 +40,15 @@
   --destructive: oklch(0.577 0.245 27.325);
 
   /* Muted-pastel accent layer — deep same-hue tones (primary stays black).
-     As text on their own color-mix tint, measured on white:
-     pass 4.73 · info 4.72 · warning 4.71 · critical 4.77 · progress 4.73 ·
-     brand 4.72 (all :1). */
-  --pass: oklch(0.545 0.1 155);
-  --info: oklch(0.555 0.1 245);
-  --warning: oklch(0.56 0.095 75);
-  --critical: oklch(0.57 0.14 28);
-  --progress: oklch(0.565 0.1 292);
-  --brand: oklch(0.56 0.13 265);
+     As text on their own /15 tint over white (#2097):
+     pass 4.82 · info 5.00 · warning 5.12 · critical 5.31 · progress 5.23 ·
+     brand 5.14 (all :1). */
+  --pass: oklch(0.49 0.1 155);
+  --info: oklch(0.49 0.1 245);
+  --warning: oklch(0.49 0.095 75);
+  --critical: oklch(0.49 0.14 28);
+  --progress: oklch(0.49 0.1 292);
+  --brand: oklch(0.49 0.13 265);
   --surface-1: color-mix(in oklab, var(--brand) 4%, var(--background));
   --surface-2: color-mix(in oklab, var(--info) 3.5%, var(--background));
 

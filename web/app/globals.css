@@ -86,16 +86,20 @@
 
   /* Muted-pastel accent layer (claude.ai/design pull-back, 2026-06) — deep
      same-hue tones; surfaces stay neutral and --primary stays near-black.
-     Each pairs with a soft tint via color-mix in the consuming component.
-     As text on their own tint, measured on white: pass 4.73 · info 4.72 ·
-     warning 4.71 · critical 4.77 · progress 4.73 · brand 4.72 (:1) — clears
-     the WCAG AA 4.5:1 floor the slice-360 --muted-foreground decision set. */
-  --pass: oklch(0.545 0.1 155);
-  --info: oklch(0.555 0.1 245);
-  --warning: oklch(0.56 0.095 75);
-  --critical: oklch(0.57 0.14 28);
-  --progress: oklch(0.565 0.1 292);
-  --brand: oklch(0.56 0.13 265);
+     Each pairs with a soft tint (`bg-<hue>/10` or `/15`) in the consuming
+     component. #2097 darkened them from L 0.545-0.57 to 0.49: the old values
+     were ~4.7:1 on plain white but ~3.9:1 as text on their own /15 tint,
+     which is how every status badge renders (axe color-contrast). As text
+     on their own /15 tint over white, now: pass 4.82 · info 5.00 ·
+     warning 5.12 · critical 5.31 · progress 5.23 · brand 5.14 (:1); on
+     white 5.96-6.72 — clears the WCAG AA 4.5:1 floor the slice-360
+     --muted-foreground decision set. */
+  --pass: oklch(0.49 0.1 155);
+  --info: oklch(0.49 0.1 245);
+  --warning: oklch(0.49 0.095 75);
+  --critical: oklch(0.49 0.14 28);
+  --progress: oklch(0.49 0.1 292);
+  --brand: oklch(0.49 0.13 265);
   --surface-1: color-mix(in oklab, var(--brand) 4%, var(--background));
   --surface-2: color-mix(in oklab, var(--info) 3.5%, var(--background));
 

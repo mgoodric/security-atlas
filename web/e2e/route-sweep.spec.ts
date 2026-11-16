@@ -18,10 +18,11 @@
 //     skip link) and the first tabbable control inside the main column
 //     take keyboard focus.
 //
-// REPORTED, never failed: axe serious + critical violations. Each route
-// writes `axe-report/<route>.json` (uploaded by CI as the
-// `route-sweep-axe-report` artifact) and attaches the same JSON to the
-// test. Enforcement is a later ticket.
+//   * no serious or critical axe violation (#2097; the gate lives in
+//     `axe-gate.ts` and is self-tested by `axe-gate.spec.ts`). Each
+//     route also writes `axe-report/<route>.json` (uploaded by CI as the
+//     `route-sweep-axe-report` artifact) and attaches the same JSON to
+//     the test, pass or fail.
 //
 // Waits are web-first (`toBeVisible`, `toHaveTitle`, `expect.poll`) plus
 // `networkidle` so client pages have rendered their data before the
@@ -30,9 +31,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 
+import { expectNoSeriousAxe, seriousAxeViolations } from "./axe-gate";
 import { expect, seeded, test } from "./fixtures";
 
 const APP_DIR = path.join(__dirname, "..", "app");
@@ -269,18 +270,10 @@ test.describe("route sweep (#2080)", () => {
         await checkFocusRings(page, label);
       }
 
-      // axe: report serious + critical, never fail (#2080; enforcement is
-      // a later ticket). Runs against the last width's load.
-      const results = await new AxeBuilder({ page }).analyze();
-      const violations = results.violations
-        .filter((v) => v.impact === "serious" || v.impact === "critical")
-        .map((v) => ({
-          id: v.id,
-          impact: v.impact,
-          help: v.help,
-          helpUrl: v.helpUrl,
-          nodes: v.nodes.map((n) => n.target.join(" ")),
-        }));
+      // axe: serious + critical fail the route (#2097). Runs against the
+      // last width's load. The report is written before the assertion,
+      // so a failing route still leaves its JSON in the CI artifact.
+      const violations = await seriousAxeViolations(page);
       const report = { route: route.pattern, url: route.url, violations };
       fs.mkdirSync(AXE_REPORT_DIR, { recursive: true });
       fs.writeFileSync(
@@ -291,14 +284,7 @@ test.describe("route sweep (#2080)", () => {
         body: JSON.stringify(report, null, 2),
         contentType: "application/json",
       });
-      if (violations.length > 0) {
-        testInfo.annotations.push({
-          type: "axe",
-          description: `${violations.length} serious/critical: ${violations
-            .map((v) => v.id)
-            .join(", ")}`,
-        });
-      }
+      expectNoSeriousAxe(violations, route.pattern);
     });
   }
 });
