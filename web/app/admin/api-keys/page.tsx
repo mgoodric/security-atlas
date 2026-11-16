@@ -381,24 +381,30 @@ function IssueForm({
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Scope predicate (JSON)">
+          <Field label="Scope predicate (JSON)" htmlFor="issue-scope-predicate">
             <Input
+              id="issue-scope-predicate"
               value={scopePredicate}
               onChange={(e) => setScopePredicate(e.target.value)}
               placeholder='{"connector":"aws"}'
               aria-describedby={errorId}
             />
           </Field>
-          <Field label="Allowed kinds (comma-separated)">
+          <Field
+            label="Allowed kinds (comma-separated)"
+            htmlFor="issue-allowed-kinds"
+          >
             <Input
+              id="issue-allowed-kinds"
               value={allowedKinds}
               onChange={(e) => setAllowedKinds(e.target.value)}
               placeholder="aws.s3.encryption.v1, aws.iam.user.v1"
               aria-describedby={errorId}
             />
           </Field>
-          <Field label="TTL (days)">
+          <Field label="TTL (days)" htmlFor="issue-ttl-days">
             <Input
+              id="issue-ttl-days"
               type="number"
               min={1}
               max={3650}
@@ -442,14 +448,20 @@ function IssueForm({
 
 function Field({
   label,
+  htmlFor,
   children,
 }: {
   label: string;
+  // The control this label names. Without it the label is a caption only
+  // and the input has no accessible name (axe `label`).
+  htmlFor?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-sm font-medium">{label}</label>
+      <label htmlFor={htmlFor} className="text-sm font-medium">
+        {label}
+      </label>
       {children}
     </div>
   );

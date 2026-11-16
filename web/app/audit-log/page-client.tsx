@@ -554,13 +554,23 @@ function Row({ row }: { row: UnifiedEntry }) {
         onClick={() => setOpen((v) => !v)}
       >
         <TableCell className="w-8 text-center text-muted-foreground">
-          <span
+          {/* A real button: aria-expanded is not allowed on a bare span
+              (axe aria-allowed-attr). The row click still toggles too, so
+              the button stops its own click from toggling twice. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
             data-testid="audit-log-row-toggle"
             aria-expanded={open}
             aria-label={open ? "Collapse payload" : "Expand payload"}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((v) => !v);
+            }}
           >
             {open ? "▾" : "▸"}
-          </span>
+          </Button>
         </TableCell>
         <TableCell>
           <time dateTime={utcLabel} title={`${utcLabel} (UTC)`}>
