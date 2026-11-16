@@ -41,5 +41,5 @@ Vendor claims are part of the optional Third-party risk module.
 
 ## Who can do this
 
-Admins and GRC engineers can open vendor claims. Accepting, rejecting and
-mapping claims needs the approver right.
+Admins and GRC engineers can open vendor claims. Only admins with the
+approver right accept, reject and map claims.

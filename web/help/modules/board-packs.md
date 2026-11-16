@@ -36,5 +36,5 @@ it on under Admin, then Features.
 
 ## Who can do this
 
-Editing, approving and publishing need the approver right; anyone else
-sees a read-only view. Admins and GRC engineers can open the packs.
+Only admins with the approver right edit, approve and publish packs;
+anyone else sees a read-only view. Admins and GRC engineers can open the packs.
