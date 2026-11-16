@@ -104,7 +104,7 @@ func goodRecord() *evidencev1.EvidenceRecord {
 		IdempotencyKey: "ci-1",
 		EvidenceKind:   "sast.scan_result.v1",
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:VPM-04",
+		ControlId:      "scf:VPM-06",
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "environment", Values: []string{"prod"}},
 		},

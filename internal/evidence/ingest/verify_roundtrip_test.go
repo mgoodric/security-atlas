@@ -137,7 +137,7 @@ func TestVerifyRoundTrip_PinsHash_AC3(t *testing.T) {
 			IdempotencyKey: "neutral-idem-key",
 			EvidenceKind:   "sast.scan_result.v1",
 			SchemaVersion:  "1.0.0",
-			ControlId:      "scf:VPM-04",
+			ControlId:      "scf:VPM-06",
 			Scope: []*evidencev1.ScopeDimension{
 				{Key: "environment", Values: []string{"prod"}},
 			},
@@ -232,7 +232,7 @@ func TestVerifyRoundTrip_LegacyFallback_AC4(t *testing.T) {
 		IdempotencyKey: "neutral-legacy-key",
 		EvidenceKind:   "sast.scan_result.v1",
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:VPM-04",
+		ControlId:      "scf:VPM-06",
 		Scope:          []*evidencev1.ScopeDimension{{Key: "environment", Values: []string{"prod"}}},
 		ObservedAt:     timestamppb.New(time.Unix(1780954473, 585946123).UTC()),
 		Result:         evidencev1.Result_RESULT_PASS,

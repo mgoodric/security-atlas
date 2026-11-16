@@ -50,6 +50,8 @@ type transitionEnv struct {
 	ownerJWT   string
 	apprJWT    string
 	nonApprJWT string
+	// srv mints further JWTs for the tenant (#2107).
+	srv *api.Server
 }
 
 func newTransitionEnv(t *testing.T) transitionEnv {
@@ -64,7 +66,7 @@ func newTransitionEnv(t *testing.T) transitionEnv {
 	)
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	env := transitionEnv{admin: admin, app: app, tenant: tenant}
+	env := transitionEnv{admin: admin, app: app, tenant: tenant, srv: srv}
 	env.owner = seedTransitionUser(t, admin, tenant, "owner")
 	env.approver = seedTransitionUser(t, admin, tenant, "approver")
 	jwtFor := func(u uuid.UUID) string {

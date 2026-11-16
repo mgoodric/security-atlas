@@ -19,7 +19,7 @@ import (
 // for THR-07: NIST CSF 2.0 ID.RA-08 ("Processes for receiving, analyzing, and
 // responding to vulnerability disclosures are established") is exactly a
 // coordinated-disclosure requirement. It entered the bundled crosswalk in slice
-// 514's full-Subcategory pass, anchored only to VPM-04, and slice 646's sweep
+// 514's full-Subcategory pass, anchored only to VPM-06, and slice 646's sweep
 // looked at ID.RA-01 (internal vulnerability identification) rather than
 // ID.RA-08. Slice 651 authors the ID.RA-08 -> THR-07 edge; the per-framework
 // search evidence for the still-unmapped THR-05 / THR-06 is recorded in
@@ -27,7 +27,7 @@ import (
 
 // TestTHRVDPCrosswalk_EdgeResolves proves the ID.RA-08 -> THR-07 edge resolves
 // to its target anchor through a real fw_to_scf_edges row (the same join GET
-// /v1/requirements/{id}/coverage runs), and that the slice-514 VPM-04 edge
+// /v1/requirements/{id}/coverage runs), and that the slice-514 VPM-06 edge
 // survives alongside it (invariant #1 — N anchors per requirement; the edge is
 // additive, not a replacement).
 func TestTHRVDPCrosswalk_EdgeResolves(t *testing.T) {
@@ -41,7 +41,7 @@ func TestTHRVDPCrosswalk_EdgeResolves(t *testing.T) {
 	}
 
 	anchors := anchorsForRequirement(t, pool, "nist_csf", "2.0", "ID.RA-08")
-	for _, want := range []string{"THR-07", "VPM-04"} {
+	for _, want := range []string{"THR-07", "VPM-06"} {
 		if !anchors[want] {
 			t.Errorf("nist_csf:2.0:ID.RA-08 does not resolve to %s; resolved to %v", want, keys(anchors))
 		}
@@ -53,7 +53,7 @@ func TestTHRVDPCrosswalk_EdgeResolves(t *testing.T) {
 // because ID.RA-08 and THR-07 name the same control concept — an established
 // intake process for externally-reported vulnerabilities. `0.9` (not 1.0)
 // because ID.RA-08 also spans the downstream analyze/respond half that the
-// VPM-04 edge carries, and THR-07 scopes the VDP to products and services.
+// VPM-06 edge carries, and THR-07 scopes the VDP to products and services.
 // A future re-strengthening or downgrade must be a deliberate edit here.
 func TestTHRVDPCrosswalk_RelationshipIsHonest(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)

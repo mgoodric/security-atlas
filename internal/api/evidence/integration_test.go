@@ -300,7 +300,7 @@ func pushBody(idem string) string {
 			"idempotency_key": %q,
 			"evidence_kind": "sast.scan_result.v1",
 			"schema_version": "1.0.0",
-			"control_id": "scf:VPM-04",
+			"control_id": "scf:VPM-06",
 			"scope": [{"key": "environment", "values": ["prod"]}],
 			"observed_at": %q,
 			"result": "pass",

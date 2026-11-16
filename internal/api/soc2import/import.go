@@ -36,6 +36,25 @@ type Report struct {
 	// it ships a new version instead (#1730).
 	RequirementsDiffered []string
 
+	// RequirementsDifferedFields names, per code in RequirementsDiffered,
+	// which of "title", "body" and "points_of_focus" differed, in that order
+	// (#2026).
+	RequirementsDifferedFields map[string][]string
+
+	// LegacyPointsOfFocus lists the requirement rows of the target version
+	// whose code is a SOC 2 point of focus (`CC1.1-POF1`) and that the
+	// crosswalk does not list, sorted. They are left from an import before
+	// points of focus rolled up onto their criterion (#1731), and they still
+	// count toward requirement_count and the coverage denominator; only an
+	// import into a new framework version drops them (#2026).
+	LegacyPointsOfFocus []string
+
+	// LegacyPointsOfFocusEdgesRetired counts the EdgesRetired that sat on a
+	// LegacyPointsOfFocus row: this import's source wrote them, and the
+	// roll-up moved them to the criterion, so the retire pass (#1971) dropped
+	// them. The rows they leave behind count as uncovered.
+	LegacyPointsOfFocusEdgesRetired int
+
 	EdgesCreated   int
 	EdgesUpdated   int
 	EdgesUnchanged int
@@ -393,6 +412,15 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	reqIDByCode := make(map[string]pgtype.UUID, len(cw.Requirements))
 	for _, r := range cw.Requirements {
 		reqID := uuidFromString("req-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + r.Code)
+		// A point of focus names SCF anchors as metadata, not edges, so no
+		// edge lookup would catch a misspelt one: bind each here (#2026).
+		for _, p := range r.PointsOfFocus {
+			for _, a := range p.SCFAnchors {
+				if _, err := bind(a); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: requirement %s point of focus %s: %w", r.Code, p.Code, err)
+				}
+			}
+		}
 		pofJSON, err := marshalPointsOfFocus(r.PointsOfFocus)
 		if err != nil {
 			return Report{}, fmt.Errorf("crosswalk: encode points of focus for %s: %w", r.Code, err)
@@ -405,7 +433,8 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		switch {
 		case lookupErr == nil:
 			reqIDByCode[r.Code] = existing.ID
-			if existing.Title == r.Title && existing.Body == r.Body && pointsOfFocusEqual(existing.PointsOfFocus, r.PointsOfFocus) {
+			differed := differedFields(existing, r)
+			if len(differed) == 0 {
 				report.RequirementsUnchanged++
 				continue
 			}
@@ -415,6 +444,10 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 			// report the difference (#1730).
 			if isFrozenVersionStatus(version.Status) {
 				report.RequirementsDiffered = append(report.RequirementsDiffered, r.Code)
+				if report.RequirementsDifferedFields == nil {
+					report.RequirementsDifferedFields = map[string][]string{}
+				}
+				report.RequirementsDifferedFields[r.Code] = differed
 				continue
 			}
 			if _, err := q.UpsertFrameworkRequirement(ctx, dbx.UpsertFrameworkRequirementParams{
@@ -446,6 +479,16 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 			return Report{}, fmt.Errorf("crosswalk: lookup requirement %s: %w", r.Code, lookupErr)
 		}
 	}
+
+	// 3b. Find point-of-focus requirement rows left from before the roll-up
+	//     (#1731). The importer never deletes a requirement, so they stay in
+	//     the denominator; report them so the operator imports into a new
+	//     framework version instead (#2026).
+	legacyPOF, err := legacyPointsOfFocus(ctx, q, version.ID, cw)
+	if err != nil {
+		return Report{}, err
+	}
+	report.LegacyPointsOfFocus = legacyPOF
 
 	// 4. Keep framework_versions.requirement_count in sync.
 	count, err := q.CountFrameworkRequirementsForVersion(ctx, version.ID)
@@ -641,6 +684,9 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 			return Report{}, fmt.Errorf("crosswalk: audit retire %s->%s: %w", e.RequirementCode, e.ScfID, err)
 		}
 		report.EdgesRetired = append(report.EdgesRetired, catalogEdge(e))
+		if slices.Contains(legacyPOF, e.RequirementCode) {
+			report.LegacyPointsOfFocusEdgesRetired++
+		}
 	}
 	for _, e := range keep {
 		report.EdgesUnlisted = append(report.EdgesUnlisted, catalogEdge(e))
@@ -742,6 +788,56 @@ func pointsOfFocusEqual(stored []byte, incoming []PointOfFocus) bool {
 		}
 	}
 	return true
+}
+
+// differedFields names the fields of an incoming requirement that differ
+// from the stored row, in a fixed order; none when the row is unchanged.
+func differedFields(existing dbx.FrameworkRequirement, r Requirement) []string {
+	var fields []string
+	if existing.Title != r.Title {
+		fields = append(fields, "title")
+	}
+	if existing.Body != r.Body {
+		fields = append(fields, "body")
+	}
+	if !pointsOfFocusEqual(existing.PointsOfFocus, r.PointsOfFocus) {
+		fields = append(fields, "points_of_focus")
+	}
+	return fields
+}
+
+// legacyPointsOfFocus lists the version's stored requirement codes that are
+// point-of-focus codes the crosswalk does not list, sorted.
+func legacyPointsOfFocus(ctx context.Context, q *dbx.Queries, versionID pgtype.UUID, cw *Crosswalk) ([]string, error) {
+	stored, err := q.ListFrameworkRequirementsForVersion(ctx, versionID)
+	if err != nil {
+		return nil, fmt.Errorf("crosswalk: list requirements: %w", err)
+	}
+	listed := make(map[string]struct{}, len(cw.Requirements))
+	for _, r := range cw.Requirements {
+		listed[r.Code] = struct{}{}
+	}
+	var codes []string
+	for _, s := range stored {
+		if _, ok := listed[s.Code]; ok {
+			continue
+		}
+		if _, _, ok := parsePointOfFocus(s.Code); ok {
+			codes = append(codes, s.Code)
+		}
+	}
+	slices.Sort(codes)
+	return codes, nil
+}
+
+// LegacyPointsOfFocusWarning renders LegacyPointsOfFocus as one operator
+// warning, or "" when there are none (#2026).
+func (r Report) LegacyPointsOfFocusWarning() string {
+	if len(r.LegacyPointsOfFocus) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("framework version %s keeps %d point-of-focus requirement row(s) from before points of focus rolled up onto their criterion (%s); they still count toward requirement_count and coverage, and this import retired %d edge(s) on them; import into a new --framework-version to drop them",
+		r.FrameworkVersion, len(r.LegacyPointsOfFocus), strings.Join(r.LegacyPointsOfFocus, ", "), r.LegacyPointsOfFocusEdgesRetired)
 }
 
 // isFrozenVersionStatus mirrors enforce_framework_requirement_immutability:

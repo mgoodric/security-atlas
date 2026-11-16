@@ -245,6 +245,8 @@ PATCH /v1/risks/{id}/acceptance/approve
 PATCH /v1/risks/{id}/acceptance/propose
 PATCH /v1/risks/{id}/acceptance/reject
 PATCH /v1/risks/{id}/acceptance/revoke
+PATCH /v1/risks/{id}/close
+PATCH /v1/risks/{id}/reopen
 PATCH /v1/risks/{id}/treatment
 PATCH /v1/tenants/{id}
 PATCH /v1/themes/{ref}

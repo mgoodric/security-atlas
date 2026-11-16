@@ -139,6 +139,7 @@ func TestContract_Risks(t *testing.T) {
 		LinkedControlIDs:    []uuid.UUID{uuid.MustParse(contractCtrlA), uuid.MustParse(contractCtrlB)},
 		CreatedAt:           created,
 		UpdatedAt:           updated,
+		Status:              dbx.RiskStatusOpen,
 	}
 
 	// Row 2 — minimal: empty opaque blobs (handler defaults to {}), NO linked
@@ -155,6 +156,7 @@ func TestContract_Risks(t *testing.T) {
 		LinkedControlIDs: nil,
 		CreatedAt:        created,
 		UpdatedAt:        updated,
+		Status:           dbx.RiskStatusOpen,
 	}
 
 	// #1746 — the treatment states with no side fields: an untreated risk
@@ -168,6 +170,7 @@ func TestContract_Risks(t *testing.T) {
 		Treatment:    dbx.RiskTreatmentUntreated,
 		CreatedAt:    created,
 		UpdatedAt:    updated,
+		Status:       dbx.RiskStatusOpen,
 	}
 	proposedAccept := risk.Risk{
 		ID:               uuid.MustParse(contractRiskID),
@@ -178,16 +181,39 @@ func TestContract_Risks(t *testing.T) {
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
 		CreatedAt:        created,
 		UpdatedAt:        updated,
+		Status:           dbx.RiskStatusOpen,
+	}
+
+	// #2107 — a closed risk carries its closure; GET /v1/risks returns it
+	// only with ?include_closed=true.
+	closedAt := time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)
+	closed := risk.Risk{
+		ID:           uuid.MustParse(contractRiskID),
+		Title:        "Retired data-centre lease risk",
+		CategorySlug: "operational",
+		Methodology:  dbx.RiskMethodologyNist80030,
+		Treatment:    dbx.RiskTreatmentMitigate,
+		CreatedAt:    created,
+		UpdatedAt:    updated,
+		Status:       dbx.RiskStatusClosed,
+		Closure: risk.Closure{
+			Reason: dbx.RiskClosureReasonNotApplicable,
+			Note:   "Lease ended; site decommissioned.",
+			At:     &closedAt,
+			By:     "user-2107",
+		},
 	}
 
 	populated := stubRiskLister{rows: []risk.Risk{full, minimal}}
 	empty := stubRiskLister{rows: []risk.Risk{}}
 	states := stubRiskLister{rows: []risk.Risk{untreated, proposedAccept}}
+	lifecycle := stubRiskLister{rows: []risk.Risk{untreated, closed}}
 
 	recorded := map[string]json.RawMessage{
 		"populated":        recordVariant(t, newHandlerWithLister(populated).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
 		"empty":            recordVariant(t, newHandlerWithLister(empty).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
 		"treatment_states": recordVariant(t, newHandlerWithLister(states).ListRisks, "/v1/risks"),
+		"lifecycle_states": recordVariant(t, newHandlerWithLister(lifecycle).ListRisks, "/v1/risks?include_closed=true"),
 	}
 	assertContractGolden(t,
 		filepath.Clean("../../../web/lib/contracts/risks.golden.json"),
