@@ -24,6 +24,12 @@
 // shows the platform's 403 as a toast; it never widens or narrows that
 // decision itself (#2291 is open on the policy).
 //
+// Auditors (#2118): the period's assigned auditors, with a picker of the
+// tenant's other active auditors and a Remove per row. Only an admin may
+// read or change them; anyone else sees the platform's 403 as a note in
+// place of the list. An assigned auditor reaches the period through the
+// auditor workspace (/audit).
+//
 // OSCAL export: the platform mounts the export route only when the
 // OSCAL bridge is wired. The button fetches the bundle and, when the
 // route is absent, says the bridge isn't running instead of saving an
@@ -44,14 +50,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmInline } from "@/components/ui/row-actions";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import {
+  assignPeriodAuditor,
   fetchAuditPeriod,
   fetchAuditPeriods,
   fetchOscalBundle,
+  fetchPeriodAuditors,
   fetchPeriodControlState,
   freezeAuditPeriod,
+  removePeriodAuditor,
   type AuditPeriod,
   type AuditPeriodResponse,
 } from "@/lib/api/audit-periods";
@@ -74,6 +84,8 @@ import {
   oscalExportDownloadFilename,
 } from "../oscal-export";
 import {
+  auditorChangeErrorMessage,
+  auditorLabel,
   FREEZE_CONFIRM_DETAIL,
   FREEZE_CONFIRM_PROMPT,
   freezeErrorMessage,
@@ -251,6 +263,7 @@ export default function AuditPeriodDetailPage({
         </ConfirmInline>
       ) : null}
       {frozen ? <FreezeCard period={period} /> : null}
+      <AuditorsCard periodId={period.id} />
       <ControlsCard period={period} />
     </DetailHeader>
   );
@@ -334,6 +347,159 @@ function OscalExportButton({ period }: { period: AuditPeriod }) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+function AuditorsCard({ periodId }: { periodId: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [picked, setPicked] = useState("");
+  const queryKey = ["audits", periodId, "auditors"];
+  const auditorsQ = useQuery({
+    queryKey,
+    queryFn: () => fetchPeriodAuditors(periodId),
+    retry: noRetryOn([401, 403, 404]),
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey });
+  const assign = useMutation({
+    mutationFn: (userID: string) => assignPeriodAuditor(periodId, userID),
+    onSuccess: () => {
+      setPicked("");
+      void refresh();
+      toast("Auditor assigned.");
+    },
+    onError: (err) => toast(auditorChangeErrorMessage(err, "assign")),
+  });
+  const remove = useMutation({
+    mutationFn: (userID: string) => removePeriodAuditor(periodId, userID),
+    onSuccess: () => {
+      void refresh();
+      toast("Auditor removed.");
+    },
+    onError: (err) => {
+      void refresh();
+      toast(auditorChangeErrorMessage(err, "remove"));
+    },
+  });
+
+  const refused =
+    auditorsQ.error instanceof APIError && auditorsQ.error.status === 403;
+  const auditors = auditorsQ.data?.auditors ?? [];
+  const candidates = auditorsQ.data?.candidates ?? [];
+
+  return (
+    <Card data-testid="audit-period-auditors">
+      <CardHeader>
+        <CardTitle>Auditors</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Assigned auditors open this period in the audit workspace. The
+          assignment covers this period only.
+        </p>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {auditorsQ.isLoading ? <Skeleton className="h-16 w-full" /> : null}
+        {refused ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="audit-period-auditors-refused"
+          >
+            Only an admin can see and change this period&apos;s auditors.
+          </p>
+        ) : auditorsQ.isError ? (
+          <Alert
+            variant="destructive"
+            data-testid="audit-period-auditors-error"
+          >
+            <AlertTitle>Could not load the auditors</AlertTitle>
+            <AlertDescription>
+              {(auditorsQ.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {auditorsQ.isSuccess ? (
+          <>
+            {auditors.length === 0 ? (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="audit-period-auditors-empty"
+              >
+                No auditors assigned yet.
+              </p>
+            ) : (
+              <ul className="grid gap-2">
+                {auditors.map((a) => (
+                  <li
+                    key={a.user_id}
+                    className="flex items-center justify-between gap-3 text-sm"
+                    data-testid="audit-period-auditor"
+                    data-user-id={a.user_id}
+                  >
+                    <span>{auditorLabel(a)}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={remove.isPending}
+                      onClick={() => remove.mutate(a.user_id)}
+                      aria-label={`Remove ${auditorLabel(a)}`}
+                      data-testid="audit-period-auditor-remove"
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {candidates.length > 0 ? (
+              <form
+                className="flex flex-col gap-2 sm:flex-row sm:items-end"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (picked) assign.mutate(picked);
+                }}
+              >
+                <div className="grid flex-1 gap-1">
+                  <label
+                    htmlFor="audit-period-auditor-picker"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Assign an auditor
+                  </label>
+                  <Select
+                    id="audit-period-auditor-picker"
+                    value={picked}
+                    onChange={(e) => setPicked(e.target.value)}
+                    data-testid="audit-period-auditor-picker"
+                  >
+                    <option value="">Choose an auditor…</option>
+                    {candidates.map((c) => (
+                      <option key={c.user_id} value={c.user_id}>
+                        {auditorLabel(c)}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Button
+                  type="submit"
+                  disabled={!picked || assign.isPending}
+                  data-testid="audit-period-auditor-assign"
+                >
+                  {assign.isPending ? "Assigning…" : "Assign"}
+                </Button>
+              </form>
+            ) : (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="audit-period-auditors-no-candidates"
+              >
+                No other users hold the auditor role. Give a user the auditor
+                role in Admin, Users to assign them here.
+              </p>
+            )}
+          </>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 

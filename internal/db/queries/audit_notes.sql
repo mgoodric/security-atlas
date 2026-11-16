@@ -7,15 +7,81 @@
 
 -- ===== auditor_assignments =====
 
--- name: AssignAuditor :exec
+-- name: AssignAuditor :execrows
 -- Insert an (tenant, user, period) assignment. ON CONFLICT DO NOTHING makes
 -- repeated calls idempotent -- granting the same auditor to the same period
--- twice is a no-op rather than an error.
+-- twice is a no-op rather than an error. The row count says whether the
+-- grant is new (#2118 logs only new grants).
 INSERT INTO auditor_assignments (
     tenant_id, user_id, audit_period_id, granted_by, granted_at
 )
 VALUES ($1, $2, $3, $4, now())
 ON CONFLICT (tenant_id, user_id, audit_period_id) DO NOTHING;
+
+-- name: RemoveAuditor :execrows
+-- #2118: drop one (tenant, user, period) assignment. Returns the row
+-- count so the caller logs only a removal that happened.
+DELETE FROM auditor_assignments
+WHERE tenant_id       = $1
+  AND user_id         = $2
+  AND audit_period_id = $3;
+
+-- name: ListAuditorsForPeriod :many
+-- #2118: the auditors assigned to one period, with the display fields
+-- GET /v1/admin/users already shows an admin. user_id is the bare user
+-- uuid (20261021000000); a row whose user no longer resolves still lists,
+-- with empty name and email, so an admin can remove it.
+SELECT
+    aa.user_id                       AS user_id,
+    COALESCE(u.display_name, '')::text AS display_name,
+    COALESCE(u.email, '')::text      AS email,
+    aa.granted_at                    AS granted_at,
+    aa.granted_by                    AS granted_by
+FROM auditor_assignments aa
+LEFT JOIN users u
+  ON u.tenant_id = aa.tenant_id
+ AND u.id::text  = aa.user_id
+WHERE aa.tenant_id       = $1
+  AND aa.audit_period_id = $2
+ORDER BY aa.granted_at ASC, aa.user_id ASC;
+
+-- name: ListAuditorCandidatesForPeriod :many
+-- #2118: the picker's choices: active users of this tenant holding the
+-- auditor role and not yet assigned to the period. Tenant-scoped here, so
+-- a super-admin caller sees only the current tenant's users.
+SELECT
+    u.id::text     AS user_id,
+    u.display_name AS display_name,
+    u.email        AS email
+FROM users u
+JOIN user_roles ur
+  ON ur.tenant_id = u.tenant_id
+ AND ur.user_id   = u.id::text
+WHERE u.tenant_id = $1
+  AND u.status    = 'active'
+  AND ur.role     = 'auditor'
+  AND NOT EXISTS (
+      SELECT 1 FROM auditor_assignments aa
+      WHERE aa.tenant_id       = u.tenant_id
+        AND aa.user_id         = u.id::text
+        AND aa.audit_period_id = $2
+  )
+ORDER BY u.display_name ASC, u.email ASC;
+
+-- name: IsActiveTenantAuditor :one
+-- #2118: whether user_id is an active user of this tenant holding the
+-- auditor role. The assign route refuses anyone else.
+SELECT EXISTS (
+    SELECT 1
+    FROM users u
+    JOIN user_roles ur
+      ON ur.tenant_id = u.tenant_id
+     AND ur.user_id   = u.id::text
+    WHERE u.tenant_id = $1
+      AND u.id        = $2
+      AND u.status    = 'active'
+      AND ur.role     = 'auditor'
+) AS ok;
 
 -- name: ListAuditorAssignmentsForUser :many
 -- Returns every assignment the user holds in the current tenant, joined with
