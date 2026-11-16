@@ -189,15 +189,15 @@
     },
 
     {
-      "scf_id": "END-04",
+      "scf_id": "END-03",
       "family": "END",
-      "title": "Endpoint Security",
+      "title": "Endpoint Protection Mechanisms",
       "description": "Mechanisms exist to protect endpoint devices."
     },
     {
-      "scf_id": "END-07",
+      "scf_id": "END-04",
       "family": "END",
-      "title": "Malicious Code Protection",
+      "title": "Malicious Code Protection (Antimalware)",
       "description": "Mechanisms exist to detect and prevent malicious code execution on endpoints."
     },
 
@@ -315,13 +315,13 @@
     },
 
     {
-      "scf_id": "NET-01",
+      "scf_id": "NET-02",
       "family": "NET",
-      "title": "Network Security",
+      "title": "Network Security Controls (NSC)",
       "description": "Mechanisms exist to facilitate the implementation of network security controls."
     },
     {
-      "scf_id": "NET-04",
+      "scf_id": "NET-03",
       "family": "NET",
       "title": "Boundary Protection",
       "description": "Mechanisms exist to protect network boundaries."
@@ -329,18 +329,18 @@
     {
       "scf_id": "NET-06",
       "family": "NET",
-      "title": "Network Segmentation",
+      "title": "Network Segmentation (macrosegmentation)",
       "description": "Mechanisms exist to segment networks and isolate systems, applications, and services that handle sensitive data from those that do not."
     },
     {
-      "scf_id": "NET-08",
+      "scf_id": "NET-24",
       "family": "NET",
-      "title": "Wireless Network Security",
+      "title": "Wireless Networking",
       "description": "Mechanisms exist to govern wireless network security."
     },
 
     {
-      "scf_id": "PES-04",
+      "scf_id": "PES-08",
       "family": "PES",
       "title": "Physical Access Control",
       "description": "Mechanisms exist to control physical access to facilities."

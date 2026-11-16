@@ -4,7 +4,7 @@
   "x-evidence-kind": "azure.firewall_rules.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["NET-04", "NET-01"],
+  "x-default-scf-anchors": ["NET-03", "NET-02"],
   "title": "Azure Firewall rule-collection posture",
   "description": "Per-firewall-policy network-perimeter posture captured read-only from Azure Resource Manager (ARM Reader role): the firewall policy's rule-collection groups (with their priority ordering) and, inside each group, the network + application rule collections (collection action allow/deny, priority, and per-rule metadata: protocols, source/destination address prefixes, destination ports for network rules, and target FQDNs for application rules). Azure Firewall is a centralized policy-based L3-L7 boundary-protection control point — a sibling to the per-subnet/per-NIC NSG kind — so it answers the network-segmentation question at the network-perimeter grain (e.g. no rule collection allows traffic from the whole Internet to management ports 22/3389). RULE configuration only — NEVER flow logs, packet captures, traffic contents, NAT-rule secrets, threat-intel feeds, or route tables; the connector never mutates a network resource (read-only list). The platform evaluator decides pass/fail per (control, firewall policy); the connector emits a descriptive default verdict. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
   "type": "object",

@@ -10,15 +10,17 @@ const alertVariants = cva(
       variant: {
         default: "bg-card text-card-foreground",
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive *:[svg]:text-current",
         // Semantic tinted variants (PR #1427 tokens). Soft same-hue fill +
         // same-hue border; the deep hue carries the icon and tints the
         // description, but the TITLE resolves to --foreground for max
-        // legibility. Every pairing measured >=4.5:1 (WCAG AA). Mirrors the
+        // legibility. The description uses the full hue, not /90: at 90%
+        // the destructive text fell under 4.5:1 on the card (axe, #2097).
+        // Every pairing measured >=4.5:1 (WCAG AA). Mirrors the
         // `destructive` selector idiom above.
         // See web/.claude-design/components/alert/index.html.
-        pass: "bg-pass/10 text-pass border-pass/25 *:data-[slot=alert-title]:text-foreground *:data-[slot=alert-description]:text-pass/90 dark:bg-pass/20",
-        info: "bg-info/10 text-info border-info/25 *:data-[slot=alert-title]:text-foreground *:data-[slot=alert-description]:text-info/90 dark:bg-info/20",
+        pass: "bg-pass/10 text-pass border-pass/25 *:data-[slot=alert-title]:text-foreground *:data-[slot=alert-description]:text-pass dark:bg-pass/20",
+        info: "bg-info/10 text-info border-info/25 *:data-[slot=alert-title]:text-foreground *:data-[slot=alert-description]:text-info dark:bg-info/20",
       },
     },
     defaultVariants: {

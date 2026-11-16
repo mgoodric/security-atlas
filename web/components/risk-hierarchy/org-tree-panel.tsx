@@ -134,7 +134,7 @@ function TreeRow({
         ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <span
-            className="font-mono text-[10px] text-muted-foreground/80"
+            className="font-mono text-[10px] text-muted-foreground"
             data-testid="org-tree-risk-counts"
             title="5x5 methodology risk count"
           >
