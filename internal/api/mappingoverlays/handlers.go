@@ -211,6 +211,13 @@ var refusalStatus = map[string]int{
 	"overlay_edge_exists":       http.StatusConflict,
 	"already_retired":           http.StatusConflict,
 	"not_found":                 http.StatusNotFound,
+	// #1804: remap proposal decisions.
+	"invalid_remap_decision":      http.StatusBadRequest,
+	"remap_proposal_not_found":    http.StatusNotFound,
+	"remap_proposal_decided":      http.StatusConflict,
+	"remap_anchor_required":       http.StatusBadRequest,
+	"remap_anchor_not_in_release": http.StatusBadRequest,
+	"remap_edge_changed":          http.StatusConflict,
 }
 
 // hasOverlayWrite reports whether the credential may change the tenant's
