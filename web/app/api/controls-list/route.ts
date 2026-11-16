@@ -45,6 +45,7 @@ export async function GET(req?: NextRequest): Promise<Response> {
     try {
       const page = await fetchTenantControlsWithState(bearer, {
         scope: params?.get("scope") || undefined,
+        owner: params?.get("owner") || undefined,
         limit: parseNonNegativeInt(params?.get("limit") ?? null),
         offset: parseNonNegativeInt(params?.get("offset") ?? null),
       });

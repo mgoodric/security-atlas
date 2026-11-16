@@ -645,8 +645,9 @@ func (s *Store) List(ctx context.Context) ([]ActiveControl, error) {
 // scopeCell narrows the rollup to that cell; the zero value is no filter.
 //
 // A non-empty anchorFit narrows both the page and the total to controls
-// with that fit (issue #1736).
-func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID, anchorFit string) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
+// with that fit (issue #1736). A valid owner narrows both to controls
+// assigned to that person (#2128); the zero value is no filter.
+func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID, anchorFit string, owner pgtype.UUID) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
 	var fit *string
 	if anchorFit != "" {
 		fit = &anchorFit
@@ -663,13 +664,15 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 			RowOffset:   offset,
 			ScopeCellID: scopeCell,
 			AnchorFit:   fit,
+			OwnerUserID: owner,
 		})
 		if err != nil {
 			return fmt.Errorf("list active controls with state: %w", err)
 		}
 		total, err = q.CountActiveControls(ctx, dbx.CountActiveControlsParams{
-			TenantID:  pgUUID(tenantID),
-			AnchorFit: fit,
+			TenantID:    pgUUID(tenantID),
+			AnchorFit:   fit,
+			OwnerUserID: owner,
 		})
 		if err != nil {
 			return fmt.Errorf("count active controls: %w", err)

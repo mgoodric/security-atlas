@@ -356,6 +356,10 @@ type controlWire struct {
 	// organisation (#2043). Omitted otherwise, and on views that never set
 	// it.
 	Demo bool `json:"demo,omitempty"`
+	// OwnerUserID is the person "assign owner" made this control's owner
+	// (#2128); OwnerRole stays the manifest's default owner role. Omitted
+	// when nobody is assigned, and on views that never set it.
+	OwnerUserID string `json:"owner_user_id,omitempty"`
 }
 
 // externalRefWire is one controls.external_refs element. Kind is

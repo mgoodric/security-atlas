@@ -83,6 +83,7 @@ export function rowsFromControls(controls: ControlWithState[]): AnchorRow[] {
     anchorFit: c.anchor_fit ?? "exact",
     anchorFitNote: c.anchor_fit_note ?? null,
     demo: c.demo === true,
+    ownerUserId: c.owner_user_id ?? null,
   }));
 }
 

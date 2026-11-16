@@ -423,6 +423,37 @@ test.describe("/controls list view", () => {
     await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
+  // #2128 — the assignment is read back: "assign to me" shows my name in
+  // the Owner column and on the control page, while the manifest
+  // owner_role stays visible as the default owner role. "My name" is read
+  // from /api/me: the demo user's display name depends on which fixture
+  // seeded that row first.
+  test("#2128: assign to me shows my name in the Owner column and on the control page", async ({
+    authedPage: page,
+  }) => {
+    const meRes = await page.request.get("/api/me");
+    expect(meRes.ok()).toBe(true);
+    const me = ((await meRes.json()) as { display_name: string }).display_name;
+    expect(me).toBeTruthy();
+    await page.goto("/controls");
+    const row = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "Encryption at rest (e2e fixture control 1)" });
+    await expect(row).toBeVisible();
+    await row.getByRole("checkbox", { name: /^Select control / }).click();
+    await page.getByTestId("controls-bulk-assign-owner").click();
+    await expect(
+      page.getByTestId("controls-bulk-assign-message"),
+    ).toContainText(/assigned \d+ control/i);
+    await expect(row.getByTestId("controls-row-owner")).toContainText(me);
+
+    await page.goto("/controls/e2e74300-0000-0000-0000-00000000a001");
+    await expect(page.getByTestId("control-owner")).toContainText(me);
+    await expect(page.getByTestId("control-owner-role")).toHaveText(
+      "security-engineering",
+    );
+  });
+
   test("slice 448 AC-3: the selection cap is communicated in the selection bar", async ({
     authedPage: page,
   }) => {

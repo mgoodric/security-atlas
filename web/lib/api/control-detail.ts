@@ -53,6 +53,10 @@ export type ControlWire = {
   // #2043 — true when the in-place demo seed added this control; omitted
   // for real controls.
   demo?: boolean;
+  // #2128 — the person "assign owner" made this control's owner, as a
+  // user id for <Person>; omitted when nobody is assigned. owner_role
+  // above stays the manifest's default owner role.
+  owner_user_id?: string;
 };
 
 // externalRefWire mirrors `externalRefWire` in internal/api/ucfcoverage/handlers.go.

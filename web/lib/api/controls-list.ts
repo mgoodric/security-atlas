@@ -237,6 +237,9 @@ export type ControlWithState = TenantControl & {
   // #2043 — true when the in-place demo seed added this control. The
   // platform omits it for real controls.
   demo?: boolean;
+  // #2128 — the person "assign owner" made this control's owner, as a
+  // user id for <Person>; null when nobody is assigned.
+  owner_user_id?: string | null;
 };
 
 export type ControlsWithStateResponse = {
@@ -252,10 +255,16 @@ export const CONTROLS_WITH_STATE_PAGE_LIMIT = 500;
 // `/api/controls-list` BFF when the browser asks for state.
 export async function fetchTenantControlsWithState(
   bearer: string,
-  opts: { scope?: string; limit?: number; offset?: number } = {},
+  opts: {
+    scope?: string;
+    owner?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<ControlsWithStateResponse> {
   const qs = new URLSearchParams({ include: "state" });
   if (opts.scope) qs.set("scope", opts.scope);
+  if (opts.owner) qs.set("owner", opts.owner);
   if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
   if (opts.offset !== undefined) qs.set("offset", String(opts.offset));
   const res = await apiFetch(`/v1/controls?${qs.toString()}`, bearer);
