@@ -60,6 +60,7 @@ import { RowActions } from "@/components/ui/row-actions";
 import { lastSuperAdminReason } from "@/components/admin/last-holder";
 import type { SuperAdminRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
 
@@ -177,8 +178,10 @@ export default function SuperAdminsPage() {
       subtitle={
         <>
           Platform-global identities authorized to create tenants, rename
-          tenants, and grant or demote other super admins. Super admin is NOT a
-          per-tenant role; it does not confer tenant-write authority on its own.
+          tenants, and grant or demote other super admins.{" "}
+          <Term id="super-admin">Super admin</Term> is NOT a per-tenant{" "}
+          <Term id="role">role</Term>; it does not confer tenant-write authority
+          on its own.
         </>
       }
     >
