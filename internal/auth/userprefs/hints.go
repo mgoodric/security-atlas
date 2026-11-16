@@ -29,6 +29,16 @@ var ErrUnknownHintModule = errors.New("userprefs: unknown hint module")
 // cap on how many dismissals one user can hold.
 var HintModules = []string{
 	"controls",
+	// #2155: Settings & admin.
+	"settings",
+	"admin",
+	"admin-users",
+	"admin-api-keys",
+	"admin-sso",
+	"admin-features",
+	"admin-tenants",
+	"admin-super-admins",
+	"admin-demo",
 }
 
 // HintChange is one PATCH's worth of hint edits. Reset clears every

@@ -20,7 +20,8 @@ func TestHintChange_Validate(t *testing.T) {
 		{"known module dismissed", HintChange{Dismissed: map[string]bool{"controls": true}}, false},
 		{"known module shown again", HintChange{Dismissed: map[string]bool{"controls": false}}, false},
 		{"unknown module", HintChange{Dismissed: map[string]bool{"risks-typo": true}}, true},
-		{"over the cap", HintChange{Dismissed: map[string]bool{"controls": true, "a": true, "b": true}}, true},
+		{"several known modules", HintChange{Dismissed: map[string]bool{"settings": true, "admin-api-keys": true}}, false},
+		{"over the cap", HintChange{Dismissed: overTheCap()}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -34,6 +35,16 @@ func TestHintChange_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// overTheCap dismisses every known module plus one more key, so it is
+// refused on length whatever the allow-list holds.
+func overTheCap() map[string]bool {
+	m := map[string]bool{"zz-extra": true}
+	for _, h := range HintModules {
+		m[h] = true
+	}
+	return m
 }
 
 func TestHintChange_Empty(t *testing.T) {

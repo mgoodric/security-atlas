@@ -132,6 +132,56 @@
       "name": "Freeze",
       "short": "Locking something so it can't change. A frozen audit period only uses evidence observed up to the freeze; an activated framework-scope revision can't be changed apart from its name.",
       "long": "Freezing an audit period is final: it can't be unfrozen or edited, and the app records a fingerprint of exactly what was frozen. Live work carries on as normal; only the audit's view stops moving. Framework scopes work the same way: once a revision is activated, only its name can change, and anything else means making a new revision, so you can always see the scope that was in force at a given date."
+    },
+    {
+      "id": "tenant",
+      "name": "Tenant",
+      "short": "One organisation's separate space in security-atlas, with its own controls, risks, evidence, people and settings. Most installs have just one, shown as your organisation.",
+      "long": "Nothing in one tenant can be seen from another: the database itself keeps them apart. A person can belong to several tenants and switch between them from the header, and holds separate roles in each one. An install has a single tenant unless whoever runs it opts in to multi-tenant."
+    },
+    {
+      "id": "multi-tenant",
+      "name": "Multi-tenant",
+      "short": "An install that holds more than one tenant, such as a consultant running programmes for several clients. It's off unless whoever runs the install opts in.",
+      "long": "A new install has one tenant. To add a second, whoever runs the deployment turns on the multi-tenant setting (ATLAS_ALLOW_MULTI_TENANT=true) and restarts it; a super admin then creates the tenant on the Tenants page. Until a second tenant exists, the app hides the tenant picker and the Tenants and Super admins links, and calls the one tenant your organisation."
+    },
+    {
+      "id": "role",
+      "name": "Role",
+      "short": "What a person may do in a tenant: admin, GRC engineer, control owner, auditor or viewer. A person can hold several, and holds them separately in each tenant.",
+      "long": "Admins configure the tenant and assign roles. GRC engineers author controls, mappings and policies. Control owners keep the controls they own up to date and attest to manual ones. Auditors read what their audit period covers and annotate samples. Viewers read dashboards and controls and change nothing. A role says what you can do; the modules switched on for the tenant say where."
+    },
+    {
+      "id": "super-admin",
+      "name": "Super admin",
+      "short": "A person who manages the install as a whole: the Admin pages, creating tenants, and granting or demoting other super admins. It isn't a role inside a tenant.",
+      "long": "Super admin sits above the tenants. On its own it gives no right to work in a tenant's programme: a super admin still needs a role in a tenant to read or change its records. A new install's first administrator becomes its first super admin, and the last remaining super admin can't be demoted, so an install is never left without one."
+    },
+    {
+      "id": "api-key",
+      "name": "API key",
+      "short": "A credential a program uses instead of a person signing in, such as a connector pushing evidence or the command-line tool. Its secret is shown once, when it's issued.",
+      "long": "A key acts with the access it was issued with, and a key issued with admin privileges can manage the tenant. A machine credential never approves anything, whatever it holds. A key expires after the number of days set when it was issued. Rotating it gives a new secret while the old one keeps working for a grace period, 7 days by default, so the program can switch over without a gap. Revoking it stops it at once."
+    },
+    {
+      "id": "sso",
+      "name": "Single sign-on (SSO)",
+      "short": "Signing in with your organisation's existing identity provider, such as Okta, Google or Entra ID, instead of a separate security-atlas password.",
+      "long": "security-atlas trusts your identity provider to say who someone is, over the OpenID Connect (OIDC) standard; it never issues identities itself. Each tenant has one identity provider. Which roles a person holds is still decided in security-atlas, on the Users page."
+    },
+    {
+      "id": "module",
+      "name": "Module",
+      "short": "A top-level area of the product, such as Risk, Policies or Questionnaires. Core modules are always on; an optional module can be switched off for the whole tenant.",
+      "long": "The core modules, which the rest depends on, are Controls, Evidence, Frameworks and the SCF catalog, Scopes and framework scopes, Audit periods, Dashboard, and Settings & admin. The optional ones are Risk, Third-party risk, Policies, Questionnaires, Personnel security, Exceptions and Board reporting. A feature is a smaller switch inside a module, and is only on while its module is.",
+      "glossary": "GLOSSARY.md#modules-in-design"
+    },
+    {
+      "id": "switched-off",
+      "name": "Switched off",
+      "short": "An optional module hidden from everyone in the tenant: its pages leave the sidebar and can't be opened. Its data is kept, and switching it back on brings everything back.",
+      "long": "Switching a module off deletes nothing. Its records, their history and the module's feature settings stay as they were, so switching it on again restores the module as you left it.",
+      "glossary": "GLOSSARY.md#modules-in-design"
     }
   ]
 }

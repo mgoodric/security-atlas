@@ -24,6 +24,7 @@ import {
 } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -67,9 +68,9 @@ export default function AdminOverviewPage() {
       title={pageTitle("/admin")}
       subtitle={
         <>
-          Self-administer the platform — SSO, users, API keys, feature flags,
-          and the audit log live here. Day-to-day program work is outside this
-          section.
+          Self-administer the platform — <Term id="sso">SSO</Term>, users,{" "}
+          <Term id="api-key">API keys</Term>, feature flags, and the audit log
+          live here. Day-to-day program work is outside this section.
         </>
       }
     >
