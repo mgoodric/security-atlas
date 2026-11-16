@@ -39,7 +39,12 @@
 //   - P0-A4: real placeholder data — no Lorem Ipsum.
 //   - P0-A5: neutral test tokens only in tests.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -51,7 +56,6 @@ import {
   ListPage,
   ListPagination,
   ListTable,
-  paginateRows,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
@@ -63,8 +67,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Person } from "@/components/ui/person";
 import {
   fetchCatalogCounts,
-  fetchControlsCatalog,
-  fetchMyControls,
+  fetchControlsList,
+  fetchMyControlsPage,
+  fetchMyControlsTotal,
   fetchScopeCells,
   type ControlsListResponse,
   type ControlsWithStateResponse,
@@ -94,19 +99,26 @@ import {
   ALL,
   ANCHOR_FIT_OPTIONS,
   anchorFitMarker,
-  applyFilters,
   clearFilters,
   DEFAULT_FILTERS,
+  FILTER_KEYS,
   FRAMEWORKS_JOIN_SEPARATOR,
   isDefault,
   setFilter,
-  uniqueFamilies,
   type AnchorRow,
   type ControlFilters,
 } from "./filters";
 import { controlsCountLabel } from "./count-label";
 import {
-  catalogTruncationNote,
+  ariaSort,
+  clampedPage,
+  myControlsQuery,
+  nextSort,
+  normalizeFilters,
+  pageOffset,
+  SORT_KEY_BY_COLUMN,
+} from "./server-query";
+import {
   controlHref,
   controlsViewSummary,
   HAS_CONTROL_OPTIONS,
@@ -125,7 +137,6 @@ import {
 } from "./controls-toolbar";
 import {
   isOverCap,
-  pruneSelection,
   selectAllState,
   toggleSelectAll,
   toggleSelection,
@@ -140,18 +151,21 @@ import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
 import { pageTitle } from "@/lib/page-titles";
 import { Timestamp } from "@/components/ui/timestamp";
 
-const FILTER_KEYS: (keyof ControlFilters)[] = [
+// #2131 — the filter keys (`FILTER_KEYS`, from ./filters) are the URL keys
+// and the `GET /v1/controls?include=state` parameters, one for one; the
+// platform applies every one of them. Only "My controls" offers the
+// framework, family, state, freshness, anchor fit and owner filters and
+// the column sort; the SCF catalog view filters by scope and has-control.
+
+// #2131 — the filters "My controls" offers and the catalog does not.
+const MINE_ONLY_KEYS: (keyof ControlFilters)[] = [
   "framework",
   "family",
   "result",
   "freshness",
-  // Slice 224 — scope cell filter. URL key `scope`, value is a cell uuid
-  // or `ALL`. The BFF / upstream applies the actual intersection
-  // (P0-224-2 — applicability_expr never reaches the browser).
-  "scope",
-  // Issue #1736 — anchor fit, "My controls" only. Filtered client-side
-  // over the full control set like family / state / freshness.
   "anchor_fit",
+  "owner",
+  "sort",
 ];
 
 // Slice 224 — cap the Scope pill at 50 entries per AC-5. Tenants with
@@ -201,12 +215,14 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
 // onto the semantic Badge variants introduced with the PR-#1427 tokens.
 // The design canvas's table card (web/.claude-design/components/table/)
 // uses example labels (Compliant / In review / Gap); the REAL enum is
-// pass / fail / insufficient_evidence / not_applicable, so the mapping
-// is by semantic intent, not by the card's display strings:
+// pass / fail / inconclusive / excepted / na (#2131: this map used to
+// name `insufficient_evidence` and `not_applicable`, which the rollup
+// never produces), so the mapping is by semantic intent, not by the
+// card's display strings:
 //   pass                  -> pass     (green  — control passing)
 //   fail                  -> critical (red    — the card's "Gap")
-//   insufficient_evidence -> warning  (amber  — needs attention, not a hard fail)
-//   not_applicable        -> secondary (neutral — out of scope, no signal hue)
+//   inconclusive          -> warning  (amber  — needs attention, not a hard fail)
+//   na                    -> secondary (neutral — out of scope, no signal hue)
 //   excepted              -> info     (blue   — waived by an active exception;
 //                                      #2112: never the pass hue, never "pass")
 // `progress` from the badge family has no member in the control-result
@@ -223,8 +239,8 @@ type StatusBadgeVariant =
 const RESULT_BADGE_VARIANT: Record<string, StatusBadgeVariant> = {
   pass: "pass",
   fail: "critical",
-  insufficient_evidence: "warning",
-  not_applicable: "secondary",
+  inconclusive: "warning",
+  na: "secondary",
   excepted: "info",
 };
 
@@ -283,13 +299,16 @@ function ControlsPageInner() {
   // URL-driven filter state — mirrors the slice 094 calendar pattern so
   // the filter set is shareable / bookmarkable. Default = ALL on every
   // pill.
+  //
+  // #2131: each value is checked against what the platform accepts, so a
+  // hand-edited URL widens the list rather than failing it with a 400.
   const filters: ControlFilters = useMemo(() => {
     const out = { ...DEFAULT_FILTERS };
     for (const k of FILTER_KEYS) {
       const v = search.get(k);
       if (v) out[k] = v;
     }
-    return out;
+    return normalizeFilters(out);
   }, [search]);
 
   // Slice 227 — current page index. URL is the source of truth so the
@@ -323,11 +342,12 @@ function ControlsPageInner() {
     } else {
       sp.set(key, value);
     }
-    // Catalog anchors carry no fit, so the fit filter only applies to
-    // "My controls" and is dropped on a view switch (issue #1736).
+    // Catalog anchors carry no fit, owner or per-control state, so the
+    // "My controls" filters and sort are dropped on a view switch (issue
+    // #1736, #2131).
     if (key === VIEW_PARAM) {
       sp.delete(HAS_CONTROL_PARAM);
-      sp.delete("anchor_fit");
+      for (const k of MINE_ONLY_KEYS) sp.delete(k);
     }
     sp.delete(PAGE_PARAM);
     router.replace(`/controls?${sp.toString()}`);
@@ -372,30 +392,53 @@ function ControlsPageInner() {
     router.replace(`/controls?${sp.toString()}`);
   };
 
-  // Slice 224 — refetch the controls list when the scope filter changes.
-  // The narrowing is server-side; the queryKey carries the scope so
-  // TanStack invalidates correctly. `ALL` is treated as no-filter
-  // (fetchControlsList drops the query param entirely). Issue #1740 —
-  // the catalog view walks every anchor page, not just the first 100.
+  // #2131 — both views ask the server for one page. "My controls" sends
+  // every filter and the sort to `GET /v1/controls?include=state`, which
+  // filters, sorts and pages in SQL; the SCF catalog view sends its scope
+  // and has-control filters to `GET /v1/anchors?include=state`. The
+  // queryKey carries the whole request, so a filter, sort or page change
+  // refetches. Only the active view's query runs.
   const scopeArg = filters.scope === ALL ? undefined : filters.scope;
-  // Issue #1741 — the default view reads the tenant's controls; the
-  // catalog view reads the anchors (with the server-side has_control
-  // filter). Only the active view's query runs.
-  const myControlsQ = useQuery<ControlsWithStateResponse>({
-    queryKey: ["controls", "mine", scopeArg ?? "all"],
-    queryFn: () => fetchMyControls(scopeArg),
+  const myControlsParams = useMemo(
+    () => myControlsQuery(filters, currentPage, CONTROLS_PAGE_SIZE),
+    [filters, currentPage],
+  );
+  const myControlsQ = useQuery<Partial<ControlsWithStateResponse>>({
+    queryKey: ["controls", "mine", myControlsParams],
+    queryFn: () => fetchMyControlsPage(myControlsParams),
     enabled: view === "mine",
+    placeholderData: keepPreviousData,
   });
   const anchorsQ = useQuery<ControlsListResponse>({
-    queryKey: ["controls", "list", scopeArg ?? "all", String(hasControl)],
-    queryFn: () => fetchControlsCatalog(scopeArg, hasControl),
+    queryKey: [
+      "controls",
+      "list",
+      scopeArg ?? "all",
+      String(hasControl),
+      currentPage,
+    ],
+    queryFn: () =>
+      fetchControlsList(
+        scopeArg,
+        hasControl,
+        CONTROLS_PAGE_SIZE,
+        pageOffset(currentPage, CONTROLS_PAGE_SIZE),
+      ),
     enabled: view === "catalog",
+    placeholderData: keepPreviousData,
   });
   // The catalog size for the "My controls" header. Issue #1832: a
   // one-row page; only the totals are read.
   const catalogCountsQ = useQuery<ControlsListResponse>({
     queryKey: ["controls", "catalog-counts"],
     queryFn: fetchCatalogCounts,
+    enabled: view === "mine",
+  });
+  // The unfiltered control count for the "N of M controls" header. The
+  // sidebar badge reads the same count under the same key (#1832).
+  const myTotalQ = useQuery<number>({
+    queryKey: ["sidebar", "controls-count"],
+    queryFn: fetchMyControlsTotal,
     enabled: view === "mine",
   });
   const listQ = view === "mine" ? myControlsQ : anchorsQ;
@@ -409,16 +452,16 @@ function ControlsPageInner() {
     queryFn: fetchScopeCells,
   });
 
-  // Convert the anchor wire payload into the join-ready row shape used
-  // by the filter logic + table renderer. Slice 104 attaches a real
-  // state cell per anchor (or `null` when the tenant has no control
-  // instantiated for the anchor). Slice 226 additionally threads the
-  // per-anchor frameworks set (display abbreviations) through the row;
-  // empty array when the anchor has no satisfaction edges.
+  // Convert the wire page into the row shape the table renders. Slice 104
+  // attaches a real state cell per row (or `null` when there is no
+  // evaluation); slice 226 threads the frameworks set through.
   //
   // Issue #1741 — the mapping per view lives in `./view`: control rows are
   // keyed and linked by control id; catalog rows by anchor id, linking to
   // the tenant control behind the anchor when there is one.
+  //
+  // #2131 — `rows` is the one page the server returned, already filtered
+  // and sorted; the page does not narrow or reorder it.
   const rows: AnchorRow[] = useMemo(
     () =>
       view === "mine"
@@ -426,62 +469,43 @@ function ControlsPageInner() {
         : rowsFromAnchors(anchorsQ.data?.anchors ?? []),
     [view, myControlsQ.data, anchorsQ.data],
   );
+  // The filtered total the server counted, which the pagination footer
+  // pages over.
+  const filteredTotal =
+    view === "mine"
+      ? myControlsQ.data?.total ?? rows.length
+      : anchorsQ.data?.total ?? rows.length;
 
-  const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+  // A page past the end (a stale bookmark, or a filter that shrank the
+  // set) moves to the last page that has rows.
+  useEffect(() => {
+    if (!listQ.data || listQ.isPlaceholderData) return;
+    const last = clampedPage(currentPage, CONTROLS_PAGE_SIZE, filteredTotal);
+    if (last !== null) goToPage(last);
+    // goToPage is rebuilt each render from the current search params.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listQ.data, listQ.isPlaceholderData, currentPage, filteredTotal]);
 
-  // Slice 227 — client-side page slice over the filtered set. Per slice
-  // 246 P0-246-1 (carried forward to /controls — see decisions log D1
-  // for slice 227) the v1 wire `GET /v1/anchors` ships the full list;
-  // the table consumes the per-page slice rather than the full `visible`
-  // array. The pagination footer below the table emits page-change
-  // events through `goToPage` which round-trip through the URL.
-  const pagedRows = useMemo(
-    () => paginateRows(visible, currentPage, CONTROLS_PAGE_SIZE),
-    [visible, currentPage],
-  );
-
-  // Slice 448 — multi-select state. A Set of anchor ids (the row key).
-  // The pure set math lives in `./selection`; this holds the Set in
-  // React state and prunes ids that vanish from the fetched row set so
-  // a stale selection never references a row the operator can't see.
+  // Slice 448 — multi-select state. A Set of control ids. The pure set
+  // math lives in `./selection`; this holds the Set in React state.
+  //
+  // #2131: the page holds one server page of rows, so the selection
+  // outlives a page change (select on page 1, then on page 2, then assign)
+  // and is not pruned against the rows on screen. Bulk-assign re-checks
+  // every id on the server (AC-11), so an id that has since gone is
+  // refused there, not trusted here.
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
 
-  // The ids visible after the active filters (NOT page-sliced — select-
-  // all-in-view operates on the full filtered set the operator narrowed
-  // to, which is the mental model; pagination is a display concern).
+  // The ids on this page. Select-all-in-view selects these.
   //
   // Issue #1741 — selection holds CONTROL ids, since bulk-assign posts
   // them; a catalog anchor without a tenant control is not selectable.
   const visibleIds = useMemo(
-    () => visible.flatMap((row) => (row.controlId ? [row.controlId] : [])),
-    [visible],
-  );
-
-  // Prune the selection whenever the fetched row set changes (e.g. a
-  // refetch removed an anchor). Keyed on the full row id list so a
-  // filter change (which only narrows `visible`) does NOT drop a
-  // selection the operator made under a broader filter.
-  const allRowIds = useMemo(
-    () => rows.flatMap((r) => (r.controlId ? [r.controlId] : [])),
+    () => rows.flatMap((row) => (row.controlId ? [row.controlId] : [])),
     [rows],
   );
-  useEffect(() => {
-    // Sync local selection state when the external row source (the
-    // fetched anchor set) changes — the canonical post-data-change
-    // cleanup case the react-hooks/set-state-in-effect rule is
-    // intentionally disabled for (same precedent as the slice 170
-    // AppearanceSelector hydration in settings/page.tsx). The functional
-    // updater is a no-op (returns the same reference) when no id was
-    // dropped, so this does not cause a cascading render in the steady
-    // state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelected((prev) => {
-      const pruned = pruneSelection(prev, allRowIds);
-      return pruned.size === prev.size ? prev : pruned;
-    });
-  }, [allRowIds]);
 
   const headerSelectState = selectAllState(visibleIds, selected);
   const selectionOverCap = isOverCap(selected);
@@ -616,12 +640,16 @@ function ControlsPageInner() {
       }
       const saved = findView(savedViews, id);
       if (!saved) return;
+      // #2131: the saved filters become the URL, which is the query the
+      // page sends to the server.
       const sp = new URLSearchParams();
       for (const k of FILTER_KEYS) {
+        if (view === "catalog" && MINE_ONLY_KEYS.includes(k)) continue;
         if (saved.filters[k] !== ALL) sp.set(k, saved.filters[k]);
       }
       // Issue #1741 — a saved view restores filters within the view the
       // operator is on; it does not switch between controls and catalog.
+      // The catalog applies only the scope.
       if (view === "catalog") sp.set(VIEW_PARAM, view);
       router.replace(`/controls?${sp.toString()}`);
     },
@@ -662,13 +690,21 @@ function ControlsPageInner() {
     [deleteViewMutation],
   );
 
+  // #2131 — the family options are every family of the tenant's controls,
+  // which the server sends with each page; the page's own rows are only
+  // one page. A family in the URL that is not in the list (a typo, or a
+  // family since removed) stays selectable so the pill shows what applies.
+  const serverFamilies = myControlsQ.data?.families;
   const familyOptions: { value: string; label: string }[] = useMemo(() => {
-    const families = uniqueFamilies(rows);
+    const families = [...(serverFamilies ?? [])];
+    if (filters.family !== ALL && !families.includes(filters.family)) {
+      families.push(filters.family);
+    }
     return [
       { value: ALL, label: "All families" },
       ...families.map((f) => ({ value: f, label: f })),
     ];
-  }, [rows]);
+  }, [serverFamilies, filters.family]);
 
   // Slice 224 — render the Scope pill options from the tenant's cells.
   // Cap at 50 entries; surface a banner above the table when the
@@ -694,6 +730,56 @@ function ControlsPageInner() {
     return opts;
   }, [cappedScopeCells]);
 
+  // #2131 — the owner pill. A user id in the URL (a dashboard "mine"
+  // link, or a saved view) shows as "A person"; the pill itself offers the
+  // two cases a triage pass needs.
+  const ownerOptions: { value: string; label: string }[] = [
+    { value: ALL, label: "Anyone" },
+    { value: "none", label: "Unowned" },
+    ...(filters.owner !== ALL && filters.owner !== "none"
+      ? [{ value: filters.owner, label: "A person" }]
+      : []),
+  ];
+
+  // #2131 — "My controls" filters on every pill below in SQL. The SCF
+  // catalog view lists anchors, which carry no owner, fit or per-control
+  // state, so it keeps the view, has-control and scope pills only.
+  const minePills: FilterPill[] =
+    view === "mine"
+      ? [
+          {
+            id: "framework",
+            label: "Framework",
+            value: filters.framework,
+            options: FRAMEWORK_OPTIONS,
+          },
+          {
+            id: "family",
+            label: "Family",
+            value: filters.family,
+            options: familyOptions,
+          },
+          {
+            id: "result",
+            label: "State",
+            value: filters.result,
+            options: RESULT_OPTIONS,
+          },
+          {
+            id: "freshness",
+            label: "Freshness",
+            value: filters.freshness,
+            options: FRESHNESS_OPTIONS,
+          },
+          {
+            id: "owner",
+            label: "Owner",
+            value: filters.owner,
+            options: ownerOptions,
+          },
+        ]
+      : [];
+
   const pills: FilterPill[] = [
     // Issue #1741 — view toggle: the tenant's controls (default) or the
     // SCF catalog.
@@ -715,33 +801,10 @@ function ControlsPageInner() {
           },
         ]
       : []),
-    {
-      id: "framework",
-      label: "Framework",
-      value: filters.framework,
-      options: FRAMEWORK_OPTIONS,
-    },
-    {
-      id: "family",
-      label: "Family",
-      value: filters.family,
-      options: familyOptions,
-    },
-    {
-      id: "result",
-      label: "State",
-      value: filters.result,
-      options: RESULT_OPTIONS,
-    },
-    {
-      id: "freshness",
-      label: "Freshness",
-      value: filters.freshness,
-      options: FRESHNESS_OPTIONS,
-    },
-    // Slice 224 — fifth pill, scope cell filter. Options enumerate
-    // the tenant's own cells (RLS-scoped). Selecting a cell sets
-    // ?scope=<id> and the BFF / upstream applies the intersection.
+    ...minePills,
+    // Slice 224 — scope cell filter. Options enumerate the tenant's own
+    // cells (RLS-scoped). Selecting a cell sets ?scope=<id> and the BFF /
+    // upstream applies the intersection.
     {
       id: "scope",
       label: "Scope",
@@ -776,19 +839,27 @@ function ControlsPageInner() {
   // tenant's controls against the catalog size from the server's totals
   // (the sidebar badge counts the same controls).
   const rowNoun = view === "mine" ? "controls" : "SCF anchors";
-  const countLabel = controlsCountLabel(visible.length, rows.length, rowNoun);
+  //
+  // #2131 — both numbers are the server's: the filtered total the list
+  // pages over, and the unfiltered count (the tenant's controls, or the
+  // whole catalog).
+  const unfilteredTotal =
+    view === "mine"
+      ? myTotalQ.data ?? filteredTotal
+      : anchorsQ.data?.catalog_total ?? filteredTotal;
+  const countLabel = controlsCountLabel(
+    filteredTotal,
+    unfilteredTotal,
+    rowNoun,
+  );
   const viewSummary = controlsViewSummary(view, {
-    controls: myControlsQ.data?.total,
+    controls: myTotalQ.data,
     catalogTotal:
       view === "mine"
         ? catalogCountsQ.data?.catalog_total
         : anchorsQ.data?.catalog_total,
     withControlTotal: anchorsQ.data?.with_control_total,
   });
-  const truncationNote =
-    view === "catalog" && anchorsQ.data
-      ? catalogTruncationNote(anchorsQ.data.anchors.length, anchorsQ.data.total)
-      : "";
   const meta = (
     <span className="inline-flex flex-wrap items-baseline gap-x-3">
       <span data-testid="controls-count-label">
@@ -814,14 +885,6 @@ function ControlsPageInner() {
           data-testid="controls-view-summary"
         >
           {viewSummary}
-        </span>
-      ) : null}
-      {truncationNote ? (
-        <span
-          className="text-xs text-muted-foreground"
-          data-testid="controls-catalog-truncated"
-        >
-          {truncationNote}
         </span>
       ) : null}
     </span>
@@ -1034,6 +1097,45 @@ function ControlsPageInner() {
     },
   ];
 
+  // #2131 — on "My controls" every displayed column sorts on the server.
+  // A header click cycles ascending, descending, then the default order
+  // (failing first, then stalest evidence); the sort rides in the URL
+  // with the filters, so it is bookmarkable and saved with a view.
+  const tableColumns: ListColumn<AnchorRow>[] =
+    view === "mine"
+      ? columns.map((col) => {
+          const key = SORT_KEY_BY_COLUMN[col.id];
+          if (!key || typeof col.header !== "string") return col;
+          const state = ariaSort(filters.sort, key);
+          const label = col.header;
+          return {
+            ...col,
+            ariaSort: state,
+            header: (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground"
+                data-testid={`controls-sort-${key}`}
+                data-sort={state}
+                aria-label={`Sort by ${label}`}
+                onClick={() =>
+                  updateFilter("sort", nextSort(filters.sort, key))
+                }
+              >
+                {label}
+                <span aria-hidden="true">
+                  {state === "ascending"
+                    ? "▲"
+                    : state === "descending"
+                      ? "▼"
+                      : ""}
+                </span>
+              </button>
+            ),
+          };
+        })
+      : columns;
+
   // Slice 137: Export buttons (CSV / JSON / XLSX) wire to the BFF
   // proxy at `/api/controls/export?format=...`, which forwards to the
   // platform `GET /v1/controls/export` endpoint. Each link is an
@@ -1132,7 +1234,12 @@ function ControlsPageInner() {
   // Issue #1741 — in the default view, "truly empty" means the tenant has
   // no controls (the catalog may well be loaded), so the copy says so and
   // offers the catalog view instead of blaming the importer.
-  const isTrulyEmpty = rows.length === 0;
+  //
+  // #2131 — "truly empty" is the server's unfiltered count reading zero;
+  // until that count loads, an empty filtered page is a filter result.
+  const isTrulyEmpty =
+    unfilteredTotal === 0 &&
+    (isDefault(filters) || view === "catalog" || myTotalQ.data === 0);
   const trulyEmptyState =
     view === "mine" ? (
       <EmptyState
@@ -1224,8 +1331,8 @@ function ControlsPageInner() {
         </Alert>
       ) : null}
       <ListTable<AnchorRow>
-        columns={columns}
-        rows={pagedRows}
+        columns={tableColumns}
+        rows={rows}
         rowKey={(row) => row.key}
         onRowClick={(row) => {
           const href = controlHref(row);
@@ -1247,11 +1354,11 @@ function ControlsPageInner() {
           so the user gets the truth-telling "Showing N of N" summary;
           both Previous and Next are disabled and clearly read as such.
           Matches the slice 246 /risks composition (decisions log D3). */}
-      {visible.length > 0 ? (
+      {filteredTotal > 0 ? (
         <ListPagination
           currentPage={currentPage}
           pageSize={CONTROLS_PAGE_SIZE}
-          totalCount={visible.length}
+          totalCount={filteredTotal}
           onPageChange={goToPage}
           testIdPrefix="controls-pagination"
         />

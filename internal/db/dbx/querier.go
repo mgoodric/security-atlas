@@ -189,8 +189,10 @@ type Querier interface {
 	CountActionPlanControls(ctx context.Context, arg CountActionPlanControlsParams) (int64, error)
 	CountActionPlanRisks(ctx context.Context, arg CountActionPlanRisksParams) (int64, error)
 	// Issue #1741 — total for the paged ListActiveControlsWithState read.
-	// The optional anchor_fit (issue #1736) and owner_user_id (#2128) filters
-	// match the list's.
+	// Takes every filter the list does (#1736 anchor_fit, #2128 owner, #2131
+	// unowned / state / freshness / family / framework), so the total counts
+	// exactly what the filtered list pages over. The rollup CTEs repeat the
+	// list's.
 	CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error)
 	// #2261: the distinct users holding 'admin' in the tenant (any origin) whose
 	// membership is active (status='active' AND active). user_roles.user_id is
@@ -1592,6 +1594,10 @@ type Querier interface {
 	// The engine's hot path: every 'active' rule for the tenant. Runs on every
 	// risk write. Hits idx_aggregation_rules_tenant_status.
 	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
+	// #2131: the distinct families of the active tenant's active controls. The
+	// /controls Family filter reads it, since the page now holds one page of
+	// rows rather than every control.
+	ListActiveControlFamilies(ctx context.Context, tenantID pgtype.UUID) ([]string, error)
 	// Every active (non-superseded) control for the active tenant.
 	ListActiveControls(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsRow, error)
 	// Slice 137 — controls UCF graph data-export projection.
@@ -1687,13 +1693,24 @@ type Querier interface {
 	// never borrow each other's state.
 	//
 	// Paged server-side (row_limit / row_offset); CountActiveControls is the
-	// matching total. The optional scope_cell_id narrows the rollup exactly as
-	// slice 224 does on the anchor list.
+	// matching total and takes the same filters. The optional scope_cell_id
+	// narrows the rollup exactly as slice 224 does on the anchor list.
+	//
+	// #2131: filters on state, freshness, family, framework, anchor fit and
+	// owner (a person, or unowned), and an allow-listed sort. sort_key is one
+	// of the fixed keys in the ORDER BY; the handler refuses any other value
+	// before it gets here, and a key this query does not name falls through
+	// to the tiebreakers. The default order is failing first (worst state
+	// rank), then the stalest evidence (never observed first, then the oldest
+	// last_observed_at). Every order ends on c.id, so offset paging has no
+	// duplicates or gaps. Text keys sort lower-cased under COLLATE "C", so the
+	// order is the same on every deployment whatever its default collation.
 	//
 	// RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
 	// belt-and-suspenders alongside the GUC-driven RLS on `controls` and
 	// `control_evaluations` (invariant #6).
 	// #2128: the person-owner "assign owner" writes (slice 468).
+	// #2131: the owner's name, read by the owner sort only.
 	ListActiveControlsWithState(ctx context.Context, arg ListActiveControlsWithStateParams) ([]ListActiveControlsWithStateRow, error)
 	// Slice 439 — evidence-staleness rollup producer queries.
 	//
