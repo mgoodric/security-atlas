@@ -159,9 +159,25 @@ func MiddlewareWithResourceAttrs(engine *authz.Engine, audit *authz.AuditWriter,
 					return
 				}
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, withTenantRoles(r, decision.LiveRoles))
 		})
 	}
+}
+
+// withTenantRoles records the live user_roles the decision used on the
+// request's credential (#2428), so a handler gate (authz.IsTenantAdmin /
+// IsTenantApprover) reads the same assignment OPA did and not the JWT role
+// claim. Any value already on the credential is replaced, never merged.
+func withTenantRoles(r *http.Request, roles []authz.Role) *http.Request {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		return r
+	}
+	cred.TenantRoles = nil
+	for _, role := range roles {
+		cred.TenantRoles = append(cred.TenantRoles, string(role))
+	}
+	return r.WithContext(authctx.WithCredential(r.Context(), cred))
 }
 
 // dbUnavailableRetryAfterSeconds is the client back-off hint carried in

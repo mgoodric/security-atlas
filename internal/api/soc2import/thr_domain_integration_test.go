@@ -16,7 +16,7 @@ import (
 // Slice 641 — the FULL SCF Threat-Management (THR) domain is present in the
 // seeded sample catalog.
 //
-// Slice 635 seeded a single domain-head anchor (THR-01 "Threat Intelligence
+// Slice 635 seeded a single domain-head anchor (THR-02 "Threat Intelligence
 // Program") so the datadog.siem_rule.v1 advisory detection anchor would
 // resolve. Slice 641 imports the rest of the canonical SCF THR domain
 // (threat-intel feeds, threat hunting, insider-threat program, vulnerability
@@ -27,20 +27,23 @@ import (
 // slug='scf' AND status='current').
 
 // thrDomain is the full set of canonical SCF Threat-Management anchors the
-// sample catalog carries after slice 641. THR-01 was seeded by slice 635 and
+// sample catalog carries after slice 641. THR-02 was seeded by slice 635 and
 // reconciled here; the remainder are added by slice 641. The list is the
 // assertion surface — if a maintainer adds or removes a THR anchor in the
-// fixture, this list moves in lockstep with it.
+// fixture, this list moves in lockstep with it. The codes are SCF 2026.3
+// (#1982); slices 635 and 641 seeded the same concepts under the pre-2026.3
+// codes THR-01..THR-10, which the D5 remap in
+// docs/audit-log/1717-scf-pin-ratchet-decisions.md maps onto these.
 var thrDomain = []string{
-	"THR-01", // Threat Intelligence Program (reconciled — slice 635 head)
-	"THR-02", // Indicators of Exposure (IOE)
-	"THR-03", // Threat Intelligence Feeds
-	"THR-04", // Threat Hunting
-	"THR-05", // Insider Threat Program
-	"THR-06", // Insider Threat Awareness
-	"THR-07", // Vulnerability Disclosure Program (VDP)
-	"THR-09", // Threat Catalog
-	"THR-10", // Threat Analysis
+	"THR-02", // Threat Intelligence Program (reconciled — slice 635 head)
+	"THR-11", // Indicators of Exposure (IOE)
+	"THR-04", // Threat Intelligence Feeds
+	"THR-13", // Threat Hunting
+	"THR-15", // Insider Threat Program
+	"THR-16", // Insider Threat Awareness
+	"THR-12", // Vulnerability Disclosure Program (VDP)
+	"THR-06", // Threat Catalog
+	"THR-08", // Threat Analysis
 }
 
 // TestTHRDomain_AllAnchorsResolveInSeededCatalog asserts every THR-domain
@@ -79,7 +82,7 @@ func TestTHRDomain_AllAnchorsResolveInSeededCatalog(t *testing.T) {
 // TestTHRDomain_HasMoreThanTheDomainHead is the slice-641 grain assertion:
 // the catalog now carries the THR domain as a multi-control family, not just
 // the single slice-635 domain-head anchor. It guards against a regression that
-// silently collapses the import back to the THR-01-only state.
+// silently collapses the import back to the THR-02-only state.
 func TestTHRDomain_HasMoreThanTheDomainHead(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)

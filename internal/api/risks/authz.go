@@ -105,18 +105,3 @@ func requireTaxonomyAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
-
-// isTenantAdmin reports whether the credential is an admin: the admin
-// flag, or a JWT user holding the tenant admin role (#2107). grc_engineer
-// and the approver flag are not admin.
-func isTenantAdmin(c credstore.Credential) bool {
-	if c.IsAdmin {
-		return true
-	}
-	for _, role := range c.OwnerRoles {
-		if role == "admin" {
-			return true
-		}
-	}
-	return false
-}

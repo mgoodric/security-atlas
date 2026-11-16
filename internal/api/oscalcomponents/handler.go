@@ -17,6 +17,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -216,7 +217,8 @@ func (h *Handler) NeedsInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // disposition is the shared accept/reject/needs-info body. It is gated on
-// IsApprover (grc_engineer) | IsAdmin — disposition is a write that credits or
+// a tenant admin (authz.IsTenantAdmin, the role set OPA admits on "oscal",
+// #2428) — disposition is a write that credits or
 // declines a vendor assertion, so a bare read role is not enough. Accepting a
 // claim does NOT auto-satisfy a control: the store writes only the claim's
 // disposition metadata + an append-only audit row (invariant #2 / P0-512-1).
@@ -226,8 +228,8 @@ func (h *Handler) disposition(w http.ResponseWriter, r *http.Request, toStatus s
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer (approver) role required to disposition a vendor claim")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to disposition a vendor claim")
 		return
 	}
 	claimID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -262,7 +264,7 @@ func (h *Handler) disposition(w http.ResponseWriter, r *http.Request, toStatus s
 // MapScfAnchor handles PATCH /v1/oscal/component-claims/{id}/scf-anchor — an
 // operator maps an unmapped vendor claim to a canonical SCF anchor.
 //
-// It is gated on IsApprover (grc_engineer) | IsAdmin — mapping is a write that
+// It is gated on a tenant admin (authz.IsTenantAdmin, #2428) — mapping is a write that
 // records the human-approved crosswalk (the same write tier as disposition; a
 // bare read role is not enough). The body carries {scf_anchor_id} (the SCF
 // code, e.g. "IAC-37"), validated server-side against the bundled catalog.
@@ -277,8 +279,8 @@ func (h *Handler) MapScfAnchor(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer (approver) role required to map a vendor claim to an SCF anchor")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to map a vendor claim to an SCF anchor")
 		return
 	}
 	claimID, err := uuid.Parse(chi.URLParam(r, "id"))

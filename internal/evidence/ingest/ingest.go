@@ -42,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/redact"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -670,12 +671,18 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 		return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: kind=%s", ErrScopeViolation, rec.EvidenceKind)
 	}
 
-	// Credential scope_predicate: a tiny key=value subset enforcement for
-	// v1. EVIDENCE_SDK §4.3 specifies that a credential can be scoped to
-	// e.g. `cloud_account=aws:111122223333`. Parse predicate and require
-	// the record's scope to contain those values.
-	if cred.ScopePredicate != "" {
-		if !scopeSatisfiesPredicate(rec.GetScope(), cred.ScopePredicate) {
+	// Credential scope_predicate (#2435): the internal/scope grammar,
+	// stored as JSONB. "{}" is unrestricted; every cell the record's
+	// scope spans must satisfy the predicate; a malformed predicate
+	// denies. See scope.MatchRecordScope.
+	if !scope.IsUnrestrictedPredicate(cred.ScopePredicate) {
+		ok, perr := scopeSatisfiesPredicate(rec.GetScope(), cred.ScopePredicate)
+		if !ok {
+			if perr != nil {
+				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
+					fmt.Sprintf("scope_predicate %q is invalid: %v", cred.ScopePredicate, perr), recordID)
+				return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: invalid predicate=%q: %v", ErrScopeViolation, cred.ScopePredicate, perr)
+			}
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
 				fmt.Sprintf("scope_predicate %q not satisfied", cred.ScopePredicate), recordID)
 			return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: predicate=%q", ErrScopeViolation, cred.ScopePredicate)
@@ -1040,36 +1047,15 @@ func missingField(r *evidencev1.EvidenceRecord) string {
 	return ""
 }
 
-// scopeSatisfiesPredicate is the v1 scope_predicate evaluator. The
-// predicate format is "key=value[,key=value...]" — every key/value pair
-// must appear in the record's scope. EVIDENCE_SDK §4.3 anticipates a
-// richer expression language in v2; v1 hard-codes simple equality so the
-// security boundary is auditable.
-func scopeSatisfiesPredicate(scope []*evidencev1.ScopeDimension, predicate string) bool {
-	have := map[string]map[string]bool{}
-	for _, d := range scope {
-		have[d.Key] = map[string]bool{}
-		for _, v := range d.Values {
-			have[d.Key][v] = true
-		}
+// scopeSatisfiesPredicate evaluates a credential's scope_predicate against
+// a record's scope with scope.MatchRecordScope. A malformed predicate
+// returns false with a non-nil error.
+func scopeSatisfiesPredicate(dims []*evidencev1.ScopeDimension, predicate string) (bool, error) {
+	have := make(map[string][]string, len(dims))
+	for _, d := range dims {
+		have[d.GetKey()] = append(have[d.GetKey()], d.GetValues()...)
 	}
-	for _, part := range strings.Split(predicate, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			return false
-		}
-		k := strings.TrimSpace(kv[0])
-		v := strings.TrimSpace(kv[1])
-		vals, ok := have[k]
-		if !ok || !vals[v] {
-			return false
-		}
-	}
-	return true
+	return scope.MatchRecordScope(predicate, have)
 }
 
 // protoResultToEnum maps the proto Result enum to the SQL evidence_result

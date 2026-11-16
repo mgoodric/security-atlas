@@ -54,7 +54,9 @@ type transitionEnv struct {
 	srv *api.Server
 }
 
-func newTransitionEnv(t *testing.T) transitionEnv {
+// newTransitionEnv builds the risk transition test server. configure runs
+// before the handler is built, so a test can attach the authz engine.
+func newTransitionEnv(t *testing.T, configure ...func(srv *api.Server, app *pgxpool.Pool)) transitionEnv {
 	t.Helper()
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -62,6 +64,8 @@ func newTransitionEnv(t *testing.T) transitionEnv {
 		"mcp_write_proposals",
 		"risk_audit_log",
 		"risks",
+		"user_roles",
+		"decision_audit_log",
 		"users",
 	)
 	srv := api.New(api.Config{})
@@ -77,6 +81,9 @@ func newTransitionEnv(t *testing.T) transitionEnv {
 	env.ownerJWT, env.apprJWT = jwtFor(env.owner), jwtFor(env.approver)
 	// A grc_engineer without the approver flag.
 	env.nonApprJWT = srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"grc_engineer"}))
+	for _, c := range configure {
+		c(srv, app)
+	}
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil")

@@ -164,11 +164,10 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 	asViewer := periodAuditorsCall{t, ts.URL, viewerBearer}
 	asGRC := periodAuditorsCall{t, ts.URL, grcBearer}
 
-	// A grc_engineer builds both periods' populations over HTTP. The
-	// attach is the store's own UPDATE, run directly: over HTTP no JWT
-	// reaches it, because the handler wants IsAdmin (which a tenant admin
-	// JWT does not carry) or grc_engineer (which the rego refuses on an
-	// audit-periods write). Reported on #2157.
+	// A grc_engineer builds both periods' populations over HTTP and a
+	// tenant admin attaches each to its period (#2425, #2428: the attach
+	// gate reads the live tenant admin role, as the rego does). An auditor
+	// and a viewer are refused the attach.
 	window := map[string]any{"time_window_start": "2026-01-01T00:00:00Z", "time_window_end": "2026-03-31T23:59:59Z"}
 	population := func(ctrl uuid.UUID, predicate string, period uuid.UUID) string {
 		t.Helper()
@@ -181,10 +180,14 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 			t.Fatalf("grc POST /v1/populations: %d %v", st, out)
 		}
 		id, _ := out["population"].(map[string]any)["id"].(string)
-		if _, err := admin.Exec(context.Background(),
-			`UPDATE populations SET audit_period_id = $3 WHERE tenant_id = $1 AND id = $2 AND audit_period_id IS NULL`,
-			tenant, id, period); err != nil {
-			t.Fatalf("attach population: %v", err)
+		attach := "/v1/audit-periods/" + period.String() + "/populations/" + id
+		for name, c := range map[string]periodAuditorsCall{"auditor": asAuditor, "viewer": asViewer} {
+			if st, out := c.do(http.MethodPost, attach, nil); st != http.StatusForbidden {
+				t.Fatalf("%s POST %s: %d %v, want 403", name, attach, st, out)
+			}
+		}
+		if st, out := asAdmin.do(http.MethodPost, attach, nil); st != http.StatusOK {
+			t.Fatalf("tenant admin POST %s: %d %v, want 200", attach, st, out)
 		}
 		return id
 	}

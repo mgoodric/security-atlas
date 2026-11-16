@@ -118,15 +118,16 @@ export function bareUserId(id: string | null | undefined): string {
 }
 
 /**
- * Whether the viewer may verify a plan: the approver role (admin implies
- * it for a signed-in person) and not the plan's owner. The platform makes
+ * Whether the viewer may verify a plan: a tenant admin (/v1/me
+ * is_tenant_admin; the platform admits only admin on action-plan writes,
+ * #2428) and not the plan's owner. The platform makes
  * the same check; this only decides whether to show the button.
  */
 export function viewerCanVerify(
-  me: { user_id: string; is_admin: boolean } | undefined,
+  me: { user_id: string; is_tenant_admin: boolean } | undefined,
   ownerId: string,
 ): boolean {
-  if (!me || !me.is_admin) return false;
+  if (!me || !me.is_tenant_admin) return false;
   const viewer = bareUserId(me.user_id);
   return viewer !== "" && viewer !== bareUserId(ownerId);
 }

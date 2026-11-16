@@ -372,11 +372,11 @@ func buildFilename(entity, ext string) string {
 // export is a bulk-handoff surface, so we limit it to admin +
 // approver (auditor-level). Pins the AC-6 contract.
 //
-// `IsAdmin` is the wildcard signal; `IsApprover` represents the
-// auditor / sign-off role family. A bare push credential or a
-// control-owner credential lacks both and is denied.
+// authz.IsTenantApprover admits the admin and approver flags and the
+// live tenant admin / grc_engineer roles (#2428). A bare push
+// credential or a control-owner credential is denied.
 func hasDashboardExportAccess(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover
+	return authz.IsTenantApprover(c)
 }
 
 // ===== Meta-audit =====
