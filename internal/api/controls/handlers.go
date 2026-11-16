@@ -20,6 +20,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/control/bundletest"
 	"github.com/mgoodric/security-atlas/internal/eval"
@@ -133,7 +134,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if !cred.IsAdmin && !isMachineActor(cred) {
+	if !authz.IsTenantAdmin(cred) && !isMachineActor(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return
 	}

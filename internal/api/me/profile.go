@@ -80,6 +80,14 @@ type profileWire struct {
 	IsAdmin     bool     `json:"is_admin"`
 	OwnerRoles  []string `json:"owner_roles"`
 	Roles       []string `json:"roles"`
+	// IsTenantAdmin and IsApprover are authz.IsTenantAdmin and
+	// authz.IsTenantApprover (#2428): the flags, or the live tenant admin
+	// (and, for approver, grc_engineer) role. The web shows an approve
+	// button on whichever matches the role set OPA admits on that resource
+	// (action-plan Verify: is_tenant_admin). is_admin stays the super-admin
+	// bit that gates /admin (#2216 D2).
+	IsTenantAdmin bool `json:"is_tenant_admin"`
+	IsApprover    bool `json:"is_approver"`
 }
 
 // patchProfileRequest is the wire shape of PATCH /v1/me. Pointer fields encode the
@@ -300,16 +308,18 @@ func (h *ProfileHandler) buildProfile(ctx context.Context, cred credstore.Creden
 	// Synthetic profile for bootstrap/API-key credentials with no users row.
 	var tz *string // nil = null on wire
 	return profileWire{
-		UserID:      cred.UserID,
-		TenantID:    cred.TenantID,
-		DisplayName: "API key " + cred.Last4,
-		Email:       "",
-		IdpSubject:  "",
-		TenantRole:  role,
-		TimeZone:    tz,
-		Theme:       nil, // no users row: nowhere to store a choice
-		IsAdmin:     cred.IsAdmin,
-		OwnerRoles:  append([]string(nil), cred.OwnerRoles...),
+		UserID:        cred.UserID,
+		TenantID:      cred.TenantID,
+		DisplayName:   "API key " + cred.Last4,
+		Email:         "",
+		IdpSubject:    "",
+		TenantRole:    role,
+		TimeZone:      tz,
+		Theme:         nil, // no users row: nowhere to store a choice
+		IsAdmin:       cred.IsAdmin,
+		IsTenantAdmin: authz.IsTenantAdmin(cred),
+		IsApprover:    authz.IsTenantApprover(cred),
+		OwnerRoles:    append([]string(nil), cred.OwnerRoles...),
 	}, nil
 }
 
@@ -324,16 +334,18 @@ func profileWireFrom(u users.User, cred credstore.Credential) profileWire {
 		tz = &v
 	}
 	return profileWire{
-		UserID:      u.ID.String(),
-		TenantID:    u.TenantID.String(),
-		DisplayName: u.DisplayName,
-		Email:       u.Email,
-		IdpSubject:  u.IdpSubject,
-		TenantRole:  role,
-		TimeZone:    tz,
-		Theme:       storedTheme(u.Theme),
-		IsAdmin:     cred.IsAdmin,
-		OwnerRoles:  append([]string(nil), cred.OwnerRoles...),
+		UserID:        u.ID.String(),
+		TenantID:      u.TenantID.String(),
+		DisplayName:   u.DisplayName,
+		Email:         u.Email,
+		IdpSubject:    u.IdpSubject,
+		TenantRole:    role,
+		TimeZone:      tz,
+		Theme:         storedTheme(u.Theme),
+		IsAdmin:       cred.IsAdmin,
+		IsTenantAdmin: authz.IsTenantAdmin(cred),
+		IsApprover:    authz.IsTenantApprover(cred),
+		OwnerRoles:    append([]string(nil), cred.OwnerRoles...),
 	}
 }
 

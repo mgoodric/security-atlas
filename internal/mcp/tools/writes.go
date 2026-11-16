@@ -435,7 +435,7 @@ type confirmWriteArgs struct {
 }
 
 // ConfirmWriteTool dispatches to POST /v1/mcp/write-proposals/{id}/confirm.
-// The platform enforces IsApprover / IsAdmin gating server-side.
+// The platform requires a tenant admin server-side (#2428).
 type ConfirmWriteTool struct {
 	client *mcp.Client
 }

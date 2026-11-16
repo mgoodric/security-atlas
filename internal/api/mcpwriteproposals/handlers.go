@@ -12,8 +12,9 @@
 //   - POST /v1/mcp/write-proposals — any authenticated bearer (the MCP
 //     server proxies the caller's bearer; gating happens at the MCP
 //     tool layer + the operator's own role).
-//   - confirm / reject — REQUIRE IsApprover or IsAdmin. Mirrors slice-021
-//     exception approval (AC-3 segregation gate).
+//   - confirm / reject — REQUIRE a tenant admin (authz.IsTenantAdmin, the
+//     role set OPA admits on "mcp", #2428). Mirrors slice-021 exception
+//     approval (AC-3 segregation gate).
 //   - list / get — any authenticated bearer; RLS scopes to caller's tenant.
 //
 // Wire shapes mirror the store layer 1:1; payload_json equivalents
@@ -41,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/approval"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -206,8 +208,8 @@ func (h *Handler) ConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -240,8 +242,8 @@ func (h *Handler) RejectProposal(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))

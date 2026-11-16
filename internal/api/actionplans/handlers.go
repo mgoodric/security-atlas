@@ -48,6 +48,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/approval"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -286,8 +287,9 @@ func (h *Handler) UpdateActionPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 // VerifyActionPlan handles POST /v1/action-plans/{id}/verify (#2108): an
-// approver verifies a completed plan with no linked controls. The approver
-// role is checked here; the store refuses the plan's owner (whatever the
+// approver verifies a completed plan with no linked controls. OPA admits
+// only admin on action-plans writes, so the approver here is a tenant admin
+// (authz.IsTenantAdmin, #2428), checked here; the store refuses the plan's owner (whatever the
 // self-approval setting), a credential that is not a person, and a plan
 // with linked controls.
 func (h *Handler) VerifyActionPlan(w http.ResponseWriter, r *http.Request) {
@@ -296,8 +298,8 @@ func (h *Handler) VerifyActionPlan(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))

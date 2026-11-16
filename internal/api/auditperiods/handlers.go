@@ -37,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -159,7 +160,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canWrite(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 
@@ -258,7 +259,7 @@ func (h *Handler) Freeze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canWrite(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -288,7 +289,7 @@ func (h *Handler) ControlState(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !canWrite(cred) {
+	if !canReadControlState(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
@@ -342,7 +343,7 @@ func (h *Handler) AttachPopulation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canWrite(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -384,21 +385,23 @@ func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Cred
 	return r.Context(), cred, true
 }
 
-// canWrite returns true when the credential is an admin or carries the
-// grc_engineer owner role. Slice 035's OPA layer enforces broader RBAC
-// across the platform; this handler-local check is defense-in-depth and
-// returns 403 even when the OPA middleware is not wired (which is the
-// case in unit-test servers).
+// canWrite returns true when the credential is a tenant admin, by flag or
+// by live tenant role (authz.IsTenantAdmin, #2428). It gates the period
+// writes (create, freeze, attach a population), which OPA admits for admin
+// only: audit-periods is not in grc_engineer.rego's writable set, so the
+// handler admitting grc_engineer here only let it reach a rego deny
+// (#2425). Slice 035's OPA layer is the primary gate; this handler-local
+// check is defense-in-depth and returns 403 even when the OPA middleware
+// is not wired (which is the case in unit-test servers).
 func canWrite(cred credstore.Credential) bool {
-	if cred.IsAdmin {
-		return true
-	}
-	for _, role := range cred.OwnerRoles {
-		if role == "grc_engineer" {
-			return true
-		}
-	}
-	return false
+	return authz.IsTenantAdmin(cred)
+}
+
+// canReadControlState returns true for a tenant admin or grc_engineer, by
+// flag or by live tenant role (authz.IsTenantApprover, #2428): the
+// audit-workspace read set evidencesummary.hasAuditWorkspaceRead shares.
+func canReadControlState(cred credstore.Credential) bool {
+	return authz.IsTenantApprover(cred)
 }
 
 func periodWireFrom(p period.Period) periodWire {
