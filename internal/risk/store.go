@@ -250,6 +250,9 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			in.ResidualScore = normalizedResidual
 		}
 	}
+	if err := ValidateCreateAcceptance(in.AcceptanceStatus, in.Accepter, in.AcceptedUntil != nil); err != nil {
+		return Risk{}, err
+	}
 	if err := ValidateTreatment(TreatmentInput{
 		Treatment:            in.Treatment,
 		AcceptanceStatus:     in.AcceptanceStatus,

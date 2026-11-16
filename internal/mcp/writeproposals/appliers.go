@@ -94,6 +94,9 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 		treatment = dbx.RiskTreatmentUntreated
 	}
 	status := dbx.RiskAcceptanceStatus(in.AcceptanceStatus)
+	if err := risk.ValidateCreateAcceptance(status, "", false); err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
+	}
 	// A new risk has no linked controls or action plans and no accepter.
 	if err := risk.ValidateTreatment(risk.TreatmentInput{
 		Treatment:        treatment,

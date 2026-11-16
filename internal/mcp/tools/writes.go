@@ -112,8 +112,8 @@ const createRiskInputSchema = `{
     },
     "acceptance_status": {
       "type": "string",
-      "enum": ["proposed", "approved"],
-      "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off."
+      "enum": ["proposed"],
+      "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off. A risk cannot be created already approved; approve the acceptance afterwards."
     },
     "treatment_owner": {
       "type": "string",
