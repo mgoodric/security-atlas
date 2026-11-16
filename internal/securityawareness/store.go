@@ -381,7 +381,7 @@ func BuildCompletionEvidence(detail AssignmentDetail, actorID string) (*evidence
 		SchemaVersion:  EvidenceVersionTraining,
 		ControlId:      "soc2_cc1_4_competence_training",
 		Scope: []*evidencev1.ScopeDimension{
-			{Key: "scf_anchor", Values: []string{"HRS-04"}},
+			{Key: "scf_anchor", Values: []string{"SAT-04"}},
 			{Key: "framework_controls", Values: []string{"SOC2:CC1.4", "ISO27001:A.6.3"}},
 			{Key: "metric", Values: []string{MetricTrainingCompletionRate}},
 		},
