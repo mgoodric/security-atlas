@@ -86,6 +86,8 @@ async function mock(page: Page, store: Store, viewer: string) {
         time_zone: null,
         theme: null,
         is_admin: true,
+        is_tenant_admin: true,
+        is_approver: true,
         owner_roles: [],
         roles: ["admin"],
       }),

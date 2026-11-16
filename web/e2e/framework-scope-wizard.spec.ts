@@ -5,9 +5,9 @@
 //      wizard from the index, picks the framework version in the entity
 //      picker, scopes Everything (choose by dimension with nothing picked
 //      refuses submit: the picker's null is never sent), names it and
-//      submits it for approval. A second user, an admin signed in with a
-//      JWT minted by /v1/test/issue-jwt (a super-admin until #2428, see
-//      mintApproverJWT), approves and activates it from the
+//      submits it for approval. A second user, a tenant admin (the
+//      fixture's user_roles row) signed in with a JWT minted by
+//      /v1/test/issue-jwt, approves and activates it from the
 //      page's header, and the tile turns into a percentage. The dashboard
 //      prefetches its panels on the server, so this one cannot be mocked.
 //   2. The submitter's own Approve is refused, and a second user approves
@@ -265,12 +265,6 @@ async function mintApproverJWT(): Promise<string> {
       tenant_id: DEMO_TENANT_ID,
       user_id: `user:${REAL_APPROVER}`,
       roles: ["admin"],
-      // WORKAROUND (remove with #2428): tenant-admin JWTs can't approve
-      // until jwtmw derives IsAdmin/IsApprover from tenant roles. The
-      // approver is still a different person from the submitter, so the
-      // approval rule runs and the scope is not self-approved.
-      // https://github.com/mgoodric/security-atlas/issues/2428
-      super_admin: true,
     }),
   });
   if (!res.ok) {
