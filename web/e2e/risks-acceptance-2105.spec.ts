@@ -227,7 +227,7 @@ test.describe("/risks/[id] acceptance (#2105)", () => {
     );
     await expect(
       page.getByTestId("risk-detail-acceptance-proposed-until"),
-    ).toHaveText("2099-03-31");
+    ).toHaveText("Mar 31, 2099");
     expect(store.bodies[0]).toEqual({
       action: "propose",
       justification: "Compensated by the edge filter (test-2105)",
@@ -276,7 +276,7 @@ test.describe("/risks/[id] acceptance (#2105)", () => {
       );
       await expect(
         approver.getByTestId("risk-detail-acceptance-accepted-until"),
-      ).toHaveText("2099-03-31");
+      ).toHaveText("Mar 31, 2099");
       await expect(
         approver.getByTestId("risk-detail-acceptance-approved"),
       ).toContainText(APPROVER);

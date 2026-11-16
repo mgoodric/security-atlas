@@ -434,22 +434,37 @@ export default function RiskDetailPage({
 function AcceptanceCard({ risk }: { risk: Risk }) {
   const a = risk.acceptance;
   if (!a) return null;
-  const rows: [string, string, string][] = [
+  const by = (who: string | undefined) => ` by ${who || "unknown"}`;
+  const rows: [string, React.ReactNode, string][] = [
     [
       "Proposed",
-      `${formatDate(a.proposed_at)} by ${a.proposed_by || "unknown"}`,
+      <>
+        <Timestamp value={a.proposed_at} />
+        {by(a.proposed_by)}
+      </>,
       "proposed",
     ],
-    ["Proposed expiry", formatDate(a.proposed_until), "proposed-until"],
+    [
+      "Proposed expiry",
+      <Timestamp key="v" value={a.proposed_until} style="date" />,
+      "proposed-until",
+    ],
   ];
   if (risk.acceptance_status === "approved") {
     rows.push(
       [
         "Approved",
-        `${formatDate(a.approved_at)} by ${risk.accepter || "unknown"}`,
+        <>
+          <Timestamp value={a.approved_at} />
+          {by(risk.accepter)}
+        </>,
         "approved",
       ],
-      ["Accepted until", formatDate(risk.accepted_until), "accepted-until"],
+      [
+        "Accepted until",
+        <Timestamp key="v" value={risk.accepted_until} style="date" />,
+        "accepted-until",
+      ],
     );
   }
   return (
