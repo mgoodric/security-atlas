@@ -55,6 +55,9 @@ export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
 // #2142 — seeded by fixtures/e2e/theme.sql. The stored theme is per user,
 // so the theme spec signs in as this user rather than the shared demo one.
 export const THEME_USER_ID = "44444444-4444-4444-4444-444444442142";
+// #2145 — seeded by fixtures/e2e/onboarding-hints.sql. Hint dismissals are
+// per user, so the hints spec signs in as this user, not the demo one.
+export const HINTS_USER_ID = "44444444-4444-4444-4444-444444442145";
 
 // The fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
@@ -125,6 +128,9 @@ export type FixtureName =
   // #2142 — a user of settings-theme.spec.ts's own, its stored theme
   // reset to never-chosen on each run.
   | "theme"
+  // #2145 — a user of onboarding-hints.spec.ts's own, its hint dismissals
+  // cleared on each run.
+  | "onboarding-hints"
   // #1800 — a requirement with a catalog edge and a demo-tenant overlay
   // edge, a control behind the overlay, and a second tenant
   // (org-mapping.spec.ts).

@@ -101,6 +101,52 @@ export async function getMyPreferences(): Promise<MePreferences> {
   return body.preferences;
 }
 
+// ===== #2145 — first-visit onboarding hints, through /v1/me/preferences =====
+
+/** The help module ids whose "New to <module>?" hint the caller dismissed.
+ *  Throws on any non-2xx; a machine credential has no preferences (404). */
+export async function getMyDismissedHints(): Promise<string[]> {
+  const res = await fetch(`/api/me/preferences`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { dismissed_hints?: string[] };
+  return body.dismissed_hints ?? [];
+}
+
+/** Dismiss one module's hint for the caller, on every device. */
+export function dismissHint(module: string): Promise<string[]> {
+  return patchHints({ dismissed_hints: { [module]: true } });
+}
+
+/** "Show onboarding hints again": clear every dismissal. */
+export function resetOnboardingHints(): Promise<string[]> {
+  return patchHints({ reset_hints: true });
+}
+
+async function patchHints(body: {
+  dismissed_hints?: Record<string, boolean>;
+  reset_hints?: boolean;
+}): Promise<string[]> {
+  const res = await fetch(`/api/me/preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  const out = (await res.json()) as { dismissed_hints?: string[] };
+  return out.dismissed_hints ?? [];
+}
+
 // ===== Slice 445 — /v1/me/email-channel (master email opt-in) =====
 
 // EmailChannelOptIn is the wire shape for the per-user master email

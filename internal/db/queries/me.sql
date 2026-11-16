@@ -42,3 +42,26 @@ INSERT INTO me_audit_log (
 VALUES (
     $1, $2, $3, $4, $5, 'core'
 );
+
+-- name: ListOnboardingHintDismissals :many
+-- #2145: the modules whose first-visit hint the caller has dismissed.
+SELECT module
+FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2
+ORDER BY module ASC;
+
+-- name: InsertOnboardingHintDismissal :exec
+-- #2145: dismissing twice is a no-op.
+INSERT INTO user_onboarding_hint_dismissals (tenant_id, user_id, module)
+VALUES ($1, $2, $3)
+ON CONFLICT (tenant_id, user_id, module) DO NOTHING;
+
+-- name: DeleteOnboardingHintDismissal :exec
+-- #2145: show one module's hint again.
+DELETE FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2 AND module = $3;
+
+-- name: DeleteOnboardingHintDismissals :exec
+-- #2145: "Show onboarding hints again" clears every dismissal for the caller.
+DELETE FROM user_onboarding_hint_dismissals
+WHERE tenant_id = $1 AND user_id = $2;

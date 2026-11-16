@@ -18,7 +18,13 @@
 // inlined as SVG markup.
 
 import { usePathname } from "next/navigation";
-import { useId, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useId,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { Markdown } from "@/components/markdown";
 import {
@@ -34,6 +40,7 @@ import {
   helpDiagramSrc,
   helpDocsHref,
   helpModuleForPath,
+  type HelpModule,
 } from "@/lib/help/modules";
 import { getTerm, termHref } from "@/lib/help/terms";
 import { cn } from "@/lib/utils";
@@ -41,10 +48,41 @@ import { cn } from "@/lib/utils";
 const LINK =
   "rounded-sm text-primary underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-export function HelpButton() {
+type HelpState = {
+  mod: HelpModule | undefined;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+};
+
+const HelpContext = createContext<HelpState | null>(null);
+
+/** #2145 — PageShell's help scope: the page's help module and whether its
+ *  panel is open, shared by the **?** button and the first-visit hint
+ *  (`onboarding-hint.tsx`), which opens the same panel. */
+export function HelpScope({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const mod = pathname ? helpModuleForPath(pathname) : undefined;
   const [open, setOpen] = useState(false);
+  return (
+    <HelpContext.Provider value={{ mod, open, setOpen }}>
+      {children}
+    </HelpContext.Provider>
+  );
+}
+
+/** The enclosing HelpScope's state; no module outside one. */
+export function useHelp(): HelpState {
+  return (
+    useContext(HelpContext) ?? {
+      mod: undefined,
+      open: false,
+      setOpen: () => {},
+    }
+  );
+}
+
+export function HelpButton() {
+  const { mod, open, setOpen } = useHelp();
   const termsHeadingId = useId();
 
   if (!mod) return null;
