@@ -867,7 +867,7 @@ func (q *Queries) ListFrameworkVersionLinkedControls(ctx context.Context, arg Li
 }
 
 const listFrameworkVersionMigrationsInto = `-- name: ListFrameworkVersionMigrationsInto :many
-SELECT id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at FROM framework_version_migrations
+SELECT id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at, overlay_carried_over_at FROM framework_version_migrations
 WHERE to_version_id = $1
 ORDER BY from_version_id, match_kind, requirement_code
 `
@@ -897,6 +897,7 @@ func (q *Queries) ListFrameworkVersionMigrationsInto(ctx context.Context, toVers
 			&i.Note,
 			&i.CreatedAt,
 			&i.DecidedAt,
+			&i.OverlayCarriedOverAt,
 		); err != nil {
 			return nil, err
 		}
