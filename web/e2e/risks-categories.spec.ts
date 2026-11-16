@@ -110,10 +110,11 @@ test.describe("/risks organisation categories (#1817)", () => {
     await page.route(/\/api\/risks(\?.*)?$/, async (route, req) => {
       if (req.method() !== "POST") return json(route, 200, { risks: [] });
       posted = req.postDataJSON() as { category?: string };
-      // Custom categories are refused until #1745's contract step.
+      // The category was archived after the form loaded: the backend
+      // refuses it, and the form shows the backend's message.
       return json(route, 400, {
         error:
-          'category "cloud_posture" cannot hold risks until the risk_category enum is retired (#1745)',
+          'risk: category "cloud_posture" is archived and cannot be assigned',
       });
     });
 
@@ -139,7 +140,7 @@ test.describe("/risks organisation categories (#1817)", () => {
     await page.getByTestId("risks-create-submit").click();
 
     await expect(page.getByTestId("risks-create-error")).toContainText(
-      "cannot hold risks",
+      "is archived and cannot be assigned",
     );
     expect(posted?.category).toBe("cloud_posture");
     // The form keeps the user's input after the refusal.

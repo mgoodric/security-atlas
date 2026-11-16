@@ -631,8 +631,8 @@ var teardownTables = []string{
 	"questionnaires",
 	"risk_control_links",
 	"risks",
-	// risks_category_sync_trg seeds the tenant's risk categories when the
-	// first risk lands, so the seed writes them. After risks: risks'
+	// risk_category_id() seeds the tenant's risk categories when the first
+	// risk lands (#1819), so the seed writes them. After risks: risks'
 	// (tenant_id, category_id) references them. #2153: without this a
 	// whole-tenant teardown left them behind.
 	"org_risk_categories",

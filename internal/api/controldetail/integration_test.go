@@ -138,10 +138,10 @@ func seedRiskWithLink(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID u
 	riskID := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, methodology,
+			id, tenant_id, title, category_id, methodology,
 			inherent_score, treatment, residual_score
 		)
-		VALUES ($1, $2, $3, 'confidentiality', 'qualitative_5x5',
+		VALUES ($1, $2, $3, risk_category_id($2, 'confidentiality'), 'qualitative_5x5',
 		        '{"likelihood":3,"impact":4}'::jsonb, 'mitigate',
 		        '{"likelihood":2,"impact":3}'::jsonb)
 	`, riskID, tenant, title); err != nil {

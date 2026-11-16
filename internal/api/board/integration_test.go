@@ -154,11 +154,11 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, residualS
 	residual := []byte(`{"score": ` + floatStr(residualScore) + `}`)
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			accepted_until, accepter, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, $3, '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        '{"likelihood": 3, "impact": 3}'::jsonb, 'mitigate', 'sec-lead', $4,
 		        NULL, '', $5, $5)
 	`, id, tenant, title, residual, updatedAt); err != nil {

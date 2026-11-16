@@ -68,8 +68,8 @@ func seedControlLinks(t *testing.T, admin *pgxpool.Pool, tenant string, controlI
 		}
 	}
 	riskID := uuid.New()
-	if _, err := admin.Exec(ctx, `INSERT INTO risks (id, tenant_id, title, category)
-		VALUES ($1, $2, 'Linked risk', 'operational')`, riskID, tenant); err != nil {
+	if _, err := admin.Exec(ctx, `INSERT INTO risks (id, tenant_id, title, category_id)
+		VALUES ($1, $2, 'Linked risk', risk_category_id($2, 'operational'))`, riskID, tenant); err != nil {
 		t.Fatalf("seed risk: %v", err)
 	}
 	if _, err := admin.Exec(ctx, `INSERT INTO risk_control_links (risk_id, control_id, tenant_id)

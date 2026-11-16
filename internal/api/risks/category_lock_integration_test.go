@@ -189,7 +189,7 @@ func TestCategoryLock_MoveRacingArchiveIsRefused(t *testing.T) {
 	if r.status != http.StatusBadRequest {
 		t.Fatalf("move racing archive: status %d (%v), want 400", r.status, r.body)
 	}
-	if _, slug, _, _ := storedCategory(t, admin, riskID); slug != "regulatory" {
+	if slug, _, _ := storedCategory(t, admin, riskID); slug != "regulatory" {
 		t.Fatalf("after refused move: category %s, want regulatory", slug)
 	}
 	if n := countRisksOn(t, admin, env.tenant, "financial"); n != 0 {
@@ -264,7 +264,7 @@ func TestCategoryLock_PatchWithOtherTenantsCategoryIs400(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("PATCH with another tenant's category id: status %d (%v), want 400", status, body)
 	}
-	if _, slug, catTenant, _ := storedCategory(t, admin, riskID); slug != "regulatory" || catTenant != env.tenant {
+	if slug, catTenant, _ := storedCategory(t, admin, riskID); slug != "regulatory" || catTenant != env.tenant {
 		t.Fatalf("after refused move: category %s of tenant %s", slug, catTenant)
 	}
 }
@@ -312,7 +312,7 @@ func TestCategoryLock_DisplayNameResolvesThroughPostAndPatch(t *testing.T) {
 		t.Fatalf("POST by display name: status %d (%v)", status, body)
 	}
 	riskID := body["risk"].(map[string]any)["id"].(string)
-	if _, slug, _, _ := storedCategory(t, admin, riskID); slug != "financial" {
+	if slug, _, _ := storedCategory(t, admin, riskID); slug != "financial" {
 		t.Fatalf("POST by display name: category %s, want financial", slug)
 	}
 
@@ -328,7 +328,7 @@ func TestCategoryLock_DisplayNameResolvesThroughPostAndPatch(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("PATCH by a name one archived category shares: status %d (%v)", status, body)
 	}
-	if _, slug, _, _ := storedCategory(t, admin, riskID); slug != "regulatory" {
+	if slug, _, _ := storedCategory(t, admin, riskID); slug != "regulatory" {
 		t.Fatalf("PATCH by display name: category %s, want regulatory", slug)
 	}
 }

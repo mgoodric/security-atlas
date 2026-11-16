@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -221,20 +220,12 @@ func (s *Store) setCategoryArchived(ctx context.Context, ref, actor string, arch
 
 // SetDefaultCategory makes a category the tenant's default; the previous
 // default stops being one in the same transaction, so exactly one remains.
-// An archived category is ErrCategoryArchived; a custom category, which the
-// risk_category enum cannot hold, is an *InvalidCategoryError until #1745's
-// contract step (#1813).
+// An archived category is ErrCategoryArchived. Any active category can be
+// the default, custom ones included, since the contract step (#1819).
 func (s *Store) SetDefaultCategory(ctx context.Context, ref, actor string) (Category, error) {
 	return s.changeCategory(ctx, ref, actor, "set_default", func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, cur Category) (dbx.OrgRiskCategory, error) {
 		if cur.Archived {
 			return dbx.OrgRiskCategory{}, ErrCategoryArchived
-		}
-		if !slices.Contains(dbx.AllRiskCategoryValues(), dbx.RiskCategory(cur.Slug)) {
-			// #1813: aggregation meta-risks fall back to the default, and
-			// the risk row still carries the enum until #1745's contract
-			// step, so the default must be a category the enum can hold.
-			return dbx.OrgRiskCategory{}, &InvalidCategoryError{Reason: fmt.Sprintf(
-				"category %q cannot be the default until the risk_category enum is retired (#1745)", cur.Slug)}
 		}
 		if err := q.ClearRiskCategoryDefault(ctx, dbx.ClearRiskCategoryDefaultParams{
 			TenantID: pgUUID(tenantID), ID: pgUUID(cur.ID),

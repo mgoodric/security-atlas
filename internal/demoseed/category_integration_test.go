@@ -1,8 +1,7 @@
 //go:build integration
 
 // Integration tests for #1816: the demo seed writes each risk's category
-// reference (category_id), not only the enum, on both the new-tenant and
-// the in-place path.
+// reference (category_id) on both the new-tenant and the in-place path.
 //
 // Run with: go test -tags=integration -p 1 ./internal/demoseed/...
 
@@ -18,13 +17,13 @@ import (
 )
 
 // assertRiskCategoriesReferenced fails unless the tenant has risks and every
-// one references a category of its own tenant whose slug equals its enum.
+// one references a category of its own tenant.
 func assertRiskCategoriesReferenced(t *testing.T, tenantID uuid.UUID) {
 	t.Helper()
 	var total, referenced int
 	if err := adminPool.QueryRow(context.Background(), `
 		SELECT count(*),
-		       count(*) FILTER (WHERE c.id IS NOT NULL AND c.slug = r.category::text)
+		       count(*) FILTER (WHERE c.id IS NOT NULL)
 		FROM risks r
 		LEFT JOIN org_risk_categories c
 		       ON c.tenant_id = r.tenant_id AND c.id = r.category_id

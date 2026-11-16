@@ -125,7 +125,7 @@ func TestContract_Risks(t *testing.T) {
 		ID:                  uuid.MustParse(contractRiskID),
 		Title:               "Unpatched perimeter dependency",
 		Description:         "A high-severity CVE in an internet-facing dependency.",
-		Category:            dbx.RiskCategory("technology"),
+		CategorySlug:        "technology",
 		Methodology:         dbx.RiskMethodologyNist80030,
 		InherentScore:       []byte(`{"likelihood":4,"impact":5,"severity":20}`),
 		Treatment:           dbx.RiskTreatmentMitigate,
@@ -149,7 +149,7 @@ func TestContract_Risks(t *testing.T) {
 	minimal := risk.Risk{
 		ID:               uuid.MustParse(contractRiskID),
 		Title:            "Vendor SOC 2 report pending renewal",
-		Category:         dbx.RiskCategory("third_party"),
+		CategorySlug:     "third_party",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		Treatment:        dbx.RiskTreatmentMitigate,
 		LinkedControlIDs: nil,
@@ -161,18 +161,18 @@ func TestContract_Risks(t *testing.T) {
 	// (acceptance_status absent on the wire) and a proposed acceptance
 	// (acceptance_status present, no accepter or accepted_until).
 	untreated := risk.Risk{
-		ID:          uuid.MustParse(contractRiskID),
-		Title:       "Intake risk not yet triaged",
-		Category:    dbx.RiskCategory("operational"),
-		Methodology: dbx.RiskMethodologyNist80030,
-		Treatment:   dbx.RiskTreatmentUntreated,
-		CreatedAt:   created,
-		UpdatedAt:   updated,
+		ID:           uuid.MustParse(contractRiskID),
+		Title:        "Intake risk not yet triaged",
+		CategorySlug: "operational",
+		Methodology:  dbx.RiskMethodologyNist80030,
+		Treatment:    dbx.RiskTreatmentUntreated,
+		CreatedAt:    created,
+		UpdatedAt:    updated,
 	}
 	proposedAccept := risk.Risk{
 		ID:               uuid.MustParse(contractRiskID),
 		Title:            "Legacy TLS endpoint, acceptance pending sign-off",
-		Category:         dbx.RiskCategory("technology"),
+		CategorySlug:     "technology",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,

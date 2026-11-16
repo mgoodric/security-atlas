@@ -92,11 +92,11 @@ func seedHierRisk(t *testing.T, admin *pgxpool.Pool, tenant string, orgUnit *uui
 	inherent := `{"likelihood":` + itoa(likelihood) + `,"impact":` + itoa(impact) + `}`
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			org_unit_id, themes
 		)
-		VALUES ($1, $2, 'slice 067 risk', '', 'operational', 'nist_800_30',
+		VALUES ($1, $2, 'slice 067 risk', '', risk_category_id($2, 'operational'), 'nist_800_30',
 		        $3::jsonb, 'mitigate', 'owner', '{}'::jsonb, $4, $5::text[])
 	`, id, tenant, inherent, orgUnit, themes); err != nil {
 		t.Fatalf("seed hier risk: %v", err)
@@ -111,11 +111,11 @@ func seedFairHierRisk(t *testing.T, admin *pgxpool.Pool, tenant string, orgUnit 
 	inherent := `{"loss_event_frequency":` + itoa(lef) + `,"loss_magnitude":` + itoa(lm) + `,"annualized_loss_exposure":` + itoa(ale) + `}`
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, description, category, methodology,
+			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			org_unit_id, themes
 		)
-		VALUES ($1, $2, 'slice 596 fair risk', '', 'financial', 'fair',
+		VALUES ($1, $2, 'slice 596 fair risk', '', risk_category_id($2, 'financial'), 'fair',
 		        $3::jsonb, 'avoid', 'owner', $3::jsonb, $4, $5::text[])
 	`, id, tenant, inherent, orgUnit, themes); err != nil {
 		t.Fatalf("seed fair hier risk: %v", err)
