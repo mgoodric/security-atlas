@@ -78,6 +78,15 @@ describe("rowsFromControls", () => {
     expect(row.anchor.family).toBe("Identity & Access Management");
     expect(row.frameworks).toEqual(["SOC2"]);
   });
+  test("carries the assigned owner, or null when unassigned (#2128)", () => {
+    const owner = "u0000000-0000-4000-8000-000000000001";
+    const [assigned, unassigned] = rowsFromControls([
+      control({ owner_user_id: owner }),
+      control(),
+    ]);
+    expect(assigned.ownerUserId).toBe(owner);
+    expect(unassigned.ownerUserId).toBeNull();
+  });
   test("carries the control's own state cell", () => {
     const [row] = rowsFromControls([
       control({

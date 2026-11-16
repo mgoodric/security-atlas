@@ -423,6 +423,33 @@ test.describe("/controls list view", () => {
     await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
+  // #2128 — the assignment is read back: "assign to me" shows my name in
+  // the Owner column and on the control page, while the manifest
+  // owner_role stays visible as the default owner role. The fixture's
+  // DEMO_USER_ID is the signed-in user ("Controls-list E2E Operator").
+  test("#2128: assign to me shows my name in the Owner column and on the control page", async ({
+    authedPage: page,
+  }) => {
+    const me = /Controls-list E2E Operator/;
+    await page.goto("/controls");
+    const row = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "Encryption at rest (e2e fixture control 1)" });
+    await expect(row).toBeVisible();
+    await row.getByRole("checkbox", { name: /^Select control / }).click();
+    await page.getByTestId("controls-bulk-assign-owner").click();
+    await expect(
+      page.getByTestId("controls-bulk-assign-message"),
+    ).toContainText(/assigned \d+ control/i);
+    await expect(row.getByTestId("controls-row-owner")).toContainText(me);
+
+    await page.goto("/controls/e2e74300-0000-0000-0000-00000000a001");
+    await expect(page.getByTestId("control-owner")).toContainText(me);
+    await expect(page.getByTestId("control-owner-role")).toHaveText(
+      "security-engineering",
+    );
+  });
+
   test("slice 448 AC-3: the selection cap is communicated in the selection bar", async ({
     authedPage: page,
   }) => {

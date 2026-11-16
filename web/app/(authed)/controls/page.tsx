@@ -60,6 +60,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Person } from "@/components/ui/person";
 import {
   fetchCatalogCounts,
   fetchControlsCatalog,
@@ -508,6 +509,7 @@ function ControlsPageInner() {
     kind: "ok" | "error";
     text: string;
   } | null>(null);
+  const queryClient = useQueryClient();
   const bulkAssignMutation = useMutation({
     mutationFn: async (controlIds: string[]) => {
       const me = await getMe();
@@ -521,6 +523,8 @@ function ControlsPageInner() {
         } to you.`,
       });
       setSelected(new Set<string>());
+      // #2128: the Owner column reads the assignment back.
+      void queryClient.invalidateQueries({ queryKey: ["controls", "mine"] });
     },
     onError: (err) => {
       const text =
@@ -559,7 +563,6 @@ function ControlsPageInner() {
   // slice 448 built made this a one-place swap. The server returns a flat
   // filter map; `toSavedView` narrows it back to the typed ControlFilters
   // via the slice-448 `sanitizeFilters` (defense-in-depth on read).
-  const queryClient = useQueryClient();
   const [activeViewId, setActiveViewId] = useState<string>("");
 
   const savedViewsQ = useQuery<SavedView[]>({
@@ -985,6 +988,23 @@ function ControlsPageInner() {
           <span className="text-muted-foreground">—</span>
         ),
     },
+    // #2128 — the assigned owner (a person). Catalog anchor rows have no
+    // control, so the column is on the "My controls" view only.
+    ...(view === "mine"
+      ? [
+          {
+            id: "owner",
+            header: "Owner",
+            cell: (row: AnchorRow) => (
+              <Person
+                id={row.ownerUserId}
+                className="text-xs"
+                testId="controls-row-owner"
+              />
+            ),
+          },
+        ]
+      : []),
     // Slice 226 — Frameworks-per-row column. Right-aligned per the
     // mockup (`Plans/_archive/mockups/controls.html` line 197). Renders the
     // display abbreviations joined by `·`; empty set renders `—`
