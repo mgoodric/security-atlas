@@ -54,6 +54,45 @@ func TestIssue_TTL(t *testing.T) {
 	}
 }
 
+// #2435: Issue stores the predicate in the scope grammar, converts the
+// legacy key=value form, and refuses a malformed one before minting.
+func TestIssue_ScopePredicate(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		in, stored string
+		want       codes.Code
+	}{
+		"empty":     {"", "{}", codes.OK},
+		"grammar":   {`{"op":"eq","dim":"environment","value":"prod"}`, `{"op":"eq","dim":"environment","value":"prod"}`, codes.OK},
+		"legacy":    {"environment=prod", `{"args":[{"dim":"environment","op":"eq","value":"prod"}],"op":"and"}`, codes.OK},
+		"bare map":  {`{"environment":"prod"}`, "", codes.InvalidArgument},
+		"unknown":   {`{"op":"xor"}`, "", codes.InvalidArgument},
+		"not a map": {"environment", "", codes.InvalidArgument},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			store := credstore.New(time.Minute)
+			svc := New(store)
+			const tenant = "00000000-0000-0000-0000-000000000001"
+			ctx := authctx.WithCredential(context.Background(), credstore.Credential{TenantID: tenant, IsAdmin: true})
+			resp, err := svc.Issue(ctx, &adminv1.IssueRequest{TenantId: tenant, ScopePredicate: tc.in})
+			if got := status.Code(err); got != tc.want {
+				t.Fatalf("code = %v, want %v (err=%v)", got, tc.want, err)
+			}
+			if tc.want != codes.OK {
+				return
+			}
+			cred, err := store.Authenticate(resp.GetBearerToken())
+			if err != nil {
+				t.Fatalf("Authenticate: %v", err)
+			}
+			if cred.ScopePredicate != tc.stored {
+				t.Fatalf("stored predicate = %q, want %q", cred.ScopePredicate, tc.stored)
+			}
+		})
+	}
+}
+
 // #1762, #2167: Issue and List act in the admin caller's own credential
 // tenant. Omitting tenant_id or naming the caller's own tenant works; naming
 // another tenant is refused; a caller in no tenant can act in none.

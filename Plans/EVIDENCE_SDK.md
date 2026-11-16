@@ -194,6 +194,17 @@ Every credential is **scoped** at issue time:
 
 The platform refuses pushes that violate scope. The audit log records every push attempt — accepted or rejected — keyed by credential.
 
+**Scope predicate schema (#2435).** `api_keys.scope_predicate` is JSONB in the same expression grammar as `applicability_expr` (`internal/scope`), the one the scope builder writes:
+
+| Predicate                                                                | Meaning                                 |
+| ------------------------------------------------------------------------ | --------------------------------------- |
+| `{}` (the column default), `""` or `null`                                | Unrestricted                            |
+| `{"op":"eq","dim":"cloud_account","value":"aws:111122223333"}`           | The dimension has that value            |
+| `{"op":"in","dim":"environment","values":["prod","staging"]}`            | The dimension has one of those values   |
+| `{"op":"and"\|"or","args":[…]}`, `{"op":"not","arg":…}`, `{"op":"true"}` | Combinators, as in `applicability_expr` |
+
+A record's scope can give a dimension several values. The record expands to every cell those values span, and the predicate must hold in each cell. A key scoped to `environment=prod` cannot push a record that also names `staging`. Under a restricted key, a record that names no dimensions is refused. Any other shape is invalid: a bare `{"environment":"prod"}` map, an unknown op, an unknown field, an empty `and`/`or`, an `in` with no values, or non-JSON. Issue refuses an invalid predicate (HTTP 400 / gRPC `InvalidArgument`), and a push under one is refused as `rejected_scope_violation` with the parse error in the audit row. It is never treated as unrestricted. The legacy `key=value[,key=value]` string is still accepted at issue and is stored converted to an `and` of `eq` nodes. No stored key can hold the raw string, because the column is JSONB. The evaluator is `scope.MatchRecordScope` in `internal/scope/predicate.go`.
+
 ### 4.4 Idempotency and replay protection
 
 `idempotency_key` is required and must be unique within a 24-hour window per tenant. Duplicate pushes return the original `EvidenceReceipt` without writing again. This makes retry safe — a CI step that fails halfway and retries does not produce two evidence records.
