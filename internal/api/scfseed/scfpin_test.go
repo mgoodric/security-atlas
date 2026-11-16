@@ -49,16 +49,11 @@ const (
 
 // knownMismatchCeiling caps knownMismatch at its seeded size. Lower it as
 // family groups land; never raise it.
-const knownMismatchCeiling = 15
+const knownMismatchCeiling = 9
 
 // knownMismatch: sample scf_id -> the sample title that does not match the
 // pin. Seeded 2026-11-13 with every mismatching row; drained by family.
 var knownMismatch = map[string]string{
-	"PRI-01": "Privacy Governance",
-	"PRI-04": "Data Subject Rights",
-	"SEA-01": "Secure Engineering Principles",
-	"SEA-05": "Secure Software Development",
-	"TDA-01": "Technology Development & Acquisition",
 	"THR-01": "Threat Intelligence Program",
 	"THR-02": "Indicators of Exposure (IOE)",
 	"THR-03": "Threat Intelligence Feeds",
@@ -68,7 +63,6 @@ var knownMismatch = map[string]string{
 	"THR-07": "Vulnerability Disclosure Program (VDP)",
 	"THR-09": "Threat Catalog",
 	"THR-10": "Threat Analysis",
-	"VPM-04": "Vulnerability Remediation Process",
 }
 
 type scfPinControl struct {

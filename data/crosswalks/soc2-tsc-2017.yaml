@@ -304,7 +304,7 @@ mappings:
     strength: 0.6
     rationale: "Selecting controls to mitigate risk overlaps Risk Management Program."
   - tsc_code: CC5.2
-    scf_anchor: SEA-01
+    scf_anchor: SEA-05
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Secure engineering principles deploy general tech controls."
@@ -382,7 +382,7 @@ mappings:
     strength: 0.8
     rationale: "Vulnerability & Patch Management Policy covers new-vulnerability detection."
   - tsc_code: CC7.1
-    scf_anchor: VPM-04
+    scf_anchor: VPM-06
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Vulnerability Remediation Process is the operational half of CC7.1."
@@ -522,17 +522,17 @@ mappings:
     strength: 0.4
     rationale: "Processing-objective information quality is governance-adjacent. LOW CONFIDENCE — review (PI is weak in SCF coverage)."
   - tsc_code: PI1.2
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Secure Software Development addresses input validation. LOW CONFIDENCE — partial fit."
+    rationale: "Secure Software Development Practices (SSDP) addresses input validation. LOW CONFIDENCE — partial fit."
   - tsc_code: PI1.3
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Secure development addresses processing integrity. LOW CONFIDENCE — partial fit."
   - tsc_code: PI1.4
-    scf_anchor: SEA-05
+    scf_anchor: TDA-05
     relationship_type: intersects_with
     strength: 0.4
     rationale: "Output integrity is software-development-adjacent. LOW CONFIDENCE — review."

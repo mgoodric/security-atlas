@@ -128,8 +128,8 @@ func TestPushUnknownRefStaysUnlinked(t *testing.T) {
 	if got.Valid {
 		t.Fatalf("control_id = %v, want NULL for free-form ref %q", got, ref)
 	}
-	if ref != "scf:VPM-04" {
-		t.Fatalf("control_ref = %q, want scf:VPM-04", ref)
+	if ref != "scf:VPM-06" {
+		t.Fatalf("control_ref = %q, want scf:VPM-06", ref)
 	}
 	// #2165: an unlinked record reports no linked control.
 	if receipt.LinkedControlID != "" {

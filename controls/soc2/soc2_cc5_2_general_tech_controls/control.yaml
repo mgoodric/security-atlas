@@ -9,7 +9,7 @@ description: |
   threat modeling for net-new services) is in force and was applied to
   each new service shipped in the period.
 
-scf_anchor_id: SEA-01
+scf_anchor_id: SEA-05
 control_family: SEA
 implementation_type: manual_attested
 owner_role: security-engineering

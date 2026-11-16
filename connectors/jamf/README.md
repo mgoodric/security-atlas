@@ -163,7 +163,7 @@ accuracy recheck:
 - `endpoint.device_posture.v1` → `END-03` (Endpoint Protection Mechanisms), `CFG-04` (Secure
   Baseline Configurations) — consistent with the existing
   `osquery.host_posture.v1` anchors.
-- `endpoint.software_inventory.v1` → `VPM-04` (Vulnerability Remediation
+- `endpoint.software_inventory.v1` → `VPM-06` (Vulnerability Remediation
   Process), `AST-04` (Asset Inventories) — a deliberately different anchor set
   (the kind answers a different control question than posture).
 - `endpoint.config_profile.v1` → `CFG-04` (Secure Baseline Configurations),
