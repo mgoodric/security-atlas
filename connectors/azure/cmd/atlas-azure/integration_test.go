@@ -207,7 +207,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nsg.Inspect: %v", err)
 	}
-	nsgRec, err := buildNSGRecord(groups[0], "prod", "scf:NET-04")
+	nsgRec, err := buildNSGRecord(groups[0], "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildNSGRecord: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("firewall.Inspect: %v", err)
 	}
-	fwRec, err := buildFirewallRecord(policies[0], "prod", "scf:NET-04")
+	fwRec, err := buildFirewallRecord(policies[0], "prod", "scf:NET-03")
 	if err != nil {
 		t.Fatalf("buildFirewallRecord: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}},
 	}}
 	nsgGroups, _ := nsg.Inspect(context.Background(), nsgAPI, "sub-1", fixed)
-	nsgRec, _ := buildNSGRecord(nsgGroups[0], "prod", "scf:NET-04")
+	nsgRec, _ := buildNSGRecord(nsgGroups[0], "prod", "scf:NET-03")
 
 	kvAPI := &fakeKeyVaultForIntegration{vaults: []keyvault.RawVault{
 		{ID: "/sub/kv", Name: "kv", ResourceGroup: "rg", Location: "eastus", RBACAuthorization: false,
@@ -381,7 +381,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}},
 	}}
 	fwPolicies, _ := firewall.Inspect(context.Background(), fwAPI, "sub-1", fixed)
-	fwRec, _ := buildFirewallRecord(fwPolicies[0], "prod", "scf:NET-04")
+	fwRec, _ := buildFirewallRecord(fwPolicies[0], "prod", "scf:NET-03")
 
 	// Allow-list of permitted payload keys per kind. Any key NOT in the
 	// allow-list is a leak and fails the test (config/assignment metadata only).

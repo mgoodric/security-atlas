@@ -347,8 +347,8 @@ func TestNewReceiver_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReceiver: %v", err)
 	}
-	if rec.cfg.ControlID != "scf:END-04" {
-		t.Errorf("default ControlID = %q, want scf:END-04", rec.cfg.ControlID)
+	if rec.cfg.ControlID != "scf:END-03" {
+		t.Errorf("default ControlID = %q, want scf:END-03", rec.cfg.ControlID)
 	}
 	if rec.cfg.Service != "intune" {
 		t.Errorf("default Service = %q, want intune", rec.cfg.Service)

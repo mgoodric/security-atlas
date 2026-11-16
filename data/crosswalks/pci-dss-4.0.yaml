@@ -181,12 +181,12 @@ mappings:
     strength: 0.7
     rationale: "NSC configuration standards overlap with SCF Configuration Change Control; the firewall-rule baseline is the configuration-management surface."
   - requirement_code: 1.3.1
-    scf_anchor: NET-04
+    scf_anchor: NET-03
     relationship_type: equal
     strength: 0.9
     rationale: "Restricting inbound traffic to the CDE maps to SCF Boundary Protection — shared with SOC 2 CC6.6 and ISO A.8.20 (three-framework anchor)."
   - requirement_code: 1.4.1
-    scf_anchor: NET-08
+    scf_anchor: NET-24
     relationship_type: equal
     strength: 0.8
     rationale: "Controls between trusted and untrusted networks map to SCF Network Segmentation; CDE segmentation is the PCI scope-reduction lever."
@@ -225,12 +225,12 @@ mappings:
     rationale: "Strong cryptography for PAN in transit maps to SCF Encrypting Data In Transit — shared with SOC 2 CC6.7 and ISO A.8.24."
   # --- Req 5: Anti-malware ---
   - requirement_code: 5.2.1
-    scf_anchor: END-07
+    scf_anchor: END-04
     relationship_type: equal
     strength: 0.9
     rationale: "Deploying an anti-malware solution maps to SCF Malicious Code Protection — shared with SOC 2 CC6.8 and ISO A.8.7."
   - requirement_code: 5.3.1
-    scf_anchor: END-04
+    scf_anchor: END-03
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Keeping anti-malware current and active overlaps with SCF Endpoint Protection Measures (managed-agent currency facet)."
@@ -289,7 +289,7 @@ mappings:
     rationale: "MFA replay/bypass resistance is a subset/hardening facet of the SCF Multi-Factor Authentication anchor."
   # --- Req 9: Physical access ---
   - requirement_code: 9.2.1
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: equal
     strength: 0.9
     rationale: "Facility entry controls for the CDE map to SCF Physical Access Control — shared with SOC 2 CC6.4 and ISO A.7.2."

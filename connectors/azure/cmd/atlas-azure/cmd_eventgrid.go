@@ -135,9 +135,9 @@ valid certificate — terminate TLS at a reverse proxy in front of this process.
 	cmd.Flags().StringVar(&f.entraControl, "entra-control", "scf:IAC-10", "control_id to attach to azure.entra_role_assignment.v1 records")
 	cmd.Flags().StringVar(&f.storageControl, "storage-control", "scf:CRY-07", "control_id to attach to azure.storage_account_config.v1 records")
 	cmd.Flags().StringVar(&f.aksControl, "aks-control", "scf:CFG-04", "control_id to attach to azure.aks_cluster_config.v1 records")
-	cmd.Flags().StringVar(&f.nsgControl, "nsg-control", "scf:NET-04", "control_id to attach to azure.nsg_rules.v1 records")
+	cmd.Flags().StringVar(&f.nsgControl, "nsg-control", "scf:NET-03", "control_id to attach to azure.nsg_rules.v1 records")
 	cmd.Flags().StringVar(&f.keyvaultControl, "keyvault-control", "scf:CRY-10", "control_id to attach to azure.keyvault_access_config.v1 records")
-	cmd.Flags().StringVar(&f.firewallControl, "firewall-control", "scf:NET-04", "control_id to attach to azure.firewall_rules.v1 records")
+	cmd.Flags().StringVar(&f.firewallControl, "firewall-control", "scf:NET-03", "control_id to attach to azure.firewall_rules.v1 records")
 	return cmd
 }
 

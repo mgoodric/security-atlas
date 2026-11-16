@@ -109,7 +109,7 @@ func okFlags() runFlags {
 		authMode:        "kubeconfig-token",
 		rbacControl:     "scf:IAC-10",
 		workloadControl: "scf:CFG-04",
-		netpolControl:   "scf:NET-04",
+		netpolControl:   "scf:NET-03",
 		pssControl:      "scf:CFG-04",
 		webhookControl:  "scf:CFG-04",
 		policyControl:   "scf:CFG-04",

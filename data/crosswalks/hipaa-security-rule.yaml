@@ -409,7 +409,7 @@ mappings:
     strength: 0.7
     rationale: "Security Reminders (periodic updates/reminders) are an ongoing-reinforcement facet of SCF Security Awareness Training."
   - requirement_code: "164.308(a)(5)(ii)(B)"
-    scf_anchor: "END-07"
+    scf_anchor: "END-04"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Protection from Malicious Software maps directly to SCF Malicious Code Protection."
@@ -481,7 +481,7 @@ mappings:
 
   # ===== PHYSICAL SAFEGUARDS (§164.310) → SCF =====
   - requirement_code: "164.310(a)(1)"
-    scf_anchor: "PES-04"
+    scf_anchor: "PES-08"
     relationship_type: "equal"
     strength: 0.9
     rationale: "Facility Access Controls map directly to SCF Physical Access Control."
@@ -491,12 +491,12 @@ mappings:
     strength: 0.6
     rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Contingency Operations (facility access supporting data restoration in an emergency) genuinely straddles continuity and physical access, and neither family carries a control at that intersection worth minting: an emergency-facility-access anchor would exist only to serve this one row. BCD-04 remains the honest covering anchor at 0.60 (LOW). See decisions log D6 row 5."
   - requirement_code: "164.310(a)(2)(ii)"
-    scf_anchor: "PES-04"
+    scf_anchor: "PES-08"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Facility Security Plan (safeguard facility/equipment from unauthorized access, tampering, theft) is the planning facet of SCF Physical Access Control."
   - requirement_code: "164.310(a)(2)(iii)"
-    scf_anchor: "PES-04"
+    scf_anchor: "PES-08"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Access Control and Validation Procedures (control/validate person access by role, visitor control) are covered by SCF Physical Access Control."
@@ -504,14 +504,14 @@ mappings:
     scf_anchor: "MNT-02"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Slice 567 re-point (was PES-04 @ 0.55). Maintenance Records (document repairs and modifications to the physical components of a facility which are related to security) is maintenance record-keeping, not physical access control; MNT-02 Controlled Maintenance carries the record-retention obligation. The fit stays partial because HIPAA scopes it to security-related facility components. Lift 0.55 -> 0.70 (LOW -> MEDIUM). See decisions log D6 row 6."
+    rationale: "Slice 567 re-point (was PES-08 @ 0.55). Maintenance Records (document repairs and modifications to the physical components of a facility which are related to security) is maintenance record-keeping, not physical access control; MNT-02 Controlled Maintenance carries the record-retention obligation. The fit stays partial because HIPAA scopes it to security-related facility components. Lift 0.55 -> 0.70 (LOW -> MEDIUM). See decisions log D6 row 6."
   - requirement_code: "164.310(b)"
     scf_anchor: "HRS-12"
     relationship_type: "intersects_with"
     strength: 0.75
-    rationale: "Slice 567 re-point (was PES-04 @ 0.60; flagged in slice 481 D7 and re-confirmed in 516 D5). Workstation Use specifies the proper functions, the manner of performance, and the physical surroundings of a workstation — an acceptable-use / rules-of-behavior control. PES-04 covered only the surroundings clause. HRS-12 Rules of Behavior carries the use-policy body; the physical-surroundings clause keeps the relationship partial. Lift 0.60 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 7."
+    rationale: "Slice 567 re-point (was PES-08 @ 0.60; flagged in slice 481 D7 and re-confirmed in 516 D5). Workstation Use specifies the proper functions, the manner of performance, and the physical surroundings of a workstation — an acceptable-use / rules-of-behavior control. PES-08 covered only the surroundings clause. HRS-12 Rules of Behavior carries the use-policy body; the physical-surroundings clause keeps the relationship partial. Lift 0.60 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 7."
   - requirement_code: "164.310(c)"
-    scf_anchor: "PES-04"
+    scf_anchor: "PES-08"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Workstation Security (physical safeguards restricting workstation access) is covered by SCF Physical Access Control."
@@ -589,7 +589,7 @@ mappings:
     strength: 0.8
     rationale: "Person or Entity Authentication (verify claimed identity) is covered by SCF Identification & Authentication Policy."
   - requirement_code: "164.312(e)(1)"
-    scf_anchor: "NET-04"
+    scf_anchor: "NET-03"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Transmission Security (guard against unauthorized access to ePHI in transit) overlaps SCF Boundary Protection; the cryptographic facet sits in 164.312(e)(2)(ii) (MEDIUM)."
@@ -597,7 +597,7 @@ mappings:
     scf_anchor: "CRY-06"
     relationship_type: "subset_of"
     strength: 0.85
-    rationale: "Slice 567 re-point (was NET-04 @ 0.60). Integrity Controls (Transmission) requires that transmitted ePHI is not improperly modified without detection — modification DETECTION in transit, not perimeter enforcement. Boundary protection answered a different question. CRY-06 Integrity of Data In Transit is the on-point anchor. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 13."
+    rationale: "Slice 567 re-point (was NET-03 @ 0.60). Integrity Controls (Transmission) requires that transmitted ePHI is not improperly modified without detection — modification DETECTION in transit, not perimeter enforcement. Boundary protection answered a different question. CRY-06 Integrity of Data In Transit is the on-point anchor. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 13."
   - requirement_code: "164.312(e)(2)(ii)"
     scf_anchor: "CRY-05"
     relationship_type: "equal"

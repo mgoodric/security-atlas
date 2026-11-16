@@ -61,7 +61,7 @@ func okEnv(t *testing.T) {
 }
 
 func okFlags() runFlags {
-	return runFlags{environment: "prod", deviceControl: "scf:END-04"}
+	return runFlags{environment: "prod", deviceControl: "scf:END-03"}
 }
 
 func twoDevices() []devposture.RawDevice {
