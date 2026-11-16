@@ -157,7 +157,7 @@ test.describe("/risks/[id] edit + history (#2104)", () => {
       "Test risk after edit",
     );
     await expect(page.getByTestId("risk-detail-review-due")).toHaveText(
-      "2027-06-30",
+      "Jun 30, 2027",
     );
 
     await expect(

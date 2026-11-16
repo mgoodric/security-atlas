@@ -137,6 +137,7 @@ import {
 } from "./saved-views";
 import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
 import { pageTitle } from "@/lib/page-titles";
+import { Timestamp } from "@/components/ui/timestamp";
 
 const FILTER_KEYS: (keyof ControlFilters)[] = [
   "framework",
@@ -976,9 +977,10 @@ function ControlsPageInner() {
       header: "Last observed",
       cell: (row) =>
         row.state?.last_observed_at ? (
-          <span className="font-mono text-xs text-muted-foreground">
-            {row.state.last_observed_at}
-          </span>
+          <Timestamp
+            value={row.state.last_observed_at}
+            className="text-xs text-muted-foreground"
+          />
         ) : (
           <span className="text-muted-foreground">—</span>
         ),
