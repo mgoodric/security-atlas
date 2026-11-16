@@ -72,10 +72,14 @@ var keepsPayload = map[authz.Role]map[string]bool{
 
 // keeps reports whether a caller holding role sees a kind's payload. The
 // test credential has the shape jwtmw synthesizes for a human (the JWT's
-// tenant roles in OwnerRoles), which authz.BuildInput derives to
-// control_owner; the engine then adds role. So the caller reads what
-// either role reads, exactly as the authz middleware decides its routes.
+// tenant roles in OwnerRoles). authz.BuildInput derives control_owner from
+// it unless the claim names only viewer or auditor (#2381); the engine then
+// adds role. So the caller reads what its roles read, exactly as the authz
+// middleware decides its routes.
 func keeps(role authz.Role, kind string) bool {
+	if role == authz.RoleViewer || role == authz.RoleAuditor {
+		return keepsPayload[role][kind]
+	}
 	return keepsPayload[role][kind] || keepsPayload[authz.RoleControlOwner][kind]
 }
 

@@ -132,6 +132,14 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		return []Role{RoleAdmin}
 	case cred.IsApprover:
 		return []Role{RoleGRCEngineer}
+	case jwtSession(cred) && readOnlyRoleClaim(cred.OwnerRoles):
+		// #2381: jwtmw copies the JWT's role claim into OwnerRoles, so a
+		// viewer or auditor session used to derive control_owner below and
+		// could write evidence, artifacts and walkthroughs. Such a session
+		// derives nothing from the credential: its roles come only from
+		// the live user_roles rows the resolver merges in Decide. Not the
+		// claim itself, which outlives a revoke until the token expires.
+		return nil
 	case len(cred.OwnerRoles) > 0:
 		return []Role{RoleControlOwner}
 	case cred.TenantID == "":
@@ -146,6 +154,27 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		// admin UI will populate them.
 		return []Role{RoleGRCEngineer}
 	}
+}
+
+// jwtSession reports whether cred was synthesized by jwtmw from a verified
+// atlas JWT. jwtmw stamps the credential ID "jwt:" + jti.
+func jwtSession(cred credstore.Credential) bool {
+	return strings.HasPrefix(cred.ID, "jwt:")
+}
+
+// readOnlyRoleClaim reports whether a non-empty role claim names only
+// viewer and auditor. Any other entry (control_owner, grc_engineer, admin,
+// or a slice-011 owner-role label) keeps the control_owner derivation.
+func readOnlyRoleClaim(roles []string) bool {
+	if len(roles) == 0 {
+		return false
+	}
+	for _, r := range roles {
+		if Role(r) != RoleViewer && Role(r) != RoleAuditor {
+			return false
+		}
+	}
+	return true
 }
 
 // actionFromMethodAndPath derives the canonical action name. GET is
