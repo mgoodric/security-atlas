@@ -114,6 +114,57 @@ func TestUnifiedAuditLog_ShowsRiskRows_1954(t *testing.T) {
 	}
 }
 
+// risk_audit_log has no FK to risks and the unified branch joins nothing,
+// so a deleted risk's rows stay in the unified log with their envelope.
+func TestUnifiedAuditLog_DeletedRiskKeepsRows_1954(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshPlacementTenant(t, admin)
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO tenants (id, name) VALUES ($1, $2)`, tenant, "risk-deleted-1954-"+tenant[:8]); err != nil {
+		t.Fatalf("seed tenants row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, tenant)
+	})
+	env := adminServer(t, app, tenant)
+
+	_, created := createPlaced(t, env, nil)
+	id := riskField(t, created, "id").(string)
+	if resp, body := patch(t, env, "/v1/risks/"+id, `{"level":"org"}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH: status %d (%v)", resp.StatusCode, body)
+	}
+	req, _ := http.NewRequest(http.MethodDelete, env.server.URL+"/v1/risks/"+id, nil)
+	req.Header.Set("Authorization", "Bearer "+env.bearer)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE: status %d, want 204", resp.StatusCode)
+	}
+
+	now := time.Now().UTC()
+	q := url.Values{
+		"from": {now.Add(-time.Hour).Format(time.RFC3339)},
+		"to":   {now.Add(time.Hour).Format(time.RFC3339)},
+		"kind": {"risk"},
+	}
+	r, unified := get(t, env, "/v1/admin/audit-log/unified?"+q.Encode())
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("unified audit log: status %d (%v)", r.StatusCode, unified)
+	}
+	entries, _ := unified["entries"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %v, want the deleted risk's placement row", entries)
+	}
+	e := entries[0].(map[string]any)
+	if e["target_id"] != id || e["action"] != "placement_changed" || e["actor_id"] == "" {
+		t.Fatalf("entry = %v", e)
+	}
+}
+
 // rawGet issues an authenticated GET and returns the status and raw body.
 func rawGet(t *testing.T, baseURL, path, bearer string) (int, string) {
 	t.Helper()
