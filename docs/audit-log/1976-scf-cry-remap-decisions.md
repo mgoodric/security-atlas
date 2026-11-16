@@ -43,6 +43,8 @@ The sample concept is hash and signature integrity checks. Its only reference is
 - (c) `CRY-02` Use of Cryptographic Controls: too generic, and collides with `CRY-01`'s target;
 - (d) an integrity control outside CRY: overlaps the DCH group's low pick.
 
+Matt chose (a), one to one, on 2026-11-15.
+
 ## D4 — Search keeps finding the encryption anchors
 
 Anchor search is a per-token `ILIKE` over `scf_id`, title and description (`internal/api/search/search.go`). The old titles said "Encryption"; the 2026.3 titles say "Encrypting", which `%encryption%` does not match, and the old descriptions never said "encryption". Left alone, a search for "encryption" would stop finding either anchor, and `TestSlice661_AnchorSearch_EmptyTenant` would fail. Both descriptions now end "through encryption". That is still our own wording, and it keeps the search behaviour and both search integration tests as they were.
