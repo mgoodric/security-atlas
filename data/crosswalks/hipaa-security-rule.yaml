@@ -387,7 +387,7 @@ mappings:
     scf_anchor: "NET-06"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Slice 567 re-point (was DCH-01 @ 0.55). Isolating Health Care Clearinghouse Functions is structural isolation of the clearinghouse's ePHI from the larger organization — a segmentation control, not a data-classification one. NET-06 Network Segmentation is the closer concept, though the HIPAA obligation is organizational as well as technical, so the fit stays partial. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 2."
+    rationale: "Slice 567 re-point (was DCH-04 @ 0.55). Isolating Health Care Clearinghouse Functions is structural isolation of the clearinghouse's ePHI from the larger organization — a segmentation control, not a data-classification one. NET-06 Network Segmentation is the closer concept, though the HIPAA obligation is organizational as well as technical, so the fit stays partial. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 2."
   - requirement_code: "164.308(a)(4)(ii)(B)"
     scf_anchor: "IAC-04"
     relationship_type: "subset_of"
@@ -531,10 +531,10 @@ mappings:
     strength: 0.8
     rationale: "Media Re-use (remove ePHI from media before re-use) is the sanitization facet of SCF Secure Disposal, Destruction or Re-Use of Equipment."
   - requirement_code: "164.310(d)(2)(iii)"
-    scf_anchor: "DCH-07"
+    scf_anchor: "DCH-16"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Slice 567 re-point (was AST-01 @ 0.65). Accountability (record the movements of hardware and electronic media and any person responsible therefor) is media chain-of-custody, a specific control beneath the asset-management policy head rather than the head itself. DCH-07 Media Transportation & Custody carries the movement-and-accountability record. Lift 0.65 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 8."
+    rationale: "Slice 567 re-point (was AST-01 @ 0.65). Accountability (record the movements of hardware and electronic media and any person responsible therefor) is media chain-of-custody, a specific control beneath the asset-management policy head rather than the head itself. DCH-16 Media Transportation carries the movement-and-accountability record. Lift 0.65 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 8."
   - requirement_code: "164.310(d)(2)(iv)"
     scf_anchor: "BCD-24"
     relationship_type: "subset_of"
@@ -574,15 +574,15 @@ mappings:
     strength: 0.9
     rationale: "Audit Controls (record and examine system activity) map directly to SCF System Generated Event Logs & Security-Relevant Telemetry."
   - requirement_code: "164.312(c)(1)"
-    scf_anchor: "DCH-05"
+    scf_anchor: "MON-27"
     relationship_type: "subset_of"
-    strength: 0.8
-    rationale: "Slice 567 re-point (was DCH-01 @ 0.65; the palette-bound row slice 481 D7 flagged and slice 516 D5 held). Integrity (protect ePHI from improper alteration or destruction) is a data-integrity control, not a classification-and-handling one; DCH-01 was the covering anchor only because no integrity anchor existed. DCH-05 Data Integrity is the policy-level integrity anchor; 164.312(c)(2) carries the cryptographic mechanism that implements it. Lift 0.65 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 11."
+    strength: 0.7
+    rationale: "Slice 567 re-point (was DCH-04 @ 0.65; the palette-bound row slice 481 D7 flagged and slice 516 D5 held). Integrity (protect ePHI from improper alteration or destruction) is a data-integrity control, not a classification-and-handling one; DCH-04 was the covering anchor only because no integrity anchor existed. SCF 2026.3 has no data-integrity control, so #1977 re-anchors it on MON-27 File Integrity Monitoring (FIM), the nearest control; 164.312(c)(2) carries the cryptographic mechanism. FIM is the detection half of the obligation, not the protection half, so the strength drops 0.80 -> 0.70 (Matt's pick, #1977). See decisions log D6 row 11 and 1977 D3."
   - requirement_code: "164.312(c)(2)"
     scf_anchor: "CRY-14"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Slice 567 re-point (was DCH-01 @ 0.60). Mechanism to Authenticate ePHI (electronic mechanisms to corroborate that ePHI has not been altered or destroyed in an unauthorized manner) is the cryptographic verification mechanism — hashing, digital signatures — that implements 164.312(c)(1)'s integrity obligation. CRY-14 Cryptographic Hash keeps the mechanism distinct from the policy-level DCH-05 anchor rather than collapsing both onto one row. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 12."
+    rationale: "Slice 567 re-point (was DCH-04 @ 0.60). Mechanism to Authenticate ePHI (electronic mechanisms to corroborate that ePHI has not been altered or destroyed in an unauthorized manner) is the cryptographic verification mechanism — hashing, digital signatures — that implements 164.312(c)(1)'s integrity obligation. CRY-14 Cryptographic Hash keeps the mechanism distinct from the MON-27 integrity anchor rather than collapsing both onto one row. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 12."
   - requirement_code: "164.312(d)"
     scf_anchor: "IAC-01"
     relationship_type: "subset_of"
@@ -663,10 +663,10 @@ mappings:
     strength: 0.7
     rationale: "Documentation (maintain policies/procedures and document required actions/assessments in writing) is the recordkeeping facet of SCF Statutory, Regulatory & Contractual Compliance."
   - requirement_code: "164.316(b)(2)(i)"
-    scf_anchor: "DCH-03"
+    scf_anchor: "DCH-27"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Time Limit (retain the required documentation six years) is a retention-period obligation applied to compliance documentation. Retention is one control concept; splitting compliance-records retention from data retention would mint a distinction the catalog does not draw, to serve one row. DCH-03 stays at 0.60 (LOW). See decisions log D6 row 19."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Time Limit (retain the required documentation six years) is a retention-period obligation applied to compliance documentation. Retention is one control concept; splitting compliance-records retention from data retention would mint a distinction the catalog does not draw, to serve one row. DCH-27 stays at 0.60 (LOW). See decisions log D6 row 19."
   - requirement_code: "164.316(b)(2)(ii)"
     scf_anchor: "GOV-02"
     relationship_type: "subset_of"

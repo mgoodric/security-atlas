@@ -389,30 +389,30 @@ mappings:
     strength: 0.7
     rationale: "Inventory of assets is part of the SCF asset management family; AST-22 (Secure Disposal, Destruction or Re-Use of Equipment) carries this edge for the asset lifecycle."
   - requirement_code: A.5.10
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Acceptable use + handling of information maps to Data Classification & Handling."
+    rationale: "Acceptable use + handling of information maps to Data & Asset Classification."
   - requirement_code: A.5.11
     scf_anchor: HRS-09
     relationship_type: subset_of
     strength: 0.7
     rationale: "Asset return on departure is a step within the Personnel Termination Process (HRS-09)."
   - requirement_code: A.5.12
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Information classification is the core of SCF Data Classification & Handling."
+    rationale: "Information classification is the core of SCF Data & Asset Classification."
   - requirement_code: A.5.13
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Information labelling implements the classification scheme; it is a subset of Data Classification & Handling (DCH-01)."
+    rationale: "Information labelling implements the classification scheme; it is a subset of Data & Asset Classification (DCH-04)."
   - requirement_code: A.5.14
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Information-transfer rules are a handling concern under DCH-01; CRY-05 covers the in-transit protection facet."
+    rationale: "Information-transfer rules are a handling concern under DCH-04; CRY-05 covers the in-transit protection facet."
   - requirement_code: A.5.14
     scf_anchor: CRY-05
     relationship_type: intersects_with
@@ -519,10 +519,10 @@ mappings:
     strength: 0.6
     rationale: "IP-rights protection is a legal/regulatory compliance obligation tracked under Statutory, Regulatory & Contractual Compliance (CPL-02)."
   - requirement_code: A.5.33
-    scf_anchor: DCH-03
+    scf_anchor: DCH-27
     relationship_type: equal
     strength: 0.7
-    rationale: "Protection and integrity of records over their lifetime maps to Data Retention (DCH-03)."
+    rationale: "Protection and integrity of records over their lifetime maps to Data Retention (DCH-27)."
   - requirement_code: A.5.33
     scf_anchor: MON-13
     relationship_type: intersects_with
@@ -590,10 +590,10 @@ mappings:
     strength: 0.6
     rationale: "NDAs covering personnel are an HR-security obligation (HRS-01)."
   - requirement_code: A.6.6
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Confidentiality agreements operationalize the handling rules for classified information (DCH-01)."
+    rationale: "Confidentiality agreements operationalize the handling rules for classified information (DCH-04)."
   - requirement_code: A.6.7
     scf_anchor: END-04
     relationship_type: equal
@@ -651,10 +651,10 @@ mappings:
     strength: 0.7
     rationale: "Procedures for working within secure areas are a refinement of Physical Access Control (PES-04)."
   - requirement_code: A.7.7
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Clear-desk/clear-screen rules enforce the handling of classified information at the physical workspace (DCH-01)."
+    rationale: "Clear-desk/clear-screen rules enforce the handling of classified information at the physical workspace (DCH-04)."
   - requirement_code: A.7.8
     scf_anchor: PES-04
     relationship_type: intersects_with
@@ -772,30 +772,30 @@ mappings:
     strength: 0.8
     rationale: "Configuration management maps to SCF Configuration Change Control — shared with SOC 2 CC8.1."
   - requirement_code: A.8.10
-    scf_anchor: DCH-03
+    scf_anchor: DCH-27
     relationship_type: equal
     strength: 0.8
-    rationale: "Deletion of information when no longer required is the disposal end of Data Retention (DCH-03)."
+    rationale: "Deletion of information when no longer required is the disposal end of Data Retention (DCH-27)."
   - requirement_code: A.8.10
     scf_anchor: AST-22
     relationship_type: subset_of
     strength: 0.6
     rationale: "Media sanitization on deletion is a Secure Disposal, Destruction or Re-Use of Equipment (AST-22) activity."
   - requirement_code: A.8.11
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.4
-    rationale: "Data masking is an ISO-distinct technique only loosely covered by Data Classification & Handling; the SCF sample catalog still lacks a dedicated masking anchor (LOW CONFIDENCE — slice 467 confirmed no masking anchor exists in the 62-anchor sample fixture, so DCH-01 remains the honest stopgap pending a masking-family import)."
+    rationale: "Data masking is an ISO-distinct technique only loosely covered by Data & Asset Classification; the SCF sample catalog still lacks a dedicated masking anchor (LOW CONFIDENCE — slice 467 confirmed no masking anchor exists in the 62-anchor sample fixture, so DCH-04 remains the honest stopgap pending a masking-family import)."
   - requirement_code: A.8.11
     scf_anchor: IAC-01
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Data masking is applied in accordance with the access-control policy — masking enforces context-based access restriction, which the Identification & Authentication Policy (IAC-01) governs. Secondary edge added by slice 467 to capture the access-control facet the DCH-01 stopgap misses."
+    rationale: "Data masking is applied in accordance with the access-control policy — masking enforces context-based access restriction, which the Identification & Authentication Policy (IAC-01) governs. Secondary edge added by slice 467 to capture the access-control facet the DCH-04 stopgap misses."
   - requirement_code: A.8.12
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Preventing leakage of sensitive information is a handling/protection control under Data Classification & Handling (DCH-01)."
+    rationale: "Preventing leakage of sensitive information is a handling/protection control under Data & Asset Classification (DCH-04)."
   - requirement_code: A.8.12
     scf_anchor: NET-04
     relationship_type: intersects_with
@@ -967,10 +967,10 @@ mappings:
     strength: 0.7
     rationale: "Configuration-level change control is the Configuration Change Control (CHG-03) facet."
   - requirement_code: A.8.33
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Protection and handling of test information (especially when derived from production data) is a Data Classification & Handling (DCH-01) concern."
+    rationale: "Protection and handling of test information (especially when derived from production data) is a Data & Asset Classification (DCH-04) concern."
   - requirement_code: A.8.34
     scf_anchor: CPL-07.1
     relationship_type: equal
