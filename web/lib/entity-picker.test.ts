@@ -1,10 +1,14 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  controlOptions,
   credentialOptions,
   frameworkOptions,
   matchesQuery,
   parsePastedId,
+  policyOptions,
+  riskOptions,
+  toggleSelection,
   userOptions,
 } from "./entity-picker";
 
@@ -129,5 +133,88 @@ describe("matchesQuery", () => {
     expect(matchesQuery(opt, "current")).toBe(true);
     expect(matchesQuery(opt, U1.toUpperCase())).toBe(true);
     expect(matchesQuery(opt, "soc")).toBe(false);
+  });
+
+  test("matches keywords the list does not show", () => {
+    const control = { value: U1, label: "MFA", keywords: ["soc2-starter"] };
+    expect(matchesQuery(control, "starter")).toBe(true);
+    expect(matchesQuery(control, "iso")).toBe(false);
+  });
+});
+
+describe("controlOptions / riskOptions / policyOptions", () => {
+  test("a control is its title, with SCF code and family, bundle searchable", () => {
+    expect(
+      controlOptions([
+        {
+          id: U1,
+          title: "Multi-factor authentication",
+          control_family: "IAC",
+          scf_id: "IAC-06",
+          lifecycle_state: "active",
+          bundle_id: "soc2-starter",
+        },
+        {
+          id: U2,
+          title: "Custom control",
+          control_family: "",
+          scf_id: "",
+          lifecycle_state: "active",
+          bundle_id: "",
+        },
+      ]),
+    ).toEqual([
+      {
+        value: U1,
+        label: "Multi-factor authentication",
+        hint: "IAC-06 · IAC",
+        keywords: ["soc2-starter"],
+      },
+      {
+        value: U2,
+        label: "Custom control",
+        hint: undefined,
+        keywords: undefined,
+      },
+    ]);
+  });
+
+  test("a risk is its title, with the category name as the hint", () => {
+    expect(
+      riskOptions([
+        {
+          id: U1,
+          title: "Stale access",
+          category: "ops",
+          category_name: "Operational",
+        },
+        { id: U2, title: "Vendor", category: "third_party" },
+      ]),
+    ).toEqual([
+      { value: U1, label: "Stale access", hint: "Operational" },
+      { value: U2, label: "Vendor", hint: "third_party" },
+    ]);
+  });
+
+  test("a policy is its title, with version and status as the hint", () => {
+    const [p] = policyOptions([
+      { id: U1, title: "Access policy", version: "2", status: "published" },
+    ]);
+    expect(p.value).toBe(U1);
+    expect(p.label).toBe("Access policy");
+    expect(p.hint).toMatch(/^v2 · /);
+  });
+});
+
+describe("toggleSelection", () => {
+  test("adds in pick order and removes", () => {
+    expect(toggleSelection([], U1)).toEqual([U1]);
+    expect(toggleSelection([U1], U2)).toEqual([U1, U2]);
+    expect(toggleSelection([U1, U2], U1)).toEqual([U2]);
+  });
+
+  test("refuses an add at the cap but always allows a removal", () => {
+    expect(toggleSelection([U1], U2, 1)).toEqual([U1]);
+    expect(toggleSelection([U1], U1, 1)).toEqual([]);
   });
 });

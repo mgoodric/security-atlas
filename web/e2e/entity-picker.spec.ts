@@ -7,6 +7,10 @@
 //   - A pasted valid ID is accepted; an invalid one shows an inline error.
 //   - Keyboard-only selection works, with a visible focus ring and no
 //     serious or critical axe violations while the list is open.
+//   - #2087: New action plan links risks and controls through the
+//     multi-select, capped at 50; a refused list reads "not available".
+//     The new-risk form's control picker is covered by
+//     risks-create-control-link.spec.ts.
 //
 // Mocked with `route.fulfill` (the questionnaires.spec.ts convention): the
 // assertions are on the request each form sends, which must carry the
@@ -171,6 +175,197 @@ test("creates an action plan by picking the owner by name", async ({
   await expect(page).toHaveURL(new RegExp(`/action-plans/${PLAN_ID}$`));
   expect(body).not.toBeNull();
   expect(body!.owner_id).toBe(USER_BOB);
+});
+
+// #2087 — risks and controls come from the tenant's own lists.
+const RISK_ACCESS = "a7a7a7a7-0000-4000-8000-000000002087";
+const RISK_VENDOR = "b8b8b8b8-0000-4000-8000-000000002087";
+const CONTROL_MFA = "c9c9c9c9-0000-4000-8000-000000002087";
+const CONTROL_BACKUP = "dadadada-0000-4000-8000-000000002087";
+
+function riskRow(id: string, title: string) {
+  return {
+    id,
+    title,
+    category: "operational",
+    category_name: "Operational",
+    treatment: "mitigate",
+    status: "open",
+  };
+}
+
+async function mockRisksAndControls(
+  page: Page,
+  risks: { status: number; body: unknown },
+) {
+  await page.route(
+    (url) => url.pathname === "/api/risks",
+    (route) => json(route, risks.status, risks.body),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/controls-list",
+    (route) =>
+      json(route, 200, {
+        controls: [
+          {
+            id: CONTROL_MFA,
+            title: "Multi-factor authentication",
+            control_family: "IAC",
+            scf_id: "IAC-06",
+            lifecycle_state: "active",
+            bundle_id: "soc2-starter",
+          },
+          {
+            id: CONTROL_BACKUP,
+            title: "Backup integrity verification",
+            control_family: "BCD",
+            scf_id: "BCD-11",
+            lifecycle_state: "active",
+            bundle_id: "soc2-starter",
+          },
+        ],
+        count: 2,
+      }),
+  );
+}
+
+// mockActionPlanCreate records the create body and every link POST.
+function mockActionPlanCreate(page: Page) {
+  const seen = {
+    body: null as Record<string, unknown> | null,
+    links: [] as string[],
+  };
+  void page.route("**/api/action-plans", (route, req) => {
+    if (req.method() === "POST") {
+      seen.body = req.postDataJSON() as Record<string, unknown>;
+      return json(route, 201, {
+        action_plan: { id: PLAN_ID, title: "Linked plan", status: "open" },
+      });
+    }
+    return json(route, 200, { action_plans: [], count: 0 });
+  });
+  void page.route(`**/api/action-plans/${PLAN_ID}/**`, (route, req) => {
+    if (req.method() === "POST") {
+      seen.links.push(new URL(req.url()).pathname);
+      return json(route, 201, {});
+    }
+    return json(route, 200, { items: [] });
+  });
+  void page.route(`**/api/action-plans/${PLAN_ID}`, (route) =>
+    json(route, 200, {
+      action_plan: {
+        id: PLAN_ID,
+        title: "Linked plan",
+        owner_id: USER_BOB,
+        status: "open",
+        created_at: "2026-11-16T00:00:00Z",
+        updated_at: "2026-11-16T00:00:00Z",
+      },
+      linkage: { risks: [], controls: [] },
+    }),
+  );
+  return seen;
+}
+
+test("New action plan links risks and controls through the shared picker", async ({
+  authedPage: page,
+}) => {
+  await mockRisksAndControls(page, {
+    status: 200,
+    body: {
+      risks: [
+        riskRow(RISK_ACCESS, "Stale access reviews"),
+        riskRow(RISK_VENDOR, "Unvetted vendor"),
+      ],
+    },
+  });
+  const seen = mockActionPlanCreate(page);
+
+  await page.goto("/action-plans/new");
+  await page.getByTestId("action-plan-title").fill("Linked plan");
+  await pick(page, "action-plan-owner", "bob", "Bob Picker");
+
+  const risks = page.getByTestId("action-plan-risks");
+  const controls = page.getByTestId("action-plan-controls");
+  await expect(risks).toHaveAttribute("data-entity-picker", "risk");
+  await expect(controls).toHaveAttribute("data-entity-picker", "control");
+  await expect(risks.locator("legend")).toContainText("(0/50)");
+
+  // Search narrows the risk list; a checkbox picks the row.
+  await page.getByTestId("action-plan-risks-search").fill("vendor");
+  await expect(
+    page.getByTestId(`action-plan-risks-option-${RISK_VENDOR}`),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId(`action-plan-risks-option-${RISK_ACCESS}`),
+  ).toHaveCount(0);
+  await page.getByTestId(`action-plan-risks-checkbox-${RISK_VENDOR}`).check();
+  await expect(risks.locator("legend")).toContainText("(1/50)");
+
+  // Controls search on the SCF code as well as the title.
+  await page.getByTestId("action-plan-controls-search").fill("IAC-06");
+  await page
+    .getByTestId(`action-plan-controls-checkbox-${CONTROL_MFA}`)
+    .check();
+  await expect(controls.locator("legend")).toContainText("(1/50)");
+
+  await page.getByTestId("action-plan-submit").click();
+  await expect(page).toHaveURL(new RegExp(`/action-plans/${PLAN_ID}$`));
+  expect(seen.body!.owner_id).toBe(USER_BOB);
+  expect(seen.links).toEqual([
+    `/api/action-plans/${PLAN_ID}/risks/${RISK_VENDOR}`,
+    `/api/action-plans/${PLAN_ID}/controls/${CONTROL_MFA}`,
+  ]);
+});
+
+test("the risk picker stops at 50 links, as the server does", async ({
+  authedPage: page,
+}) => {
+  const ids = Array.from(
+    { length: 51 },
+    (_, i) => `eeeeeeee-0000-4000-8000-${String(i).padStart(12, "0")}`,
+  );
+  await mockRisksAndControls(page, {
+    status: 200,
+    body: { risks: ids.map((id, i) => riskRow(id, `Capped risk ${i}`)) },
+  });
+
+  await page.goto("/action-plans/new");
+  const risks = page.getByTestId("action-plan-risks");
+  await expect(page.getByTestId("action-plan-risks-list")).toBeVisible();
+  for (const id of ids.slice(0, 50)) {
+    await page.getByTestId(`action-plan-risks-checkbox-${id}`).check();
+  }
+  await expect(risks.locator("legend")).toContainText("(50/50)");
+  await expect(page.getByTestId("action-plan-risks-cap")).toBeVisible();
+  await expect(
+    page.getByTestId(`action-plan-risks-checkbox-${ids[50]}`),
+  ).toBeDisabled();
+
+  // Unchecking one frees the slot again.
+  await page.getByTestId(`action-plan-risks-checkbox-${ids[0]}`).uncheck();
+  await expect(risks.locator("legend")).toContainText("(49/50)");
+  await expect(
+    page.getByTestId(`action-plan-risks-checkbox-${ids[50]}`),
+  ).toBeEnabled();
+});
+
+test("a risk list the caller cannot read shows not available, not an error", async ({
+  authedPage: page,
+}) => {
+  // 404 is what the module gate answers when Risk is switched off.
+  await mockRisksAndControls(page, {
+    status: 404,
+    body: { error: "not found" },
+  });
+
+  await page.goto("/action-plans/new");
+  await expect(page.getByTestId("action-plan-risks-unavailable")).toHaveText(
+    "Risks are not available to you.",
+  );
+  await expect(page.getByTestId("action-plan-risks-error")).toHaveCount(0);
+  // The other picker on the form is unaffected.
+  await expect(page.getByTestId("action-plan-controls-list")).toBeVisible();
 });
 
 test("grants super admin by picking a user", async ({ authedPage: page }) => {
