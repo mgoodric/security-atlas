@@ -85,6 +85,10 @@
           "updated_at": "2026-05-12T00:00:00Z"
         },
         {
+          "acceptance": {
+            "justification": "",
+            "self_approved": false
+          },
           "acceptance_status": "proposed",
           "accepter": "",
           "category": "technology",

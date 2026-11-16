@@ -136,6 +136,8 @@ sql:
       - "migrations/sql/20261127000000_exception_revoke.sql"
       - "migrations/sql/20261128000000_scf_remap_proposals_rebind_record.sql"
       - "migrations/sql/20261201000000_scf_remap_decisions.sql"
+      # #2105: risks gain the acceptance record (proposal, approval, self-approved).
+      - "migrations/sql/20261206000000_risk_acceptance_transitions.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -2989,26 +2989,32 @@ type QuestionnaireQuestion struct {
 }
 
 type Risk struct {
-	ID                  pgtype.UUID           `json:"id"`
-	TenantID            pgtype.UUID           `json:"tenant_id"`
-	Title               string                `json:"title"`
-	Description         string                `json:"description"`
-	Methodology         RiskMethodology       `json:"methodology"`
-	InherentScore       []byte                `json:"inherent_score"`
-	Treatment           RiskTreatment         `json:"treatment"`
-	TreatmentOwner      string                `json:"treatment_owner"`
-	ResidualScore       []byte                `json:"residual_score"`
-	ReviewDueAt         pgtype.Timestamptz    `json:"review_due_at"`
-	CreatedAt           pgtype.Timestamptz    `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz    `json:"updated_at"`
-	AcceptedUntil       pgtype.Date           `json:"accepted_until"`
-	Accepter            string                `json:"accepter"`
-	InstrumentReference string                `json:"instrument_reference"`
-	Level               RiskLevel             `json:"level"`
-	OrgUnitID           pgtype.UUID           `json:"org_unit_id"`
-	Themes              []string              `json:"themes"`
-	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
-	CategoryID          pgtype.UUID           `json:"category_id"`
+	ID                      pgtype.UUID           `json:"id"`
+	TenantID                pgtype.UUID           `json:"tenant_id"`
+	Title                   string                `json:"title"`
+	Description             string                `json:"description"`
+	Methodology             RiskMethodology       `json:"methodology"`
+	InherentScore           []byte                `json:"inherent_score"`
+	Treatment               RiskTreatment         `json:"treatment"`
+	TreatmentOwner          string                `json:"treatment_owner"`
+	ResidualScore           []byte                `json:"residual_score"`
+	ReviewDueAt             pgtype.Timestamptz    `json:"review_due_at"`
+	CreatedAt               pgtype.Timestamptz    `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz    `json:"updated_at"`
+	AcceptedUntil           pgtype.Date           `json:"accepted_until"`
+	Accepter                string                `json:"accepter"`
+	InstrumentReference     string                `json:"instrument_reference"`
+	Level                   RiskLevel             `json:"level"`
+	OrgUnitID               pgtype.UUID           `json:"org_unit_id"`
+	Themes                  []string              `json:"themes"`
+	AcceptanceStatus        *RiskAcceptanceStatus `json:"acceptance_status"`
+	CategoryID              pgtype.UUID           `json:"category_id"`
+	AcceptanceJustification string                `json:"acceptance_justification"`
+	AcceptanceProposedUntil pgtype.Date           `json:"acceptance_proposed_until"`
+	AcceptanceProposedBy    string                `json:"acceptance_proposed_by"`
+	AcceptanceProposedAt    pgtype.Timestamptz    `json:"acceptance_proposed_at"`
+	AcceptanceApprovedAt    pgtype.Timestamptz    `json:"acceptance_approved_at"`
+	SelfApproved            bool                  `json:"self_approved"`
 }
 
 type RiskAggregation struct {

@@ -4,9 +4,9 @@
 // "Allow self-approval". An approval that relies on that setting is
 // reported as self-approved so the caller can flag the record.
 //
-// Policies (#1807), framework scopes and exceptions call Check; risk
-// acceptance adopts it when its transitions are built. Each module maps
-// the errors below onto its own error values and HTTP statuses.
+// Policies (#1807), framework scopes, exceptions and risk acceptance
+// (#2105) call Check. Each module maps the errors below onto its own
+// error values and HTTP statuses.
 package approval
 
 import (

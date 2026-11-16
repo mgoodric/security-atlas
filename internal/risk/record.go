@@ -177,6 +177,26 @@ func updateRecordTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, nex
 	return riskFromRow(row), nil
 }
 
+// SetTreatmentOwnerTx changes a risk's treatment owner inside the caller's
+// transaction, audit-logged as a fields_changed row as PATCH logs it. The
+// MCP treatment applier uses it for the owner its proposal names (#2105).
+// The same owner writes nothing.
+func SetTreatmentOwnerTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID, owner, actor string) error {
+	current, err := lockRisk(ctx, q, tenantID, id)
+	if err != nil {
+		return err
+	}
+	next, before, after, err := applyRecordFields(current, RecordFields{TreatmentOwner: &owner})
+	if err != nil {
+		return err
+	}
+	if len(after) == 0 {
+		return nil
+	}
+	_, err = updateRecordTx(ctx, q, tenantID, next, actor, before, after)
+	return err
+}
+
 func sameTime(a, b *time.Time) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil

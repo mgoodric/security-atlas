@@ -83,6 +83,13 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// #2104: the risk's change history. Literal-suffix route declared
 	// before the generic /v1/risks/{id}.
 	root.Get("/v1/risks/{id}/audit-log", risksH.ListAuditLog)
+	// #2105: treatment and acceptance transitions. Literal-suffix routes,
+	// declared before the generic /v1/risks/{id}.
+	root.Patch("/v1/risks/{id}/treatment", risksH.ChangeTreatment)
+	root.Patch("/v1/risks/{id}/acceptance/propose", risksH.ProposeAcceptance)
+	root.Patch("/v1/risks/{id}/acceptance/approve", risksH.ApproveAcceptance)
+	root.Patch("/v1/risks/{id}/acceptance/reject", risksH.RejectAcceptance)
+	root.Patch("/v1/risks/{id}/acceptance/revoke", risksH.RevokeAcceptance)
 	// Slice 384: read-only "Linked Action Plans" section on /risks/{id}
 	// (AC-25). Literal-suffix route declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps it ahead.
