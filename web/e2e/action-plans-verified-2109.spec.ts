@@ -5,8 +5,8 @@
 // Verified only while the control passes, and "Completed · linked
 // controls still failing" otherwise.
 //
-// MOCK STRATEGY: the control page is the seeded demo control, signed in
-// through the authedPage fixture. Only its linked-plans BFF
+// MOCK STRATEGY: the control page is the demo control the control-detail
+// fixture seeds, signed in through the authedPage fixture. Only its linked-plans BFF
 // (/api/controls/{id}/action-plans) is mocked, with what the API returns
 // for the control passing or failing. The Go tier proves the evaluation
 // makes those moves against Postgres
@@ -17,6 +17,7 @@
 import type { Page, Route } from "@playwright/test";
 
 import { expect, seeded, test } from "./fixtures";
+import { seedFromFixture } from "./seed";
 
 const PLAN_ID = "d4d4d4d4-0000-4000-8000-000000002109";
 const PLAN_TITLE = "Rotate the deploy keys (test-2109)";
@@ -52,6 +53,11 @@ async function mockLinkedPlans(page: Page, controlPasses: boolean) {
 }
 
 test.describe("control page: linked plan verified from evidence (#2109)", () => {
+  test.beforeAll(() => {
+    // The demo control row the page renders, as control-detail-tabs seeds it.
+    seedFromFixture("control-detail");
+  });
+
   test("the linked plan reads Verified when the control passes", async ({
     authedPage: page,
   }) => {
