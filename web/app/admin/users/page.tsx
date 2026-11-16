@@ -90,6 +90,7 @@ import {
 } from "@/lib/admin/assign-options";
 import { showTenantChrome, useTenancy } from "@/lib/tenancy";
 import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -294,7 +295,13 @@ export default function UsersPage() {
     <PageShell
       title="Users"
       data-testid="admin-users-page"
-      subtitle="User accounts with their tenant memberships and RBAC roles. Roles are the coarse authorization signal; ABAC predicates layer over them per scope."
+      subtitle={
+        <>
+          User accounts with their <Term id="tenant">tenant</Term> memberships
+          and RBAC <Term id="role">roles</Term>. Roles are the coarse
+          authorization signal; ABAC predicates layer over them per scope.
+        </>
+      }
       actions={
         <>
           <Button data-testid="open-assign-user" onClick={() => openAssign({})}>
