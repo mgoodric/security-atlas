@@ -595,15 +595,15 @@ mappings:
     strength: 0.5
     rationale: "Confidentiality agreements operationalize the handling rules for classified information (DCH-04)."
   - requirement_code: A.6.7
-    scf_anchor: END-04
+    scf_anchor: END-03
     relationship_type: equal
     strength: 0.7
-    rationale: "Protecting information on remote/off-premises endpoints maps to Endpoint Security (END-04)."
+    rationale: "Protecting information on remote/off-premises endpoints maps to Endpoint Protection Mechanisms (END-03)."
   - requirement_code: A.6.7
-    scf_anchor: NET-04
+    scf_anchor: NET-03
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Remote-access protection of the network boundary is the Boundary Protection (NET-04) facet."
+    rationale: "Remote-access protection of the network boundary is the Boundary Protection (NET-03) facet."
   - requirement_code: A.6.8
     scf_anchor: IRO-09
     relationship_type: equal
@@ -611,55 +611,55 @@ mappings:
     rationale: "A personnel event-reporting mechanism maps to Incident Reporting (IRO-09)."
   # --- A.7 Physical ---
   - requirement_code: A.7.1
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: equal
     strength: 0.8
-    rationale: "Defining and protecting physical security perimeters is part of Physical Access Control (PES-04)."
+    rationale: "Defining and protecting physical security perimeters is part of Physical Access Control (PES-08)."
   - requirement_code: A.7.2
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: equal
     strength: 0.9
     rationale: "Physical entry controls map to SCF Physical Access Control — shared with SOC 2 CC6.4."
   - requirement_code: A.7.3
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: equal
     strength: 0.8
-    rationale: "Securing rooms and facilities is a Physical Access Control (PES-04) activity."
+    rationale: "Securing rooms and facilities is a Physical Access Control (PES-08) activity."
   - requirement_code: A.7.4
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Continuous monitoring for unauthorized physical access extends Physical Access Control (PES-04)."
+    rationale: "Continuous monitoring for unauthorized physical access extends Physical Access Control (PES-08)."
   - requirement_code: A.7.4
     scf_anchor: MON-02
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Physical-access monitoring shares the continuous-monitoring discipline (MON-02)."
   - requirement_code: A.7.5
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Physical-threat protection is an extension of physical security controls (PES-04)."
+    rationale: "Physical-threat protection is an extension of physical security controls (PES-08)."
   - requirement_code: A.7.5
     scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Resilience against environmental threats (disaster) ties to the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.7.6
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Procedures for working within secure areas are a refinement of Physical Access Control (PES-04)."
+    rationale: "Procedures for working within secure areas are a refinement of Physical Access Control (PES-08)."
   - requirement_code: A.7.7
     scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Clear-desk/clear-screen rules enforce the handling of classified information at the physical workspace (DCH-04)."
   - requirement_code: A.7.8
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Secure siting and protection of equipment is a physical-protection control (PES-04)."
+    rationale: "Secure siting and protection of equipment is a physical-protection control (PES-08)."
   - requirement_code: A.7.8
     scf_anchor: AST-01
     relationship_type: intersects_with
@@ -671,10 +671,10 @@ mappings:
     strength: 0.6
     rationale: "Protection of off-premises assets is governed by the Asset Management Policy (AST-01)."
   - requirement_code: A.7.9
-    scf_anchor: END-04
+    scf_anchor: END-03
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Off-site devices fall under Endpoint Security (END-04)."
+    rationale: "Off-site devices fall under Endpoint Protection Mechanisms (END-03)."
   - requirement_code: A.7.10
     scf_anchor: AST-22
     relationship_type: intersects_with
@@ -686,15 +686,15 @@ mappings:
     strength: 0.6
     rationale: "Protection from utility failures is a continuity/availability concern under the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.7.12
-    scf_anchor: PES-04
+    scf_anchor: PES-08
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Physical protection of cabling is a physical-security control (PES-04)."
+    rationale: "Physical protection of cabling is a physical-security control (PES-08)."
   - requirement_code: A.7.12
-    scf_anchor: NET-01
+    scf_anchor: NET-02
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Protecting data-carrying cabling supports overall Network Security (NET-01)."
+    rationale: "Protecting data-carrying cabling supports Network Security Controls (NSC) (NET-02)."
   - requirement_code: A.7.13
     scf_anchor: AST-01
     relationship_type: intersects_with
@@ -707,10 +707,10 @@ mappings:
     rationale: "Secure disposal/re-use of equipment with media sanitization maps to Secure Disposal, Destruction or Re-Use of Equipment (AST-22)."
   # --- A.8 Technological ---
   - requirement_code: A.8.1
-    scf_anchor: END-04
+    scf_anchor: END-03
     relationship_type: equal
     strength: 0.9
-    rationale: "Protection of information on user endpoint devices maps to Endpoint Security (END-04)."
+    rationale: "Protection of information on user endpoint devices maps to Endpoint Protection Mechanisms (END-03)."
   - requirement_code: A.8.2
     scf_anchor: IAC-10
     relationship_type: equal
@@ -752,7 +752,7 @@ mappings:
     strength: 0.5
     rationale: "Capacity planning to sustain availability supports the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.8.7
-    scf_anchor: END-07
+    scf_anchor: END-04
     relationship_type: equal
     strength: 0.9
     rationale: "Protection against malware maps to SCF Malicious Code Protection — shared with SOC 2 CC6.8."
@@ -797,10 +797,10 @@ mappings:
     strength: 0.6
     rationale: "Preventing leakage of sensitive information is a handling/protection control under Data & Asset Classification (DCH-04)."
   - requirement_code: A.8.12
-    scf_anchor: NET-04
+    scf_anchor: NET-03
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Egress controls at the network boundary are part of Boundary Protection (NET-04)."
+    rationale: "Egress controls at the network boundary are part of Boundary Protection (NET-03)."
   - requirement_code: A.8.13
     scf_anchor: BCD-24
     relationship_type: equal
@@ -857,35 +857,35 @@ mappings:
     strength: 0.6
     rationale: "Approved-software baselines are governed by Secure Baseline Configurations (CFG-04)."
   - requirement_code: A.8.20
-    scf_anchor: NET-04
+    scf_anchor: NET-03
     relationship_type: equal
     strength: 0.8
     rationale: "Networks security maps to SCF Boundary Protection — shared with SOC 2 CC6.6."
   - requirement_code: A.8.21
-    scf_anchor: NET-01
+    scf_anchor: NET-02
     relationship_type: equal
     strength: 0.8
-    rationale: "Securing network services maps to Network Security (NET-01)."
+    rationale: "Securing network services maps to Network Security Controls (NSC) (NET-02)."
   - requirement_code: A.8.21
-    scf_anchor: NET-04
+    scf_anchor: NET-03
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Boundary-level service protection is the Boundary Protection (NET-04) facet."
+    rationale: "Boundary-level service protection is the Boundary Protection (NET-03) facet."
   - requirement_code: A.8.22
-    scf_anchor: NET-04
+    scf_anchor: NET-03
     relationship_type: equal
     strength: 0.8
-    rationale: "Network segregation/segmentation maps to Boundary Protection (NET-04)."
+    rationale: "Network segregation/segmentation maps to Boundary Protection (NET-03)."
   - requirement_code: A.8.23
-    scf_anchor: NET-04
+    scf_anchor: NET-03
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Outbound web filtering at the boundary is part of Boundary Protection (NET-04)."
+    rationale: "Outbound web filtering at the boundary is part of Boundary Protection (NET-03)."
   - requirement_code: A.8.23
-    scf_anchor: END-07
+    scf_anchor: END-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Blocking access to malicious content reduces malware exposure, aligning with Malicious Code Protection (END-07)."
+    rationale: "Blocking access to malicious content reduces malware exposure, aligning with END-04 Malicious Code Protection (Antimalware)."
   - requirement_code: A.8.24
     scf_anchor: CRY-02
     relationship_type: equal

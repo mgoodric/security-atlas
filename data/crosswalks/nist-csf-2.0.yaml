@@ -570,7 +570,7 @@ mappings:
     strength: 0.9
     rationale: "Maintaining a software inventory maps directly to SCF Asset Inventories."
   - requirement_code: "ID.AM-03"
-    scf_anchor: "NET-01"
+    scf_anchor: "NET-02"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Maintaining authorized network-communication/data-flow representations overlaps SCF Network Security; data-flow-diagram specificity is a residual gap (LOW)."
@@ -714,7 +714,7 @@ mappings:
     strength: 0.7
     rationale: "Least-privilege/separation-of-duties enforcement overlaps SCF Privileged Account Management; broader access governance gap (MEDIUM)."
   - requirement_code: "PR.AA-06"
-    scf_anchor: "PES-04"
+    scf_anchor: "PES-08"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Managing/monitoring/enforcing physical access to assets maps directly to SCF Physical Access Control."
@@ -779,12 +779,12 @@ mappings:
     strength: 0.9
     rationale: "Secure software development practices map directly to SCF Secure Software Development."
   - requirement_code: "PR.IR-01"
-    scf_anchor: "NET-04"
+    scf_anchor: "NET-03"
     relationship_type: "intersects_with"
     strength: 0.75
     rationale: "Protecting networks from unauthorized access strongly overlaps SCF Boundary Protection."
   - requirement_code: "PR.IR-02"
-    scf_anchor: "PES-04"
+    scf_anchor: "PES-08"
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Protecting assets from environmental threats overlaps SCF Physical Access Control (the closest physical/environmental anchor in the fixture); environmental-controls specificity is absent (LOW)."
@@ -806,7 +806,7 @@ mappings:
     strength: 0.8
     rationale: "Network monitoring for adverse events is part of SCF Continuous Monitoring."
   - requirement_code: "DE.CM-02"
-    scf_anchor: "PES-04"
+    scf_anchor: "PES-08"
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Monitoring the physical environment for adverse events overlaps SCF Physical Access Control (the closest physical anchor); physical-environment-monitoring specificity is a residual gap (LOW)."

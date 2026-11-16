@@ -363,7 +363,7 @@ atlas-k8s permissions
 | `--auth-mode`                     | `run`       | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                                                                            |
 | `--rbac-control`                  | `run`       | no       | `scf:IAC-10`                  | control id attached to RBAC records                                                                           |
 | `--workload-control`              | `run`       | no       | `scf:CFG-04`                  | control id attached to workload records                                                                       |
-| `--netpol-control`                | `run`       | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records                                                         |
+| `--netpol-control`                | `run`       | no       | `scf:NET-03`                  | control id attached to NetworkPolicy coverage records                                                         |
 | `--pss-control`                   | `run`       | no       | `scf:CFG-04`                  | control id attached to PSS admission records                                                                  |
 | `--secret-control`                | `run`       | no       | `scf:CRY-02`                  | control id attached to Secret-inventory records                                                               |
 | `--skip-rbac`                     | `run`       | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                                                                           |

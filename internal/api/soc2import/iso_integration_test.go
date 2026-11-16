@@ -180,7 +180,7 @@ func TestISOImport_FullAnnexA_PreservesSlice438Subset(t *testing.T) {
 		"A.5.18": "IAC-04",
 		"A.5.24": "IRO-04",
 		"A.6.3":  "HRS-04",
-		"A.7.2":  "PES-04",
+		"A.7.2":  "PES-08",
 		"A.8.2":  "IAC-10",
 		"A.8.8":  "VPM-01",
 		"A.8.13": "BCD-24",

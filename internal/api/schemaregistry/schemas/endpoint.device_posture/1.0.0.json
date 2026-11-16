@@ -4,7 +4,7 @@
   "x-evidence-kind": "endpoint.device_posture.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["END-04", "CFG-04"],
+  "x-default-scf-anchors": ["END-03", "CFG-04"],
   "title": "Managed-device endpoint posture summary",
   "description": "One record per managed device across an MDM (Jamf Pro managed Mac, Microsoft Intune managed device): the device's disk-encryption state (FileVault / BitLocker), screen-lock / passcode-policy compliance, OS version, managed/enrollment state, and the MDM's overall compliance verdict — plus the device->owner ASSIGNMENT identity (opaque id + optional display name) needed to attribute the device for an access review. Pulled read-only from the MDM API (Jamf read-only API role; Intune Entra app with DeviceManagementManagedDevices.Read.All). Posture/compliance SUMMARY only — NEVER device geolocation, installed-app inventory, device contents, browsing data, or owner personal contact detail (phone / personal email / address). The connector reports a descriptive posture; the platform evaluator owns the final pass/fail per (control, scope). Shared across the Jamf + Intune connectors because the two MDMs' device-posture field set is identical at the posture-summary altitude; the source_mdm field preserves provenance.",
   "type": "object",

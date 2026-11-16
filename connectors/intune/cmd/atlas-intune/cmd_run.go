@@ -78,7 +78,7 @@ contact detail.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.deviceControl, "device-control", "scf:END-04", "control_id to attach to endpoint.device_posture.v1 records")
+	cmd.Flags().StringVar(&f.deviceControl, "device-control", "scf:END-03", "control_id to attach to endpoint.device_posture.v1 records")
 	cmd.Flags().StringVar(&f.tenantID, "tenant-id", "", "Entra tenant id override (env: INTUNE_TENANT_ID)")
 	return cmd
 }

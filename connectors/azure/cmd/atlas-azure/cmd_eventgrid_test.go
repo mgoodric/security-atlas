@@ -83,9 +83,9 @@ func okEventGridFlags() eventGridFlags {
 		entraControl:    "scf:IAC-10",
 		storageControl:  "scf:CRY-07",
 		aksControl:      "scf:CFG-04",
-		nsgControl:      "scf:NET-04",
+		nsgControl:      "scf:NET-03",
 		keyvaultControl: "scf:CRY-10",
-		firewallControl: "scf:NET-04",
+		firewallControl: "scf:NET-03",
 	}
 }
 
