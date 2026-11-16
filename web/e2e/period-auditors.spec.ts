@@ -9,10 +9,10 @@
 // an auditor user of this spec's own and drops the user's assignments, so
 // each run starts unassigned and no other spec's period or user changes.
 //
-// The auditor signs in with a JWT minted by /v1/test/issue-jwt for their
-// user id, the settings-theme.spec.ts pattern. A /login session carries
-// the subject "user:<uuid>", which the OPA roles lookup does not resolve
-// yet, so a real-login auditor gets no auditor role until #2239 lands.
+// The auditor signs in with a JWT minted by /v1/test/issue-jwt with the
+// subject "user:<uuid>", the shape a /login, PKCE or device-grant session
+// carries. Until #2239 the OPA roles lookup missed that subject, so this
+// spec used a bare-uuid token; it now proves a real-login auditor works.
 //
 // Hard rule (P0-A9 / GitGuardian): every id is a neutral test string.
 
@@ -38,7 +38,7 @@ async function mintAuditorJWT(): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       tenant_id: DEMO_TENANT_ID,
-      user_id: AUDITOR_ID,
+      user_id: `user:${AUDITOR_ID}`,
       roles: ["auditor"],
       super_admin: false,
     }),
