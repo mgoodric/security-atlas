@@ -143,7 +143,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("storage.Inspect: %v", err)
 	}
-	storageRec, err := buildStorageRecord(accounts[0], "prod", "scf:CRY-04")
+	storageRec, err := buildStorageRecord(accounts[0], "prod", "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildStorageRecord: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("keyvault.Inspect: %v", err)
 	}
-	kvRec, err := buildKeyVaultRecord(vaults[0], "prod", "scf:CRY-09")
+	kvRec, err := buildKeyVaultRecord(vaults[0], "prod", "scf:CRY-10")
 	if err != nil {
 		t.Fatalf("buildKeyVaultRecord: %v", err)
 	}
@@ -310,8 +310,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 		{ID: "/sub/acct", Name: "acct", EncryptionEnabled: true, EncryptionKeySource: "Microsoft.Storage", HTTPSTrafficOnly: true},
 	}}
 	accts, _ := storage.Inspect(context.Background(), api, "sub-1", fixed)
-	r1, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-04")
-	r2, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-04")
+	r1, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-07")
+	r2, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-07")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -344,7 +344,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 		{ID: "/sub/a", Name: "a", EncryptionEnabled: true, EncryptionKeySource: "Microsoft.Storage", HTTPSTrafficOnly: true},
 	}}
 	accts, _ := storage.Inspect(context.Background(), armAPI, "sub-1", fixed)
-	storageRec, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-04")
+	storageRec, _ := buildStorageRecord(accts[0], "prod", "scf:CRY-07")
 
 	aksAPI := &fakeAKSForIntegration{clusters: []aks.RawCluster{
 		{ID: "/sub/clu", Name: "clu", RBACEnabled: true, NetworkPolicy: "calico", PrivateCluster: true, AuthorizedIPRanges: true},
@@ -370,7 +370,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			}},
 	}}
 	kvVaults, _ := keyvault.Inspect(context.Background(), kvAPI, "sub-1", fixed)
-	kvRec, _ := buildKeyVaultRecord(kvVaults[0], "prod", "scf:CRY-09")
+	kvRec, _ := buildKeyVaultRecord(kvVaults[0], "prod", "scf:CRY-10")
 
 	fwAPI := &fakeFirewallForIntegration{policies: []firewall.RawPolicy{
 		{ID: "/sub/fw", Name: "fw", ResourceGroup: "rg", Location: "eastus",

@@ -412,12 +412,12 @@ mappings:
     scf_anchor: DCH-01
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Information-transfer rules are a handling concern under DCH-01; CRY-08 covers the in-transit protection facet."
+    rationale: "Information-transfer rules are a handling concern under DCH-01; CRY-05 covers the in-transit protection facet."
   - requirement_code: A.5.14
-    scf_anchor: CRY-08
+    scf_anchor: CRY-05
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Secure transfer of information overlaps Encryption In Transit (CRY-08) where the transfer channel is protected cryptographically."
+    rationale: "Secure transfer of information overlaps Encrypting Data In Transit (CRY-05) where the transfer channel is protected cryptographically."
   - requirement_code: A.5.15
     scf_anchor: IAC-01
     relationship_type: equal
@@ -887,20 +887,20 @@ mappings:
     strength: 0.6
     rationale: "Blocking access to malicious content reduces malware exposure, aligning with Malicious Code Protection (END-07)."
   - requirement_code: A.8.24
-    scf_anchor: CRY-01
+    scf_anchor: CRY-02
     relationship_type: equal
     strength: 0.9
-    rationale: "Rules for the effective use of cryptography map directly to Use of Cryptographic Controls (CRY-01) — the policy-level cryptography anchor. Added by slice 467 as the primary edge of the A.8.24 split."
+    rationale: "Rules for the effective use of cryptography map directly to Use of Cryptographic Controls (CRY-02) — the policy-level cryptography anchor. Added by slice 467 as the primary edge of the A.8.24 split."
   - requirement_code: A.8.24
-    scf_anchor: CRY-08
+    scf_anchor: CRY-05
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Encryption-in-transit is one concrete application of A.8.24's cryptography rules; CRY-08 (Encryption In Transit) is the in-transit facet — shared with SOC 2 CC6.7. Split out by slice 467."
+    rationale: "Encryption-in-transit is one concrete application of A.8.24's cryptography rules; CRY-05 (Encrypting Data In Transit) is the in-transit facet — shared with SOC 2 CC6.7. Split out by slice 467."
   - requirement_code: A.8.24
-    scf_anchor: CRY-09
+    scf_anchor: CRY-10
     relationship_type: subset_of
     strength: 0.8
-    rationale: "A.8.24 explicitly spans cryptographic key management; Cryptographic Key Management (CRY-09) is the dedicated key-lifecycle anchor — the key-management half of the slice-467 A.8.24 split that the slice-438 decisions log flagged for completion."
+    rationale: "A.8.24 explicitly spans cryptographic key management; Cryptographic Key Management (CRY-10) is the dedicated key-lifecycle anchor — the key-management half of the slice-467 A.8.24 split that the slice-438 decisions log flagged for completion."
   - requirement_code: A.8.25
     scf_anchor: SEA-05
     relationship_type: equal

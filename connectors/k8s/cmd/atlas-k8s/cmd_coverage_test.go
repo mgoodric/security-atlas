@@ -248,7 +248,7 @@ func TestBuildSecretMetaRecord_Shape(t *testing.T) {
 		AgeDays: 30, CreatedAt: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC),
 		KeyNames: []string{"tls.crt", "tls.key"}, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildSecretMetaRecord(s, "cluster-1", "prod", "scf:CRY-01")
+	rec, err := buildSecretMetaRecord(s, "cluster-1", "prod", "scf:CRY-02")
 	if err != nil {
 		t.Fatalf("buildSecretMetaRecord: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestBuildSecretMetaRecord_OmitsEmptyOptionals(t *testing.T) {
 		AgeDays: 0, ObservedAt: time.Now().UTC(),
 		// no CreatedAt, no KeyNames
 	}
-	rec, err := buildSecretMetaRecord(s, "c", "prod", "scf:CRY-01")
+	rec, err := buildSecretMetaRecord(s, "c", "prod", "scf:CRY-02")
 	if err != nil {
 		t.Fatalf("buildSecretMetaRecord: %v", err)
 	}

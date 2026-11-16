@@ -363,7 +363,7 @@ mappings:
     strength: 0.6
     rationale: "Data classification governs transmission/movement restrictions."
   - tsc_code: CC6.7
-    scf_anchor: CRY-08
+    scf_anchor: CRY-05
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Encryption in transit is the canonical control for protected transmission."

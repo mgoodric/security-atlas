@@ -4,7 +4,7 @@
   "x-evidence-kind": "azure.storage_account_config.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["CRY-04", "NET-04"],
+  "x-default-scf-anchors": ["CRY-07", "NET-04"],
   "title": "Azure Storage account configuration",
   "description": "Per-storage-account hardening posture captured read-only from Azure Resource Manager (ARM Reader role): encryption-at-rest, secure-transfer (HTTPS-only) / minimum TLS version, and public-blob-access state. Account configuration only — never blob/object contents, access keys, or SAS tokens.",
   "type": "object",

@@ -62,7 +62,7 @@ func main() {
 		IdempotencyKey: "example-key-2026-06-03T00:00:00Z",
 		EvidenceKind:   "aws.s3.bucket_encryption_state.v1",
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:CRY-04",
+		ControlId:      "scf:CRY-07",
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "cloud_account", Values: []string{"aws:<ACCOUNT_ID>"}},
 			{Key: "environment", Values: []string{"prod"}},
