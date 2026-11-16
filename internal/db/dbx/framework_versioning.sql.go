@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const carryOverOverlayEdges = `-- name: CarryOverOverlayEdges :one
+SELECT carry_over_overlay_edges($1::uuid, $2::text)::int AS copied
+`
+
+type CarryOverOverlayEdgesParams struct {
+	MigrationID pgtype.UUID `json:"migration_id"`
+	Actor       string      `json:"actor"`
+}
+
+// #1803: copy every tenant's active overlay edges from an approved exact_code
+// migration's N requirement to its N+1 requirement, each in its own tenant,
+// one audit row per copy. Returns the number copied. See the function's
+// migration for why it is SECURITY DEFINER.
+func (q *Queries) CarryOverOverlayEdges(ctx context.Context, arg CarryOverOverlayEdgesParams) (int32, error) {
+	row := q.db.QueryRow(ctx, carryOverOverlayEdges, arg.MigrationID, arg.Actor)
+	var copied int32
+	err := row.Scan(&copied)
+	return copied, err
+}
+
 const getCurrentFrameworkVersion = `-- name: GetCurrentFrameworkVersion :one
 SELECT id, tenant_id, framework_id, version, effective_from, effective_to, status, requirement_count, oscal_catalog_uri, created_at FROM framework_versions
 WHERE framework_id = $1 AND status = 'current' AND tenant_id IS NULL
