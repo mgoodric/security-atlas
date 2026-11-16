@@ -1,30 +1,23 @@
-// Slice 125 — /audit-log server-component shell.
+// /audit-log — retired; Activity is the one audit-log page (#2093).
 //
-// AC-1. The shell stays server-rendered so the page chrome (title +
-// subtitle + outer layout container) lands in the initial HTML payload.
-// All interactivity (URL-state-driven filters, TanStack-Query-driven
-// infinite scroll, row-expand) lives in the page-client island below.
-//
-// The route is guarded by /audit-log/layout.tsx (admin OR future-auditor
-// preflight) BEFORE this component renders. By the time this component
-// runs, the caller has cleared the route-level guard.
+// The redirect keeps the query string, so a bookmarked or shared filter
+// (`?from=…&to=…&actor=…&kind=…`) opens the same view on /activity.
+// It grants nothing: /activity reads through `/v1/activity/unified`,
+// which every tenant member already reaches, and the backend's
+// row-visibility predicate decides what each caller sees there.
 
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { PageShell } from "@/components/shell/page-shell";
-
-import { AuditLogPageClient } from "./page-client";
-
-export const metadata: Metadata = { title: "Audit log" };
-
-export default function AuditLogPage() {
-  return (
-    <PageShell
-      title="Audit log"
-      subtitle="Every audit event across the tenant, in one paginated view. Filter by time window, actor, or event kind; expand a row to see its raw payload. Read-only."
-      bodyClassName="space-y-4"
-    >
-      <AuditLogPageClient />
-    </PageShell>
-  );
+export default async function AuditLogRedirect({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(await searchParams)) {
+    if (Array.isArray(v)) v.forEach((x) => params.append(k, x));
+    else if (v !== undefined) params.set(k, v);
+  }
+  const qs = params.toString();
+  redirect(qs ? `/activity?${qs}` : "/activity");
 }

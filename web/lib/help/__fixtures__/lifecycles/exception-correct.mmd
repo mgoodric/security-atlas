@@ -1,0 +1,11 @@
+%% lifecycle: exception
+stateDiagram-v2
+  [*] --> requested: request
+  requested --> approved: approve
+  requested --> denied: deny
+  approved --> active: activate
+  active --> expired: expire (system)
+  active --> revoked: revoke
+  denied --> [*]
+  expired --> [*]
+  revoked --> [*]
