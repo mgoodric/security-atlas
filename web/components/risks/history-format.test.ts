@@ -81,4 +81,40 @@ describe("risk history format (#2104)", () => {
     expect(formatHistoryValue("treatment_owner", "")).toBe("none");
     expect(historyActionLabel("fields_changed")).toBe("Edited");
   });
+
+  test("an acceptance approval reads its expiry, approver and self-approval (#2105)", () => {
+    const changes = historyChanges(
+      entry(
+        "acceptance_approved",
+        { acceptance_status: "proposed" },
+        {
+          acceptance_status: "approved",
+          accepted_until: "2027-06-30",
+          accepter: "u-2",
+          self_approved: true,
+        },
+      ),
+    );
+    expect(changes.map((c) => c.field)).toEqual([
+      "Acceptance",
+      "Accepted until",
+      "Approved by",
+      "Self-approved",
+    ]);
+    expect(changes[3]).toEqual({
+      field: "Self-approved",
+      before: "none",
+      after: "yes",
+    });
+    expect(historyActionLabel("acceptance_approved")).toBe(
+      "Acceptance approved",
+    );
+  });
+
+  test("a second-person approval shows no self-approval line (#2105)", () => {
+    const changes = historyChanges(
+      entry("acceptance_approved", {}, { self_approved: false }),
+    );
+    expect(changes).toEqual([]);
+  });
 });

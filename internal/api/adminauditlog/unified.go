@@ -189,11 +189,13 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		entries    []unifiedlog.Entry
 		nextCursor *unifiedlog.Cursor
 	)
+	gate := h.newPayloadGate(r, userIdentifier)
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		got, _, qErr := unifiedlog.Query(ctx, q, params.queryParams)
 		if qErr != nil {
 			return qErr
 		}
+		gate.apply(got)
 		// Apply the page-size cap + cursor derivation here. The aggregator
 		// was asked for (pageSize + 1) rows; if it returned more than
 		// pageSize, the (pageSize+1)-th row signals "more available" and

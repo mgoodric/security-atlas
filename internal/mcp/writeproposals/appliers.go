@@ -341,22 +341,32 @@ func ingestProposalRecord(ctx context.Context, ing EvidenceProcessor, tx pgx.Tx,
 }
 
 // UpdateRiskTreatmentInput is the bounded shape the update_risk_treatment
-// MCP tool ships. Accepter and AcceptedUntil (YYYY-MM-DD) are optional;
-// when set they overwrite the risk's values, which is how a proposed
-// acceptance moves to approved.
+// MCP tool ships. A confirmed proposal runs the same transitions as the
+// REST routes (#2105):
+//
+//	treatment=accept, acceptance_status=proposed -> propose acceptance,
+//	    with justification and accepted_until as the proposed expiry
+//	treatment=accept, acceptance_status=approved -> approve the risk's
+//	    proposed acceptance until accepted_until; the confirming person is
+//	    the approver, under the approval rule
+//	any other treatment -> change treatment
+//
+// Accepter is refused: the approving person is the accepter.
 type UpdateRiskTreatmentInput struct {
 	RiskID           string  `json:"risk_id"`
 	Treatment        string  `json:"treatment"`
 	AcceptanceStatus string  `json:"acceptance_status"`
 	TreatmentOwner   string  `json:"treatment_owner"`
+	Justification    string  `json:"justification,omitempty"`
 	Accepter         *string `json:"accepter,omitempty"`
 	AcceptedUntil    *string `json:"accepted_until,omitempty"`
 }
 
-// ApplyUpdateRiskTreatment updates an existing risk's treatment + owner.
-// The change runs through risk.ValidateTreatment against the risk's
-// current links and side fields, so an approved proposal cannot set a
-// treatment the REST path would reject (#1746).
+// ApplyUpdateRiskTreatment applies a confirmed update_risk_treatment
+// proposal through the risk's treatment and acceptance transitions, so it
+// writes the same audit events and is refused by the same state machine
+// and approval rule as the REST path. A treatment_owner, when set, is
+// changed as a record field and audit-logged as PATCH logs it.
 func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
 	var in UpdateRiskTreatmentInput
 	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
@@ -369,72 +379,52 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 	if err != nil {
 		return "", fmt.Errorf("apply update_risk_treatment: risk_id must be UUID: %w", err)
 	}
-
-	var (
-		acceptedUntil       *time.Time
-		accepter            string
-		instrumentReference string
-		controlCount        int
-		actionPlanCount     int
-	)
-	err = tx.QueryRow(ctx, `
-		SELECT r.accepted_until, r.accepter, r.instrument_reference,
-			(SELECT count(*) FROM risk_control_links l
-			  WHERE l.tenant_id = r.tenant_id AND l.risk_id = r.id),
-			(SELECT count(*) FROM action_plan_risks apr
-			  JOIN action_plans ap
-			    ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
-			  WHERE apr.tenant_id = r.tenant_id AND apr.risk_id = r.id
-			    AND ap.tombstoned_at IS NULL)
-		FROM risks r
-		WHERE r.tenant_id = $1 AND r.id = $2
-	`, p.TenantID, riskID).Scan(&acceptedUntil, &accepter, &instrumentReference, &controlCount, &actionPlanCount)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("apply update_risk_treatment: risk %s not found in tenant", riskID)
-	}
-	if err != nil {
-		return "", fmt.Errorf("apply update_risk_treatment: read risk: %w", err)
-	}
 	if in.Accepter != nil {
-		accepter = *in.Accepter
+		return "", fmt.Errorf("apply update_risk_treatment: %w: accepter is not proposed; the approving person is the accepter", risk.ErrTransitionInput)
 	}
+	var until time.Time
 	if in.AcceptedUntil != nil {
-		t, perr := time.Parse("2006-01-02", *in.AcceptedUntil)
-		if perr != nil {
-			return "", fmt.Errorf("apply update_risk_treatment: accepted_until must be YYYY-MM-DD: %w", perr)
+		if until, err = time.Parse(time.DateOnly, *in.AcceptedUntil); err != nil {
+			return "", fmt.Errorf("apply update_risk_treatment: %w: accepted_until must be YYYY-MM-DD", risk.ErrTransitionInput)
 		}
-		acceptedUntil = &t
 	}
-
+	actor := p.Confirmer.UserID
+	if actor == "" {
+		actor = p.Confirmer.CredentialID
+	}
+	q := dbx.New(tx)
+	now := time.Now().UTC()
 	treatment := dbx.RiskTreatment(in.Treatment)
 	status := dbx.RiskAcceptanceStatus(in.AcceptanceStatus)
-	if err := risk.ValidateTreatment(risk.TreatmentInput{
-		Treatment:             treatment,
-		AcceptanceStatus:      status,
-		AcceptedUntilPresent:  acceptedUntil != nil,
-		Accepter:              accepter,
-		InstrumentReference:   instrumentReference,
-		LinkedControlCount:    controlCount,
-		LinkedActionPlanCount: actionPlanCount,
-	}); err != nil {
+	switch {
+	case treatment != dbx.RiskTreatmentAccept && status != "":
+		err = fmt.Errorf("%w: acceptance_status applies only to treatment=accept", risk.ErrTransitionInput)
+	case treatment != dbx.RiskTreatmentAccept:
+		_, err = risk.ChangeTreatmentTx(ctx, q, p.TenantID, riskID, risk.ChangeTreatmentInput{
+			Treatment: treatment,
+			Actor:     actor,
+		})
+	case status == dbx.RiskAcceptanceStatusProposed:
+		_, err = risk.ProposeAcceptanceTx(ctx, q, p.TenantID, riskID, risk.ProposeAcceptanceInput{
+			Justification: in.Justification,
+			ProposedUntil: until,
+			Proposer:      actor,
+		}, now)
+	case status == dbx.RiskAcceptanceStatusApproved:
+		_, err = risk.ApproveAcceptanceTx(ctx, q, p.TenantID, riskID, risk.ApproveAcceptanceInput{
+			AcceptedUntil: until,
+			Approver:      p.Confirmer,
+		}, now)
+	default:
+		err = fmt.Errorf("%w: treatment=accept requires acceptance_status (proposed or approved)", risk.ErrTransitionInput)
+	}
+	if err != nil {
 		return "", fmt.Errorf("apply update_risk_treatment: %w", err)
 	}
-
-	tag, err := tx.Exec(ctx, `
-		UPDATE risks
-		SET treatment = $3,
-			acceptance_status = $4,
-			treatment_owner = $5,
-			accepter = $6,
-			accepted_until = $7,
-			updated_at = now()
-		WHERE tenant_id = $1 AND id = $2
-	`, p.TenantID, riskID, treatment, risk.NullAcceptanceStatus(status), in.TreatmentOwner, accepter, acceptedUntil)
-	if err != nil {
-		return "", fmt.Errorf("apply update_risk_treatment: update: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return "", fmt.Errorf("apply update_risk_treatment: risk %s not found in tenant", riskID)
+	if in.TreatmentOwner != "" {
+		if err := risk.SetTreatmentOwnerTx(ctx, q, p.TenantID, riskID, in.TreatmentOwner, actor); err != nil {
+			return "", fmt.Errorf("apply update_risk_treatment: %w", err)
+		}
 	}
 	return riskID.String(), nil
 }

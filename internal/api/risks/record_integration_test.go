@@ -63,12 +63,12 @@ func TestRecord_AuditActionCheck(t *testing.T) {
 			VALUES ($1, gen_random_uuid(), 'test', $2, '{}', '{}')`, tenant, action)
 		return err
 	}
-	for _, action := range []string{"placement_changed", "category_changed", "fields_changed"} {
+	for _, action := range []string{"placement_changed", "category_changed", "fields_changed", "treatment_changed"} {
 		if err := insert(action); err != nil {
 			t.Fatalf("%s refused: %v", action, err)
 		}
 	}
-	if err := insert("treatment_changed"); err == nil {
+	if err := insert("acceptance_expired"); err == nil {
 		t.Fatal("an action outside the list was accepted")
 	}
 }

@@ -35,6 +35,10 @@
 //  2. Adding the new kind enum to [Kind] and to [AllKinds].
 //  3. Updating the integration test in `internal/api/adminauditlog/`
 //     to seed + assert the new table's rows.
+//  4. Mapping the kind to the OPA resource type of its source route in
+//     `kindSourceResource` (`internal/api/adminauditlog/payloadgate.go`).
+//     An unmapped kind's payload is withheld from every non-admin reader
+//     (#2375), and a unit test there fails until the kind is mapped.
 //
 // No code change is required in this Go file beyond the [Kind] addition.
 package unifiedlog

@@ -259,6 +259,9 @@ type Querier interface {
 	// user-role binding table. Until then this is the stand-in per GLOSSARY.md
 	// "Policy acknowledgment (slice 023)".
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
+	// #2105: live (not tombstoned) action plans linked to a risk, for the
+	// mitigate rule (a linked control or a linked action plan).
+	CountRiskActionPlanLinks(ctx context.Context, arg CountRiskActionPlanLinksParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	// Issue #1741: totals for the paged `/v1/anchors?include=state` read on
@@ -3455,6 +3458,11 @@ type Querier interface {
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
 	SetRiskCategoryArchived(ctx context.Context, arg SetRiskCategoryArchivedParams) (OrgRiskCategory, error)
 	SetRiskCategoryDefault(ctx context.Context, arg SetRiskCategoryDefaultParams) (OrgRiskCategory, error)
+	// #2105: the treatment and acceptance columns, written only by the risk
+	// treatment and acceptance transitions (internal/risk/transitions.go),
+	// which validate the state machine and audit-log the change in the same
+	// transaction. Record fields are untouched.
+	SetRiskTreatment(ctx context.Context, arg SetRiskTreatmentParams) (Risk, error)
 	// Soft-disables / re-enables a group (Delete = active=false). Bumps updated_at.
 	SetSCIMGroupActive(ctx context.Context, arg SetSCIMGroupActiveParams) (ScimGroup, error)
 	// SCIM Patch `active` flip (AC-4) — the deprovision/reprovision signal. Keeps
