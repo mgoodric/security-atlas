@@ -144,6 +144,8 @@ sql:
       - "migrations/sql/20261213000000_onboarding_hint_dismissals.sql"
       # #2136: posture targets per framework version, and their audit log.
       - "migrations/sql/20261214000000_framework_posture_targets.sql"
+      # #2026: framework_requirements.points_of_focus must be a JSON array.
+      - "migrations/sql/20261215000000_framework_requirement_points_of_focus_array.sql"
     queries: "internal/db/queries"
     gen:
       go:
