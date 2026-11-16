@@ -16,6 +16,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -213,6 +214,36 @@ func TestLifecycle_RegisterExcludesClosedUnlessAsked(t *testing.T) {
 	}
 }
 
+// briefIDs reads the board brief's top-risks query as of asOf under the
+// tenant, as the board store does.
+func (env transitionEnv) briefIDs(t *testing.T, asOf time.Time) []string {
+	t.Helper()
+	ctx, err := tenancy.WithTenant(context.Background(), env.tenant)
+	if err != nil {
+		t.Fatalf("with tenant: %v", err)
+	}
+	tx, err := env.app.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		t.Fatalf("apply tenant: %v", err)
+	}
+	rows, err := dbx.New(tx).ListRisksForBoardBrief(ctx, dbx.ListRisksForBoardBriefParams{
+		TenantID:  pgtype.UUID{Bytes: uuid.MustParse(env.tenant), Valid: true},
+		CreatedAt: pgtype.Timestamptz{Time: asOf, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("ListRisksForBoardBrief: %v", err)
+	}
+	ids := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = uuid.UUID(r.ID.Bytes).String()
+	}
+	return ids
+}
+
 // TestLifecycle_BoardBriefTopRisksExcludeClosed: the board brief's and
 // board pack's top-risks read leaves out a risk closed before the brief's
 // date, and keeps one closed after it (it was open as of that date).
@@ -222,32 +253,7 @@ func TestLifecycle_BoardBriefTopRisksExcludeClosed(t *testing.T) {
 	closed := env.newRisk(t)
 	env.step(t, closed, "close", env.ownerJWT, closeReason(), http.StatusOK)
 
-	read := func(asOf time.Time) []string {
-		ctx, err := tenancy.WithTenant(context.Background(), env.tenant)
-		if err != nil {
-			t.Fatalf("with tenant: %v", err)
-		}
-		tx, err := env.app.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		if err := tenancy.ApplyTenant(ctx, tx); err != nil {
-			t.Fatalf("apply tenant: %v", err)
-		}
-		rows, err := dbx.New(tx).ListRisksForBoardBrief(ctx, dbx.ListRisksForBoardBriefParams{
-			TenantID:  pgtype.UUID{Bytes: uuid.MustParse(env.tenant), Valid: true},
-			CreatedAt: pgtype.Timestamptz{Time: asOf, Valid: true},
-		})
-		if err != nil {
-			t.Fatalf("ListRisksForBoardBrief: %v", err)
-		}
-		ids := make([]string, len(rows))
-		for i, r := range rows {
-			ids[i] = uuid.UUID(r.ID.Bytes).String()
-		}
-		return ids
-	}
+	read := func(asOf time.Time) []string { return env.briefIDs(t, asOf) }
 
 	if got := read(time.Now().UTC().Add(time.Minute)); !slices.Equal(got, []string{open}) {
 		t.Fatalf("brief as of now = %v, want only %s", got, open)
@@ -303,5 +309,81 @@ func TestLifecycle_HardDeleteIsAdminOnly(t *testing.T) {
 	}
 	if actor == "" || title != "transition risk" {
 		t.Fatalf("deleted row actor=%q title=%q", actor, title)
+	}
+}
+
+// TestLifecycle_ParentOfClosedChildrenIsNotARollUp: a parent whose only
+// child is closed summarises nothing the register shows, so it is listed
+// and ranked in the board brief itself; reopening the child makes it a
+// roll-up again, hidden from both.
+func TestLifecycle_ParentOfClosedChildrenIsNotARollUp(t *testing.T) {
+	env := newTransitionEnv(t)
+	parent := seedLeveledRisk(t, env.admin, env.tenant, "org", "rollup parent", 4, 4).String()
+	child := seedLeveledRisk(t, env.admin, env.tenant, "team", "rollup child", 2, 3).String()
+	if code, body := env.do(t, http.MethodPost, "/v1/risks/"+parent+"/children", env.ownerJWT,
+		map[string]any{"child_risk_ids": []string{child}}); code != http.StatusOK && code != http.StatusCreated {
+		t.Fatalf("link child: status %d: %v", code, body)
+	}
+	soon := func() time.Time { return time.Now().UTC().Add(time.Minute) }
+
+	ids, _ := env.listIDs(t, "")
+	if !slices.Equal(ids, []string{child}) {
+		t.Fatalf("register with an open child = %v, want only the child", ids)
+	}
+	if got := env.briefIDs(t, soon()); !slices.Equal(got, []string{child}) {
+		t.Fatalf("brief with an open child = %v, want only the child", got)
+	}
+
+	env.step(t, child, "close", env.ownerJWT, closeReason(), http.StatusOK)
+	ids, count := env.listIDs(t, "")
+	if !slices.Equal(ids, []string{parent}) || count != 1 {
+		t.Fatalf("register with the child closed = %v (count %d), want only the parent", ids, count)
+	}
+	if got := env.briefIDs(t, soon()); !slices.Equal(got, []string{parent}) {
+		t.Fatalf("brief with the child closed = %v, want only the parent", got)
+	}
+
+	env.step(t, child, "reopen", env.ownerJWT, nil, http.StatusOK)
+	if ids, _ = env.listIDs(t, ""); !slices.Equal(ids, []string{child}) {
+		t.Fatalf("register after reopen = %v, want only the child", ids)
+	}
+	if got := env.briefIDs(t, soon()); !slices.Equal(got, []string{child}) {
+		t.Fatalf("brief after reopen = %v, want only the child", got)
+	}
+}
+
+// TestLifecycle_ClosedRiskRefusesTreatmentAndAcceptance: a closed risk
+// takes no treatment or acceptance transition (409) and writes no audit
+// row for one; reopened, it takes them again.
+func TestLifecycle_ClosedRiskRefusesTreatmentAndAcceptance(t *testing.T) {
+	env := newTransitionEnv(t)
+	id := env.newRisk(t)
+	env.step(t, id, "close", env.ownerJWT, closeReason(), http.StatusOK)
+
+	env.step(t, id, "treatment", env.ownerJWT, map[string]any{"treatment": "avoid"}, http.StatusConflict)
+	env.step(t, id, "acceptance/propose", env.ownerJWT, proposal(), http.StatusConflict)
+	if got := actionsOf(env.auditRows(t, id)); !slices.Equal(got, []string{"closed"}) {
+		t.Fatalf("audit actions = %v, want only [closed]", got)
+	}
+
+	env.step(t, id, "reopen", env.ownerJWT, nil, http.StatusOK)
+	body := env.step(t, id, "treatment", env.ownerJWT, map[string]any{"treatment": "avoid"}, http.StatusOK)
+	if got := riskField(t, body, "treatment"); got != "avoid" {
+		t.Fatalf("treatment after reopen = %v, want avoid", got)
+	}
+}
+
+// TestLifecycle_ClosureNoteIsCapped: a note over 4000 characters is a
+// 400 and the risk stays open.
+func TestLifecycle_ClosureNoteIsCapped(t *testing.T) {
+	env := newTransitionEnv(t)
+	id := env.newRisk(t)
+	env.step(t, id, "close", env.ownerJWT,
+		map[string]any{"reason": "merged", "note": strings.Repeat("x", 4001)}, http.StatusBadRequest)
+	env.step(t, id, "close", env.ownerJWT,
+		map[string]any{"reason": "merged", "note": strings.Repeat("x", 4000)}, http.StatusOK)
+	if _, err := env.admin.Exec(context.Background(),
+		`UPDATE risks SET closure_note = repeat('x', 4001) WHERE id = $1`, id); err == nil {
+		t.Fatal("a 4001-character note was accepted by the database")
 	}
 }

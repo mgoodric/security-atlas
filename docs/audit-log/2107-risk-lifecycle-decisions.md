@@ -50,6 +50,24 @@ exposure leaves closed risks out:
 | `ListCandidateRisksForRule`                                            | `status = 'open'` (D4).                                                                                                                                     |
 | Calendar risk-review events                                            | `status = 'open'`: a closed risk is not due for review.                                                                                                     |
 
+**Roll-ups count open children only.** The register (#2060) and the board
+brief hide a parent that has children linked, because the children already
+stand for its exposure. Once a parent's children are all closed, none of
+them is listed, so hiding the parent too would make an open risk vanish
+from the register, its count, the dashboard and the board top risks.
+`ListRiskChildCountsForTenant` therefore counts only open children. The
+brief's roll-up test counts children open as of its date
+(`c.status = 'open' OR c.closed_at > as_of`). Closing a parent's only child
+lists the parent; reopening the child hides it again
+(`TestLifecycle_ParentOfClosedChildrenIsNotARollUp`). The review found this.
+
+**Historical briefs read closure from current state.** The schema keeps no
+status history, only the current `status` and `closed_at`, so a risk closed
+before a brief's date and reopened since reads as open as of that date. A
+brief generated on its own date freezes what it showed (canvas §7.5), so
+this matters only when a brief is generated later for an earlier date. A
+dated status history would fix it, and #2107 does not need one.
+
 Left as they are:
 
 - **Usage counts:** the category and theme usage counts that guard their
@@ -96,9 +114,20 @@ status.
 **D7: Close and reopen are risk-writer actions.** Their paths end in
 `close` and `reopen`, which are not promoted actions, so they derive
 `write` on `risks` (admin and grc_engineer). The handler adds no approver
-gate. Closing is the routine way to retire a risk, not an approval. A
-closed risk still accepts treatment and acceptance transitions at the API.
-The page hides them while it is closed, and the ticket asks for no refusal.
+gate. Closing is the routine way to retire a risk, not an approval.
+
+A closed risk refuses treatment and acceptance transitions with 409,
+"reopen it first". The check is in `lockOpenRisk`, the lock step every
+#2105 transition shares, so the REST routes and the MCP
+`update_risk_treatment` applier refuse alike. A retired risk's treatment
+and acceptance stand as they were until it is reopened. The page also hides
+those actions while the risk is closed. The review asked for this; the
+first cut left the API open
+(`TestLifecycle_ClosedRiskRefusesTreatmentAndAcceptance`).
+
+The closure note is capped at 4000 characters, the close form's
+`maxLength`. The store checks it (400) and so does the
+`risks_closure_note_length` CHECK.
 
 **D8: UI.** These follow the #2102 detail-page pattern:
 

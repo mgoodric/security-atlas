@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -54,6 +55,10 @@ type CloseInput struct {
 	Actor  string
 }
 
+// MaxClosureNote is the longest closure note, in characters; the
+// risks_closure_note_length CHECK enforces it too.
+const MaxClosureNote = 4000
+
 // ReopenInput reopens a closed risk.
 type ReopenInput struct {
 	Actor string
@@ -81,6 +86,9 @@ func (s *Store) Close(ctx context.Context, id uuid.UUID, in CloseInput) (Risk, e
 		return Risk{}, fmt.Errorf("%w: actor is required", ErrTransitionInput)
 	}
 	note := strings.TrimSpace(in.Note)
+	if utf8.RuneCountInString(note) > MaxClosureNote {
+		return Risk{}, fmt.Errorf("%w: note must be at most %d characters", ErrTransitionInput, MaxClosureNote)
+	}
 	return s.lifecycle(ctx, id, func(current Risk, now time.Time) (dbx.SetRiskStatusParams, string, map[string]any, map[string]any, error) {
 		if current.Status != dbx.RiskStatusOpen {
 			return dbx.SetRiskStatusParams{}, "", nil, nil, fmt.Errorf("%w: only an open risk can be closed", ErrTransitionState)

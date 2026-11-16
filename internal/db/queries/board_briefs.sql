@@ -60,16 +60,25 @@ ORDER BY slug;
 -- brief's date.
 --
 -- Closed risks are left out (#2107), unless they were closed after the
--- brief's date: as of that date they were still open.
+-- brief's date: as of that date they were still open. A roll-up counts
+-- only children open as of that date, so a parent whose children were all
+-- closed by then is ranked itself rather than hidden with them.
+--
+-- Closure is read from the risk's current state, so a risk closed before
+-- the brief's date and reopened since reads as open throughout. A brief
+-- generated at the time froze what it showed; this matters only for a
+-- brief generated later for an earlier date.
 SELECT r.* FROM risks r
 WHERE r.tenant_id = $1
   AND r.created_at <= $2
   AND (r.status = 'open' OR r.closed_at > $2)
   AND NOT EXISTS (
     SELECT 1 FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
     WHERE ra.tenant_id = r.tenant_id
       AND ra.parent_risk_id = r.id
       AND ra.created_at <= $2
+      AND (c.status = 'open' OR c.closed_at > $2)
   )
 ORDER BY r.updated_at ASC, r.id ASC;
 

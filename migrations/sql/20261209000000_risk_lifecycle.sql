@@ -11,6 +11,15 @@
 --    keeps them consistent: an open risk carries no closure, and a closed
 --    one carries a reason, a closer and a time.
 --
+--    The note is capped at 4000 characters, as the close form caps it.
+--
+--    Both CHECKs are added validated, in line, not NOT VALID + VALIDATE:
+--    every existing row takes the column defaults (open, no closure), so
+--    the scan cannot fail, and the risk register is small enough that one
+--    scan under the ALTER's lock is brief. They are dropped first so the
+--    migration re-applies cleanly on a self-host re-run, as the type and
+--    column adds above do.
+--
 -- 2. risk_audit_log accepts closed, reopened and deleted. This is the full
 --    list from 20261206000000_risk_acceptance_transitions.sql plus the
 --    three new values. risk_audit_log has no foreign key to risks and its
@@ -35,6 +44,7 @@ ALTER TABLE risks ADD COLUMN IF NOT EXISTS closure_note TEXT NOT NULL DEFAULT ''
 ALTER TABLE risks ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ NULL;
 ALTER TABLE risks ADD COLUMN IF NOT EXISTS closed_by TEXT NOT NULL DEFAULT '';
 
+ALTER TABLE risks DROP CONSTRAINT IF EXISTS risks_closure_consistent;
 ALTER TABLE risks ADD CONSTRAINT risks_closure_consistent
     CHECK (
         (status = 'open'
@@ -48,6 +58,10 @@ ALTER TABLE risks ADD CONSTRAINT risks_closure_consistent
             AND closed_at IS NOT NULL
             AND length(closed_by) > 0)
     );
+
+ALTER TABLE risks DROP CONSTRAINT IF EXISTS risks_closure_note_length;
+ALTER TABLE risks ADD CONSTRAINT risks_closure_note_length
+    CHECK (length(closure_note) <= 4000);
 
 ALTER TABLE risk_audit_log
     DROP CONSTRAINT risk_audit_log_action_type_check;

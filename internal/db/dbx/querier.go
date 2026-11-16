@@ -2725,6 +2725,10 @@ type Querier interface {
 	// A risk with no row here is not a roll-up. The register leaves roll-ups
 	// out of its rows and counts by default, so a parent never reads as a
 	// duplicate of the children it summarises.
+	//
+	// Only open children count (#2107): the register leaves closed risks out,
+	// so a parent whose children are all closed summarises nothing the
+	// register shows. It is not a roll-up, and it stays listed.
 	ListRiskChildCountsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListRiskChildCountsForTenantRow, error)
 	// The children of a parent risk with the fields the hierarchy views show
 	// (#1748). rule_id NULL means the link was made by hand.
@@ -2770,7 +2774,14 @@ type Querier interface {
 	// brief's date.
 	//
 	// Closed risks are left out (#2107), unless they were closed after the
-	// brief's date: as of that date they were still open.
+	// brief's date: as of that date they were still open. A roll-up counts
+	// only children open as of that date, so a parent whose children were all
+	// closed by then is ranked itself rather than hidden with them.
+	//
+	// Closure is read from the risk's current state, so a risk closed before
+	// the brief's date and reopened since reads as open throughout. A brief
+	// generated at the time froze what it showed; this matters only for a
+	// brief generated later for an earlier date.
 	ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error)
 	// AC-3: risks linked to one control via slice 020's risk_control_links.
 	// One join from the link table to risks; the per-link design_score is the

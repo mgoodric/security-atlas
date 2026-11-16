@@ -18,6 +18,7 @@ ALTER TABLE risk_audit_log
         'acceptance_revoked'
     ));
 
+ALTER TABLE risks DROP CONSTRAINT IF EXISTS risks_closure_note_length;
 ALTER TABLE risks DROP CONSTRAINT IF EXISTS risks_closure_consistent;
 ALTER TABLE risks DROP COLUMN IF EXISTS closed_by;
 ALTER TABLE risks DROP COLUMN IF EXISTS closed_at;
