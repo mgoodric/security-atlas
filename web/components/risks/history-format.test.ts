@@ -118,6 +118,21 @@ describe("risk history format (#2104)", () => {
     expect(changes).toEqual([]);
   });
 
+  test("a control link and unlink read as the control (#2106)", () => {
+    const control = "6a7c829b-ad4a-4472-aaac-46e95717767f";
+    expect(historyActionLabel("control_linked")).toBe("Control linked");
+    expect(historyActionLabel("control_unlinked")).toBe("Control unlinked");
+    expect(
+      historyChanges(
+        entry(
+          "control_unlinked",
+          { control_id: control },
+          { control_id: null },
+        ),
+      ),
+    ).toEqual([{ field: "Control", before: control, after: "none" }]);
+  });
+
   test("a close and a reopen read their status and closure (#2107)", () => {
     expect(historyActionLabel("closed")).toBe("Closed");
     expect(historyActionLabel("reopened")).toBe("Reopened");

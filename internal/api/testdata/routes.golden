@@ -17,6 +17,7 @@ DELETE /v1/policies/{id}
 DELETE /v1/risks/categories/{ref}
 DELETE /v1/risks/{id}
 DELETE /v1/risks/{id}/children/{child_id}
+DELETE /v1/risks/{id}/controls/{control_id}
 DELETE /v1/risks/{id}/themes/{theme}
 DELETE /v1/saved-views/{id}
 DELETE /v1/themes/{ref}

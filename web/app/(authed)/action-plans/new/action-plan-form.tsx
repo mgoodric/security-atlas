@@ -28,19 +28,21 @@ import {
 
 type Props = {
   onSubmit: (body: CreateActionPlanInput) => Promise<void>;
+  // #2106: risks the form starts with linked ("Add action plan" on a risk).
+  initialRiskIds?: readonly string[];
 };
 
 const OWNER_KINDS: readonly EntityKind[] = ["user"];
 const RISK_KINDS: readonly EntityKind[] = ["risk"];
 const CONTROL_KINDS: readonly EntityKind[] = ["control"];
 
-export function ActionPlanForm({ onSubmit }: Props) {
+export function ActionPlanForm({ onSubmit, initialRiskIds = [] }: Props) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [triggeringEvent, setTriggeringEvent] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [riskIds, setRiskIds] = useState<string[]>([]);
+  const [riskIds, setRiskIds] = useState<string[]>(() => [...initialRiskIds]);
   const [controlIds, setControlIds] = useState<string[]>([]);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitErr, setSubmitErr] = useState<string | null>(null);

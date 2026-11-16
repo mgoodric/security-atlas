@@ -6196,6 +6196,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/controls/{control_id}:
+    delete:
+      summary: DELETE /v1/risks/{id}/controls/{control_id} — unlink a control from a risk; 400 when it is the last link of a mitigate risk with no live action plan; 404 when not linked; 409 when the risk is closed; audit-logged
+      tags: [risks]
+      operationId: delete-v1-risks-id-controls-control_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: control_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/parents:
     get:
       summary: GET /v1/risks/{id}/parents — the parent risks this risk rolls up to
