@@ -79,6 +79,9 @@ const (
 	// KindControlImport is control_import_audit_log (#1782): control
 	// import approvals, rejections and duplicates.
 	KindControlImport Kind = "control_import"
+	// KindPostureTarget is framework_posture_target_audit_log (#2136): a
+	// framework version's posture target set.
+	KindPostureTarget Kind = "posture_target"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -111,6 +114,7 @@ var AllKinds = []Kind{
 	KindTaxonomy,
 	KindMappingOverlay,
 	KindControlImport,
+	KindPostureTarget,
 }
 
 // IsCanonical reports whether k is one of the nine canonical kinds.

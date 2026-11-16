@@ -140,6 +140,8 @@ sql:
       - "migrations/sql/20261204000000_overlay_edges_version_carry_over.sql"
       # #2105: risks gain the acceptance record (proposal, approval, self-approved).
       - "migrations/sql/20261206000000_risk_acceptance_transitions.sql"
+      # #2136: posture targets per framework version, and their audit log.
+      - "migrations/sql/20261211000000_framework_posture_targets.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -38,6 +38,8 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 	unifiedlog.KindMappingOverlay: "mapping-overlays",
 	// Control import rows are read with the controls they create.
 	unifiedlog.KindControlImport: "controls",
+	// Posture targets are set and read under /v1/framework-scopes.
+	unifiedlog.KindPostureTarget: "framework-scopes",
 }
 
 // payloadGate decides, per row, whether the caller sees payload_json. It

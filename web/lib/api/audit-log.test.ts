@@ -100,6 +100,7 @@ describe("AUDIT_LOG_KINDS", () => {
       "taxonomy",
       "mapping_overlay",
       "control_import",
+      "posture_target",
     ]);
   });
 });

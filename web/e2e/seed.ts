@@ -131,7 +131,11 @@ export type FixtureName =
   | "org-mapping"
   // #2118 — an open audit period and an auditor user of its own, with
   // no assignment, for period-auditors.spec.ts.
-  | "period-auditors";
+  | "period-auditors"
+  // #2136 — two framework versions, one with an activated scope and no
+  // posture target (reset each run), one with no scope, for
+  // posture-targets.spec.ts.
+  | "posture-targets";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

@@ -3598,6 +3598,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/framework-scopes/posture-targets/{framework_version_id}:
+    get:
+      summary: GET /v1/framework-scopes/posture-targets/{framework_version_id} — a framework version's posture target (target, warning and critical thresholds, direction); 404 when none is set
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-posture-targets-framework_version_id
+      security:
+        - bearer: []
+      parameters:
+        - name: framework_version_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/framework-scopes/posture-targets/{framework_version_id} — set a framework version's posture target; admin or grc_engineer, and the version needs an activated scope
+      tags: [framework-scopes]
+      operationId: put-v1-framework-scopes-posture-targets-framework_version_id
+      security:
+        - bearer: []
+      parameters:
+        - name: framework_version_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}:
     get:
       summary: GET /v1/framework-scopes/{id}
