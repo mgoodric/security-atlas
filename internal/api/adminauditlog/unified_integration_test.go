@@ -141,6 +141,18 @@ func seedUnifiedRow(t *testing.T, tenantID uuid.UUID, table string) time.Time {
 		     VALUES (gen_random_uuid(), $1, $2, 'created', 'seeder')
 		     RETURNING created_at`
 		args = []any{tenantID, ruleID}
+	case "taxonomy_audit_log":
+		q = `INSERT INTO taxonomy_audit_log
+		     (tenant_id, subject_kind, subject_id, subject_slug, action, after, actor)
+		     VALUES ($1, 'category', gen_random_uuid(), 'access', 'create', '{"name":"Access"}'::jsonb, 'seeder')
+		     RETURNING occurred_at`
+		args = []any{tenantID}
+	case "fw_to_scf_overlay_edge_audit_log":
+		q = `INSERT INTO fw_to_scf_overlay_edge_audit_log
+		     (tenant_id, overlay_edge_id, action, after, actor)
+		     VALUES ($1, gen_random_uuid(), 'create', '{"rationale":"seeded"}'::jsonb, 'seeder')
+		     RETURNING occurred_at`
+		args = []any{tenantID}
 	default:
 		t.Fatalf("seedUnifiedRow: unsupported table %q", table)
 	}
@@ -172,6 +184,8 @@ func cleanupUnifiedTables(t *testing.T, tenantID uuid.UUID) {
 			"feature_flag_audit_log",
 			"me_audit_log",
 			"walkthrough_audit_log",
+			"taxonomy_audit_log",
+			"fw_to_scf_overlay_edge_audit_log",
 			"aggregation_rule_audit_log",
 			"aggregation_rules",
 		} {

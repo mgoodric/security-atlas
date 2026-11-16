@@ -14,7 +14,7 @@ It follows the slice-004 AWS connector pattern: register-per-run, stable
 | ----------------------------- | ------- | ------------------------------- | ------------------- |
 | `slack.workspace_member.v1`   | pull    | `users.list` (admin users)      | `IAC-01`, `IAC-37`  |
 | `slack.admin_audit_event.v1`  | pull    | audit-logs API `/audit/v1/logs` | `MON-02`            |
-| `slack.retention_settings.v1` | pull    | `team.preferences.list`         | `DCH-01`, `DCH-03`  |
+| `slack.retention_settings.v1` | pull    | `team.preferences.list`         | `DCH-04`, `DCH-27`  |
 
 - **workspace_member** — one record per member: stable id, public handle,
   admin/owner role flags, deactivation state, and 2FA-enforcement. Verdict:
@@ -104,7 +104,7 @@ slack-connector run \
 | `--slack-token`          | `run`      | yes      | env `SLACK_TOKEN`             | least-privilege read-only Slack OAuth token |
 | `--member-control-id`    | `run`      | no       | `scf:IAC-01`                  | control id on member records                |
 | `--audit-control-id`     | `run`      | no       | `scf:MON-02`                  | control id on audit records                 |
-| `--retention-control-id` | `run`      | no       | `scf:DCH-01`                  | control id on the retention record          |
+| `--retention-control-id` | `run`      | no       | `scf:DCH-04`                  | control id on the retention record          |
 
 ## Scope minimums
 

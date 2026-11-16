@@ -103,6 +103,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
+
 	format, ok := formatFromContentType(r.Header.Get("Content-Type"))
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnsupportedMediaType,
@@ -131,7 +136,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.store.Create(r.Context(), rule, actorFrom(r))
+	created, err := h.store.Create(r.Context(), rule, actor)
 	if err != nil {
 		var ve *aggrule.ValidationError
 		switch {
@@ -212,12 +217,15 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, activate bo
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	actor := actorFrom(r)
 
 	var sr aggrule.StoredRule
 	if activate {
@@ -311,15 +319,15 @@ func formatFromContentType(ct string) (aggrule.Format, bool) {
 	}
 }
 
-// actorFrom resolves the human (or service principal) performing the action
-// for the audit log. The authenticated credential's subject is the actor;
-// when no credential is in context (unit-test servers) it falls back to a
-// non-empty sentinel so the audit-log actor-nonempty CHECK never trips.
-func actorFrom(r *http.Request) string {
+// actorFrom names the caller on the audit row: the credential's id. With
+// no credential (or one without an id) in context it writes a 401 and
+// returns false, so a write is never recorded without an actor (#2375).
+func actorFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if cred, ok := authctx.CredentialFromContext(r.Context()); ok && cred.ID != "" {
-		return cred.ID
+		return cred.ID, true
 	}
-	return "system"
+	httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
+	return "", false
 }
 
 // writeValidationError renders a *aggrule.ValidationError as a 400 with the
