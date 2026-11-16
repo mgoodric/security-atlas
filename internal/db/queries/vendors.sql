@@ -6,11 +6,12 @@ INSERT INTO vendors (
     id, tenant_id, name, domain, criticality, contract_start, contract_end,
     dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user,
     linked_sow_uri, notes, annual_cost, currency, renewal_date, auto_renew,
-    license_count, tool_category, cost_owner, commercial_status, billing_cadence
+    license_count, tool_category, cost_owner, commercial_status, billing_cadence,
+    owner_user_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21, $22, $23
+    $17, $18, $19, $20, $21, $22, $23, $24
 )
 RETURNING *;
 
@@ -40,6 +41,7 @@ UPDATE vendors SET
     cost_owner       = $21,
     commercial_status = $22,
     billing_cadence  = $23,
+    owner_user_id    = $24,
     updated_at       = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;

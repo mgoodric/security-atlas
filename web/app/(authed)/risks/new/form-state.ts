@@ -20,6 +20,11 @@ export type FormState = {
   category: string;
   methodology: string;
   treatment: RiskTreatment;
+  // #2129: the owner, a user id ("" for none), set with the user picker.
+  owner_user_id: string;
+  // The free-text owner no user matched ("Owner (unlinked)"). Read-only:
+  // the form shows it with a prompt to pick the user it names, and the
+  // platform clears it once one is picked.
   treatment_owner: string;
   likelihood: number;
   impact: number;
@@ -47,6 +52,7 @@ export function initialState(): FormState {
     // #1746: open on "untreated" (no decision yet, no required fields).
     // See validate.ts DEFAULT_TREATMENT.
     treatment: DEFAULT_TREATMENT,
+    owner_user_id: "",
     treatment_owner: "",
     likelihood: 3,
     impact: 3,
@@ -98,7 +104,12 @@ export function riskToFormState(risk: Risk): FormState {
   s.category = risk.category;
   s.methodology = risk.methodology;
   s.treatment = risk.treatment as RiskTreatment;
-  s.treatment_owner = risk.treatment_owner;
+  s.owner_user_id = risk.owner_user_id ?? "";
+  // A response without owner_unlinked (an older platform) carries the
+  // unlinked text in treatment_owner alone.
+  s.treatment_owner = risk.owner_user_id
+    ? ""
+    : (risk.owner_unlinked ?? risk.treatment_owner ?? "").trim();
   s.instrument_reference = risk.instrument_reference;
   s.linked_control_ids = risk.linked_control_ids;
   s.review_due = utcDay(risk.review_due_at);
@@ -124,8 +135,9 @@ export function toPatchInput(initial: FormState, s: FormState): RiskPatchInput {
     body.description = description;
   }
   if (s.category && s.category !== initial.category) body.category = s.category;
-  const owner = s.treatment_owner.trim();
-  if (owner !== initial.treatment_owner.trim()) body.treatment_owner = owner;
+  if (s.owner_user_id !== initial.owner_user_id) {
+    body.owner_user_id = s.owner_user_id || null;
+  }
   const instrument = s.instrument_reference.trim();
   if (instrument !== initial.instrument_reference.trim()) {
     body.instrument_reference = instrument;

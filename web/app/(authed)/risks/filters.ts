@@ -94,9 +94,9 @@ export function isDefault(filters: RiskFilters): boolean {
  * string from `riskWire`; the severity filter buckets the numeric
  * `severity` scalar into the four bands above.
  *
- * Unassigned-owner rows match `owner = "unassigned"` (the sentinel the
- * mockup uses) — the wire shape carries an empty string for an unset
- * treatment_owner, so the filter normalizes both shapes.
+ * The owner filter matches `ownerKey(row)` (#2129): the owner's user id,
+ * else the "Owner (unlinked)" free text, else the "unassigned" sentinel
+ * the mockup uses.
  *
  * Slice 244 — three new branches:
  *   - category: exact match against the category slug on the wire
@@ -118,8 +118,7 @@ export function applyFilters(rows: Risk[], filters: RiskFilters): Risk[] {
       if (severityBand(row.severity) !== filters.severity) return false;
     }
     if (filters.owner !== ALL) {
-      const ownerNorm = row.treatment_owner.trim() || "unassigned";
-      if (ownerNorm !== filters.owner) return false;
+      if (ownerKey(row) !== filters.owner) return false;
     }
     if (filters.category !== ALL && row.category !== filters.category) {
       return false;
@@ -138,6 +137,16 @@ export function applyFilters(rows: Risk[], filters: RiskFilters): Risk[] {
 }
 
 /**
+ * The owner a register row filters on (#2129): its owner's user id; else
+ * the free-text owner no user matched ("Owner (unlinked)"); else
+ * "unassigned".
+ */
+export function ownerKey(row: Risk): string {
+  if (row.owner_user_id) return row.owner_user_id;
+  return (row.owner_unlinked ?? "").trim() || "unassigned";
+}
+
+/**
  * Extract the unique owner set from a row list. Used to drive the
  * "Owner" pill options. Sorted alphabetically with the "unassigned"
  * sentinel pinned last so it stays visually distinct from real names.
@@ -146,8 +155,8 @@ export function uniqueOwners(rows: Risk[]): string[] {
   const seen = new Set<string>();
   let hasUnassigned = false;
   for (const r of rows) {
-    const norm = r.treatment_owner.trim();
-    if (norm === "") {
+    const norm = ownerKey(r);
+    if (norm === "unassigned") {
       hasUnassigned = true;
     } else {
       seen.add(norm);

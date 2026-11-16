@@ -5,8 +5,8 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
-import { isEmail, VENDOR_OWNER_EMAIL_ERROR } from "@/lib/email";
 import { Vendor, VendorWrite } from "@/lib/api/vendors";
 
 // Slice-024 vendor create/edit form. Intentionally simple — the AC says
@@ -52,7 +52,11 @@ function fromVendor(v: Vendor | undefined): VendorWrite {
     dpa_signed_at: v?.dpa_signed_at ?? "",
     review_cadence: v?.review_cadence ?? "annual",
     last_review_date: v?.last_review_date ?? "",
-    owner_user: v?.owner_user ?? "",
+    owner_user_id: v?.owner_user_id ?? "",
+    // #2129: only the unlinked text is carried; a linked owner has none.
+    owner_user: v?.owner_user_id
+      ? ""
+      : v?.owner_unlinked ?? v?.owner_user ?? "",
     linked_sow_uri: v?.linked_sow_uri ?? "",
     notes: v?.notes ?? "",
     annual_cost: v?.annual_cost ?? null,
@@ -102,12 +106,10 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
   const [body, setBody] = useState<VendorWrite>(fromVendor(initial));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ownerError, setOwnerError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
 
   function update<K extends keyof VendorWrite>(key: K, value: VendorWrite[K]) {
     setBody((b) => ({ ...b, [key]: value }));
-    if (key === "owner_user") setOwnerError(null);
     if (key === "name") setNameError(null);
   }
 
@@ -119,17 +121,8 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
       setNameError("Name is required.");
       return;
     }
-    // ATLAS-032 (slice 679): the owner field is contractually an email.
-    // Reject a non-email (e.g. a role string) before the network call so
-    // the invalid value never reaches the store or the export's masker.
-    // An empty owner stays allowed — the field is optional, only a
-    // present-but-malformed value is rejected.
-    const owner = body.owner_user.trim();
-    if (owner !== "" && !isEmail(owner)) {
-      setOwnerError(VENDOR_OWNER_EMAIL_ERROR);
-      return;
-    }
-    setOwnerError(null);
+    // #2129: the owner is picked from the tenant's users, so there is no
+    // free text to check (ATLAS-032's email rule applied to the text).
     setSubmitting(true);
     setError(null);
     try {
@@ -186,24 +179,31 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
               placeholder="datadoghq.com"
             />
           </Field>
-          <Field label="Owner (email)">
-            <Input
-              type="email"
-              value={body.owner_user}
-              onChange={(e) => update("owner_user", e.target.value)}
-              placeholder="alice@demo.example"
-              aria-invalid={ownerError ? true : undefined}
-              aria-describedby={ownerError ? "owner-error" : undefined}
-              data-testid="vendor-owner-input"
+          <Field label="Owner">
+            <EntityPicker
+              kinds={["user"]}
+              id="vendor-owner"
+              value={body.owner_user_id ?? ""}
+              onChange={(id) => update("owner_user_id", id)}
+              testId="vendor-owner-input"
+              errorId="vendor-owner-error"
+              placeholder="Search people by name"
+              describedBy={
+                !body.owner_user_id && body.owner_user.trim()
+                  ? "vendor-owner-unlinked"
+                  : undefined
+              }
             />
-            {ownerError ? (
+            {/* #2129: a free-text owner no user matched, kept until a
+                user is picked. Rendered as text, never as markup. */}
+            {!body.owner_user_id && body.owner_user.trim() ? (
               <p
-                id="owner-error"
-                role="alert"
-                className="text-xs text-destructive"
-                data-testid="vendor-owner-error"
+                id="vendor-owner-unlinked"
+                className="text-xs text-muted-foreground"
+                data-testid="vendor-owner-unlinked"
               >
-                {ownerError}
+                Owner (unlinked): {body.owner_user.trim()}. Pick the person this
+                names.
               </p>
             ) : null}
           </Field>
