@@ -86,6 +86,9 @@ export type DashboardRisk = {
   treatment: string;
   // #1746: proposed | approved when treatment is accept; absent otherwise.
   acceptance_status?: "proposed" | "approved";
+  // #2129: the owner (a user id) and any unlinked free-text owner.
+  owner_user_id?: string | null;
+  owner_unlinked?: string;
   treatment_owner: string;
   residual_score: unknown;
   review_due_at?: string;

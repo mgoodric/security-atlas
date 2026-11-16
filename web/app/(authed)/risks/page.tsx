@@ -70,6 +70,8 @@ import {
 import { Term } from "@/components/help/term";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Person, usePeopleDirectory } from "@/components/ui/person";
+import { resolvePerson } from "@/lib/person";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
   fetchRegisterRisks,
@@ -422,16 +424,26 @@ function RisksPageInner() {
     [visible, currentPage],
   );
 
+  // #2129: an owner is a user id, shown by name; unlinked free text is
+  // listed as itself.
+  const people = usePeopleDirectory();
   const ownerOptions: { value: string; label: string }[] = useMemo(() => {
     const owners = uniqueOwners(rows);
+    const linked = new Set(
+      rows.map((r) => r.owner_user_id).filter((id): id is string => !!id),
+    );
     return [
       { value: ALL, label: "All owners" },
       ...owners.map((o) => ({
         value: o,
-        label: o === "unassigned" ? "unassigned" : o,
+        label: linked.has(o)
+          ? resolvePerson(o, people.data).text
+          : o === "unassigned"
+            ? "unassigned"
+            : `${o} (unlinked)`,
       })),
     ];
-  }, [rows]);
+  }, [rows, people.data]);
 
   // Slice 244 — Org unit options derive from the unique `org_unit_id`
   // set on the loaded rows (same pattern as `ownerOptions`), then join
@@ -654,15 +666,32 @@ function RisksPageInner() {
       id: "treatment_owner",
       header: "Owner",
       cell: (row) => {
-        const owner = row.treatment_owner.trim();
-        if (owner === "") {
+        if (row.owner_user_id) {
+          return (
+            <Person
+              id={row.owner_user_id}
+              className="text-xs text-muted-foreground"
+              testId="risks-row-owner"
+            />
+          );
+        }
+        const unlinked = (row.owner_unlinked ?? "").trim();
+        if (unlinked === "") {
           return (
             <span className="text-xs italic text-muted-foreground">
               unassigned
             </span>
           );
         }
-        return <span className="text-xs text-muted-foreground">{owner}</span>;
+        return (
+          <span
+            className="text-xs text-muted-foreground"
+            title="Owner (unlinked): no user matched this text. Edit the risk to pick one."
+            data-testid="risks-row-owner-unlinked"
+          >
+            {unlinked} <span className="italic">(unlinked)</span>
+          </span>
+        );
       },
     },
     {

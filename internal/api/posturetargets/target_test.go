@@ -1,11 +1,16 @@
 package posturetargets
 
 import (
+	"context"
 	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 func f(v float64) *float64 { return &v }
@@ -59,27 +64,45 @@ func TestInputValidate(t *testing.T) {
 	}
 }
 
-func TestHasTargetAdmin(t *testing.T) {
+// TestSet_Gate: the posture-target write gate is authz.IsTenantApprover
+// (#2447). An admitted caller reaches the version parse (400 on a bad id);
+// a refused one gets 403 first. A JWT role claim with no live tenant role
+// is refused, so a revoked grant fails while its token is still live.
+func TestSet_Gate(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
 		cred credstore.Credential
-		want bool
+		want int
 	}{
-		{"platform admin", credstore.Credential{IsAdmin: true}, true},
-		{"approver flag", credstore.Credential{IsApprover: true}, true},
-		{"admin role", credstore.Credential{OwnerRoles: []string{"admin"}}, true},
-		{"grc_engineer role", credstore.Credential{OwnerRoles: []string{"grc_engineer"}}, true},
-		{"viewer", credstore.Credential{OwnerRoles: []string{"viewer"}}, false},
-		{"auditor", credstore.Credential{OwnerRoles: []string{"auditor"}}, false},
-		{"control_owner", credstore.Credential{OwnerRoles: []string{"control_owner"}}, false},
-		{"no signal", credstore.Credential{}, false},
+		{"platform admin", credstore.Credential{IsAdmin: true}, http.StatusBadRequest},
+		{"approver flag", credstore.Credential{IsApprover: true}, http.StatusBadRequest},
+		{"live admin", credstore.Credential{ID: "jwt:a", TenantRoles: []string{"admin"}}, http.StatusBadRequest},
+		{"live grc_engineer", credstore.Credential{ID: "jwt:g", TenantRoles: []string{"grc_engineer"}}, http.StatusBadRequest},
+		{"live viewer", credstore.Credential{ID: "jwt:v", TenantRoles: []string{"viewer"}}, http.StatusForbidden},
+		{"live auditor", credstore.Credential{ID: "jwt:u", TenantRoles: []string{"auditor"}}, http.StatusForbidden},
+		{"live control_owner", credstore.Credential{ID: "jwt:c", TenantRoles: []string{"control_owner"}}, http.StatusForbidden},
+		{"revoked admin, JWT claim live", credstore.Credential{ID: "jwt:r", OwnerRoles: []string{"admin"}}, http.StatusForbidden},
+		{"revoked grc_engineer, JWT claim live", credstore.Credential{ID: "jwt:s", OwnerRoles: []string{"grc_engineer"}}, http.StatusForbidden},
+		{"API key grc_engineer label", credstore.Credential{ID: "key_g", OwnerRoles: []string{"grc_engineer"}}, http.StatusBadRequest},
+		{"no signal", credstore.Credential{}, http.StatusForbidden},
 	}
+	const tenant = "00000000-0000-4000-8000-000000002447"
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := hasTargetAdmin(tc.cred); got != tc.want {
-				t.Fatalf("hasTargetAdmin = %v; want %v", got, tc.want)
+			cred := tc.cred
+			cred.TenantID = tenant
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			r := httptest.NewRequest(http.MethodPut, "/v1/framework-scopes/posture-targets/not-a-uuid", nil)
+			r = r.WithContext(authctx.WithCredential(ctx, cred))
+			w := httptest.NewRecorder()
+			New(nil).Set(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("Set status = %d; want %d", w.Code, tc.want)
 			}
 		})
 	}

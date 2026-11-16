@@ -136,6 +136,14 @@ Risks roll up through the `risk_aggregations` join table (parent → child, many
 
 **Organisation theme** — a theme a tenant adds beside the built-ins, visible only to that tenant. Its name must be unique across the built-ins and the tenant's own themes. A rename rewrites the name on every one of the tenant's risks and aggregation rules in one transaction; a delete is refused while any risk or rule uses it.
 
+## Owner and Owner role (#2129)
+
+**Owner** — the person accountable for a record: always a user of the record's own tenant, never free text or a role. A control's owner is the user "assign owner" sets (`control_owner_assignments`, #2128); a risk's and a vendor's is `owner_user_id` (#2129). Setting one checks the user is active in the tenant (422 otherwise) and writes an audit row: a risk's `fields_changed` row, a vendor's `vendor_owner_update` row in `me_audit_log`. The API returns the owner as a user id, which the web app shows by name.
+
+**Owner (unlinked)** — the free text a risk (`treatment_owner`) or vendor (`owner_user`) carried before owners were users, when no single user matched it. The #2129 migration linked text equal to exactly one active user's name or email (ignoring case) and left the rest, including names two users share, as unlinked text. It is display-only, returned as `owner_unlinked`, and shown with a prompt to pick the user it names; picking one clears it. A record with an owner has no unlinked text.
+
+**Owner role** — a role, not a person: the role that owns a **policy** (`policies.owner_role`), and a control's **default owner role** from its manifest (`owner_role`), shown beside the control's Owner. A user counts as a policy's owner while they hold its owner role.
+
 ## Exception (slice 021)
 
 A time-bounded, scope-bounded waiver of a control's normal evaluation. Always:

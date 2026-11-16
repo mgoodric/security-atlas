@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { ComponentDefinitionList } from "@/lib/api/oscal-components";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 export default function ComponentDefinitionsPage() {
   const q = useQuery({
@@ -38,7 +39,14 @@ export default function ComponentDefinitionsPage() {
   return (
     <PageShell
       title={pageTitle("/oscal/component-definitions")}
-      subtitle="Imported vendor component-definitions. Each claim is a vendor assertion, not platform-verified evidence — accept, reject, or ask for more information."
+      subtitle={
+        <>
+          Imported vendor <Term id="oscal">OSCAL</Term> component-definitions.
+          Each <Term id="vendor-claim">claim</Term> is a vendor assertion, not
+          platform-verified evidence — accept, reject, or ask for more
+          information.
+        </>
+      }
       data-testid="component-definitions-page"
     >
       {q.isLoading && (

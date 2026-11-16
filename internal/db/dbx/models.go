@@ -3146,6 +3146,7 @@ type Risk struct {
 	ClosureNote             string                `json:"closure_note"`
 	ClosedAt                pgtype.Timestamptz    `json:"closed_at"`
 	ClosedBy                string                `json:"closed_by"`
+	OwnerUserID             pgtype.UUID           `json:"owner_user_id"`
 }
 
 type RiskAggregation struct {
@@ -3588,6 +3589,7 @@ type Vendor struct {
 	CostOwner        string                 `json:"cost_owner"`
 	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
 	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
+	OwnerUserID      pgtype.UUID            `json:"owner_user_id"`
 }
 
 type VendorReview struct {
