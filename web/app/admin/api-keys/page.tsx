@@ -374,6 +374,8 @@ function IssueForm({
   // when the alert is absent so React strips the attribute cleanly.
   // See `web/components/ui/checkbox.tsx` for the convention.
   const errorId = error ? "issue-credential-error" : undefined;
+  let rawDescribedBy = errorId ?? "issue-scope-json-hint";
+  if (rawError) rawDescribedBy = "issue-scope-json-error";
 
   function openRaw() {
     setRawText(advancedText(predicate));
@@ -462,8 +464,15 @@ function IssueForm({
                 className="w-full rounded-md border bg-background p-2 font-mono text-xs"
                 data-testid="issue-scope-json"
                 aria-invalid={rawError ? true : undefined}
-                aria-describedby={rawError ? "issue-scope-json-error" : errorId}
+                aria-describedby={rawDescribedBy}
               />
+              <p
+                id="issue-scope-json-hint"
+                className="text-xs text-muted-foreground"
+                data-testid="issue-scope-json-hint"
+              >
+                Blank means Everything (unrestricted).
+              </p>
               {rawError ? (
                 <p
                   id="issue-scope-json-error"

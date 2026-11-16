@@ -105,9 +105,10 @@ test.describe("API key scope builder (#2088)", () => {
       expect(JSON.parse(stored!.scope_predicate)).toEqual(eq);
     } finally {
       // Leave no live key behind in the shared tenant.
-      await page.request.post(
+      const rev = await page.request.post(
         `/api/admin/credentials/${encodeURIComponent(id)}/revoke`,
       );
+      expect(rev.ok(), `revoke of issued key ${id}`).toBe(true);
     }
   });
 
@@ -145,6 +146,9 @@ test.describe("API key scope builder (#2088)", () => {
     await toggle.click();
     const editor = page.getByTestId("issue-scope-json");
     expect(JSON.parse(await editor.inputValue())).toEqual(eq);
+    await expect(page.getByTestId("issue-scope-json-hint")).toHaveText(
+      "Blank means Everything (unrestricted).",
+    );
 
     // An edit the builder can show goes back into the pickers...
     const both = { op: "in", dim: "environment", values: ["prod", "staging"] };
