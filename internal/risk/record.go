@@ -157,7 +157,6 @@ func updateRecordTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, nex
 		ID:                  pgUUID(next.ID),
 		Title:               next.Title,
 		Description:         next.Description,
-		Category:            next.Category,
 		Methodology:         next.Methodology,
 		InherentScore:       next.InherentScore,
 		Treatment:           next.Treatment,
