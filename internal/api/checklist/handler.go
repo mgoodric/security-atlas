@@ -29,6 +29,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/checklist"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -136,7 +137,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to generate a checklist")
 		return
 	}
@@ -168,7 +169,7 @@ func (h *Handler) LoadGeneration(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin && len(cred.OwnerRoles) == 0 {
+	if !authz.IsTenantApprover(cred) && len(cred.OwnerRoles) == 0 {
 		httpresp.WriteError(w, http.StatusForbidden, "role does not grant checklist-read access")
 		return
 	}
@@ -203,7 +204,7 @@ func (h *Handler) ApproveSection(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve a checklist section")
 		return
 	}
@@ -246,7 +247,7 @@ func (h *Handler) ExportMarkdown(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin && len(cred.OwnerRoles) == 0 {
+	if !authz.IsTenantApprover(cred) && len(cred.OwnerRoles) == 0 {
 		httpresp.WriteError(w, http.StatusForbidden, "role does not grant checklist-read access")
 		return
 	}

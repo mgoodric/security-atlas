@@ -25,6 +25,11 @@ type Decision struct {
 	Allow      bool
 	Reason     string
 	PolicyHits []string
+	// LiveRoles is the canonical subset of the caller's user_roles rows the
+	// resolver returned for this decision, without the credential-derived
+	// roles. authzmw hands it to handlers as credstore.Credential.TenantRoles
+	// (#2428), so a handler gate reads the same live assignment OPA did.
+	LiveRoles []Role
 }
 
 // Engine wraps a prepared OPA query. It is goroutine-safe and intended
@@ -229,6 +234,7 @@ func (e *Engine) WithAttrsResolver(r AttrsResolver) *Engine {
 func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 	// Resolver hook: enrich roles from user_roles table when the input
 	// arrived without any (or with only credential-derived roles).
+	var liveRoles []Role
 	if in.TenantID != "" && in.User.ID != "" {
 		dbRoles, err := e.resolver.RolesFor(ctx, in.TenantID, in.User.ID)
 		if err != nil {
@@ -239,6 +245,7 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 			return Decision{}, wrapIfDependencyUnavailable(fmt.Errorf("authz: resolve roles: %w", err))
 		}
 		if len(dbRoles) > 0 {
+			liveRoles = mergeRoles(nil, dbRoles)
 			in.User.Roles = mergeRoles(in.User.Roles, dbRoles)
 		}
 	}
@@ -308,8 +315,9 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 		}, nil
 	}
 	return Decision{
-		Allow:  true,
-		Reason: "allowed",
+		Allow:     true,
+		Reason:    "allowed",
+		LiveRoles: liveRoles,
 	}, nil
 }
 

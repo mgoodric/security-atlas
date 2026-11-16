@@ -32,6 +32,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/approval"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
@@ -214,7 +215,7 @@ func (h *Handler) runTransition(w http.ResponseWriter, r *http.Request, req any,
 		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
 		return
 	}
-	if needsApprover && !cred.IsApprover && !cred.IsAdmin {
+	if needsApprover && !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}

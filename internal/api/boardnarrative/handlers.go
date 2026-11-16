@@ -8,8 +8,9 @@
 //	POST /v1/board/narrative/generate   generate the coverage-section DRAFT
 //	POST /v1/board/narrative/approve    one-click approve a section (records approver)
 //
-// Both routes are ROLE-GATED: board narratives are an admin / grc_engineer
-// (IsApprover) capability (AC-11, threat-model S). A bare read role cannot
+// Both routes are ROLE-GATED: board narratives are a tenant admin
+// capability (AC-11, threat-model S; authz.IsTenantAdmin, the role set
+// OPA admits on "board", #2428). A bare read role cannot
 // generate a draft that becomes a board-facing artifact, nor approve one.
 //
 // The constitutional invariants (no fabricated coverage, no fabricated numbers,
@@ -31,6 +32,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/boardnarrative"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -73,8 +75,8 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to generate a board-narrative section")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to generate a board-narrative section")
 		return
 	}
 	if h.svc == nil {
@@ -122,8 +124,8 @@ func (h *Handler) GenerateAll(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to generate a board-narrative section")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to generate a board-narrative section")
 		return
 	}
 	if h.svc == nil {
@@ -171,8 +173,8 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve a board-narrative section")
+	if !authz.IsTenantAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin role required to approve a board-narrative section")
 		return
 	}
 	if h.svc == nil {

@@ -33,6 +33,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -647,7 +648,7 @@ func actorFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 // deleted row to the risk's audit trail, which outlives the risk.
 func (h *Handler) DeleteRisk(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || !isTenantAdmin(cred) {
+	if !ok || !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "only an admin can delete a risk; close it instead")
 		return
 	}

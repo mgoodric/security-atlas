@@ -35,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidencesummary"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -162,22 +163,14 @@ func periodEvidenceSetWireFrom(sum evidencesummary.PeriodSummary) periodEvidence
 
 // ===== authz: audit-workspace read guard (defense-in-depth) =====
 
-// hasAuditWorkspaceRead mirrors auditperiods.canWrite — the audit-workspace role
-// set is admin (wildcard) OR grc_engineer (an owner role). The slice-035 OPA
+// hasAuditWorkspaceRead mirrors auditperiods.canReadControlState — the audit-workspace role
+// set is admin OR grc_engineer, by flag or live tenant role (#2428). The slice-035 OPA
 // middleware is the primary gate in production; this handler-level guard is the
 // testable enforcement point when OPA is not wired (unit/integration servers).
 // The period-scoped summary reuses the SAME audit-workspace authz as the
 // slice-028 control-state read — no new role (AC-4 scope discipline).
 func hasAuditWorkspaceRead(c credstore.Credential) bool {
-	if c.IsAdmin {
-		return true
-	}
-	for _, role := range c.OwnerRoles {
-		if role == "grc_engineer" {
-			return true
-		}
-	}
-	return false
+	return authz.IsTenantApprover(c)
 }
 
 // requireAuditWorkspaceRead is the guard the period handler calls FIRST. It

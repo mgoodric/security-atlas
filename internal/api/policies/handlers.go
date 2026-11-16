@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	policypdf "github.com/mgoodric/security-atlas/internal/policy/pdf"
@@ -556,7 +557,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
@@ -588,7 +589,7 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required for publish")
 		return
 	}
@@ -650,7 +651,7 @@ func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required to change a policy review date")
 		return
 	}
