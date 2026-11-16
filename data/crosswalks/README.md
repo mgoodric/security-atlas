@@ -8,10 +8,15 @@ titles"). Every release therefore ships their contents, not just the repo.
 
 ## Authoring rules
 
-- **Never put verbatim standard text in a crosswalk.** A requirement carries
-  its identifier, its title, and a `body` written in our own words. Do not
-  paste clause, control or criterion text from the standard, even for a
-  public-domain framework, and even in a comment.
+- **Never quote a copyrighted standard.** For ISO/IEC 27001, PCI DSS and the
+  AICPA SOC 2 Trust Services Criteria, a requirement carries its identifier,
+  its title, and a `body` written in our own words. Do not paste clause,
+  control or criterion text from the standard, not even in a comment.
+- **Public-domain sources may be quoted.** NIST publications (such as CSF 2.0)
+  and U.S. regulation (such as the HIPAA Security Rule, 45 CFR Part 164) are
+  not under copyright, so a `body` may reproduce the source text.
+- **Check the license before adding a framework.** A standard not named here
+  is treated as copyrighted until its license says otherwise.
 - **The licensing posture in each file's header applies to everything
   shipped.** Read it before adding or changing a requirement, and keep new
   rows within it. A framework whose license forbids bundling (CCM, CAIQ, SIG)

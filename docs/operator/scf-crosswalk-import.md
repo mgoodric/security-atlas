@@ -275,8 +275,8 @@ these sources that has its code:
    body are used whatever its version. The match is on the slug the import
    writes, so pass `--framework-slug soc2` to get the bundled SOC 2 titles
    rather than the slug derived from the workbook's Focal Documents row.
-   Because these files ship inside the binary, they never carry verbatim
-   standard text; `data/crosswalks/README.md` has the authoring rules.
+   Because these files ship inside the binary, they never quote a
+   copyrighted standard; `data/crosswalks/README.md` has the authoring rules.
 3. **The code itself**, but only with `--allow-code-titles`.
 
 A SOC 2 point of focus (`CC1.1-POF3`) takes its parent criterion's title and

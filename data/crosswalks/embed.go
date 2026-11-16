@@ -6,8 +6,10 @@
 // path: atlas-cli catalog import-crosswalk data/crosswalks/<file>.yaml.
 //
 // Because every release ships these files, the licensing posture in each
-// file's header covers the binary too: no verbatim standard text goes in a
-// crosswalk. See README.md in this directory (#2008).
+// file's header covers the binary too: a copyrighted standard (ISO, PCI DSS,
+// AICPA SOC 2) is never quoted, while a public-domain source (NIST
+// publications, U.S. regulation such as 45 CFR) may be. See README.md in this
+// directory (#2008).
 package crosswalks
 
 import (
