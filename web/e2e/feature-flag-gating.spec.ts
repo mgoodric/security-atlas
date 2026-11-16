@@ -24,6 +24,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { ATLAS_JWT_COOKIE } from "../lib/auth";
+import { seedFromFixture } from "./seed";
 
 // A tenant with no feature_flags rows: every flag reads as its seed
 // default. "20f0" ties the id to #2092 (FeatureGate off state).
@@ -33,6 +34,18 @@ const FLAGS_OFF_TENANT = "00000000-0000-0000-0000-0000000020f0";
 // beforeAll, through the real admin API. Its own tenant, so no other spec
 // races it over the flag row. "2170" ties the id to #2170.
 const QUESTIONNAIRES_OFF_TENANT = "00000000-0000-0000-0000-000000002170";
+
+// #2381: a viewer JWT's role claim derives no role by itself; the session
+// holds the user's live user_roles rows. So the viewer signs in as a user
+// fixtures/e2e/feature-flag-gating.sql gives a viewer row, per tenant.
+const VIEWER_USER: Record<string, string> = {
+  [FLAGS_OFF_TENANT]: "44444444-4444-4444-4444-4444444420f0",
+  [QUESTIONNAIRES_OFF_TENANT]: "44444444-4444-4444-4444-444444442170",
+};
+
+test.beforeAll(() => {
+  seedFromFixture("feature-flag-gating");
+});
 
 function atlasBaseURL(): string {
   return process.env.ATLAS_HTTP_URL ?? "http://localhost:8080";
@@ -56,6 +69,7 @@ async function mintJWT(
         ? { tenant_id: tenant, roles: ["admin"], super_admin: true }
         : {
             tenant_id: tenant,
+            user_id: VIEWER_USER[tenant],
             roles: ["viewer"],
             super_admin: false,
           },

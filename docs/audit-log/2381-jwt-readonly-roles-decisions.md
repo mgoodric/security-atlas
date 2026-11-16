@@ -76,6 +76,19 @@ surface #2157 says never matches its ABAC predicate. #2157 may see auditor
 reads that used to pass now fail; that is this fix working, and the
 auditor rules are where it is repaired.
 
+### D6 — e2e viewers sign in as a user with a viewer row
+
+`POST /v1/test/issue-jwt` mints a role claim without writing `user_roles`.
+A viewer token from it now behaves like a revoked user's: no roles, so the
+`/v1/me/*` defaults (which need `count(input.user.roles) > 0`) deny it, and
+the sidebar, unable to read `/v1/me/modules`, shows every module.
+`feature-flag-gating.spec.ts`'s "Questionnaires switched off › viewer: not
+in the sidebar" caught this in CI. The spec now seeds a viewer user with a
+viewer `user_roles` row per tenant (`fixtures/e2e/feature-flag-gating.sql`)
+and mints the token for that user, the shape a real login produces. The
+issuer itself is unchanged: making it write role rows would hide exactly
+the stale-claim case D1 closes.
+
 ## Rollout
 
 `scripts/dry-run-2381-roles.sql` is read-only and prints counts only: per

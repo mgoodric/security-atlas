@@ -131,7 +131,10 @@ export type FixtureName =
   | "org-mapping"
   // #2118 — an open audit period and an auditor user of its own, with
   // no assignment, for period-auditors.spec.ts.
-  | "period-auditors";
+  | "period-auditors"
+  // #2381 — a viewer user with a viewer user_roles row in each of
+  // feature-flag-gating.spec.ts's two tenants.
+  | "feature-flag-gating";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
