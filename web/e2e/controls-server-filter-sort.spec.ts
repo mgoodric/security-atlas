@@ -211,7 +211,7 @@ test.describe("/controls filters and sorts on the server (#2131)", () => {
     );
 
     // Last observed: ascending, then descending, each a new request.
-    const header = page.getByTestId("controls-sort-last_observed_at");
+    const header = table.getByTestId("controls-sort-last_observed_at");
     await header.click();
     await page.waitForURL(
       (u) => u.searchParams.get("sort") === "last_observed_at",

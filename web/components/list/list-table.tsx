@@ -72,6 +72,12 @@ export type ListColumn<Row> = {
    * control in `header`.
    */
   ariaSort?: "ascending" | "descending" | "none";
+  /**
+   * #2131 — the label a mobile card shows for this column, when `header`
+   * is a control (a sort button) that should not repeat on every card.
+   * Defaults to `header`.
+   */
+  cardLabel?: ReactNode;
 };
 
 /**
@@ -264,7 +270,7 @@ export function ListTable<Row>({
                     className="contents"
                   >
                     <dt className="text-[11px] uppercase tracking-wider text-muted-foreground self-center">
-                      {col.header}
+                      {col.cardLabel ?? col.header}
                     </dt>
                     <dd
                       className={[

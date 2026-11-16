@@ -1111,13 +1111,16 @@ function ControlsPageInner() {
           return {
             ...col,
             ariaSort: state,
+            // The cards show the plain label; the sort button is the
+            // table header's alone.
+            cardLabel: label,
             header: (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground"
                 data-testid={`controls-sort-${key}`}
                 data-sort={state}
-                aria-label={`Sort by ${label}`}
+                title={`Sort by ${label}`}
                 onClick={() =>
                   updateFilter("sort", nextSort(filters.sort, key))
                 }
