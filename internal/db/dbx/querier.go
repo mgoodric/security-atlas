@@ -143,6 +143,11 @@ type Querier interface {
 	// The COALESCE start chain mirrors the lifecycle: effective_from is set at
 	// activation, approved_at at approval, requested_at always.
 	BoardBriefExceptionAggregate(ctx context.Context, arg BoardBriefExceptionAggregateParams) (BoardBriefExceptionAggregateRow, error)
+	// #1803: copy every tenant's active overlay edges from an approved exact_code
+	// migration's N requirement to its N+1 requirement, each in its own tenant,
+	// one audit row per copy. Returns the number copied. See the function's
+	// migration for why it is SECURITY DEFINER.
+	CarryOverOverlayEdges(ctx context.Context, arg CarryOverOverlayEdgesParams) (int32, error)
 	ChangeControlExistsInTenant(ctx context.Context, arg ChangeControlExistsInTenantParams) (bool, error)
 	ChangeRollup(ctx context.Context, tenantID pgtype.UUID) (ChangeRollupRow, error)
 	ChangeUserExistsInTenant(ctx context.Context, arg ChangeUserExistsInTenantParams) (bool, error)
