@@ -1,5 +1,9 @@
 // Slice 060 — /admin/api-keys (AC-4).
 //
+// #2088: the issue form builds a key's scope with pickers (evidence kinds,
+// scope dimensions) and keeps raw JSON as a fallback for predicates the
+// builder cannot show. Model in `scope-builder.ts`.
+//
 // Real bind to slice 034: list / issue / rotate / revoke. The bearer
 // plaintext returned by issue + rotate is shown EXACTLY ONCE in a
 // dismissible callout; subsequent renders of the page do not surface it.
@@ -25,7 +29,21 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { ScopePicker } from "@/components/scope/scope-picker";
+import { EVERYTHING } from "@/components/scope/scope-picker-model";
+import {
+  advancedText,
+  parseAdvanced,
+} from "@/app/(authed)/framework-scopes/wizard";
+import { fetchEvidenceKinds } from "@/lib/api/evidence-kinds";
+import {
+  kindOptions,
+  predicateBody,
+  rawToPicker,
+  toggleKind,
+} from "./scope-builder";
 import { RowActions } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -344,8 +362,11 @@ function IssueForm({
   submitting: boolean;
   error: string | null;
 }) {
-  const [scopePredicate, setScopePredicate] = useState("");
-  const [allowedKinds, setAllowedKinds] = useState("");
+  const [allowedKinds, setAllowedKinds] = useState<string[]>([]);
+  const [predicate, setPredicate] = useState<unknown>(EVERYTHING);
+  const [raw, setRaw] = useState(false);
+  const [rawText, setRawText] = useState("");
+  const [rawError, setRawError] = useState<string | null>(null);
   const [ttlDays, setTtlDays] = useState(90);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -355,14 +376,44 @@ function IssueForm({
   // See `web/components/ui/checkbox.tsx` for the convention.
   const errorId = error ? "issue-credential-error" : undefined;
 
+  function openRaw() {
+    setRawText(advancedText(predicate));
+    setRawError(null);
+    setRaw(true);
+  }
+
+  function closeRaw() {
+    const r = rawToPicker(rawText);
+    if (!r.ok) {
+      setRawError(r.error);
+      return;
+    }
+    setPredicate(r.predicate);
+    setRaw(false);
+  }
+
+  // Under raw JSON the predicate is the editor's text as written, so a
+  // predicate the builder cannot show can still be issued. Text that is
+  // not a JSON object blocks submit, as does an unfinished picker choice.
+  const rawParsed = raw
+    ? rawText.trim() === ""
+      ? ({ ok: true, predicate: EVERYTHING } as const)
+      : parseAdvanced(rawText)
+    : null;
+  const current: unknown = rawParsed
+    ? rawParsed.ok
+      ? rawParsed.predicate
+      : null
+    : predicate;
+
   function submit() {
-    const kinds = allowedKinds
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    if (current === null) {
+      if (rawParsed && !rawParsed.ok) setRawError(rawParsed.error);
+      return;
+    }
     onSubmit({
-      scope_predicate: scopePredicate.trim() || "{}",
-      allowed_kinds: kinds,
+      scope_predicate: predicateBody(current),
+      allowed_kinds: allowedKinds,
       ttl_seconds: ttlDays * 86400,
       is_admin: isAdmin,
       is_approver: false,
@@ -375,33 +426,63 @@ function IssueForm({
       <CardHeader>
         <CardTitle>Issue a new credential</CardTitle>
         <CardDescription>
-          Scope predicate narrows which evidence kinds and scope cells the
-          bearer can push to. TTL is in days; the bearer auto-expires.
+          Choose which evidence kinds the bearer may push and which scope cells
+          it may push for. TTL is in days; the bearer auto-expires.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
+        <KindsPicker value={allowedKinds} onChange={setAllowedKinds} />
+
+        <div className="space-y-2" data-testid="issue-scope">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium">Scope</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-pressed={raw}
+              onClick={raw ? closeRaw : openRaw}
+              data-testid="issue-scope-raw-toggle"
+            >
+              {raw ? "Back to the builder" : "Raw JSON"}
+            </Button>
+          </div>
+          {raw ? (
+            <div className="space-y-1">
+              <label htmlFor="issue-scope-predicate" className="text-sm">
+                Scope predicate (JSON)
+              </label>
+              <textarea
+                id="issue-scope-predicate"
+                value={rawText}
+                onChange={(e) => {
+                  setRawText(e.target.value);
+                  setRawError(null);
+                }}
+                rows={8}
+                spellCheck={false}
+                className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                data-testid="issue-scope-json"
+                aria-invalid={rawError ? true : undefined}
+                aria-describedby={rawError ? "issue-scope-json-error" : errorId}
+              />
+              {rawError ? (
+                <p
+                  id="issue-scope-json-error"
+                  className="text-xs text-rose-600"
+                  role="alert"
+                  data-testid="issue-scope-json-error"
+                >
+                  {rawError}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <ScopePicker value={predicate} onChange={setPredicate} />
+          )}
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Scope predicate (JSON)" htmlFor="issue-scope-predicate">
-            <Input
-              id="issue-scope-predicate"
-              value={scopePredicate}
-              onChange={(e) => setScopePredicate(e.target.value)}
-              placeholder='{"connector":"aws"}'
-              aria-describedby={errorId}
-            />
-          </Field>
-          <Field
-            label="Allowed kinds (comma-separated)"
-            htmlFor="issue-allowed-kinds"
-          >
-            <Input
-              id="issue-allowed-kinds"
-              value={allowedKinds}
-              onChange={(e) => setAllowedKinds(e.target.value)}
-              placeholder="aws.s3.encryption.v1, aws.iam.user.v1"
-              aria-describedby={errorId}
-            />
-          </Field>
           <Field label="TTL (days)" htmlFor="issue-ttl-days">
             <Input
               id="issue-ttl-days"
@@ -426,7 +507,13 @@ function IssueForm({
             </label>
           </Field>
         </div>
-        <Button onClick={submit} disabled={submitting}>
+        <Button
+          onClick={submit}
+          // An unfinished picker choice says so under the picker; under raw
+          // JSON a click shows why the text cannot be sent.
+          disabled={submitting || (!raw && current === null)}
+          data-testid="issue-credential-submit"
+        >
           {submitting ? "Issuing…" : "Issue credential"}
         </Button>
         {error ? (
@@ -443,6 +530,103 @@ function IssueForm({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+// The evidence kinds the key may push, from the tenant's schema registry.
+// None picked means any kind. A kind the registry does not list (a
+// connector's private kind not registered yet) can be added by name.
+function KindsPicker({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (kinds: string[]) => void;
+}) {
+  const schemas = useQuery({
+    queryKey: ["evidence-kinds"],
+    queryFn: fetchEvidenceKinds,
+    staleTime: 60_000,
+  });
+  const [filter, setFilter] = useState("");
+  const [extra, setExtra] = useState("");
+  const options = kindOptions(schemas.data?.schemas ?? [], value);
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? options.filter((k) => k.toLowerCase().includes(q))
+    : options;
+
+  function addExtra() {
+    const k = extra.trim();
+    if (k === "") return;
+    if (!value.includes(k)) onChange(toggleKind(value, k, [...options, k]));
+    setExtra("");
+  }
+
+  return (
+    <fieldset className="space-y-2" data-testid="issue-kinds">
+      <legend className="text-sm font-medium">Evidence kinds</legend>
+      <p className="text-xs text-muted-foreground">
+        {value.length === 0
+          ? "None picked: the key may push any kind."
+          : `${value.length} picked: the key may push only these.`}
+      </p>
+      <Input
+        aria-label="Filter evidence kinds"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter kinds"
+        data-testid="issue-kinds-filter"
+      />
+      {schemas.isPending ? (
+        <p className="text-sm text-muted-foreground">Loading evidence kinds…</p>
+      ) : schemas.isError ? (
+        <p className="text-sm text-destructive" role="alert">
+          Could not load evidence kinds: {schemas.error.message}. Add kinds by
+          name below.
+        </p>
+      ) : null}
+      <div className="max-h-48 space-y-1 overflow-auto rounded border p-2">
+        {shown.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No kinds match.</p>
+        ) : (
+          shown.map((k) => (
+            <label key={k} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={value.includes(k)}
+                onCheckedChange={() => onChange(toggleKind(value, k, options))}
+                data-testid={`issue-kind-${k}`}
+              />
+              <span className="font-mono text-xs">{k}</span>
+            </label>
+          ))
+        )}
+      </div>
+      <div className="flex gap-2">
+        <Input
+          aria-label="Add an evidence kind by name"
+          value={extra}
+          onChange={(e) => setExtra(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addExtra();
+            }
+          }}
+          placeholder="Add a kind by name"
+          data-testid="issue-kinds-add-input"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={addExtra}
+          data-testid="issue-kinds-add"
+        >
+          Add
+        </Button>
+      </div>
+    </fieldset>
   );
 }
 
