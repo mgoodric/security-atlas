@@ -52,11 +52,15 @@ func (h *Handler) CreateTheme(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	var req createThemeReq
 	if !decodeStrict(w, r, &req) {
 		return
 	}
-	created, err := h.store.CreateTheme(ctx, risk.NewTheme{Name: req.Name, Description: req.Description}, actorFrom(r))
+	created, err := h.store.CreateTheme(ctx, risk.NewTheme{Name: req.Name, Description: req.Description}, actor)
 	if err != nil {
 		writeThemeErr(w, r, "create theme", err)
 		return
@@ -81,6 +85,10 @@ func (h *Handler) RenameTheme(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	var req renameThemeReq
 	if !decodeStrict(w, r, &req) {
 		return
@@ -91,7 +99,7 @@ func (h *Handler) RenameTheme(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.store.RenameTheme(ctx, chi.URLParam(r, "ref"), risk.ThemeText{
 		Name: req.Name, Description: req.Description,
-	}, actorFrom(r))
+	}, actor)
 	if err != nil {
 		writeThemeErr(w, r, "rename theme", err)
 		return
@@ -114,7 +122,11 @@ func (h *Handler) DeleteTheme(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if err := h.store.DeleteTheme(ctx, chi.URLParam(r, "ref"), actorFrom(r)); err != nil {
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
+	if err := h.store.DeleteTheme(ctx, chi.URLParam(r, "ref"), actor); err != nil {
 		writeThemeErr(w, r, "delete theme", err)
 		return
 	}
