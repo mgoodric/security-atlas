@@ -1,10 +1,15 @@
 // #2086 — the entity picker's pure logic: the options each kind lists,
-// and the check a pasted ID passes before the picker accepts it.
+// and the check a pasted ID passes before the picker accepts it. #2087
+// adds controls, risks and policies, and the multi-select's selection
+// rule (`toggleSelection`).
 //
 // Pure, so every case is vitest-testable without a DOM (Q-3). The
-// `<EntityPicker>` component (`components/ui/entity-picker.tsx`) is the
-// only render path.
+// `<EntityPicker>` and `<EntityMultiPicker>` components
+// (`components/ui/entity-picker.tsx`) are the only render paths.
 
+import type { TenantControl } from "./api/controls-list";
+import type { Policy } from "./api/policies";
+import type { Risk } from "./api/risks";
 import { enumLabel } from "./labels/enum-labels";
 import { frameworkLabel } from "./labels/framework-label";
 import {
@@ -13,7 +18,13 @@ import {
   type DirectoryUser,
 } from "./person";
 
-export type EntityKind = "framework" | "user" | "credential";
+export type EntityKind =
+  | "framework"
+  | "user"
+  | "credential"
+  | "control"
+  | "risk"
+  | "policy";
 
 export interface EntityOption {
   // The ID the form submits.
@@ -22,6 +33,9 @@ export interface EntityOption {
   label: string;
   // Secondary text beside the label (a version's status, an owner).
   hint?: string;
+  // Text the search also matches but the list does not show (a
+  // control's bundle).
+  keywords?: readonly string[];
 }
 
 // The `GET /v1/frameworks?include=versions` wire shape.
@@ -39,6 +53,19 @@ const KIND_NOUN: Record<EntityKind, string> = {
   framework: "framework version",
   user: "user",
   credential: "API key",
+  control: "control",
+  risk: "risk",
+  policy: "policy",
+};
+
+/** The plural noun for a kind, for the picker's own copy. */
+export const KIND_PLURAL: Record<EntityKind, string> = {
+  framework: "framework versions",
+  user: "people",
+  credential: "API keys",
+  control: "controls",
+  risk: "risks",
+  policy: "policies",
 };
 
 /** One option per framework version, labelled "<name> <version>". */
@@ -92,6 +119,63 @@ export function credentialOptions(
   });
 }
 
+/**
+ * The tenant's controls, labelled by title. The SCF code and family are
+ * the hint; the bundle is searchable too.
+ */
+export function controlOptions(
+  controls: readonly TenantControl[],
+): EntityOption[] {
+  return controls.map((c) => ({
+    value: c.id,
+    label: c.title,
+    hint: [c.scf_id, c.control_family].filter(Boolean).join(" · ") || undefined,
+    keywords: c.bundle_id ? [c.bundle_id] : undefined,
+  }));
+}
+
+/** The tenant's risks, labelled by title, with the category as the hint. */
+export function riskOptions(
+  risks: readonly Pick<Risk, "id" | "title" | "category" | "category_name">[],
+): EntityOption[] {
+  return risks.map((r) => ({
+    value: r.id,
+    label: r.title,
+    hint: r.category_name || r.category || undefined,
+  }));
+}
+
+/** The tenant's policies, labelled by title, with version and status. */
+export function policyOptions(
+  policies: readonly Pick<Policy, "id" | "title" | "version" | "status">[],
+): EntityOption[] {
+  return policies.map((p) => ({
+    value: p.id,
+    label: p.title,
+    hint:
+      [
+        p.version ? `v${p.version}` : "",
+        p.status ? enumLabel("PolicyStatus", p.status) : "",
+      ]
+        .filter(Boolean)
+        .join(" · ") || undefined,
+  }));
+}
+
+/**
+ * The selection after toggling `id`. An add past `max` is refused and
+ * the selection comes back unchanged; a removal always applies.
+ */
+export function toggleSelection(
+  selected: readonly string[],
+  id: string,
+  max?: number,
+): string[] {
+  if (selected.includes(id)) return selected.filter((x) => x !== id);
+  if (max !== undefined && selected.length >= max) return [...selected];
+  return [...selected, id];
+}
+
 export type PastedId = { ok: true; id: string } | { ok: false; error: string };
 
 /**
@@ -130,6 +214,7 @@ export function matchesQuery(option: EntityOption, query: string): boolean {
   return (
     option.label.toLowerCase().includes(q) ||
     (option.hint ?? "").toLowerCase().includes(q) ||
+    (option.keywords ?? []).some((k) => k.toLowerCase().includes(q)) ||
     option.value === q
   );
 }

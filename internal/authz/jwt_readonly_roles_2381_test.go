@@ -32,7 +32,13 @@ func TestBuildInput2381_DerivedRoles(t *testing.T) {
 		{"JWT admin", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"admin"}}, []authz.Role{authz.RoleControlOwner}},
 		{"JWT auditor+control_owner", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"auditor", "control_owner"}}, []authz.Role{authz.RoleControlOwner}},
 		{"JWT empty claim", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u"}, []authz.Role{authz.RoleGRCEngineer}},
-		{"key viewer", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"viewer"}}, []authz.Role{authz.RoleControlOwner}},
+		{"unbound key viewer", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"viewer"}}, []authz.Role{authz.RoleViewer}},
+		{"unbound key auditor", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"auditor"}}, []authz.Role{authz.RoleAuditor}},
+		{"unbound key auditor+viewer", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"auditor", "viewer", "viewer"}}, []authz.Role{authz.RoleViewer, authz.RoleAuditor}},
+		{"bound key viewer", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "6f1c2a9e-1d2b-4c3d-8e4f-5a6b7c8d9e0f", OwnerRoles: []string{"viewer"}}, nil},
+		{"bound key auditor", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "6f1c2a9e-1d2b-4c3d-8e4f-5a6b7c8d9e0f", OwnerRoles: []string{"auditor"}}, nil},
+		{"key control_owner", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"control_owner"}}, []authz.Role{authz.RoleControlOwner}},
+		{"key viewer+owner label", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"viewer", "platform-eng"}}, []authz.Role{authz.RoleControlOwner}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/v1/controls", nil)
 		req = req.WithContext(authctx.WithCredential(req.Context(), tc.cred))

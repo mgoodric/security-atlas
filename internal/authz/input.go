@@ -140,6 +140,18 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		// the live user_roles rows the resolver merges in Decide. Not the
 		// claim itself, which outlives a revoke until the token expires.
 		return nil
+	case apiKey(cred) && readOnlyRoleClaim(cred.OwnerRoles):
+		// #2402: an API key whose owner_roles names only viewer and/or
+		// auditor used to derive control_owner below, so a "viewer" key
+		// could write evidence, artifacts and walkthroughs. A key bound to
+		// a user (issued_by set, UserID the owner's uuid) derives nothing:
+		// like a JWT session (#2381) its roles are the owner's live
+		// user_roles rows. An unbound machine key has no user_roles to fall
+		// back on, so it derives exactly the roles its label names.
+		if cred.UserID != cred.ID {
+			return nil
+		}
+		return readOnlyRoles(cred.OwnerRoles)
 	case len(cred.OwnerRoles) > 0:
 		return []Role{RoleControlOwner}
 	case cred.TenantID == "":
@@ -160,6 +172,27 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 // atlas JWT. jwtmw stamps the credential ID "jwt:" + jti.
 func jwtSession(cred credstore.Credential) bool {
 	return strings.HasPrefix(cred.ID, "jwt:")
+}
+
+// apiKey reports whether cred is a slice-014/034 api_keys credential.
+// apikeystore stamps the credential ID "key_" + the row id.
+func apiKey(cred credstore.Credential) bool {
+	return strings.HasPrefix(cred.ID, "key_")
+}
+
+// readOnlyRoles maps a label that readOnlyRoleClaim accepts to its roles,
+// viewer before auditor, each once.
+func readOnlyRoles(labels []string) []Role {
+	var out []Role
+	for _, want := range []Role{RoleViewer, RoleAuditor} {
+		for _, l := range labels {
+			if Role(l) == want {
+				out = append(out, want)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // readOnlyRoleClaim reports whether a non-empty role claim names only
