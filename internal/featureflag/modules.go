@@ -256,6 +256,7 @@ var Modules = []Module{
 		Routes: []string{
 			"/v1/admin",
 			"/v1/me",
+			"/v1/people",
 			"/v1/tenants",
 			"/v1/mcp",
 			"/v1/install",
