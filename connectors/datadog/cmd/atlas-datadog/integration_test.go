@@ -203,7 +203,7 @@ func TestRun_PushesSIEMRuleRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	rec, err := siemrules.Build(rules[0], "scf:THR-01", actorID("siemrules"), "datadog", "prod")
+	rec, err := siemrules.Build(rules[0], "scf:THR-02", actorID("siemrules"), "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestSIEMEmittedRecords_NoSecretsOrPII(t *testing.T) {
 			Handles: []string{"@oncall@fixture.invalid", "@slack-ops"}},
 	}}
 	rules, _ := siemrules.Collect(context.Background(), api, fixed)
-	rec, _ := siemrules.Build(rules[0], "scf:THR-01", actorID("siemrules"), "datadog", "prod")
+	rec, _ := siemrules.Build(rules[0], "scf:THR-02", actorID("siemrules"), "datadog", "prod")
 
 	allowed := map[string]bool{
 		"rule_id": true, "rule_name": true, "detection_class": true,
