@@ -25,8 +25,9 @@ placement-only name would mislabel two of its three actions. The kind is
 (`placement_changed`, `category_changed`, `fields_changed`). That way the
 kind names the source table, as every other kind does, and the action
 tells the three changes apart. `target_type` is `risk` and `target_id` is
-the risk id. `payload_json` holds `id`, `before_state` and `after_state`,
-following the pattern the other branches use.
+the risk id. `payload_json` holds the row `id` and `changed_fields`, the
+names of the fields whose value differs between the before and after
+states. It holds no field values (D3).
 
 ### D2 — the timestamp is `created_at`
 
@@ -36,17 +37,44 @@ renames the column, because a rename would touch the append-only table
 and its readers (`ListRiskAuditLog`, `/v1/risks/{id}/audit-log`) for no
 behavioural gain.
 
-### D3 — visibility follows the other tenant-public kinds
+### D3 — the unified row names the changed fields, never their values
 
 The rows are tenant-scoped by the table's existing `tenant_read` RLS
 policy, which the unified query runs under. Tenant isolation is asserted
-in `TestUnifiedAuditLog_ShowsRiskRows_1954`. For non-privileged callers on
-`/v1/activity/unified`, `risk` is treated like `taxonomy` and
-`aggregation_rule`: visible, not hidden like `feature_flag`. The only
-identity on a row is `actor`, the credential id, which every other kind
-already exposes and the `actor_name` join resolves the same way. The
-before/after states hold risk fields that `GET /v1/risks/{id}` already
-returns to the same callers, so no new identity data reaches them.
+in `TestUnifiedAuditLog_ShowsRiskRows_1954`.
+
+The first version of this PR projected `before_state` and `after_state`
+into `payload_json` and claimed the same callers could already read those
+values on `GET /v1/risks/{id}`. That was wrong, and the PR review caught
+it. The unified log and its export are open to auditors, and
+`/v1/activity/unified` to control owners. OPA denies both roles
+`/v1/risks` (`policies/authz/auditor.rego`). The states hold titles,
+descriptions, scores and the treatment owner, so projecting them
+leaked risk content to roles that may not read risks.
+
+The branch now builds `payload_json` as `{id, changed_fields}`.
+`changed_fields` is the sorted list of keys in `after_state` whose value
+differs from `before_state`: `[level]` for a level-only move,
+`[category, category_id]` for a category change, and the edited field
+names for `fields_changed`. A reader learns that a risk changed and what
+kind of change it was, which is what an audit trail across modules needs.
+The values stay on `GET /v1/risks/{id}/audit-log`, behind the risk read
+policy. A `CASE` keeps `jsonb_object_keys` off a non-object state, so one
+malformed row cannot fail the whole unified query.
+
+`TestUnifiedAuditLog_RiskRowsCarryNoFieldValues_1954` covers four
+readers: an auditor on the unified log, an auditor on the JSON and the
+CSV export, and a control owner on Activity. Each is a real user row
+with a `user_roles` grant, because the unified log's role probe reads
+`user_roles`. The test PATCHes distinctive title, description and
+treatment-owner values and asserts that each response contains the risk
+row but none of those values, `before_state` or `after_state`. It fails
+on all four against the first version's projection. Test servers don't
+wire OPA, so the `/v1/risks` denial itself is not asserted there.
+
+`risk` stays visible to non-privileged Activity callers, as `taxonomy`
+and `aggregation_rule` are. The only identity on a row is `actor`, the
+credential id, as on every other kind.
 
 ### D4 — module switches: deferred to #2173, consistent with `exception`
 
