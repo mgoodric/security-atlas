@@ -12,7 +12,9 @@ import { APIError } from "./base";
 /**
  * ActionPlan lifecycle status. Mirrors the constants in
  * `internal/actionplan/statemachine.go`:
- *   draft → in_progress → blocked → completed → verified
+ *   draft → in_progress → blocked → completed ⇄ verified
+ * verified → completed is the system's alone: a linked control failing
+ * its latest evaluation returns the plan to completed (#2109).
  */
 export type ActionPlanStatus =
   | "draft"
@@ -48,6 +50,8 @@ export type ActionPlan = {
   due_date?: string;
   status: ActionPlanStatus;
   audit_period_id?: string;
+  /** Completed, and the linked controls do not all pass yet (#2109). */
+  controls_failing?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -81,6 +85,8 @@ export type ActionPlanRef = {
   title: string;
   status: ActionPlanStatus;
   due_date?: string;
+  /** Completed, and the linked controls do not all pass yet (#2109). */
+  controls_failing?: boolean;
 };
 
 export type ActionPlansRefListResponse = {

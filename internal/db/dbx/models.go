@@ -1617,6 +1617,7 @@ type ActionPlanAuditLog struct {
 	BeforeState  []byte             `json:"before_state"`
 	AfterState   []byte             `json:"after_state"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	SystemActor  *string            `json:"system_actor"`
 }
 
 type ActionPlanControl struct {

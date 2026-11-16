@@ -57,9 +57,26 @@ func TestLifecycle_TriggerPairs(t *testing.T) {
 			return p.ID.String()
 		},
 		func(t *testing.T, id, to string) error {
-			_, err := admin.Exec(context.Background(),
-				`UPDATE action_plans SET status = $2 WHERE id = $1`, id, to)
-			return err
+			// #2109: verified -> completed is the system's move, which the
+			// trigger admits only as the reconcile function's owner with
+			// its marker set. The migrate pool is that owner; the marker
+			// is what action_plans_reconcile_verification sets.
+			// TestReconcile_TriggerRefusesUnverifyOutsideTheFunction proves
+			// the app role cannot do the same.
+			tx, err := admin.Begin(context.Background())
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback(context.Background()) }()
+			if _, err := tx.Exec(context.Background(),
+				`SELECT set_config('atlas.action_plan_system_move', 'on', true)`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(context.Background(),
+				`UPDATE action_plans SET status = $2 WHERE id = $1`, id, to); err != nil {
+				return err
+			}
+			return tx.Commit(context.Background())
 		},
 		func(t *testing.T, id string) string {
 			p, err := store.Get(ctx, uuid.MustParse(id))
