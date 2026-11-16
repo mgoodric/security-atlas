@@ -22,9 +22,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -272,9 +275,26 @@ func TestLifecycle_BoardBriefTopRisksExcludeClosed(t *testing.T) {
 // refused and the risk survives; a tenant admin deletes it, and the
 // deleted row stays in risk_audit_log after the risk is gone.
 func TestLifecycle_HardDeleteIsAdminOnly(t *testing.T) {
-	env := newTransitionEnv(t)
+	// The tenant admin is a person with a live admin grant, and authz runs
+	// as production wires it: the delete gate reads the live role, not the
+	// JWT claim (#2428).
+	env := newTransitionEnv(t, func(srv *api.Server, app *pgxpool.Pool) {
+		engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+		if err != nil {
+			t.Fatalf("authz.NewEngine: %v", err)
+		}
+		srv.AttachAuthz(engine, authz.NewAuditWriter(app))
+	})
 	id := env.newRisk(t)
 	tenant := uuid.MustParse(env.tenant)
+	tenantAdmin := seedTransitionUser(t, env.admin, env.tenant, "tenant-admin")
+	if _, err := env.admin.Exec(context.Background(),
+		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, 'admin', 'test-2428')`,
+		env.tenant, tenantAdmin.String()); err != nil {
+		t.Fatalf("grant admin: %v", err)
+	}
+	adminClaims := testjwt.OwnerFor(tenant, []string{"admin"})
+	adminClaims.Subject = "user:" + tenantAdmin.String()
 	srvJWT := func(roles ...string) string {
 		return env.issue(t, testjwt.OwnerFor(tenant, roles))
 	}
@@ -293,7 +313,7 @@ func TestLifecycle_HardDeleteIsAdminOnly(t *testing.T) {
 		t.Fatalf("risk gone after refused deletes: status %d", code)
 	}
 
-	if code, body := env.do(t, http.MethodDelete, "/v1/risks/"+id, srvJWT("admin"), nil); code != http.StatusNoContent {
+	if code, body := env.do(t, http.MethodDelete, "/v1/risks/"+id, env.issue(t, adminClaims), nil); code != http.StatusNoContent {
 		t.Fatalf("tenant admin delete: status %d, want 204: %v", code, body)
 	}
 	if code, _ := env.do(t, http.MethodGet, "/v1/risks/"+id, env.ownerJWT, nil); code != http.StatusNotFound {
