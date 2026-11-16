@@ -25,7 +25,8 @@ export type FormState = {
   impact: number;
   loss_event_frequency: string;
   loss_magnitude: string;
-  // Slice 151: linked_control_ids drives the ControlMultiSelect picker.
+  // Slice 151: linked_control_ids drives the control picker
+  // (`EntityMultiPicker`, #2087).
   // The form keeps the selection in state even when the picker is
   // hidden (treatment !== mitigate) so toggling treatment back to
   // mitigate does NOT wipe the user's prior selection (D-151-Q8).

@@ -13,6 +13,14 @@
 //
 // The value is the selected ID, "" for none. The picker reports a new
 // value through onChange only; it never submits a form.
+//
+// #2087 adds controls (`/api/controls-list`), risks (`/api/risks`, with
+// roll-ups) and policies (`/api/policies`), and `<EntityMultiPicker>`:
+// the same lists as a searchable checkbox list with a count and an
+// optional cap. A list the caller may not read (403, a role that cannot
+// see it) or that its module hides (404, the module switched off) shows
+// "not available" in place, never an error page. The picker is UI only:
+// the server still checks link caps and tenant ownership.
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -26,11 +34,20 @@ import {
   ComboboxPopup,
 } from "@/components/ui/combobox";
 import { usePeopleDirectory } from "@/components/ui/person";
+import { APIError } from "@/lib/api/base";
+import { fetchTenantControlsList } from "@/lib/api/controls-list";
+import { fetchPoliciesList } from "@/lib/api/policies";
+import { fetchRisksListWithRollUps } from "@/lib/api/risks";
 import {
+  controlOptions,
   credentialOptions,
   frameworkOptions,
+  KIND_PLURAL,
   matchesQuery,
   parsePastedId,
+  policyOptions,
+  riskOptions,
+  toggleSelection,
   userOptions,
   type EntityKind,
   type EntityOption,
@@ -46,9 +63,18 @@ async function fetchFrameworkVersions(): Promise<FrameworkWithVersions[]> {
   return body.frameworks ?? [];
 }
 
+// A 403 (the role cannot read the list) or 404 (its module is switched
+// off) means the list is not offered, not that loading failed.
+function isUnavailable(err: unknown): boolean {
+  return err instanceof APIError && (err.status === 403 || err.status === 404);
+}
+
 function useEntityOptions(kinds: readonly EntityKind[]) {
   const wantsFrameworks = kinds.includes("framework");
   const wantsPeople = kinds.includes("user") || kinds.includes("credential");
+  const wantsControls = kinds.includes("control");
+  const wantsRisks = kinds.includes("risk");
+  const wantsPolicies = kinds.includes("policy");
   const frameworks = useQuery({
     queryKey: ["entity-picker", "framework-versions"],
     queryFn: fetchFrameworkVersions,
@@ -56,6 +82,29 @@ function useEntityOptions(kinds: readonly EntityKind[]) {
     enabled: wantsFrameworks,
   });
   const people = usePeopleDirectory();
+  // Refused lists are not retried: a 403 or 404 will not change.
+  const retry = (n: number, err: unknown) => !isUnavailable(err) && n < 2;
+  const controls = useQuery({
+    queryKey: ["entity-picker", "controls"],
+    queryFn: fetchTenantControlsList,
+    staleTime: 30_000,
+    enabled: wantsControls,
+    retry,
+  });
+  const risks = useQuery({
+    queryKey: ["entity-picker", "risks"],
+    queryFn: fetchRisksListWithRollUps,
+    staleTime: 30_000,
+    enabled: wantsRisks,
+    retry,
+  });
+  const policies = useQuery({
+    queryKey: ["entity-picker", "policies"],
+    queryFn: fetchPoliciesList,
+    staleTime: 30_000,
+    enabled: wantsPolicies,
+    retry,
+  });
 
   const options = useMemo(() => {
     const out: EntityOption[] = [];
@@ -69,17 +118,44 @@ function useEntityOptions(kinds: readonly EntityKind[]) {
         );
       }
     }
+    if (wantsControls) out.push(...controlOptions(controls.data ?? []));
+    if (wantsRisks) out.push(...riskOptions(risks.data?.risks ?? []));
+    if (wantsPolicies) {
+      out.push(...policyOptions(policies.data?.policies ?? []));
+    }
     return out;
-  }, [kinds, wantsFrameworks, wantsPeople, frameworks.data, people.data]);
+  }, [
+    kinds,
+    wantsFrameworks,
+    wantsPeople,
+    wantsControls,
+    wantsRisks,
+    wantsPolicies,
+    frameworks.data,
+    people.data,
+    controls.data,
+    risks.data,
+    policies.data,
+  ]);
 
+  const records = [
+    wantsControls ? controls : null,
+    wantsRisks ? risks : null,
+    wantsPolicies ? policies : null,
+  ].filter((q) => q !== null);
   const isLoading =
     (wantsFrameworks && frameworks.isPending) ||
-    (wantsPeople && people.isPending);
+    (wantsPeople && people.isPending) ||
+    records.some((q) => q.isPending);
+  const unavailable =
+    records.length > 0 && records.every((q) => isUnavailable(q.error));
   // The people endpoint answers null (not an error) to a caller it refuses.
   const isError =
-    (wantsFrameworks && frameworks.isError) ||
-    (wantsPeople && !people.isPending && !people.data);
-  return { options, isLoading, isError };
+    !unavailable &&
+    ((wantsFrameworks && frameworks.isError) ||
+      (wantsPeople && !people.isPending && !people.data) ||
+      records.some((q) => q.isError && !isUnavailable(q.error)));
+  return { options, isLoading, isError, unavailable };
 }
 
 export function EntityPicker({
@@ -237,9 +313,11 @@ export function EntityPicker({
           <ComboboxEmpty>
             {fetched.isLoading
               ? "Loading…"
-              : fetched.isError
-                ? "The list could not be loaded. Paste an ID instead."
-                : "No matches. Paste an ID to use one not listed."}
+              : fetched.unavailable
+                ? unavailableText(kinds)
+                : fetched.isError
+                  ? "The list could not be loaded. Paste an ID instead."
+                  : "No matches. Paste an ID to use one not listed."}
           </ComboboxEmpty>
           <ComboboxList>
             {(o: EntityOption) => (
@@ -270,5 +348,216 @@ export function EntityPicker({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function unavailableText(kinds: readonly EntityKind[]): string {
+  const noun = kinds.map((k) => KIND_PLURAL[k]).join(" and ");
+  return `${noun.charAt(0).toUpperCase()}${noun.slice(
+    1,
+  )} are not available to you.`;
+}
+
+// EntityMultiPicker picks several records of one or more kinds: a search
+// box over a checkbox list, a count ("2 selected", and "(2/50)" in the
+// legend when there is a cap) and a "Clear selection" link. At the cap
+// the unchecked rows are disabled. The value is the selected IDs in the
+// order they were picked.
+//
+// Test ids hang off `testId`: the fieldset itself, `-search`, `-list`,
+// `-option-<id>` (the row), `-checkbox-<id>`, `-summary`, `-clear`,
+// `-cap`, `-loading`, `-empty`, `-error`, `-unavailable`.
+export function EntityMultiPicker({
+  kinds,
+  value,
+  onChange,
+  legend,
+  testId,
+  max,
+  required,
+  description,
+  searchPlaceholder,
+  emptyHint,
+  error,
+  errorId = `${testId}-required-error`,
+}: {
+  kinds: readonly EntityKind[];
+  value: readonly string[];
+  onChange: (ids: string[]) => void;
+  legend: string;
+  testId: string;
+  // The most the form accepts; the server enforces it too.
+  max?: number;
+  required?: boolean;
+  // Help text under the legend.
+  description?: React.ReactNode;
+  searchPlaceholder?: string;
+  // What to say when the tenant has none of these yet.
+  emptyHint: React.ReactNode;
+  // An error the form owns (a required selection left empty).
+  error?: string;
+  errorId?: string;
+}) {
+  const fetched = useEntityOptions(kinds);
+  const [filter, setFilter] = useState("");
+  const filtered = useMemo(
+    () => fetched.options.filter((o) => matchesQuery(o, filter)),
+    [fetched.options, filter],
+  );
+  const atCap = max !== undefined && value.length >= max;
+  const total = fetched.options.length;
+  const placeholder =
+    searchPlaceholder ??
+    `Search ${kinds.map((k) => KIND_PLURAL[k]).join(" and ")}…`;
+  const searchId = `${testId}-search`;
+
+  return (
+    <fieldset
+      className="min-w-0 space-y-2 rounded-md border border-input p-3"
+      data-testid={testId}
+      data-entity-picker={kinds.join(",")}
+      aria-describedby={error ? errorId : undefined}
+    >
+      <legend className="px-1 text-sm font-medium text-foreground">
+        {legend}
+        {required ? <span className="text-destructive"> *</span> : null}
+        {max !== undefined ? (
+          <span className="text-xs text-muted-foreground">
+            {" "}
+            ({value.length}/{max})
+          </span>
+        ) : null}
+      </legend>
+      {description ? (
+        <p className="text-xs text-muted-foreground">{description}</p>
+      ) : null}
+
+      <input
+        id={searchId}
+        type="text"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        spellCheck={false}
+        autoComplete="off"
+        className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        data-testid={searchId}
+      />
+
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span data-testid={`${testId}-summary`} aria-live="polite">
+          {value.length} selected
+          {filter
+            ? ` · ${filtered.length} of ${total} visible`
+            : ` · ${total} total`}
+        </span>
+        {value.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-xs underline hover:text-foreground"
+            data-testid={`${testId}-clear`}
+          >
+            Clear selection
+          </button>
+        ) : null}
+      </div>
+
+      {fetched.isLoading ? (
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid={`${testId}-loading`}
+        >
+          Loading…
+        </p>
+      ) : fetched.unavailable ? (
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid={`${testId}-unavailable`}
+        >
+          {unavailableText(kinds)}
+        </p>
+      ) : fetched.isError ? (
+        <p className="text-sm text-destructive" data-testid={`${testId}-error`}>
+          The list could not be loaded. Reload the page to try again.
+        </p>
+      ) : total === 0 ? (
+        <p
+          className="rounded-md border border-input bg-muted/40 p-3 text-sm text-muted-foreground"
+          data-testid={`${testId}-empty`}
+        >
+          {emptyHint}
+        </p>
+      ) : (
+        <ul
+          className="max-h-64 overflow-y-auto rounded-md border border-input"
+          data-testid={`${testId}-list`}
+        >
+          {filtered.map((o) => {
+            const checked = value.includes(o.value);
+            const disabled = !checked && atCap;
+            return (
+              <li
+                key={o.value}
+                className="border-b border-input/60 last:border-b-0"
+              >
+                <label
+                  className={
+                    "flex min-w-0 items-start gap-3 px-3 py-2 text-sm " +
+                    (disabled
+                      ? "opacity-50"
+                      : "cursor-pointer hover:bg-accent/40") +
+                    (checked ? " bg-accent/30" : "")
+                  }
+                  data-testid={`${testId}-option-${o.value}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() =>
+                      onChange(toggleSelection(value, o.value, max))
+                    }
+                    className="mt-1"
+                    data-testid={`${testId}-checkbox-${o.value}`}
+                  />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate font-medium text-foreground">
+                      {o.label}
+                    </span>
+                    {o.hint ? (
+                      <span className="text-xs text-muted-foreground">
+                        {o.hint}
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              </li>
+            );
+          })}
+          {filtered.length === 0 ? (
+            <li className="p-3 text-sm text-muted-foreground">
+              No matches for your search.
+            </li>
+          ) : null}
+        </ul>
+      )}
+
+      {atCap ? (
+        <p className="text-xs text-amber-600" data-testid={`${testId}-cap`}>
+          Maximum of {max} reached.
+        </p>
+      ) : null}
+      {error ? (
+        <p
+          id={errorId}
+          className="text-sm text-destructive"
+          data-testid={errorId}
+        >
+          {error}
+        </p>
+      ) : null}
+    </fieldset>
   );
 }
