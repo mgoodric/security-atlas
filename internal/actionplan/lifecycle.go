@@ -7,8 +7,9 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 // store runs; TestLifecycle_MatchesAllowedTransition proves the two agree
 // on every pair, and lifecycle_integration_test.go proves the table and
 // action_plans_status_transition_guard agree against a real Postgres.
-// Every move but verify is a status change through PATCH
-// /v1/action-plans/{id}; verify has its own route (#2108).
+// Every person's move but verify is a status change through PATCH
+// /v1/action-plans/{id}; verify has its own route (#2108). unverify is the
+// system's alone, made after a control evaluation (#2109).
 var Lifecycle = lifecycle.Table{
 	Name:   "action_plan",
 	Title:  "Action plan",
@@ -21,7 +22,7 @@ var Lifecycle = lifecycle.Table{
 		Routes: []string{"POST /v1/action-plans"},
 		Roles:  planRoles,
 	}},
-	Terminal: []string{StatusVerified},
+	Terminal: []string{},
 	Transitions: []lifecycle.Transition{
 		planMove(StatusDraft, StatusInProgress, "start", ""),
 		planMove(StatusInProgress, StatusBlocked, "block", ""),
@@ -36,9 +37,14 @@ var Lifecycle = lifecycle.Table{
 			RequiresApprover: true,
 			PeopleOnly:       true,
 			SecondPerson:     true,
-			Note:             "Only for a plan with no linked controls, and never by the plan's owner, whatever the self-approval setting.",
+			Note:             "A person verifies only a plan with no linked controls, and never the plan's owner, whatever the self-approval setting. A plan with linked controls the system verifies after a control evaluation, once every linked control passes its latest evaluation (#2109).",
 		},
 		planMove(StatusCompleted, StatusInProgress, "reopen", "Reopened when verification fails."),
+		{
+			From: StatusVerified, To: StatusCompleted, Action: "unverify",
+			Actor: lifecycle.ActorSystem,
+			Note:  "After each control evaluation, a verified plan with a linked control that no longer passes returns to completed (#2109). No person or key makes this move.",
+		},
 	},
 	Trigger: &lifecycle.Trigger{
 		Name: "action_plans_status_transition_guard",
