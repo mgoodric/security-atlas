@@ -6,6 +6,8 @@ import { APIError } from "@/lib/api/base";
 import type { AuditPeriod } from "@/lib/api/audit-periods";
 
 import {
+  auditorChangeErrorMessage,
+  auditorLabel,
   FREEZE_CONFIRM_DETAIL,
   freezeErrorMessage,
   isOscalBridgeUnavailable,
@@ -134,5 +136,51 @@ describe("toWorkspacePeriod", () => {
       status: "frozen",
       frozen_at: "2026-04-01T00:00:00Z",
     });
+  });
+});
+
+describe("auditorLabel", () => {
+  test("name and email together", () => {
+    expect(
+      auditorLabel({
+        user_id: "u",
+        display_name: "Ada",
+        email: "ada@example.invalid",
+      }),
+    ).toBe("Ada (ada@example.invalid)");
+  });
+  test("falls back to the email, then the id", () => {
+    expect(
+      auditorLabel({ user_id: "u", display_name: "", email: "e@x.invalid" }),
+    ).toBe("e@x.invalid");
+    expect(auditorLabel({ user_id: "u-1", display_name: "", email: "" })).toBe(
+      "u-1",
+    );
+  });
+});
+
+describe("auditorChangeErrorMessage", () => {
+  test("403 says only an admin can change auditors", () => {
+    expect(
+      auditorChangeErrorMessage(new APIError(403, "forbidden"), "assign"),
+    ).toMatch(/Only an admin/);
+  });
+  test("404 on remove says the grant is gone", () => {
+    expect(auditorChangeErrorMessage(new APIError(404, "x"), "remove")).toMatch(
+      /no longer assigned/,
+    );
+  });
+  test("404 on assign says the period is gone", () => {
+    expect(auditorChangeErrorMessage(new APIError(404, "x"), "assign")).toMatch(
+      /period no longer exists/,
+    );
+  });
+  test("other statuses carry the platform message", () => {
+    expect(
+      auditorChangeErrorMessage(
+        new APIError(400, "user_id is not an active auditor in this tenant"),
+        "assign",
+      ),
+    ).toMatch(/not an active auditor/);
   });
 });
