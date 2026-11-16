@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { dateLabel, statusLabel, statusPillClass } from "./status";
+import {
+  dateLabel,
+  planStatusLabel,
+  statusLabel,
+  statusPillClass,
+} from "./status";
 
 describe("statusLabel", () => {
   it("maps known statuses to human labels", () => {
@@ -14,6 +19,20 @@ describe("statusLabel", () => {
   });
   it("falls back to the raw value for unknown statuses", () => {
     expect(statusLabel("bogus")).toBe("bogus");
+  });
+});
+
+describe("planStatusLabel", () => {
+  it("says a completed plan's linked controls still fail (#2109)", () => {
+    expect(planStatusLabel("completed", true)).toBe(
+      "Completed · linked controls still failing",
+    );
+  });
+  it("is the plain label otherwise", () => {
+    expect(planStatusLabel("completed", false)).toBe("Completed");
+    expect(planStatusLabel("completed")).toBe("Completed");
+    expect(planStatusLabel("verified", true)).toBe("Verified");
+    expect(planStatusLabel("in_progress", true)).toBe("In progress");
   });
 });
 
