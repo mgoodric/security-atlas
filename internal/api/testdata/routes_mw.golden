@@ -168,6 +168,7 @@ GET /v1/org_units/{id} 9
 GET /v1/oscal/component-definitions 9
 GET /v1/oscal/component-definitions/{id} 9
 GET /v1/oscal/imported-profiles/{id}/provenance 9
+GET /v1/people 9
 GET /v1/personnel-security/checklists 9
 GET /v1/personnel-security/checklists/{id} 9
 GET /v1/policies 9

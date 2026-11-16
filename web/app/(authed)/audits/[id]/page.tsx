@@ -49,6 +49,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Person } from "@/components/ui/person";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -288,7 +289,7 @@ function FreezeCard({ period }: { period: AuditPeriod }) {
           </dd>
           <dt className="text-muted-foreground">Frozen by</dt>
           <dd data-testid="audit-period-frozen-by">
-            {period.frozen_by ?? "—"}
+            <Person id={period.frozen_by} />
           </dd>
           <dt className="text-muted-foreground">Freeze hash</dt>
           <dd

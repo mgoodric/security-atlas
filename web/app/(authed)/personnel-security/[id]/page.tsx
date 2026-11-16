@@ -19,6 +19,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Person } from "@/components/ui/person";
 import {
   completePersonnelChecklistItem,
   fetchPersonnelChecklist,
@@ -218,7 +219,7 @@ function ItemRow({
       {completed ? (
         <div className="space-y-1 text-xs text-muted-foreground">
           <p data-testid="personnel-item-completed-by">
-            By {item.completed_by || "—"}
+            By <Person id={item.completed_by} />
           </p>
           {item.evidence_uri ? (
             <p
