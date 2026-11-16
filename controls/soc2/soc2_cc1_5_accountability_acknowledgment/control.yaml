@@ -9,7 +9,7 @@ description: |
   Management). The evidence query reads the `policy.acknowledgment` ledger
   and asserts coverage across active users.
 
-scf_anchor_id: HRS-01
+scf_anchor_id: HRS-02
 control_family: HRS
 implementation_type: automated
 owner_role: hr

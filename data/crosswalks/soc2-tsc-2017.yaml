@@ -203,27 +203,27 @@ mappings:
   # CC1 — Control Environment — anchors mostly to GOV-* + HRS-* families
   # =====================================================================
   - tsc_code: CC1.1
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "GOV-01 covers governance program; integrity/ethical values is a subset focus area."
+    rationale: "GOV-02 covers governance program; integrity/ethical values is a subset focus area."
   - tsc_code: CC1.2
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Board oversight is implicit in security governance; SCF anchor is broader."
   - tsc_code: CC1.3
-    scf_anchor: GOV-04
+    scf_anchor: GOV-05
     relationship_type: equal
     strength: 0.9
     rationale: "Both establish roles, authorities, responsibilities."
   - tsc_code: CC1.4
-    scf_anchor: HRS-04
+    scf_anchor: SAT-04
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Security awareness training covers part of competence; broader HR competence is out of scope. LOW CONFIDENCE — review."
   - tsc_code: CC1.5
-    scf_anchor: HRS-01
+    scf_anchor: HRS-02
     relationship_type: intersects_with
     strength: 0.5
     rationale: "HR security covers accountability mechanisms; broader internal-control accountability is out of scope. LOW CONFIDENCE — review."
@@ -232,12 +232,12 @@ mappings:
   # CC2 — Communication & Information — mostly governance + monitoring
   # =====================================================================
   - tsc_code: CC2.1
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Information quality for internal control overlaps governance but is broader. LOW CONFIDENCE — review."
   - tsc_code: CC2.2
-    scf_anchor: GOV-04
+    scf_anchor: GOV-05
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Roles + responsibilities define internal communication flows."
@@ -309,7 +309,7 @@ mappings:
     strength: 0.6
     rationale: "Secure engineering principles deploy general tech controls."
   - tsc_code: CC5.3
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Policies + procedures live in the governance program."
@@ -517,7 +517,7 @@ mappings:
   # PI1 — Processing Integrity — anchors to SEA-* + governance
   # =====================================================================
   - tsc_code: PI1.1
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: intersects_with
     strength: 0.4
     rationale: "Processing-objective information quality is governance-adjacent. LOW CONFIDENCE — review (PI is weak in SCF coverage)."

@@ -322,15 +322,15 @@ mappings:
     rationale: "Penetration testing partially overlaps with Software Patching/VPM; SCF sample lacks a dedicated pen-test anchor (LOW CONFIDENCE)."
   # --- Req 12: Org policies and programs ---
   - requirement_code: 12.1.1
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: equal
     strength: 0.9
-    rationale: "An overall information security policy maps to SCF Information Security Governance — shared with SOC 2 CC1.1/CC2.1 and ISO A.5.1."
+    rationale: "An overall information security policy maps to SCF Security, Compliance & Resilience Program (SCRP) — shared with SOC 2 CC1.1/CC2.1 and ISO A.5.1."
   - requirement_code: 12.6.1
-    scf_anchor: HRS-04
+    scf_anchor: SAT-04
     relationship_type: equal
     strength: 0.9
-    rationale: "A security awareness program maps to SCF Security Awareness Training — shared with SOC 2 CC1.4 and ISO A.6.3."
+    rationale: "A security awareness program maps to SCF Security, Compliance & Resilience Awareness Training — shared with SOC 2 CC1.4 and ISO A.6.3."
   - requirement_code: 12.8.1
     scf_anchor: TPM-02
     relationship_type: equal

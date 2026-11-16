@@ -310,12 +310,12 @@ func TestCSFImport_SharedAnchorSatisfiesFourFrameworks_Invariant1(t *testing.T) 
 // is CSF 2.0's headline addition; SOC 2's TSC has no GOVERN *Function* — there
 // is no SOC 2 organizing structure that is the analog of GOVERN. This test
 // proves a GOVERN-function Subcategory (GV.RR-02 — security roles and
-// responsibilities) maps to an SCF governance-family anchor (GOV-04) via an
+// responsibilities) maps to an SCF governance-family anchor (GOV-05) via an
 // STRM edge, demonstrating the graph models a Function with no v1-framework
 // structural counterpart — it does not quietly assume framework overlap.
 //
 // NOTE on what is and is NOT asserted: SOC 2's Control-Environment criteria
-// (CC1.x) DO map to the SCF governance anchors (GOV-01/GOV-04) — that is
+// (CC1.x) DO map to the SCF governance anchors (GOV-02/GOV-05) — that is
 // expected and is exactly invariant #1 at work (one SCF governance anchor
 // satisfies a SOC 2 CC1.x criterion AND a CSF GOVERN Subcategory through the
 // SAME anchor). The "no analog" claim is at the FRAMEWORK-STRUCTURE grain
@@ -336,7 +336,7 @@ func TestCSFImport_GovernFunctionMapsToGovernanceAnchor_NoSOC2Analog(t *testing.
 		t.Fatalf("CSF Import: %v", err)
 	}
 
-	// GV.RR-02 resolves to the GOV-04 governance-family anchor with a non-empty
+	// GV.RR-02 resolves to the GOV-05 governance-family anchor with a non-empty
 	// STRM type. This is the GOVERN-Subcategory -> governance-anchor edge.
 	var govAnchor, strm string
 	if err := pool.QueryRow(context.Background(), `
@@ -349,8 +349,8 @@ func TestCSFImport_GovernFunctionMapsToGovernanceAnchor_NoSOC2Analog(t *testing.
 		WHERE f.slug = 'nist_csf' AND fv.version = '2.0' AND fr.code = 'GV.RR-02'`).Scan(&govAnchor, &strm); err != nil {
 		t.Fatalf("GV.RR-02 anchor query: %v", err)
 	}
-	if govAnchor != "GOV-04" {
-		t.Fatalf("GV.RR-02 should map to governance anchor GOV-04; got %q", govAnchor)
+	if govAnchor != "GOV-05" {
+		t.Fatalf("GV.RR-02 should map to governance anchor GOV-05; got %q", govAnchor)
 	}
 	if strm == "" {
 		t.Fatal("GOVERN edge resolved with empty STRM relationship_type")
@@ -394,7 +394,7 @@ func TestCSFImport_GovernFunctionMapsToGovernanceAnchor_NoSOC2Analog(t *testing.
 		t.Fatal("CSF GOVERN function has zero SCF-anchor edges — no-analog Function is not wired into the graph")
 	}
 
-	t.Logf("AC-5 proven: CSF GV.RR-02 -> GOV-04 (%s); %d GOVERN edges all traverse SCF anchors — GOVERN (no SOC 2 Function analog) is modeled via invariant #7", strm, governEdges)
+	t.Logf("AC-5 proven: CSF GV.RR-02 -> GOV-05 (%s); %d GOVERN edges all traverse SCF anchors — GOVERN (no SOC 2 Function analog) is modeled via invariant #7", strm, governEdges)
 }
 
 // AC-2 / P0-480-4 — an edge whose scf_anchor does not resolve to a real anchor

@@ -40,7 +40,7 @@ func TestImport_FrozenVersionKeepsTitlesAndAddsEdges(t *testing.T) {
 		return cw
 	}
 
-	first := load([][2]string{{"GOV-01", "EX-1\nEX-2"}}, `
+	first := load([][2]string{{"GOV-02", "EX-1\nEX-2"}}, `
 requirements:
   - code: EX-1
     title: "Original one"
@@ -82,7 +82,7 @@ requirements:
 	before := read()
 
 	// The re-import changes EX-1's title, keeps EX-2's, and adds an edge.
-	second := load([][2]string{{"GOV-01", "EX-1\nEX-2"}, {"IAC-01", "EX-2"}}, `
+	second := load([][2]string{{"GOV-02", "EX-1\nEX-2"}, {"IAC-01", "EX-2"}}, `
 requirements:
   - code: EX-1
     title: "Retitled one"

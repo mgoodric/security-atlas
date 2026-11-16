@@ -12,7 +12,7 @@ description: |
   query asserts every active user has an open or closed completion ticket
   within the last 365 days.
 
-scf_anchor_id: HRS-04
+scf_anchor_id: SAT-04
 control_family: HRS
 implementation_type: automated
 owner_role: hr

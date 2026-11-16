@@ -339,25 +339,25 @@ requirements:
 mappings:
   # --- A.5 Organizational ---
   - requirement_code: A.5.1
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: equal
     strength: 1.0
-    rationale: "ISO security policy framework maps directly to SCF Information Security Governance."
+    rationale: "ISO security policy framework maps directly to SCF Security, Compliance & Resilience Program (SCRP)."
   - requirement_code: A.5.2
-    scf_anchor: GOV-04
+    scf_anchor: GOV-05
     relationship_type: equal
     strength: 0.9
-    rationale: "Roles & responsibilities allocation aligns with SCF GOV-04."
+    rationale: "Roles & responsibilities allocation aligns with SCF GOV-05."
   - requirement_code: A.5.3
     scf_anchor: IAC-04
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Segregation of duties is enforced through user provisioning and access-lifecycle controls; IAC-04 (User Provisioning & De-Provisioning) is the nearest sample anchor that carries the entitlement-separation concept."
   - requirement_code: A.5.4
-    scf_anchor: GOV-04
+    scf_anchor: GOV-05
     relationship_type: equal
     strength: 0.8
-    rationale: "Management's duty to direct personnel toward security policy compliance is the Information Security Roles & Responsibilities concept."
+    rationale: "Management's duty to direct personnel toward security policy compliance is the Assigned Security, Compliance & Resilience Responsibilities concept."
   - requirement_code: A.5.5
     scf_anchor: IRO-04
     relationship_type: intersects_with
@@ -394,10 +394,10 @@ mappings:
     strength: 0.7
     rationale: "Acceptable use + handling of information maps to Data & Asset Classification."
   - requirement_code: A.5.11
-    scf_anchor: HRS-09
+    scf_anchor: HRS-12
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Asset return on departure is a step within the Personnel Termination Process (HRS-09)."
+    rationale: "Asset return on departure is a step within the Personnel Termination (HRS-12)."
   - requirement_code: A.5.12
     scf_anchor: DCH-04
     relationship_type: equal
@@ -560,35 +560,35 @@ mappings:
     rationale: "Documented, repeatable operating procedures align with Secure Baseline Configurations (CFG-04) as the documented-standard-state anchor."
   # --- A.6 People ---
   - requirement_code: A.6.1
-    scf_anchor: HRS-01
+    scf_anchor: HRS-02
     relationship_type: equal
     strength: 0.8
-    rationale: "Pre-employment screening and background verification is a core Human Resources Security (HRS-01) activity."
+    rationale: "Pre-employment screening and background verification is a core Human Resources Security Management (HRS-02) activity."
   - requirement_code: A.6.2
-    scf_anchor: HRS-01
+    scf_anchor: HRS-02
     relationship_type: equal
     strength: 0.8
-    rationale: "Security responsibilities embedded in employment terms is part of Human Resources Security (HRS-01)."
+    rationale: "Security responsibilities embedded in employment terms is part of Human Resources Security Management (HRS-02)."
   - requirement_code: A.6.3
-    scf_anchor: HRS-04
+    scf_anchor: SAT-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Security awareness, education & training maps to SCF Security Awareness Training — shared with SOC 2 CC1.4."
+    rationale: "Security awareness, education & training maps to SCF Security, Compliance & Resilience Awareness Training — shared with SOC 2 CC1.4."
   - requirement_code: A.6.4
-    scf_anchor: HRS-01
+    scf_anchor: HRS-02
     relationship_type: subset_of
     strength: 0.7
-    rationale: "A formal disciplinary process for security-policy violations is a Human Resources Security (HRS-01) control."
+    rationale: "A formal disciplinary process for security-policy violations is a Human Resources Security Management (HRS-02) control."
   - requirement_code: A.6.5
-    scf_anchor: HRS-09
+    scf_anchor: HRS-12
     relationship_type: equal
     strength: 0.9
-    rationale: "Responsibilities after termination maps to SCF Personnel Termination Process."
+    rationale: "Responsibilities after termination maps to SCF Personnel Termination."
   - requirement_code: A.6.6
-    scf_anchor: HRS-01
+    scf_anchor: HRS-02
     relationship_type: subset_of
     strength: 0.6
-    rationale: "NDAs covering personnel are an HR-security obligation (HRS-01)."
+    rationale: "NDAs covering personnel are an HR-security obligation (HRS-02)."
   - requirement_code: A.6.6
     scf_anchor: DCH-04
     relationship_type: intersects_with
