@@ -39,6 +39,8 @@ const FIELD_LABELS: Record<string, string> = {
   closure_note: "Closure note",
   closed_by: "Closed by",
   closed_at: "Closed at",
+  // #2106: control links.
+  control_id: "Control",
 };
 
 // Keys an entry carries that are not a change a reader needs to see.
@@ -66,6 +68,10 @@ export function historyActionLabel(action: string): string {
       return "Closed";
     case "reopened":
       return "Reopened";
+    case "control_linked":
+      return "Control linked";
+    case "control_unlinked":
+      return "Control unlinked";
     default:
       return action;
   }

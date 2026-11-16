@@ -711,10 +711,11 @@ func (s *Store) deleteOnce(ctx context.Context, id uuid.UUID, actor string) erro
 // LinkControlInput is the API-shape for POST /v1/risks/{id}/controls. The
 // three weights + design_score are optional: when DesignScoreSet / WeightsSet
 // are false the migration `_029` column DEFAULTs apply (design 0.5, weights
-// 0.3/0.5/0.2). Slice 020.
+// 0.3/0.5/0.2). Slice 020. Actor is who links it, for the audit row (#2106).
 type LinkControlInput struct {
 	RiskID    uuid.UUID
 	ControlID uuid.UUID
+	Actor     string
 
 	DesignScore    float64
 	DesignScoreSet bool
@@ -732,6 +733,14 @@ type LinkControlInput struct {
 // instead of a raw 23503. Idempotent: re-linking the same control updates the
 // per-link weights rather than 23505-ing.
 //
+// #2106: the risk row is locked and a closed risk refused, as the
+// treatment transitions do: the links back the treatment, so they stand
+// as they were until the risk is reopened. A new link writes one
+// control_linked audit row in the same transaction; a re-link that only
+// updates weights writes none. Control links are not an aggregation
+// input, so no rule lock is taken: the risk row is the only lock, the last
+// step of the #2335 order.
+//
 // When no weights are supplied (DesignScoreSet / WeightsSet both false), the
 // slice-019 weight-free LinkRiskControl query is used so the migration `_029`
 // column DEFAULTs apply. When any are supplied, LinkRiskControlWithWeights
@@ -739,6 +748,9 @@ type LinkControlInput struct {
 // their migration `_029` value via the input zero-value being overridden
 // below).
 func (s *Store) LinkControl(ctx context.Context, in LinkControlInput) error {
+	if in.Actor == "" {
+		return fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
 	// Primary validation — DB CHECK is defense-in-depth.
 	for _, v := range []struct {
 		set bool
@@ -755,15 +767,10 @@ func (s *Store) LinkControl(ctx context.Context, in LinkControlInput) error {
 	}
 
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		// The risk must exist in-tenant (AC-1: link on unknown risk -> 404).
-		if _, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
-			TenantID: pgUUID(tenantID),
-			ID:       pgUUID(in.RiskID),
-		}); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrNotFound
-			}
-			return fmt.Errorf("link control: get risk: %w", err)
+		// The risk must exist in-tenant (AC-1: link on unknown risk -> 404)
+		// and be open (#2106: a closed risk -> 409).
+		if _, err := lockOpenRisk(ctx, q, tenantID, in.RiskID); err != nil {
+			return err
 		}
 		// The control must exist in-tenant (AC-1: link unknown control -> 404).
 		if _, err := q.GetControlByID(ctx, dbx.GetControlByIDParams{
@@ -775,56 +782,72 @@ func (s *Store) LinkControl(ctx context.Context, in LinkControlInput) error {
 			}
 			return fmt.Errorf("link control: get control: %w", err)
 		}
-
-		if !in.DesignScoreSet && !in.WeightsSet {
-			// No weights supplied — let the migration `_029` DEFAULTs apply.
-			if err := q.LinkRiskControl(ctx, dbx.LinkRiskControlParams{
-				RiskID:    pgUUID(in.RiskID),
-				ControlID: pgUUID(in.ControlID),
-				TenantID:  pgUUID(tenantID),
-			}); err != nil {
-				return fmt.Errorf("link control: %w", err)
-			}
+		linked, err := controlLinked(ctx, q, tenantID, in.RiskID, in.ControlID)
+		if err != nil {
+			return err
+		}
+		if err := writeControlLink(ctx, q, tenantID, in); err != nil {
+			return err
+		}
+		if linked {
 			return nil
 		}
+		return insertRiskAudit(ctx, q, tenantID, in.RiskID, in.Actor, ActionControlLinked,
+			map[string]any{"control_id": nil}, map[string]any{"control_id": in.ControlID})
+	})
+}
 
-		// At least one weight supplied — write explicit values. Unsupplied
-		// values in the group fall back to the migration `_029` defaults so a
-		// caller setting only design_score does not zero the weights.
-		design := defaultIfUnset(in.DesignScoreSet, in.DesignScore, 0.5)
-		wDesign := defaultIfUnset(in.WeightsSet, in.WeightDesign, 0.3)
-		wOper := defaultIfUnset(in.WeightsSet, in.WeightOperation, 0.5)
-		wCover := defaultIfUnset(in.WeightsSet, in.WeightCoverage, 0.2)
-
-		designN, err := floatToNumeric(design)
-		if err != nil {
-			return err
-		}
-		wDesignN, err := floatToNumeric(wDesign)
-		if err != nil {
-			return err
-		}
-		wOperN, err := floatToNumeric(wOper)
-		if err != nil {
-			return err
-		}
-		wCoverN, err := floatToNumeric(wCover)
-		if err != nil {
-			return err
-		}
-		if err := q.LinkRiskControlWithWeights(ctx, dbx.LinkRiskControlWithWeightsParams{
-			RiskID:          pgUUID(in.RiskID),
-			ControlID:       pgUUID(in.ControlID),
-			TenantID:        pgUUID(tenantID),
-			DesignScore:     designN,
-			WeightDesign:    wDesignN,
-			WeightOperation: wOperN,
-			WeightCoverage:  wCoverN,
+// writeControlLink writes the link row: with the migration `_029`
+// DEFAULTs when no weights are supplied, explicit values otherwise.
+func writeControlLink(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, in LinkControlInput) error {
+	if !in.DesignScoreSet && !in.WeightsSet {
+		// No weights supplied — let the migration `_029` DEFAULTs apply.
+		if err := q.LinkRiskControl(ctx, dbx.LinkRiskControlParams{
+			RiskID:    pgUUID(in.RiskID),
+			ControlID: pgUUID(in.ControlID),
+			TenantID:  pgUUID(tenantID),
 		}); err != nil {
-			return fmt.Errorf("link control with weights: %w", err)
+			return fmt.Errorf("link control: %w", err)
 		}
 		return nil
-	})
+	}
+
+	// At least one weight supplied — write explicit values. Unsupplied
+	// values in the group fall back to the migration `_029` defaults so a
+	// caller setting only design_score does not zero the weights.
+	design := defaultIfUnset(in.DesignScoreSet, in.DesignScore, 0.5)
+	wDesign := defaultIfUnset(in.WeightsSet, in.WeightDesign, 0.3)
+	wOper := defaultIfUnset(in.WeightsSet, in.WeightOperation, 0.5)
+	wCover := defaultIfUnset(in.WeightsSet, in.WeightCoverage, 0.2)
+
+	designN, err := floatToNumeric(design)
+	if err != nil {
+		return err
+	}
+	wDesignN, err := floatToNumeric(wDesign)
+	if err != nil {
+		return err
+	}
+	wOperN, err := floatToNumeric(wOper)
+	if err != nil {
+		return err
+	}
+	wCoverN, err := floatToNumeric(wCover)
+	if err != nil {
+		return err
+	}
+	if err := q.LinkRiskControlWithWeights(ctx, dbx.LinkRiskControlWithWeightsParams{
+		RiskID:          pgUUID(in.RiskID),
+		ControlID:       pgUUID(in.ControlID),
+		TenantID:        pgUUID(tenantID),
+		DesignScore:     designN,
+		WeightDesign:    wDesignN,
+		WeightOperation: wOperN,
+		WeightCoverage:  wCoverN,
+	}); err != nil {
+		return fmt.Errorf("link control with weights: %w", err)
+	}
+	return nil
 }
 
 // defaultIfUnset returns val when set is true, otherwise def.
