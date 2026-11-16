@@ -6,6 +6,7 @@
 //	GET    /v1/action-plans                              list + pagination (AC-11)
 //	GET    /v1/action-plans/{id}                         get one + linkage (AC-12)
 //	PATCH  /v1/action-plans/{id}                         update + state machine (AC-13/AC-15)
+//	POST   /v1/action-plans/{id}/verify                  verify a plan with no linked controls (#2108)
 //	DELETE /v1/action-plans/{id}                         soft-delete (AC-14)
 //	POST   /v1/action-plans/{id}/risks/{risk_id}         link risk (AC-17)
 //	DELETE /v1/action-plans/{id}/risks/{risk_id}         unlink risk (AC-18)
@@ -46,6 +47,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -280,6 +282,37 @@ func (h *Handler) UpdateActionPlan(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"action_plan": planWireFrom(updated)})
 }
 
+// VerifyActionPlan handles POST /v1/action-plans/{id}/verify (#2108): an
+// approver verifies a completed plan with no linked controls. The approver
+// role is checked here; the store refuses the plan's owner (whatever the
+// self-approval setting), a credential that is not a person, and a plan
+// with linked controls.
+func (h *Handler) VerifyActionPlan(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCtx(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	verified, err := h.store.Verify(ctx, id, approval.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
+	if err != nil {
+		h.writeStoreErr(w, r, "verify action plan", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"action_plan": planWireFrom(verified)})
+}
+
 // DeleteActionPlan handles DELETE /v1/action-plans/{id} (AC-14). Soft-delete.
 func (h *Handler) DeleteActionPlan(w http.ResponseWriter, r *http.Request) {
 	if !requireProgramWrite(w, r) {
@@ -458,6 +491,13 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op strin
 		httpresp.WriteError(w, http.StatusConflict, "already linked")
 	case errors.Is(err, actionplan.ErrIllegalTransition):
 		httpresp.WriteError(w, http.StatusUnprocessableEntity, "illegal status transition")
+	case errors.Is(err, actionplan.ErrVerifyThroughVerify):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, actionplan.ErrVerifyHasControls):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, actionplan.ErrOwnerCannotVerify),
+		errors.Is(err, actionplan.ErrVerifierNotPerson):
+		httpresp.WriteError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, actionplan.ErrLimitExceeded):
 		httpresp.WriteError(w, http.StatusUnprocessableEntity, "limit_exceeded")
 	case errors.Is(err, actionplan.ErrTitleRequired),

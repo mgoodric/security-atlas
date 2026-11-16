@@ -7,7 +7,8 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 // store runs; TestLifecycle_MatchesAllowedTransition proves the two agree
 // on every pair, and lifecycle_integration_test.go proves the table and
 // action_plans_status_transition_guard agree against a real Postgres.
-// Every move is a status change through PATCH /v1/action-plans/{id}.
+// Every move but verify is a status change through PATCH
+// /v1/action-plans/{id}; verify has its own route (#2108).
 var Lifecycle = lifecycle.Table{
 	Name:   "action_plan",
 	Title:  "Action plan",
@@ -27,7 +28,16 @@ var Lifecycle = lifecycle.Table{
 		planMove(StatusInProgress, StatusCompleted, "complete", ""),
 		planMove(StatusBlocked, StatusInProgress, "resume", ""),
 		planMove(StatusBlocked, StatusCompleted, "complete", ""),
-		planMove(StatusCompleted, StatusVerified, "verify", ""),
+		{
+			From: StatusCompleted, To: StatusVerified, Action: "verify",
+			Actor:            lifecycle.ActorPerson,
+			Routes:           []string{"POST /v1/action-plans/{id}/verify"},
+			Roles:            planRoles,
+			RequiresApprover: true,
+			PeopleOnly:       true,
+			SecondPerson:     true,
+			Note:             "Only for a plan with no linked controls, and never by the plan's owner, whatever the self-approval setting.",
+		},
 		planMove(StatusCompleted, StatusInProgress, "reopen", "Reopened when verification fails."),
 	},
 	Trigger: &lifecycle.Trigger{
