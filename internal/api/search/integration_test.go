@@ -486,10 +486,10 @@ func TestSlice268_PartialTypesAlwaysArray(t *testing.T) {
 // ===== IST-8: slice 661 — SCF anchor catalog search (AC-1, AC-4) =====
 //
 // This is the reproduction-and-fix test. It seeds the bundled SCF
-// catalog via scfseed.EnsureFullCatalog (which loads CRY-04 "Encryption
-// At Rest" + CRY-08 "Encryption In Transit" among ~53 anchors) and a
+// catalog via scfseed.EnsureFullCatalog (which loads CRY-07 "Encrypting
+// Data At Rest" + CRY-05 "Encrypting Data In Transit" among ~53 anchors) and a
 // brand-new tenant with ZERO instantiated controls. Before the slice
-// 661 change there is no `anchors` search branch, so both `q=CRY-04`
+// 661 change there is no `anchors` search branch, so both `q=CRY-07`
 // (anchor-code match) and `q=encryption` (anchor-title match) return
 // zero hits even though the anchors are present in /catalog/scf. With
 // the change, both return anchor hits.
@@ -503,7 +503,7 @@ func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	// Seed the bundled SCF catalog (CRY-04, CRY-08, ... — tenant-agnostic).
+	// Seed the bundled SCF catalog (CRY-07, CRY-05, ... — tenant-agnostic).
 	if err := scfseed.EnsureFullCatalog(context.Background(), admin); err != nil {
 		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
@@ -520,10 +520,10 @@ func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
 
 	envA := testServer(t, app, tenantA)
 
-	// --- AC-4(a): exact anchor code `CRY-04` returns an anchor hit. ---
-	resp, body := doGet(t, envA, "/v1/search?q=CRY-04&limit=50")
+	// --- AC-4(a): exact anchor code `CRY-07` returns an anchor hit. ---
+	resp, body := doGet(t, envA, "/v1/search?q=CRY-07&limit=50")
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("IST-8 CRY-04: status %d body=%v", resp.StatusCode, body)
+		t.Fatalf("IST-8 CRY-07: status %d body=%v", resp.StatusCode, body)
 	}
 	hits := hitsAsSlice(body)
 	var sawCRY04 bool
@@ -535,7 +535,7 @@ func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
 		// /catalog/scf/<id>). Title is "<scf_id> — <title>".
 		title, _ := h["title"].(string)
 		id, _ := h["id"].(string)
-		if strings.Contains(title, "CRY-04") {
+		if strings.Contains(title, "CRY-07") {
 			sawCRY04 = true
 			if _, err := uuid.Parse(id); err != nil {
 				t.Errorf("IST-8: anchor hit id %q is not a UUID (FE links to /catalog/scf/<id>)", id)
@@ -543,11 +543,12 @@ func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
 		}
 	}
 	if !sawCRY04 {
-		t.Fatalf("IST-8 CRY-04: expected an anchor hit for CRY-04 on an empty tenant, got hits=%v", hits)
+		t.Fatalf("IST-8 CRY-07: expected an anchor hit for CRY-07 on an empty tenant, got hits=%v", hits)
 	}
 
 	// --- AC-4(b): name query `encryption` returns anchor hits ---
-	// (CRY-04 "Encryption At Rest" + CRY-08 "Encryption In Transit"),
+	// (CRY-07 "Encrypting Data At Rest" + CRY-05 "Encrypting Data In Transit",
+	// whose descriptions say "encryption"),
 	// AND does NOT leak tenant B's matching control (RLS isolation).
 	resp, body = doGet(t, envA, "/v1/search?q=encryption&limit=50")
 	if resp.StatusCode != http.StatusOK {
@@ -572,18 +573,18 @@ func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
 	// Both encryption anchors should surface by title.
 	var sawAtRest, sawInTransit bool
 	for title := range anchorTitles {
-		if strings.Contains(title, "CRY-04") {
+		if strings.Contains(title, "CRY-07") {
 			sawAtRest = true
 		}
-		if strings.Contains(title, "CRY-08") {
+		if strings.Contains(title, "CRY-05") {
 			sawInTransit = true
 		}
 	}
 	if !sawAtRest {
-		t.Errorf("IST-8 encryption: expected CRY-04 (Encryption At Rest) anchor hit, titles=%v", anchorTitles)
+		t.Errorf("IST-8 encryption: expected CRY-07 (Encrypting Data At Rest) anchor hit, titles=%v", anchorTitles)
 	}
 	if !sawInTransit {
-		t.Errorf("IST-8 encryption: expected CRY-08 (Encryption In Transit) anchor hit, titles=%v", anchorTitles)
+		t.Errorf("IST-8 encryption: expected CRY-05 (Encrypting Data In Transit) anchor hit, titles=%v", anchorTitles)
 	}
 }
 
@@ -683,8 +684,8 @@ func TestIssue2067_TenantControlsBeforeCatalogAnchors(t *testing.T) {
 		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
 	tenant := freshTenant(t, admin)
-	// Matches "encryption" but not "rest", so CRY-04 "Encryption At
-	// Rest" outscores it on relevance.
+	// Matches "encryption" but not "rest", so CRY-07 "Encrypting Data
+	// At Rest" (description: "encryption") outscores it on relevance.
 	ctrl := seedControl(t, admin, tenant, "Disk encryption standard", "Laptops are encrypted.")
 	policy := seedPolicy(t, admin, tenant, "Encryption Policy", "How we encrypt.", "published", "1.0")
 

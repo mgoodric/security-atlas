@@ -81,10 +81,10 @@ func okEventGridFlags() eventGridFlags {
 		credentialIn:    "header",
 		credentialName:  "Authorization",
 		entraControl:    "scf:IAC-10",
-		storageControl:  "scf:CRY-04",
+		storageControl:  "scf:CRY-07",
 		aksControl:      "scf:CFG-04",
 		nsgControl:      "scf:NET-04",
-		keyvaultControl: "scf:CRY-09",
+		keyvaultControl: "scf:CRY-10",
 		firewallControl: "scf:NET-04",
 	}
 }
@@ -306,7 +306,7 @@ func TestReread_DedupKeyMatchesPullProfile(t *testing.T) {
 		EncryptionEnabled: true, HTTPSTrafficOnly: true, ObservedAt: time.Now().UTC(),
 	}
 	// The pull profile's record for this account:
-	pullRec, err := buildStorageRecord(acct, "prod", "scf:CRY-04")
+	pullRec, err := buildStorageRecord(acct, "prod", "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildStorageRecord: %v", err)
 	}

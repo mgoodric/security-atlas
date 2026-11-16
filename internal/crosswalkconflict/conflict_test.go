@@ -563,7 +563,7 @@ func TestDetectEveryFindingIsDescribed(t *testing.T) {
 			edge(1, "IAC", "IAC-01", RelEqual, 1.0),
 			edge(2, "IAC", "IAC-22", RelEqual, 1.0),
 			edge(3, "CRY", "CRY-03", RelNoRelationship, 0.7),
-			edge(4, "CRY", "CRY-04", RelIntersectsWith, 1.0),
+			edge(4, "CRY", "CRY-07", RelIntersectsWith, 1.0),
 		},
 	})
 	if len(got) == 0 {

@@ -667,7 +667,7 @@ const DemoSCFRelease = "2026.3"
 // to real SCF controls, not fabricated ones.
 var demoSCFAnchors = []demoSCFAnchor{
 	{"IAC-37", "Identification & Authentication", "Multi-Factor Authentication"},
-	{"CRY-05", "Cryptographic Protections", "Encryption of Data at Rest"},
+	{"CRY-07", "Cryptographic Protections", "Encrypting Data At Rest"},
 	{"BCD-24", "Business Continuity & Disaster Recovery", "Data Backups"},
 	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
 	{"TPM-04", "Third-Party Management", "Supply Chain Risk Management (SCRM)"},
