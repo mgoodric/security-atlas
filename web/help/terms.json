@@ -182,6 +182,54 @@
       "short": "An optional module hidden from everyone in the tenant: its pages leave the sidebar and can't be opened. Its data is kept, and switching it back on brings everything back.",
       "long": "Switching a module off deletes nothing. Its records, their history and the module's feature settings stay as they were, so switching it on again restores the module as you left it.",
       "glossary": "GLOSSARY.md#modules-in-design"
+    },
+    {
+      "id": "population",
+      "name": "Sample population",
+      "short": "The set of evidence an auditor can sample from for one control: the control's evidence in a scope, over a window of time.",
+      "long": "A population is defined by a control, the part of your organisation it covers, and a time window. In a frozen audit period the population only holds evidence observed up to the freeze, so evidence that arrives later can't slip into the audit."
+    },
+    {
+      "id": "sample",
+      "name": "Sample",
+      "short": "A handful of evidence records drawn from a population for an auditor to test. The draw uses a seed, so the same seed always picks the same records.",
+      "long": "Auditors rarely look at every record. They draw a sample of a set size from the population and record a result and notes against each record they test. Because the draw is repeatable from its seed, anyone can check later that the sample wasn't picked by hand."
+    },
+    {
+      "id": "assigned-auditor",
+      "name": "Assigned auditor",
+      "short": "A person with the auditor role who has been given one audit period. They see that period's samples, populations and the evidence in them, and can draw samples.",
+      "long": "An admin assigns auditors on the audit period's page, one period at a time. An auditor can read controls, policies and framework scopes across the organisation, but samples, populations and evidence only for the periods they are assigned to. Auditors can't freeze a period or change your controls."
+    },
+    {
+      "id": "oscal",
+      "name": "OSCAL",
+      "short": "The Open Security Controls Assessment Language: a NIST standard file format for security plans, assessments and control claims. security-atlas exports audits in it and imports vendor claims from it.",
+      "long": "OSCAL lets security tools and auditors exchange records without retyping them. security-atlas exports a frozen audit period as an OSCAL bundle (system security plan, assessment plan and results, and plan of action and milestones) with a signed manifest. It reads vendors' OSCAL component definitions as vendor claims."
+    },
+    {
+      "id": "board-pack",
+      "name": "Board pack",
+      "short": "A quarterly report for your board: posture, top risks, coverage trend, open findings and asks of the board. Each section is approved before the pack is published, and a published pack never changes.",
+      "long": "A board pack is generated as a draft from your live data as of a quarter-end date. Its narrative is written from fixed templates, not by AI. An approver edits and approves each section, then publishes the pack, which freezes it so the board always sees the version that was presented."
+    },
+    {
+      "id": "csf-tier",
+      "name": "CSF tier",
+      "short": "How rigorous and risk-informed your security programme is, on the NIST Cybersecurity Framework's four steps: Partial, Risk Informed, Repeatable and Adaptive.",
+      "long": "A tier describes how the programme is run as a whole, not how many controls you have. It is a judgement your organisation records with a short rationale; the CSF doesn't say every organisation must reach Tier 4."
+    },
+    {
+      "id": "csf-profile",
+      "name": "CSF profile",
+      "short": "A list of NIST CSF outcomes with how far each is achieved. The Current profile is where you are today; the Target profile is where you mean to be.",
+      "long": "Each outcome, called a Subcategory, is marked not targeted, partial, largely or fully. Comparing the two profiles shows the gap: a Subcategory whose target is above its current level is work still to do, and one already at or above its target is met."
+    },
+    {
+      "id": "vendor-claim",
+      "name": "Vendor claim",
+      "short": "A vendor's own statement that their product meets a control, imported from their OSCAL file. It is the vendor's word, not evidence security-atlas has checked.",
+      "long": "Each claim names a control and the vendor's explanation. You can accept it, reject it, or mark that you need more information. Accepting records that you rely on the vendor's statement and includes it, labelled as vendor-attested, in your OSCAL security plan export. It doesn't make any of your controls pass."
     }
   ]
 }

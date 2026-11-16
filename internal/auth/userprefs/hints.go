@@ -39,6 +39,12 @@ var HintModules = []string{
 	"admin-tenants",
 	"admin-super-admins",
 	"admin-demo",
+	// #2152: Audit.
+	"audits",
+	"framework-scopes",
+	"board-packs",
+	"csf",
+	"vendor-claims",
 }
 
 // HintChange is one PATCH's worth of hint edits. Reset clears every

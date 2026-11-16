@@ -38,8 +38,13 @@ import adminSsoSource from "@/help/modules/admin-sso.md";
 import adminSuperAdminsSource from "@/help/modules/admin-super-admins.md";
 import adminTenantsSource from "@/help/modules/admin-tenants.md";
 import adminUsersSource from "@/help/modules/admin-users.md";
+import auditsSource from "@/help/modules/audits.md";
+import boardPacksSource from "@/help/modules/board-packs.md";
 import controlsSource from "@/help/modules/controls.md";
+import csfSource from "@/help/modules/csf.md";
+import frameworkScopesSource from "@/help/modules/framework-scopes.md";
 import settingsSource from "@/help/modules/settings.md";
+import vendorClaimsSource from "@/help/modules/vendor-claims.md";
 import {
   describeLifecycle,
   extractLifecycleBlocks,
@@ -98,6 +103,12 @@ export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "admin-tenants.md": adminTenantsSource,
   "admin-super-admins.md": adminSuperAdminsSource,
   "admin-demo.md": adminDemoSource,
+  // #2152: Audit.
+  "audits.md": auditsSource,
+  "framework-scopes.md": frameworkScopesSource,
+  "board-packs.md": boardPacksSource,
+  "csf.md": csfSource,
+  "vendor-claims.md": vendorClaimsSource,
 };
 
 export const HELP_DOCS_BASE_URL =
