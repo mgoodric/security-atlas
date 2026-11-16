@@ -322,11 +322,12 @@ func proposalRecord(p Proposal, tool, kind, version string, controlID uuid.UUID,
 // operator's credential, read from ctx. That credential must belong to the
 // proposal's tenant, and its kind scope applies as on any other push.
 //
-// An approver whose credential carries a ScopePredicate is refused
-// (ingest.ErrScopeViolation, 403 scope_violation at the handler): the
-// record's only scope dimension is the server-set mcp_tool, which no
-// predicate such as cloud_account=... can match. Confirming MCP evidence
-// needs an approver credential without a scope predicate.
+// An approver whose credential carries a restrictive ScopePredicate is
+// refused (ingest.ErrScopeViolation, 403 scope_violation at the handler):
+// the record's only scope dimension is the server-set mcp_tool, which a
+// predicate on cloud_account or the like cannot match. Confirming MCP
+// evidence needs an unrestricted approver credential ("" or the stored
+// default "{}", #2435).
 //
 // A record already ingested for this proposal (an earlier confirm whose
 // state flip rolled back after ingest committed) is returned as is. The
