@@ -1685,6 +1685,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/audit-periods/{id}/auditors:
+    get:
+      summary: GET /v1/audit-periods/{id}/auditors — list the period's auditors (admin; #2118)
+      tags: [audit-periods]
+      operationId: get-v1-audit-periods-id-auditors
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/audit-periods/{id}/auditors — assign an auditor to the period (admin; #2118)
+      tags: [audit-periods]
+      operationId: post-v1-audit-periods-id-auditors
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/audit-periods/{id}/auditors/{userID}:
+    delete:
+      summary: DELETE /v1/audit-periods/{id}/auditors/{userID} — remove an auditor from the period (admin; #2118)
+      tags: [audit-periods]
+      operationId: delete-v1-audit-periods-id-auditors-userID
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/control-state:
     get:
       summary: GET /v1/audit-periods/{id}/control-state

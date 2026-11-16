@@ -96,7 +96,7 @@ test.describe("policy review dates (#1806)", () => {
 
     await expect(
       row(OVERDUE.title).getByTestId("policies-row-next-review"),
-    ).toHaveText("2026-03-01");
+    ).toHaveText("Mar 1, 2026");
     await expect(
       row(OVERDUE.title).getByTestId("policies-row-review-marker"),
     ).toHaveText("Overdue");

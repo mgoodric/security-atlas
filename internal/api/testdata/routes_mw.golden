@@ -3,6 +3,7 @@ DELETE /scim/v2/Users/{id} 10
 DELETE /v1/action-plans/{id} 9
 DELETE /v1/action-plans/{id}/controls/{control_id} 9
 DELETE /v1/action-plans/{id}/risks/{risk_id} 9
+DELETE /v1/audit-periods/{id}/auditors/{userID} 9
 DELETE /v1/admin/group-role-mappings/{id} 9
 DELETE /v1/admin/llm-routing 9
 DELETE /v1/admin/scim-credentials/{id} 9
@@ -71,6 +72,7 @@ GET /v1/audit-notes 9
 GET /v1/audit-notes/thread 9
 GET /v1/audit-periods 9
 GET /v1/audit-periods/{id} 9
+GET /v1/audit-periods/{id}/auditors 9
 GET /v1/audit-periods/{id}/control-state 9
 GET /v1/audit-periods/{id}/controls/{controlID}/evidence-summary 9
 GET /v1/board-briefs 9
@@ -280,6 +282,7 @@ POST /v1/aggregation-rules 9
 POST /v1/aggregation-rules/evaluate 9
 POST /v1/audit-notes 9
 POST /v1/audit-periods 9
+POST /v1/audit-periods/{id}/auditors 9
 POST /v1/audit-periods/{id}/freeze 9
 POST /v1/audit-periods/{id}/oscal-export 9
 POST /v1/audit-periods/{id}/oscal-export:download 9

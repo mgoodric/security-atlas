@@ -56,6 +56,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 
 import {
   type ControlCoverage,
@@ -306,9 +307,10 @@ export function HistoryBody({
             className="text-muted-foreground"
             data-testid="audit-log-entry"
           >
-            <span className="font-mono text-muted-foreground">
-              {formatHistoryDate(h.evaluated_at)}
-            </span>{" "}
+            <Timestamp
+              value={h.evaluated_at}
+              className="text-muted-foreground"
+            />{" "}
             ·{" "}
             <span className="text-foreground">
               evaluated <span className="font-mono">{h.computed_state}</span>
@@ -374,7 +376,7 @@ export function EvidenceStreamRow({
         <span className={`inline-block h-2 w-2 rounded-full ${dotClass}`} />
       </div>
       <div className="col-span-3 font-mono text-[11px] text-muted-foreground">
-        {observedAt}
+        <Timestamp value={observedAt} />
       </div>
       <div className="col-span-6 min-w-0">
         <div className="truncate text-sm text-foreground">
@@ -408,14 +410,4 @@ export function formatEvidenceSource(
   if (typeof actorID === "string") return actorID;
   if (typeof actorType === "string") return actorType;
   return "—";
-}
-
-// formatHistoryDate renders the RFC3339 evaluated_at as the YYYY-MM-DD
-// prefix used in the mockup's audit-log entries (lines 552-557). Falls
-// back to the raw string when parsing fails so a backend-shape change
-// surfaces as a visible date, not a silent error.
-export function formatHistoryDate(iso: string): string {
-  if (!iso) return "—";
-  const t = iso.indexOf("T");
-  return t > 0 ? iso.slice(0, t) : iso;
 }

@@ -24,6 +24,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 import { APIError } from "@/lib/api/base";
 import { fetchEvidenceDetail, type EvidenceDetail } from "@/lib/api/evidence";
 
@@ -109,7 +110,11 @@ export default function EvidenceDetailPage({
           {ev.demo ? <DemoBadge testId="evidence-detail-demo" /> : null}
         </div>
       }
-      subtitle={`Observed ${ev.observed_at}`}
+      subtitle={
+        <>
+          Observed <Timestamp value={ev.observed_at} style="datetime" />
+        </>
+      }
       actions={<BackLink />}
       data-testid="evidence-detail"
     >
@@ -195,10 +200,10 @@ function RecordCard({ evidence: ev }: { evidence: EvidenceDetail }) {
             )}
           </Field>
           <Field label="Observed" testId="evidence-detail-observed-at">
-            <span className="font-mono">{ev.observed_at}</span>
+            <Timestamp value={ev.observed_at} style="datetime" />
           </Field>
           <Field label="Ingested">
-            <span className="font-mono">{ev.ingested_at}</span>
+            <Timestamp value={ev.ingested_at} style="datetime" />
           </Field>
           <Field label="Observer" testId="evidence-detail-observer">
             <span className="font-mono">{observer}</span>
