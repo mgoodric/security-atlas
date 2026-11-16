@@ -203,7 +203,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 533: Datadog Cloud-SIEM / Security-Monitoring detection-rule
 		// inventory — the deliberate slice-488 D1 sibling-kind SPLIT (a detection
 		// rule carries a severity + detection-class field monitoring.alert_config
-		// lacks, so it gets its own kind: MON-02 + THR-01). Read-only
+		// lacks, so it gets its own kind: MON-02 + THR-02). Read-only
 		// (security_monitoring_rules_read); RULE configuration only — never firing
 		// signals, raw log samples, matched-event payloads, secret notification
 		// targets, recipient PII, or the raw detection query.
@@ -212,7 +212,7 @@ func DefaultSeed() []KindVersion {
 		// slice-533 CC7.3 sibling. Slice 533 reads detection-rule CONFIGURATION
 		// (CC7.2: which rules exist); this reads what FIRED and how it was TRIAGED
 		// (CC7.3 incident response: rules fired + were triaged over the audit
-		// period, when, by whom): THR-01 + IRO-16. Read-only
+		// period, when, by whom): THR-02 + IRO-16. Read-only
 		// (security_monitoring_signals_read), bounded PULL over a look-back window
 		// (NOT continuous monitoring, NOT event-driven). Triage METADATA only —
 		// never the signal message body, matched log/event samples, the

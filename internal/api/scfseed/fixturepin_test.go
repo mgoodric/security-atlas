@@ -35,7 +35,7 @@ import (
 // to the sha256 of its anchor content (see fixtureContentHash). test-2026.3
 // is the open working label (see above); every other entry is frozen.
 var fixtureContentByRelease = map[string]string{
-	"test-2026.3": "58b90d570ff34528aa1ad5a7d7f9a7d555fd0df0a211ae6219660bec3dcc852c",
+	"test-2026.3": "4ad778ac05950aeb738e9ba8016a37b8a54451f00322dd89f15a3857e20c7c0e",
 }
 
 // fixtureContentHash hashes exactly the anchor content scfimport freezes:

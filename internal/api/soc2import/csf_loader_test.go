@@ -105,9 +105,9 @@ func TestLoad_CSFFullSubcategoryCoverage(t *testing.T) {
 	// Threat-Management anchor (slices 646, 651). The base is one edge per
 	// Subcategory (1:1); the THR finer-crosswalk pass adds extra anchors to
 	// the requirements that have a genuine STRM relationship to
-	// THR-01/03/07/09/10 (invariant #1 — N anchors per requirement). The exact
+	// THR-02/04/06/08/12 (invariant #1 — N anchors per requirement). The exact
 	// total is asserted so a row added or dropped fails loudly.
-	const wantTHRExtraEdges = 5 // ID.RA-02->THR-03, ID.RA-03->THR-09, ID.RA-03->THR-10, DE.AE-07->THR-01 (slice 646); ID.RA-08->THR-07 (slice 651)
+	const wantTHRExtraEdges = 5 // ID.RA-02->THR-04, ID.RA-03->THR-06, ID.RA-03->THR-08, DE.AE-07->THR-02 (slice 646); ID.RA-08->THR-12 (slice 651)
 	if n := len(cw.Mappings); n != wantSubcategories+wantTHRExtraEdges {
 		t.Fatalf("CSF mappings = %d; want %d (one base edge per Subcategory + %d finer-THR edges)",
 			n, wantSubcategories+wantTHRExtraEdges, wantTHRExtraEdges)

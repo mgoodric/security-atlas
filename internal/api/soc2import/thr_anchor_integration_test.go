@@ -19,17 +19,17 @@ import (
 // seeded catalog.
 //
 // Slice 533 shipped datadog.siem_rule.v1 with
-// x-default-scf-anchors=[MON-02, THR-01]. MON-02 resolved against the seeded
-// sample catalog, but THR-01 (the SCF Threat-Management / threat-intelligence
+// x-default-scf-anchors=[MON-02, THR-02]. MON-02 resolved against the seeded
+// sample catalog, but THR-02 (the SCF Threat-Management / threat-intelligence
 // domain) did NOT exist in the sample catalog — it carried the MON domain
 // (incl. MON-08 "Anomalous Behavior Detection", MON-16 since the SCF 2026.3 remap) but no THR-domain anchor, so
 // the connector's advisory detection anchor pointed at no catalog row (see
-// slice 533 decisions-log D2). Slice 635 seeds THR-01 into
+// slice 533 decisions-log D2). Slice 635 seeds THR-02 into
 // migrations/fixtures/scf-sample.json with its STRM crosswalk edges to
 // SOC 2 CC7.2/CC7.3 and ISO 27001 A.5.7/A.8.16, so the advisory anchor now
 // resolves. This file is the load-bearing proof.
 
-// TestTHRAnchor_ResolvesInSeededCatalog asserts THR-01 resolves through the
+// TestTHRAnchor_ResolvesInSeededCatalog asserts THR-02 resolves through the
 // exact production path the crosswalk importer uses (GetSCFAnchorBySCFID
 // against slug='scf' AND status='current') — the same path that produced the
 // `scf_anchor "GOV-01" not found` failure when an anchor was absent. Before
@@ -39,18 +39,18 @@ func TestTHRAnchor_ResolvesInSeededCatalog(t *testing.T) {
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 
-	anchor, err := dbx.New(pool).GetSCFAnchorBySCFID(context.Background(), "THR-01")
+	anchor, err := dbx.New(pool).GetSCFAnchorBySCFID(context.Background(), "THR-02")
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			t.Fatal("THR-01 does not resolve in the seeded SCF catalog — slice 635 regression (the SIEM-rule advisory detection anchor points at no catalog row)")
+			t.Fatal("THR-02 does not resolve in the seeded SCF catalog — slice 635 regression (the SIEM-rule advisory detection anchor points at no catalog row)")
 		}
-		t.Fatalf("GetSCFAnchorBySCFID(THR-01): %v", err)
+		t.Fatalf("GetSCFAnchorBySCFID(THR-02): %v", err)
 	}
-	if anchor.ScfID != "THR-01" {
-		t.Fatalf("resolved scf_id = %q; want THR-01", anchor.ScfID)
+	if anchor.ScfID != "THR-02" {
+		t.Fatalf("resolved scf_id = %q; want THR-02", anchor.ScfID)
 	}
 	if anchor.Family != "THR" {
-		t.Fatalf("THR-01 family = %q; want THR (the dedicated threat-management domain)", anchor.Family)
+		t.Fatalf("THR-02 family = %q; want THR (the dedicated threat-management domain)", anchor.Family)
 	}
 }
 
@@ -88,10 +88,10 @@ func anchorsForRequirement(t *testing.T, pool *pgxpool.Pool, slug, version, code
 
 // TestTHRAnchor_DetectionCrosswalkEdgesExist proves the STRM crosswalk the
 // slice records: SOC 2 CC7.2 + CC7.3 and ISO 27001 A.5.7 + A.8.16 each
-// resolve to THR-01 after both crosswalks are imported. This is the catalog
+// resolve to THR-02 after both crosswalks are imported. This is the catalog
 // half of the SIEM-rule evidence question ("threat-detection rules are
 // configured AND appropriately tiered" — slice 533 D1): the
-// datadog.siem_rule.v1 family anchors at THR-01, and THR-01 now reaches the
+// datadog.siem_rule.v1 family anchors at THR-02, and THR-02 now reaches the
 // SOC 2 CC7.2/CC7.3 + ISO A.5.7/A.8.16 requirements through real STRM edges.
 func TestTHRAnchor_DetectionCrosswalkEdgesExist(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
@@ -116,12 +116,12 @@ func TestTHRAnchor_DetectionCrosswalkEdgesExist(t *testing.T) {
 	}
 	for _, c := range cases {
 		anchors := anchorsForRequirement(t, pool, c.slug, c.version, c.code)
-		if !anchors["THR-01"] {
-			t.Errorf("%s:%s:%s does not resolve to THR-01; resolved to %v", c.slug, c.version, c.code, keys(anchors))
+		if !anchors["THR-02"] {
+			t.Errorf("%s:%s:%s does not resolve to THR-02; resolved to %v", c.slug, c.version, c.code, keys(anchors))
 		}
 	}
 
-	// A.5.7 (Threat intelligence) is the direct STRM equal of THR-01 — the
+	// A.5.7 (Threat intelligence) is the direct STRM equal of THR-02 — the
 	// slice-635 upgrade from the slice-438 LOW-CONFIDENCE MON-08 placeholder (MON-16 since the SCF 2026.3 remap).
 	// Assert the relationship type is `equal`, not the old intersects_with.
 	var rel string
@@ -132,11 +132,11 @@ func TestTHRAnchor_DetectionCrosswalkEdgesExist(t *testing.T) {
 		JOIN frameworks f ON f.id = fv.framework_id
 		JOIN fw_to_scf_edges e ON e.framework_requirement_id = fr.id
 		JOIN scf_anchors a ON a.id = e.scf_anchor_id
-		WHERE f.slug = 'iso27001' AND fv.version = '2022' AND fr.code = 'A.5.7' AND a.scf_id = 'THR-01'`).Scan(&rel); err != nil {
-		t.Fatalf("A.5.7 -> THR-01 edge query: %v", err)
+		WHERE f.slug = 'iso27001' AND fv.version = '2022' AND fr.code = 'A.5.7' AND a.scf_id = 'THR-02'`).Scan(&rel); err != nil {
+		t.Fatalf("A.5.7 -> THR-02 edge query: %v", err)
 	}
 	if rel != "equal" {
-		t.Fatalf("A.5.7 -> THR-01 relationship_type = %q; want equal (the dedicated threat-intel anchor is the direct STRM match)", rel)
+		t.Fatalf("A.5.7 -> THR-02 relationship_type = %q; want equal (the dedicated threat-intel anchor is the direct STRM match)", rel)
 	}
 }
 
