@@ -92,10 +92,11 @@ allow if {
     input.resource.type == "notifications"
 }
 
-# One write action carried over from the slice-035 stub: annotating
-# a sample with audit findings (slice 026:
-# POST /v1/samples/{id}/annotations). Period-scoped via
-# audit_periods.rego's ABAC predicate.
+# Sample writes in an assigned period: annotating a sample with audit
+# findings (slice 026: POST /v1/samples/{id}/annotations) and drawing one
+# from a period's population (POST /v1/samples). The hydrator sets
+# input.resource.attrs.audit_period_id from the sample's, or the body
+# population_id's, population (#2157).
 allow if {
     has_role("auditor")
     input.action == "write"
@@ -219,9 +220,9 @@ allow if {
 }
 
 # #2381: the dashboard's Evidence freshness panel, the same narrow admit
-# as viewer.rego. Counts per freshness class only; /v1/evidence and
-# /v1/evidence/{id} stay denied to auditor until #2157 repairs the
-# audit-period ABAC rules.
+# as viewer.rego. Counts per freshness class only. /v1/evidence and
+# /v1/evidence/{id} are admitted only for an assigned period's evidence
+# (audit_periods.rego, #2157).
 allow if {
     has_role("auditor")
     is_read
