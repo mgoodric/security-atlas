@@ -156,11 +156,13 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 		entries    []unifiedlog.Entry
 		nextCursor *unifiedlog.Cursor
 	)
+	gate := h.newPayloadGate(r, userIdentifier)
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		got, _, qErr := unifiedlog.Query(ctx, q, params.queryParams)
 		if qErr != nil {
 			return qErr
 		}
+		gate.apply(got)
 		// Apply the page-size cap + cursor derivation here (mirrors
 		// UnifiedList — the aggregator returns up to Limit rows, and
 		// the handler asks for one more than the page size to detect
