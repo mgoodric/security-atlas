@@ -3642,6 +3642,11 @@ type Querier interface {
 	// YAML so a repeat upload is a no-op.
 	UpdateControlMetadataInPlace(ctx context.Context, arg UpdateControlMetadataInPlaceParams) (int64, error)
 	UpdateDecision(ctx context.Context, arg UpdateDecisionParams) (Decision, error)
+	// #2116 — edit a draft in place. Only a row still in 'draft' matches, so a
+	// submitted, approved, published or superseded policy is never rewritten
+	// here: a published policy changes through a new version (predecessor_id).
+	// version, predecessor_id and source_attribution are not editable.
+	UpdateDraftPolicy(ctx context.Context, arg UpdateDraftPolicyParams) (Policy, error)
 	// Patch the predicate. The BEFORE UPDATE trigger
 	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row
 	// was in `review` or `approved`, NEW.state falls back to `draft` and the
