@@ -133,39 +133,39 @@
     },
 
     {
-      "scf_id": "CRY-01",
+      "scf_id": "CRY-02",
       "family": "CRY",
       "title": "Use of Cryptographic Controls",
       "description": "Mechanisms exist to facilitate the use of cryptographic protections of data."
     },
     {
-      "scf_id": "CRY-04",
+      "scf_id": "CRY-07",
       "family": "CRY",
-      "title": "Encryption At Rest",
-      "description": "Cryptographic mechanisms exist to protect the confidentiality of sensitive data at rest."
+      "title": "Encrypting Data At Rest",
+      "description": "Cryptographic mechanisms exist to protect the confidentiality of sensitive data at rest through encryption."
     },
     {
-      "scf_id": "CRY-08",
+      "scf_id": "CRY-05",
       "family": "CRY",
-      "title": "Encryption In Transit",
-      "description": "Cryptographic mechanisms exist to protect the confidentiality and integrity of data in transit."
+      "title": "Encrypting Data In Transit",
+      "description": "Cryptographic mechanisms exist to protect the confidentiality and integrity of data in transit through encryption."
     },
     {
-      "scf_id": "CRY-09",
+      "scf_id": "CRY-10",
       "family": "CRY",
       "title": "Cryptographic Key Management",
       "description": "Mechanisms exist to govern the cryptographic key management lifecycle."
     },
     {
-      "scf_id": "CRY-11",
+      "scf_id": "CRY-14",
       "family": "CRY",
-      "title": "Cryptographic Integrity Verification",
+      "title": "Cryptographic Hash",
       "description": "Cryptographic mechanisms exist to corroborate that data has not been altered or destroyed in an unauthorized manner, using hashing, digital signatures, or equivalent integrity checks."
     },
     {
-      "scf_id": "CRY-12",
+      "scf_id": "CRY-06",
       "family": "CRY",
-      "title": "Transmission Integrity",
+      "title": "Integrity of Data In Transit",
       "description": "Cryptographic mechanisms exist to detect unauthorized modification of data during transmission across communications networks."
     },
 

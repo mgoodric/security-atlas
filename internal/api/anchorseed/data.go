@@ -65,9 +65,9 @@ func defaultMappings() []Mapping {
 
 		{RequirementID: "req_iso_a8_15", AnchorSCFID: "MON-13", STRMType: "intersects", Strength: 0.7},
 
-		{RequirementID: "req_iso_a8_24", AnchorSCFID: "CRY-04", STRMType: "intersects", Strength: 0.8},
-		{RequirementID: "req_nist_pr_ds_01", AnchorSCFID: "CRY-04", STRMType: "equal", Strength: 1.0},
+		{RequirementID: "req_iso_a8_24", AnchorSCFID: "CRY-07", STRMType: "intersects", Strength: 0.8},
+		{RequirementID: "req_nist_pr_ds_01", AnchorSCFID: "CRY-07", STRMType: "equal", Strength: 1.0},
 
-		{RequirementID: "req_iso_a8_24", AnchorSCFID: "CRY-01", STRMType: "equal", Strength: 1.0},
+		{RequirementID: "req_iso_a8_24", AnchorSCFID: "CRY-02", STRMType: "equal", Strength: 1.0},
 	}
 }

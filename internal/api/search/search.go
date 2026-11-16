@@ -22,8 +22,8 @@
 //
 // Slice 661 — the `anchors` type fixes the empty-tenant gap (ATLAS-002):
 // on a fresh tenant with zero instantiated controls, the ~53 bundled SCF
-// anchors (CRY-04, etc.) were unindexed, so the operator's most natural
-// query ("find CRY-04" / "encryption") returned nothing. The anchor
+// anchors (CRY-07, etc.) were unindexed, so the operator's most natural
+// query ("find CRY-07" / "encryption") returned nothing. The anchor
 // branch reads the tenant-AGNOSTIC scf_anchors catalog directly (no RLS
 // — invariant #6 is preserved because there is no tenant column to leak
 // across; the three tenant types keep their RLS-bound path unchanged).
@@ -542,7 +542,7 @@ func (h *Handler) searchEvidence(ctx context.Context, q string, tokens []string,
 // tenant_id IS NULL`, so only the current version participates and each
 // scf_id appears at most once.
 //
-// Matched columns: scf_id (so `CRY-04` matches by code) + title +
+// Matched columns: scf_id (so `CRY-07` matches by code) + title +
 // description (so `encryption` matches by name). The synthesized title
 // is "<scf_id> — <title>" so the FE renders a stable, code-prefixed
 // label. The hit ID is the anchor UUID, which the FE links to

@@ -113,7 +113,7 @@ aws-connector run \
 | `--region`      | `run`      | yes      | —                                   | primary AWS region; S3 calls re-target per bucket via `GetBucketLocation`               |
 | `--environment` | `run`      | no       | —                                   | environment scope tag; fallback when `Organizations:ListTagsForResource` is unavailable |
 | `--kind`        | `run`      | no       | `aws.s3.bucket_encryption_state.v1` | slice 004 supports exactly this kind                                                    |
-| `--control-id`  | `run`      | no       | `scf:CRY-04`                        | control id attached to each emitted record                                              |
+| `--control-id`  | `run`      | no       | `scf:CRY-07`                        | control id attached to each emitted record                                              |
 
 `register` announces `name=aws-connector`, `supported_kinds=[aws.s3.bucket_encryption_state.v1]`,
 and `profiles_supported=[push]` to `ConnectorRegistryService.Register`.

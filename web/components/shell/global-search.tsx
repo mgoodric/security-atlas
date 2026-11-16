@@ -110,7 +110,7 @@ const PER_TYPE_TARGET = 10;
 
 // SearchHitType is the discriminator union. Slice 661 added `anchors` —
 // the bundled SCF anchor catalog — so an empty tenant (zero instantiated
-// controls) can still find controls by their SCF code (CRY-04) or name
+// controls) can still find controls by their SCF code (CRY-07) or name
 // (encryption). #2067 added `policies`. See web/app/api/search/route.ts.
 type SearchHitType = "controls" | "risks" | "policies" | "evidence" | "anchors";
 

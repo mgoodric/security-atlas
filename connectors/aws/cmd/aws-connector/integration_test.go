@@ -56,7 +56,7 @@ func TestBuildRecord_PushesWithScopeAndProvenance(t *testing.T) {
 	}
 	identity := awsauth.Identity{AccountID: "111122223333", Environment: "prod", Source: "flag"}
 
-	rec, err := buildRecord(state, identity, "scf:CRY-04")
+	rec, err := buildRecord(state, identity, "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildRecord: %v", err)
 	}
@@ -119,11 +119,11 @@ func TestBuildRecord_DedupesWithinHour(t *testing.T) {
 	}
 	identity := awsauth.Identity{AccountID: "111122223333", Environment: "prod", Source: "flag"}
 
-	first, err := buildRecord(state, identity, "scf:CRY-04")
+	first, err := buildRecord(state, identity, "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildRecord first: %v", err)
 	}
-	second, err := buildRecord(state, identity, "scf:CRY-04")
+	second, err := buildRecord(state, identity, "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildRecord second: %v", err)
 	}

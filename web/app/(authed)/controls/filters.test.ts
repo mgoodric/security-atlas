@@ -218,7 +218,7 @@ describe("formatFrameworksCell", () => {
   });
 
   test("AC-5: four-framework row renders the full strip", () => {
-    // Mockup CRY-04 example (`SOC2 · ISO · CSF · GDPR`).
+    // Mockup CRY-07 example (`SOC2 · ISO · CSF · GDPR`).
     expect(formatFrameworksCell(["SOC2", "ISO", "CSF", "GDPR"])).toBe(
       "SOC2 · ISO · CSF · GDPR",
     );
