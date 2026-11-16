@@ -268,3 +268,34 @@ SELECT COALESCE(
     (SELECT t.risk_review_cadence_days FROM tenants t WHERE t.id = $1),
     365
 )::int AS cadence_days;
+
+-- name: SetRiskTreatment :one
+-- #2105: the treatment and acceptance columns, written only by the risk
+-- treatment and acceptance transitions (internal/risk/transitions.go),
+-- which validate the state machine and audit-log the change in the same
+-- transaction. Record fields are untouched.
+UPDATE risks
+SET treatment = $3,
+    acceptance_status = $4,
+    instrument_reference = $5,
+    accepted_until = $6,
+    accepter = $7,
+    acceptance_justification = $8,
+    acceptance_proposed_until = $9,
+    acceptance_proposed_by = $10,
+    acceptance_proposed_at = $11,
+    acceptance_approved_at = $12,
+    self_approved = $13,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: CountRiskActionPlanLinks :one
+-- #2105: live (not tombstoned) action plans linked to a risk, for the
+-- mitigate rule (a linked control or a linked action plan).
+SELECT COUNT(*)::bigint
+FROM action_plan_risks apr
+JOIN action_plans ap
+  ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
+WHERE apr.tenant_id = $1 AND apr.risk_id = $2
+  AND ap.tombstoned_at IS NULL;

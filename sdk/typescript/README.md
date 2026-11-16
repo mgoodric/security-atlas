@@ -35,7 +35,7 @@ await fetch("https://atlas.example.com/v1/evidence:push", {
       idempotency_key: "example-key-2026-06-03T00:00:00Z",
       evidence_kind: "aws.s3.bucket_encryption_state.v1",
       schema_version: "1.0.0",
-      control_id: "scf:CRY-04",
+      control_id: "scf:CRY-07",
       scope: [
         { key: "cloud_account", values: ["aws:<ACCOUNT_ID>"] },
         { key: "environment", values: ["prod"] },

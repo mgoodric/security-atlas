@@ -141,3 +141,61 @@ export async function fetchOscalBundle(id: string): Promise<Blob> {
   if (!res.ok) return throwAPIError(res);
   return await res.blob();
 }
+
+// ----- #2118: the period's auditors (admin only) -----
+//
+// The platform lists the assigned auditors and the candidates: the
+// tenant's active auditors not yet on the period. It refuses a non-admin
+// with 403, which the page shows instead of the picker.
+
+export type PeriodAuditor = {
+  user_id: string;
+  display_name: string;
+  email: string;
+  granted_at: string;
+  granted_by: string;
+};
+
+export type AuditorCandidate = {
+  user_id: string;
+  display_name: string;
+  email: string;
+};
+
+export type PeriodAuditorsResponse = {
+  audit_period_id: string;
+  auditors: PeriodAuditor[];
+  count: number;
+  candidates: AuditorCandidate[];
+};
+
+export async function fetchPeriodAuditors(
+  id: string,
+): Promise<PeriodAuditorsResponse> {
+  const res = await fetch(`${periodPath(id)}/auditors`);
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as PeriodAuditorsResponse;
+}
+
+export async function assignPeriodAuditor(
+  id: string,
+  userID: string,
+): Promise<void> {
+  const res = await fetch(`${periodPath(id)}/auditors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userID }),
+  });
+  if (!res.ok) return throwAPIError(res);
+}
+
+export async function removePeriodAuditor(
+  id: string,
+  userID: string,
+): Promise<void> {
+  const res = await fetch(
+    `${periodPath(id)}/auditors/${encodeURIComponent(userID)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) return throwAPIError(res);
+}

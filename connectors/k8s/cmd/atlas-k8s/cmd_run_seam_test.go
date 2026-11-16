@@ -379,7 +379,7 @@ func TestDoRun_SecretInventoryOptIn(t *testing.T) {
 	f.skipNetpol = true
 	f.skipPSS = true
 	f.collectSecretInventory = true
-	f.secretControl = "scf:CRY-01"
+	f.secretControl = "scf:CRY-02"
 	if err := doRun(context.Background(), f); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}

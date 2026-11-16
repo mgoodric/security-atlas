@@ -1081,7 +1081,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "DSI-02", Domain: "Data Security",
 			Text:        "Is customer data encrypted at rest?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("CRY-05"), SortOrder: 2,
+			SCFAnchorID: anchor("CRY-07"), SortOrder: 2,
 			AnswerValue: "Yes",
 			Narrative:   "All data stores use AES-256 at rest (KMS-managed keys); S3 buckets enforce SSE-KMS.",
 			AuthoredBy:  authoredBy,

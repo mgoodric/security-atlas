@@ -187,6 +187,26 @@ type Risk struct {
 	// ChildCount is how many child risks roll up into this one (#2060).
 	// Non-zero marks a roll-up. Only List sets it; other reads leave it 0.
 	ChildCount int
+	// Acceptance is the record of a proposed or approved acceptance
+	// (#2105). It is empty unless Treatment is accept.
+	Acceptance Acceptance
+}
+
+// Acceptance is what proposing and approving an acceptance record (#2105).
+// AcceptedUntil and Accepter on Risk carry the approval's expiry and
+// approver; these carry the rest.
+type Acceptance struct {
+	Justification string
+	// ProposedUntil is the proposer's suggested expiry; the approver sets
+	// AcceptedUntil, which may differ.
+	ProposedUntil *time.Time
+	// ProposedBy is the proposer's principal (credstore.PrincipalOf), the
+	// requester the approval rule compares against. Empty for a proposal
+	// made before #2105.
+	ProposedBy   string
+	ProposedAt   *time.Time
+	ApprovedAt   *time.Time
+	SelfApproved bool
 }
 
 // CreateInput is the API-shape for POST /v1/risks. The store re-validates
@@ -843,6 +863,7 @@ func riskFromRow(r dbx.Risk) Risk {
 		risk.OrgUnitID = &ou
 	}
 	risk.Themes = append([]string(nil), r.Themes...)
+	risk.Acceptance = acceptanceFromRow(r)
 	return risk
 }
 

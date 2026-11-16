@@ -2,7 +2,8 @@
 
 // #1746 integration coverage for the risk appliers: create_risk stores
 // untreated when the proposal omits a treatment, and update_risk_treatment
-// runs risk.ValidateTreatment against the risk's current links.
+// runs risk.ValidateTreatment against the risk's current links, and the
+// #2105 acceptance transitions and approval rule.
 //
 // Run with:  go test -tags=integration ./internal/mcp/writeproposals/...
 
@@ -11,11 +12,13 @@ package writeproposals_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -115,36 +118,64 @@ func TestApplyRiskTreatment_UntreatedDefaultAndValidation(t *testing.T) {
 		t.Fatalf("treatment = %q; want mitigate", tr)
 	}
 
-	// Proposed acceptance needs no accepter or expiry.
+	// A proposed acceptance runs the propose transition (#2105): it needs
+	// a justification and a proposed expiry.
+	_, err = proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
+		`{"risk_id":"`+riskID+`","treatment":"accept","acceptance_status":"proposed"}`)
+	if !risk.IsTransitionInput(err) {
+		t.Fatalf("proposal without justification: want transition input error, got %v", err)
+	}
 	if _, err := proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
-		`{"risk_id":"`+riskID+`","treatment":"accept","acceptance_status":"proposed"}`); err != nil {
+		`{"risk_id":"`+riskID+`","treatment":"accept","acceptance_status":"proposed",`+
+			`"justification":"Compensated by the WAF","accepted_until":"2099-01-31"}`); err != nil {
 		t.Fatalf("proposed accept: %v", err)
 	}
 	if tr, st := readTreatment(t, admin, riskID); tr != "accept" || st == nil || *st != "proposed" {
 		t.Fatalf("after proposed accept: treatment=%q status=%v", tr, st)
 	}
 
-	// Approving without accepter / expiry fails; with them it succeeds.
+	// Approval needs accepted_until, refuses an accepter (the approver is
+	// the accepter) and a machine confirmer, and succeeds for a person.
+	approve := `{"risk_id":"` + riskID + `","treatment":"accept","acceptance_status":"approved","accepted_until":"2099-06-30"}`
 	_, err = proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
 		`{"risk_id":"`+riskID+`","treatment":"accept","acceptance_status":"approved"}`)
-	if !risk.IsTreatmentValidation(err) {
-		t.Fatalf("unsigned approval: want treatment validation, got %v", err)
+	if !risk.IsTransitionInput(err) {
+		t.Fatalf("approval without accepted_until: want transition input error, got %v", err)
 	}
-	if _, err := proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
+	_, err = proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
 		`{"risk_id":"`+riskID+`","treatment":"accept","acceptance_status":"approved",`+
-			`"accepter":"ciso@example.com","accepted_until":"2027-06-30"}`); err != nil {
-		t.Fatalf("signed approval: %v", err)
+			`"accepter":"ciso@example.com","accepted_until":"2099-06-30"}`)
+	if !risk.IsTransitionInput(err) {
+		t.Fatalf("approval naming an accepter: want transition input error, got %v", err)
+	}
+	if _, err := proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment, approve); !risk.IsApprovalRefusal(err) {
+		t.Fatalf("approval confirmed by a machine: want approval refusal, got %v", err)
+	}
+	created, err := store.Create(ctx, writeproposals.CreateInput{
+		ToolName:       writeproposals.ToolUpdateRiskTreatment,
+		ToolInput:      json.RawMessage(approve),
+		AIModelName:    "llama3.1:8b-instruct-q5",
+		AIModelVersion: "2026-05-01",
+		CreatedBy:      "key_" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("Create approval proposal: %v", err)
+	}
+	cred := "jwt:" + uuid.NewString()
+	if _, err := store.ConfirmAs(ctx, created.ID, cred, approval.Approver{UserID: owner.String(), CredentialID: cred}); err != nil {
+		t.Fatalf("approval confirmed by a person: %v", err)
 	}
 	if _, st := readTreatment(t, admin, riskID); st == nil || *st != "approved" {
 		t.Fatalf("after approval: status=%v; want approved", st)
 	}
 
-	// Moving off accept clears the acceptance status.
-	if _, err := proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
-		`{"risk_id":"`+riskID+`","treatment":"avoid"}`); err != nil {
-		t.Fatalf("avoid: %v", err)
+	// An approved acceptance is revoked, not replaced by a treatment change.
+	_, err = proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
+		`{"risk_id":"`+riskID+`","treatment":"avoid"}`)
+	if !errors.Is(err, risk.ErrTransitionState) {
+		t.Fatalf("avoid over an approved acceptance: want transition state error, got %v", err)
 	}
-	if tr, st := readTreatment(t, admin, riskID); tr != "avoid" || st != nil {
-		t.Fatalf("after avoid: treatment=%q status=%v; want avoid/nil", tr, st)
+	if tr, st := readTreatment(t, admin, riskID); tr != "accept" || st == nil || *st != "approved" {
+		t.Fatalf("after refused avoid: treatment=%q status=%v; want accept/approved", tr, st)
 	}
 }
