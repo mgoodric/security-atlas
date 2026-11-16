@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -100,6 +101,9 @@ type PlacementInput struct {
 	// unknown or archived category is refused (IsCategoryRefusal). A risk
 	// already on an archived category keeps it until moved off.
 	CategoryRef string
+	// Fields are the record fields to change (#2104). Each edit that
+	// changes something writes one fields_changed audit row.
+	Fields RecordFields
 	// Actor is recorded on the audit row. It must be non-empty.
 	Actor string
 }
@@ -117,8 +121,9 @@ type placementState struct {
 	OrgUnitID *uuid.UUID    `json:"org_unit_id"`
 }
 
-// UpdatePlacement moves a risk to a new level and/or org unit, and onto
-// another category when in.CategoryRef is set, recording each change in
+// UpdatePlacement moves a risk to a new level and/or org unit, onto
+// another category when in.CategoryRef is set, and changes the record
+// fields in in.Fields (#2104, IsRecordValidation on refusal), recording each change in
 // risk_audit_log. A request that changes nothing writes no row and returns
 // the risk as it is. Returns ErrNotFound for an unknown risk, a placement
 // validation error (IsPlacementValidation) for a bad level or unit, and a
@@ -199,7 +204,14 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 
 		placementChanged := after.Level != before.Level || !sameUnit(after.OrgUnitID, before.OrgUnitID)
 		categoryChanged := in.CategoryRef != "" && category.ID != current.CategoryID
-		if !placementChanged && !categoryChanged {
+		// Record fields are checked before any write, so a refused field
+		// leaves placement and category untouched too.
+		_, fieldsBefore, fieldsAfter, err := applyRecordFields(current, in.Fields)
+		if err != nil {
+			return err
+		}
+		fieldsChanged := len(fieldsAfter) > 0
+		if !placementChanged && !categoryChanged && !fieldsChanged {
 			return s.finishPatch(ctx, q, tenantID, current, &out, false)
 		}
 
@@ -238,6 +250,17 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 				return err
 			}
 			current = riskFromRow(updated)
+		}
+		if fieldsChanged {
+			// Re-apply onto the row as the writes above left it, so the
+			// category enum and updated_at carried over are current.
+			next, _, _, err := applyRecordFields(current, in.Fields)
+			if err != nil {
+				return err
+			}
+			if current, err = updateRecordTx(ctx, q, tenantID, next, in.Actor, fieldsBefore, fieldsAfter); err != nil {
+				return err
+			}
 		}
 		return s.finishPatch(ctx, q, tenantID, current, &out, true)
 	})
@@ -285,15 +308,20 @@ func insertRiskAudit(ctx context.Context, q *dbx.Queries, tenantID, riskID uuid.
 	return nil
 }
 
-// PlacementAuditEntry is one risk_audit_log row.
+// PlacementAuditEntry is one risk_audit_log row: a placement, category or
+// record-field change (#2104).
 type PlacementAuditEntry struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
 	Actor       string
 	ActionType  string
 	BeforeState json.RawMessage
 	AfterState  json.RawMessage
 }
 
-// ListPlacementAudit returns a risk's audit rows, newest first.
+// ListPlacementAudit returns a risk's audit rows, newest first. A risk
+// that does not exist, or has been deleted, returns its trail (possibly
+// empty): the trail outlives the risk.
 func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID) ([]PlacementAuditEntry, error) {
 	var out []PlacementAuditEntry
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -307,6 +335,8 @@ func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID) ([]Pla
 		out = make([]PlacementAuditEntry, len(rows))
 		for i, r := range rows {
 			out[i] = PlacementAuditEntry{
+				ID:          uuid.UUID(r.ID.Bytes),
+				CreatedAt:   r.CreatedAt.Time,
 				Actor:       r.Actor,
 				ActionType:  r.ActionType,
 				BeforeState: json.RawMessage(r.BeforeState),
