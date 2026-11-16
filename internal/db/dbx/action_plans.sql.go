@@ -50,6 +50,29 @@ func (q *Queries) ActionPlanControlExistsInTenant(ctx context.Context, arg Actio
 	return exists, err
 }
 
+const actionPlanControlsFailing = `-- name: ActionPlanControlsFailing :one
+
+SELECT (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
+FROM action_plans ap
+WHERE ap.tenant_id = $1 AND ap.id = $2
+`
+
+type ActionPlanControlsFailingParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// ===== #2109: verified from evidence =====
+// A completed plan whose linked controls do not all pass their latest
+// evaluation: the plan page's "Completed · linked controls still failing".
+func (q *Queries) ActionPlanControlsFailing(ctx context.Context, arg ActionPlanControlsFailingParams) (bool, error) {
+	row := q.db.QueryRow(ctx, actionPlanControlsFailing, arg.TenantID, arg.ID)
+	var controls_failing bool
+	err := row.Scan(&controls_failing)
+	return controls_failing, err
+}
+
 const actionPlanOwnerExistsInTenant = `-- name: ActionPlanOwnerExistsInTenant :one
 SELECT EXISTS (
     SELECT 1 FROM users WHERE tenant_id = $1 AND id = $2 AND status = 'active'
@@ -291,7 +314,7 @@ func (q *Queries) LinkActionPlanRisk(ctx context.Context, arg LinkActionPlanRisk
 }
 
 const listActionPlanAuditLog = `-- name: ListActionPlanAuditLog :many
-SELECT id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at
+SELECT id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at, system_actor
 FROM action_plan_audit_log
 WHERE tenant_id = $1 AND action_plan_id = $2
 ORDER BY created_at ASC, id ASC
@@ -320,6 +343,7 @@ func (q *Queries) ListActionPlanAuditLog(ctx context.Context, arg ListActionPlan
 			&i.BeforeState,
 			&i.AfterState,
 			&i.CreatedAt,
+			&i.SystemActor,
 		); err != nil {
 			return nil, err
 		}
@@ -370,7 +394,9 @@ func (q *Queries) ListActionPlanControls(ctx context.Context, arg ListActionPlan
 }
 
 const listActionPlanIDsForControl = `-- name: ListActionPlanIDsForControl :many
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_controls apc
 JOIN action_plans ap ON ap.id = apc.action_plan_id AND ap.tenant_id = apc.tenant_id
 WHERE apc.tenant_id = $1 AND apc.control_id = $2 AND ap.tombstoned_at IS NULL
@@ -383,10 +409,11 @@ type ListActionPlanIDsForControlParams struct {
 }
 
 type ListActionPlanIDsForControlRow struct {
-	ID      pgtype.UUID `json:"id"`
-	Title   string      `json:"title"`
-	Status  string      `json:"status"`
-	DueDate pgtype.Date `json:"due_date"`
+	ID              pgtype.UUID `json:"id"`
+	Title           string      `json:"title"`
+	Status          string      `json:"status"`
+	DueDate         pgtype.Date `json:"due_date"`
+	ControlsFailing bool        `json:"controls_failing"`
 }
 
 // Powers the "Linked Action Plans" read-only section on /controls/{id} (AC-26).
@@ -404,6 +431,7 @@ func (q *Queries) ListActionPlanIDsForControl(ctx context.Context, arg ListActio
 			&i.Title,
 			&i.Status,
 			&i.DueDate,
+			&i.ControlsFailing,
 		); err != nil {
 			return nil, err
 		}
@@ -416,7 +444,9 @@ func (q *Queries) ListActionPlanIDsForControl(ctx context.Context, arg ListActio
 }
 
 const listActionPlanIDsForRisk = `-- name: ListActionPlanIDsForRisk :many
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_risks apr
 JOIN action_plans ap ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
 WHERE apr.tenant_id = $1 AND apr.risk_id = $2 AND ap.tombstoned_at IS NULL
@@ -429,10 +459,11 @@ type ListActionPlanIDsForRiskParams struct {
 }
 
 type ListActionPlanIDsForRiskRow struct {
-	ID      pgtype.UUID `json:"id"`
-	Title   string      `json:"title"`
-	Status  string      `json:"status"`
-	DueDate pgtype.Date `json:"due_date"`
+	ID              pgtype.UUID `json:"id"`
+	Title           string      `json:"title"`
+	Status          string      `json:"status"`
+	DueDate         pgtype.Date `json:"due_date"`
+	ControlsFailing bool        `json:"controls_failing"`
 }
 
 // Powers the "Linked Action Plans" read-only section on /risks/{id} (AC-25).
@@ -451,6 +482,7 @@ func (q *Queries) ListActionPlanIDsForRisk(ctx context.Context, arg ListActionPl
 			&i.Title,
 			&i.Status,
 			&i.DueDate,
+			&i.ControlsFailing,
 		); err != nil {
 			return nil, err
 		}
@@ -615,6 +647,20 @@ func (q *Queries) ListActionPlansSnapshot(ctx context.Context, arg ListActionPla
 	return items, nil
 }
 
+const reconcileActionPlanVerification = `-- name: ReconcileActionPlanVerification :one
+SELECT action_plans_reconcile_verification($1::uuid)::int AS moved
+`
+
+// After a control's evaluation, inside the evaluation's transaction: the
+// system moves completed <-> verified for the plans linked to it. The
+// function reads the tenant from app.current_tenant and refuses without it.
+func (q *Queries) ReconcileActionPlanVerification(ctx context.Context, controlID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, reconcileActionPlanVerification, controlID)
+	var moved int32
+	err := row.Scan(&moved)
+	return moved, err
+}
+
 const tombstoneActionPlan = `-- name: TombstoneActionPlan :one
 UPDATE action_plans
 SET tombstoned_at = now(),
@@ -753,7 +799,7 @@ INSERT INTO action_plan_audit_log (
     id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at
+RETURNING id, tenant_id, action_plan_id, actor_id, action_type, before_state, after_state, created_at, system_actor
 `
 
 type WriteActionPlanAuditLogParams struct {
@@ -789,6 +835,7 @@ func (q *Queries) WriteActionPlanAuditLog(ctx context.Context, arg WriteActionPl
 		&i.BeforeState,
 		&i.AfterState,
 		&i.CreatedAt,
+		&i.SystemActor,
 	)
 	return i, err
 }

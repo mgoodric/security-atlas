@@ -24,6 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/mgoodric/security-atlas/internal/actionplan"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
@@ -131,6 +132,12 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 				return err
 			}
 			written++
+		}
+		// #2109: the plans linked to this control move completed <->
+		// verified on the evaluation just written, in this transaction.
+		// It locks only action_plans rows (in id order), never a risk.
+		if _, err := actionplan.ReconcileVerification(ctx, q, controlID); err != nil {
+			return err
 		}
 		return nil
 	})

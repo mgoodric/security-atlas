@@ -105,7 +105,9 @@ SELECT EXISTS (
 -- name: ListActionPlanIDsForRisk :many
 -- Powers the "Linked Action Plans" read-only section on /risks/{id} (AC-25).
 -- Joins to action_plans so tombstoned plans are excluded.
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_risks apr
 JOIN action_plans ap ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
 WHERE apr.tenant_id = $1 AND apr.risk_id = $2 AND ap.tombstoned_at IS NULL
@@ -140,7 +142,9 @@ SELECT EXISTS (
 
 -- name: ListActionPlanIDsForControl :many
 -- Powers the "Linked Action Plans" read-only section on /controls/{id} (AC-26).
-SELECT ap.id, ap.title, ap.status, ap.due_date
+SELECT ap.id, ap.title, ap.status, ap.due_date,
+       (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
 FROM action_plan_controls apc
 JOIN action_plans ap ON ap.id = apc.action_plan_id AND ap.tenant_id = apc.tenant_id
 WHERE apc.tenant_id = $1 AND apc.control_id = $2 AND ap.tombstoned_at IS NULL
@@ -185,3 +189,19 @@ SELECT *
 FROM action_plan_audit_log
 WHERE tenant_id = $1 AND action_plan_id = $2
 ORDER BY created_at ASC, id ASC;
+
+-- ===== #2109: verified from evidence =====
+
+-- name: ActionPlanControlsFailing :one
+-- A completed plan whose linked controls do not all pass their latest
+-- evaluation: the plan page's "Completed · linked controls still failing".
+SELECT (ap.status = 'completed'
+        AND action_plan_linked_controls_pass(ap.tenant_id, ap.id) IS FALSE)::boolean AS controls_failing
+FROM action_plans ap
+WHERE ap.tenant_id = $1 AND ap.id = $2;
+
+-- name: ReconcileActionPlanVerification :one
+-- After a control's evaluation, inside the evaluation's transaction: the
+-- system moves completed <-> verified for the plans linked to it. The
+-- function reads the tenant from app.current_tenant and refuses without it.
+SELECT action_plans_reconcile_verification(sqlc.arg(control_id)::uuid)::int AS moved;
