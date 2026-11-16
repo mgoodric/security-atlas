@@ -655,16 +655,28 @@ SOC2_WITH_EDGES="$(db_count "SELECT count(DISTINCT fr.id)
     WHERE f.slug = 'soc2'")"
 [ "${SOC2_WITH_EDGES}" = "${SOC2_WANT}" ] \
     || fail "SOC 2 requirements with edges = ${SOC2_WITH_EDGES:-?}, want ${SOC2_WANT} (every requirement in soc2-tsc-2017.yaml)"
-SOC2_MAPPED="$(db_count "SELECT count(DISTINCT fr.id)
-    FROM controls c
-    JOIN fw_to_scf_edges e ON e.scf_anchor_id = c.scf_anchor_id
-    JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+#
+# security-atlas#1753: the Privacy criteria P1.1-P8.1 have edges but no
+# stock control yet (the Privacy control kit is a follow-up); only P4.3
+# is reached, through AST-22. So the requirements the stock controls do
+# NOT reach must be exactly the other 17:
+# a lost edge elsewhere still fails, and so does the kit landing, which
+# is when this expected gap is removed.
+SOC2_UNMAPPED="$(db_count "SELECT coalesce(string_agg(fr.code, ',' ORDER BY fr.code COLLATE \"C\"), '')
+    FROM framework_requirements fr
     JOIN framework_versions fv ON fv.id = fr.framework_version_id
     JOIN frameworks f ON f.id = fv.framework_id
-    WHERE c.tenant_id = '${BOOTSTRAP_TENANT_ID}' AND f.slug = 'soc2'")"
-[ "${SOC2_MAPPED}" = "${SOC2_WITH_EDGES}" ] \
-    || fail "stock SOC 2 controls map to ${SOC2_MAPPED:-?} SOC 2 requirements, want ${SOC2_WITH_EDGES} (the SOC 2 requirements that have edges)"
-log "stock SOC 2 controls map to ${SOC2_MAPPED} SOC 2 requirements"
+    WHERE f.slug = 'soc2'
+      AND EXISTS (SELECT 1 FROM fw_to_scf_edges e WHERE e.framework_requirement_id = fr.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM fw_to_scf_edges e
+        JOIN controls c ON c.scf_anchor_id = e.scf_anchor_id
+        WHERE e.framework_requirement_id = fr.id
+          AND c.tenant_id = '${BOOTSTRAP_TENANT_ID}')")"
+SOC2_UNMAPPED_WANT="P1.1,P2.1,P3.1,P3.2,P4.1,P4.2,P5.1,P5.2,P6.1,P6.2,P6.3,P6.4,P6.5,P6.6,P6.7,P7.1,P8.1"
+[ "${SOC2_UNMAPPED}" = "${SOC2_UNMAPPED_WANT}" ] \
+    || fail "SOC 2 requirements no stock control reaches = '${SOC2_UNMAPPED}', want exactly the 17 unreached Privacy criteria '${SOC2_UNMAPPED_WANT}'"
+log "stock SOC 2 controls reach every SOC 2 requirement with edges except 17 Privacy criteria (no stock Privacy kit yet)"
 
 # ---------------------------------------------------------------------
 # Assertion 8c (security-atlas#1928) — BUNDLED MODE: the artifact store is
