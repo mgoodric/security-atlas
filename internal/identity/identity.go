@@ -27,3 +27,20 @@ func UserID(s string) (uuid.UUID, bool) {
 	}
 	return u, true
 }
+
+// RolesKey returns the user_roles.user_id a principal's roles are stored
+// under (#2239). Role assignment writes the bare users(id), so a
+// "user:<uuid>" JWT subject is read as its uuid. Every other principal is
+// returned unchanged: a bare uuid already is the key, and "key_...",
+// "bootstrap-admin" and "oauth_client:<id>" are looked up as themselves,
+// exactly as before. Only the prefixed form is rewritten, so an unbound key
+// whose id happens to parse as a uuid is never mistaken for a user.
+func RolesKey(principal string) string {
+	if !strings.HasPrefix(principal, "user:") {
+		return principal
+	}
+	if u, ok := UserID(principal); ok {
+		return u.String()
+	}
+	return principal
+}

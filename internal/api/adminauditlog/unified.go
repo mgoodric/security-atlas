@@ -43,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/identity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -288,7 +289,9 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 // callerAllowedUnified is the defense-in-depth role probe. IsAdmin short-circuits
 // (admin always allowed). Otherwise we probe user_roles for either auditor or
 // grc_engineer membership under the caller's tenant context. The query goes
-// through ApplyTenant so RLS on user_roles enforces tenant scoping.
+// through ApplyTenant so RLS on user_roles enforces tenant scoping. userID is
+// the raw credential principal; identity.RolesKey reads a "user:<uuid>" JWT
+// subject as the bare uuid role assignment stores (#2239).
 func (h *Handler) callerAllowedUnified(ctx context.Context, tenantID uuid.UUID, userID string, isAdmin bool) (bool, error) {
 	if isAdmin {
 		return true, nil
@@ -300,7 +303,7 @@ func (h *Handler) callerAllowedUnified(ctx context.Context, tenantID uuid.UUID, 
 	err := h.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		got, qErr := q.HasUnifiedAuditLogRole(ctx, dbx.HasUnifiedAuditLogRoleParams{
 			TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
-			UserID:   userID,
+			UserID:   identity.RolesKey(userID),
 		})
 		if qErr != nil {
 			return qErr

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/identity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -27,9 +28,13 @@ func NewDBRolesResolver(pool *pgxpool.Pool) *DBRolesResolver {
 // (nil, nil) when no rows match -- the caller falls back to the
 // credential-derived roles.
 //
-// userID is the credential's UserID -- "key_..." for slice-014/034
-// machine credentials, or the user UUID for slice-034 human users.
-// Both shapes are TEXT in user_roles.user_id, so no parsing.
+// userID is the credential's raw UserID: "key_..." for slice-014/034
+// machine credentials, the bare user UUID for a user-bound key, or the
+// "user:<uuid>" subject of a local-login / OIDC / PKCE / device-grant JWT.
+// Role assignment stores the bare uuid, so the lookup key goes through
+// identity.RolesKey, which strips the "user:" prefix and leaves every other
+// shape as it is (#2239). Before that, JWT users matched no row and
+// decided on credential-derived roles alone.
 //
 // The SELECT runs inside a transaction that first applies the
 // `app.current_tenant` GUC via tenancy.ApplyTenant. user_roles carries
@@ -63,7 +68,7 @@ func (r *DBRolesResolver) RolesFor(ctx context.Context, tenantID, userID string)
 		return nil, fmt.Errorf("authz: apply tenant to user_roles tx: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, q, tenantID, userID)
+	rows, err := tx.Query(ctx, q, tenantID, identity.RolesKey(userID))
 	if err != nil {
 		return nil, fmt.Errorf("authz: query user_roles: %w", err)
 	}
