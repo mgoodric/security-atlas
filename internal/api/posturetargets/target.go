@@ -73,38 +73,68 @@ func invalid(format string, args ...any) error {
 //	target_is_better   |warning - target| <= |critical - target|
 //
 // The table carries the same rules as CHECK constraints.
+//
+// The checks run on whole hundredths, the NUMERIC(5,2) the table stores,
+// not on the float64s: 70.1 * 100 is 7009.999999999999 in binary floating
+// point, so comparing floats would refuse values a person typed with two
+// decimals, and could order two thresholds differently from the CHECK.
 func (in Input) Validate() (target, warning, critical float64, err error) {
 	if in.TargetValue == nil || in.WarningThreshold == nil || in.CriticalThreshold == nil {
 		return 0, 0, 0, invalid("target_value, warning_threshold and critical_threshold are required")
 	}
-	target, warning, critical = *in.TargetValue, *in.WarningThreshold, *in.CriticalThreshold
-	for name, v := range map[string]float64{
-		"target_value":       target,
-		"warning_threshold":  warning,
-		"critical_threshold": critical,
-	} {
-		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 100 {
-			return 0, 0, 0, invalid("%s must be between 0 and 100", name)
-		}
-		if math.Round(v*100) != v*100 {
-			return 0, 0, 0, invalid("%s has more than two decimal places", name)
-		}
+	t, err := hundredths("target_value", *in.TargetValue)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	w, err := hundredths("warning_threshold", *in.WarningThreshold)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	c, err := hundredths("critical_threshold", *in.CriticalThreshold)
+	if err != nil {
+		return 0, 0, 0, err
 	}
 	switch in.Direction {
 	case DirectionHigherIsBetter:
-		if !(critical <= warning && warning <= target) {
+		if c > w || w > t {
 			return 0, 0, 0, invalid("higher_is_better needs critical_threshold <= warning_threshold <= target_value")
 		}
 	case DirectionLowerIsBetter:
-		if !(target <= warning && warning <= critical) {
+		if t > w || w > c {
 			return 0, 0, 0, invalid("lower_is_better needs target_value <= warning_threshold <= critical_threshold")
 		}
 	case DirectionTargetIsBetter:
-		if math.Abs(warning-target) > math.Abs(critical-target) {
+		if abs(w-t) > abs(c-t) {
 			return 0, 0, 0, invalid("target_is_better needs warning_threshold no further from target_value than critical_threshold")
 		}
 	default:
 		return 0, 0, 0, invalid("direction must be higher_is_better, lower_is_better or target_is_better")
 	}
-	return target, warning, critical, nil
+	return float64(t) / 100, float64(w) / 100, float64(c) / 100, nil
+}
+
+// decimalTolerance is how far v*100 may sit from a whole number and still
+// be read as a two-decimal value. Float error on a 0..100 value with two
+// decimals is around 1e-12; a third decimal is at least 1e-1 away.
+const decimalTolerance = 1e-6
+
+// hundredths reads v as a whole number of hundredths, refusing a value
+// outside 0..100 or with a third decimal.
+func hundredths(name string, v float64) (int64, error) {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 100 {
+		return 0, invalid("%s must be between 0 and 100", name)
+	}
+	scaled := v * 100
+	h := math.Round(scaled)
+	if math.Abs(scaled-h) > decimalTolerance {
+		return 0, invalid("%s has more than two decimal places", name)
+	}
+	return int64(h), nil
+}
+
+func abs(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

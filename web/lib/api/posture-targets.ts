@@ -122,17 +122,22 @@ export function postureTargetError(input: {
     ["Warning", input.warning_threshold],
     ["Critical", input.critical_threshold],
   ];
+  // Checked in whole hundredths, as the platform does: 70.1 * 100 is
+  // 7009.999999999999 in floating point, so comparing the numbers as typed
+  // would refuse two-decimal values and could misorder close thresholds.
+  const h: number[] = [];
   for (const [name, v] of values) {
     if (!Number.isFinite(v) || v < 0 || v > 100) {
       return `${name} must be between 0 and 100.`;
     }
-    if (Math.round(v * 100) !== v * 100) {
+    const scaled = v * 100;
+    const whole = Math.round(scaled);
+    if (Math.abs(scaled - whole) > 1e-6) {
       return `${name} can have at most two decimal places.`;
     }
+    h.push(whole);
   }
-  const t = input.target_value;
-  const w = input.warning_threshold;
-  const c = input.critical_threshold;
+  const [t, w, c] = h as [number, number, number];
   switch (input.direction) {
     case "higher_is_better":
       return c <= w && w <= t

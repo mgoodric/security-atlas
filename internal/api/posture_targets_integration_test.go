@@ -293,6 +293,21 @@ func TestPostureTargets_SetReadAndRefuse(t *testing.T) {
 		}
 	})
 
+	t.Run("two-decimal values with float error are accepted and stored exactly", func(t *testing.T) {
+		// 70.1, 4.35 and 0.57 are not whole numbers of hundredths in
+		// float64; the handler and the NUMERIC(5,2) CHECK must still agree.
+		if s, b := callers["admin"].do(http.MethodPut, path(scoped), body(70.1, 4.35, 0.57, "higher_is_better")); s != http.StatusOK {
+			t.Fatalf("PUT 70.1 / 4.35 / 0.57: %d %v; want 200", s, b)
+		}
+		if s, b := callers["admin"].do(http.MethodPut, path(scoped), body(70.1, 70.2, 70.0, "target_is_better")); s != http.StatusOK {
+			t.Fatalf("PUT equal target band: %d %v; want 200", s, b)
+		}
+		s, got := callers["viewer"].do(http.MethodGet, path(scoped), nil)
+		if s != http.StatusOK || got["target_value"] != 70.1 || got["warning_threshold"] != 70.2 || got["critical_threshold"] != 70.0 {
+			t.Fatalf("GET = %d %v; want 70.1 / 70.2 / 70", s, got)
+		}
+	})
+
 	t.Run("another tenant does not see the target", func(t *testing.T) {
 		c := testjwt.OwnerFor(uuid.MustParse(otherTenant), []string{"admin"})
 		c.Subject = subOf["admin"]

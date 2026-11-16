@@ -100,6 +100,47 @@ describe("postureTargetError", () => {
     expect(postureTargetError(base)).toBeNull();
   });
 
+  // Two-decimal values whose float * 100 is not a whole number.
+  test.each([
+    [
+      {
+        ...base,
+        target_value: 70.1,
+        warning_threshold: 4.35,
+        critical_threshold: 0.57,
+      },
+    ],
+    [
+      {
+        target_value: 4.35,
+        warning_threshold: 70.1,
+        critical_threshold: 70.1,
+        direction: "lower_is_better",
+      },
+    ],
+    [
+      {
+        target_value: 70.1,
+        warning_threshold: 70.2,
+        critical_threshold: 70.0,
+        direction: "target_is_better",
+      },
+    ],
+  ])("%j passes despite float error", (input) => {
+    expect(postureTargetError(input)).toBeNull();
+  });
+
+  test("a band 0.01 wider at warning than critical is refused", () => {
+    expect(
+      postureTargetError({
+        target_value: 70.1,
+        warning_threshold: 70.25,
+        critical_threshold: 69.96,
+        direction: "target_is_better",
+      }),
+    ).toMatch(/no further from the target/);
+  });
+
   test.each([
     [{ ...base, warning_threshold: 95 }, /critical ≤ warning ≤ target/],
     [{ ...base, direction: "lower_is_better" }, /target ≤ warning ≤ critical/],

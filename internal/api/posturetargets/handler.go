@@ -28,6 +28,10 @@ func New(store *Store) *Handler { return &Handler{store: store} }
 // grc_engineer. It reads the credential as the risk-taxonomy guard does:
 // the platform-admin and approver flags (a browser session's super-admin
 // sets both), then the tenant role list a JWT carries in OwnerRoles.
+// IsApprover alone is kept on purpose: for a bearer credential
+// authz.derivedRolesFor reads it as grc_engineer, so OPA admits that
+// credential's PUT, and refusing it here would make the two layers
+// disagree.
 func hasTargetAdmin(c credstore.Credential) bool {
 	if c.IsAdmin || c.IsApprover {
 		return true

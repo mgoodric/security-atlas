@@ -30,6 +30,12 @@ func TestInputValidate(t *testing.T) {
 		{"NaN", Input{f(math.NaN()), f(80), f(60), DirectionHigherIsBetter}, false},
 		{"three decimals", Input{f(90.125), f(80), f(60), DirectionHigherIsBetter}, false},
 		{"two decimals", Input{f(90.25), f(80.5), f(60), DirectionHigherIsBetter}, true},
+		// Two-decimal values whose float64 * 100 is not a whole number.
+		{"70.1 / 0.57 / 4.35 (float error)", Input{f(70.1), f(4.35), f(0.57), DirectionHigherIsBetter}, true},
+		{"4.35 lower", Input{f(4.35), f(70.1), f(70.1), DirectionLowerIsBetter}, true},
+		{"target band, equal distances", Input{f(70.1), f(70.2), f(70.0), DirectionTargetIsBetter}, true},
+		{"target band, 0.01 further", Input{f(70.1), f(70.25), f(69.96), DirectionTargetIsBetter}, false},
+		{"three decimals near a whole hundredth", Input{f(70.101), f(60), f(50), DirectionHigherIsBetter}, false},
 		{"missing warning", Input{f(90), nil, f(60), DirectionHigherIsBetter}, false},
 		{"unknown direction", Input{f(90), f(80), f(60), "up"}, false},
 		{"empty direction", Input{f(90), f(80), f(60), ""}, false},
