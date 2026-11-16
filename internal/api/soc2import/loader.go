@@ -220,6 +220,9 @@ func validate(cw *Crosswalk) error {
 			return fmt.Errorf("crosswalk: duplicate requirement code %q", r.Code)
 		}
 		codes[r.Code] = struct{}{}
+		if err := validatePointsOfFocus(r); err != nil {
+			return err
+		}
 	}
 	if len(cw.Mappings) == 0 {
 		return errors.New("crosswalk: crosswalk has zero mappings")
@@ -251,6 +254,37 @@ func validate(cw *Crosswalk) error {
 		if !isValidSourceAttribution(attribution) {
 			return fmt.Errorf("crosswalk: mapping[%d] (%s -> %s) source_attribution %q is not one of {scf_official, community_draft, org_internal}",
 				i, m.RequirementCode, m.SCFAnchor, attribution)
+		}
+	}
+	return nil
+}
+
+// validatePointsOfFocus rejects a requirement whose YAML points_of_focus the
+// workbook roll-up could not have produced (#2026): each code must be a
+// point-of-focus code of this very requirement (`<code>-POF<n>`), listed
+// once, with at least one non-blank SCF anchor. Whether the anchors exist in
+// the SCF release is checked at import time, where the catalog is available.
+func validatePointsOfFocus(r Requirement) error {
+	seen := make(map[string]struct{}, len(r.PointsOfFocus))
+	for i, p := range r.PointsOfFocus {
+		parent, _, ok := parsePointOfFocus(p.Code)
+		if !ok {
+			return fmt.Errorf("crosswalk: requirement %s points_of_focus[%d] code %q is not a point-of-focus code (<criterion>-POF<n>)", r.Code, i, p.Code)
+		}
+		if parent != r.Code {
+			return fmt.Errorf("crosswalk: requirement %s points_of_focus[%d] code %q belongs to criterion %s", r.Code, i, p.Code, parent)
+		}
+		if _, dup := seen[p.Code]; dup {
+			return fmt.Errorf("crosswalk: requirement %s lists point of focus %q twice", r.Code, p.Code)
+		}
+		seen[p.Code] = struct{}{}
+		if len(p.SCFAnchors) == 0 {
+			return fmt.Errorf("crosswalk: requirement %s point of focus %s has no scf_anchors", r.Code, p.Code)
+		}
+		for j, a := range p.SCFAnchors {
+			if strings.TrimSpace(a) == "" {
+				return fmt.Errorf("crosswalk: requirement %s point of focus %s scf_anchors[%d] is blank", r.Code, p.Code, j)
+			}
 		}
 	}
 	return nil
