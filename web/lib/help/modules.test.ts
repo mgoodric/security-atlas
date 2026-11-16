@@ -46,6 +46,7 @@ describe("parseHelpModule", () => {
         { src: "widget-states.svg", alt: "Widgets move from draft to live" },
         { src: "other.svg", alt: "Second diagram" },
       ],
+      lifecycles: [],
       body: "Body **text**.",
     });
   });

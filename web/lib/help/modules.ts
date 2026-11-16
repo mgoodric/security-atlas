@@ -22,15 +22,42 @@
 // PyYAML. `modules.test.ts` fails the build on a malformed file, an
 // unknown term, a route claimed twice, or a file not registered below.
 //
+// A lifecycle diagram is not listed under `diagrams`: it is a ```mermaid
+// block in the body (#2148, `lifecycle-diagram.ts`), pre-rendered to a
+// light and a dark SVG, checked against the backend's exported lifecycle
+// by `diagrams.test.ts`, and lifted out of the body into `lifecycles`.
+//
 // The `.md` imports resolve to the file's text: Turbopack's `raw` rule in
 // `next.config.ts`, and a matching plugin in `vitest.config.ts`.
 
 import controlsSource from "@/help/modules/controls.md";
 
+import {
+  describeLifecycle,
+  extractLifecycleBlocks,
+  lifecycleDiagramFile,
+  parseStateDiagram,
+  type LifecycleDiagram,
+} from "./lifecycle-diagram";
+
 export type HelpDiagram = {
   /** File name under `web/public/help/diagrams/`. */
   src: string;
   alt: string;
+};
+
+/** #2148 — a lifecycle diagram from a ```mermaid block in the body. */
+export type HelpLifecycle = {
+  /** The lifecycle's name, as in `docs/lifecycles/<name>.json`. */
+  lifecycle: string;
+  /** The Mermaid source, for the diagram check. */
+  source: string;
+  diagram: LifecycleDiagram;
+  /** The pre-rendered files under `public/help/diagrams/`. */
+  light: string;
+  dark: string;
+  /** The text alternative: the states, then the transitions. */
+  text: { states: string[]; transitions: string[] };
 };
 
 export type HelpModule = {
@@ -40,7 +67,9 @@ export type HelpModule = {
   /** Term ids from `web/help/terms.json`. */
   terms: string[];
   diagrams: HelpDiagram[];
-  /** The Markdown body, after the front matter. */
+  lifecycles: HelpLifecycle[];
+  /** The Markdown body after the front matter, without its lifecycle
+   *  diagram blocks. */
   body: string;
 };
 
@@ -174,16 +203,31 @@ export function parseHelpModule(source: string): HelpModule {
   for (const key of Object.keys(fm)) {
     if (!known.has(key)) throw new Error(`unknown front matter key "${key}"`);
   }
+  const id = scalar(fm, "id");
+  const { body, blocks } = extractLifecycleBlocks(
+    lines
+      .slice(end + 1)
+      .join("\n")
+      .trim(),
+  );
   return {
-    id: scalar(fm, "id"),
+    id,
     title: scalar(fm, "title"),
     routes: list(fm, "routes"),
     terms: list(fm, "terms"),
     diagrams: diagrams(fm),
-    body: lines
-      .slice(end + 1)
-      .join("\n")
-      .trim(),
+    lifecycles: blocks.map(({ lifecycle, source }) => {
+      const diagram = parseStateDiagram(source);
+      return {
+        lifecycle,
+        source,
+        diagram,
+        light: lifecycleDiagramFile(id, lifecycle, "light"),
+        dark: lifecycleDiagramFile(id, lifecycle, "dark"),
+        text: describeLifecycle(diagram),
+      };
+    }),
+    body,
   };
 }
 

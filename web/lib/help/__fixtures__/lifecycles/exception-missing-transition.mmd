@@ -1,0 +1,11 @@
+%% lifecycle: exception
+%% #2148 fixture: drops the active --> revoked move the backend allows.
+stateDiagram-v2
+  [*] --> requested: request
+  requested --> approved: approve
+  requested --> denied: deny
+  approved --> active: activate
+  active --> expired: expire (system)
+  denied --> [*]
+  expired --> [*]
+  revoked --> [*]

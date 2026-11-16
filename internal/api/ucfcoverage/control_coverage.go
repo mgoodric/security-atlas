@@ -129,6 +129,7 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 	var (
 		controlOK bool
 		ctrl      dbx.GetControlByIDRow
+		owner     pgtype.UUID
 		demo      demoprov.Set
 	)
 	if err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
@@ -144,6 +145,18 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		}
 		ctrl = got
 		controlOK = true
+		// #2128: the person "assign owner" made this control's owner, if
+		// any. RLS keeps another tenant's assignment out of reach.
+		assigned, err := q.GetControlOwnerAssignment(ctx, dbx.GetControlOwnerAssignmentParams{
+			TenantID:  pgUUIDFromTenantCtx(ctx),
+			ControlID: pgtype.UUID{Bytes: cid, Valid: true},
+		})
+		switch {
+		case err == nil:
+			owner = assigned.OwnerUserID
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("lookup control owner: %w", err)
+		}
 		// #2043: badge a control the in-place demo seed added.
 		demo, err = demoprov.Lookup(ctx, q, demoprov.TableControls, []uuid.UUID{cid})
 		return err
@@ -159,6 +172,9 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		return coverageView{}, false, err
 	}
 	cw.Demo = demo.Has(cid)
+	if owner.Valid {
+		cw.OwnerUserID = uuidStr(owner)
+	}
 	view := coverageView{Control: cw}
 	if !ctrl.ScfAnchorID.Valid {
 		// Control exists but isn't anchored.

@@ -95,7 +95,7 @@ implementation_type: manual_attested
 		{"none", []uuid.UUID{noneAnchoredID, noneBareID}},
 		{"partial", nil},
 	} {
-		rows, total, err := store.ListWithState(ctx, 100, 0, pgtype.UUID{}, tc.fit)
+		rows, total, err := store.ListWithState(ctx, 100, 0, pgtype.UUID{}, tc.fit, pgtype.UUID{})
 		if err != nil {
 			t.Fatalf("ListWithState(%q): %v", tc.fit, err)
 		}

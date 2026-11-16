@@ -491,22 +491,31 @@ SELECT
     wpc.freshness_status              AS state_freshness_status,
     wpc.last_observed_at::timestamptz AS state_last_observed_at,
     wpc.evaluated_at::timestamptz     AS state_evaluated_at,
-    af.framework_slugs::text[]        AS framework_slugs
+    af.framework_slugs::text[]        AS framework_slugs,
+    coa.owner_user_id                 AS owner_user_id
 FROM controls c
 LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
 LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
+-- #2128: the person-owner "assign owner" writes (slice 468).
+LEFT JOIN control_owner_assignments coa
+       ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
 WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
   AND (sqlc.narg('anchor_fit')::text IS NULL OR c.anchor_fit = sqlc.narg('anchor_fit')::text)
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR coa.owner_user_id = sqlc.narg('owner_user_id')::uuid)
 ORDER BY c.scf_id NULLS LAST, c.bundle_id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: CountActiveControls :one
 -- Issue #1741 — total for the paged ListActiveControlsWithState read.
--- The optional anchor_fit filter matches the list's (issue #1736).
+-- The optional anchor_fit (issue #1736) and owner_user_id (#2128) filters
+-- match the list's.
 SELECT count(*)::bigint AS total
-FROM controls
-WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
-  AND (sqlc.narg('anchor_fit')::text IS NULL OR anchor_fit = sqlc.narg('anchor_fit')::text);
+FROM controls c
+LEFT JOIN control_owner_assignments coa
+       ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
+WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+  AND (sqlc.narg('anchor_fit')::text IS NULL OR c.anchor_fit = sqlc.narg('anchor_fit')::text)
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR coa.owner_user_id = sqlc.narg('owner_user_id')::uuid);
 
 -- name: InsertSCFRemapProposal :execrows
 -- Issue #1775: queue one remap proposal for a control on a legacy SCF

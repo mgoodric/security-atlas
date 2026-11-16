@@ -15,7 +15,9 @@
 // these and runs axe on the open panel.
 //
 // Diagrams are served as <img src> from `web/public/help/diagrams/`, never
-// inlined as SVG markup.
+// inlined as SVG markup. A lifecycle diagram (#2148) has a light and a dark
+// file, pre-rendered from the help file's Mermaid, and lists its states and
+// transitions as its text alternative.
 
 import { usePathname } from "next/navigation";
 import {
@@ -40,6 +42,7 @@ import {
   helpDiagramSrc,
   helpDocsHref,
   helpModuleForPath,
+  type HelpLifecycle,
   type HelpModule,
 } from "@/lib/help/modules";
 import { getTerm, termHref } from "@/lib/help/terms";
@@ -78,6 +81,68 @@ export function useHelp(): HelpState {
       open: false,
       setOpen: () => {},
     }
+  );
+}
+
+/** #2148 — one lifecycle diagram: the pre-rendered SVG for the current
+ *  theme (the other is `display: none`, so out of the accessibility tree
+ *  too), described by the states and transitions listed under it. */
+function LifecycleFigure({ lc }: { lc: HelpLifecycle }) {
+  const textId = useId();
+  const name = lc.lifecycle.replace(/_/g, " ");
+  const alt =
+    `${name.charAt(0).toUpperCase()}${name.slice(1)} lifecycle: ` +
+    `${lc.text.states.length} states and ${lc.text.transitions.length} transitions, listed below.`;
+  const img =
+    "w-full max-w-sm rounded-md border border-border bg-background p-2";
+  return (
+    <figure
+      className="space-y-2"
+      data-testid="help-lifecycle"
+      data-lifecycle={lc.lifecycle}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- a static SVG from public/, not a photo to optimise */}
+      <img
+        src={helpDiagramSrc(lc.light)}
+        alt={alt}
+        aria-describedby={textId}
+        data-testid="help-lifecycle-light"
+        className={cn(img, "dark:hidden")}
+      />
+      {/* eslint-disable-next-line @next/next/no-img-element -- as above */}
+      <img
+        src={helpDiagramSrc(lc.dark)}
+        alt={alt}
+        aria-describedby={textId}
+        data-testid="help-lifecycle-dark"
+        className={cn(img, "hidden dark:block")}
+      />
+      <figcaption>
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted-foreground">
+            The diagram as text
+          </summary>
+          <div
+            id={textId}
+            data-testid="help-lifecycle-text"
+            className="mt-2 space-y-2"
+          >
+            <p className="font-medium">States</p>
+            <ul className="list-disc pl-5">
+              {lc.text.states.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
+            <p className="font-medium">Transitions</p>
+            <ul className="list-disc pl-5">
+              {lc.text.transitions.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      </figcaption>
+    </figure>
   );
 }
 
@@ -144,6 +209,10 @@ export function HelpButton() {
               ))}
             </div>
           ) : null}
+
+          {mod.lifecycles.map((lc) => (
+            <LifecycleFigure key={lc.lifecycle} lc={lc} />
+          ))}
 
           {terms.length > 0 ? (
             <section

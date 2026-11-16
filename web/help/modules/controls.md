@@ -44,6 +44,26 @@ described:
 
 A control covered by an approved exception shows **Excepted** instead.
 
+An exception is a time-limited, approved decision to accept that a
+control is not met. Someone asks for it, a second person approves or
+denies it, and an approved exception is then activated. It ends when it
+expires, which happens automatically, or when an approver revokes it
+early. The exception lifecycle diagram shows each step.
+
+```mermaid
+%% lifecycle: exception
+stateDiagram-v2
+  [*] --> requested: request
+  requested --> approved: approve
+  requested --> denied: deny
+  approved --> active: activate
+  active --> expired: expire (system)
+  active --> revoked: revoke
+  denied --> [*]
+  expired --> [*]
+  revoked --> [*]
+```
+
 Manual controls work the same way as automated ones. The only difference
 is where the evidence comes from: someone who holds the control's owner
 role uploads it or attests to it on the control's page.

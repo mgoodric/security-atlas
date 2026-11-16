@@ -155,6 +155,10 @@ type controlWithStateWire struct {
 	// Demo is true when the in-place demo seed added this control to the
 	// organisation (#2043), so the page can badge it. Omitted otherwise.
 	Demo bool `json:"demo,omitempty"`
+	// OwnerUserID is the person "assign owner" made this control's owner
+	// (#2128), or null when nobody is assigned. The manifest owner_role is
+	// the default owner role and is a separate field on the detail view.
+	OwnerUserID *string `json:"owner_user_id"`
 }
 
 type listWithStateResp struct {
@@ -180,7 +184,20 @@ func (h *ListHandler) listWithState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, total, err := h.store.ListWithState(r.Context(), limit, offset, scopeCell, anchorFit)
+	// #2128: ?owner=<user id> narrows the page and total to that person's
+	// controls. RLS keeps another tenant's assignments invisible, so a
+	// foreign user id matches nothing.
+	var owner pgtype.UUID
+	if v := r.URL.Query().Get("owner"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "owner must be a UUID")
+			return
+		}
+		owner = pgtype.UUID{Bytes: id, Valid: true}
+	}
+
+	rows, total, err := h.store.ListWithState(r.Context(), limit, offset, scopeCell, anchorFit, owner)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list controls with state", err)
 		return
@@ -223,6 +240,10 @@ func controlWithStateWireFrom(row dbx.ListActiveControlsWithStateRow) controlWit
 	if row.ScfAnchorID.Valid {
 		id := uuid.UUID(row.ScfAnchorID.Bytes).String()
 		out.SCFAnchorID = &id
+	}
+	if row.OwnerUserID.Valid {
+		id := uuid.UUID(row.OwnerUserID.Bytes).String()
+		out.OwnerUserID = &id
 	}
 	if len(row.FrameworkSlugs) > 0 {
 		out.Frameworks = catalog.SortedFrameworkDisplayCodes(row.FrameworkSlugs)

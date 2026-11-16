@@ -1,13 +1,12 @@
 // /admin/audit — target of the admin overview's "Audit log" tile.
 //
-// The unified audit log ships at /audit-log, whose own server-side layout
-// guard decides access (it admits auditor and grc_engineer as well as
-// admin, so the redirect grants nothing new). This route
-// used to hold a pre-backend scaffold that described the missing endpoint
-// to the user; it now forwards to the real page (#2082).
+// Activity is the one audit-log page (#2093); this route forwards to it.
+// /activity reads through `/v1/activity/unified`, which every tenant
+// member already reaches, so the redirect grants nothing new. Callers
+// the export endpoint admits see the export bar there.
 
 import { redirect } from "next/navigation";
 
 export default function AdminAuditRedirect() {
-  redirect("/audit-log");
+  redirect("/activity");
 }

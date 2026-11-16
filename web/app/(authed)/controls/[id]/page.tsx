@@ -54,6 +54,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect } from "react";
 
 import { DemoBadge } from "@/components/demo-badge";
+import { Person } from "@/components/ui/person";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -453,8 +454,21 @@ function ControlDetailPageInner() {
             </div>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
               <span className="text-muted-foreground">
-                Owner role{" "}
-                <span className="text-foreground">{control.owner_role}</span>
+                Owner{" "}
+                <Person
+                  id={control.owner_user_id}
+                  className="text-foreground"
+                  testId="control-owner"
+                />
+              </span>
+              <span className="text-muted-foreground">
+                Default owner role{" "}
+                <span
+                  className="text-foreground"
+                  data-testid="control-owner-role"
+                >
+                  {control.owner_role}
+                </span>
               </span>
               <span className="text-muted-foreground">
                 Implementation{" "}
