@@ -1,4 +1,4 @@
--- #2129 dry run: what 20261221000000_risk_vendor_owner_users.sql would do to
+-- #2129 dry run: what 20261226000000_risk_vendor_owner_users.sql would do to
 -- the free-text risk and vendor owners, per tenant, without writing.
 --
 -- Read-only and counts-only: it prints no owner text, names or emails. Run

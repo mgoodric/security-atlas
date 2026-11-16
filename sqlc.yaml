@@ -149,7 +149,7 @@ sql:
       # #2026: framework_requirements.points_of_focus must be a JSON array.
       - "migrations/sql/20261215000000_framework_requirement_points_of_focus_array.sql"
       # #2129: risk and vendor owners are users (owner_user_id).
-      - "migrations/sql/20261221000000_risk_vendor_owner_users.sql"
+      - "migrations/sql/20261226000000_risk_vendor_owner_users.sql"
     queries: "internal/db/queries"
     gen:
       go:

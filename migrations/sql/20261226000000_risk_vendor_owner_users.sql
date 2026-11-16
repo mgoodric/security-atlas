@@ -29,7 +29,7 @@
 --    (20261120000000_llm_settings_audit.sql): every existing value is kept
 --    and the new one is appended.
 --
--- Reversible via 20261221000000_risk_vendor_owner_users.down.sql.
+-- Reversible via 20261226000000_risk_vendor_owner_users.down.sql.
 
 ALTER TABLE risks ADD COLUMN IF NOT EXISTS owner_user_id UUID NULL;
 ALTER TABLE risks DROP CONSTRAINT IF EXISTS risks_owner_user_fk;

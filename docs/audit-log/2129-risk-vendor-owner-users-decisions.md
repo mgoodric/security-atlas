@@ -97,6 +97,14 @@ SCIM purge) should leave the record unowned, an ownership gap the
 dashboard reports, rather than block the delete on every risk and vendor
 they owned. The owner's id stays in the audit rows.
 
+## D7: migration number
+
+The migration is `20261226000000`. It was renumbered twice as main took
+`20261217000000` and `20261220000000`, and `20261221000000`-`20261225000000`
+are held by open work (#2445 and others). The CHECK it rewrites is still
+the latest definition (`20261120000000_llm_settings_audit.sql`); none of
+the migrations in between touches `me_audit_log`.
+
 ## Follow-ups not done here
 
 - The MCP `create_risk` and treatment proposal still take a free-text

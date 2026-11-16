@@ -1,4 +1,4 @@
--- Reverses 20261221000000_risk_vendor_owner_users.sql: drops
+-- Reverses 20261226000000_risk_vendor_owner_users.sql: drops
 -- risks.owner_user_id and vendors.owner_user_id, and restores the
 -- me_audit_log action CHECK of 20261120000000_llm_settings_audit.sql.
 --
@@ -20,7 +20,7 @@ BEGIN
     SELECT count(*) INTO n FROM me_audit_log WHERE action = 'vendor_owner_update';
     IF n > 0 THEN
         RAISE EXCEPTION 'me_audit_log holds % vendor owner audit row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261221000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261226000000.';
     END IF;
 END
 $$;
