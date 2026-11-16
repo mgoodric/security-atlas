@@ -14,6 +14,7 @@ import Link from "next/link";
 
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -24,6 +25,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { pageTitle } from "@/lib/page-titles";
+
+import { newScopeHref } from "./wizard";
 
 type Framework = {
   id: string;
@@ -42,7 +45,7 @@ async function fetchFrameworks(): Promise<Framework[]> {
 }
 
 const SUBTITLE =
-  "Which systems each framework applies to. Open a framework to edit, review and activate its scope.";
+  "Which systems each framework applies to. Open a framework to edit, review and activate its scope, or start a new one.";
 
 export default function FrameworkScopesIndexPage() {
   const frameworksQ = useQuery({
@@ -55,6 +58,16 @@ export default function FrameworkScopesIndexPage() {
       title={pageTitle("/framework-scopes")}
       subtitle={SUBTITLE}
       data-testid="framework-scopes-index"
+      actions={
+        // #2115: the wizard picks the framework version itself.
+        <Link
+          href={newScopeHref()}
+          className={buttonVariants({ size: "sm" })}
+          data-testid="framework-scopes-new"
+        >
+          New scope
+        </Link>
+      }
     >
       {frameworksQ.isLoading ? (
         <Skeleton className="h-32 w-full" />
