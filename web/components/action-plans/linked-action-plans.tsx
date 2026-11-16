@@ -5,6 +5,8 @@
 // linked plans for the given target via the BFF and renders a compact,
 // read-only list. No link/unlink affordances here — linkage is managed from
 // the action-plan create form + detail page; this section is a drill-in.
+// #2106: with addHref, the section offers "Add action plan", which opens
+// the create form pre-linked to the target.
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -19,6 +21,8 @@ import {
 type Props = {
   target: "risk" | "control";
   targetId: string;
+  // The create form, pre-linked to the target; absent, no add link.
+  addHref?: string;
 };
 
 function pillClass(status: string): string {
@@ -36,7 +40,7 @@ function pillClass(status: string): string {
   }
 }
 
-export function LinkedActionPlans({ target, targetId }: Props) {
+export function LinkedActionPlans({ target, targetId, addHref }: Props) {
   const q = useQuery<ActionPlansRefListResponse>({
     queryKey: ["action-plans", "for", target, targetId],
     queryFn: () =>
@@ -50,7 +54,18 @@ export function LinkedActionPlans({ target, targetId }: Props) {
 
   return (
     <section className="space-y-2" data-testid="linked-action-plans">
-      <h2 className="text-sm font-medium">Linked Action Plans</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">Linked Action Plans</h2>
+        {addHref ? (
+          <Link
+            href={addHref}
+            className="text-sm text-primary hover:underline"
+            data-testid="linked-action-plans-add"
+          >
+            Add action plan
+          </Link>
+        ) : null}
+      </div>
       {q.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : q.isError ? (
