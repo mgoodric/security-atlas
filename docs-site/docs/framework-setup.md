@@ -72,9 +72,9 @@ curl -fsS http://localhost:8080/v1/frameworks \
 # { "frameworks": [ { "slug": "soc2", "name": "SOC 2 (System and Organization Controls 2)", "issuer": "AICPA", ... } ] }
 ```
 
-The import registers framework version `2017` with 43 requirements: the
-Common Criteria (CC1.1-CC9.2) plus the Availability, Confidentiality and
-Processing Integrity criteria. A requirement's natural key is
+The import registers framework version `2017` with 61 requirements: the
+Common Criteria (CC1.1-CC9.2) plus the Availability, Confidentiality,
+Processing Integrity and Privacy criteria. A requirement's natural key is
 `soc2:2017:<code>`, e.g. `soc2:2017:CC6.1`.
 
 ## Step 3 — inspect a crosswalk

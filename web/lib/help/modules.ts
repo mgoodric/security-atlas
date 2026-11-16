@@ -30,8 +30,16 @@
 // The `.md` imports resolve to the file's text: Turbopack's `raw` rule in
 // `next.config.ts`, and a matching plugin in `vitest.config.ts`.
 
+import adminSource from "@/help/modules/admin.md";
+import adminApiKeysSource from "@/help/modules/admin-api-keys.md";
+import adminDemoSource from "@/help/modules/admin-demo.md";
+import adminFeaturesSource from "@/help/modules/admin-features.md";
+import adminSsoSource from "@/help/modules/admin-sso.md";
+import adminSuperAdminsSource from "@/help/modules/admin-super-admins.md";
+import adminTenantsSource from "@/help/modules/admin-tenants.md";
+import adminUsersSource from "@/help/modules/admin-users.md";
 import controlsSource from "@/help/modules/controls.md";
-
+import settingsSource from "@/help/modules/settings.md";
 import {
   describeLifecycle,
   extractLifecycleBlocks,
@@ -80,6 +88,16 @@ export type HelpModule = {
  *  until then the hint shows but its dismissal is refused with a 400. */
 export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "controls.md": controlsSource,
+  // #2155: Settings & admin.
+  "settings.md": settingsSource,
+  "admin.md": adminSource,
+  "admin-users.md": adminUsersSource,
+  "admin-api-keys.md": adminApiKeysSource,
+  "admin-sso.md": adminSsoSource,
+  "admin-features.md": adminFeaturesSource,
+  "admin-tenants.md": adminTenantsSource,
+  "admin-super-admins.md": adminSuperAdminsSource,
+  "admin-demo.md": adminDemoSource,
 };
 
 export const HELP_DOCS_BASE_URL =

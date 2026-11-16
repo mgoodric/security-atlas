@@ -18,6 +18,12 @@
 #   bootstrap image imports this file on every boot (#1884), so the posture
 #   matters for what the image redistributes.
 #
+#   The Privacy criteria P1.1-P8.1 (#1753) follow the same posture: the
+#   identifiers are AICPA's, the titles and bodies are ours, and no TSC
+#   text is quoted or closely paraphrased (data/crosswalks/README.md).
+#   Their anchor calls are logged in
+#   docs/audit-log/1753-soc2-privacy-criteria-decisions.md.
+#
 # Source basis (methodology, not copied text): the agent-authored mapping
 # is informed by:
 #   - AICPA TSC 2017 (with 2022 points-of-focus revisions) criterion IDs
@@ -197,6 +203,62 @@ requirements:
   - code: PI1.5
     title: "Storage controls"
     body: "Inputs, work in progress, and outputs are stored completely and accurately, as specified."
+
+  # Privacy (P1-P8). Titles and bodies are agent-authored (see header).
+  - code: P1.1
+    title: "Privacy notice"
+    body: "People are told, in plain terms, what personal information is gathered about them and what happens to it."
+  - code: P2.1
+    title: "Choice and consent"
+    body: "People can say yes or no to how their personal information is handled, and the decision they made is kept on file."
+  - code: P3.1
+    title: "Collection limited to purpose"
+    body: "Only the personal information the stated purposes call for is gathered."
+  - code: P3.2
+    title: "Explicit consent for collection"
+    body: "Where the law or a commitment calls for it, a person's express agreement is obtained before information is gathered from them."
+  - code: P4.1
+    title: "Use limited to purpose"
+    body: "Personal information is put only to the uses the organization committed to."
+  - code: P4.2
+    title: "Retention"
+    body: "Personal information is kept only for as long as its purpose or a legal duty demands."
+  - code: P4.3
+    title: "Disposal"
+    body: "Personal information that has reached the end of its retention is destroyed securely."
+  - code: P5.1
+    title: "Data subject access"
+    body: "A person whose identity has been confirmed can see the personal information held about them."
+  - code: P5.2
+    title: "Data subject correction"
+    body: "People can ask for their personal information to be fixed, and the request is acted on or the refusal explained."
+  - code: P6.1
+    title: "Disclosure to third parties"
+    body: "Personal information goes to outside parties only for the agreed purposes and with the person's agreement where it is needed."
+  - code: P6.2
+    title: "Record of authorized disclosures"
+    body: "Every permitted release of personal information is logged."
+  - code: P6.3
+    title: "Record of unauthorized disclosures"
+    body: "Breaches and other improper releases of personal information are logged."
+  - code: P6.4
+    title: "Vendor privacy commitments"
+    body: "Vendors who handle personal information take on privacy duties by contract, and are checked against them."
+  - code: P6.5
+    title: "Vendor breach notification"
+    body: "Vendors are obliged to report any improper release of personal information they cause or discover."
+  - code: P6.6
+    title: "Breach notification to data subjects"
+    body: "People affected by a breach of their personal information, and regulators where required, are informed."
+  - code: P6.7
+    title: "Accounting of disclosures"
+    body: "On request, a person can learn what of their personal information was released and to whom."
+  - code: P7.1
+    title: "Data quality"
+    body: "Personal information is kept correct, complete and current enough for the purpose it serves."
+  - code: P8.1
+    title: "Privacy inquiries, complaints, and compliance monitoring"
+    body: "Privacy questions and grievances have a channel and get resolved, and privacy practices are checked against commitments."
 
 mappings:
   # =====================================================================
@@ -541,3 +603,147 @@ mappings:
     relationship_type: intersects_with
     strength: 0.4
     rationale: "Storage integrity overlaps data retention; partial fit. LOW CONFIDENCE — review."
+
+  # =====================================================================
+  # P1-P8 — Privacy — anchors to PRI-* (+ IRO-22 for breaches)
+  # =====================================================================
+  - tsc_code: P1.1
+    scf_anchor: PRI-21
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Data Privacy Notice is the direct STRM equivalent of P1.1."
+  - tsc_code: P2.1
+    scf_anchor: PRI-24
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Data Subject Consent covers obtaining and recording consent choices."
+  - tsc_code: P2.1
+    scf_anchor: PRI-27
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Data Subject Opt-In Consent covers the opt-in half of P2.1 choice."
+  - tsc_code: P3.1
+    scf_anchor: PRI-31
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Personal Data (PD) Collection Methods limits collection to what the purpose needs."
+  - tsc_code: P3.1
+    scf_anchor: PRI-12
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Authority To Collect, Process, Store & Share Personal Data (PD) establishes the basis for collecting at all."
+  - tsc_code: P3.2
+    scf_anchor: PRI-27
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Data Subject Opt-In Consent is express consent obtained before collection."
+  - tsc_code: P4.1
+    scf_anchor: PRI-29
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Usage Restrictions of Personal Data (PD) is the direct STRM equivalent of P4.1."
+  - tsc_code: P4.2
+    scf_anchor: PRI-30
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Personal Data (PD) Retention & Disposal covers the retention half of the anchor."
+  - tsc_code: P4.3
+    scf_anchor: PRI-30
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Personal Data (PD) Retention & Disposal covers the disposal half of the anchor."
+  - tsc_code: P4.3
+    scf_anchor: AST-22
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Secure Disposal, Destruction or Re-Use of Equipment covers media holding personal information. LOW CONFIDENCE — partial fit."
+  - tsc_code: P5.1
+    scf_anchor: PRI-39
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Data Subject Rights Management includes the right of access."
+  - tsc_code: P5.1
+    scf_anchor: PRI-38
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Data Subject Authentication covers confirming identity before access is given."
+  - tsc_code: P5.2
+    scf_anchor: PRI-39
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Data Subject Rights Management includes the right to correction."
+  - tsc_code: P5.2
+    scf_anchor: PRI-08
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Updating Personal Data (PD) Process covers acting on correction requests."
+  - tsc_code: P6.1
+    scf_anchor: PRI-16
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Information Sharing With Third Parties governs disclosure to outside parties."
+  - tsc_code: P6.1
+    scf_anchor: PRI-17
+    relationship_type: intersects_with
+    strength: 0.7
+    rationale: "Limiting Personal Data (PD) Disclosures limits disclosure to the agreed purposes."
+  - tsc_code: P6.2
+    scf_anchor: PRI-17.1
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Accounting of Disclosures is a record of authorized disclosures."
+  - tsc_code: P6.3
+    scf_anchor: IRO-22
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Data Breach covers handling, and so recording, unauthorized disclosures. LOW CONFIDENCE — recording is a subset of breach handling."
+  - tsc_code: P6.4
+    scf_anchor: PRI-14
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Data Privacy Requirements for Contractors & Service Providers is the direct STRM equivalent of P6.4."
+  - tsc_code: P6.4
+    scf_anchor: TPM-14
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Third-Party Contract Requirements is the contractual vehicle for the commitments."
+  - tsc_code: P6.5
+    scf_anchor: PRI-14
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Data Privacy Requirements for Contractors & Service Providers includes breach notice duties."
+  - tsc_code: P6.5
+    scf_anchor: TPM-14
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Third-Party Contract Requirements carries the notification clause. LOW CONFIDENCE — partial fit."
+  - tsc_code: P6.6
+    scf_anchor: IRO-22
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Data Breach includes notifying affected individuals and regulators."
+  - tsc_code: P6.7
+    scf_anchor: PRI-17.1
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "Accounting of Disclosures is the record a data subject is given on request."
+  - tsc_code: P7.1
+    scf_anchor: PRI-35
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Personal Data (PD) Accuracy & Integrity is the direct STRM equivalent of P7.1."
+  - tsc_code: P7.1
+    scf_anchor: PRI-08
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Updating Personal Data (PD) Process keeps personal information current."
+  - tsc_code: P8.1
+    scf_anchor: PRI-11
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Personal Data (PD) Control Testing, Training & Monitoring covers the compliance-monitoring half. LOW CONFIDENCE — review."
+  - tsc_code: P8.1
+    scf_anchor: PRI-37
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Data Subject Communications covers the inquiry and complaint channel. LOW CONFIDENCE — review."

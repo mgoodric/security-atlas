@@ -263,6 +263,12 @@
       "title": "Incident Stakeholder Reporting",
       "description": "Mechanisms exist to report incidents within defined time frames."
     },
+    {
+      "scf_id": "IRO-22",
+      "family": "IRO",
+      "title": "Data Breach",
+      "description": "Mechanisms exist to handle breaches of personal data, including notifying the people affected and regulators."
+    },
 
     {
       "scf_id": "MNT-03",
@@ -345,6 +351,102 @@
       "family": "PRI",
       "title": "Data Privacy Program",
       "description": "Mechanisms exist to facilitate the implementation of personal data governance."
+    },
+    {
+      "scf_id": "PRI-08",
+      "family": "PRI",
+      "title": "Updating Personal Data (PD) Process",
+      "description": "Mechanisms exist to keep personal data current and to act on requests to update it."
+    },
+    {
+      "scf_id": "PRI-11",
+      "family": "PRI",
+      "title": "Personal Data (PD) Control Testing, Training & Monitoring",
+      "description": "Mechanisms exist to test privacy controls, train staff on them and monitor that they keep working."
+    },
+    {
+      "scf_id": "PRI-12",
+      "family": "PRI",
+      "title": "Authority To Collect, Process, Store & Share Personal Data (PD)",
+      "description": "Mechanisms exist to establish the legal basis for each handling of personal data."
+    },
+    {
+      "scf_id": "PRI-14",
+      "family": "PRI",
+      "title": "Data Privacy Requirements for Contractors & Service Providers",
+      "description": "Mechanisms exist to bind contractors and service providers to privacy obligations."
+    },
+    {
+      "scf_id": "PRI-16",
+      "family": "PRI",
+      "title": "Information Sharing With Third Parties",
+      "description": "Mechanisms exist to govern when personal data may be shared with outside parties."
+    },
+    {
+      "scf_id": "PRI-17",
+      "family": "PRI",
+      "title": "Limiting Personal Data (PD) Disclosures",
+      "description": "Mechanisms exist to restrict disclosure of personal data to approved purposes."
+    },
+    {
+      "scf_id": "PRI-17.1",
+      "family": "PRI",
+      "title": "Accounting of Disclosures",
+      "description": "Mechanisms exist to keep a record of which personal data was disclosed, when and to whom."
+    },
+    {
+      "scf_id": "PRI-21",
+      "family": "PRI",
+      "title": "Data Privacy Notice",
+      "description": "Mechanisms exist to tell data subjects how their personal data is handled."
+    },
+    {
+      "scf_id": "PRI-24",
+      "family": "PRI",
+      "title": "Data Subject Consent",
+      "description": "Mechanisms exist to obtain and record data subject consent."
+    },
+    {
+      "scf_id": "PRI-27",
+      "family": "PRI",
+      "title": "Data Subject Opt-In Consent",
+      "description": "Mechanisms exist to obtain affirmative consent before handling personal data that requires it."
+    },
+    {
+      "scf_id": "PRI-29",
+      "family": "PRI",
+      "title": "Usage Restrictions of Personal Data (PD)",
+      "description": "Mechanisms exist to hold use of personal data to its stated purposes."
+    },
+    {
+      "scf_id": "PRI-30",
+      "family": "PRI",
+      "title": "Personal Data (PD) Retention & Disposal",
+      "description": "Mechanisms exist to keep personal data no longer than needed and dispose of it securely."
+    },
+    {
+      "scf_id": "PRI-31",
+      "family": "PRI",
+      "title": "Personal Data (PD) Collection Methods",
+      "description": "Mechanisms exist to limit collection of personal data to what its purpose needs."
+    },
+    {
+      "scf_id": "PRI-35",
+      "family": "PRI",
+      "title": "Personal Data (PD) Accuracy & Integrity",
+      "description": "Mechanisms exist to keep personal data accurate and complete."
+    },
+    {
+      "scf_id": "PRI-37",
+      "family": "PRI",
+      "title": "Data Subject Communications",
+      "description": "Mechanisms exist to answer data subject inquiries and complaints."
+    },
+    {
+      "scf_id": "PRI-38",
+      "family": "PRI",
+      "title": "Data Subject Authentication",
+      "description": "Mechanisms exist to confirm a data subject's identity before acting on a request."
     },
     {
       "scf_id": "PRI-39",

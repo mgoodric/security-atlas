@@ -172,4 +172,54 @@ describe("the real help files", () => {
       "https://mgoodric.github.io/security-atlas/help/controls/",
     );
   });
+
+  // #2155 — every Settings & admin page resolves to its own module.
+  it.each([
+    ["/settings", "settings"],
+    ["/admin", "admin"],
+    ["/admin/users", "admin-users"],
+    ["/admin/api-keys", "admin-api-keys"],
+    ["/admin/sso", "admin-sso"],
+    ["/admin/features", "admin-features"],
+    ["/admin/tenants", "admin-tenants"],
+    ["/admin/super-admins", "admin-super-admins"],
+    ["/admin/demo", "admin-demo"],
+  ])("covers %s with the %s help", (route, id) => {
+    expect(helpModuleForPath(route)?.id).toBe(id);
+  });
+
+  // #2145 — a module's hint dismissal is refused unless its id is in
+  // userprefs.HintModules and the migration's CHECK, so the three lists
+  // move together.
+  it("lists every module in the hint allow-list and its CHECK", () => {
+    const ids = HELP_MODULES.map((m) => m.id).sort();
+    const goSrc = readFileSync(
+      join(WEB_ROOT, "..", "internal", "auth", "userprefs", "hints.go"),
+      "utf8",
+    );
+    const goList = /var HintModules = \[\]string\{([\s\S]*?)\n\}/.exec(goSrc);
+    expect(goList).not.toBeNull();
+    const goIds = [...goList![1].matchAll(/"([a-z0-9-]+)"/g)].map((x) => x[1]);
+    expect(goIds.sort()).toEqual(ids);
+
+    const migrations = readdirSync(join(WEB_ROOT, "..", "migrations", "sql"))
+      .filter((f) => f.endsWith(".sql") && !f.endsWith(".down.sql"))
+      .sort();
+    const latestCheck = migrations
+      .map((f) =>
+        readFileSync(join(WEB_ROOT, "..", "migrations", "sql", f), "utf8"),
+      )
+      .map((sql) =>
+        /user_onboarding_hint_dismissals_module_check\s+CHECK\s*\(\s*module IN \(([^)]*)\)/.exec(
+          sql,
+        ),
+      )
+      .filter((m) => m !== null)
+      .pop();
+    expect(latestCheck).toBeDefined();
+    const sqlIds = [...latestCheck![1].matchAll(/'([a-z0-9-]+)'/g)].map(
+      (x) => x[1],
+    );
+    expect(sqlIds.sort()).toEqual(ids);
+  });
 });
