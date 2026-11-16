@@ -35,6 +35,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { Markdown } from "@/components/markdown";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
@@ -62,16 +63,7 @@ import {
   severityClasses,
 } from "../filters";
 import { enumLabel } from "@/lib/labels/enum-labels";
-import { utcDay } from "../new/form-state";
 import { SeverityPill } from "../severity-pill";
-
-// The UTC calendar day, as the edit form and History read it (#2104): the
-// platform renders timestamps in its own zone, so slicing the string
-// would show a different day from the one saved.
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return utcDay(iso) || iso.slice(0, 10);
-}
 
 export default function RiskDetailPage({
   params,
@@ -216,9 +208,13 @@ export default function RiskDetailPage({
               className="inline font-mono text-foreground"
               data-testid="risk-detail-review-due"
             >
-              {reviewDuePending(risk.review_due_at)
-                ? "Not set"
-                : formatDate(risk.review_due_at)}
+              {reviewDuePending(risk.review_due_at) ? (
+                "Not set"
+              ) : (
+                // The UTC calendar day, as the edit form and History read
+                // it (#2104); the "date" style formats in UTC.
+                <Timestamp value={risk.review_due_at} style="date" />
+              )}
             </dd>
           </div>
         </dl>

@@ -52,6 +52,10 @@ export default defineConfig({
 
   use: {
     baseURL,
+    // #2084 — dates render in the viewer's locale and timezone; pin both
+    // so date assertions read the same on every runner.
+    locale: "en-US",
+    timezoneId: "UTC",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

@@ -61,16 +61,6 @@ export function prettyJSON(value: unknown): string {
 }
 
 /**
- * Render an RFC3339 timestamp for the cell. Today we render the
- * timestamp verbatim — a future slice may localise to the user's
- * timezone per the slice-097 preference. The function is here so the
- * timezone work has a single seam to extend.
- */
-export function observedAtLabel(observed_at: string): string {
-  return observed_at;
-}
-
-/**
  * Slice 236 — render the filter-row meta-count string.
  *
  * The /evidence page surfaces this in the filter-pill row so the
