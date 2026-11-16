@@ -68,6 +68,7 @@ const PARAM_VALUES: Record<string, string> = {
   "/questionnaires/[id]": NO_ROW_ID,
   "/requirements/[id]": NO_ROW_ID,
   "/risks/[id]": NO_ROW_ID,
+  "/risks/[id]/acceptance/[action]": "propose",
   "/vendors/[id]": NO_ROW_ID,
   "/audit/[controlId]": seeded.controlId,
 };
