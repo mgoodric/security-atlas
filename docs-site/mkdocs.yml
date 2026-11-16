@@ -113,6 +113,15 @@ nav:
   # the same files the app's "How this works" panel shows.
   - In-app help:
       - Controls: help/controls.md
+      - Settings: help/settings.md
+      - Admin: help/admin.md
+      - Users: help/admin-users.md
+      - API keys: help/admin-api-keys.md
+      - SSO: help/admin-sso.md
+      - Features: help/admin-features.md
+      - Tenants: help/admin-tenants.md
+      - Super admins: help/admin-super-admins.md
+      - Demo data: help/admin-demo.md
   - Audit logs: audit-logs.md
   - Operations:
       - Backup and restore: backup-restore.md

@@ -70,3 +70,29 @@ func TestHints_RLSTenantIsolation(t *testing.T) {
 		t.Fatalf("cross-tenant DismissedHints = %v, %v; want []", got, err)
 	}
 }
+
+// #2155: every module in HintModules can be dismissed, so the migration's
+// module CHECK admits the whole allow-list.
+func TestHints_EveryAllowedModuleDismisses(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantID, userID := seedUser(t, admin)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
+	s := userprefs.NewStore(app)
+
+	all := map[string]bool{}
+	for _, m := range userprefs.HintModules {
+		all[m] = true
+	}
+	if err := s.ApplyHints(ctx, tenantID, userID, userprefs.HintChange{Dismissed: all}); err != nil {
+		t.Fatalf("ApplyHints every module: %v", err)
+	}
+	got, err := s.DismissedHints(ctx, tenantID, userID)
+	if err != nil {
+		t.Fatalf("DismissedHints: %v", err)
+	}
+	want := slices.Sorted(slices.Values(userprefs.HintModules))
+	if !slices.Equal(got, want) {
+		t.Fatalf("dismissed = %v; want %v", got, want)
+	}
+}
