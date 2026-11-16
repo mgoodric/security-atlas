@@ -62,6 +62,7 @@ import {
 } from "@/components/ui/table";
 import type { CreateTenantResponse, TenantRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 
 type TenantListResponse = { items: TenantRow[]; error?: string };
 
@@ -152,9 +153,10 @@ export default function AdminTenantsPage() {
       data-testid="admin-tenants-page"
       subtitle={
         <>
-          Platform-global tenant identities. Super admins create new tenants
-          here. Each new tenant ships with one builtin <code>environment</code>{" "}
-          scope dimension and a default <code>All</code> scope cell so it is
+          Platform-global <Term id="tenant">tenant</Term> identities.{" "}
+          <Term id="super-admin">Super admins</Term> create new tenants here.
+          Each new tenant ships with one builtin <code>environment</code> scope
+          dimension and a default <code>All</code> scope cell so it is
           immediately usable for control + evidence work.
         </>
       }

@@ -24,6 +24,7 @@ import {
 import { PageShell } from "@/components/shell/page-shell";
 
 import { DemoControls } from "./demo-controls";
+import { Term } from "@/components/help/term";
 
 export const metadata: Metadata = { title: "Demo tools" };
 
@@ -34,9 +35,10 @@ export default function AdminDemoPage() {
       width="reading"
       subtitle={
         <>
-          Reseed and tear down the demo tenant on this deployment. These do the
-          same as the <code className="rounded bg-muted px-1">demo</code>{" "}
-          command-line tool, in one click.
+          Reseed and tear down the demo <Term id="tenant">tenant</Term> on this
+          deployment. These do the same as the{" "}
+          <code className="rounded bg-muted px-1">demo</code> command-line tool,
+          in one click.
         </>
       }
     >

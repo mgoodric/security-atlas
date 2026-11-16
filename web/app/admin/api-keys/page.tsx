@@ -64,6 +64,7 @@ import {
   AdminCredentialRotateResponse,
 } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -161,9 +162,9 @@ export default function APIKeysPage() {
       title="API keys"
       subtitle={
         <>
-          Issue, rotate, and revoke bearer credentials for connectors and the
-          CLI. The bearer plaintext is returned exactly once at issue and
-          rotate; this UI shows it and discards it.
+          Issue, rotate, and revoke <Term id="api-key">bearer credentials</Term>{" "}
+          for connectors and the CLI. The bearer plaintext is returned exactly
+          once at issue and rotate; this UI shows it and discards it.
         </>
       }
     >

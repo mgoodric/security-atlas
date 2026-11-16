@@ -34,6 +34,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { AdminSSOConfig } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 
 type Preflight =
   | { state: "idle" }
@@ -233,8 +234,9 @@ export default function SSOConfigPage() {
       title="SSO"
       subtitle={
         <>
-          Configure a per-tenant OIDC identity provider. The platform is a
-          relying party only — it never issues identity itself.
+          Configure a per-tenant <Term id="sso">OIDC identity provider</Term>.
+          The platform is a relying party only — it never issues identity
+          itself.
         </>
       }
     >
