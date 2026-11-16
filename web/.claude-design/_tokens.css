@@ -37,7 +37,7 @@
   --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.5 0.245 27.325);
 
   /* Muted-pastel accent layer — deep same-hue tones (primary stays black).
      As text on their own /15 tint over white (#2097):
