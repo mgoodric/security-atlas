@@ -137,7 +137,10 @@ export type FixtureName =
   | "org-mapping"
   // #2118 — an open audit period and an auditor user of its own, with
   // no assignment, for period-auditors.spec.ts.
-  | "period-auditors";
+  | "period-auditors"
+  // #2085: a named user who owns an action plan, created an audit
+  // period and completed a personnel item, for person-names.spec.ts.
+  | "person-names";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
