@@ -3,8 +3,10 @@ package authzmw_test
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -84,5 +86,44 @@ func TestMiddlewareWithResourceAttrs_AttrsReachTheDecision(t *testing.T) {
 				t.Fatalf("POST /v1/audit-notes: status %d; want %d", rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+// #2157: ChainResourceAttrs merges what each hydrator returns, skips a nil
+// one, and stops at the first error.
+func TestChainResourceAttrs(t *testing.T) {
+	t.Parallel()
+	a := func(*http.Request) (map[string]any, error) { return map[string]any{"a": 1, "k": "a"}, nil }
+	b := func(*http.Request) (map[string]any, error) { return map[string]any{"k": "b"}, nil }
+	none := func(*http.Request) (map[string]any, error) { return nil, nil }
+	r := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+
+	got, err := authzmw.ChainResourceAttrs(a, nil, none, b)(r)
+	if err != nil || len(got) != 2 || got["a"] != 1 || got["k"] != "b" {
+		t.Fatalf("chain = %v, %v; want a=1 k=b", got, err)
+	}
+	if got, err := authzmw.ChainResourceAttrs(none)(r); err != nil || got != nil {
+		t.Fatalf("empty chain = %v, %v; want nil", got, err)
+	}
+	boom := errors.New("boom")
+	called := false
+	after := func(*http.Request) (map[string]any, error) { called = true; return nil, nil }
+	fail := func(*http.Request) (map[string]any, error) { return nil, boom }
+	if _, err := authzmw.ChainResourceAttrs(fail, after)(r); !errors.Is(err, boom) || called {
+		t.Fatalf("err = %v, later hydrator called = %v; want boom, false", err, called)
+	}
+}
+
+// #2157: PeekBody returns the prefix and leaves the full body for the
+// handler.
+func TestPeekBody(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest(http.MethodPost, "/v1/x", strings.NewReader("0123456789"))
+	peek, err := authzmw.PeekBody(r, 4)
+	if err != nil || string(peek) != "0123" {
+		t.Fatalf("peek = %q, %v; want 0123", peek, err)
+	}
+	if rest, _ := io.ReadAll(r.Body); string(rest) != "0123456789" {
+		t.Fatalf("handler body = %q; want the whole body", rest)
 	}
 }
