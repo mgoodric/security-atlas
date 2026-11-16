@@ -13,20 +13,25 @@ import (
 
 const countActiveControls = `-- name: CountActiveControls :one
 SELECT count(*)::bigint AS total
-FROM controls
-WHERE tenant_id = $1 AND superseded_by IS NULL
-  AND ($2::text IS NULL OR anchor_fit = $2::text)
+FROM controls c
+LEFT JOIN control_owner_assignments coa
+       ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
+WHERE c.tenant_id = $1 AND c.superseded_by IS NULL
+  AND ($2::text IS NULL OR c.anchor_fit = $2::text)
+  AND ($3::uuid IS NULL OR coa.owner_user_id = $3::uuid)
 `
 
 type CountActiveControlsParams struct {
-	TenantID  pgtype.UUID `json:"tenant_id"`
-	AnchorFit *string     `json:"anchor_fit"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	AnchorFit   *string     `json:"anchor_fit"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 }
 
 // Issue #1741 — total for the paged ListActiveControlsWithState read.
-// The optional anchor_fit filter matches the list's (issue #1736).
+// The optional anchor_fit (issue #1736) and owner_user_id (#2128) filters
+// match the list's.
 func (q *Queries) CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveControls, arg.TenantID, arg.AnchorFit)
+	row := q.db.QueryRow(ctx, countActiveControls, arg.TenantID, arg.AnchorFit, arg.OwnerUserID)
 	var total int64
 	err := row.Scan(&total)
 	return total, err
@@ -862,7 +867,7 @@ worst_per_control AS (
         MAX(le.last_observed_at) AS last_observed_at,
         MAX(le.evaluated_at)     AS evaluated_at
     FROM latest_eval le
-    WHERE ($5::uuid IS NULL OR le.scope_cell_id = $5::uuid)
+    WHERE ($6::uuid IS NULL OR le.scope_cell_id = $6::uuid)
     GROUP BY le.control_id
 ),
 anchor_frameworks AS (
@@ -886,19 +891,24 @@ SELECT
     wpc.freshness_status              AS state_freshness_status,
     wpc.last_observed_at::timestamptz AS state_last_observed_at,
     wpc.evaluated_at::timestamptz     AS state_evaluated_at,
-    af.framework_slugs::text[]        AS framework_slugs
+    af.framework_slugs::text[]        AS framework_slugs,
+    coa.owner_user_id                 AS owner_user_id
 FROM controls c
 LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
 LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
+LEFT JOIN control_owner_assignments coa
+       ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
 WHERE c.tenant_id = $1 AND c.superseded_by IS NULL
   AND ($2::text IS NULL OR c.anchor_fit = $2::text)
+  AND ($3::uuid IS NULL OR coa.owner_user_id = $3::uuid)
 ORDER BY c.scf_id NULLS LAST, c.bundle_id
-LIMIT $4 OFFSET $3
+LIMIT $5 OFFSET $4
 `
 
 type ListActiveControlsWithStateParams struct {
 	TenantID    pgtype.UUID `json:"tenant_id"`
 	AnchorFit   *string     `json:"anchor_fit"`
+	OwnerUserID pgtype.UUID `json:"owner_user_id"`
 	RowOffset   int32       `json:"row_offset"`
 	RowLimit    int32       `json:"row_limit"`
 	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
@@ -919,6 +929,7 @@ type ListActiveControlsWithStateRow struct {
 	StateLastObservedAt  pgtype.Timestamptz    `json:"state_last_observed_at"`
 	StateEvaluatedAt     pgtype.Timestamptz    `json:"state_evaluated_at"`
 	FrameworkSlugs       []string              `json:"framework_slugs"`
+	OwnerUserID          pgtype.UUID           `json:"owner_user_id"`
 }
 
 // NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
@@ -941,10 +952,12 @@ type ListActiveControlsWithStateRow struct {
 // RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
 // belt-and-suspenders alongside the GUC-driven RLS on `controls` and
 // `control_evaluations` (invariant #6).
+// #2128: the person-owner "assign owner" writes (slice 468).
 func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiveControlsWithStateParams) ([]ListActiveControlsWithStateRow, error) {
 	rows, err := q.db.Query(ctx, listActiveControlsWithState,
 		arg.TenantID,
 		arg.AnchorFit,
+		arg.OwnerUserID,
 		arg.RowOffset,
 		arg.RowLimit,
 		arg.ScopeCellID,
@@ -971,6 +984,7 @@ func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiv
 			&i.StateLastObservedAt,
 			&i.StateEvaluatedAt,
 			&i.FrameworkSlugs,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}

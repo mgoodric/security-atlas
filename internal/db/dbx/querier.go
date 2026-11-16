@@ -188,7 +188,8 @@ type Querier interface {
 	CountActionPlanControls(ctx context.Context, arg CountActionPlanControlsParams) (int64, error)
 	CountActionPlanRisks(ctx context.Context, arg CountActionPlanRisksParams) (int64, error)
 	// Issue #1741 — total for the paged ListActiveControlsWithState read.
-	// The optional anchor_fit filter matches the list's (issue #1736).
+	// The optional anchor_fit (issue #1736) and owner_user_id (#2128) filters
+	// match the list's.
 	CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error)
 	// #2261: the distinct users holding 'admin' in the tenant (any origin) whose
 	// membership is active (status='active' AND active). user_roles.user_id is
@@ -1691,6 +1692,7 @@ type Querier interface {
 	// RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
 	// belt-and-suspenders alongside the GUC-driven RLS on `controls` and
 	// `control_evaluations` (invariant #6).
+	// #2128: the person-owner "assign owner" writes (slice 468).
 	ListActiveControlsWithState(ctx context.Context, arg ListActiveControlsWithStateParams) ([]ListActiveControlsWithStateRow, error)
 	// Slice 439 — evidence-staleness rollup producer queries.
 	//

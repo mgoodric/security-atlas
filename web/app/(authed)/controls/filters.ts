@@ -181,6 +181,8 @@ export type AnchorRow = {
   anchorFitNote?: string | null;
   /** #2043 — the in-place demo seed added this control; the row shows a Demo badge. */
   demo?: boolean;
+  /** #2128 — the assigned owner's user id; null or absent when unassigned. */
+  ownerUserId?: string | null;
 };
 
 export type AnchorFit = "exact" | "partial" | "none";
