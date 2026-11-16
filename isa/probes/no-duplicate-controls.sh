@@ -7,7 +7,7 @@
 # What a duplicate is (Matt's ruling on #1698, recorded in isa/ISA.md): one
 # control copied per framework onto the same SCF anchor. That is the thing C1
 # and ADR-0013 forbid. Distinct controls written for ONE framework that share
-# an anchor are not duplicates: the five SOC 2 controls on GOV-01 are five
+# an anchor are not duplicates: the five SOC 2 controls on GOV-02 are five
 # controls, not one control five times.
 #
 # Where the framework comes from: the catalog's layout. The shipped catalog is
@@ -23,9 +23,9 @@
 #
 # Self-test, every run: before scanning the real catalog, the probe scans two
 # fixtures under isa/probes/testdata/no-duplicate-controls/:
-#   holds/  -- three soc2 controls sharing GOV-01, plus an iso27001 control on
+#   holds/  -- three soc2 controls sharing GOV-02, plus an iso27001 control on
 #              a different anchor. Must report no duplicate.
-#   false/  -- the same, plus an iso27001 copy on GOV-01. Must report it.
+#   false/  -- the same, plus an iso27001 copy on GOV-02. Must report it.
 # If either answers wrong, the scan itself is broken and nothing it says about
 # the real catalog can be trusted, so the probe exits 3.
 #
@@ -71,11 +71,11 @@ for d in "$FIXTURES/holds" "$FIXTURES/false"; do
   fi
 done
 if [ -n "$(dupes "$FIXTURES/holds")" ]; then
-  echo "$name: CANNOT RUN -- self-test: the holds/ fixture (distinct soc2 controls sharing GOV-01) was reported as a duplicate" >&2
+  echo "$name: CANNOT RUN -- self-test: the holds/ fixture (distinct soc2 controls sharing GOV-02) was reported as a duplicate" >&2
   exit 3
 fi
 if [ -z "$(dupes "$FIXTURES/false")" ]; then
-  echo "$name: CANNOT RUN -- self-test: the false/ fixture (an iso27001 copy on GOV-01) was not reported" >&2
+  echo "$name: CANNOT RUN -- self-test: the false/ fixture (an iso27001 copy on GOV-02) was not reported" >&2
   exit 3
 fi
 

@@ -33,12 +33,12 @@ requirements:
     title: EX-2
 mappings:
   - requirement_code: EX-1
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: intersects_with
     strength: 0.5
     rationale: workbook default
   - requirement_code: EX-2
-    scf_anchor: GOV-01
+    scf_anchor: GOV-02
     relationship_type: intersects_with
     strength: 0.5
     rationale: workbook default
@@ -113,7 +113,7 @@ func TestLoadSCFWorkbook_CombinesColumnsWithPrefix(t *testing.T) {
 	}
 	mustSetRows(t, f, "SCF 2026.3", [][]interface{}{
 		{"SCF Domain", "SCF Control", "SCF #", "ISO\n27001\n2022", "ISO\n27002\n2022"},
-		{"Governance", "Program", "GOV-01", "4.4\n5.1", "5.1"},
+		{"Governance", "Program", "GOV-02", "4.4\n5.1", "5.1"},
 		{"Identity", "Access", "IAC-01", "", "5.15\n5.16"},
 	})
 	path := filepath.Join(t.TempDir(), "scf-iso.xlsx")
@@ -212,7 +212,7 @@ func TestLoadSCFWorkbook_ControlSheetSelection(t *testing.T) {
 			})
 			mustSetRows(t, f, tc.wantSheet, [][]interface{}{
 				{"SCF #", "Example\nStandard"},
-				{"GOV-01", "EX-1"},
+				{"GOV-02", "EX-1"},
 			})
 			path := filepath.Join(t.TempDir(), "select.xlsx")
 			if err := f.SaveAs(path); err != nil {
@@ -257,7 +257,7 @@ func TestLoadSCFWorkbook_MissingFocalMetadataRequiresSlug(t *testing.T) {
 			mustSetSheetName(t, f, "Sheet1", "SCF 2026.3")
 			mustSetRows(t, f, "SCF 2026.3", [][]interface{}{
 				{"SCF #", "Example\nStandard"},
-				{"GOV-01", "EX-1"},
+				{"GOV-02", "EX-1"},
 			})
 			if tc.focal != nil {
 				if _, err := f.NewSheet("Focal Documents"); err != nil {
@@ -340,7 +340,7 @@ func TestLoadSCFWorkbook_OLIRWorkbookUsesExplicitSTRM(t *testing.T) {
 		t.Fatalf("Source = %q; want an scf-olir: source", cw.Source)
 	}
 	got := cw.Mappings[0]
-	if got.RequirementCode != "AC-01" || got.SCFAnchor != "GOV-02" ||
+	if got.RequirementCode != "AC-01" || got.SCFAnchor != "GOV-04" ||
 		got.RelationshipType != "subset_of" || got.Strength != 1.0 {
 		t.Fatalf("mapping = %+v", got)
 	}
@@ -388,7 +388,7 @@ func writeWideSCFWorkbook(t *testing.T) string {
 	}
 	mustSetRows(t, f, "SCF 2026.2", [][]interface{}{
 		{"SCF Domain", "SCF Control", "SCF #", "Secure Controls Framework (SCF)\nControl Description", "Example\nStandard\n2026"},
-		{"Governance", "Program", "GOV-01", "short", "EX-1\nEX-2"},
+		{"Governance", "Program", "GOV-02", "short", "EX-1\nEX-2"},
 		{"Identity", "Access", "IAC-01", "short", "EX-2"},
 	})
 	path := filepath.Join(t.TempDir(), "scf-wide.xlsx")
@@ -411,7 +411,7 @@ func writePublishedLayoutSCFWorkbook(t *testing.T) string {
 			t.Fatalf("NewSheet %q: %v", name, err)
 		}
 	}
-	mustSetRows(t, f, "Change Overview", [][]interface{}{{"Change", "SCF #"}, {"Added", "GOV-01"}})
+	mustSetRows(t, f, "Change Overview", [][]interface{}{{"Change", "SCF #"}, {"Added", "GOV-02"}})
 	// STRM Errata sorts ahead of the control sheet and carries all four OLIR
 	// STRM headers; it must never be imported as the crosswalk.
 	mustSetRows(t, f, "STRM Errata", [][]interface{}{
@@ -428,7 +428,7 @@ func writePublishedLayoutSCFWorkbook(t *testing.T) string {
 	})
 	mustSetRows(t, f, "SCF 2026.3", [][]interface{}{
 		{"SCF Domain", "SCF Control", "SCF #", "Secure Controls Framework (SCF)\nControl Description", "Example\nStandard\n2026", "Other\nStandard"},
-		{"Governance", "Program", "GOV-01", "short", "EX-1\nEX-2", "OT-1"},
+		{"Governance", "Program", "GOV-02", "short", "EX-1\nEX-2", "OT-1"},
 		{"Identity", "Access", "IAC-01", "short", "EX-2", ""},
 	})
 	path := filepath.Join(t.TempDir(), "scf-published-layout.xlsx")
@@ -453,7 +453,7 @@ func writeOLIRWorkbook(t *testing.T, relationship, strength string) string {
 	}
 	mustSetRows(t, f, "NIST 800-53 R5.1.1", [][]interface{}{
 		{"Focal Document\nElement", "Focal Document Element Description", "Security Control\nBaseline", "Rationale", "Relationship", "Reference Document\nElement", "Reference Document\nElement Description\n(Optional)", "Comments\n(Optional)", "Strength of\nRelationship\n(Optional)"},
-		{"AC-01", "do not import prose", "Low", "Functional", relationship, "GOV-02", "do not import prose", "", strength},
+		{"AC-01", "do not import prose", "Low", "Functional", relationship, "GOV-04", "do not import prose", "", strength},
 	})
 	path := filepath.Join(t.TempDir(), "scf-olir.xlsx")
 	if err := f.SaveAs(path); err != nil {

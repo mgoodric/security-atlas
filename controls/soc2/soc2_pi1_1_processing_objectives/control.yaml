@@ -8,7 +8,7 @@ description: |
   objectives: what data it handles, what transformations it performs, what
   success and failure modes are, and what published SLAs apply.
 
-scf_anchor_id: GOV-01
+scf_anchor_id: GOV-02
 control_family: GOV
 implementation_type: manual_attested
 owner_role: product-engineering

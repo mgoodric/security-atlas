@@ -2,7 +2,7 @@ bundle_schema_version: "1"
 bundle_id: noquery_manual_test
 title: "Manual attestation (no declared evidence query)"
 description: "A control with no evidence query; state is the per-record rollup."
-scf_anchor_id: GOV-01
+scf_anchor_id: GOV-02
 implementation_type: manual_attested
 control_family: GOV
 owner_role: security-leadership

@@ -132,6 +132,9 @@ export type FixtureName =
   // #2118 — an open audit period and an auditor user of its own, with
   // no assignment, for period-auditors.spec.ts.
   | "period-auditors"
+  // #2085: a named user who owns an action plan, created an audit
+  // period and completed a personnel item, for person-names.spec.ts.
+  | "person-names"
   // #2136 — two framework versions, one with an activated scope and no
   // posture target (reset each run), one with no scope, for
   // posture-targets.spec.ts.

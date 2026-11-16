@@ -14,6 +14,7 @@ import { Markdown } from "@/components/markdown";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Person } from "@/components/ui/person";
 import {
   fetchActionPlan,
   type ActionPlanDetailResponse,
@@ -83,7 +84,16 @@ export default function ActionPlanDetailPage() {
       }
     >
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Owner" value={plan.owner_id} mono />
+        <div>
+          <dt className="text-xs text-muted-foreground">Owner</dt>
+          <dd className="text-sm">
+            <Person
+              id={plan.owner_id}
+              avatar
+              testId="action-plan-detail-owner"
+            />
+          </dd>
+        </div>
         <Field label="Created" value={dateLabel(plan.created_at)} />
         <Field label="Updated" value={dateLabel(plan.updated_at)} />
         <Field

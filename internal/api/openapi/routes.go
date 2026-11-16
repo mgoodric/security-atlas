@@ -153,6 +153,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/incidents", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "GET /v1/incidents"},
 	{Method: "GET", Path: "/v1/incidents/{id}", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "GET /v1/incidents/{id}"},
 	{Method: "GET", Path: "/v1/me/modules", Tag: "feature-flags", Tier: "bearer", Internal: false, Summary: "GET /v1/me/modules — the caller's effective optional modules (#2170)"},
+	{Method: "GET", Path: "/v1/people", Tag: "people", Tier: "bearer", Internal: false, Summary: "GET /v1/people — the caller's tenant's users and API keys, as names in place of IDs (#2085)"},
 	{Method: "GET", Path: "/v1/framework-scopes", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes"},
 	{Method: "GET", Path: "/v1/framework-scopes/applicability", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/applicability — applicability decisions in force at as_of"},
 	{Method: "GET", Path: "/v1/framework-scopes/applicability/export", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/applicability/export — export the Statement of Applicability as CSV or xlsx"},

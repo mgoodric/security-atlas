@@ -53,7 +53,7 @@ func newS3Cmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.bucket, "bucket", "", "S3 bucket [required]")
 	cmd.Flags().StringVar(&f.prefix, "prefix", "", "S3 key prefix [required]")
 	cmd.Flags().StringVar(&f.region, "region", "", "AWS region (optional; falls back to standard chain)")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-04", "control id to attach to each record")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-05", "control id to attach to each record")
 	cmd.Flags().StringArrayVar(&f.scope, "scope", nil, "scope tag in key=value form (repeatable, at least one required)")
 	return cmd
 }

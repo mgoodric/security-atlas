@@ -149,7 +149,7 @@ func TestSeed_NoopResolver_AllInsertedAllOrphan(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	policies := validStockPolicies(t, []string{"GOV-01", "GOV-04", "RSK-01"})
+	policies := validStockPolicies(t, []string{"GOV-02", "GOV-05", "RSK-01"})
 
 	report, err := seed.Seed(context.Background(), app, tenant, policies, seed.NoopAnchorResolver{})
 	if err != nil {
@@ -193,7 +193,7 @@ func TestSeed_NilResolver_FallsBackToNoop(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	policies := validStockPolicies(t, []string{"GOV-01"})
+	policies := validStockPolicies(t, []string{"GOV-02"})
 
 	report, err := seed.Seed(context.Background(), app, tenant, policies, nil)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestSeed_WrongCount_Errors(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
-	tooFew := validStockPolicies(t, []string{"GOV-01"})[:4]
+	tooFew := validStockPolicies(t, []string{"GOV-02"})[:4]
 	_, err := seed.Seed(context.Background(), app, tenant, tooFew, seed.NoopAnchorResolver{})
 	if err == nil {
 		t.Fatal("expected error for wrong policy count")
@@ -240,7 +240,7 @@ func TestSeed_InvalidTenantID(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	_ = freshTenant(t, admin) // ensure cleanup runs even though we use a synthetic uuid
-	policies := validStockPolicies(t, []string{"GOV-01"})
+	policies := validStockPolicies(t, []string{"GOV-02"})
 
 	// uuid.Nil is a valid UUID per the parser ("00000000-..."); to
 	// exercise the rejection branch we use uuid.UUID{} which is also
@@ -346,8 +346,8 @@ version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
 linked_control_ids:
-  - GOV-01
-  - GOV-04
+  - GOV-02
+  - GOV-05
   - RSK-01
 acknowledgment_required_roles:
   - employee
