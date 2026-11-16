@@ -322,3 +322,21 @@ WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = sqlc.arg('id')
   AND status = 'draft'
 RETURNING *;
+
+-- name: UpdateDraftPolicy :one
+-- #2116 — edit a draft in place. Only a row still in 'draft' matches, so a
+-- submitted, approved, published or superseded policy is never rewritten
+-- here: a published policy changes through a new version (predecessor_id).
+-- version, predecessor_id and source_attribution are not editable.
+UPDATE policies
+SET title = sqlc.arg('title'),
+    body_md = sqlc.arg('body_md'),
+    owner_role = sqlc.arg('owner_role'),
+    approver_role = sqlc.arg('approver_role'),
+    linked_control_ids = sqlc.arg('linked_control_ids'),
+    acknowledgment_required_roles = sqlc.arg('acknowledgment_required_roles'),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND status = 'draft'
+RETURNING *;

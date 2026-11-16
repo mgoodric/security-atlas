@@ -236,6 +236,7 @@ PATCH /v1/me/notifications/{id}/read 9
 PATCH /v1/me/preferences 9
 PATCH /v1/org_units/{id} 9
 PATCH /v1/oscal/component-claims/{id}/scf-anchor 9
+PATCH /v1/policies/{id} 9
 PATCH /v1/policies/{id}/approve 9
 PATCH /v1/policies/{id}/review-date 9
 PATCH /v1/policies/{id}/submit 9
