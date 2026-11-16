@@ -64,3 +64,73 @@ func TestPayloadGate_Unit(t *testing.T) {
 		})
 	}
 }
+
+// kindSourcePath is a route that reads each kind's subject. The mapped
+// resource type must be the one the authz middleware derives from it, so
+// the gate decides exactly what the source route would.
+var kindSourcePath = map[unifiedlog.Kind]string{
+	unifiedlog.KindDecision:        "/v1/admin/audit-log",
+	unifiedlog.KindEvidence:        "/v1/evidence",
+	unifiedlog.KindException:       "/v1/exceptions",
+	unifiedlog.KindSample:          "/v1/audit-periods/00000000-0000-0000-0000-000000000001/samples",
+	unifiedlog.KindAuditPeriod:     "/v1/audit-periods",
+	unifiedlog.KindAggregationRule: "/v1/aggregation-rules",
+	unifiedlog.KindFeatureFlag:     "/v1/admin/features",
+	unifiedlog.KindWalkthrough:     "/v1/walkthroughs",
+	unifiedlog.KindFrameworkScope:  "/v1/framework-scopes",
+	unifiedlog.KindTaxonomy:        "/v1/risks/categories",
+	unifiedlog.KindMappingOverlay:  "/v1/mapping-overlays",
+	unifiedlog.KindControlImport:   "/v1/controls",
+}
+
+type grcRoles struct{}
+
+func (grcRoles) RolesFor(context.Context, string, string) ([]authz.Role, error) {
+	return []authz.Role{authz.RoleGRCEngineer}, nil
+}
+
+// TestKindSourceResource_CoversEveryKind fails when a kind is added to
+// unifiedlog.AllKinds without a source resource (#2375 review B1): an
+// unmapped kind would show every non-admin reader a null payload. me rows
+// are judged by owner, not by a resource. Each mapped type must be the one
+// its source route resolves to, and one the policy knows (grc_engineer,
+// which reads every tenant resource, is allowed it).
+func TestKindSourceResource_CoversEveryKind(t *testing.T) {
+	t.Parallel()
+	engine, err := authz.NewEngine(context.Background(), grcRoles{})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	for _, kind := range unifiedlog.AllKinds {
+		if kind == unifiedlog.KindMe {
+			continue
+		}
+		resource, ok := kindSourceResource[kind]
+		if !ok {
+			t.Errorf("kind %q has no kindSourceResource entry; map it to its source route's OPA resource type", kind)
+			continue
+		}
+		path, ok := kindSourcePath[kind]
+		if !ok {
+			t.Errorf("kind %q has no kindSourcePath entry in this test", kind)
+			continue
+		}
+		r := httptest.NewRequest("GET", path, nil)
+		r = r.WithContext(authctx.WithCredential(r.Context(), credstore.Credential{
+			ID: "k", TenantID: "11111111-1111-1111-1111-111111111111", UserID: "22222222-2222-2222-2222-222222222222",
+		}))
+		in := authz.BuildInput(r, nil)
+		if in.Resource.Type != resource {
+			t.Errorf("kind %q: mapped to %q but its source route %s resolves to %q", kind, resource, path, in.Resource.Type)
+		}
+		d, err := engine.Decide(r.Context(), in)
+		if err != nil || !d.Allow {
+			t.Errorf("kind %q: grc_engineer read of %q denied (%v, %s)", kind, resource, err, d.Reason)
+		}
+	}
+	for kind := range kindSourceResource {
+		if !unifiedlog.IsCanonical(kind) || kind == unifiedlog.KindMe {
+			t.Errorf("kindSourceResource maps %q, which is not a gated unified-log kind", kind)
+		}
+	}
+}

@@ -41,8 +41,9 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 }
 
 // payloadGate decides, per row, whether the caller sees payload_json. It
-// evaluates the caller's OPA read once per source resource and caches it,
-// so a page costs at most one decision per distinct resource.
+// evaluates the caller's OPA read once per source resource when it is
+// built, before the handler opens its transaction, so the engine's role
+// lookup never runs while the transaction holds a connection.
 type payloadGate struct {
 	r       *http.Request
 	engine  *authz.Engine
@@ -61,6 +62,14 @@ func (h *Handler) newPayloadGate(r *http.Request, self string) *payloadGate {
 	g := &payloadGate{r: r, engine: h.engine, self: jwtmw.SubjectUserID(self), allowed: map[string]bool{}}
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	g.admin = cred.IsAdmin || g.decide("write", "admin")
+	if g.admin {
+		return g
+	}
+	for _, resource := range kindSourceResource {
+		if _, seen := g.allowed[resource]; !seen {
+			g.allowed[resource] = g.decide("read", resource)
+		}
+	}
 	return g
 }
 
@@ -78,12 +87,7 @@ func (g *payloadGate) keep(e unifiedlog.Entry) bool {
 	if !ok {
 		return false
 	}
-	allow, seen := g.allowed[resource]
-	if !seen {
-		allow = g.decide("read", resource)
-		g.allowed[resource] = allow
-	}
-	return allow
+	return g.allowed[resource]
 }
 
 // apply nulls the payload of every entry the caller may not see.
