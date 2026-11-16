@@ -117,4 +117,35 @@ describe("risk history format (#2104)", () => {
     );
     expect(changes).toEqual([]);
   });
+
+  test("a close and a reopen read their status and closure (#2107)", () => {
+    expect(historyActionLabel("closed")).toBe("Closed");
+    expect(historyActionLabel("reopened")).toBe("Reopened");
+    expect(
+      historyChanges({
+        id: "e1",
+        actor: "u1",
+        action: "closed",
+        before: { status: "open" },
+        after: {
+          status: "closed",
+          closure_reason: "merged",
+          closure_note: "Covered by the vendor risk.",
+        },
+        created_at: "2026-11-15T00:00:00Z",
+      }),
+    ).toEqual([
+      { field: "Status", before: "Open", after: "Closed" },
+      {
+        field: "Closure reason",
+        before: "none",
+        after: "Merged into another risk",
+      },
+      {
+        field: "Closure note",
+        before: "none",
+        after: "Covered by the vendor risk.",
+      },
+    ]);
+  });
 });

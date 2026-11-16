@@ -168,7 +168,7 @@ func (s *ResidualSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	controlID, err := uuid.Parse(rec.ControlId)
 	if err != nil {
 		// control_id is a free-form string in the SDK (may be an SCF anchor
-		// like "scf:VPM-04"). When it is not a UUID there is no control row
+		// like "scf:VPM-06"). When it is not a UUID there is no control row
 		// to resolve linked risks for. Ack and move on.
 		s.logger.Debug("residual subscriber: control_id not a uuid; skipping", "control_ref", rec.ControlId)
 		_ = msg.Ack()

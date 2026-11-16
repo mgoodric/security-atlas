@@ -145,7 +145,7 @@ Both wrap the same internal `IngestEvidence` call. The REST endpoint is the publ
   "idempotency_key": "ci-run-2026-05-10-abc123-step-sast", // required, dedups within a window
   "evidence_kind": "sast.scan_result.v1", // required, must be registered in the schema registry
   "schema_version": "1.0.0", // required, validated against registry
-  "control_id": "scf:VPM-04", // required — control or SCF anchor
+  "control_id": "scf:VPM-06", // required — control or SCF anchor
   "scope": {
     // required — at least one dimension
     "environment": "prod",
@@ -306,7 +306,7 @@ Friction kills adoption. The reference CLI ships with the platform:
 # One-shot push from a CI step
 security-atlas evidence push \
   --kind sast.scan_result.v1 \
-  --control scf:VPM-04 \
+  --control scf:VPM-06 \
   --scope environment=prod,cloud_account=aws:111122223333 \
   --observed-at "$(date -u +%FT%TZ)" \
   --result pass \

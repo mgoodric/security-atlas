@@ -92,8 +92,14 @@ SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || sqlc.arg(tena
 -- A risk with no row here is not a roll-up. The register leaves roll-ups
 -- out of its rows and counts by default, so a parent never reads as a
 -- duplicate of the children it summarises.
-SELECT parent_risk_id, COUNT(*)::int AS child_count
-FROM risk_aggregations
-WHERE tenant_id = $1
-GROUP BY parent_risk_id
-ORDER BY parent_risk_id ASC;
+--
+-- Only open children count (#2107): the register leaves closed risks out,
+-- so a parent whose children are all closed summarises nothing the
+-- register shows. It is not a roll-up, and it stays listed.
+SELECT ra.parent_risk_id, COUNT(*)::int AS child_count
+FROM risk_aggregations ra
+JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+WHERE ra.tenant_id = $1
+  AND c.status = 'open'
+GROUP BY ra.parent_risk_id
+ORDER BY ra.parent_risk_id ASC;

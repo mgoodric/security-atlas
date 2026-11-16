@@ -7,6 +7,8 @@ package risks
 //	PATCH /v1/risks/{id}/acceptance/approve {accepted_until}
 //	PATCH /v1/risks/{id}/acceptance/reject  {reason?}
 //	PATCH /v1/risks/{id}/acceptance/revoke  {reason}
+//	PATCH /v1/risks/{id}/close              {reason, note?}  (#2107)
+//	PATCH /v1/risks/{id}/reopen             {}               (#2107)
 //
 // Each returns {"risk": ...}. The state machine and the approval rule live
 // in internal/risk/transitions.go; these handlers decode, gate approve,
@@ -79,6 +81,25 @@ type endAcceptanceReq struct {
 	Reason string `json:"reason"`
 }
 
+type closeReq struct {
+	Reason string `json:"reason"`
+	Note   string `json:"note"`
+}
+
+type reopenReq struct{}
+
+// closureWire is a closed risk's closure (#2107).
+type closureWire struct {
+	Reason   string     `json:"reason"`
+	Note     string     `json:"note,omitempty"`
+	ClosedAt *time.Time `json:"closed_at,omitempty"`
+	ClosedBy string     `json:"closed_by"`
+}
+
+func closureWireFrom(c risk.Closure) *closureWire {
+	return &closureWire{Reason: string(c.Reason), Note: c.Note, ClosedAt: c.At, ClosedBy: c.By}
+}
+
 // ChangeTreatment handles PATCH /v1/risks/{id}/treatment.
 func (h *Handler) ChangeTreatment(w http.ResponseWriter, r *http.Request) {
 	var req changeTreatmentReq
@@ -148,6 +169,28 @@ func (h *Handler) RevokeAcceptance(w http.ResponseWriter, r *http.Request) {
 		return h.store.RevokeAcceptance(ctx.r.Context(), ctx.id, risk.EndAcceptanceInput{
 			Reason: req.Reason,
 			Actor:  credstore.PrincipalOf(ctx.cred),
+		})
+	})
+}
+
+// CloseRisk handles PATCH /v1/risks/{id}/close (#2107).
+func (h *Handler) CloseRisk(w http.ResponseWriter, r *http.Request) {
+	var req closeReq
+	h.runTransition(w, r, &req, false, func(ctx transitionCtx) (risk.Risk, error) {
+		return h.store.Close(ctx.r.Context(), ctx.id, risk.CloseInput{
+			Reason: dbx.RiskClosureReason(strings.TrimSpace(req.Reason)),
+			Note:   req.Note,
+			Actor:  credstore.PrincipalOf(ctx.cred),
+		})
+	})
+}
+
+// ReopenRisk handles PATCH /v1/risks/{id}/reopen (#2107).
+func (h *Handler) ReopenRisk(w http.ResponseWriter, r *http.Request) {
+	var req reopenReq
+	h.runTransition(w, r, &req, false, func(ctx transitionCtx) (risk.Risk, error) {
+		return h.store.Reopen(ctx.r.Context(), ctx.id, risk.ReopenInput{
+			Actor: credstore.PrincipalOf(ctx.cred),
 		})
 	})
 }

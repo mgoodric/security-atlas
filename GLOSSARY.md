@@ -97,6 +97,19 @@ A risk with an acceptance proposed or approved changes treatment only by rejecti
 
 **Open exposure** — a risk counts as open unless it is an `approved` acceptance. `untreated` risks and `proposed` acceptances stay open (`risk.IsOpenTreatment`, the `open_risk_financial_exposure` metric). `untreated` is never grouped with `avoid`.
 
+## Risk lifecycle (#2107)
+
+A risk is **open** or **closed** (`risks.status`, the `risk_status` enum, default `open`). Treatment says how an open risk is handled; status says whether the risk is still live at all.
+
+| Transition | From     | To       | Who and what                                                                                                                                                                                          |
+| ---------- | -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Close      | `open`   | `closed` | A risk writer, with a **closure reason** (`not_applicable`: it no longer applies; `merged`: another risk now covers it; `realised_and_handled`: it happened and was dealt with) and an optional note. |
+| Reopen     | `closed` | `open`   | A risk writer. The closure is cleared; the audit row keeps it. A closed risk takes no treatment or acceptance transition (409) until it is reopened.                                                  |
+
+Both are written to the risk audit log (`closed`, `reopened`). A closed risk keeps its record, links and history, and is still readable at `GET /v1/risks/{id}`. It is left out of the register list and its count (unless `?include_closed=true`, the register's **Show closed**), the heatmaps and org-unit rollups, the dashboard's and board pack's top risks, the review calendar, and aggregation-rule candidates: closing a child takes it out of its meta-risk at the next evaluation, which the close itself runs. The board brief keeps a risk closed after the brief's date, because it was open then. A parent counts as a roll-up only while it has an open child: once its children are all closed, the parent is listed and ranked itself. The export carries every risk with its `status` and `closure_reason`.
+
+**Hard delete** (`DELETE /v1/risks/{id}`) is admin-only, at the handler and in the OPA policy. It is for a record that should never have existed; closing is how anyone else retires a risk. The delete writes a `deleted` row to the risk audit log, which has no foreign key to `risks` and refuses DELETE, so the row outlives the risk.
+
 ## Risk hierarchy links (#1748)
 
 Risks roll up through the `risk_aggregations` join table (parent → child, many-to-many). A risk can have several parents and several children.

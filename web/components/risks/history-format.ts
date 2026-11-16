@@ -33,6 +33,12 @@ const FIELD_LABELS: Record<string, string> = {
   accepter: "Approved by",
   self_approved: "Self-approved",
   reason: "Reason",
+  // #2107: the open/closed lifecycle.
+  status: "Status",
+  closure_reason: "Closure reason",
+  closure_note: "Closure note",
+  closed_by: "Closed by",
+  closed_at: "Closed at",
 };
 
 // Keys an entry carries that are not a change a reader needs to see.
@@ -56,6 +62,10 @@ export function historyActionLabel(action: string): string {
       return "Acceptance rejected";
     case "acceptance_revoked":
       return "Acceptance revoked";
+    case "closed":
+      return "Closed";
+    case "reopened":
+      return "Reopened";
     default:
       return action;
   }
@@ -79,6 +89,12 @@ export function formatHistoryValue(field: string, v: unknown): string {
   }
   if (field === "acceptance_status" && typeof v === "string") {
     return enumLabel("RiskAcceptanceStatus", v);
+  }
+  if (field === "status" && typeof v === "string") {
+    return enumLabel("RiskStatus", v);
+  }
+  if (field === "closure_reason" && typeof v === "string") {
+    return enumLabel("RiskClosureReason", v);
   }
   // Only a self-approval is worth a line; false reads as no change.
   if (field === "self_approved") return v === true ? "yes" : "none";

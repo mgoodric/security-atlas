@@ -113,7 +113,7 @@ func TestRiskDelete_TakesRuleLocksBeforeRow_1867(t *testing.T) {
 	}
 
 	deleted := make(chan error, 1)
-	go func() { deleted <- risks.Delete(ctx, r4) }()
+	go func() { deleted <- risks.Delete(ctx, r4, "test-actor") }()
 	waitBlockedBy(t, admin, pidA)
 
 	// A evaluates while the delete waits: it links r4 as a child.
@@ -341,7 +341,7 @@ func TestRiskWrite_RetriesWhenThemesChangeBeforeRowLock_1880(t *testing.T) {
 	t.Run("Delete", func(t *testing.T) {
 		r := seedRisk(t, admin, tenant, "delete", 2, 2, []string{"ownership"}, &team1, now)
 		h := &themeRacingHook{race: addMonitoring(r)}
-		if err := wired(h).Delete(ctx, r); err != nil {
+		if err := wired(h).Delete(ctx, r, "test-actor"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 		if len(h.calls) != 2 || !contains(h.calls[1], "monitoring") {

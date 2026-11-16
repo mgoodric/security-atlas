@@ -219,7 +219,7 @@ func recordFor(t *testing.T, kind string, idem string, payload map[string]any) *
 		IdempotencyKey: idem,
 		EvidenceKind:   kind,
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:VPM-04",
+		ControlId:      "scf:VPM-06",
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "environment", Values: []string{"prod"}},
 		},
@@ -516,7 +516,7 @@ func TestReceiptStatusHTTP_ReportsTerminalConsumerRejection(t *testing.T) {
 		"idempotency_key": idem,
 		"evidence_kind":   "does.not.exist.v1",
 		"schema_version":  "1.0.0",
-		"control_id":      "scf:VPM-04",
+		"control_id":      "scf:VPM-06",
 		"scope": []map[string]any{
 			{"key": "environment", "values": []string{"prod"}},
 		},
