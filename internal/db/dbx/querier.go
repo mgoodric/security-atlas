@@ -1141,7 +1141,8 @@ type Querier interface {
 	// methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30
 	// and qualitative_5x5 both use this shape (canvas §2.2 + AC-7); other
 	// methodologies (FAIR has LEF/LM) are intentionally excluded so the
-	// heatmap stays a single coherent visualization.
+	// heatmap stays a single coherent visualization. Closed risks are left
+	// out (#2107): the heatmap counts live exposure.
 	//
 	// The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 	// read jsonb-number values directly as int4 without an explicit cast.
@@ -1984,6 +1985,8 @@ type Querier interface {
 	// Hits idx_risks_tenant_created_themes for the (tenant_id, created_at)
 	// range scan, then the GIN-backed theme containment narrows the slice.
 	// The methodology filter mirrors slice 053's IsAggregableMethodology.
+	// Closed risks are not candidates (#2107): a closed child stops counting
+	// toward the thresholds and the severity at the next evaluation.
 	//
 	// target_theme is a SCALAR text parameter — the explicit `::text` cast on
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
@@ -2765,6 +2768,9 @@ type Querier interface {
 	// are already ranked here, so counting it too would show the same exposure
 	// twice. A risk is a roll-up when it had at least one child linked as of the
 	// brief's date.
+	//
+	// Closed risks are left out (#2107), unless they were closed after the
+	// brief's date: as of that date they were still open.
 	ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error)
 	// AC-3: risks linked to one control via slice 020's risk_control_links.
 	// One join from the link table to risks; the per-link design_score is the
@@ -3390,6 +3396,9 @@ type Querier interface {
 	// risks, not malformed 5×5 risks, so they are deliberately excluded from
 	// the severity rollups and surfaced through FairExposureByOrgUnit instead.
 	// This keeps the hierarchy from silently mixing dollars into a 1..25 scalar.
+	//
+	// Every rollup here counts open risks only (#2107): a closed risk is no
+	// longer exposure.
 	// AC-1: per-org-unit risk count broken down by severity scalar. ONE
 	// GROUP BY query for the whole tenant — joined to the org-unit tree in Go,
 	// never one query per node (anti-criterion: no N+1).
@@ -3458,6 +3467,10 @@ type Querier interface {
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
 	SetRiskCategoryArchived(ctx context.Context, arg SetRiskCategoryArchivedParams) (OrgRiskCategory, error)
 	SetRiskCategoryDefault(ctx context.Context, arg SetRiskCategoryDefaultParams) (OrgRiskCategory, error)
+	// #2107: the lifecycle columns, written only by the close and reopen
+	// transitions (internal/risk/lifecycle.go), which check the current state
+	// and audit-log the change in the same transaction.
+	SetRiskStatus(ctx context.Context, arg SetRiskStatusParams) (Risk, error)
 	// #2105: the treatment and acceptance columns, written only by the risk
 	// treatment and acceptance transitions (internal/risk/transitions.go),
 	// which validate the state machine and audit-log the change in the same

@@ -20,6 +20,21 @@ allow if {
     has_role("grc_engineer")
     grc_writable_resources[input.resource.type]
     grc_actions[input.action]
+    not risk_hard_delete
+}
+
+# #2107: hard-deleting a risk (DELETE /v1/risks/{id}) is admin-only.
+# grc_engineer closes a risk instead (PATCH /v1/risks/{id}/close). Deletes
+# under a risk (/children/{id}, /themes/{theme}) and of risk categories
+# have more path segments and stay grc_engineer's.
+risk_hard_delete if {
+    input.request.method == "DELETE"
+    parts := split(input.request.path, "/")
+    count(parts) == 4
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "risks"
+    parts[3] != ""
 }
 
 grc_writable_resources := {

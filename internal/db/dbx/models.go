@@ -800,6 +800,57 @@ func AllRiskAcceptanceStatusValues() []RiskAcceptanceStatus {
 	}
 }
 
+type RiskClosureReason string
+
+const (
+	RiskClosureReasonNotApplicable      RiskClosureReason = "not_applicable"
+	RiskClosureReasonMerged             RiskClosureReason = "merged"
+	RiskClosureReasonRealisedAndHandled RiskClosureReason = "realised_and_handled"
+)
+
+func (e *RiskClosureReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskClosureReason(s)
+	case string:
+		*e = RiskClosureReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskClosureReason: %T", src)
+	}
+	return nil
+}
+
+type NullRiskClosureReason struct {
+	RiskClosureReason RiskClosureReason `json:"risk_closure_reason"`
+	Valid             bool              `json:"valid"` // Valid is true if RiskClosureReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskClosureReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskClosureReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskClosureReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskClosureReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskClosureReason), nil
+}
+
+func AllRiskClosureReasonValues() []RiskClosureReason {
+	return []RiskClosureReason{
+		RiskClosureReasonNotApplicable,
+		RiskClosureReasonMerged,
+		RiskClosureReasonRealisedAndHandled,
+	}
+}
+
 type RiskLevel string
 
 const (
@@ -903,6 +954,55 @@ func AllRiskMethodologyValues() []RiskMethodology {
 		RiskMethodologyCisRam,
 		RiskMethodologyIso27005,
 		RiskMethodologyQualitative5x5,
+	}
+}
+
+type RiskStatus string
+
+const (
+	RiskStatusOpen   RiskStatus = "open"
+	RiskStatusClosed RiskStatus = "closed"
+)
+
+func (e *RiskStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskStatus(s)
+	case string:
+		*e = RiskStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskStatus: %T", src)
+	}
+	return nil
+}
+
+type NullRiskStatus struct {
+	RiskStatus RiskStatus `json:"risk_status"`
+	Valid      bool       `json:"valid"` // Valid is true if RiskStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskStatus), nil
+}
+
+func AllRiskStatusValues() []RiskStatus {
+	return []RiskStatus{
+		RiskStatusOpen,
+		RiskStatusClosed,
 	}
 }
 
@@ -3016,6 +3116,11 @@ type Risk struct {
 	AcceptanceProposedAt    pgtype.Timestamptz    `json:"acceptance_proposed_at"`
 	AcceptanceApprovedAt    pgtype.Timestamptz    `json:"acceptance_approved_at"`
 	SelfApproved            bool                  `json:"self_approved"`
+	Status                  RiskStatus            `json:"status"`
+	ClosureReason           *RiskClosureReason    `json:"closure_reason"`
+	ClosureNote             string                `json:"closure_note"`
+	ClosedAt                pgtype.Timestamptz    `json:"closed_at"`
+	ClosedBy                string                `json:"closed_by"`
 }
 
 type RiskAggregation struct {

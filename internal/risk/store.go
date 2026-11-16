@@ -190,6 +190,9 @@ type Risk struct {
 	// Acceptance is the record of a proposed or approved acceptance
 	// (#2105). It is empty unless Treatment is accept.
 	Acceptance Acceptance
+	// Status is open or closed (#2107); Closure is empty unless closed.
+	Status  dbx.RiskStatus
+	Closure Closure
 }
 
 // Acceptance is what proposing and approving an acceptance record (#2105).
@@ -433,6 +436,10 @@ type ListFilter struct {
 	// linked) in the result (#2060). Left false, List drops them so a
 	// parent is never counted beside the children it summarises.
 	IncludeRollUps bool
+	// IncludeClosed keeps closed risks in the result (#2107). Left false,
+	// List returns open risks only, so the register and its count show
+	// live risks.
+	IncludeClosed bool
 }
 
 // List returns all risks for the active tenant, optionally filtered and
@@ -473,6 +480,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 		for _, r := range rows {
 			n := childCount[uuid.UUID(r.ID.Bytes)]
 			if n > 0 && !filter.IncludeRollUps {
+				continue
+			}
+			if r.Status == dbx.RiskStatusClosed && !filter.IncludeClosed {
 				continue
 			}
 			if filter.Treatment != "" && r.Treatment != filter.Treatment {
@@ -605,8 +615,13 @@ func (s *Store) Heatmap(ctx context.Context) ([]HeatmapCell, error) {
 	return out, err
 }
 
-// Delete removes a risk by id. ErrNotFound if no row was matched.
-func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
+// Delete removes a risk by id and writes a deleted row to its audit trail,
+// naming actor. ErrNotFound if no row was matched. Only an admin reaches
+// it over HTTP (#2107); closing is how anyone else retires a risk.
+func (s *Store) Delete(ctx context.Context, id uuid.UUID, actor string) error {
+	if actor == "" {
+		return fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
 	return s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		// Check existence first so we can return ErrNotFound rather than a
 		// silent success on a missing row.
@@ -649,6 +664,12 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 			ID:       pgUUID(id),
 		}); err != nil {
 			return fmt.Errorf("delete risk: %w", err)
+		}
+		// The trail outlives the risk (#2107): risk_audit_log has no
+		// foreign key to risks and refuses DELETE, so this row stays.
+		if err := insertRiskAudit(ctx, q, tenantID, id, actor, ActionDeleted,
+			deletedState(riskFromRow(row)), map[string]any{}); err != nil {
+			return err
 		}
 		// Re-evaluate the rules that targeted the deleted risk's themes, so
 		// a meta-risk it fed drops it from its score (#1861). Deleting a
@@ -861,6 +882,8 @@ func riskFromRow(r dbx.Risk) Risk {
 	}
 	risk.Themes = append([]string(nil), r.Themes...)
 	risk.Acceptance = acceptanceFromRow(r)
+	risk.Status = r.Status
+	risk.Closure = closureFromRow(r)
 	return risk
 }
 

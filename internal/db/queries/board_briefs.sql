@@ -58,9 +58,13 @@ ORDER BY slug;
 -- are already ranked here, so counting it too would show the same exposure
 -- twice. A risk is a roll-up when it had at least one child linked as of the
 -- brief's date.
+--
+-- Closed risks are left out (#2107), unless they were closed after the
+-- brief's date: as of that date they were still open.
 SELECT r.* FROM risks r
 WHERE r.tenant_id = $1
   AND r.created_at <= $2
+  AND (r.status = 'open' OR r.closed_at > $2)
   AND NOT EXISTS (
     SELECT 1 FROM risk_aggregations ra
     WHERE ra.tenant_id = r.tenant_id

@@ -32,6 +32,7 @@ SELECT
     )::numeric AS annualized_loss_exposure
 FROM risks
 WHERE tenant_id = $1
+  AND status = 'open'
   AND org_unit_id IS NOT NULL
   AND methodology = 'fair'
 GROUP BY org_unit_id
@@ -84,6 +85,7 @@ SELECT
     COUNT(*)::int AS risk_count
 FROM risks
 WHERE tenant_id = $1
+  AND status = 'open'
   AND org_unit_id IS NOT NULL
   AND methodology IN ('nist_800_30', 'qualitative_5x5')
 GROUP BY org_unit_id, severity
@@ -117,6 +119,9 @@ type RiskCountsByOrgUnitRow struct {
 // risks, not malformed 5×5 risks, so they are deliberately excluded from
 // the severity rollups and surfaced through FairExposureByOrgUnit instead.
 // This keeps the hierarchy from silently mixing dollars into a 1..25 scalar.
+//
+// Every rollup here counts open risks only (#2107): a closed risk is no
+// longer exposure.
 // AC-1: per-org-unit risk count broken down by severity scalar. ONE
 // GROUP BY query for the whole tenant — joined to the org-unit tree in Go,
 // never one query per node (anti-criterion: no N+1).
@@ -166,6 +171,7 @@ JOIN org_themes t
     ON t.theme_name = theme_slug
    AND (t.tenant_id IS NULL OR t.tenant_id = $1)
 WHERE r.tenant_id = $1
+  AND r.status = 'open'
   AND r.org_unit_id IS NOT NULL
   AND r.methodology IN ('nist_800_30', 'qualitative_5x5')
 GROUP BY t.theme_name, theme_builtin, r.org_unit_id

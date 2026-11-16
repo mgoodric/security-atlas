@@ -5436,7 +5436,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks:
     get:
-      summary: GET /v1/risks — the register; ?category= takes one or more category slugs or ids (repeated or comma-separated, archived included), an unknown one is a 400 naming the valid slugs; each risk carries category (slug), category_id and category_name; roll-ups (risks with at least one child linked) are left out unless ?include_rollups=true, and an included roll-up carries child_count
+      summary: GET /v1/risks — the register; ?category= takes one or more category slugs or ids (repeated or comma-separated, archived included), an unknown one is a 400 naming the valid slugs; each risk carries category (slug), category_id and category_name; roll-ups (risks with at least one child linked) are left out unless ?include_rollups=true, and an included roll-up carries child_count; closed risks are left out of the list and count unless ?include_closed=true; each risk carries status (open | closed) and, when closed, closure {reason, note, closed_at, closed_by}
       tags: [risks]
       operationId: get-v1-risks
       security:
@@ -5659,7 +5659,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/{id}:
     delete:
-      summary: DELETE /v1/risks/{id}
+      summary: DELETE /v1/risks/{id} — hard-delete a risk; admin only (403 otherwise; close it instead); a deleted row stays in the risk audit trail
       tags: [risks]
       operationId: delete-v1-risks-id
       security:
@@ -5919,6 +5919,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/close:
+    patch:
+      summary: PATCH /v1/risks/{id}/close — close an open risk; body {reason (not_applicable | merged | realised_and_handled, required), note?}; a closed risk leaves the register, its counts, the heatmaps and the top risks; 409 unless open; audit-logged
+      tags: [risks]
+      operationId: patch-v1-risks-id-close
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/controls:
     post:
       summary: POST /v1/risks/{id}/controls
@@ -5944,6 +5964,26 @@ paths:
       summary: GET /v1/risks/{id}/parents — the parent risks this risk rolls up to
       tags: [risks]
       operationId: get-v1-risks-id-parents
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/reopen:
+    patch:
+      summary: PATCH /v1/risks/{id}/reopen — reopen a closed risk, clearing its closure; 409 unless closed; audit-logged
+      tags: [risks]
+      operationId: patch-v1-risks-id-reopen
       security:
         - bearer: []
       parameters:

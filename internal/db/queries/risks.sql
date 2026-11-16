@@ -207,7 +207,8 @@ RETURNING *;
 -- methodology shares the 5x5 (likelihood, impact 1..5) shape. nist_800_30
 -- and qualitative_5x5 both use this shape (canvas §2.2 + AC-7); other
 -- methodologies (FAIR has LEF/LM) are intentionally excluded so the
--- heatmap stays a single coherent visualization.
+-- heatmap stays a single coherent visualization. Closed risks are left
+-- out (#2107): the heatmap counts live exposure.
 --
 -- The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 -- read jsonb-number values directly as int4 without an explicit cast.
@@ -217,6 +218,7 @@ SELECT
     COUNT(*)::int                         AS count
 FROM risks
 WHERE tenant_id = $1
+  AND status = 'open'
   AND methodology IN ('nist_800_30', 'qualitative_5x5')
   AND jsonb_typeof(inherent_score->'likelihood') = 'number'
   AND jsonb_typeof(inherent_score->'impact')     = 'number'
@@ -299,3 +301,17 @@ JOIN action_plans ap
   ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
 WHERE apr.tenant_id = $1 AND apr.risk_id = $2
   AND ap.tombstoned_at IS NULL;
+
+-- name: SetRiskStatus :one
+-- #2107: the lifecycle columns, written only by the close and reopen
+-- transitions (internal/risk/lifecycle.go), which check the current state
+-- and audit-log the change in the same transaction.
+UPDATE risks
+SET status = sqlc.arg(status),
+    closure_reason = sqlc.narg(closure_reason),
+    closure_note = sqlc.arg(closure_note),
+    closed_at = sqlc.narg(closed_at),
+    closed_by = sqlc.arg(closed_by),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
+RETURNING *;

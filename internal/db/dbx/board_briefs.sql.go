@@ -227,9 +227,10 @@ func (q *Queries) ListFrameworksForTenant(ctx context.Context, tenantID pgtype.U
 }
 
 const listRisksForBoardBrief = `-- name: ListRisksForBoardBrief :many
-SELECT r.id, r.tenant_id, r.title, r.description, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id, r.acceptance_justification, r.acceptance_proposed_until, r.acceptance_proposed_by, r.acceptance_proposed_at, r.acceptance_approved_at, r.self_approved FROM risks r
+SELECT r.id, r.tenant_id, r.title, r.description, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id, r.acceptance_justification, r.acceptance_proposed_until, r.acceptance_proposed_by, r.acceptance_proposed_at, r.acceptance_approved_at, r.self_approved, r.status, r.closure_reason, r.closure_note, r.closed_at, r.closed_by FROM risks r
 WHERE r.tenant_id = $1
   AND r.created_at <= $2
+  AND (r.status = 'open' OR r.closed_at > $2)
   AND NOT EXISTS (
     SELECT 1 FROM risk_aggregations ra
     WHERE ra.tenant_id = r.tenant_id
@@ -260,6 +261,9 @@ type ListRisksForBoardBriefParams struct {
 // are already ranked here, so counting it too would show the same exposure
 // twice. A risk is a roll-up when it had at least one child linked as of the
 // brief's date.
+//
+// Closed risks are left out (#2107), unless they were closed after the
+// brief's date: as of that date they were still open.
 func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error) {
 	rows, err := q.db.Query(ctx, listRisksForBoardBrief, arg.TenantID, arg.CreatedAt)
 	if err != nil {
@@ -296,6 +300,11 @@ func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBo
 			&i.AcceptanceProposedAt,
 			&i.AcceptanceApprovedAt,
 			&i.SelfApproved,
+			&i.Status,
+			&i.ClosureReason,
+			&i.ClosureNote,
+			&i.ClosedAt,
+			&i.ClosedBy,
 		); err != nil {
 			return nil, err
 		}
