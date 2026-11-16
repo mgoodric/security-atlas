@@ -2455,6 +2455,30 @@ type Framework struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type FrameworkPostureTarget struct {
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	TargetValue        pgtype.Numeric     `json:"target_value"`
+	WarningThreshold   pgtype.Numeric     `json:"warning_threshold"`
+	CriticalThreshold  pgtype.Numeric     `json:"critical_threshold"`
+	Direction          string             `json:"direction"`
+	UpdatedBy          string             `json:"updated_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type FrameworkPostureTargetAuditLog struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	Action             string             `json:"action"`
+	Before             []byte             `json:"before"`
+	After              []byte             `json:"after"`
+	Actor              string             `json:"actor"`
+	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule      string             `json:"subject_module"`
+}
+
 type FrameworkRequirement struct {
 	ID                 pgtype.UUID        `json:"id"`
 	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`

@@ -237,6 +237,7 @@ export const ENUM_LABELS = {
     mapping_overlay: "Mapping overlay",
     control_import: "Control import",
     risk: "Risk",
+    posture_target: "Posture target",
   },
   // Checklist item kinds are CHECK-constrained text, not a Postgres enum,
   // so models.go cannot see them and the coverage test does not check them.

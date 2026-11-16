@@ -2,6 +2,7 @@
 // extracted from the former `web/lib/api.ts` god-file.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import type { PostureTarget } from "./posture-targets";
 import {
   type CalendarResponse,
   fetchCalendarEvents,
@@ -143,6 +144,9 @@ export type FrameworkPostureRow = {
   covered_by_exception_pct: number | null;
   freshness_composite: number | null;
   trend_delta_90d: number | null;
+  // target (#2136): the organisation's posture target for the version, or
+  // null when none is set. The tile colours coverage against it.
+  target: PostureTarget | null;
 };
 
 // FrameworkPostureReport mirrors the FrameworkPosture handler's envelope.

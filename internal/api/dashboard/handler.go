@@ -11,6 +11,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/posturetargets"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -29,6 +30,7 @@ const trendWindow = 90 * 24 * time.Hour
 // handler's public API is unchanged: New still takes a *Store).
 type reader interface {
 	FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error)
+	PostureTargets(ctx context.Context) ([]dbx.FrameworkPostureTarget, error)
 	ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error)
 }
 
@@ -75,6 +77,10 @@ type postureWire struct {
 	CoveredByExceptionPct *float64 `json:"covered_by_exception_pct"`
 	FreshnessComposite    *float64 `json:"freshness_composite"`
 	TrendDelta90d         *float64 `json:"trend_delta_90d"`
+	// Target (#2136) is the organisation's posture target for the version,
+	// or null when none is set. Tiles colour coverage against it and stay
+	// neutral without one.
+	Target *posturetargets.Target `json:"target"`
 }
 
 // postureWireFromRow projects one posture row onto the wire, leaving the
@@ -130,9 +136,23 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targets, err := h.store.PostureTargets(ctx)
+	if err != nil {
+		httperr.WriteInternal(w, r, "dashboard", err)
+		return
+	}
+	byVersion := make(map[string]posturetargets.Target, len(targets))
+	for _, t := range targets {
+		pt := posturetargets.FromRow(t)
+		byVersion[pt.FrameworkVersionID] = pt
+	}
+
 	out := make([]postureWire, len(rows))
 	for i, p := range rows {
 		out[i] = postureWireFromRow(p)
+		if t, ok := byVersion[out[i].FrameworkVersionID]; ok {
+			out[i].Target = &t
+		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"frameworks": out,

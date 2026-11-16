@@ -136,6 +136,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	var titlesPath string
 	var allowCodeTitles bool
 	var scfRelease string
+	var strict bool
 	cmd := &cobra.Command{
 		Use:     "import-crosswalk <path>",
 		Aliases: []string{"import-soc2"},
@@ -205,10 +206,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			if n := soc2import.CodeOnlyTitleCount(cw); n > 0 {
 				fmt.Printf("requirements titled with their own code=%d\n", n)
 			}
-			for _, code := range report.RequirementsDiffered {
-				fmt.Printf("requirement kept %s: incoming title or body differs, but framework version %s is frozen; ship a new version to change it\n",
-					code, report.FrameworkVersion)
-			}
+			printDifferedWarnings(os.Stderr, report.FrameworkVersion, report.RequirementsDiffered)
 			for _, line := range cw.PointsOfFocusRollUp.Summary() {
 				fmt.Println(line)
 			}
@@ -255,7 +253,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			for _, k := range keys {
 				fmt.Printf("edges by source_attribution[%s]=%d\n", k, report.MappingsByAttribution[k])
 			}
-			return nil
+			return strictDifferedErr(strict, report.RequirementsDiffered)
 		},
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
@@ -268,7 +266,30 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	cmd.Flags().StringVar(&titlesPath, "titles", "", "crosswalk-format YAML whose requirement titles and bodies override the bundled crosswalk's for SCF workbook imports (its mappings are ignored)")
 	cmd.Flags().BoolVar(&allowCodeTitles, "allow-code-titles", false, "let SCF workbook requirements that no title source covers import titled with their code")
 	cmd.Flags().StringVar(&scfRelease, "scf-release", "", "SCF release the crosswalk's SCF codes belong to; the only way to declare it for an OLIR STRM workbook, which names none (a wide workbook takes it from its \"SCF <release>\" sheet, a YAML file from scf_release)")
+	cmd.Flags().BoolVar(&strict, "strict", false, "exit non-zero when a frozen framework version kept its stored text for a requirement whose incoming title or body differs")
 	return cmd
+}
+
+// printDifferedWarnings writes one warning per requirement whose incoming
+// title or body differed from a frozen framework version's stored text
+// (#2008). It goes to stderr so scripted imports and the bootstrap log
+// surface it instead of burying it in the stdout summary.
+func printDifferedWarnings(w io.Writer, frameworkVersion string, codes []string) {
+	for _, code := range codes {
+		_, _ = fmt.Fprintf(w, "warning: requirement kept %s: incoming title or body differs, but framework version %s is frozen; ship a new version to change it\n",
+			code, frameworkVersion)
+	}
+}
+
+// strictDifferedErr fails a --strict import whose frozen framework version
+// kept its stored text for any requirement (#2008). The import has already
+// committed; the error changes only the exit status.
+func strictDifferedErr(strict bool, codes []string) error {
+	if !strict || len(codes) == 0 {
+		return nil
+	}
+	return fmt.Errorf("crosswalk: --strict: %d requirement(s) kept their stored text because the framework version is frozen (the import committed): %s",
+		len(codes), strings.Join(codes, ", "))
 }
 
 // printEdgeRemapCounts writes how many crosswalk-edge remap proposals

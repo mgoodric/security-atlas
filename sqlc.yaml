@@ -144,6 +144,8 @@ sql:
       - "migrations/sql/20261212000000_risk_lifecycle.sql"
       # #2145: first-visit onboarding hint dismissals, per user.
       - "migrations/sql/20261213000000_onboarding_hint_dismissals.sql"
+      # #2136: posture targets per framework version, and their audit log.
+      - "migrations/sql/20261214000000_framework_posture_targets.sql"
     queries: "internal/db/queries"
     gen:
       go:
