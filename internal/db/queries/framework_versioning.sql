@@ -95,3 +95,10 @@ RETURNING *;
 SELECT * FROM framework_version_audit
 WHERE framework_id = $1
 ORDER BY created_at DESC;
+
+-- name: CarryOverOverlayEdges :one
+-- #1803: copy every tenant's active overlay edges from an approved exact_code
+-- migration's N requirement to its N+1 requirement, each in its own tenant,
+-- one audit row per copy. Returns the number copied. See the function's
+-- migration for why it is SECURITY DEFINER.
+SELECT carry_over_overlay_edges(sqlc.arg(migration_id)::uuid, sqlc.arg(actor)::text)::int AS copied;
