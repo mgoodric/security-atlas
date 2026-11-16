@@ -368,7 +368,7 @@ function AuditorsCard({ periodId }: { periodId: string }) {
       void refresh();
       toast("Auditor assigned.");
     },
-    onError: (err) => toast(auditorChangeErrorMessage(err)),
+    onError: (err) => toast(auditorChangeErrorMessage(err, "assign")),
   });
   const remove = useMutation({
     mutationFn: (userID: string) => removePeriodAuditor(periodId, userID),
@@ -378,7 +378,7 @@ function AuditorsCard({ periodId }: { periodId: string }) {
     },
     onError: (err) => {
       void refresh();
-      toast(auditorChangeErrorMessage(err));
+      toast(auditorChangeErrorMessage(err, "remove"));
     },
   });
 

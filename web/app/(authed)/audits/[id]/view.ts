@@ -20,14 +20,20 @@ export function auditorLabel(a: {
   return a.display_name || a.email || a.user_id;
 }
 
-/** #2118: the toast for a failed assign or remove. */
-export function auditorChangeErrorMessage(err: unknown): string {
+/** #2118: the toast for a failed assign or remove. A 404 on remove means
+ *  the grant is already gone; on assign it means the period is. */
+export function auditorChangeErrorMessage(
+  err: unknown,
+  change: "assign" | "remove",
+): string {
   if (err instanceof APIError) {
     if (err.status === 403) {
       return "Only an admin can change this period's auditors.";
     }
     if (err.status === 404) {
-      return "That auditor is no longer assigned to this period.";
+      return change === "remove"
+        ? "That auditor is no longer assigned to this period."
+        : "This audit period no longer exists.";
     }
     return `Could not change the auditors: ${err.message}`;
   }

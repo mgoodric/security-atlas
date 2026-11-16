@@ -29,10 +29,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // AuditorsHandler serves the period-auditor routes over auditor.Store.
@@ -68,7 +70,7 @@ type assignAuditorReq struct {
 
 // List handles GET /v1/audit-periods/{id}/auditors.
 func (h *AuditorsHandler) List(w http.ResponseWriter, r *http.Request) {
-	periodID, ok := h.admit(w, r)
+	periodID, _, ok := h.admit(w, r)
 	if !ok {
 		return
 	}
@@ -102,11 +104,10 @@ func (h *AuditorsHandler) List(w http.ResponseWriter, r *http.Request) {
 // Assign handles POST /v1/audit-periods/{id}/auditors. 201 on a new
 // grant, 200 when the user already held it.
 func (h *AuditorsHandler) Assign(w http.ResponseWriter, r *http.Request) {
-	periodID, ok := h.admit(w, r)
+	periodID, actor, ok := h.admit(w, r)
 	if !ok {
 		return
 	}
-	cred, _, _ := credFrom(r)
 	var req assignAuditorReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4*1024)).Decode(&req); err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
@@ -117,7 +118,7 @@ func (h *AuditorsHandler) Assign(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "user_id must be a UUID")
 		return
 	}
-	created, err := h.store.AssignToPeriod(r.Context(), periodID, userID, cred)
+	created, err := h.store.AssignToPeriod(r.Context(), periodID, userID, actor)
 	if err != nil {
 		writeAuditorErr(w, r, "assign auditor", err)
 		return
@@ -136,17 +137,16 @@ func (h *AuditorsHandler) Assign(w http.ResponseWriter, r *http.Request) {
 // Remove handles DELETE /v1/audit-periods/{id}/auditors/{userID}. 404
 // when the user held no grant on the period.
 func (h *AuditorsHandler) Remove(w http.ResponseWriter, r *http.Request) {
-	periodID, ok := h.admit(w, r)
+	periodID, actor, ok := h.admit(w, r)
 	if !ok {
 		return
 	}
-	cred, _, _ := credFrom(r)
 	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "userID must be a UUID")
 		return
 	}
-	removed, err := h.store.RemoveFromPeriod(r.Context(), periodID, userID.String(), cred)
+	removed, err := h.store.RemoveFromPeriod(r.Context(), periodID, userID.String(), actor)
 	if err != nil {
 		writeAuditorErr(w, r, "remove auditor", err)
 		return
@@ -158,39 +158,35 @@ func (h *AuditorsHandler) Remove(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// admit checks tenant context and the admin role, and parses {id}.
-func (h *AuditorsHandler) admit(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	_, isAdmin, ok := credFrom(r)
-	if !ok {
+// admit checks tenant context and that the caller administers the tenant
+// (platform admin or the admin role), and parses {id}. It returns the
+// period id and the actor recorded on the grant and the log row: the
+// signed-in person (the JWT subject) when there is one, else the
+// credential id, as adminusers records granted_by.
+func (h *AuditorsHandler) admit(w http.ResponseWriter, r *http.Request) (uuid.UUID, string, bool) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok || cred.TenantID == "" {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
-		return uuid.Nil, false
+		return uuid.Nil, "", false
 	}
-	if !isAdmin {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return uuid.Nil, "", false
+	}
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
-		return uuid.Nil, false
+		return uuid.Nil, "", false
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
-		return uuid.Nil, false
-	}
-	return id, true
-}
-
-// credFrom returns the actor recorded on the grant and the log row, and
-// whether the caller administers the tenant (platform admin or the admin
-// role). The actor is the signed-in person (the JWT subject) when there is
-// one, else the credential id, as adminusers records granted_by.
-func credFrom(r *http.Request) (string, bool, bool) {
-	_, cred, ok := (&Handler{}).authnContext(r)
-	if !ok {
-		return "", false, false
+		return uuid.Nil, "", false
 	}
 	actor := cred.UserID
 	if actor == "" {
 		actor = cred.ID
 	}
-	return actor, authz.IsTenantAdmin(cred), true
+	return id, actor, true
 }
 
 func writeAuditorErr(w http.ResponseWriter, r *http.Request, op string, err error) {

@@ -205,6 +205,25 @@ func TestPeriodAuditors_AdminAssignsAndRemoves(t *testing.T) {
 		t.Fatalf("auditor periods before assign = %v; want none", got)
 	}
 
+	// The auditor role's own reads, answered the same with or without a
+	// grant: an assignment neither widens nor narrows them.
+	roleReads := []string{
+		"/v1/audit-periods",
+		"/v1/audit-periods/" + sibling.String(),
+		"/v1/audit-periods/" + sibling.String() + "/control-state?control=" + uuid.NewString(),
+		"/v1/controls",
+	}
+	readStatuses := func() map[string]int {
+		t.Helper()
+		out := map[string]int{}
+		for _, p := range roleReads {
+			s, _ := asAuditor.do(http.MethodGet, p, nil)
+			out[p] = s
+		}
+		return out
+	}
+	readsBefore := readStatuses()
+
 	t.Run("non-admins are refused", func(t *testing.T) {
 		for name, c := range map[string]periodAuditorsCall{"grc_engineer": asGRC, "auditor": asAuditor, "viewer": asViewer} {
 			if s, b := c.do(http.MethodPost, base, assign); s != http.StatusForbidden {
@@ -308,6 +327,11 @@ func TestPeriodAuditors_AdminAssignsAndRemoves(t *testing.T) {
 		// read or change the period's auditors.
 		if s, b := asAuditor.do(http.MethodGet, base, nil); s != http.StatusForbidden {
 			t.Fatalf("auditor lists auditors: %d %v; want 403", s, b)
+		}
+		for p, after := range readStatuses() {
+			if after != readsBefore[p] {
+				t.Errorf("GET %s: %d with the grant, %d without; an assignment must not change the role's reads", p, after, readsBefore[p])
+			}
 		}
 	})
 

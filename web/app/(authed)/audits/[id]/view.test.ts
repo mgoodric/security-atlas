@@ -161,19 +161,25 @@ describe("auditorLabel", () => {
 
 describe("auditorChangeErrorMessage", () => {
   test("403 says only an admin can change auditors", () => {
-    expect(auditorChangeErrorMessage(new APIError(403, "forbidden"))).toMatch(
-      /Only an admin/,
+    expect(
+      auditorChangeErrorMessage(new APIError(403, "forbidden"), "assign"),
+    ).toMatch(/Only an admin/);
+  });
+  test("404 on remove says the grant is gone", () => {
+    expect(auditorChangeErrorMessage(new APIError(404, "x"), "remove")).toMatch(
+      /no longer assigned/,
     );
   });
-  test("404 says the grant is gone", () => {
-    expect(auditorChangeErrorMessage(new APIError(404, "x"))).toMatch(
-      /no longer assigned/,
+  test("404 on assign says the period is gone", () => {
+    expect(auditorChangeErrorMessage(new APIError(404, "x"), "assign")).toMatch(
+      /period no longer exists/,
     );
   });
   test("other statuses carry the platform message", () => {
     expect(
       auditorChangeErrorMessage(
         new APIError(400, "user_id is not an active auditor in this tenant"),
+        "assign",
       ),
     ).toMatch(/not an active auditor/);
   });
