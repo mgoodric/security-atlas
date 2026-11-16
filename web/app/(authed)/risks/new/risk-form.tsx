@@ -46,6 +46,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 
+import { enumLabel } from "@/lib/labels/enum-labels";
 import {
   fetchRiskCategories,
   type Risk,
@@ -87,11 +88,11 @@ const TREATMENTS = [
 // #1746: the option text says what each value records, so the opening
 // "untreated" reads as "no decision yet" rather than a choice.
 const TREATMENT_LABELS: Record<(typeof TREATMENTS)[number], string> = {
-  untreated: "untreated (not yet decided)",
-  mitigate: "mitigate",
-  transfer: "transfer",
-  accept: "accept (proposed, pending approval)",
-  avoid: "avoid",
+  untreated: "Untreated (not yet decided)",
+  mitigate: enumLabel("RiskTreatment", "mitigate"),
+  transfer: enumLabel("RiskTreatment", "transfer"),
+  accept: "Accept (proposed, pending approval)",
+  avoid: enumLabel("RiskTreatment", "avoid"),
 };
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
@@ -402,7 +403,7 @@ export function RiskForm(props: Props) {
           >
             {methodologies.map((m) => (
               <option key={m} value={m}>
-                {m}
+                {enumLabel("RiskMethodology", m)}
               </option>
             ))}
           </select>
@@ -427,7 +428,8 @@ export function RiskForm(props: Props) {
               data-testid="risks-edit-instrument-reference"
             />
             <p className={HELP_CLASS} data-testid="risks-edit-treatment-note">
-              Treatment ({state.treatment}) is not changed here.
+              Treatment ({enumLabel("RiskTreatment", state.treatment)}) is not
+              changed here.
             </p>
           </div>
         ) : (

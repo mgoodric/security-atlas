@@ -61,6 +61,7 @@ import {
   severityBand,
   severityClasses,
 } from "../filters";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { utcDay } from "../new/form-state";
 import { SeverityPill } from "../severity-pill";
 
@@ -169,11 +170,7 @@ export default function RiskDetailPage({
       }}
       status={
         <>
-          <Badge
-            variant="secondary"
-            data-testid="risk-detail-treatment"
-            className="capitalize"
-          >
+          <Badge variant="secondary" data-testid="risk-detail-treatment">
             {treatmentLabel(risk)}
           </Badge>
           <span
@@ -206,7 +203,12 @@ export default function RiskDetailPage({
           </div>
           <div>
             <dt className="inline text-muted-foreground">Methodology </dt>
-            <dd className="inline text-foreground">{risk.methodology}</dd>
+            <dd
+              className="inline text-foreground"
+              data-testid="risk-detail-methodology"
+            >
+              {enumLabel("RiskMethodology", risk.methodology)}
+            </dd>
           </div>
           <div>
             <dt className="inline text-muted-foreground">Review due </dt>

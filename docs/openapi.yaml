@@ -3240,6 +3240,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/exceptions/{id}/revoke:
+    patch:
+      summary: PATCH /v1/exceptions/{id}/revoke
+      tags: [exceptions]
+      operationId: patch-v1-exceptions-id-revoke
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes:
     get:
       summary: GET /v1/framework-scopes
@@ -3452,7 +3472,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}/applicability/diff:
     get:
-      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision
+      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision; implementation-reference-only edits are listed apart in reference_changes; the baseline is always the currently activated revision, so a superseded revision is compared against its successor
       tags: [framework-scopes]
       operationId: get-v1-framework-scopes-id-applicability-diff
       security:
@@ -3749,6 +3769,34 @@ paths:
       summary: POST /v1/mapping-overlays — add an overlay edge; body {framework, framework_version?, requirement_code, scf_release?, anchor_code, relationship_type, strength, rationale, source_ref}
       tags: [mapping-overlays]
       operationId: post-v1-mapping-overlays
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/audited-under:
+    get:
+      summary: GET /v1/mapping-overlays/audited-under — controls whose anchor, through catalog and overlay edges, does not reach a criterion they were tested under, with candidate anchors from the current SCF release; ?framework
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-audited-under
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/audited-under/export:
+    get:
+      summary: GET /v1/mapping-overlays/audited-under/export — the audited-under report as CSV; ?framework
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-audited-under-export
       security:
         - bearer: []
       responses:

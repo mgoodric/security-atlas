@@ -62,11 +62,14 @@ func newHandlerWithReader(r reader) *Handler { return &Handler{store: r} }
 // percentage would be over the whole requirement set: every percentage is
 // null and callers show "Scope not set" instead of a number.
 type postureWire struct {
-	FrameworkID        string   `json:"framework_id"`
-	FrameworkVersion   string   `json:"framework_version"`
-	FrameworkVersionID string   `json:"framework_version_id"`
-	ScopeSet           bool     `json:"scope_set"`
-	CoveragePct        *float64 `json:"coverage_pct"`
+	FrameworkID        string `json:"framework_id"`
+	FrameworkVersion   string `json:"framework_version"`
+	FrameworkVersionID string `json:"framework_version_id"`
+	// FrameworkName (#2083) lets callers label the version by name plus
+	// version instead of the version alone.
+	FrameworkName string   `json:"framework_name"`
+	ScopeSet      bool     `json:"scope_set"`
+	CoveragePct   *float64 `json:"coverage_pct"`
 	// CoveredByExceptionPct is the part of CoveragePct that rests only on
 	// active exceptions (#2112), 0-100.
 	CoveredByExceptionPct *float64 `json:"covered_by_exception_pct"`
@@ -80,6 +83,7 @@ func postureWireFromRow(p dbx.FrameworkPostureRow) postureWire {
 	out := postureWire{
 		FrameworkID:        uuidString(p.FrameworkID),
 		FrameworkVersion:   p.FrameworkVersion,
+		FrameworkName:      p.FrameworkName,
 		FrameworkVersionID: uuidString(p.FrameworkVersionID),
 		ScopeSet:           p.ScopeActivated,
 	}

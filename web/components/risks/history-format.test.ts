@@ -55,7 +55,22 @@ describe("risk history format (#2104)", () => {
         { level: "org", org_unit_id: null },
       ),
     );
-    expect(changes).toEqual([{ field: "Level", before: "team", after: "org" }]);
+    expect(changes).toEqual([
+      { field: "Level", before: "Team", after: "Organisation" },
+    ]);
+  });
+
+  test("enum values read as their labels (#2330)", () => {
+    const changes = historyChanges(
+      entry(
+        "fields_changed",
+        { methodology: "nist_800_30" },
+        { methodology: "fair" },
+      ),
+    );
+    expect(changes).toEqual([
+      { field: "Methodology", before: "NIST SP 800-30", after: "FAIR" },
+    ]);
   });
 
   test("scores and empty values read in words", () => {

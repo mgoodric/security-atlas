@@ -7,6 +7,7 @@
 // (and the category id behind the slug) are dropped.
 
 import type { RiskAuditEntry } from "@/lib/api/risks";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 export type HistoryChange = { field: string; before: string; after: string };
 
@@ -46,6 +47,12 @@ export function formatHistoryValue(field: string, v: unknown): string {
   if (field === "review_due_at" && typeof v === "string") {
     const d = new Date(v);
     return Number.isNaN(d.getTime()) ? v : d.toISOString().slice(0, 10);
+  }
+  if (field === "methodology" && typeof v === "string") {
+    return enumLabel("RiskMethodology", v);
+  }
+  if (field === "level" && typeof v === "string") {
+    return enumLabel("RiskLevel", v);
   }
   if (typeof v === "string") return v;
   if (typeof v === "object") {

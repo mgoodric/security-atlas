@@ -37,6 +37,10 @@ func TestLifecycle_EveryPair(t *testing.T) {
 		_, err := store.Activate(ctx, uuid.MustParse(id), "key_approver", time.Time{})
 		return err
 	}
+	revoke := func(t *testing.T, id string) error {
+		_, err := store.Revoke(ctx, uuid.MustParse(id), "key_approver", "control fixed early")
+		return err
+	}
 	// expire backdates expires_at and runs the sweep, which expires only
 	// active rows.
 	expire := func(t *testing.T, id string) error {
@@ -71,6 +75,10 @@ func TestLifecycle_EveryPair(t *testing.T) {
 				must(t, approve(t, id))
 				must(t, activate(t, id))
 				must(t, expire(t, id))
+			case exception.StateRevoked:
+				must(t, approve(t, id))
+				must(t, activate(t, id))
+				must(t, revoke(t, id))
 			}
 			return id
 		},
@@ -79,6 +87,7 @@ func TestLifecycle_EveryPair(t *testing.T) {
 			"deny":     deny,
 			"activate": activate,
 			"expire":   expire,
+			"revoke":   revoke,
 		},
 		State: func(t *testing.T, id string) string {
 			got, err := store.Get(ctx, uuid.MustParse(id))

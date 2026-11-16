@@ -65,6 +65,8 @@ import {
   type EffectiveScopeResponse,
 } from "@/lib/api/control-detail";
 import { type EvidenceListResponse } from "@/lib/api/evidence";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import { frameworkLabel } from "@/lib/labels/framework-label";
 
 import { formatResidualScore } from "@/app/(authed)/risks/filters";
 
@@ -156,7 +158,7 @@ export function EffectiveScopeRows({
           (r) => r.framework_version_id === fvId,
         );
         const label = reqForFv
-          ? `${reqForFv.framework_name} ${reqForFv.framework_version}`
+          ? frameworkLabel(reqForFv.framework_name, reqForFv.framework_version)
           : fvId;
         return (
           <div key={fvId} data-testid="effective-scope-row">
@@ -221,8 +223,8 @@ export function PoliciesBody({
                 {p.version}
               </div>
             </div>
-            <Badge variant="secondary" className="capitalize">
-              {p.status}
+            <Badge variant="secondary">
+              {enumLabel("PolicyStatus", p.status)}
             </Badge>
           </li>
         ))}
