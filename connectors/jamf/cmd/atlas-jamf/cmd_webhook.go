@@ -94,7 +94,7 @@ of this process.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.deviceControl, "device-control", "scf:END-04", "control_id to attach to endpoint.device_posture.v1 records")
+	cmd.Flags().StringVar(&f.deviceControl, "device-control", "scf:END-03", "control_id to attach to endpoint.device_posture.v1 records")
 	cmd.Flags().StringVar(&f.listen, "listen", "127.0.0.1:8476", "address to bind the webhook receiver (loopback default; terminate TLS at a reverse proxy)")
 	cmd.Flags().StringVar(&f.path, "path", "/webhooks/jamf", "URL path the receiver listens on")
 	return cmd

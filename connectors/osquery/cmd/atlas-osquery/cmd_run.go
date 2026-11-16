@@ -97,7 +97,7 @@ Fleet roles required (least-privilege):
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.fleetBaseURL, "fleet-base-url", "", "Fleet base URL (e.g. https://fleet.example.com) [required for fleet mode]")
 	cmd.Flags().StringVar(&f.osqueryDSocket, "osqueryd-socket", "/var/osquery/osquery.em", "local osqueryd extension socket path (mode=local)")
-	cmd.Flags().StringVar(&f.hostPostureCtl, "host-posture-control", "scf:END-04", "control_id to attach to osquery.host_posture.v1 records")
+	cmd.Flags().StringVar(&f.hostPostureCtl, "host-posture-control", "scf:END-03", "control_id to attach to osquery.host_posture.v1 records")
 	// --token accepted for ad-hoc shells but env-var is the documented
 	// preferred path so the secret never reaches shell history.
 	cmd.Flags().StringVar(&f.token, "token-env-only-do-not-pass-on-cli", "", "")

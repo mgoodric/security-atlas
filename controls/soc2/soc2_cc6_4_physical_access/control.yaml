@@ -10,7 +10,7 @@ description: |
   company-managed servers or backup media, a badge-access roster is
   uploaded with the most recent review date.
 
-scf_anchor_id: PES-04
+scf_anchor_id: PES-08
 control_family: PES
 implementation_type: manual_periodic
 owner_role: it-operations

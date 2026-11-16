@@ -117,7 +117,7 @@ func TestRun_PushesDeviceRecords(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 	devs := devposture.Normalize(devposture.MDMJamf, raw, fixed)
-	rec, err := devrecord.Build(devs[0], "scf:END-04", actorID("devices"), "jamf", "prod")
+	rec, err := devrecord.Build(devs[0], "scf:END-03", actorID("devices"), "jamf", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -142,8 +142,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 	api := &fakeDevicesAPI{computers: []devices.RawComputer{{ID: "1", Enrolled: true}}}
 	raw, _ := devices.Collect(context.Background(), api)
 	devs := devposture.Normalize(devposture.MDMJamf, raw, fixed)
-	r1, _ := devrecord.Build(devs[0], "scf:END-04", actorID("devices"), "jamf", "prod")
-	r2, _ := devrecord.Build(devs[0], "scf:END-04", actorID("devices"), "jamf", "prod")
+	r1, _ := devrecord.Build(devs[0], "scf:END-03", actorID("devices"), "jamf", "prod")
+	r2, _ := devrecord.Build(devs[0], "scf:END-03", actorID("devices"), "jamf", "prod")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -174,7 +174,7 @@ func TestEmittedRecords_NoGeoOrAppsOrPII(t *testing.T) {
 	}}
 	raw, _ := devices.Collect(context.Background(), api)
 	devs := devposture.Normalize(devposture.MDMJamf, raw, fixed)
-	rec, _ := devrecord.Build(devs[0], "scf:END-04", actorID("devices"), "jamf", "prod")
+	rec, _ := devrecord.Build(devs[0], "scf:END-03", actorID("devices"), "jamf", "prod")
 
 	allowed := map[string]bool{
 		"source_mdm": true, "device_id": true, "device_name": true, "os_version": true,
