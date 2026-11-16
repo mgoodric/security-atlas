@@ -1423,10 +1423,14 @@ type Querier interface {
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
 	// Issue #1775: queue one remap proposal for a control on a legacy SCF
-	// anchor. Written by the migrate role during `catalog import-scf`. A re-run
-	// of the same import leaves the existing proposal alone, except that an
-	// open proposal whose control this run re-bound becomes rebound (#2321: a
-	// stock control flagged before the title-only rule moves on the re-run).
+	// anchor. Written by the migrate role during `catalog import-scf` (source
+	// 'boot') and by the app role when an upload re-binds or flags a control in
+	// place (source 'upload', #2236). A re-run leaves the existing proposal
+	// alone, except that an open proposal whose control this run re-bound
+	// becomes rebound, taking the run's target anchor and source (#2321: a stock
+	// control flagged before the title-only rule moves on the re-run).
+	// target_anchor_id is the anchor a 'rebound' control moved to, NULL for an
+	// 'open' one.
 	InsertSCFRemapProposal(ctx context.Context, arg InsertSCFRemapProposalParams) (int64, error)
 	// Append-only audit row for a SCIM provision/deprovision mutation (AC-5).
 	InsertSCIMAuditLog(ctx context.Context, arg InsertSCIMAuditLogParams) error
@@ -1449,6 +1453,11 @@ type Querier interface {
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
+	// Issue #1776: whether a control row is the revision a person's approved SCF
+	// remap decision created. The upload path keeps such a revision when the
+	// boot seed re-uploads the stock manifest it replaced, so a reviewed
+	// re-anchor is never undone silently.
+	IsApprovedRemapRevision(ctx context.Context, arg IsApprovedRemapRevisionParams) (bool, error)
 	// The most recent successful backup run — what restore-verification restores.
 	LatestSucceededBackup(ctx context.Context) (BackupRun, error)
 	// The most-recent reviewed_at for a vendor, used to keep vendors.last_review_date

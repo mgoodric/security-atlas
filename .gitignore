@@ -101,6 +101,8 @@ docs-site/site/
 docs-site/docs/openapi.yaml
 ### #2144 — generated at docs build time from web/help/terms.json.
 docs-site/docs/terms.md
+### #2143 — generated at docs build time from web/help/modules/*.md.
+docs-site/docs/help/
 
 ### Slice 069 — Playwright runner artifacts
 web/playwright-report/

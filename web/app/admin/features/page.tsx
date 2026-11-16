@@ -1,7 +1,9 @@
 // Slice 060 — /admin/features (AC-5).
 //
 // Real bind to slice 059: list + PATCH per key. Flags are grouped by
-// category. Each toggle requires explicit confirmation, because slice
+// module (#2171): an optional module's switch heads its card, and its
+// features are nested under it. A core module has no switch. Each toggle
+// requires explicit confirmation, because slice
 // 059 + the slice 060 P0 anti-criterion call out that flag flips are
 // always intentional admin clicks. Re-enabling (false → true) surfaces
 // a modal with a reason; disabling (true → false) goes through the row
@@ -31,6 +33,8 @@ import { RowActions } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FeatureFlag, FeatureFlagListResponse } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
+
+import { groupByModule } from "./group";
 
 async function fetchFlags(): Promise<FeatureFlag[]> {
   const res = await fetch(`/api/admin/features`);
@@ -73,7 +77,13 @@ export default function FeaturesPage() {
     },
   });
 
-  const grouped = groupByCategory(list.data ?? []);
+  const groups = groupByModule(list.data ?? []);
+  const rowProps = (f: FeatureFlag) => ({
+    flag: f,
+    onRequestEnable: () => setPending({ flag: f, nextEnabled: true }),
+    onDisable: (reason: string, onDone: () => void) =>
+      mut.mutate({ key: f.key, enabled: false, reason }, { onSuccess: onDone }),
+  });
 
   return (
     <PageShell
@@ -105,31 +115,38 @@ export default function FeaturesPage() {
         </Alert>
       ) : null}
 
-      {Object.entries(grouped).map(([category, flags]) => (
-        <Card key={category}>
+      {groups.map((g) => (
+        <Card key={g.key} data-testid={`module-group-${g.key}`}>
           <CardHeader>
-            <CardTitle className="capitalize">{category}</CardTitle>
+            <CardTitle>{g.name}</CardTitle>
             <CardDescription>
-              {flags.length} flag{flags.length === 1 ? "" : "s"} in this
-              category.
+              {g.core
+                ? "Core module, always on."
+                : g.moduleSwitch && !g.moduleSwitch.enabled
+                  ? "Switched off. Its features keep their settings and return when the module is switched back on."
+                  : null}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {flags.map((f) => (
-              <FlagRow
-                key={f.key}
-                flag={f}
-                onRequestEnable={() =>
-                  setPending({ flag: f, nextEnabled: true })
+            {g.moduleSwitch ? (
+              <FlagRow {...rowProps(g.moduleSwitch)} label="Module switch" />
+            ) : null}
+            {g.features.length > 0 ? (
+              <div
+                className={
+                  g.moduleSwitch ? "ml-4 space-y-3 border-l pl-4" : "space-y-3"
                 }
-                onDisable={(reason, onDone) =>
-                  mut.mutate(
-                    { key: f.key, enabled: false, reason },
-                    { onSuccess: onDone },
-                  )
-                }
-              />
-            ))}
+                data-testid={`module-features-${g.key}`}
+              >
+                {g.features.map((f) => (
+                  <FlagRow
+                    key={f.key}
+                    {...rowProps(f)}
+                    label={f.feature_name ?? f.key}
+                  />
+                ))}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ))}
@@ -155,10 +172,13 @@ export default function FeaturesPage() {
 
 function FlagRow({
   flag,
+  label,
   onRequestEnable,
   onDisable,
 }: {
   flag: FeatureFlag;
+  /** The row's name: "Module switch", or the feature's name. */
+  label: string;
   onRequestEnable: () => void;
   /** `onDone` runs when the PATCH succeeds. */
   onDisable: (reason: string, onDone: () => void) => void;
@@ -167,10 +187,16 @@ function FlagRow({
   // earlier reason into the audit trail. Kept on failure for a retry.
   const [reason, setReason] = useState("");
   return (
-    <div className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div
+      className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between"
+      data-testid={`flag-row-${flag.key}`}
+    >
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <code className="font-mono text-sm">{flag.key}</code>
+          <span className="text-sm font-medium">{label}</span>
+          <code className="font-mono text-xs text-muted-foreground">
+            {flag.key}
+          </code>
           {flag.enabled ? (
             <Badge variant="secondary">on</Badge>
           ) : (
@@ -302,17 +328,4 @@ function ListSkeleton() {
       ))}
     </div>
   );
-}
-
-function groupByCategory(flags: FeatureFlag[]): Record<string, FeatureFlag[]> {
-  const out: Record<string, FeatureFlag[]> = {};
-  for (const f of flags) {
-    const k = f.category || "uncategorized";
-    if (!out[k]) out[k] = [];
-    out[k].push(f);
-  }
-  for (const k of Object.keys(out)) {
-    out[k].sort((a, b) => a.key.localeCompare(b.key));
-  }
-  return out;
 }

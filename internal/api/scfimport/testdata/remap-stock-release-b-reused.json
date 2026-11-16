@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-stock-remap-b-reused",
+  "release_date": "2026-06-01",
+  "attribution": "Synthetic test catalog for #1776; not SCF content. Against test-stock-remap-a: the code CHG-02 is reused for another control (its legacy ID is CHG-09) and CHG-02's concept moves to CHG-21, so the shipped stock manifest still resolves in this release.",
+  "controls": [
+    {
+      "scf_id": "CHG-02",
+      "family": "CHG",
+      "title": "Emergency Changes",
+      "description": "Handle emergency changes.",
+      "legacy_scf_id": "CHG-09"
+    },
+    {
+      "scf_id": "CHG-21",
+      "family": "CHG",
+      "title": "Change Control Process",
+      "description": "Control changes.",
+      "legacy_scf_id": "CHG-02"
+    }
+  ]
+}

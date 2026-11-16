@@ -285,7 +285,7 @@ mappings:
     strength: 0.8
     rationale: "MON-02 (Continuous Monitoring) is the broader anchor; CC4.1 ongoing+separate eval is a subset."
   - tsc_code: CC4.1
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Internal Audit Function carries the 'separate evaluation' half of CC4.1."
@@ -460,15 +460,15 @@ mappings:
     strength: 0.8
     rationale: "Business Continuity & Disaster Recovery (BC/DR) Plans address risks arising from disruptions."
   - tsc_code: CC9.2
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 1.0
     rationale: "Third-Party Management is the direct STRM equivalent of CC9.2."
   - tsc_code: CC9.2
-    scf_anchor: TPM-04
+    scf_anchor: TPM-10
     relationship_type: intersects_with
     strength: 0.8
-    rationale: "Third-Party Risk Assessments are the operational half of CC9.2."
+    rationale: "Third-Party Risk Assessments & Approvals are the operational half of CC9.2."
 
   # =====================================================================
   # A1 — Availability — anchors to BCD-* + capacity management

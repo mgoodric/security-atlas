@@ -16,10 +16,12 @@
 // "%s · security-atlas" template), because a client page cannot export
 // metadata and a second <title> in the body would race Next's own.
 //
-// No hooks, so this renders from server and client pages alike.
+// No hooks, so this renders from server and client pages alike. The **?**
+// help action (#2143) is a client component that reads the route itself.
 
 import type { ReactNode } from "react";
 
+import { HelpButton } from "@/components/help/help-panel";
 import { cn } from "@/lib/utils";
 
 export type PageShellWidth = "full" | "reading";
@@ -83,11 +85,13 @@ export function PageShell({
             never exceed the column, so every action stays reachable on
             a 390px phone. A page that groups actions in its own flex
             row must let that row wrap too (vendors' export buttons). */}
-        {actions ? (
-          <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
-            {actions}
-          </div>
-        ) : null}
+        {/* #2143 — the **?** help action sits after the page's own
+            actions. It renders nothing on a page no module's help
+            covers, so the wrapper is empty there. */}
+        <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+          {actions}
+          <HelpButton />
+        </div>
       </header>
       {tabs ? <div>{tabs}</div> : null}
       <div className={cn("min-w-0", bodyClassName)}>{children}</div>

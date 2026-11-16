@@ -50,8 +50,8 @@ import (
 // freshTenant returns a new tenant id and registers a cleanup that deletes
 // every row this slice's tests can create under it.
 // enableFeatureFlag turns a gating feature flag ON for the test tenant.
-// Slice 660 wrapped the OSCAL component-definition routes in
-// featureflag.Gate("oscal.export"), which DEFAULTS OFF — so without an
+// Vendor claims are a feature of Third-party risk switched by
+// `vendor.claims` (#2171, formerly `oscal.export`), which DEFAULTS OFF — so without an
 // explicit override every OSCAL route returns 404 for a fresh test tenant.
 // We upsert the override via the admin (BYPASSRLS) pool, the same effect as
 // an operator toggling the flag ON. Cleanup removes the row.
@@ -76,10 +76,10 @@ func enableFeatureFlag(t *testing.T, admin *pgxpool.Pool, tenant, key, category 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
-	// Slice 660: the OSCAL routes are gate-wrapped on oscal.export (default
+	// Slice 660: the OSCAL routes are gated on vendor.claims (default
 	// OFF). Enable it for the test tenant so the pre-slice-660 route tests
 	// reach the real handler instead of the gate's 404.
-	enableFeatureFlag(t, admin, tenant, "oscal.export", "integrations")
+	enableFeatureFlag(t, admin, tenant, "vendor.claims", "vendor")
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, stmt := range []string{

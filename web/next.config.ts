@@ -57,6 +57,15 @@ const nextConfig: NextConfig = {
   // output.
   output: "standalone",
 
+  // #2143 — module help files (`web/help/modules/*.md`) import as their
+  // text, so the help is bundled at build time from the same file the
+  // docs site publishes. See `lib/help/modules.ts`.
+  turbopack: {
+    rules: {
+      "*.md": { type: "raw" },
+    },
+  },
+
   // Slice 208 — see header comment.
   async rewrites() {
     const target = resolveAtlasHTTPURL();

@@ -249,6 +249,12 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if result.KeptReviewedAnchor {
+		// #1776: the boot seed's stock manifest was not applied over a
+		// person's approved SCF re-anchor.
+		slog.InfoContext(ctx, "control bundle upload kept the reviewed SCF re-anchor",
+			"bundle_id", result.BundleID, "control_id", result.ControlID.String())
+	}
 	status := http.StatusOK
 	if result.IsNewBundle {
 		status = http.StatusCreated

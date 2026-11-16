@@ -3,9 +3,14 @@
 // "<Page> · security-atlas" document title (the /settings convention,
 // slice 248). The page is a client component, so the metadata lives in
 // this sibling server-component layout.
+//
+// #2171: the layout also gates the whole module on its switch,
+// server-side, before the client page mounts.
 
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-titles";
+
+import { FeatureGate } from "@/components/feature-gate";
 
 export const metadata: Metadata = {
   title: pageTitle("/vendors"),
@@ -16,5 +21,9 @@ export default function VendorsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <FeatureGate page="/vendors" moduleName={pageTitle("/vendors")}>
+      {children}
+    </FeatureGate>
+  );
 }

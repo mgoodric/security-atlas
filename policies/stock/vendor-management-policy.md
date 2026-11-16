@@ -5,9 +5,9 @@ owner_role: tenant_admin
 approver_role: security_lead
 scf_release: "2026.3"
 linked_control_ids:
-  - TPM-01
+  - TPM-02
   - TPM-03
-  - TPM-04
+  - TPM-10
 acknowledgment_required_roles:
   - procurement_owner
   - security_lead

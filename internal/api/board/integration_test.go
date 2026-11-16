@@ -51,8 +51,8 @@ import (
 // ----- harness -----
 
 // enableFeatureFlag turns a gating feature flag ON for the test tenant.
-// Slice 660 wrapped the board (briefs + packs) routes in
-// featureflag.Gate("board.reporting"), which DEFAULTS OFF — so without an
+// The board (briefs + packs) routes belong to the Board reporting module,
+// switched by "board.reporting", which DEFAULTS OFF — so without an
 // explicit override every board route returns 404 for a fresh test tenant.
 // We upsert the override via the admin (BYPASSRLS) pool, the same effect as
 // an operator toggling the flag ON. Cleanup removes the row.

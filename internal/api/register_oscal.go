@@ -26,24 +26,23 @@ func (s *Server) registerOSCAL(root *chi.Mux) {
 	// persisted Postgres rows). Routes appended per the parallel-batch
 	// convention (chi rejects two Mounts at "/"). The {id}:verb shape mirrors
 	// the slice-025 walkthroughs /{id}:finalize precedent.
-	// Slice 660 / #2170: the vendor-claims module is switched by the
-	// `oscal.export` flag. Its routes are in the module registry
-	// (featureflag.Modules), so the module gate in the authorization chain
-	// answers 404 + {"error":"feature disabled"} on every one of them when
-	// the module is off. `oscal.export` is OFF by default pending GA.
+	// Slice 660 / #2170 / #2171: vendor claims are a feature of Third-party
+	// risk, switched by `vendor.claims` (formerly `oscal.export`). Its routes
+	// are in the module registry (featureflag.Modules), so the module gate in
+	// the authorization chain answers 404 + {"error":"feature disabled"} when
+	// Third-party risk or the feature is off. `vendor.claims` is OFF by
+	// default pending GA.
 	oscalComponentsH := oscalcomponentsapi.New(oscalcomponentsapi.NewStore(s.dbPool))
-	root.Group(func(r chi.Router) {
-		r.Get("/v1/oscal/component-definitions", oscalComponentsH.ListDefinitions)
-		r.Get("/v1/oscal/component-definitions/{id}", oscalComponentsH.GetDefinition)
-		r.Post("/v1/oscal/component-claims/{id}:accept", oscalComponentsH.Accept)
-		r.Post("/v1/oscal/component-claims/{id}:reject", oscalComponentsH.Reject)
-		r.Post("/v1/oscal/component-claims/{id}:needs-info", oscalComponentsH.NeedsInfo)
-		// Slice 620: operator maps an UNMAPPED vendor claim (slice-512
-		// scf_anchor_id IS NULL) to a canonical SCF anchor. grc_engineer-gated;
-		// validates the anchor exists in the bundled catalog; sets the crosswalk +
-		// appends an append-only mapping-audit row. Requirement -> SCF anchor only
-		// (invariant #7); the claim stays a claim -- mapping NEVER writes
-		// control_evaluations (invariant #2 / P0-512-1).
-		r.Patch("/v1/oscal/component-claims/{id}/scf-anchor", oscalComponentsH.MapScfAnchor)
-	})
+	root.Get("/v1/oscal/component-definitions", oscalComponentsH.ListDefinitions)
+	root.Get("/v1/oscal/component-definitions/{id}", oscalComponentsH.GetDefinition)
+	root.Post("/v1/oscal/component-claims/{id}:accept", oscalComponentsH.Accept)
+	root.Post("/v1/oscal/component-claims/{id}:reject", oscalComponentsH.Reject)
+	root.Post("/v1/oscal/component-claims/{id}:needs-info", oscalComponentsH.NeedsInfo)
+	// Slice 620: operator maps an UNMAPPED vendor claim (slice-512
+	// scf_anchor_id IS NULL) to a canonical SCF anchor. grc_engineer-gated;
+	// validates the anchor exists in the bundled catalog; sets the crosswalk +
+	// appends an append-only mapping-audit row. Requirement -> SCF anchor only
+	// (invariant #7); the claim stays a claim -- mapping NEVER writes
+	// control_evaluations (invariant #2 / P0-512-1).
+	root.Patch("/v1/oscal/component-claims/{id}/scf-anchor", oscalComponentsH.MapScfAnchor)
 }

@@ -137,6 +137,15 @@ export type FeatureFlag = {
   last_changed_by?: string;
   last_changed_at?: string | null;
   has_override: boolean;
+  /** #2171: the module the flag belongs to, from the server's registry. */
+  module?: string;
+  module_name?: string;
+  /** True for the module's own switch; false for a feature inside it. */
+  module_switch?: boolean;
+  /** True when the module is core: always on, with no switch of its own. */
+  module_core?: boolean;
+  /** A feature's display name. */
+  feature_name?: string;
 };
 
 export type FeatureFlagListResponse = { items: FeatureFlag[] };

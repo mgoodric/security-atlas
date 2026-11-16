@@ -23,6 +23,22 @@ func TestEmbeddedTableParses(t *testing.T) {
 	}
 }
 
+// TestManyToOneRemapResolvesEachSource: two old codes may share one target
+// (#1975 merges CLD-09 and TPM-04 into TPM-10). The table is keyed on the
+// source, so each old code resolves on its own.
+func TestManyToOneRemapResolvesEachSource(t *testing.T) {
+	t.Parallel()
+	for _, from := range []string{"CLD-09", "TPM-04"} {
+		r, ok, err := Lookup("test-2026.1", from)
+		if err != nil {
+			t.Fatalf("Lookup(%s): %v", from, err)
+		}
+		if !ok || r.From != from || r.To != "TPM-10" || r.ToRelease != "test-2026.3" || r.Basis != "concept" {
+			t.Errorf("%s remap = %+v ok=%v; want TPM-10 (concept) in test-2026.3", from, r, ok)
+		}
+	}
+}
+
 // TestRemapTargetsExistInTheSample: every row that remaps into the bundled
 // sample's release names a code the sample carries, so a re-anchoring note
 // never points an operator at an anchor that is not there (#1972 review).
