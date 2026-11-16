@@ -32,7 +32,7 @@ export function AdminSectionNav({ demoEnabled }: { demoEnabled: boolean }) {
       <Link href="/admin/features" className="hover:text-foreground">
         Features
       </Link>
-      <Link href="/admin/audit" className="hover:text-foreground">
+      <Link href="/audit-log" className="hover:text-foreground">
         Audit
       </Link>
       {tenantChrome ? (

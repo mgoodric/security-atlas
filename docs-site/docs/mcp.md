@@ -37,22 +37,28 @@ Once connected, the assistant can answer questions from your **live data**:
 
 ### Read tools
 
-| Tool                     | Answers questions like…                                           |
-| ------------------------ | ----------------------------------------------------------------- |
-| `list_controls`          | "List my active controls and their framework mappings."           |
-| `get_control`            | "Show me control IAC-06 and where its evidence stands."           |
-| `list_risks`             | "What risks are in the mitigate treatment?" (filter by treatment) |
-| `get_risk`               | "Show risk R-14 with its linked controls and residual score."     |
-| `list_evidence`          | "What evidence landed in the last 30 days?" (never raw payloads)  |
-| `list_audit_periods`     | "Which audit periods exist and which are frozen?"                 |
-| `list_policies`          | "List my policies and their acknowledgment state."                |
-| `list_vendors`           | "Show my third-party vendors and their review cadence."           |
-| `list_exceptions`        | "What exceptions are active, and when do they expire?"            |
-| `list_action_plans`      | "What remediation (OSCAL POA&M) is still open?"                   |
-| `list_framework_posture` | "How does my program score against each framework?"               |
+| Tool                     | Answers questions like…                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `list_controls`          | "List my active controls and their framework mappings."                                                            |
+| `get_control`            | "Show me control IAC-37 and where its evidence stands."                                                            |
+| `list_risks`             | "What risks are in the mitigate treatment?" (filter by treatment)                                                  |
+| `get_risk`               | "Show risk R-14 with its linked controls and residual score."                                                      |
+| `list_risk_categories`   | "Which risk categories does my organisation use?" (the valid values for `create_risk` and the `list_risks` filter) |
+| `list_evidence`          | "What evidence landed in the last 30 days?" (never raw payloads)                                                   |
+| `list_audit_periods`     | "Which audit periods exist and which are frozen?"                                                                  |
+| `list_policies`          | "List my policies and their acknowledgment state."                                                                 |
+| `list_vendors`           | "Show my third-party vendors and their review cadence."                                                            |
+| `list_exceptions`        | "What exceptions are active, and when do they expire?"                                                             |
+| `list_action_plans`      | "What remediation (OSCAL POA&M) is still open?"                                                                    |
+| `list_framework_posture` | "How does my program score against each framework?"                                                                |
 
 Every list tool returns up to 100 rows by default; pass `limit=N` (max 500) to
 widen. There is no "return everything" option — a request over 500 is rejected.
+
+`list_risks` leaves out roll-ups (risks with at least one child risk linked) by
+default, so a parent and the children it summarises are not counted twice. Pass
+`include_rollups=true` to list them too; each roll-up then carries
+`child_count`.
 
 ### Write tools (human-approved)
 

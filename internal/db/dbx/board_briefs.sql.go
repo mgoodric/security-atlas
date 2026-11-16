@@ -227,10 +227,16 @@ func (q *Queries) ListFrameworksForTenant(ctx context.Context, tenantID pgtype.U
 }
 
 const listRisksForBoardBrief = `-- name: ListRisksForBoardBrief :many
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id FROM risks
-WHERE tenant_id = $1
-  AND created_at <= $2
-ORDER BY updated_at ASC, id ASC
+SELECT r.id, r.tenant_id, r.title, r.description, r.category, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id FROM risks r
+WHERE r.tenant_id = $1
+  AND r.created_at <= $2
+  AND NOT EXISTS (
+    SELECT 1 FROM risk_aggregations ra
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND ra.created_at <= $2
+  )
+ORDER BY r.updated_at ASC, r.id ASC
 `
 
 type ListRisksForBoardBriefParams struct {
@@ -249,6 +255,11 @@ type ListRisksForBoardBriefParams struct {
 // extraction is done in Go, not a JSONB-path SQL expression that would trip
 // pgx type inference). `created_at` lower bound is passed explicitly so pgx
 // never has to infer a bare-placeholder type (SQLSTATE 42P08).
+//
+// Roll-up parents are left out (#2060): a parent summarises children that
+// are already ranked here, so counting it too would show the same exposure
+// twice. A risk is a roll-up when it had at least one child linked as of the
+// brief's date.
 func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error) {
 	rows, err := q.db.Query(ctx, listRisksForBoardBrief, arg.TenantID, arg.CreatedAt)
 	if err != nil {

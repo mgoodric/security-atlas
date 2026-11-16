@@ -87,6 +87,7 @@ tags:
   - name: frameworks
   - name: incidents
   - name: install
+  - name: mapping-overlays
   - name: mcp
   - name: me
   - name: oauth
@@ -2195,6 +2196,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/settings:
+    get:
+      summary: GET /v1/controls/imports/settings — the tenant's control import settings, including the local-Ollama rerank opt-in (tenant-admin; #2079)
+      tags: [controls]
+      operationId: get-v1-controls-imports-settings
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/controls/imports/settings — opt the tenant in or out of reranking import candidates on local Ollama (tenant-admin; #2079)
+      tags: [controls]
+      operationId: put-v1-controls-imports-settings
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/imports/{id}:
     get:
       summary: GET /v1/controls/imports/{id} — an import batch with its counts, staged rows and rejected rows (#1779)
@@ -2215,11 +2243,203 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/{id}/approve-clear:
+    post:
+      summary: POST /v1/controls/imports/{id}/approve-clear — approve every pending row whose top candidate is crosswalk-derived and reaches all of its tested criteria, with that candidate; a person must approve (#1783)
+      tags: [controls]
+      operationId: post-v1-controls-imports-id-approve-clear
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/{id}/export:
+    get:
+      summary: GET /v1/controls/imports/{id}/export — the batch's approved controls as a gzip-tar of <bundle_id>/control.yaml bundles, each declaring its anchor, SCF release and external references (#1784)
+      tags: [controls]
+      operationId: get-v1-controls-imports-id-export
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/imports/{id}/rows:
     get:
       summary: GET /v1/controls/imports/{id}/rows — staged rows with ranked SCF anchor candidates, filterable by status and no_candidate_reaches (#1780)
       tags: [controls]
       operationId: get-v1-controls-imports-id-rows
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/{id}/rows/{row}/approve:
+    post:
+      summary: POST /v1/controls/imports/{id}/rows/{row}/approve — approve a staged row with a candidate or any anchor of the batch's SCF release, creating a control; a person must approve (#1782)
+      tags: [controls]
+      operationId: post-v1-controls-imports-id-rows-row-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: row
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/{id}/rows/{row}/reject:
+    post:
+      summary: POST /v1/controls/imports/{id}/rows/{row}/reject — reject a staged row with a reason (#1782)
+      tags: [controls]
+      operationId: post-v1-controls-imports-id-rows-row-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: row
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/needs-reanchoring:
+    get:
+      summary: GET /v1/controls/needs-reanchoring — the tenant's controls left on a legacy SCF release's anchor that need re-anchoring, each with its remap note; pinned controls are excluded (#2176)
+      tags: [controls]
+      operationId: get-v1-controls-needs-reanchoring
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals:
+    get:
+      summary: GET /v1/controls/remap-proposals — the tenant's SCF remap proposals, one per control left on an older SCF release's anchor, filterable by class and status (#1775)
+      tags: [controls]
+      operationId: get-v1-controls-remap-proposals
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/approve-unchanged:
+    post:
+      summary: POST /v1/controls/remap-proposals/approve-unchanged — approve every open unchanged SCF remap proposal with its single successor, re-anchoring each control as a new revision; a person must approve (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-approve-unchanged
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/{id}/approve:
+    post:
+      summary: POST /v1/controls/remap-proposals/{id}/approve — re-anchor the control on a successor (scf_id required for split and no_successor) as a superseding revision and record the anchor history; a person must approve (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-id-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/{id}/keep-legacy:
+    post:
+      summary: POST /v1/controls/remap-proposals/{id}/keep-legacy — keep the control on its legacy SCF anchor for good; a person must decide (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-id-keep-legacy
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals/{id}/reject:
+    post:
+      summary: POST /v1/controls/remap-proposals/{id}/reject — reject a remap proposal; the control stays on its legacy anchor and the proposal can be revisited (#1776)
+      tags: [controls]
+      operationId: post-v1-controls-remap-proposals-id-reject
       security:
         - bearer: []
       parameters:
@@ -2919,6 +3139,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/evidence/{id}:
+    get:
+      summary: GET /v1/evidence/{id} — one evidence record with its redacted payload
+      tags: [evidence]
+      operationId: get-v1-evidence-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/evidence:push:
     post:
       summary: POST /v1/evidence:push
@@ -3074,13 +3314,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
-  /v1/features/enabled:
-    get:
-      summary: GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)
-      tags: [feature-flags]
-      operationId: get-v1-features-enabled
+  /v1/exceptions/{id}/revoke:
+    patch:
+      summary: PATCH /v1/exceptions/{id}/revoke
+      tags: [exceptions]
+      operationId: patch-v1-exceptions-id-revoke
       security:
         - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -3136,13 +3382,69 @@ paths:
       operationId: get-v1-framework-scopes-applicability-export
       security:
         - bearer: []
+      parameters:
+        - name: framework_version
+          in: query
+          required: true
+          description: Framework version id. Every requirement of this version is exported.
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: true
+          description: csv is the bare table, header first, and reads back through POST /v1/framework-scopes/{id}/applicability/import. xlsx adds a title block above the same table.
+          schema:
+            type: string
+            enum: [csv, xlsx]
+        - name: revision
+          in: query
+          required: false
+          description: Scope revision id to export instead of the activated revision. Mutually exclusive with as_of.
+          schema:
+            type: string
+            format: uuid
+        - name: as_of
+          in: query
+          required: false
+          description: RFC3339 time; exports the revision in force then, or every requirement undecided when none was. Mutually exclusive with revision.
+          schema:
+            type: string
+            format: date-time
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: >-
+            The export file, as an attachment. Cells a spreadsheet would read as a formula
+            (leading = + - @, tab or carriage return) are prefixed with a single quote in CSV;
+            the import strips it. The contradiction column is always evaluated against current
+            control results, including for as_of and a non-activated revision; the xlsx states
+            this in its title block, the CSV carries no preamble.
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Bad framework_version, format, revision or as_of; revision and as_of together; or a revision of another framework version.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing tenant or bearer context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown framework version or revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/framework-scopes/{id}:
     get:
       summary: GET /v1/framework-scopes/{id}
@@ -3227,6 +3529,26 @@ paths:
       summary: POST /v1/framework-scopes/{id}/applicability/bulk — set one applicability decision on many requirements
       tags: [framework-scopes]
       operationId: post-v1-framework-scopes-id-applicability-bulk
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability/diff:
+    get:
+      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision; implementation-reference-only edits are listed apart in reference_changes; the baseline is always the currently activated revision, so a superseded revision is compared against its successor
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-id-applicability-diff
       security:
         - bearer: []
       parameters:
@@ -3363,7 +3685,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/frameworks/posture:
     get:
-      summary: GET /v1/frameworks/posture
+      summary: GET /v1/frameworks/posture — per-version coverage, freshness and 90-day trend; scope_set=false with null percentages when no framework scope is activated (#2114)
       tags: [dashboard]
       operationId: get-v1-frameworks-posture
       security:
@@ -3496,6 +3818,109 @@ paths:
       operationId: post-v1-install-mark-first-signin
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays:
+    get:
+      summary: GET /v1/mapping-overlays — the organisation's overlay edges (requirement -> SCF anchor); ?framework, ?requirement, ?anchor, ?status=active|retired
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/mapping-overlays — add an overlay edge; body {framework, framework_version?, requirement_code, scf_release?, anchor_code, relationship_type, strength, rationale, source_ref}
+      tags: [mapping-overlays]
+      operationId: post-v1-mapping-overlays
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/audited-under:
+    get:
+      summary: GET /v1/mapping-overlays/audited-under — controls whose anchor, through catalog and overlay edges, does not reach a criterion they were tested under, with candidate anchors from the current SCF release; ?framework
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-audited-under
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/audited-under/export:
+    get:
+      summary: GET /v1/mapping-overlays/audited-under/export — the audited-under report as CSV; ?framework
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-audited-under-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/export:
+    get:
+      summary: GET /v1/mapping-overlays/export — the organisation's overlay edges as CSV (requirement, anchor, relationship, strength, rationale, source, author, dates, status); the list filters apply
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/import:
+    post:
+      summary: POST /v1/mapping-overlays/import — import overlay edges from a CSV or YAML body (?format=csv|yaml or Content-Type); all or nothing unless ?partial=true; bad rows reported by row and reason
+      tags: [mapping-overlays]
+      operationId: post-v1-mapping-overlays-import
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/{id}/retire:
+    post:
+      summary: POST /v1/mapping-overlays/{id}/retire — retire an overlay edge; body {reason}; the edge keeps its history
+      tags: [mapping-overlays]
+      operationId: post-v1-mapping-overlays-id-retire
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -3677,6 +4102,20 @@ paths:
       summary: PUT /v1/me/email-channel
       tags: [me]
       operationId: put-v1-me-email-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/me/modules:
+    get:
+      summary: GET /v1/me/modules — the caller's effective optional modules (#2170)
+      tags: [feature-flags]
+      operationId: get-v1-me-modules
       security:
         - bearer: []
       responses:
@@ -4788,7 +5227,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest:
     post:
-      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest — ?scf_release=<label> picks the SCF release the candidates come from, the current one when absent; the response names it in scf_release
       tags: [questionnaires]
       operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-ai-suggest
       security:
@@ -4933,7 +5372,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks:
     get:
-      summary: GET /v1/risks
+      summary: GET /v1/risks — the register; ?category= takes one or more category slugs or ids (repeated or comma-separated, archived included), an unknown one is a 400 naming the valid slugs; each risk carries category (slug), category_id and category_name; roll-ups (risks with at least one child linked) are left out unless ?include_rollups=true, and an included roll-up carries child_count
       tags: [risks]
       operationId: get-v1-risks
       security:
@@ -4946,7 +5385,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/risks
+      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: post-v1-risks
       security:
@@ -5194,7 +5633,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?}
+      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: patch-v1-risks-id
       security:
@@ -5638,7 +6077,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/search:
     get:
-      summary: GET /v1/search — unified lexical search across controls, risks, and evidence
+      summary: GET /v1/search — unified lexical search across controls, risks, policies, evidence, and SCF anchors
       tags: [search]
       operationId: get-v1-search
       security:
@@ -5657,7 +6096,7 @@ paths:
           description: Comma-separated result types. Omit for all supported types.
           schema:
             type: string
-            pattern: "^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$"
+            pattern: "^(controls|risks|policies|evidence|anchors)(,(controls|risks|policies|evidence|anchors))*$"
             examples: ["controls,risks,evidence"]
         - name: limit
           in: query
@@ -5689,7 +6128,7 @@ paths:
                 $ref: "#/components/schemas/Error"
   /v1/tenants/{id}:
     patch:
-      summary: PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)
+      summary: PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy, risk review cadence, Allow self-approval or vendor initial-review window (per-tenant admin or super_admin)
       tags: [tenants]
       operationId: patch-v1-tenants-id
       security:
@@ -5734,13 +6173,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
-  /v1/upcoming:
-    get:
-      summary: GET /v1/upcoming
-      tags: [dashboard]
-      operationId: get-v1-upcoming
+    post:
+      summary: POST /v1/themes — add an organisation theme; body {name, description?}; names are unique across built-ins and the organisation
+      tags: [risks]
+      operationId: post-v1-themes
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/themes/{ref}:
+    delete:
+      summary: DELETE /v1/themes/{ref} — delete an unused organisation theme (409 with risk and rule counts while in use; built-ins refused); ref is name or id
+      tags: [risks]
+      operationId: delete-v1-themes-ref
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    patch:
+      summary: PATCH /v1/themes/{ref} — rename an organisation theme; body {name?, description?}; rewrites every risk and aggregation rule that used the old name
+      tags: [risks]
+      operationId: patch-v1-themes-ref
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -5780,6 +6257,20 @@ paths:
       summary: GET /v1/vendors/burndown
       tags: [vendors]
       operationId: get-v1-vendors-burndown
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/vendors/initial-review-window:
+    get:
+      summary: GET /v1/vendors/initial-review-window — the organisation vendor initial-review window in days; set via PATCH /v1/tenants/{id} vendor_initial_review_days
+      tags: [vendors]
+      operationId: get-v1-vendors-initial-review-window
       security:
         - bearer: []
       responses:
@@ -6079,26 +6570,44 @@ components:
         `POST /v1/policies/{id}/publish`).
     SearchResponse:
       type: object
-      required: [hits, count, partial_types]
+      required: [hits, count, groups, partial_types]
       properties:
         hits:
           type: array
           items:
             $ref: "#/components/schemas/SearchHit"
+          description: Hits grouped by type in the order controls, risks, policies, evidence, anchors; best match first within a group. The limit is shared across groups.
         count:
           type: integer
           minimum: 0
-          description: Number of hits returned after relevance sorting and the global limit.
+          description: Number of hits returned after grouping and the global limit.
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchGroup"
+          description: One entry per admitted type, in group order, with that type's full match count.
         partial_types:
           type: array
           items:
             type: string
-            enum: [anchors, controls, risks, evidence]
+            enum: [controls, risks, policies, evidence, anchors]
           description: Requested types omitted because per-type authorization denied them.
       description: |
         Unified lexical search response for `GET /v1/search`. Controls,
-        risks, and evidence are tenant-confined by database RLS. Anchors are
-        bundled tenant-agnostic catalog rows.
+        risks, policies, and evidence are tenant-confined by database RLS.
+        Anchors are bundled tenant-agnostic catalog rows.
+    SearchGroup:
+      type: object
+      required: [type, count]
+      properties:
+        type:
+          type: string
+          enum: [controls, risks, policies, evidence, anchors]
+          description: Result type.
+        count:
+          type: integer
+          minimum: 0
+          description: Every row of this type matching the query that the caller can see, which may exceed the hits returned.
     ResetBootstrapRequest:
       type: object
       properties:
@@ -6168,7 +6677,7 @@ components:
           description: Stable identifier for the matched row or bundled anchor.
         type:
           type: string
-          enum: [anchors, controls, risks, evidence]
+          enum: [controls, risks, policies, evidence, anchors]
           description: Result discriminator used by clients for grouping and routing.
         title:
           type: string

@@ -17,6 +17,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { forwardJSON } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // FORWARD_PARAMS are the query keys the BFF is willing to forward to
@@ -57,4 +58,18 @@ export async function GET(req: Request): Promise<Response> {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// #2113 — POST /api/exceptions files an exception (the request form). The
+// body passes through as sent; the platform validates it, including
+// refusing a null scope predicate, and derives the requester from the
+// bearer.
+export async function POST(req: Request): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  return forwardJSON("/v1/exceptions", { method: "POST", jsonBody: body });
 }

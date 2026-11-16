@@ -6,9 +6,10 @@
 // breadcrumb names this section "Metrics"; the title matches.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Metrics · security-atlas",
+  title: pageTitle("/dashboards/metrics"),
 };
 
 export default function MetricsLayout({

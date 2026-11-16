@@ -86,7 +86,7 @@ is empty.`,
 	cmd.Flags().StringVar(&f.addr, "addr", ":8080", "address to bind the webhook receiver on")
 	cmd.Flags().StringVar(&f.path, "path", "/webhook", "HTTP path the GitHub webhook delivers to")
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:MON-01", "control_id to attach to github.audit_event.v1 records")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:MON-02", "control_id to attach to github.audit_event.v1 records")
 	return cmd
 }
 

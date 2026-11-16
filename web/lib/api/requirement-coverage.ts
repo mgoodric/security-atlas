@@ -9,6 +9,7 @@
 // renders the backend's number and band verbatim.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import type { EdgeOrigin, OverlayProvenance } from "./org-mapping";
 
 // RequirementAnchorWire mirrors `anchorWire` in
 // internal/api/ucfcoverage/handlers.go (the edge-bearing form returned by
@@ -24,7 +25,13 @@ export type RequirementAnchorWire = {
   relationship_type?: string;
   strength?: number;
   source_attribution?: string;
+  // "catalog", or "overlay" when the path is the tenant's own org mapping
+  // (#1798).
+  origin?: EdgeOrigin;
   rationale?: string;
+  // The org mapping's source, author and date; set only on an overlay row
+  // (#1800).
+  overlay?: OverlayProvenance;
 };
 
 // RequirementPointOfFocusWire mirrors soc2import.PointOfFocus: one SOC 2

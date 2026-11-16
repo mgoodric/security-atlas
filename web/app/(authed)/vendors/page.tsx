@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import {
   Card,
   CardContent,
@@ -31,6 +32,7 @@ import {
   VendorBurndown,
   VendorSpendRollupRow,
 } from "@/lib/api/vendors";
+import { pageTitle } from "@/lib/page-titles";
 
 // Slice 024 — vendor lite list view. The filters are query-param-driven so
 // a deep link survives reload and the user can bookmark "high + overdue".
@@ -109,16 +111,11 @@ export default function VendorsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
-          <p className="text-sm text-muted-foreground">
-            Third-party register. Lite scope: contract dates, DPA, review
-            cadence, criticality. Phase 2 adds questionnaire issuance.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell
+      title={pageTitle("/vendors")}
+      subtitle="Third-party register: contract dates, DPA, review cadence and criticality."
+      actions={
+        <>
           {/* Slice 139 — vendor data export (csv|json|xlsx). The
               button group renders three direct links to the BFF;
               clicking each triggers the browser's file-save dialog.
@@ -127,9 +124,9 @@ export default function VendorsPage() {
           <Link href="/vendors/new" className={buttonVariants()}>
             Add vendor
           </Link>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       <BurndownCard
         burndown={burndownQ.data}
         loading={burndownQ.isLoading}
@@ -212,7 +209,7 @@ export default function VendorsPage() {
           {vendorsQ.data ? <VendorTable vendors={vendorsQ.data} /> : null}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }
 
@@ -299,6 +296,10 @@ function VendorTable({ vendors }: { vendors: Vendor[] }) {
               <TableCell>
                 {v.overdue ? (
                   <Badge variant="destructive">overdue</Badge>
+                ) : v.first_review_due ? (
+                  <Badge variant="outline">
+                    First review due {v.first_review_due}
+                  </Badge>
                 ) : (
                   <Badge variant="secondary">on time</Badge>
                 )}
@@ -364,7 +365,7 @@ function formatSpend(amount?: number | null, currency?: string | null): string {
 function CriticalityBadge({ value }: { value: string }) {
   const variant =
     value === "high"
-      ? "destructive"
+      ? "critical"
       : value === "medium"
         ? "secondary"
         : "outline";
@@ -486,7 +487,7 @@ function ListSkeleton() {
 function ExportButtons() {
   return (
     <div
-      className="flex items-center gap-1"
+      className="flex flex-wrap items-center gap-1"
       data-testid="vendors-export-buttons"
     >
       <span className="text-xs text-muted-foreground">Export:</span>

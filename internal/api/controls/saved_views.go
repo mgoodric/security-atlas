@@ -44,7 +44,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -265,8 +264,8 @@ func (h *SavedViewsHandler) identity(w http.ResponseWriter, r *http.Request) (cr
 		writeSavedViewError(w, http.StatusInternalServerError, "tenant context: invalid tenant id")
 		return cred, uuid.Nil, uuid.Nil, false
 	}
-	userUUID, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		writeSavedViewError(w, http.StatusForbidden, "saved views require a user credential")
 		return cred, uuid.Nil, uuid.Nil, false
 	}

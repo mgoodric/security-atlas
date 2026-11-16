@@ -270,7 +270,7 @@ bundle_id: acme_mfa_all_staff
 title: "MFA is enforced for every staff account"
 description: |
   Every workforce identity signs in through the IdP with MFA enforced.
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: manual_attested
 owner_role: it
 lifecycle_state: active
@@ -323,9 +323,10 @@ One control, anchored once, reaches both frameworks.
 
 If a criterion your auditor tested the control under is missing, the
 anchor does not map to it. Choose a closer anchor, or record the gap
-with `anchor_fit`. Mapping a requirement directly for your organisation
-is planned as tenant overlay edges
-([#1735](https://github.com/mgoodric/security-atlas/issues/1735)).
+with `anchor_fit`. To map the criterion to the anchor for your
+organisation only, add a tenant overlay edge
+(`atlas-cli mappings overlay add`). Coverage counts it, and coverage
+responses mark that path `"origin": "overlay"`.
 
 ## 7. Evidence
 
@@ -365,11 +366,14 @@ atlas-cli evidence push --insecure \
   --payload @attestation.json \
   --idempotency-key "attest-$CONTROL_ID-$(date -u +%F)" \
   --actor-type human --actor-id jane.doe@example.com
-# { "recordId": "…", "hash": "…", "ingestedAt": "…", "credentialId": "key_…" }
+# { "recordId": "…", "hash": "…", "ingestedAt": "…", "credentialId": "key_…", "linkedControlId": "470d1eb3-…" }
 ```
 
 `--control` takes the control's UUID or its bundle ID
-(`acme_mfa_all_staff`); either links the record to the control.
+(`acme_mfa_all_staff`); either links the record to the control, and
+`linkedControlId` in the receipt names it. A bundle ID that matches no
+active control is stored unlinked, without `linkedControlId`, and the CLI
+warns on stderr.
 
 The key exists for this first push. Keep it in this shell, never in a
 shell rc file, and revoke it once the push has landed:

@@ -99,6 +99,7 @@ func main() {
 | `(*Client).Close() error`                                                 | Release the underlying gRPC connection when the client owns it.                            |
 | `sdk.WithTLSConfig(*tls.Config) Option`                                   | Override the default TLS configuration (default: system roots, TLS 1.2 floor).             |
 | `sdk.WithInsecure() Option`                                               | Disable TLS — accepted **only** for loopback endpoints; refuses non-loopback.              |
+| `sdk.IsLoopbackEndpoint(endpoint string) bool`                            | The `WithInsecure` gate: `localhost`, `127.0.0.0/8` or `::1`, by parsed host (not prefix). |
 | `sdk.NewClientFromConn(*grpc.ClientConn, bearer string) *Client`          | Build a client around an existing conn (typical in `bufconn` tests). `Close()` is a no-op. |
 | `sdk.MetadataAuthorization`, `sdk.BearerPrefix`                           | The gRPC metadata key and bearer prefix the client appends to every RPC.                   |
 

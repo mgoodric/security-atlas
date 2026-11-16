@@ -37,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -306,7 +307,7 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, a)
 }
 
-// ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-06&limit=10 =====
+// ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-37&limit=10 =====
 
 // Suggestions returns prior canonical answers for a given SCF anchor.
 func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
@@ -665,11 +666,14 @@ func (h *Handler) MappingSuggest(w http.ResponseWriter, r *http.Request) {
 	out, err := h.mappingSuggest.Suggest(ctx, qmapsuggest.SuggestParams{
 		QuestionID: qid,
 		Actor:      cred.ID,
+		SCFRelease: r.URL.Query().Get("scf_release"),
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, qmapsuggest.ErrQuestionNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "needs_mapping question not found")
+		case errors.Is(err, scfrelease.ErrUnknownRelease):
+			httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		case errors.Is(err, qmapsuggest.ErrQuestionCanonical):
 			httpresp.WriteError(w, http.StatusConflict, "question is already mapped")
 		default:

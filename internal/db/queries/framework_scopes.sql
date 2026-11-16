@@ -29,6 +29,16 @@ SELECT *
 FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: LockOpenFrameworkScope :one
+-- The applicability carry-over's target (#2179): a draft or review revision
+-- of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
+-- (approved, activated, superseded) or unknown revision.
+SELECT *
+FROM framework_scopes
+WHERE tenant_id = $1 AND id = $2
+  AND state IN ('draft', 'review')
+FOR UPDATE;
+
 -- name: ListFrameworkScopes :many
 -- Newest first. Caller filters by framework_version + state in the
 -- application layer because sqlc-static optional WHERE is noisy; the row
@@ -86,10 +96,16 @@ RETURNING *;
 -- name: SubmitFrameworkScope :one
 -- AC-6: draft -> review. Guarded so callers can never re-submit an already
 -- under-review row by accident (would still be valid but masks bugs).
+-- #2101: records the submitter as a person, so approval can compare. Also
+-- re-submits a review row whose submitter is unrecorded (NULL) or a session
+-- id ('jwt:<token id>'), which approval refuses because it names no person.
 UPDATE framework_scopes
 SET state = 'review',
+    submitted_by = sqlc.arg('submitted_by'),
     updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND state = 'draft'
+WHERE tenant_id = $1 AND id = $2
+  AND (state = 'draft'
+       OR (state = 'review' AND (submitted_by IS NULL OR submitted_by LIKE 'jwt:%')))
 RETURNING *;
 
 -- name: ApproveFrameworkScope :one
@@ -104,6 +120,7 @@ SET state = 'approved',
     predicate_hash_at_approval = predicate_hash,
     approval_evidence_file_url = $4,
     approval_evidence_file_hash = $5,
+    self_approved = sqlc.arg('self_approved'),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND state = 'review'
 RETURNING *;

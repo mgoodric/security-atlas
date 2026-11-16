@@ -46,9 +46,9 @@ func TestControlsImportShow_PrintsCandidatesWithSourceAndFit(t *testing.T) {
 				RowNumber: 2, ExternalID: "ORG-AC-01", Title: "MFA for workforce", Status: "pending",
 				TestedUnder: []controlimport.Requirement{cc61, cc62},
 				Candidates: []controlimport.Candidate{
-					{Rank: 1, SCFID: "IAC-06", Title: "Multi-Factor Authentication", Source: controlimport.SourceCrosswalk,
+					{Rank: 1, SCFID: "IAC-37", Title: "Multi-Factor Authentication", Source: controlimport.SourceCrosswalk,
 						Reaches: []controlimport.Requirement{cc61, cc62}, TestedCount: 2},
-					{Rank: 2, SCFID: "IAC-15", Title: "Account Management", Source: controlimport.SourceCrosswalk,
+					{Rank: 2, SCFID: "IAC-12", Title: "Account Management", Source: controlimport.SourceCrosswalk,
 						Reaches: []controlimport.Requirement{cc62}, TestedCount: 2},
 					{Rank: 3, SCFID: "IAC-01", Title: "Identity & Access Management", Source: controlimport.SourceKeyword,
 						Reaches: []controlimport.Requirement{}, TestedCount: 2},
@@ -65,7 +65,7 @@ func TestControlsImportShow_PrintsCandidatesWithSourceAndFit(t *testing.T) {
 				RowNumber: 8, ExternalID: "ORG-OP-01", Title: "Incident monitoring", Status: "pending",
 				TestedUnder: []controlimport.Requirement{cc71}, NoCandidateReaches: true,
 				Candidates: []controlimport.Candidate{
-					{Rank: 1, SCFID: "MON-01", Title: "Continuous Monitoring", Source: controlimport.SourceKeyword,
+					{Rank: 1, SCFID: "MON-02", Title: "Continuous Monitoring", Source: controlimport.SourceKeyword,
 						Reaches: []controlimport.Requirement{}, TestedCount: 1},
 				},
 			},
@@ -83,13 +83,13 @@ func TestControlsImportShow_PrintsCandidatesWithSourceAndFit(t *testing.T) {
 		"import batch batch-1  SCF release 2026.3  suggestions ready",
 		"row 2  ORG-AC-01  MFA for workforce  [pending]",
 		"  tested under: CC6.1, CC6.2",
-		"  1. IAC-06  Multi-Factor Authentication  (crosswalk; reaches 2 of 2: CC6.1, CC6.2)",
-		"  2. IAC-15  Account Management  (crosswalk; reaches 1 of 2: CC6.2)",
+		"  1. IAC-37  Multi-Factor Authentication  (crosswalk; reaches 2 of 2: CC6.1, CC6.2)",
+		"  2. IAC-12  Account Management  (crosswalk; reaches 1 of 2: CC6.2)",
 		"  3. IAC-01  Identity & Access Management  (keyword; reaches 0 of 2)",
 		"  1. HRS-04  Personnel Screening  (keyword)",
 		"row 8  ORG-OP-01  Incident monitoring  [pending]",
 		"  flag: no candidate reaches a tested criterion",
-		"  1. MON-01  Continuous Monitoring  (keyword; reaches 0 of 1)",
+		"  1. MON-02  Continuous Monitoring  (keyword; reaches 0 of 1)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
@@ -135,10 +135,11 @@ func TestControlsImportShow_PrintsRationalesAndUnavailableRerank(t *testing.T) {
 		Rows: []controlimport.BatchControl{
 			{
 				RowNumber: 2, ExternalID: "ORG-AC-01", Title: "MFA", Status: "pending", LLMRerank: controlimport.RerankApplied,
+				LLMProvider: "anthropic",
 				Candidates: []controlimport.Candidate{
-					{Rank: 1, SCFID: "IAC-15", Title: "Account Management", Source: controlimport.SourceCrosswalk,
+					{Rank: 1, SCFID: "IAC-12", Title: "Account Management", Source: controlimport.SourceCrosswalk,
 						AIAssisted: true, Rationale: "Covers account lifecycle."},
-					{Rank: 2, SCFID: "IAC-06", Title: "Multi-Factor Authentication", Source: controlimport.SourceKeyword},
+					{Rank: 2, SCFID: "IAC-37", Title: "Multi-Factor Authentication", Source: controlimport.SourceKeyword},
 				},
 			},
 			{
@@ -155,8 +156,8 @@ func TestControlsImportShow_PrintsRationalesAndUnavailableRerank(t *testing.T) {
 		t.Fatalf("controls import show: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"  1. IAC-15  Account Management  (crosswalk, LLM-reranked)\n     why: Covers account lifecycle.\n",
-		"  2. IAC-06  Multi-Factor Authentication  (keyword)\n",
+		"  LLM rerank routes to anthropic\n  1. IAC-12  Account Management  (crosswalk, LLM-reranked)\n     why: Covers account lifecycle.\n",
+		"  2. IAC-37  Multi-Factor Authentication  (keyword)\n",
 		"row 3  ORG-AC-02  Review  [pending]\n  LLM rerank unavailable: deterministic order, no rationale\n",
 	} {
 		if !strings.Contains(out, want) {

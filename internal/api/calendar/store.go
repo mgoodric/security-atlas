@@ -35,8 +35,31 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/duedate"
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// DueSoonDays is the due-soon window, in whole UTC days, for the event
+// types whose status the store computes: risk reviews, action-plan due
+// dates and policy acknowledgement expiries (#2130), and vendor reviews
+// (#2232). It matches the control-review branch's 14 days and the
+// dashboard's "Coming up" window. Policy reviews keep the policy list's
+// own window, policy.ReviewDueSoonDays.
+const DueSoonDays = 14
+
+// storeStatusDueSoonDays names the event types whose SQL branch leaves
+// status empty for ListEvents to fill with duedate.Status, the one overdue
+// rule (overdue strictly after the UTC due day), and each one's due-soon
+// window. A vendor renewal row shares the vendor type but carries its
+// commercial status, so only a row whose status is empty is filled.
+var storeStatusDueSoonDays = map[string]int{
+	"risk":        DueSoonDays,
+	"action_plan": DueSoonDays,
+	"policy_ack":  DueSoonDays,
+	"vendor":      DueSoonDays,
+	"policy":      policy.ReviewDueSoonDays,
+}
 
 // Store is the calendar read layer. It holds no write methods on the four
 // source tables — every query it issues over them is a SELECT. The single
@@ -89,6 +112,12 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 // The returned rows are ordered by starts_at ASC, then event_id ASC. The
 // SQL itself does NOT split into a separate "next_from" — that's a
 // handler-layer concern computed off the truncation probe.
+//
+// Risk-review, action-plan, policy-acknowledgement, vendor-review and
+// policy-review rows get their status here, from duedate.Status at now
+// (#2130, #2232). Every branch filters on
+// its own date against [from, to), so a window starting in the past
+// returns the items that fell due in it, marked overdue.
 func (s *Store) ListEvents(
 	ctx context.Context,
 	from, to, now time.Time,
@@ -108,7 +137,16 @@ func (s *Store) ListEvents(
 		})
 		return qerr
 	})
-	return rows, err
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		soonDays, ok := storeStatusDueSoonDays[rows[i].EventType]
+		if ok && rows[i].Status == "" && rows[i].StartsAt.Valid {
+			rows[i].Status = duedate.Status(rows[i].StartsAt.Time, now, soonDays)
+		}
+	}
+	return rows, nil
 }
 
 // ----- pgtype helpers (kept local — mirror the dashboard package) -----

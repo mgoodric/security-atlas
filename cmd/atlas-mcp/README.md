@@ -35,18 +35,19 @@ is a 1-tenant-per-process veneer over that surface.
 The first six shipped in slice 172; the last four widened the read surface
 to the rest of the program (see `docs-site/docs/mcp.md`).
 
-| Tool                 | Wraps endpoint                                              | Returns                                                    |
-| -------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
-| `list_controls`      | `GET /v1/controls`                                          | Tenant's active controls (canonical row shape)             |
-| `get_control`        | `GET /v1/anchors/{shortcode}` or list-then-filter for UUIDs | One control row                                            |
-| `list_risks`         | `GET /v1/risks`                                             | Tenant risks; status filter forwarded as `?treatment=`     |
-| `get_risk`           | `GET /v1/risks/{id}`                                        | One risk + linked controls + (optional) residual derive    |
-| `list_evidence`      | `GET /v1/evidence`                                          | Evidence ledger window; **never includes `payload_json`**  |
-| `list_audit_periods` | `GET /v1/audit-periods`                                     | Tenant audit periods with freeze metadata                  |
-| `list_policies`      | `GET /v1/policies`                                          | The policy library with acknowledgment state               |
-| `list_vendors`       | `GET /v1/vendors`                                           | The vendor register with review cadence                    |
-| `list_exceptions`    | `GET /v1/exceptions`                                        | Accepted non-compliance + compensating controls and expiry |
-| `list_action_plans`  | `GET /v1/action-plans`                                      | Forward-looking remediation commitments (OSCAL POA&M)      |
+| Tool                   | Wraps endpoint                                              | Returns                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `list_controls`        | `GET /v1/controls`                                          | Tenant's active controls (canonical row shape)                                                                           |
+| `get_control`          | `GET /v1/anchors/{shortcode}` or list-then-filter for UUIDs | One control row                                                                                                          |
+| `list_risks`           | `GET /v1/risks`                                             | Tenant risks, roll-ups excluded; `status`→`?treatment=`, `category`→`?category=`, `include_rollups`→`?include_rollups=`  |
+| `get_risk`             | `GET /v1/risks/{id}`                                        | One risk + linked controls + (optional) residual derive                                                                  |
+| `list_risk_categories` | `GET /v1/risks/categories`                                  | The organisation's own risk categories: valid `category` values for `create_risk` (slug or name) and `list_risks` (slug) |
+| `list_evidence`        | `GET /v1/evidence`                                          | Evidence ledger window; **never includes `payload_json`**                                                                |
+| `list_audit_periods`   | `GET /v1/audit-periods`                                     | Tenant audit periods with freeze metadata                                                                                |
+| `list_policies`        | `GET /v1/policies`                                          | The policy library with acknowledgment state                                                                             |
+| `list_vendors`         | `GET /v1/vendors`                                           | The vendor register with review cadence                                                                                  |
+| `list_exceptions`      | `GET /v1/exceptions`                                        | Accepted non-compliance + compensating controls and expiry                                                               |
+| `list_action_plans`    | `GET /v1/action-plans`                                      | Forward-looking remediation commitments (OSCAL POA&M)                                                                    |
 
 Defaults: every list tool returns up to 100 results; pass `limit=N`
 (max 500) to override. Asking for more than 500 returns a tool error

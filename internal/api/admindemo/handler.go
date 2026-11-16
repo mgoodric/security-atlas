@@ -19,8 +19,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/ratekey"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -232,7 +234,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(clientIP(r), h.clock()) {
+	if !h.limiter.allow(ratekey.IP(clientIP(r)), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
 		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return
@@ -356,7 +358,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(clientIP(r), h.clock()) {
+	if !h.limiter.allow(ratekey.IP(clientIP(r)), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
 		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return
@@ -474,14 +476,11 @@ func (h *Handler) resolveActor(ctx context.Context) (uuid.UUID, uuid.UUID, error
 		}
 	}
 	if actorID == uuid.Nil {
-		// Legacy bearer path — try the credstore credential's UserID.
-		// jwtmw also populates this with the "user:<uuid>" Subject, so
-		// strip the prefix here too.
+		// Legacy bearer path — the credstore credential's user, which
+		// resolves a "user:<uuid>" JWT Subject and a user-bound key alike.
 		cred, _ := authctx.CredentialFromContext(ctx)
-		if cred.UserID != "" {
-			if u, err := uuid.Parse(subjectUserID(cred.UserID)); err == nil {
-				actorID = u
-			}
+		if u, ok := credstore.CallerUserID(cred); ok {
+			actorID = u
 		}
 	}
 	if actorID == uuid.Nil {

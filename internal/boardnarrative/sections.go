@@ -112,7 +112,7 @@ type SectionDef struct {
 var sectionDefs = map[SectionKey]SectionDef{
 	SectionControlCoverage: {
 		Key:           SectionControlCoverage,
-		PromptVersion: promptVersion, // boardnarrative-coverage-v0 (slice 440, unchanged)
+		PromptVersion: promptVersion, // boardnarrative-coverage-v2 (#2210)
 		Heading:       sectionHeading,
 		ExpectedItems: expectedItems,
 		buildRollup:   RollupFromBrief,
@@ -130,7 +130,7 @@ var sectionDefs = map[SectionKey]SectionDef{
 	},
 	SectionDriftActivity: {
 		Key:           SectionDriftActivity,
-		PromptVersion: "boardnarrative-drift-v0",
+		PromptVersion: "boardnarrative-drift-v1",
 		Heading:       driftHeading,
 		ExpectedItems: driftExpectedItems,
 		buildRollup:   driftRollupFromBrief,
@@ -290,12 +290,13 @@ func driftRollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
 		bounded = bounded[:maxCitedExcerpts]
 	}
 	return Rollup{
-		PeriodEnd:       b.PeriodEnd,
-		Delta:           b.Drift.Delta,
-		FlippedOutCount: b.Drift.FlippedOutCount,
-		WindowDays:      b.Drift.WindowDays,
-		Excerpts:        bounded,
-		driftOnly:       true,
+		PeriodEnd:           b.PeriodEnd,
+		Delta:               b.Drift.Delta,
+		FlippedOutCount:     b.Drift.FlippedOutCount,
+		StartedPassingCount: b.Drift.StartedPassingCount,
+		WindowDays:          b.Drift.WindowDays,
+		Excerpts:            bounded,
+		driftOnly:           true,
 	}, nil
 }
 
@@ -318,8 +319,8 @@ Rules you MUST follow:
 4. SECTION SHAPE. Emit EXACTLY this structure and nothing else — no preamble, no summary, no extra sections, no closing remarks:
 
 ## Control drift activity
-1. <one sentence stating the drift window length in days and the net drift over it>
-2. <one sentence stating how many controls drifted out of passing in the window>
+1. <one sentence stating the drift window length in days and the net change in passing controls over it>
+2. <one sentence stating how many controls started passing (when the rollup gives controls_started_passing) and how many drifted out of passing in the window>
 3. <one sentence on a control behind the posture, citing one or more control/evidence ids from the rollup>
 
 Emit the heading verbatim, then exactly three numbered items, numbered 1 through 3 in order.
@@ -333,8 +334,7 @@ func buildDriftPrompt(r Rollup) string {
 	b.WriteString("Pre-computed rollup (state ONLY these numbers):\n")
 	fmt.Fprintf(&b, "  - period_end: %s\n", r.PeriodEnd)
 	fmt.Fprintf(&b, "  - drift_window_days: %s\n", itoa(r.WindowDays))
-	fmt.Fprintf(&b, "  - drift_delta_30d: %s\n", itoa(r.Delta))
-	fmt.Fprintf(&b, "  - controls_drifted_out: %s\n", itoa(r.FlippedOutCount))
+	writeDriftMovement(&b, r)
 	writeCitableBlock(&b, r.Excerpts)
 	return b.String()
 }

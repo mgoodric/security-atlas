@@ -11,23 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countTenantAdmins = `-- name: CountTenantAdmins :one
-SELECT COUNT(DISTINCT user_id) AS admin_count
-FROM user_roles
-WHERE tenant_id = $1 AND role = 'admin'
-`
-
-// Counts the DISTINCT users holding the 'admin' role in the tenant (regardless
-// of origin). The resolver's last-admin guard (AC-5 / P0-509-3) reads this
-// before revoking an admin role: it refuses to drop the final admin so a group
-// re-derivation can never lock the tenant out.
-func (q *Queries) CountTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countTenantAdmins, tenantID)
-	var admin_count int64
-	err := row.Scan(&admin_count)
-	return admin_count, err
-}
-
 const deleteGroupDerivedRole = `-- name: DeleteGroupDerivedRole :execrows
 DELETE FROM user_roles
 WHERE tenant_id = $1 AND user_id = $2 AND role = $3 AND origin = 'group-derived'

@@ -72,8 +72,11 @@ type policyExportRow struct {
 	SourceURL              string
 	ImportedBy             string
 	ImportedAt             string // RFC3339 when set
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// SelfApproved marks a policy its submitter approved under Allow
+	// self-approval (#2101).
+	SelfApproved bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // NewExportHandler constructs the slice 138 policies export handler.
@@ -256,6 +259,7 @@ func policiesExportHeader() []string {
 		"source_url",
 		"imported_by",
 		"imported_at",
+		"self_approved",
 	}
 }
 
@@ -282,6 +286,7 @@ func policiesToRowIter(rows []policyExportRow) iter.Seq[[]string] {
 				r.SourceURL,
 				r.ImportedBy,
 				r.ImportedAt,
+				strconv.FormatBool(r.SelfApproved),
 			}
 			if !yield(row) {
 				return
@@ -336,7 +341,8 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 			historical_approved_at,
 			source_url,
 			imported_by,
-			imported_at
+			imported_at,
+			self_approved
 		FROM policies
 		WHERE tenant_id = $1
 		ORDER BY title ASC, version DESC
@@ -368,13 +374,14 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 			sourceURL    *string
 			importedBy   *string
 			importedAt   pgtype.Timestamptz
+			selfApproved bool
 		)
 		if err := rs.Scan(
 			&id, &title, &version, &status, &effective,
 			&owner, &approver, &roles, &nextReviewAt,
 			&bodyMD, &createdAt, &updatedAt,
 			&source, &histApprover, &histApproved, &sourceURL,
-			&importedBy, &importedAt,
+			&importedBy, &importedAt, &selfApproved,
 		); err != nil {
 			return nil, false, fmt.Errorf("scan policy row: %w", err)
 		}
@@ -391,6 +398,7 @@ func (h *ExportHandler) listPoliciesDirect(ctx context.Context, limit int) ([]po
 			HistoricalApproverName:      derefString(histApprover),
 			SourceURL:                   derefString(sourceURL),
 			ImportedBy:                  derefString(importedBy),
+			SelfApproved:                selfApproved,
 			CreatedAt:                   createdAt,
 			UpdatedAt:                   updatedAt,
 		}

@@ -23,12 +23,16 @@
 //
 // AC-4 / AC-5: On success the page invalidates the TanStack
 // `["risks", "list"]` query (which slice 100's `/risks` list uses) and
-// router-pushes to `/risks` so the new row appears immediately. On 4xx
+// per the #2089 create convention routes to the new risk's detail page
+// with a "Risk created" toast. On 4xx
 // the upstream error renders inline in the form and the user's input
 // is preserved.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+
+import { PageShell } from "@/components/shell/page-shell";
+import { useToast } from "@/components/ui/toast";
 
 import { createRiskFromCookieSession } from "./actions";
 import { RiskForm } from "./risk-form";
@@ -36,24 +40,24 @@ import { RiskForm } from "./risk-form";
 export default function NewRiskPage() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Add risk</h1>
-        <p className="text-sm text-muted-foreground">
-          Capture an operational risk against the program register. You can link
-          controls and refine residual scoring later from the risk detail view.
-        </p>
-      </div>
+    <PageShell
+      title="Add risk"
+      subtitle="Capture an operational risk against the program register. You can link controls and refine residual scoring later from the risk detail view."
+      width="reading"
+    >
       <RiskForm
         onSubmit={async (body) => {
-          await createRiskFromCookieSession(body);
-          // AC-4: invalidate the list-view cache and route back to it.
+          const risk = await createRiskFromCookieSession(body);
+          // AC-4: invalidate the list-view cache, then land on the new
+          // record (#2089 create convention).
           await qc.invalidateQueries({ queryKey: ["risks", "list"] });
-          router.push("/risks");
+          toast("Risk created");
+          router.push(`/risks/${encodeURIComponent(risk.id)}`);
         }}
       />
-    </div>
+    </PageShell>
   );
 }

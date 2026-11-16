@@ -75,3 +75,20 @@ the failure is logged with `slog.Error`. `VerifyLocalLogin` then refuses
 every login with an internal error before any lookup, so the handler
 answers 500. Refusing only unknown accounts would make a fast 500 against
 a slow 401 the same existence oracle the equalizer exists to close.
+
+## D6 — Limits are per replica (#2047)
+
+The buckets live in each atlas process's memory and are not shared. With
+N replicas behind a load balancer, a client whose requests spread across
+them gets up to N times each limit: the production Helm values
+(`deploy/helm/values-production.yaml`, `atlas.replicaCount: 3`) give 180
+login attempts per IP at once and 15/min per account. The same holds for
+the OAuth limiters (#2041, slice 187).
+
+Accepted for v1 rather than moved to a shared store. The single-VM
+compose bundle, the v1 target, runs one replica. A shared bucket would
+put Postgres or NATS on the path of every login attempt. An operator who
+needs the stated limit cluster-wide can divide the configurable rates by
+the replica count, or pin clients to a replica by source IP at the load
+balancer. The operator docs say this under "Rate limits are per replica" in
+`docs-site/docs/configuration.md`.

@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { UploadZone } from "@/components/questionnaire/upload-zone";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { pageTitle } from "@/lib/page-titles";
 
 interface Questionnaire {
   id: string;
@@ -141,19 +143,11 @@ export default function QuestionnairesPage() {
   const isEmpty = !listQ.isLoading && items.length === 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Questionnaires
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Vendor security diligence questionnaires. Upload an Excel workbook
-            to import questions; author answers with prior-answer suggestions
-            and policy / evidence citations.
-          </p>
-        </div>
-        {!isEmpty && !listQ.isLoading ? (
+    <PageShell
+      title={pageTitle("/questionnaires")}
+      subtitle="Vendor security diligence questionnaires. Upload an Excel workbook to import questions; author answers with prior-answer suggestions and policy / evidence citations."
+      actions={
+        !isEmpty && !listQ.isLoading ? (
           <Button
             data-testid="questionnaires-upload-button"
             onClick={() => {
@@ -171,9 +165,9 @@ export default function QuestionnairesPage() {
           >
             + Upload Excel
           </Button>
-        ) : null}
-      </div>
-
+        ) : null
+      }
+    >
       {error ? (
         <Alert variant="destructive" data-testid="questionnaires-error">
           <AlertTitle>Upload failed</AlertTitle>
@@ -235,7 +229,7 @@ export default function QuestionnairesPage() {
           </Card>
         </>
       ) : null}
-    </div>
+    </PageShell>
   );
 }
 

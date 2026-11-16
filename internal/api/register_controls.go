@@ -57,18 +57,35 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// multi-product orgs are large.
 	controlsExportH := controlsapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/controls/export", controlsExportH.ExportControls)
+	// #1775: the SCF remap queue — one proposal per control left on an
+	// older SCF release's anchor, filterable by class and status. Literal
+	// segment, ahead of the /v1/controls/{id}/... patterns.
+	root.Get("/v1/controls/remap-proposals", controlsapi.NewRemapProposalsHandler(controlsStore).List)
+	// #1776: a person approves (re-anchoring the control as a superseding
+	// revision), rejects or keeps legacy a proposal, or bulk-approves the
+	// open unchanged ones.
+	controlsapi.NewRemapDecisionsHandler(controlsStore).RegisterRoutes(root)
+	// #2176: controls left on a legacy SCF release's anchor that the #1971
+	// D3 rule flags for re-anchoring, with remap notes, for the dashboard
+	// warning. Literal segment, ahead of the /v1/controls/{id}/... patterns.
+	root.Get("/v1/controls/needs-reanchoring", controlsapi.NewReanchoringHandler(controlsStore).List)
 	// #1779: bring-your-own-controls import — upload a CSV/XLSX control
 	// sheet and get back a staged import batch, every row staged or
 	// rejected with a reason. Literal /v1/controls/imports segment, so it
 	// sits ahead of the /v1/controls/{id}/... patterns like /export.
 	// #1781: candidates are LLM-reranked only for tenants whose cloud-LLM
-	// opt-in is on.
-	stager := controlimport.NewStager(controlimport.NewStore(s.dbPool)).WithReranker(controlimport.NewReranker(
+	// opt-in is on, or (#2079) who opted in to reranking on local Ollama.
+	importStore := controlimport.NewStore(s.dbPool)
+	stager := controlimport.NewStager(importStore).WithReranker(controlimport.NewReranker(
 		s.inferenceClient(),
 		controlimport.AuditRecorder(llm.NewAuditWriter(s.dbPool)),
-		s.cloudLLMOptedIn,
+		s.importRerankAllowed(importStore),
 	))
-	controlimportsapi.New(stager).RegisterRoutes(root)
+	// #1782: approve (creating a control through the bundle store) and
+	// reject staged rows; a person decides, never a machine credential.
+	// #1784: download the approved rows' controls as control.yaml bundles.
+	controlimportsapi.New(stager).WithSettings(importStore).WithDecisions(importStore).
+		WithExport(importStore).RegisterRoutes(root)
 	// Slice 175: controls history export (lineage incl. superseded
 	// versions). Sibling endpoint to /v1/controls/export — same shape,
 	// 17-column projection (slice 137's 15 + superseded_by +

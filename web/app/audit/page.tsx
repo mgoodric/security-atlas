@@ -10,11 +10,15 @@
 // the page redirects too. A signed-in non-auditor gets the "no period"
 // empty-state.
 
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AuditShell } from "@/components/audit/audit-shell";
+import { PageShell } from "@/components/shell/page-shell";
 import { resolveAuditPeriod } from "@/lib/api/audit-server";
+
+export const metadata: Metadata = { title: "Audit workspace" };
 
 export default async function AuditLandingPage() {
   const resolution = await resolveAuditPeriod();
@@ -29,14 +33,16 @@ export default async function AuditLandingPage() {
 
   if (resolution.kind === "error") {
     return (
-      <div className="mx-auto max-w-xl py-12">
-        <Alert variant="destructive">
-          <AlertTitle>Could not load the audit workspace</AlertTitle>
-          <AlertDescription>
-            The platform returned an unexpected status ({resolution.status})
-            resolving your assigned audit period. Try again shortly.
-          </AlertDescription>
-        </Alert>
+      <div className="overflow-y-auto p-4 sm:p-6">
+        <PageShell title="Audit workspace" width="reading">
+          <Alert variant="destructive">
+            <AlertTitle>Could not load the audit workspace</AlertTitle>
+            <AlertDescription>
+              The platform returned an unexpected status ({resolution.status})
+              resolving your assigned audit period. Try again shortly.
+            </AlertDescription>
+          </Alert>
+        </PageShell>
       </div>
     );
   }
@@ -46,18 +52,21 @@ export default async function AuditLandingPage() {
 
 function NoPeriodState() {
   return (
-    <div
-      data-testid="audit-no-period"
-      className="mx-auto max-w-xl space-y-4 py-12"
-    >
-      <Alert>
-        <AlertTitle>No audit period assigned</AlertTitle>
-        <AlertDescription>
-          Your account is signed in but is not assigned to any audit period. The
-          audit workspace opens once a GRC engineer grants you an auditor
-          assignment for a period. Until then there is nothing to test here.
-        </AlertDescription>
-      </Alert>
+    <div className="overflow-y-auto p-4 sm:p-6">
+      <PageShell
+        title="Audit workspace"
+        width="reading"
+        data-testid="audit-no-period"
+      >
+        <Alert>
+          <AlertTitle>No audit period assigned</AlertTitle>
+          <AlertDescription>
+            Your account is signed in but is not assigned to any audit period.
+            The audit workspace opens once a GRC engineer grants you an auditor
+            assignment for a period. Until then there is nothing to test here.
+          </AlertDescription>
+        </Alert>
+      </PageShell>
     </div>
   );
 }

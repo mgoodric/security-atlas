@@ -38,4 +38,20 @@ authed.describe("#2062 — signed-in visitor to /login", () => {
       expect(final.pathname.startsWith("/dashboard")).toBe(true);
     },
   );
+
+  // #2196 — `%09` decodes to TAB, which browsers strip from a Location
+  // header, so an unguarded `/\t/evil.example.com` would become the
+  // protocol-relative `//evil.example.com`.
+  authed(
+    "a control-character ?from= lands on /dashboard, not off-site",
+    async ({ authedPage }) => {
+      await authedPage.goto("/login?from=/%09/evil.example.com");
+      await authedPage.waitForURL((url) => !url.pathname.startsWith("/login"), {
+        timeout: 10_000,
+      });
+      const final = new URL(authedPage.url());
+      expect(final.host).not.toBe("evil.example.com");
+      expect(final.pathname.startsWith("/dashboard")).toBe(true);
+    },
+  );
 });

@@ -22,7 +22,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -77,6 +76,7 @@ type profileWire struct {
 	IdpSubject  string   `json:"idp_subject"`
 	TenantRole  string   `json:"tenant_role"`
 	TimeZone    *string  `json:"time_zone"`
+	Theme       *string  `json:"theme"`
 	IsAdmin     bool     `json:"is_admin"`
 	OwnerRoles  []string `json:"owner_roles"`
 	Roles       []string `json:"roles"`
@@ -88,7 +88,13 @@ type profileWire struct {
 type patchProfileRequest struct {
 	DisplayName *string `json:"display_name,omitempty"`
 	TimeZone    *string `json:"time_zone,omitempty"`
+	Theme       *string `json:"theme,omitempty"`
 }
+
+// validThemes is what PATCH /v1/me accepts for theme (#2142). It mirrors the
+// users_theme_check constraint in migrations/sql/20261117000000_users_theme.sql,
+// whose extra empty-string value means "never chosen" and cannot be written back.
+var validThemes = map[string]bool{"system": true, "light": true, "dark": true}
 
 // ----- handlers -----
 
@@ -123,7 +129,7 @@ func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, wire)
 }
 
-// PatchMe handles PATCH /v1/me. Accepts display_name + time_zone (both optional);
+// PatchMe handles PATCH /v1/me. Accepts display_name, time_zone and theme (all optional);
 // other fields are read-only and rejected silently (not echoed back). Writes a
 // me_audit_log entry when the diff is non-empty.
 func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
@@ -132,8 +138,8 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := callerUserUUID(cred)
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		// API-key / bootstrap credentials with no users row cannot PATCH a
 		// profile they don't have. Honest 404.
 		httpresp.WriteError(w, http.StatusNotFound, "no profile for this credential")
@@ -162,6 +168,10 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.Theme != nil && !validThemes[*req.Theme] {
+		httpresp.WriteError(w, http.StatusBadRequest, "theme must be one of system, light, dark")
+		return
+	}
 	// Load current profile to compute diff.
 	current, err := h.users.GetByID(ctx, tenantUUID, userUUID)
 	if err != nil {
@@ -180,8 +190,12 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	if req.TimeZone != nil {
 		newTZ = *req.TimeZone
 	}
+	newTheme := current.Theme
+	if req.Theme != nil {
+		newTheme = *req.Theme
+	}
 	// Empty-diff path: skip the UPDATE + skip the audit-log INSERT (ISC-A5).
-	if newDisplay == current.DisplayName && newTZ == current.TimeZone {
+	if newDisplay == current.DisplayName && newTZ == current.TimeZone && newTheme == current.Theme {
 		wire := profileWireFrom(current, cred)
 		roles, rerr := h.resolveRoles(ctx, cred)
 		if rerr != nil {
@@ -197,6 +211,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		ID:          userUUID,
 		DisplayName: newDisplay,
 		TimeZone:    newTZ,
+		Theme:       newTheme,
 	})
 	if err != nil {
 		httperr.WriteInternal(w, r, "update profile", err)
@@ -207,8 +222,8 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	// later observation of the data state. We deliberately do not roll back the
 	// UPDATE on audit-log failure (would create a worse failure mode where the
 	// user thinks the PATCH failed when in fact only the audit row failed).
-	before := map[string]any{"display_name": current.DisplayName, "time_zone": current.TimeZone}
-	after := map[string]any{"display_name": updated.DisplayName, "time_zone": updated.TimeZone}
+	before := map[string]any{"display_name": current.DisplayName, "time_zone": current.TimeZone, "theme": current.Theme}
+	after := map[string]any{"display_name": updated.DisplayName, "time_zone": updated.TimeZone, "theme": updated.Theme}
 	_ = h.writeAuditLog(ctx, tenantUUID, userUUID, "profile.update", before, after)
 	wire := profileWireFrom(updated, cred)
 	roles, rerr := h.resolveRoles(ctx, cred)
@@ -237,7 +252,7 @@ func (h *ProfileHandler) resolveRoles(ctx context.Context, cred credstore.Creden
 	if h.roles == nil || cred.UserID == "" || cred.TenantID == "" {
 		return out, nil
 	}
-	rows, err := h.roles.RolesFor(ctx, cred.TenantID, cred.UserID)
+	rows, err := h.roles.RolesFor(ctx, cred.TenantID, rolesKey(cred))
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +260,19 @@ func (h *ProfileHandler) resolveRoles(ctx context.Context, cred credstore.Creden
 		out = append(out, string(r))
 	}
 	return out, nil
+}
+
+// rolesKey is the user_roles.user_id to look the caller up under. A JWT
+// session (password or OIDC sign-in, PKCE, device grant) carries the subject
+// "user:<uuid>" while user_roles stores the bare uuid, so a user caller is
+// keyed by credstore.CallerUserID (#2216). A principal that names no user
+// (API key, bootstrap admin, machine token) keeps its raw UserID, which is
+// what the lookup used before.
+func rolesKey(cred credstore.Credential) string {
+	if u, ok := credstore.CallerUserID(cred); ok {
+		return u.String()
+	}
+	return cred.UserID
 }
 
 // buildProfile resolves the caller's identity into the wire shape. When the
@@ -256,7 +284,7 @@ func (h *ProfileHandler) buildProfile(ctx context.Context, cred credstore.Creden
 	if cred.IsAdmin {
 		role = "admin"
 	}
-	if u, err := callerUserUUID(cred); err == nil {
+	if u, ok := credstore.CallerUserID(cred); ok {
 		tenantUUID, terr := uuid.Parse(cred.TenantID)
 		if terr == nil {
 			usr, uerr := h.users.GetByID(ctx, tenantUUID, u)
@@ -279,19 +307,10 @@ func (h *ProfileHandler) buildProfile(ctx context.Context, cred credstore.Creden
 		IdpSubject:  "",
 		TenantRole:  role,
 		TimeZone:    tz,
+		Theme:       nil, // no users row: nowhere to store a choice
 		IsAdmin:     cred.IsAdmin,
 		OwnerRoles:  append([]string(nil), cred.OwnerRoles...),
 	}, nil
-}
-
-// callerUserUUID resolves the users.id behind cred. A JWT session (local
-// login, PKCE, device grant) carries cred.UserID = "user:<uuid>", so the
-// prefix is stripped via jwtmw.SubjectUserID before the parse (#2055). Machine
-// tokens ("oauth_client:<id>") still fail to parse, and API-key / bootstrap
-// credentials, whose UserID is their own credential id, find no users row; both
-// keep the credential profile. Authorization does not read this value.
-func callerUserUUID(cred credstore.Credential) (uuid.UUID, error) {
-	return uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
 }
 
 func profileWireFrom(u users.User, cred credstore.Credential) profileWire {
@@ -312,9 +331,20 @@ func profileWireFrom(u users.User, cred credstore.Credential) profileWire {
 		IdpSubject:  u.IdpSubject,
 		TenantRole:  role,
 		TimeZone:    tz,
+		Theme:       storedTheme(u.Theme),
 		IsAdmin:     cred.IsAdmin,
 		OwnerRoles:  append([]string(nil), cred.OwnerRoles...),
 	}
+}
+
+// storedTheme maps the users.theme column to the wire: nil when the user has
+// never chosen (the empty string), so the browser keeps its cached choice rather than having
+// one invented for it (P0-A1).
+func storedTheme(t string) *string {
+	if !validThemes[t] {
+		return nil
+	}
+	return &t
 }
 
 // writeAuditLog is the shared me_audit_log INSERT primitive used by every PATCH +

@@ -14,6 +14,9 @@ data:
   ATLAS_HTTP_ADDR: ":8080"
   ATLAS_GRPC_ADDR: ":50051"
   ATLAS_SECURE_COOKIES: {{ .Values.atlas.secureCookies | quote }}
+  {{- with .Values.atlas.trustedProxyCIDRs }}
+  TRUSTED_PROXY_CIDRS: {{ . | quote }}
+  {{- end }}
   # --- NATS ---
   NATS_URL: {{ include "security-atlas.natsUrl" . | quote }}
   # --- artifact store (slice 036) ---
@@ -37,6 +40,7 @@ data:
   # --- web frontend ---
   ATLAS_HTTP_URL_WEB: {{ printf "http://%s-atlas:8080" (include "security-atlas.fullname" .) | quote }}
   NEXT_PUBLIC_API_BASE_URL: {{ .Values.web.publicApiBaseUrl | quote }}
+  WEB_TRUSTED_PROXY_CIDRS: {{ .Values.web.trustedProxyCIDRs | quote }}
   {{- if .Values.oidc.issuer }}
   # --- OIDC (relying party) — non-secret fields ---
   ATLAS_OIDC_ISSUER: {{ .Values.oidc.issuer | quote }}

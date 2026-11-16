@@ -34,33 +34,34 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
+import { useToast } from "@/components/ui/toast";
+
 import { createAuditPeriodFromCookieSession } from "./actions";
 import { AuditPeriodForm } from "./audit-period-form";
 
 export default function NewAuditPeriodPage() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          New audit period
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Open a period when an external audit begins. The period bounds the
-          evidence the sample population draws from once you freeze it.
-        </p>
-      </div>
+    <PageShell
+      width="reading"
+      title="New audit period"
+      subtitle="Open a period when an external audit begins. The period bounds the evidence the sample population draws from once you freeze it."
+    >
       <AuditPeriodForm
         onSubmit={async (body) => {
           await createAuditPeriodFromCookieSession(body);
           // Invalidate the list-view cache and route back to it so the
-          // new row appears immediately.
+          // new row appears immediately. An audit period has no detail
+          // page yet, so the list is the record's home (#2089).
           await qc.invalidateQueries({ queryKey: ["audits", "list"] });
+          toast("Audit period created");
           router.push("/audits");
         }}
       />
-    </div>
+    </PageShell>
   );
 }

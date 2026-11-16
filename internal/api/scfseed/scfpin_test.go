@@ -49,26 +49,11 @@ const (
 
 // knownMismatchCeiling caps knownMismatch at its seeded size. Lower it as
 // family groups land; never raise it.
-const knownMismatchCeiling = 73
+const knownMismatchCeiling = 46
 
 // knownMismatch: sample scf_id -> the sample title that does not match the
 // pin. Seeded 2026-11-13 with every mismatching row; drained by family.
 var knownMismatch = map[string]string{
-	"AAA-01": "Auditing & Accountability",
-	"AAA-10": "Event Log Retention",
-	"AAA-12": "Audit Log Review",
-	"AST-03": "Asset Inventory",
-	"AST-09": "Asset Disposal",
-	"BCD-02": "Business Continuity Plan",
-	"BCD-09": "Backups",
-	"BCD-11": "Backup Testing",
-	"CFG-02": "Secure Baseline Configurations",
-	"CFG-04": "Configuration Change Control",
-	"CHG-02": "Change Control Process",
-	"CLD-01": "Cloud Infrastructure Governance",
-	"CLD-09": "Cloud Service Provider Risk Management",
-	"CPL-01": "Compliance Management",
-	"CPL-03": "Internal Audit Function",
 	"CRY-01": "Use of Cryptographic Controls",
 	"CRY-04": "Encryption At Rest",
 	"CRY-08": "Encryption In Transit",
@@ -90,19 +75,9 @@ var knownMismatch = map[string]string{
 	"HRS-07": "Personnel Sanctions",
 	"HRS-09": "Personnel Termination Process",
 	"HRS-12": "Rules of Behavior (Acceptable Use)",
-	"IAC-06": "Multi-Factor Authentication (MFA)",
-
-	"IAC-07": "User Provisioning & Lifecycle",
-	"IAC-10": "Authenticator Management",
-	"IAC-15": "Account Review",
-	"IAC-21": "Privileged Account Management",
-	"IAC-24": "Emergency Access (Break-Glass) Accounts",
-	"IAC-25": "Session Termination",
 	"IRO-04": "Incident Response Plan",
 	"IRO-09": "Incident Reporting",
 	"MNT-02": "Controlled Maintenance",
-	"MON-01": "Continuous Monitoring",
-	"MON-08": "Anomalous Behavior Detection",
 	"NET-01": "Network Security",
 	"NET-04": "Boundary Protection",
 	"NET-06": "Network Segmentation",
@@ -124,9 +99,6 @@ var knownMismatch = map[string]string{
 	"THR-07": "Vulnerability Disclosure Program (VDP)",
 	"THR-09": "Threat Catalog",
 	"THR-10": "Threat Analysis",
-	"TPM-01": "Third-Party Management",
-	"TPM-04": "Third-Party Risk Assessments",
-	"TPM-05": "Third-Party Contract Requirements",
 	"VPM-04": "Vulnerability Remediation Process",
 }
 

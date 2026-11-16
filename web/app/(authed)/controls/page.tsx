@@ -118,10 +118,6 @@ import {
   VIEW_PARAM,
 } from "./view";
 import {
-  NEW_CONTROL_FUTURE_REASON,
-  NEW_CONTROL_FUTURE_TESTID,
-} from "./new-control-future";
-import {
   BulkAssignMessage,
   SavedViewsBar,
   SelectionBar,
@@ -139,6 +135,8 @@ import {
   sanitizeFilters,
   type SavedView,
 } from "./saved-views";
+import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
+import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof ControlFilters)[] = [
   "framework",
@@ -193,10 +191,7 @@ const PAGE_PARAM = "page";
 
 const RESULT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All states" },
-  { value: "pass", label: "pass" },
-  { value: "fail", label: "fail" },
-  { value: "insufficient_evidence", label: "insufficient_evidence" },
-  { value: "not_applicable", label: "not_applicable" },
+  ...enumOptions("EvaluationState"),
 ];
 
 // Slice <NNN> — map the control evaluation `result` enum (the real wire
@@ -210,11 +205,14 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
 //   fail                  -> critical (red    — the card's "Gap")
 //   insufficient_evidence -> warning  (amber  — needs attention, not a hard fail)
 //   not_applicable        -> secondary (neutral — out of scope, no signal hue)
-// `info` and `progress` from the badge family have no member in the
-// control-result enum, so they are intentionally unused here (they exist
-// for other surfaces and the design preview).
+//   excepted              -> info     (blue   — waived by an active exception;
+//                                      #2112: never the pass hue, never "pass")
+// `progress` from the badge family has no member in the control-result
+// enum, so it is intentionally unused here (it exists for other surfaces
+// and the design preview).
 type StatusBadgeVariant =
   | "pass"
+  | "info"
   | "critical"
   | "warning"
   | "secondary"
@@ -225,7 +223,15 @@ const RESULT_BADGE_VARIANT: Record<string, StatusBadgeVariant> = {
   fail: "critical",
   insufficient_evidence: "warning",
   not_applicable: "secondary",
+  excepted: "info",
 };
+
+// #2112, #2083 — display text for a result. `excepted` reads "Excepted",
+// so a waived control can never be mistaken for a passing one; the raw
+// value stays on the data-result attribute.
+function resultLabel(result: string): string {
+  return enumLabel("EvaluationState", result);
+}
 
 function resultBadgeVariant(result: string): StatusBadgeVariant {
   // Unknown / future result values fall back to a neutral outline pill
@@ -235,9 +241,7 @@ function resultBadgeVariant(result: string): StatusBadgeVariant {
 
 const FRESHNESS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All" },
-  { value: "fresh", label: "fresh" },
-  { value: "stale", label: "stale" },
-  { value: "expired", label: "expired" },
+  ...enumOptions("FreshnessState"),
 ];
 
 const FRAMEWORK_OPTIONS: { value: string; label: string }[] = [
@@ -949,7 +953,7 @@ function ControlsPageInner() {
               aria-hidden="true"
               className="size-1.5 shrink-0 rounded-full bg-current"
             />
-            {row.state.result}
+            {resultLabel(row.state.result)}
           </Badge>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -961,7 +965,7 @@ function ControlsPageInner() {
       cell: (row) =>
         row.state ? (
           <span className="text-xs text-muted-foreground">
-            {row.state.freshness_status}
+            {enumLabel("FreshnessState", row.state.freshness_status)}
           </span>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -1047,28 +1051,15 @@ function ControlsPageInner() {
           Export History {CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]}
         </a>
       ))}
-      {/* Slice 225 — replaces the formerly-disabled "New control"
-          `<Button>`, which was a permanently-disabled action with no
-          signposting (UI-honesty gap per slice 178's heuristic). The
-          create-control flow is a non-trivial mutation surface (SCF
-          anchor pick + applicability_expr + framework satisfactions +
-          optional policy attach) deferred to a future slice; the
-          route `/controls/new` does not exist on `main`. Replaced
-          with a non-button `<span>` carrying `title` + `aria-label` +
-          a stable test-id, mirroring the slice 217 audits pattern
-          (see `../audits/oscal-export-future.ts`). Visible copy +
-          tooltip + aria-label all read the same line; the disclosure
-          IS the affordance. When the create-control flow ships, this
-          surface flips back to a routing `<Link>` per slice 247's
-          enable-pattern and `new-control-future.ts` deletes. */}
-      <span
-        title={NEW_CONTROL_FUTURE_REASON}
-        aria-label={NEW_CONTROL_FUTURE_REASON}
-        data-testid={NEW_CONTROL_FUTURE_TESTID}
-        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+      {/* #1785 — upload a control sheet; the upload opens the batch's
+          review page. */}
+      <Link
+        href="/controls/imports"
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+        data-testid="controls-import"
       >
-        {NEW_CONTROL_FUTURE_REASON}
-      </span>
+        Import controls
+      </Link>
     </>
   );
 
@@ -1080,7 +1071,7 @@ function ControlsPageInner() {
   if (listQ.isLoading) {
     return (
       <ListPage
-        title="Controls"
+        title={pageTitle("/controls")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -1094,7 +1085,11 @@ function ControlsPageInner() {
 
   if (listQ.isError) {
     return (
-      <ListPage title="Controls" subtitle={subtitle} actions={actions}>
+      <ListPage
+        title={pageTitle("/controls")}
+        subtitle={subtitle}
+        actions={actions}
+      >
         <Alert variant="destructive" data-testid="controls-load-error">
           <AlertTitle>Could not load controls</AlertTitle>
           <AlertDescription>{(listQ.error as Error).message}</AlertDescription>
@@ -1150,7 +1145,7 @@ function ControlsPageInner() {
 
   return (
     <ListPage
-      title="Controls"
+      title={pageTitle("/controls")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

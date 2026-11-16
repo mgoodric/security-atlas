@@ -18,15 +18,34 @@ FROM org_risk_categories
 WHERE tenant_id = $1
 ORDER BY lower(name), slug;
 
--- name: ResolveRiskCategory :one
--- Find one of the tenant's categories by slug or by id (its text form).
+-- name: ShareLockRiskCategory :one
+-- Find one of the tenant's categories by slug or by id (its text form) and
+-- hold it FOR SHARE for the rest of the transaction (#2233). Every caller
+-- is about to assign a risk to the row: the share lock makes a concurrent
+-- archive (LockRiskCategory, FOR UPDATE) wait for this write to commit, or
+-- this read wait for the archive and see archived = true. Share locks do
+-- not conflict with each other, so concurrent risk writes do not queue.
 -- Slugs cannot be UUID-shaped strings that collide with another row's id
 -- in practice, and the tenant predicate keeps both arms tenant-local.
 SELECT *
 FROM org_risk_categories
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND (slug = sqlc.arg(ref)::text OR id::text = sqlc.arg(ref)::text)
-LIMIT 1;
+LIMIT 1
+FOR SHARE;
+
+-- name: ShareLockRiskCategoriesByName :many
+-- #1815: the tenant's categories whose display name matches name, case-
+-- insensitively on the trimmed value, archived included, each held FOR
+-- SHARE as ShareLockRiskCategory does (#2233). Active names are unique per
+-- tenant, but an archived category can share one, so a caller gets every
+-- match and picks the single active one.
+SELECT *
+FROM org_risk_categories
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND lower(btrim(name)) = lower(btrim(sqlc.arg(name)::text))
+ORDER BY slug
+FOR SHARE;
 
 -- ===== #1810: category management =====
 

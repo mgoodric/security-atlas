@@ -27,7 +27,7 @@ import {
   detachChildRisk,
   fetchRiskChildren,
   fetchRiskParents,
-  fetchRisksList,
+  fetchRisksListWithRollUps,
   type LinkedRisk,
   type Risk,
 } from "@/lib/api/risks";
@@ -54,8 +54,8 @@ export function RiskHierarchyLinks({ risk }: Props) {
   // so a team risk never fetches the register.
   const canHaveChildren = risk.level === "org" || risk.level === "company";
   const register = useQuery({
-    queryKey: ["risks", "list"],
-    queryFn: fetchRisksList,
+    queryKey: ["risks", "list", "with-rollups"],
+    queryFn: fetchRisksListWithRollUps,
     enabled: canHaveChildren,
   });
 
@@ -128,7 +128,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
         </CardContent>
       </Card>
 
-      <Card data-testid="risk-detail-children">
+      <Card id="children" data-testid="risk-detail-children">
         <CardHeader className="border-b">
           <CardTitle>Children</CardTitle>
         </CardHeader>
@@ -154,7 +154,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
               {childRows.map((c) => (
                 <LinkedRiskRow key={c.id} link={c} testid="risk-detail-child">
                   <Button
-                    variant="destructive"
+                    variant="outline"
                     size="xs"
                     disabled={detach.isPending}
                     onClick={() => detach.mutate(c.id)}

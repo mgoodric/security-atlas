@@ -71,7 +71,7 @@ func TestSuggestForAnchor_RejectsEmptyAnchor(t *testing.T) {
 
 func TestSuggestForAnchor_QueryShape(t *testing.T) {
 	r := &fakeReader{rows: &fakeRows{data: nil}}
-	_, err := SuggestForAnchor(context.Background(), r, "IAC-06", 5)
+	_, err := SuggestForAnchor(context.Background(), r, "IAC-37", 5)
 	if err != nil {
 		t.Fatalf("SuggestForAnchor: %v", err)
 	}
@@ -86,8 +86,8 @@ func TestSuggestForAnchor_QueryShape(t *testing.T) {
 	if len(r.lastArgs) != 2 {
 		t.Fatalf("expected 2 args, got %d", len(r.lastArgs))
 	}
-	if got := r.lastArgs[0].(string); got != "IAC-06" {
-		t.Fatalf("expected anchor IAC-06, got %q", got)
+	if got := r.lastArgs[0].(string); got != "IAC-37" {
+		t.Fatalf("expected anchor IAC-37, got %q", got)
 	}
 	if got := r.lastArgs[1].(int); got != 5 {
 		t.Fatalf("expected limit 5, got %d", got)
@@ -96,12 +96,12 @@ func TestSuggestForAnchor_QueryShape(t *testing.T) {
 
 func TestSuggestForAnchor_ClampsBadLimits(t *testing.T) {
 	r := &fakeReader{rows: &fakeRows{data: nil}}
-	_, _ = SuggestForAnchor(context.Background(), r, "IAC-06", -1)
+	_, _ = SuggestForAnchor(context.Background(), r, "IAC-37", -1)
 	if got := r.lastArgs[1].(int); got != DefaultSuggestionLimit {
 		t.Fatalf("expected DefaultSuggestionLimit, got %d", got)
 	}
 
-	_, _ = SuggestForAnchor(context.Background(), r, "IAC-06", 9999)
+	_, _ = SuggestForAnchor(context.Background(), r, "IAC-37", 9999)
 	if got := r.lastArgs[1].(int); got != DefaultSuggestionLimit {
 		t.Fatalf("expected DefaultSuggestionLimit, got %d", got)
 	}
@@ -109,7 +109,7 @@ func TestSuggestForAnchor_ClampsBadLimits(t *testing.T) {
 
 func TestSuggestForAnchor_PropagatesQueryError(t *testing.T) {
 	r := &fakeReader{err: errors.New("boom")}
-	_, err := SuggestForAnchor(context.Background(), r, "IAC-06", 10)
+	_, err := SuggestForAnchor(context.Background(), r, "IAC-37", 10)
 	if err == nil {
 		t.Fatal("expected error to propagate, got nil")
 	}
@@ -121,10 +121,10 @@ func TestSuggestForAnchor_PropagatesQueryError(t *testing.T) {
 func TestSuggestForAnchor_ScansRows(t *testing.T) {
 	now := time.Now().UTC()
 	r := &fakeReader{rows: &fakeRows{data: [][]any{
-		{"row-uuid-1", "IAC-06", "MFA is enforced.", "ACME-CAIQ-2026", now},
-		{"row-uuid-2", "IAC-06", "Second prior.", "OtherSrc", now.Add(-time.Hour)},
+		{"row-uuid-1", "IAC-37", "MFA is enforced.", "ACME-CAIQ-2026", now},
+		{"row-uuid-2", "IAC-37", "Second prior.", "OtherSrc", now.Add(-time.Hour)},
 	}}}
-	got, err := SuggestForAnchor(context.Background(), r, "IAC-06", 10)
+	got, err := SuggestForAnchor(context.Background(), r, "IAC-37", 10)
 	if err != nil {
 		t.Fatalf("SuggestForAnchor: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestSuggestForAnchor_ScansRows(t *testing.T) {
 // clamp must NOT kick in.
 func TestSuggestForAnchor_AcceptsDefaultLimit(t *testing.T) {
 	r := &fakeReader{rows: &fakeRows{data: nil}}
-	_, _ = SuggestForAnchor(context.Background(), r, "IAC-06", DefaultSuggestionLimit)
+	_, _ = SuggestForAnchor(context.Background(), r, "IAC-37", DefaultSuggestionLimit)
 	if got := r.lastArgs[1].(int); got != DefaultSuggestionLimit {
 		t.Fatalf("expected limit %d preserved, got %d", DefaultSuggestionLimit, got)
 	}

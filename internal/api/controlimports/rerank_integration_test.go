@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/controlimports"
@@ -32,6 +33,8 @@ import (
 type reverseStub struct {
 	calls atomic.Int32
 	err   error
+	// provider is the model_provider the stub reports; "" means anthropic.
+	provider string
 }
 
 func (s *reverseStub) Generate(_ context.Context, req llm.GenerateRequest) (llm.GenerateResult, error) {
@@ -52,7 +55,11 @@ func (s *reverseStub) Generate(_ context.Context, req llm.GenerateRequest) (llm.
 	}
 	// An anchor that is not a candidate: the importer must ignore it.
 	text += `,{"scf_id":"ZZZ-99","rationale":"invented"}]}`
-	return llm.GenerateResult{Text: text, ModelName: "stub-model", ModelVersion: "1", ModelProvider: "anthropic"}, nil
+	provider := s.provider
+	if provider == "" {
+		provider = "anthropic"
+	}
+	return llm.GenerateResult{Text: text, ModelName: "stub-model", ModelVersion: "1", ModelProvider: provider}, nil
 }
 
 // optIn sets the tenant's cloud-LLM routing to a cloud provider.
@@ -63,7 +70,7 @@ func optIn(t *testing.T, app *pgxpool.Pool, tenant string) *cloud.Store {
 		t.Fatalf("NewCrypter: %v", err)
 	}
 	store := cloud.NewStore(app, crypter)
-	if _, err := store.Set(dbtest.WithTenantCtx(t, tenant), cloud.ProviderAnthropic, cloud.Secret("control-import-fake-key-DO-NOT-USE")); err != nil {
+	if _, err := store.Set(dbtest.WithTenantCtx(t, tenant), cloud.ProviderAnthropic, cloud.Secret("control-import-fake-key-DO-NOT-USE"), uuid.Nil); err != nil {
 		t.Fatalf("opt in: %v", err)
 	}
 	return store
@@ -78,6 +85,12 @@ func rerankEnv(t *testing.T, app *pgxpool.Pool, tenant string, client llm.Client
 		cfg, err := store.Get(ctx)
 		return cfg.IsCloud, err
 	}
+	return rerankEnvGate(t, app, tenant, client, gate)
+}
+
+// rerankEnvGate is rerankEnv with an explicit rerank gate.
+func rerankEnvGate(t *testing.T, app *pgxpool.Pool, tenant string, client llm.Client, gate controlimport.RerankGate) testEnv {
+	t.Helper()
 	stager := controlimport.NewStager(controlimport.NewStore(app)).WithReranker(
 		controlimport.NewReranker(client, controlimport.AuditRecorder(llm.NewAuditWriter(app)), gate))
 	r := chi.NewRouter()
@@ -106,6 +119,8 @@ func rerankTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"control_import_batches",
 		"ai_generations",
 		"tenant_llm_routing",
+		"control_import_settings",
+		"me_audit_log",
 	)
 }
 
@@ -155,6 +170,10 @@ func TestStubLLMReordersCandidatesWithRationales(t *testing.T) {
 		}
 		if row.LLMRerank != controlimport.RerankApplied {
 			t.Errorf("%s llm_rerank = %q, want applied", row.ExternalID, row.LLMRerank)
+		}
+		// Read back through ai_generations (#2079).
+		if row.LLMProvider != "anthropic" {
+			t.Errorf("%s llm_provider = %q, want anthropic", row.ExternalID, row.LLMProvider)
 		}
 		want := scfIDs(base.Candidates)
 		slices.Reverse(want)
@@ -256,6 +275,53 @@ func TestLLMUsageRecordedUnderImportSurface(t *testing.T) {
 	}
 	if n := countGenerations(t, admin, tenant, string(llm.SurfaceQuestionnaire)); n != 0 {
 		t.Errorf("questionnaire ai_generations rows = %d, want 0", n)
+	}
+}
+
+// TestLocalOptInReranksOnLocalOllama: a tenant on the local default is
+// reranked only once its import settings opt in, its rows name the local
+// provider, and the opt-in is invisible to another tenant (#2079).
+func TestLocalOptInReranksOnLocalOllama(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	cat := seedCatalog(t, admin)
+
+	tenant := rerankTenant(t, admin)
+	other := rerankTenant(t, admin)
+	store := controlimport.NewStore(app)
+	routing := cloud.NewStore(app, nil)
+	cloudGate := func(ctx context.Context) (bool, error) {
+		cfg, err := routing.Get(ctx)
+		return cfg.IsCloud, err
+	}
+	gate := controlimport.OptInGate(cloudGate, store.GetSettings)
+
+	stub := &reverseStub{provider: "ollama-local"}
+	env := rerankEnvGate(t, app, tenant, stub, gate)
+	listRows(t, env, uploadFixture(t, env, cat.framework, "csv"), "")
+	if n := stub.calls.Load(); n != 0 {
+		t.Fatalf("LLM called %d times before the local opt-in, want 0", n)
+	}
+
+	ctx := dbtest.WithTenantCtx(t, tenant)
+	if _, err := store.SetSettings(ctx, controlimport.Settings{LLMRerankLocal: true}, "admin", uuid.Nil); err != nil {
+		t.Fatalf("SetSettings: %v", err)
+	}
+	if s, err := store.GetSettings(dbtest.WithTenantCtx(t, other)); err != nil || s.LLMRerankLocal {
+		t.Fatalf("other tenant's settings = %+v, %v; want the off default", s, err)
+	}
+
+	list := listRows(t, env, uploadFixture(t, env, cat.framework, "csv"), "")
+	if stub.calls.Load() == 0 {
+		t.Fatal("LLM not called with the local opt-in on")
+	}
+	for _, row := range list.Rows {
+		if len(row.Candidates) == 0 {
+			continue
+		}
+		if row.LLMRerank != controlimport.RerankApplied || row.LLMProvider != "ollama-local" {
+			t.Errorf("%s = %s via %q, want applied via ollama-local", row.ExternalID, row.LLMRerank, row.LLMProvider)
+		}
 	}
 }
 

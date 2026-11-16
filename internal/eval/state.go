@@ -34,6 +34,9 @@ const (
 	ResultFail         = "fail"
 	ResultNA           = "na"
 	ResultInconclusive = "inconclusive"
+	// ResultExcepted is written when an active exception covers the cell
+	// (#2112). It never comes from evidence and is never a pass.
+	ResultExcepted = "excepted"
 )
 
 // FreshnessFresh / Stale / NoEvidence mirror the `freshness_status` CHECK

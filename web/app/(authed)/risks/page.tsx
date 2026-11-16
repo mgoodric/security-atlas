@@ -67,13 +67,17 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { Term } from "@/components/help/term";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
+  fetchRiskCategories,
   fetchRisksList,
+  fetchRisksListWithRollUps,
   treatmentLabel,
   type Risk,
+  type RiskCategory,
   type RisksListResponse,
 } from "@/lib/api/risks";
 import {
@@ -86,6 +90,8 @@ import { risksCountLabel } from "./count-label";
 import {
   ALL,
   applyFilters,
+  categoryDisplay,
+  categoryOptions,
   clearFilters,
   DEFAULT_FILTERS,
   fairScore,
@@ -114,6 +120,8 @@ import {
 } from "./sort";
 import { SeverityPill } from "./severity-pill";
 import { SortableHeader } from "./sortable-header";
+import { pageTitle } from "@/lib/page-titles";
+import { enumOptions } from "@/lib/labels/enum-labels";
 
 // Slice 244 — six filter keys. Order mirrors the mockup
 // (Plans/_archive/mockups/risks.html lines 126-173) with one local deviation:
@@ -153,6 +161,18 @@ const PAGE_PARAM = "page";
 // top). The default sort (severity desc) is treated as "no param" so the
 // canonical register URL stays clean until a non-default sort is chosen.
 const SORT_PARAM = "sort";
+
+// #2060 — URL query-string key for the "Show roll-ups" toggle. A roll-up
+// is a parent risk with at least one child linked; it summarises risks
+// already in the register, so it is left out of the rows and the count
+// unless the toggle is on (`?rollups=1`).
+const ROLLUPS_PARAM = "rollups";
+
+// #1817 — URL query-string key for the "Show archived" toggle. The
+// Category pill lists the organisation's active categories; with the
+// toggle on (`?archived=1`) it lists archived ones too. It narrows only
+// the pill's options, so it composes with the roll-ups toggle.
+const ARCHIVED_PARAM = "archived";
 
 // Slice 680 / ATLAS-038 — column-header clarity copy.
 //
@@ -194,11 +214,7 @@ const PENDING_EVAL_TOOLTIP =
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
-  { value: "untreated", label: "untreated" },
-  { value: "mitigate", label: "mitigate" },
-  { value: "transfer", label: "transfer" },
-  { value: "accept", label: "accept" },
-  { value: "avoid", label: "avoid" },
+  ...enumOptions("RiskTreatment"),
 ];
 
 const SEVERITY_OPTIONS: { value: string; label: string }[] = [
@@ -209,37 +225,12 @@ const SEVERITY_OPTIONS: { value: string; label: string }[] = [
   { value: "none", label: "none (0)" },
 ];
 
-// Slice 244 — wire-enum-backed option lists.
-//
-// Decision D1 (see docs/audit-log/244-decisions.md): the mockup
-// labels for the Category pill (Operational / Compliance /
-// Third-party / Strategic) do not match the wire enum `risk_category`,
-// which is the CIA-Privacy-axis seven-value enum below. The wire is
-// the source of truth — exact-string match (AC-3) against any mockup
-// label would never hit because no risk row carries those strings.
-// The mockup is non-canonical and the discrepancy is captured as a
-// follow-up item in the slice's decision log.
-const CATEGORY_OPTIONS: { value: string; label: string }[] = [
-  { value: ALL, label: "All categories" },
-  { value: "confidentiality", label: "confidentiality" },
-  { value: "integrity", label: "integrity" },
-  { value: "availability", label: "availability" },
-  { value: "privacy", label: "privacy" },
-  { value: "regulatory", label: "regulatory" },
-  { value: "operational", label: "operational" },
-  { value: "financial", label: "financial" },
-];
-
 // Decision D2: the mockup shows `five_by_five` but the wire enum
 // `risk_methodology` carries `qualitative_5x5` for the same concept.
-// All five wire values are exposed.
+// All five wire values are exposed, under their labels (#2083).
 const METHODOLOGY_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All methodologies" },
-  { value: "nist_800_30", label: "nist_800_30" },
-  { value: "fair", label: "fair" },
-  { value: "cis_ram", label: "cis_ram" },
-  { value: "iso_27005", label: "iso_27005" },
-  { value: "qualitative_5x5", label: "qualitative_5x5" },
+  ...enumOptions("RiskMethodology"),
 ];
 
 function RisksPageInner() {
@@ -336,9 +327,45 @@ function RisksPageInner() {
     router.replace(`/risks?${sp.toString()}`);
   };
 
+  const showRollUps = search.get(ROLLUPS_PARAM) === "1";
+  const toggleRollUps = () => {
+    const sp = new URLSearchParams(search.toString());
+    if (showRollUps) {
+      sp.delete(ROLLUPS_PARAM);
+    } else {
+      sp.set(ROLLUPS_PARAM, "1");
+    }
+    sp.delete(PAGE_PARAM);
+    router.replace(`/risks?${sp.toString()}`);
+  };
+
+  const showArchived = search.get(ARCHIVED_PARAM) === "1";
+  const toggleArchived = () => {
+    const sp = new URLSearchParams(search.toString());
+    if (showArchived) {
+      sp.delete(ARCHIVED_PARAM);
+    } else {
+      sp.set(ARCHIVED_PARAM, "1");
+    }
+    sp.delete(PAGE_PARAM);
+    router.replace(`/risks?${sp.toString()}`);
+  };
+
+  // #1817 — the organisation's categories, archived included, so a risk
+  // on an archived category still reads by name with its archived mark.
+  // The pill hides archived ones unless "Show archived" is on.
+  const categoriesQ = useQuery<RiskCategory[]>({
+    queryKey: ["risks", "categories", "with-archived"],
+    queryFn: () => fetchRiskCategories(true),
+    staleTime: 60_000,
+  });
+  const categories = useMemo(() => categoriesQ.data ?? [], [categoriesQ.data]);
+
   const risksQ = useQuery<RisksListResponse>({
-    queryKey: ["risks", "list"],
-    queryFn: fetchRisksList,
+    queryKey: showRollUps
+      ? ["risks", "list", "with-rollups"]
+      : ["risks", "list"],
+    queryFn: showRollUps ? fetchRisksListWithRollUps : fetchRisksList,
   });
 
   // Slice 244 — Org unit pill options need org-unit *names*, not just
@@ -416,7 +443,7 @@ function RisksPageInner() {
       id: "category",
       label: "Category",
       value: filters.category,
-      options: CATEGORY_OPTIONS,
+      options: categoryOptions(categories, showArchived, filters.category),
     },
     {
       id: "treatment",
@@ -463,7 +490,7 @@ function RisksPageInner() {
   // only — page size + counts are unchanged (anti-criterion). See
   // `docs/audit-log/684-risks-count-semantics-decisions.md`.
   const countLabel = risksCountLabel(visible.length, rows.length);
-  const meta = (
+  const countMeta = (
     <span data-testid="risks-count-label">
       {countLabel.isFiltered ? (
         <>
@@ -482,20 +509,31 @@ function RisksPageInner() {
       )}
     </span>
   );
+  const meta = (
+    <span className="inline-flex items-center gap-3">
+      {countMeta}
+      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={showRollUps}
+          onChange={toggleRollUps}
+          data-testid="risks-show-rollups"
+        />
+        Show roll-ups
+      </label>
+      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={toggleArchived}
+          data-testid="risks-show-archived"
+        />
+        Show archived categories
+      </label>
+    </span>
+  );
 
   const columns: ListColumn<Risk>[] = [
-    {
-      id: "id",
-      header: "ID",
-      cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          data-testid="risks-row-id"
-        >
-          {row.id.slice(0, 8)}
-        </span>
-      ),
-    },
     {
       id: "title",
       header: "Title",
@@ -505,30 +543,62 @@ function RisksPageInner() {
       // this restores a drill-in that truthfully advertises its
       // destination, now that the detail route exists (decisions log D2).
       cell: (row) => (
-        <Link
-          href={`/risks/${encodeURIComponent(row.id)}`}
-          className="text-primary hover:underline"
-          data-testid="risks-row-title"
-        >
-          {row.title}
-          {patternNoLongerMet(row.inherent_score) ? (
-            <span
-              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
-              data-testid="risks-row-pattern-lapsed"
-              title="Rule-generated meta-risk with 0 child risks in the current window. The engine never closes it; review it."
+        <>
+          <Link
+            href={`/risks/${encodeURIComponent(row.id)}`}
+            className="text-primary hover:underline"
+            data-testid="risks-row-title"
+          >
+            {row.title}
+            {patternNoLongerMet(row.inherent_score) ? (
+              <span
+                className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                data-testid="risks-row-pattern-lapsed"
+                title="Rule-generated meta-risk with 0 child risks in the current window. The engine never closes it; review it."
+              >
+                Pattern no longer met
+              </span>
+            ) : null}
+          </Link>
+          {/* #2060: a roll-up only shows with the toggle on. The marker
+            links to the children it summarises on the detail page. */}
+          {row.child_count ? (
+            <Link
+              href={`/risks/${encodeURIComponent(row.id)}#children`}
+              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:underline"
+              data-testid="risks-row-rollup"
+              title="Roll-up of other risks in the register. It is left out of the count unless roll-ups are shown."
             >
-              Pattern no longer met
-            </span>
+              Roll-up · {row.child_count}{" "}
+              {row.child_count === 1 ? "child" : "children"}
+            </Link>
           ) : null}
-        </Link>
+        </>
       ),
     },
     {
       id: "category",
       header: "Category",
-      cell: (row) => (
-        <span className="text-xs text-muted-foreground">{row.category}</span>
-      ),
+      cell: (row) => {
+        const cat = categoryDisplay(row, categories);
+        return (
+          <span
+            className="text-xs text-muted-foreground"
+            data-testid="risks-row-category"
+          >
+            {cat.name}
+            {cat.archived ? (
+              <span
+                className="ml-1.5 rounded border px-1 py-0.5 text-[10px]"
+                data-testid="risks-row-category-archived"
+                title="This category is archived. It stays on the risks that have it but takes no new risks."
+              >
+                archived
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       id: "treatment",
@@ -568,7 +638,11 @@ function RisksPageInner() {
       header: (
         <SortableHeader
           sortKey="residual"
-          label="Residual (after controls)"
+          term={{
+            node: <Term id="residual-risk">Residual</Term>,
+            text: "Residual",
+          }}
+          label="(after controls)"
           title={RESIDUAL_HEADER_TOOLTIP}
           state={sortState}
           onSort={updateSort}
@@ -790,7 +864,7 @@ function RisksPageInner() {
   if (risksQ.isLoading) {
     return (
       <ListPage
-        title="Risk register"
+        title={pageTitle("/risks")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -804,7 +878,11 @@ function RisksPageInner() {
 
   if (risksQ.isError) {
     return (
-      <ListPage title="Risk register" subtitle={subtitle} actions={actions}>
+      <ListPage
+        title={pageTitle("/risks")}
+        subtitle={subtitle}
+        actions={actions}
+      >
         <Alert variant="destructive" data-testid="risks-load-error">
           <AlertTitle>Could not load risks</AlertTitle>
           <AlertDescription>{(risksQ.error as Error).message}</AlertDescription>
@@ -873,7 +951,7 @@ function RisksPageInner() {
 
   return (
     <ListPage
-      title="Risk register"
+      title={pageTitle("/risks")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

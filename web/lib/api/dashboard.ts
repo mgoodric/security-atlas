@@ -2,6 +2,11 @@
 // extracted from the former `web/lib/api.ts` god-file.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import {
+  type CalendarResponse,
+  fetchCalendarEvents,
+  getCalendarEvents,
+} from "./calendar";
 
 // ===== Slice 040 — Program dashboard view (+ slice 147 re-point) =====
 //
@@ -18,9 +23,9 @@ import { apiFetch, bffControlFetch } from "./_shared";
 //   * Top risks aging    GET /v1/risks?treatment=mitigate   (slice 019) — bound
 //       Server-side `sort=residual,age` (slice 066) is not yet passed —
 //       spillover at slice 148.
-//   * Upcoming items     GET /v1/exceptions/expiring?within=30d (slice 028) — bound
-//       The unified rollup `/v1/upcoming` (slice 066) is not yet consumed —
-//       spillover at slice 148.
+//   * Coming up          GET /v1/calendar, today + 14 days     (#2130) — bound
+//       The compliance calendar is the one list of what is due; it
+//       replaced the slice-066 upcoming rollup.
 //   * Framework posture  GET /v1/frameworks/posture          (slice 066) — bound by slice 147
 //   * Activity feed      GET /v1/activity                    (slice 066) — bound by slice 147
 //
@@ -121,12 +126,23 @@ export type ExpiringExceptionsResponse = {
 // internal/api/dashboard/handler.go. One row per active framework version.
 // `coverage_pct` and `freshness_composite` are 0-100; `trend_delta_90d`
 // is signed (current coverage minus coverage 90 days ago, in points).
+// `covered_by_exception_pct` (#2112) is the part of `coverage_pct` that
+// rests only on active exceptions, 0-100.
+//
+// `scope_set` (#2114) is false when the tenant has no activated framework
+// scope for the version; every percentage is then null and the tile shows
+// "Scope not set", linking to `/framework-scopes/<framework_version_id>`.
 export type FrameworkPostureRow = {
   framework_id: string;
   framework_version: string;
-  coverage_pct: number;
-  freshness_composite: number;
-  trend_delta_90d: number;
+  framework_version_id: string;
+  // framework_name (#2083): label the tile with frameworkLabel(name, version).
+  framework_name: string;
+  scope_set: boolean;
+  coverage_pct: number | null;
+  covered_by_exception_pct: number | null;
+  freshness_composite: number | null;
+  trend_delta_90d: number | null;
 };
 
 // FrameworkPostureReport mirrors the FrameworkPosture handler's envelope.
@@ -135,28 +151,27 @@ export type FrameworkPostureReport = {
   count: number;
 };
 
-// UpcomingItem mirrors `upcomingWire` in
-// internal/api/dashboard/handler.go. One row of the unified upcoming
-// rollup — merges expiring exceptions, policy-ack expirations, vendor
-// reviews, and audit-period milestones into one date-sorted feed.
-// `category` is one of: exception / policy_ack / vendor_review /
-// audit_period.
-export type UpcomingItem = {
-  due_date: string;
-  category: string;
-  title: string;
-  resource_type: string;
-  resource_id: string;
-};
+// COMING_UP_DAYS is the dashboard's "Coming up" window (#2130): the
+// calendar from today (UTC) through the next 14 days. The Go dashboard
+// export reads the same window (dashboardexport.UpcomingWindow).
+export const COMING_UP_DAYS = 14;
 
-// UpcomingResponse mirrors the Upcoming handler's envelope.
-// `next_cursor` is the opaque base64url keyset token for the next page,
-// or "" when no next page exists.
-export type UpcomingResponse = {
-  upcoming: UpcomingItem[];
-  count: number;
-  next_cursor: string;
-};
+// comingUpWindow returns the calendar query for the "Coming up" window
+// at `now`: `from` is today's UTC date and `to` (inclusive on the
+// calendar API) is 13 days later, so the window is [today, today + 14d).
+export function comingUpWindow(now: Date = new Date()): {
+  from: string;
+  to: string;
+} {
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const last = new Date(today.getTime() + (COMING_UP_DAYS - 1) * 86_400_000);
+  return {
+    from: today.toISOString().slice(0, 10),
+    to: last.toISOString().slice(0, 10),
+  };
+}
 
 // ActivityEvent mirrors `activityWire` in internal/api/dashboard/handler.go.
 // `summary` is forwarded as-is — the slice-062 admin_audit_log_v evidence
@@ -243,16 +258,10 @@ export async function getActivity(
   return (await res.json()) as ActivityFeedResponse;
 }
 
-// getUpcoming fetches the dashboard's unified upcoming-rollup feed —
-// expiring exceptions, policy-ack expirations, vendor reviews, and
-// audit-period milestones merged into one date-sorted (ascending)
-// paginated feed. The slice-066 (AC-4) endpoint that slice 157
-// re-points the dashboard onto; before slice 157 the dashboard rendered
-// only the expiring-exceptions subset with a labelled "rollup pending"
-// footer.
-export async function getUpcoming(bearer: string): Promise<UpcomingResponse> {
-  const res = await apiFetch(`/v1/upcoming`, bearer);
-  return (await res.json()) as UpcomingResponse;
+// getComingUp fetches the dashboard's "Coming up" panel feed: the
+// compliance calendar for the next 14 days (#2130).
+export async function getComingUp(bearer: string): Promise<CalendarResponse> {
+  return getCalendarEvents(bearer, comingUpWindow());
 }
 
 // ----- browser-side fns (hit the BFF under /api/dashboard/**) -----
@@ -271,8 +280,8 @@ export function fetchDashboardRisks(): Promise<DashboardRisk[]> {
   );
 }
 
-export function fetchDashboardUpcoming(): Promise<UpcomingResponse> {
-  return bffControlFetch<UpcomingResponse>(`/api/dashboard/upcoming`);
+export function fetchDashboardComingUp(): Promise<CalendarResponse> {
+  return fetchCalendarEvents(comingUpWindow());
 }
 
 export function fetchDashboardFrameworkPosture(): Promise<FrameworkPostureReport> {

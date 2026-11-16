@@ -19,6 +19,8 @@ SELECT
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at
 FROM tenants
@@ -31,6 +33,15 @@ WHERE id = $1;
 -- exists for the caller (e.g. a bare-UUID tenant that predates slice 144) —
 -- the resolver maps that absence to the 'strict' default.
 SELECT bundle_gate_mode
+FROM tenants
+WHERE id = $1;
+
+-- name: GetTenantVendorInitialReviewDays :one
+-- #2061: the caller-tenant's vendor initial-review window in days. RLS scopes
+-- the row to the current tenant. Returns ErrNoRows when no tenants row exists
+-- (bare-UUID tenant); the vendor store maps that to the 30-day default, the
+-- same COALESCE the vendor overdue queries use.
+SELECT vendor_initial_review_days
 FROM tenants
 WHERE id = $1;
 
@@ -50,6 +61,8 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at;
 
@@ -67,6 +80,8 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at;
 
@@ -84,5 +99,53 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
+    vendor_initial_review_days,
+    created_at,
+    updated_at;
+
+-- name: GetTenantAllowSelfApproval :one
+-- #2101: the caller-tenant's Allow self-approval setting. RLS scopes the row
+-- to the current tenant. Returns ErrNoRows when no tenants row exists
+-- (bare-UUID tenant); approval.AllowSelf maps that to the default, off.
+SELECT allow_self_approval
+FROM tenants
+WHERE id = $1;
+
+-- name: UpdateTenantAllowSelfApproval :one
+-- #2101: turn the caller-tenant's Allow self-approval on or off. RLS gates
+-- this to the caller's own row; the handler gates it to admins and writes
+-- the me_audit_log row in the same transaction.
+UPDATE tenants
+SET allow_self_approval = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
+    allow_self_approval,
+    vendor_initial_review_days,
+    created_at,
+    updated_at;
+
+-- name: UpdateTenantVendorInitialReviewDays :one
+-- #2201: set the caller-tenant's vendor initial-review window in days. RLS
+-- gates this to the caller's own row; `tenants_vendor_initial_review_days_chk`
+-- bounds it to 1..365 (defense in depth atop the handler's check). The window
+-- is read whenever a never-reviewed vendor is read, so a change moves the
+-- first review date of every vendor that has not been reviewed yet.
+UPDATE tenants
+SET vendor_initial_review_days = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
+    allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at;

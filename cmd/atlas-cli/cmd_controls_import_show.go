@@ -79,9 +79,22 @@ func newControlsImportShowCmd() *cobra.Command {
 }
 
 func getControlImport(path string) ([]byte, error) {
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(common.endpoint, "/")+path, nil)
+	return callControlImport(http.MethodGet, path, nil)
+}
+
+// callControlImport sends one control import API request and returns the
+// body of a successful response, or the API's error message.
+func callControlImport(method, path string, payload []byte) ([]byte, error) {
+	var reqBody io.Reader
+	if payload != nil {
+		reqBody = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequest(method, strings.TrimRight(common.endpoint, "/")+path, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set(sdk.MetadataAuthorization, sdk.BearerPrefix+common.token)
 	resp, err := cmdhttp.Client(time.Minute).Do(req)
@@ -121,6 +134,17 @@ func renderImportRows(out io.Writer, r controlimport.RowList) {
 	}
 	for _, row := range r.Rows {
 		_, _ = fmt.Fprintf(out, "\nrow %d  %s  %s  [%s]\n", row.RowNumber, printable(row.ExternalID), printable(row.Title), printable(row.Status))
+		if row.ID != "" {
+			_, _ = fmt.Fprintf(out, "  id: %s\n", printable(row.ID))
+		}
+		switch row.Status {
+		case controlimport.RowStatusApproved:
+			_, _ = fmt.Fprintf(out, "  approved as control %s (%s)\n", printable(row.ControlID), printable(row.ApprovedSCFID))
+		case controlimport.RowStatusDuplicate:
+			_, _ = fmt.Fprintf(out, "  duplicate of control %s\n", printable(row.ControlID))
+		case controlimport.RowStatusRejected:
+			_, _ = fmt.Fprintf(out, "  rejected: %s\n", printable(row.RejectionReason))
+		}
 		if len(row.TestedUnder) > 0 {
 			codes := make([]string, len(row.TestedUnder))
 			for i, t := range row.TestedUnder {
@@ -133,6 +157,10 @@ func renderImportRows(out io.Writer, r controlimport.RowList) {
 		}
 		if row.LLMRerank == controlimport.RerankUnavailable {
 			_, _ = fmt.Fprintln(out, "  LLM rerank unavailable: deterministic order, no rationale")
+		}
+		if row.LLMRerank == controlimport.RerankApplied && row.LLMProvider != "" {
+			// Where the row's text went (ADR 0022 provenance, #2079).
+			_, _ = fmt.Fprintf(out, "  LLM rerank routes to %s\n", printable(row.LLMProvider))
 		}
 		if len(row.Candidates) == 0 {
 			_, _ = fmt.Fprintln(out, "  no candidates")

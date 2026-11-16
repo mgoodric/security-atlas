@@ -13,6 +13,7 @@
 // when the env var is unset; buttons only render when the BFF
 // reports enabled=true.
 
+import type { Metadata } from "next";
 import {
   Card,
   CardContent,
@@ -20,21 +21,25 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PageShell } from "@/components/shell/page-shell";
 
 import { DemoControls } from "./demo-controls";
 
+export const metadata: Metadata = { title: "Demo tools" };
+
 export default function AdminDemoPage() {
   return (
-    <div className="mx-auto max-w-3xl space-y-6 py-2">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Demo tools</h1>
-        <p className="text-sm text-muted-foreground">
-          Reseed and tear down the demo tenant on this deployment. Backed by
-          slice 205&apos;s <code className="rounded bg-muted px-1">demo</code>{" "}
-          CLI; surfaced here for one-click operator access.
-        </p>
-      </header>
-
+    <PageShell
+      title="Demo tools"
+      width="reading"
+      subtitle={
+        <>
+          Reseed and tear down the demo tenant on this deployment. These do the
+          same as the <code className="rounded bg-muted px-1">demo</code>{" "}
+          command-line tool, in one click.
+        </>
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>What these actions do</CardTitle>
@@ -66,6 +71,6 @@ export default function AdminDemoPage() {
       </Card>
 
       <DemoControls />
-    </div>
+    </PageShell>
   );
 }

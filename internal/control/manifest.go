@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 // BundleSchemaVersion is the only accepted manifest schema version in slice
@@ -39,6 +41,12 @@ type Manifest struct {
 	Title               string `yaml:"title"                  json:"title"`
 	Description         string `yaml:"description,omitempty"  json:"description,omitempty"`
 	SCFAnchorID         string `yaml:"scf_anchor_id"          json:"scf_anchor_id"`
+	// SCFRelease names the SCF release SCFAnchorID is a code in, e.g.
+	// "2025.2" (#1770). The SCF reuses codes between releases, so upload
+	// binds the anchor within this release. Optional for now: without it
+	// the code binds in the current release and the upload returns a
+	// deprecation warning.
+	SCFRelease string `yaml:"scf_release,omitempty" json:"scf_release,omitempty"`
 	// AnchorFit states how well SCFAnchorID fits the control's intent:
 	// exact (the default when omitted), partial, or none (issue #1736).
 	// A non-exact fit needs AnchorFitNote; `none` also allows an empty
@@ -182,6 +190,14 @@ func (m *Manifest) ValidateStructural() error {
 	}
 	if !bundleIDPattern.MatchString(m.BundleID) {
 		return fmt.Errorf("control bundle: bundle_id %q must match pattern %s", m.BundleID, bundleIDPattern.String())
+	}
+	// #2165: evidence push resolves --control as a control UUID first and
+	// only then as a bundle ID, so a bundle_id uuid.Parse accepts (e.g.
+	// "deadbeef-0000-4000-8000-000000000000" or its 32-hex form) could
+	// never be linked to by bundle ID. Refuse it here rather than let the
+	// evidence land unlinked.
+	if _, err := uuid.Parse(m.BundleID); err == nil {
+		return fmt.Errorf("control bundle: bundle_id %q is UUID-shaped; evidence push reads a UUID as a control id, so this bundle could never be referenced by bundle_id: choose a non-UUID bundle_id", m.BundleID)
 	}
 
 	if m.Title == "" {

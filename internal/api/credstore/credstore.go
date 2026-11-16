@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/identity"
 )
 
 // ErrUnknownKey indicates a lookup or operation referenced a key that
@@ -703,14 +705,52 @@ func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, er
 // issued by a user carries the bare uuid; a bootstrap or machine
 // credential carries neither and records no minter.
 func MinterUserID(c Credential) string {
-	id := strings.TrimPrefix(c.UserID, "user:")
-	if id == c.ID {
+	u, ok := CallerUserID(c)
+	if !ok {
 		return ""
 	}
-	if _, err := uuid.Parse(id); err != nil {
-		return ""
+	return u.String()
+}
+
+// PrincipalOf names who is behind the caller c, stably across sessions:
+// the bare users(id) uuid for a person, else c.UserID (an unbound key's own
+// "key_..." id, "oauth_client:<id>", "bootstrap-admin"), else c.ID. It is
+// what approval records as the requester and compares against (#2101).
+// Never the JWT credential id when anything better exists: that is per
+// token ("jwt:<jti>"), and approval reads that prefix as a pre-#1807
+// session requester it cannot compare.
+func PrincipalOf(c Credential) string {
+	if u := MinterUserID(c); u != "" {
+		return u
 	}
-	return id
+	if c.UserID != "" {
+		return c.UserID
+	}
+	return c.ID
+}
+
+// CallerUserID returns the users(id) behind the caller c, and false when c
+// is not a user. It is the one place code turns cred.UserID into a users(id)
+// (#2183); never parse cred.UserID raw (TestNoRawCredUserIDParse guards it).
+//
+//   - A JWT session (local login, PKCE, device grant) carries "user:<uuid>":
+//     the prefix is stripped and the uuid resolves.
+//   - A key issued to a user carries that user's bare uuid: it resolves.
+//   - An unbound key (UserID == its own "key_..." ID), the bootstrap admin
+//     ("bootstrap-admin") and a machine token ("oauth_client:<id>") are not
+//     users and never resolve, even when the remainder happens to parse.
+//
+// authz.BuildInput keeps the raw cred.UserID. /v1/me's resolveRoles keys
+// user_roles by this value for a user caller (#2216). The prefix rule itself
+// lives in identity.UserID, shared with the auditor attrs resolver.
+func CallerUserID(c Credential) (uuid.UUID, bool) {
+	if c.UserID == "" || c.UserID == c.ID {
+		return uuid.Nil, false
+	}
+	if strings.TrimPrefix(c.UserID, "user:") == c.ID {
+		return uuid.Nil, false
+	}
+	return identity.UserID(c.UserID)
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)

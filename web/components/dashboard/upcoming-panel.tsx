@@ -1,23 +1,22 @@
 "use client";
 
-// Slice 040 — upcoming items panel — REBOUND by slice 157.
+// Slice 040 — upcoming items panel — REBOUND by slice 157, then by #2130.
 //
-// Binds to `GET /v1/upcoming` via the dashboard BFF (slice 066 AC-4
-// unified rollup). Each row carries `{due_date, category, title,
-// resource_type, resource_id}` across four categories: exception,
-// policy_ack, vendor_review, audit_period.
+// "Coming up" reads the compliance calendar (GET /v1/calendar via the
+// calendar BFF) for the next 14 days: `fetchDashboardComingUp` asks for
+// [today, today + 14d). The calendar is the one list of what is due
+// (#2130), so the panel shows the same items, with the same status, as
+// /calendar. Each row is one calendar event: its type badge, title, the
+// related entity and the days until it is due.
 //
-// Slice 040 originally wired this to `/v1/exceptions/expiring?within=30d`
-// (the only real source on main at slice-040 time) and surfaced the
-// unified-rollup gap as a labelled `upcoming-gap` footer. Slice 066
-// shipped the rollup endpoint, and slice 157 closes the loop by
-// re-pointing the panel onto it — dropping both the `ExpiringExceptions`
-// types and the gap footer. See
-// `docs/audit-log/157-dashboard-upcoming-and-top-risks-decisions.md`.
+// History: slice 040 bound this panel to `/v1/exceptions/expiring`;
+// slice 157 re-pointed it at the slice-066 upcoming rollup, which #2130
+// retired.
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import { Badge } from "@/components/ui/badge";
-import type { UpcomingResponse } from "@/lib/api/dashboard";
+import type { CalendarResponse } from "@/lib/api/calendar";
+import { COMING_UP_DAYS } from "@/lib/api/dashboard";
 
 function daysUntil(iso: string): number {
   const then = new Date(iso).getTime();
@@ -33,32 +32,44 @@ function dateParts(iso: string): { month: string; day: string } {
   };
 }
 
-// categoryVariant maps a rollup category onto the shadcn Badge
-// variants. Exception is destructive (it's the only category that
-// represents an open accepted-risk window); the other three are neutral
+// typeVariant maps a calendar event onto the shadcn Badge variants. An
+// overdue item is destructive (#2091: red is kept for failing and overdue
+// states); an expiring exception (an open accepted-risk window) is a
+// warning; an audit milestone is secondary; the rest are neutral
 // "outline" to keep visual weight even across the feed.
-function categoryVariant(
-  category: string,
-): "destructive" | "secondary" | "outline" {
-  if (category === "exception") return "destructive";
-  if (category === "audit_period") return "secondary";
+function typeVariant(
+  type: string,
+  status: string,
+): "destructive" | "warning" | "secondary" | "outline" {
+  if (status === "overdue") return "destructive";
+  if (type === "exception") return "warning";
+  if (type === "audit") return "secondary";
   return "outline";
 }
 
-// categoryLabel renders the snake_case category name as a short
-// human-readable label.
-function categoryLabel(category: string): string {
-  switch (category) {
+// typeLabel renders the calendar event type as a short label.
+function typeLabel(type: string): string {
+  switch (type) {
+    case "audit":
+      return "Audit period";
     case "exception":
       return "Exception";
+    case "policy":
+      return "Policy review";
+    case "vendor":
+      return "Vendor";
+    case "control":
+      return "Control review";
+    case "risk":
+      return "Risk review";
+    case "action_plan":
+      return "Action plan";
     case "policy_ack":
       return "Policy ack";
-    case "vendor_review":
-      return "Vendor review";
-    case "audit_period":
-      return "Audit period";
+    case "offboarding":
+      return "Offboarding";
     default:
-      return category;
+      return type;
   }
 }
 
@@ -66,35 +77,35 @@ export function UpcomingPanel({
   report,
   state,
 }: {
-  report: UpcomingResponse | undefined;
+  report: CalendarResponse | undefined;
   state: PanelState;
 }) {
   return (
     <PanelCard
-      title="Upcoming · next 30 days"
-      description="Expiring exceptions, policy acknowledgments, vendor reviews, audit milestones"
+      title={`Coming up · next ${COMING_UP_DAYS} days`}
+      description="From the compliance calendar: reviews, due dates, acknowledgements, expiring exceptions, audit milestones"
       state={state}
       skeletonClassName="h-40 w-full"
       testid="upcoming-panel"
     >
-      {!report || report.upcoming.length === 0 ? (
+      {!report || report.events.length === 0 ? (
         <p
           className="py-6 text-sm text-muted-foreground"
           data-testid="upcoming-empty"
         >
-          Nothing due in the next 30 days.
+          Nothing due in the next {COMING_UP_DAYS} days.
         </p>
       ) : (
         <ul
           className="divide-y divide-foreground/5"
           data-testid="upcoming-list"
         >
-          {report.upcoming.map((item, idx) => {
-            const { month, day } = dateParts(item.due_date);
-            const left = daysUntil(item.due_date);
+          {report.events.map((ev, idx) => {
+            const { month, day } = dateParts(ev.starts_at);
+            const left = daysUntil(ev.starts_at);
             return (
               <li
-                key={`${item.category}:${item.resource_id}:${idx}`}
+                key={`${ev.type}:${ev.id}:${idx}`}
                 data-testid="upcoming-row"
                 className="flex items-center gap-3 py-3 text-sm"
               >
@@ -109,22 +120,22 @@ export function UpcomingPanel({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <Badge
-                      variant={categoryVariant(item.category)}
+                      variant={typeVariant(ev.type, ev.status)}
                       data-testid="upcoming-row-category"
                     >
-                      {categoryLabel(item.category)}
+                      {typeLabel(ev.type)}
                     </Badge>
                     <span
                       className="truncate font-medium"
                       data-testid="upcoming-row-title"
                     >
-                      {item.title}
+                      {ev.title}
                     </span>
                   </div>
                   <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-                    {item.resource_type}
-                    {item.resource_id
-                      ? ` · ${item.resource_id.slice(0, 12)}`
+                    {ev.related_entity_kind}
+                    {ev.related_entity_id
+                      ? ` · ${ev.related_entity_id.slice(0, 12)}`
                       : ""}
                   </div>
                 </div>

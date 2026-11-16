@@ -339,6 +339,7 @@ var CanonicalToolOrder = []string{
 	"get_control",
 	"list_risks",
 	"get_risk",
+	"list_risk_categories", // #1815
 	"list_evidence",
 	"list_audit_periods",
 	// Program-record read tools (widened surface)

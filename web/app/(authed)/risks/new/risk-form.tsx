@@ -10,9 +10,14 @@
 // (#2059) shows created + the organisation review cadence and is sent
 // only when the user changes it.
 //
+// Category (#1817): the organisation's active categories, read from
+// `/api/risks/categories` and listed by name. The form posts the slug, so
+// a category renamed while the form is open still resolves. The picker
+// opens on the organisation default. A category the platform refuses
+// (one added before #1745's contract step can hold risks) comes back as
+// a 400 and renders in the error Alert like any other upstream refusal.
+//
 // Enum option lists mirror `internal/db/dbx/models.go`:
-//   RiskCategory:    confidentiality | integrity | availability | privacy
-//                    | regulatory | operational | financial
 //   RiskMethodology: OE-592 — deliberately NARROWER than the dbx enum.
 //                    The form offers only methodologies that have a matching
 //                    score widget here: nist_800_30, qualitative_5x5, and FAIR.
@@ -39,7 +44,12 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RiskCreateInput } from "@/lib/api/risks";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import {
+  fetchRiskCategories,
+  type RiskCategory,
+  RiskCreateInput,
+} from "@/lib/api/risks";
 
 import { ControlMultiSelect } from "./control-multi-select";
 import {
@@ -55,16 +65,6 @@ import {
   validateRiskForm,
 } from "./validate";
 
-const CATEGORIES = [
-  "confidentiality",
-  "integrity",
-  "availability",
-  "privacy",
-  "regulatory",
-  "operational",
-  "financial",
-] as const;
-
 const TREATMENTS = [
   "untreated",
   "mitigate",
@@ -76,11 +76,11 @@ const TREATMENTS = [
 // #1746: the option text says what each value records, so the opening
 // "untreated" reads as "no decision yet" rather than a choice.
 const TREATMENT_LABELS: Record<(typeof TREATMENTS)[number], string> = {
-  untreated: "untreated (not yet decided)",
-  mitigate: "mitigate",
-  transfer: "transfer",
-  accept: "accept (proposed, pending approval)",
-  avoid: "avoid",
+  untreated: "Untreated (not yet decided)",
+  mitigate: enumLabel("RiskTreatment", "mitigate"),
+  transfer: enumLabel("RiskTreatment", "transfer"),
+  accept: "Accept (proposed, pending approval)",
+  avoid: enumLabel("RiskTreatment", "avoid"),
 };
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
@@ -88,7 +88,9 @@ const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
 type FormState = {
   title: string;
   description: string;
-  category: (typeof CATEGORIES)[number];
+  // The category slug; "" until the user picks one, meaning the
+  // organisation default the picker shows.
+  category: string;
   methodology: (typeof OFFERED_METHODOLOGIES)[number];
   treatment: (typeof TREATMENTS)[number];
   treatment_owner: string;
@@ -110,7 +112,7 @@ function initialState(): FormState {
   return {
     title: "",
     description: "",
-    category: "operational",
+    category: "",
     methodology: "nist_800_30",
     // #1746: open on "untreated" (no decision yet, no required fields).
     // See validate.ts DEFAULT_TREATMENT.
@@ -222,6 +224,19 @@ export function RiskForm({ onSubmit }: Props) {
     queryFn: fetchReviewCadenceDays,
     staleTime: 60_000,
   });
+  const categoriesQ = useQuery<RiskCategory[]>({
+    queryKey: ["risks", "categories", "active"],
+    queryFn: () => fetchRiskCategories(false),
+    staleTime: 60_000,
+  });
+  // Upstream already leaves archived categories out without
+  // include_archived; filter again so the picker never offers one.
+  const categories = (categoriesQ.data ?? []).filter((c) => !c.archived);
+  // Until the user picks one, the picker shows the organisation default
+  // (else the first listed category) and that is what gets posted.
+  const defaultCategory =
+    categories.find((c) => c.is_default)?.slug ?? categories[0]?.slug ?? "";
+  const category = state.category || defaultCategory;
   const cadenceDays = cadence.data ?? DEFAULT_REVIEW_CADENCE_DAYS;
   const reviewDueDefault = defaultReviewDueDate(cadenceDays);
 
@@ -231,7 +246,12 @@ export function RiskForm({ onSubmit }: Props) {
       if (submitAttempted) {
         // Re-validate live after the first submit attempt so cleared
         // errors disappear immediately as the user fixes the field.
-        setFieldErrors(validateRiskForm(next));
+        setFieldErrors(
+          validateRiskForm({
+            ...next,
+            category: next.category || defaultCategory,
+          }),
+        );
       }
       return next;
     });
@@ -240,7 +260,7 @@ export function RiskForm({ onSubmit }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitAttempted(true);
-    const errs = validateRiskForm(state);
+    const errs = validateRiskForm({ ...state, category });
     setFieldErrors(errs);
     if (hasErrors(errs)) {
       // Surface the inline field errors and stop. Server is not even
@@ -250,7 +270,7 @@ export function RiskForm({ onSubmit }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(toCreateInput(state, reviewDueDefault));
+      await onSubmit(toCreateInput({ ...state, category }, reviewDueDefault));
     } catch (err) {
       const msg = (err as Error).message ?? "failed to create risk";
       setError(msg);
@@ -263,8 +283,11 @@ export function RiskForm({ onSubmit }: Props) {
   const fair = fairNumbers(state);
 
   return (
+    // #2089: noValidate — validateRiskForm renders errors inline beside
+    // each field instead of the browser's native bubbles.
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="space-y-6"
       data-testid="risks-create-form"
     >
@@ -286,10 +309,13 @@ export function RiskForm({ onSubmit }: Props) {
           value={state.title}
           onChange={(e) => update("title", e.target.value)}
           placeholder="Short, scannable risk statement"
+          aria-invalid={fieldErrors.title ? true : undefined}
+          aria-describedby={fieldErrors.title ? "risk-title-error" : undefined}
           data-testid="risks-create-title"
         />
         {fieldErrors.title && (
           <p
+            id="risk-title-error"
             className="mt-1 text-sm text-destructive"
             data-testid="risks-create-title-error"
           >
@@ -323,19 +349,44 @@ export function RiskForm({ onSubmit }: Props) {
             id="risk-category"
             name="category"
             required
-            value={state.category}
-            onChange={(e) =>
-              update("category", e.target.value as FormState["category"])
-            }
+            value={category}
+            onChange={(e) => update("category", e.target.value)}
+            disabled={categories.length === 0}
             className={SELECT_CLASS}
+            aria-invalid={fieldErrors.category ? true : undefined}
+            aria-describedby={
+              fieldErrors.category ? "risk-category-error" : undefined
+            }
             data-testid="risks-create-category"
           >
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
+            {categories.length === 0 && (
+              <option value="">
+                {categoriesQ.isLoading ? "Loading categories" : "No categories"}
+              </option>
+            )}
+            {categories.map((c) => (
+              <option key={c.slug} value={c.slug}>
+                {c.name}
               </option>
             ))}
           </select>
+          {categoriesQ.isError && (
+            <p
+              className="mt-1 text-sm text-destructive"
+              data-testid="risks-create-category-load-error"
+            >
+              Could not load categories: {(categoriesQ.error as Error).message}
+            </p>
+          )}
+          {fieldErrors.category && (
+            <p
+              id="risk-category-error"
+              className="mt-1 text-sm text-destructive"
+              data-testid="risks-create-category-error"
+            >
+              {fieldErrors.category}
+            </p>
+          )}
         </div>
 
         <div>
@@ -354,14 +405,12 @@ export function RiskForm({ onSubmit }: Props) {
           >
             {OFFERED_METHODOLOGIES.map((m) => (
               <option key={m} value={m}>
-                {m}
+                {enumLabel("RiskMethodology", m)}
               </option>
             ))}
           </select>
           <p className={HELP_CLASS}>
-            Default <span className="font-mono">nist_800_30</span> per canvas
-            §6.2. FAIR uses annualized dollar exposure; CIS RAM and ISO 27005
-            are not yet supported.
+            NIST 800-30 is the default. FAIR uses annualized dollar exposure.
           </p>
         </div>
       </div>
@@ -400,10 +449,17 @@ export function RiskForm({ onSubmit }: Props) {
             value={state.treatment_owner}
             onChange={(e) => update("treatment_owner", e.target.value)}
             placeholder="Person or role accountable for treatment"
+            aria-invalid={fieldErrors.treatment_owner ? true : undefined}
+            aria-describedby={
+              fieldErrors.treatment_owner
+                ? "risk-treatment-owner-error"
+                : undefined
+            }
             data-testid="risks-create-treatment-owner"
           />
           {fieldErrors.treatment_owner && (
             <p
+              id="risk-treatment-owner-error"
               className="mt-1 text-sm text-destructive"
               data-testid="risks-create-treatment-owner-error"
             >
@@ -570,7 +626,7 @@ export function RiskForm({ onSubmit }: Props) {
           {submitting ? "Creating…" : "Create risk"}
         </Button>
         <span className="text-xs text-muted-foreground">
-          On success you return to the risk register.
+          On success you land on the new risk.
         </span>
       </div>
     </form>

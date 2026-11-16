@@ -40,6 +40,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 )
 
+// testStateKey signs the OIDC flow state in tests (#2177).
+var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
 const fakeClientID = "atlas-test-client"
 
 // fakeIdP is a minimal OIDC provider: it signs ID tokens with a local RSA
@@ -213,7 +216,7 @@ func (h harness) callbackVia(t *testing.T, idp *fakeIdP, urlTenant uuid.UUID) *h
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 
 		TrustUnverifiedEmailForLink: idp.trustUnverifiedEmail,
-	}})
+	}}, testStateKey)
 	login, err := authn.BeginLogin(context.Background(), oidc.LoginInput{TenantID: urlTenant, IdpName: "primary"}, false)
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)

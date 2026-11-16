@@ -149,13 +149,16 @@ func NewListActionPlans(c *mcp.Client) mcp.Tool {
 // NewListFrameworkPosture wraps GET /v1/frameworks/posture. The
 // endpoint's wire shape is `{"frameworks": [...], "count": N}` — a flat
 // list of per-framework-version posture rows (coverage_pct,
-// freshness_composite, trend_delta_90d), so the generic passthrough
+// covered_by_exception_pct, freshness_composite, trend_delta_90d), so the
+// generic passthrough
 // fits; the sibling `count` is derived and re-emitted by the envelope.
+// A row with `scope_set: false` (#2114) has no activated framework scope
+// and null percentages; the passthrough carries that as-is.
 func NewListFrameworkPosture(c *mcp.Client) mcp.Tool {
 	return &programListTool{
 		client:   c,
 		name:     "list_framework_posture",
-		desc:     "List the bearer tenant's per-framework posture (coverage percentage, freshness composite, and 90-day trend delta — one row per active framework version). Returns canonical posture rows.",
+		desc:     "List the bearer tenant's per-framework posture (coverage percentage, the share of requirements covered only by exception, freshness composite, and 90-day trend delta — one row per active framework version; excepted controls count as covered and are never a pass). A version with no activated framework scope has scope_set=false and null percentages: its scope is not set, so there is no coverage figure to report. Returns canonical posture rows.",
 		endpoint: "/v1/frameworks/posture",
 		listKey:  "frameworks",
 	}

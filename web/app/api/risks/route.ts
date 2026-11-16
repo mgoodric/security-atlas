@@ -27,14 +27,17 @@ import { apiBaseURL } from "@/lib/api/base";
 import { listRisks } from "@/lib/api/risks";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   try {
-    const risks = await listRisks(bearer);
+    // #2060: roll-ups stay out unless the register's toggle asks for them.
+    const includeRollups =
+      new URL(req.url).searchParams.get("include_rollups") === "true";
+    const risks = await listRisks(bearer, includeRollups);
     return NextResponse.json({ risks });
   } catch (err) {
     const e = err as { status?: number; message?: string };

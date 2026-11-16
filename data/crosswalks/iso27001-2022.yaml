@@ -349,10 +349,10 @@ mappings:
     strength: 0.9
     rationale: "Roles & responsibilities allocation aligns with SCF GOV-04."
   - requirement_code: A.5.3
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Segregation of duties is enforced through user provisioning and access-lifecycle controls; IAC-07 (User Provisioning & Lifecycle) is the nearest sample anchor that carries the entitlement-separation concept."
+    rationale: "Segregation of duties is enforced through user provisioning and access-lifecycle controls; IAC-04 (User Provisioning & De-Provisioning) is the nearest sample anchor that carries the entitlement-separation concept."
   - requirement_code: A.5.4
     scf_anchor: GOV-04
     relationship_type: equal
@@ -372,7 +372,7 @@ mappings:
     scf_anchor: THR-01
     relationship_type: equal
     strength: 1.0
-    rationale: "Threat Intelligence Program (THR-01) is the dedicated SCF threat-intel anchor and the direct STRM equivalent of A.5.7 Threat intelligence. Upgraded from the slice-438 placeholder MON-08 (intersects_with/0.5, LOW CONFIDENCE) once slice 635 seeded the THR domain into the sample catalog."
+    rationale: "Threat Intelligence Program (THR-01) is the dedicated SCF threat-intel anchor and the direct STRM equivalent of A.5.7 Threat intelligence. Upgraded from the slice-438 placeholder MON-08 (MON-16 since the SCF 2026.3 remap) (intersects_with/0.5, LOW CONFIDENCE) once slice 635 seeded the THR domain into the sample catalog."
   - requirement_code: A.5.7
     scf_anchor: THR-03
     relationship_type: subset_of
@@ -384,10 +384,10 @@ mappings:
     strength: 0.6
     rationale: "Security in project management overlaps with Secure Engineering Principles for project-phase security gates."
   - requirement_code: A.5.9
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Inventory of assets is a subset of SCF Asset Disposal/management family; AST-09 is the nearest sample anchor (asset lifecycle)."
+    rationale: "Inventory of assets is part of the SCF asset management family; AST-22 (Secure Disposal, Destruction or Re-Use of Equipment) carries this edge for the asset lifecycle."
   - requirement_code: A.5.10
     scf_anchor: DCH-01
     relationship_type: intersects_with
@@ -429,45 +429,45 @@ mappings:
     strength: 0.9
     rationale: "Identity management across the identity life cycle is the core of the Identification & Authentication Policy anchor (IAC-01)."
   - requirement_code: A.5.16
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Provisioning, modification, and de-provisioning of identities is the User Provisioning & Lifecycle facet (IAC-07)."
+    rationale: "Provisioning, modification, and de-provisioning of identities is the User Provisioning & De-Provisioning facet (IAC-04)."
   - requirement_code: A.5.17
     scf_anchor: IAC-01
     relationship_type: subset_of
     strength: 0.7
     rationale: "Management of authentication information is a subset of the broader I&A policy anchor."
   - requirement_code: A.5.18
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Provision/review/remove access rights maps to SCF User Provisioning & Lifecycle — shared with SOC 2 CC6.2/CC6.3."
+    rationale: "Provision/review/remove access rights maps to SCF User Provisioning & De-Provisioning — shared with SOC 2 CC6.2/CC6.3."
   - requirement_code: A.5.19
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.9
     rationale: "Information security in supplier relationships maps to SCF Third-Party Management — shared with SOC 2 CC9.2."
   - requirement_code: A.5.20
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.8
-    rationale: "Embedding security requirements into supplier agreements is a core Third-Party Management (TPM-01) activity."
+    rationale: "Embedding security requirements into supplier agreements is a core Third-Party Management (TPM-02) activity."
   - requirement_code: A.5.21
-    scf_anchor: TPM-04
+    scf_anchor: TPM-10
     relationship_type: equal
     strength: 0.8
-    rationale: "ICT supply-chain risk management maps to Third-Party Risk Assessments (TPM-04)."
+    rationale: "ICT supply-chain risk management maps to Third-Party Risk Assessments & Approvals (TPM-10)."
   - requirement_code: A.5.22
-    scf_anchor: TPM-04
+    scf_anchor: TPM-10
     relationship_type: equal
     strength: 0.8
-    rationale: "Monitoring/review of supplier services maps to SCF Third-Party Risk Assessments."
+    rationale: "Monitoring/review of supplier services maps to SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: A.5.23
-    scf_anchor: CLD-01
+    scf_anchor: CLD-02
     relationship_type: equal
     strength: 0.9
-    rationale: "Information security for cloud services maps to SCF Cloud Infrastructure Governance."
+    rationale: "Information security for cloud services maps to SCF Cloud Services."
   - requirement_code: A.5.24
     scf_anchor: IRO-04
     relationship_type: equal
@@ -494,40 +494,40 @@ mappings:
     strength: 0.6
     rationale: "Evidence collection and preservation is the forensic-readiness facet of incident response (IRO-04)."
   - requirement_code: A.5.28
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Preserved logs and audit records are a primary evidence source; Auditing & Accountability (AAA-01) underpins evidentiary integrity."
+    rationale: "Preserved logs and audit records are a primary evidence source; System Generated Event Logs & Security-Relevant Telemetry (MON-04) underpins evidentiary integrity."
   - requirement_code: A.5.29
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Information security during disruption overlaps with Business Continuity Plan — shared with SOC 2 A1.2."
+    rationale: "Information security during disruption overlaps with Business Continuity & Disaster Recovery (BC/DR) Plans — shared with SOC 2 A1.2."
   - requirement_code: A.5.30
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: subset_of
     strength: 0.7
-    rationale: "ICT readiness for business continuity is a subset of the Business Continuity Plan anchor."
+    rationale: "ICT readiness for business continuity is a subset of the Business Continuity & Disaster Recovery (BC/DR) Plans anchor."
   - requirement_code: A.5.31
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Legal/regulatory/contractual requirements overlap with the Internal Audit/Compliance function anchor."
   - requirement_code: A.5.32
-    scf_anchor: CPL-01
+    scf_anchor: CPL-02
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "IP-rights protection is a legal/regulatory compliance obligation tracked under Compliance Management (CPL-01)."
+    rationale: "IP-rights protection is a legal/regulatory compliance obligation tracked under Statutory, Regulatory & Contractual Compliance (CPL-02)."
   - requirement_code: A.5.33
     scf_anchor: DCH-03
     relationship_type: equal
     strength: 0.7
     rationale: "Protection and integrity of records over their lifetime maps to Data Retention (DCH-03)."
   - requirement_code: A.5.33
-    scf_anchor: AAA-10
+    scf_anchor: MON-13
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Retention and protection of log/audit records is the Event Log Retention (AAA-10) facet of record protection."
+    rationale: "Retention and protection of log/audit records is the Event Log & Security-Relevant Telemetry Retention (MON-13) facet of record protection."
   - requirement_code: A.5.34
     scf_anchor: PRI-01
     relationship_type: equal
@@ -539,25 +539,25 @@ mappings:
     strength: 0.6
     rationale: "Honoring data-subject requests is the Data Subject Rights (PRI-04) facet of PII protection."
   - requirement_code: A.5.35
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: equal
     strength: 0.8
     rationale: "Independent review of information security maps to SCF Internal Audit Function — shared with SOC 2 CC4.1."
   - requirement_code: A.5.36
-    scf_anchor: CPL-01
+    scf_anchor: CPL-02
     relationship_type: equal
     strength: 0.8
-    rationale: "Regular review of policy compliance maps to Compliance Management (CPL-01)."
+    rationale: "Regular review of policy compliance maps to Statutory, Regulatory & Contractual Compliance (CPL-02)."
   - requirement_code: A.5.36
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Independent verification of compliance is performed by the Internal Audit Function (CPL-03)."
+    rationale: "Independent verification of compliance is performed by the Internal Audit Function (CPL-07.1)."
   - requirement_code: A.5.37
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Documented, repeatable operating procedures align with Secure Baseline Configurations (CFG-02) as the documented-standard-state anchor."
+    rationale: "Documented, repeatable operating procedures align with Secure Baseline Configurations (CFG-04) as the documented-standard-state anchor."
   # --- A.6 People ---
   - requirement_code: A.6.1
     scf_anchor: HRS-01
@@ -631,20 +631,20 @@ mappings:
     strength: 0.6
     rationale: "Continuous monitoring for unauthorized physical access extends Physical Access Control (PES-04)."
   - requirement_code: A.7.4
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Physical-access monitoring shares the continuous-monitoring discipline (MON-01)."
+    rationale: "Physical-access monitoring shares the continuous-monitoring discipline (MON-02)."
   - requirement_code: A.7.5
     scf_anchor: PES-04
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Physical-threat protection is an extension of physical security controls (PES-04)."
   - requirement_code: A.7.5
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Resilience against environmental threats (disaster) ties to the Business Continuity Plan (BCD-02)."
+    rationale: "Resilience against environmental threats (disaster) ties to the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.7.6
     scf_anchor: PES-04
     relationship_type: subset_of
@@ -676,15 +676,15 @@ mappings:
     strength: 0.5
     rationale: "Off-site devices fall under Endpoint Security (END-04)."
   - requirement_code: A.7.10
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Storage media handling/disposal overlaps with SCF Asset Disposal — shared with SOC 2 CC6.5."
+    rationale: "Storage media handling/disposal overlaps with SCF Secure Disposal, Destruction or Re-Use of Equipment — shared with SOC 2 CC6.5."
   - requirement_code: A.7.11
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Protection from utility failures is a continuity/availability concern under the Business Continuity Plan (BCD-02)."
+    rationale: "Protection from utility failures is a continuity/availability concern under the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.7.12
     scf_anchor: PES-04
     relationship_type: intersects_with
@@ -701,10 +701,10 @@ mappings:
     strength: 0.6
     rationale: "Correct equipment maintenance over the asset lifecycle is governed by the Asset Management Policy (AST-01)."
   - requirement_code: A.7.14
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: equal
     strength: 0.8
-    rationale: "Secure disposal/re-use of equipment with media sanitization maps to Asset Disposal (AST-09)."
+    rationale: "Secure disposal/re-use of equipment with media sanitization maps to Secure Disposal, Destruction or Re-Use of Equipment (AST-22)."
   # --- A.8 Technological ---
   - requirement_code: A.8.1
     scf_anchor: END-04
@@ -712,7 +712,7 @@ mappings:
     strength: 0.9
     rationale: "Protection of information on user endpoint devices maps to Endpoint Security (END-04)."
   - requirement_code: A.8.2
-    scf_anchor: IAC-21
+    scf_anchor: IAC-10
     relationship_type: equal
     strength: 0.9
     rationale: "Privileged access rights map to SCF Privileged Account Management."
@@ -722,35 +722,35 @@ mappings:
     strength: 0.8
     rationale: "Restricting access per the access-control policy is the Identification & Authentication Policy (IAC-01) concept."
   - requirement_code: A.8.3
-    scf_anchor: IAC-15
+    scf_anchor: IAC-12
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Periodic verification that access remains appropriately restricted is the Account Review (IAC-15) facet."
+    rationale: "Periodic verification that access remains appropriately restricted is the Account Review (IAC-12) facet."
   - requirement_code: A.8.4
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Managing read/write access to source code is an access-provisioning control (IAC-07)."
+    rationale: "Managing read/write access to source code is an access-provisioning control (IAC-04)."
   - requirement_code: A.8.4
     scf_anchor: SEA-05
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Source-code access governance is part of Secure Software Development (SEA-05)."
   - requirement_code: A.8.5
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: subset_of
     strength: 0.7
     rationale: "Secure authentication (incl. MFA) is a subset/instance of the SCF Multi-Factor Authentication anchor — shared with SOC 2 CC6.1 MFA mapping."
   - requirement_code: A.8.6
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Monitoring and adjusting resource use ties to Continuous Monitoring (MON-01) of system health."
+    rationale: "Monitoring and adjusting resource use ties to Continuous Monitoring (MON-02) of system health."
   - requirement_code: A.8.6
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Capacity planning to sustain availability supports the Business Continuity Plan (BCD-02)."
+    rationale: "Capacity planning to sustain availability supports the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.8.7
     scf_anchor: END-07
     relationship_type: equal
@@ -767,7 +767,7 @@ mappings:
     strength: 0.6
     rationale: "A.8.8 'the organization's exposure is evaluated' is the threat-exposure facet of vulnerability management; Indicators of Exposure (slice 641 THR-02) covers the exposure-evaluation concept directly, a subset of the broader A.8.8 obtain/evaluate/remediate cycle (VPM-01 carries the equal). Added by slice 646."
   - requirement_code: A.8.9
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: equal
     strength: 0.8
     rationale: "Configuration management maps to SCF Configuration Change Control — shared with SOC 2 CC8.1."
@@ -777,10 +777,10 @@ mappings:
     strength: 0.8
     rationale: "Deletion of information when no longer required is the disposal end of Data Retention (DCH-03)."
   - requirement_code: A.8.10
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Media sanitization on deletion is an Asset Disposal (AST-09) activity."
+    rationale: "Media sanitization on deletion is a Secure Disposal, Destruction or Re-Use of Equipment (AST-22) activity."
   - requirement_code: A.8.11
     scf_anchor: DCH-01
     relationship_type: intersects_with
@@ -802,27 +802,27 @@ mappings:
     strength: 0.5
     rationale: "Egress controls at the network boundary are part of Boundary Protection (NET-04)."
   - requirement_code: A.8.13
-    scf_anchor: BCD-09
+    scf_anchor: BCD-24
     relationship_type: equal
     strength: 0.9
-    rationale: "Information backup maps to SCF Backups — shared with SOC 2 A1.2 backup mapping."
+    rationale: "Information backup maps to SCF Data Backups — shared with SOC 2 A1.2 backup mapping."
   - requirement_code: A.8.14
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: equal
     strength: 0.7
-    rationale: "Redundancy of processing facilities to meet availability targets maps to the Business Continuity Plan (BCD-02)."
+    rationale: "Redundancy of processing facilities to meet availability targets maps to the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.8.14
-    scf_anchor: BCD-09
+    scf_anchor: BCD-24
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Redundant data copies relate to Backups (BCD-09)."
+    rationale: "Redundant data copies relate to Data Backups (BCD-24)."
   - requirement_code: A.8.15
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Logging maps to SCF Auditing & Accountability — shared with SOC 2 CC7.2 logging."
+    rationale: "Logging maps to SCF System Generated Event Logs & Security-Relevant Telemetry — shared with SOC 2 CC7.2 logging."
   - requirement_code: A.8.16
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: equal
     strength: 0.9
     rationale: "Monitoring activities maps to SCF Continuous Monitoring — shared with SOC 2 CC7.2."
@@ -837,25 +837,25 @@ mappings:
     strength: 0.6
     rationale: "A.8.16 'networks, systems, and applications are monitored for anomalous behavior' overlaps Threat Hunting (slice 641 THR-04) — proactive hunting is one monitoring technique that surfaces anomalous behavior. Partial: A.8.16 also covers passive/automated monitoring beyond active hunting. Added by slice 646."
   - requirement_code: A.8.17
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Synchronized clocks underpin accurate, correlatable audit timestamps; clock sync is a prerequisite facet of Auditing & Accountability (AAA-01)."
+    rationale: "Synchronized clocks underpin accurate, correlatable audit timestamps; clock sync is a prerequisite facet of System Generated Event Logs & Security-Relevant Telemetry (MON-04)."
   - requirement_code: A.8.18
-    scf_anchor: IAC-21
+    scf_anchor: IAC-10
     relationship_type: equal
     strength: 0.8
-    rationale: "Restricting privileged utility programs maps to Privileged Account Management (IAC-21)."
+    rationale: "Restricting privileged utility programs maps to Privileged Account Management (IAC-10)."
   - requirement_code: A.8.19
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: equal
     strength: 0.7
-    rationale: "Controlled software installation on operational systems is a Configuration Change Control (CFG-04) activity."
+    rationale: "Controlled software installation on operational systems is a Configuration Change Control (CHG-03) activity."
   - requirement_code: A.8.19
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Approved-software baselines are governed by Secure Baseline Configurations (CFG-02)."
+    rationale: "Approved-software baselines are governed by Secure Baseline Configurations (CFG-04)."
   - requirement_code: A.8.20
     scf_anchor: NET-04
     relationship_type: equal
@@ -937,42 +937,42 @@ mappings:
     strength: 0.6
     rationale: "Pre-release security testing that drives remediation relates to the Vulnerability Remediation Process (VPM-04)."
   - requirement_code: A.8.30
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.7
-    rationale: "Governing outsourced development providers maps to Third-Party Management (TPM-01)."
+    rationale: "Governing outsourced development providers maps to Third-Party Management (TPM-02)."
   - requirement_code: A.8.30
     scf_anchor: SEA-05
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Outsourced work must still meet Secure Software Development (SEA-05) standards."
   - requirement_code: A.8.31
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Environment separation is a baseline-configuration/segregation control (CFG-02)."
+    rationale: "Environment separation is a baseline-configuration/segregation control (CFG-04)."
   - requirement_code: A.8.31
     scf_anchor: CHG-02
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Controlled promotion between separated environments is part of the Change Control Process (CHG-02)."
+    rationale: "Controlled promotion between separated environments is part of the Change Management Program (CHG-02)."
   - requirement_code: A.8.32
     scf_anchor: CHG-02
     relationship_type: equal
     strength: 0.9
-    rationale: "System and facility changes under formal procedure map to the Change Control Process (CHG-02)."
+    rationale: "System and facility changes under formal procedure map to the Change Management Program (CHG-02)."
   - requirement_code: A.8.32
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Configuration-level change control is the Configuration Change Control (CFG-04) facet."
+    rationale: "Configuration-level change control is the Configuration Change Control (CHG-03) facet."
   - requirement_code: A.8.33
     scf_anchor: DCH-01
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Protection and handling of test information (especially when derived from production data) is a Data Classification & Handling (DCH-01) concern."
   - requirement_code: A.8.34
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: equal
     strength: 0.7
-    rationale: "Planning and controlling audit testing against operational systems maps to the Internal Audit Function (CPL-03)."
+    rationale: "Planning and controlling audit testing against operational systems maps to the Internal Audit Function (CPL-07.1)."

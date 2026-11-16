@@ -75,6 +75,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
@@ -103,6 +105,10 @@ const (
 
 	// assignRoleGrantedBy is the granted_by string the user_roles rows carry.
 	assignRoleGrantedBy = "admin:user_assign"
+
+	// lastAdminReason is the 409 body when a change would leave the tenant
+	// with no active admin (#2261).
+	lastAdminReason = "Cannot remove the tenant's last active admin; grant admin to another active user first"
 
 	// maxAssignBody caps the assign/revoke request body.
 	maxAssignBody = 16 * 1024
@@ -584,6 +590,14 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Lock the tenant's admin roster before touching roles, so two revokes
+	// of the last two admins cannot both pass (#2261).
+	guard, gerr := users.LockAdmins(r.Context(), dbx.New(tx), destTenant)
+	if gerr != nil {
+		httperr.WriteInternal(w, r, "lock admins", gerr)
+		return
+	}
+
 	if _, derr := tx.Exec(r.Context(),
 		`DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`,
 		destTenant, targetUserID.String(),
@@ -609,6 +623,17 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Refuse before the audit write; the deferred rollback discards the
+	// role delete, so a refused revoke writes nothing (#2261).
+	if cerr := guard.Check(r.Context(), dbx.New(tx)); cerr != nil {
+		if errors.Is(cerr, users.ErrLastAdmin) {
+			httpresp.WriteError(w, http.StatusConflict, lastAdminReason)
+			return
+		}
+		httperr.WriteInternal(w, r, "check admins", cerr)
+		return
+	}
+
 	if aerr := h.writeAssignAudit(r.Context(), tx, auditAssignParams{
 		action:        auditActionRevoke,
 		actorID:       actorID,
@@ -622,6 +647,10 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}); aerr != nil {
 		httperr.WriteInternal(w, r, "revoke audit", aerr)
 		return
+	}
+
+	if h.beforeRevokeCommit != nil {
+		h.beforeRevokeCommit()
 	}
 
 	if cerr := tx.Commit(r.Context()); cerr != nil {
@@ -767,8 +796,8 @@ func actorFromContext(ctx context.Context) uuid.UUID {
 			return u
 		}
 	}
-	if cred, ok := credentialFromContext(ctx); ok {
-		if u, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID)); err == nil {
+	if cred, ok := authctx.CredentialFromContext(ctx); ok {
+		if u, ok := credstore.CallerUserID(cred); ok {
 			return u
 		}
 	}

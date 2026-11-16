@@ -39,10 +39,10 @@
 // `controls` array omits the field entirely rather than emitting null,
 // so slice 012 can add it without a breaking change.
 //
-// The `?as-of=<timestamp>` and `?scf_release=<version>` query parameters
-// are accepted and documented but no-op in v1; slice 012 (point-in-time
-// evidence filtering) and a future SCF-release-import feature will
-// activate them.
+// The `?as-of=<timestamp>` query parameter is accepted and documented but
+// no-op in v1; slice 012 (point-in-time evidence filtering) will activate
+// it. `?scf_release=<version>` is live since #1770: it picks the SCF
+// release an anchor code resolves in, defaulting to the current one.
 package ucfcoverage
 
 import (
@@ -51,6 +51,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -291,7 +292,40 @@ type anchorWire struct {
 	// verified | rejected) — additive, orthogonal to source_attribution. No
 	// reviewer identity on this catalog payload (P0-483-6).
 	MappingTier string `json:"mapping_tier,omitempty"`
-	Rationale   string `json:"rationale,omitempty"`
+	// Origin is where the edge comes from: "catalog", or "overlay" for the
+	// caller tenant's own org mapping (#1798). Omitted on the bare anchor.
+	Origin    string `json:"origin,omitempty"`
+	Rationale string `json:"rationale,omitempty"`
+	// Overlay is the org mapping's source, author and date (#1800). Set
+	// only when Origin is "overlay".
+	Overlay *overlayWire `json:"overlay,omitempty"`
+}
+
+// overlayWire is the provenance of an overlay edge (#1800): the source
+// reference the organisation recorded, who created it and when. The
+// rationale stays on the edge row, where catalog edges carry theirs.
+type overlayWire struct {
+	SourceRef string    `json:"source_ref"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// overlayFrom builds the overlay provenance for a traversal row. It returns
+// nil for a catalog row, and for an overlay row whose LEFT JOIN found
+// nothing (it cannot: the view's overlay arm reads the same table under
+// the same tenant setting).
+func overlayFrom(origin string, sourceRef, createdBy *string, createdAt pgtype.Timestamptz) *overlayWire {
+	if origin != "overlay" || sourceRef == nil {
+		return nil
+	}
+	w := &overlayWire{SourceRef: *sourceRef}
+	if createdBy != nil {
+		w.CreatedBy = *createdBy
+	}
+	if createdAt.Valid {
+		w.CreatedAt = createdAt.Time.UTC()
+	}
+	return w
 }
 
 // controlWire is the shape of a control in slice-008 responses.
@@ -367,7 +401,13 @@ type requirementForAnchorWire struct {
 	// MappingTier is the slice-483 trust tier — additive, orthogonal to
 	// source_attribution; no reviewer identity (P0-483-6).
 	MappingTier string `json:"mapping_tier"`
-	Rationale   string `json:"rationale,omitempty"`
+	// Origin is "catalog", or "overlay" when the path runs through the
+	// caller tenant's own org mapping (#1798).
+	Origin    string `json:"origin"`
+	Rationale string `json:"rationale,omitempty"`
+	// Overlay is the org mapping's source, author and date (#1800). Set
+	// only when Origin is "overlay".
+	Overlay *overlayWire `json:"overlay,omitempty"`
 }
 
 // ===== shared write helpers =====

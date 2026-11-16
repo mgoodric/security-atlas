@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	auditnotesapi "github.com/mgoodric/security-atlas/internal/api/auditnotes"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
@@ -23,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	walkthroughsapi "github.com/mgoodric/security-atlas/internal/api/walkthroughs"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -178,6 +180,23 @@ func (s *Server) buildRouter() *chi.Mux {
 	// no-op when no credential is in context (bearer-exempt paths like
 	// /auth/* keep their own request-supplied tenant resolution).
 	root.Use(tenancymw.Middleware)
+	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
+	// tenancy so the cache lives inside the same request-context every
+	// downstream step sees, the module gate included. Anti-criterion P0:
+	// no cross-request cache -- the cache is created fresh per request and
+	// dies when the request ends.
+	root.Use(featureflag.CacheMiddleware)
+	// Slice 660: one shared feature-flag Store, reused by the module gate,
+	// the admin features handler, and the caller's effective-modules read.
+	// Tenant scope comes from RLS on each per-request transaction
+	// (invariant #6).
+	featureFlagStore := featureflag.NewStore(s.dbPool)
+	// #2170: the module gate step of the authorization chain. A route that
+	// belongs to a switched-off module (featureflag.Modules) answers 404
+	// with the switched-off marker before the OPA role decision; core
+	// routes and switched-on modules fall through to it. It replaces the
+	// per-route featureflag.Gate groups board and OSCAL vendor claims used.
+	root.Use(featureflag.ModuleGate(featureFlagStore))
 	// Slice 035: RBAC + ABAC via embedded OPA. Every non-exempt
 	// request reaches authz.Decide; every decision (allow or deny)
 	// writes one row to decision_audit_log. Attaches AFTER tenancymw
@@ -194,21 +213,16 @@ func (s *Server) buildRouter() *chi.Mux {
 		// (mounted only when ATLAS_TEST_MODE=1) — same rationale as the
 		// bearer-exempt above: the endpoint mints the first JWT, so it
 		// cannot be gated by OPA on a credential it has not yet produced.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
+		// #2193: POST /v1/audit-notes carries its audit_period_id in the
+		// body; the hydrator puts it on input.resource.attrs (after checking
+		// the period is in the caller's tenant) for the auditor.rego write
+		// rule.
+		var resourceAttrs authzmw.ResourceAttrsFunc
+		if s.dbPool != nil {
+			resourceAttrs = auditnotesapi.PeriodResourceAttrs(auditperiod.NewStore(s.dbPool))
+		}
+		root.Use(authzmw.MiddlewareWithResourceAttrs(s.authzEngine, s.authzAudit, resourceAttrs, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
 	}
-	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
-	// tenancy / authz so the cache lives inside the same request-context
-	// every downstream handler sees. Anti-criterion P0: no cross-request
-	// cache -- the cache is created fresh per request and dies when the
-	// request ends.
-	root.Use(featureflag.CacheMiddleware)
-
-	// Slice 660: one shared feature-flag Store, reused by the route-gate
-	// middleware (OSCAL + board), the admin features handler, and the
-	// non-admin enabled-modules read. Tenant scope comes from RLS on each
-	// per-request transaction (invariant #6).
-	featureFlagStore := featureflag.NewStore(s.dbPool)
-
 	queries := dbx.New(s.dbPool)
 
 	// Slice 436: shared stores reused across more than one per-domain
@@ -237,10 +251,10 @@ func (s *Server) buildRouter() *chi.Mux {
 	s.registerMe(root)
 	s.registerGovernance(root)
 	s.registerControlState(root)
-	s.registerOSCAL(root, featureFlagStore)
+	s.registerOSCAL(root)
 	s.registerDashboard(root, risksStore, freshnessStore, driftStore)
 	s.registerCalendar(root)
-	s.registerBoard(root, featureFlagStore, freshnessStore, driftStore, vendorStore)
+	s.registerBoard(root, freshnessStore, driftStore, vendorStore)
 	s.registerQuestionnaire(root)
 	s.registerLLMRouting(root)
 	s.registerAdmin(root, featureFlagStore)

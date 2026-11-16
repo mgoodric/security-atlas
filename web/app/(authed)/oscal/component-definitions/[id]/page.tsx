@@ -27,8 +27,10 @@
 //   GET   /api/anchors                                           (picker catalog)
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { use, useMemo, useState } from "react";
+import { use, useState } from "react";
 
+import { ScfAnchorPicker } from "@/components/control/scf-anchor-picker";
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,38 +47,17 @@ import type {
 
 function statusBadgeVariant(
   status: ClaimStatus,
-): "default" | "secondary" | "destructive" | "outline" {
+): "default" | "secondary" | "outline" {
   switch (status) {
     case "accepted":
       return "default";
     case "rejected":
-      return "destructive";
+      return "outline";
     case "needs_info":
       return "outline";
     default:
       return "secondary";
   }
-}
-
-// filterAnchors narrows the SCF-anchor catalog by a case-insensitive substring
-// match over scf_id + family + name. Exported for unit testing the picker
-// search behaviour without standing up the React tree. A blank query caps the
-// list at `cap` so the picker never renders the full ~1,400-anchor catalog.
-export function filterAnchors(
-  anchors: Anchor[],
-  query: string,
-  cap = 25,
-): Anchor[] {
-  const q = query.trim().toLowerCase();
-  if (q === "") return anchors.slice(0, cap);
-  return anchors
-    .filter(
-      (a) =>
-        a.scf_id.toLowerCase().includes(q) ||
-        a.family.toLowerCase().includes(q) ||
-        a.name.toLowerCase().includes(q),
-    )
-    .slice(0, cap);
 }
 
 function statusLabel(status: ClaimStatus): string {
@@ -199,44 +180,47 @@ export default function ComponentDefinitionDetailPage({
 
   if (detailQ.isLoading) {
     return (
-      <div className="space-y-3" data-testid="component-definition-loading">
-        <Skeleton className="h-8 w-1/3" />
+      <PageShell
+        title={<Skeleton className="inline-block h-8 w-64 align-middle" />}
+        bodyClassName="space-y-3"
+        data-testid="component-definition-loading"
+      >
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (detailQ.isError || !detailQ.data) {
     return (
-      <Alert variant="destructive" data-testid="component-definition-error">
-        Could not load this component-definition.
-      </Alert>
+      <PageShell title="Vendor Claims">
+        <Alert variant="destructive" data-testid="component-definition-error">
+          Could not load this component-definition.
+        </Alert>
+      </PageShell>
     );
   }
 
   const d = detailQ.data;
 
   return (
-    <div className="space-y-6" data-testid="component-definition-detail">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">
-          {d.source_label || d.catalog_title || d.id}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {d.catalog_title} · OSCAL {d.oscal_version} · imported by{" "}
-          {d.imported_by}
-        </p>
-        <p
-          className="text-xs text-muted-foreground"
-          data-testid="vendor-claim-disclaimer"
-        >
-          Every row below is a vendor assertion, not platform-verified evidence.
-          Accepting a claim credits the vendor&apos;s statement; it does not
-          satisfy a control on its own.
-        </p>
-      </header>
-
+    <PageShell
+      title={d.source_label || d.catalog_title || d.id}
+      subtitle={
+        <>
+          <p>
+            {d.catalog_title} · OSCAL {d.oscal_version} · imported by{" "}
+            {d.imported_by}
+          </p>
+          <p className="mt-1 text-xs" data-testid="vendor-claim-disclaimer">
+            Every row below is a vendor assertion, not platform-verified
+            evidence. Accepting a claim credits the vendor&apos;s statement; it
+            does not satisfy a control on its own.
+          </p>
+        </>
+      }
+      data-testid="component-definition-detail"
+    >
       {actionError && (
         <Alert variant="destructive" data-testid="disposition-error">
           {actionError}
@@ -330,7 +314,7 @@ export default function ComponentDefinitionDetailPage({
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant="outline"
                   data-testid="claim-reject"
                   disabled={dispositionM.isPending}
                   onClick={() =>
@@ -360,110 +344,30 @@ export default function ComponentDefinitionDetailPage({
 
               {c.unmapped && (
                 <ScfAnchorPicker
-                  claimId={c.id}
+                  prompt="Map this claim to a canonical SCF anchor. Setting the crosswalk does not satisfy a control on its own."
                   anchors={anchorsQ.data ?? []}
                   loading={anchorsQ.isLoading}
                   query={anchorQuery[c.id] ?? ""}
                   onQueryChange={(v) =>
                     setAnchorQuery((prev) => ({ ...prev, [c.id]: v }))
                   }
-                  onMap={(scfAnchorId) =>
+                  onPick={(scfAnchorId) =>
                     mapM.mutate({ claimId: c.id, scfAnchorId })
                   }
                   pending={mapM.isPending}
-                />
+                >
+                  <input
+                    type="hidden"
+                    data-testid="scf-anchor-claim-id"
+                    value={c.id}
+                    readOnly
+                  />
+                </ScfAnchorPicker>
               )}
             </li>
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-// ScfAnchorPicker is the slice-620 SCF-anchor mapping affordance for ONE
-// unmapped claim. It renders a search box + a short filtered list of bundled
-// SCF anchors; clicking one PATCHes the mapping. The picker NEVER lets the
-// operator type a free-form anchor — every option resolves to a real
-// scf_anchors row (invariant #7), and the platform validates again server-side.
-function ScfAnchorPicker({
-  claimId,
-  anchors,
-  loading,
-  query,
-  onQueryChange,
-  onMap,
-  pending,
-}: {
-  claimId: string;
-  anchors: Anchor[];
-  loading: boolean;
-  query: string;
-  onQueryChange: (v: string) => void;
-  onMap: (scfAnchorId: string) => void;
-  pending: boolean;
-}) {
-  const filtered = useMemo(
-    () => filterAnchors(anchors, query),
-    [anchors, query],
-  );
-
-  return (
-    <div
-      className="space-y-2 rounded-md border border-dashed p-3"
-      data-testid="scf-anchor-picker"
-    >
-      <p className="text-xs font-medium text-muted-foreground">
-        Map this claim to a canonical SCF anchor. Setting the crosswalk does not
-        satisfy a control on its own.
-      </p>
-      <input
-        type="text"
-        className="w-full rounded-md border p-2 text-sm"
-        placeholder="Search SCF anchors (code, family, name)…"
-        data-testid="scf-anchor-search"
-        value={query}
-        onChange={(e) => onQueryChange(e.target.value)}
-      />
-      {loading ? (
-        <p className="text-xs text-muted-foreground">Loading anchors…</p>
-      ) : filtered.length === 0 ? (
-        <p
-          className="text-xs text-muted-foreground"
-          data-testid="scf-anchor-empty"
-        >
-          No matching SCF anchors.
-        </p>
-      ) : (
-        <ul
-          className="max-h-48 space-y-1 overflow-y-auto"
-          data-testid="scf-anchor-options"
-        >
-          {filtered.map((a) => (
-            <li key={a.id}>
-              <button
-                type="button"
-                className="flex w-full flex-col rounded-md border px-2 py-1 text-left text-sm hover:bg-accent disabled:opacity-50"
-                data-testid="scf-anchor-option"
-                data-scf-id={a.scf_id}
-                disabled={pending}
-                onClick={() => onMap(a.scf_id)}
-              >
-                <span className="font-mono text-xs">{a.scf_id}</span>
-                <span className="text-xs text-muted-foreground">
-                  {a.family} · {a.name}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <input
-        type="hidden"
-        data-testid="scf-anchor-claim-id"
-        value={claimId}
-        readOnly
-      />
-    </div>
+    </PageShell>
   );
 }

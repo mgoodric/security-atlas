@@ -23,8 +23,9 @@
 //
 // Anti-criteria honored (P0):
 //   - P0-A-176-1: NO inline edit affordances. The exception lifecycle
-//     (request / approve / deny / activate / expire) lives on the slice
-//     022 control-detail page; this list page is READ-ONLY.
+//     (request / approve / deny / activate / revoke) lives on the
+//     exception's own detail page, /exceptions/[id] (#2113), and a
+//     request starts from the control; this list page is READ-ONLY.
 //   - P0-A-176-2: NO invented columns. Every column derives from
 //     `exceptionWire`. Justification is shown truncated; the full text
 //     is only available via the row drawer (or future detail page).
@@ -46,6 +47,7 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -70,12 +72,14 @@ import {
   uniqueControlIDs,
   type ExceptionFilters,
 } from "./filters";
+import { statusPillClass } from "./lifecycle";
+import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof ExceptionFilters)[] = ["status", "control_id"];
 
 // Status values mirror `internal/exception/store.go` State* constants.
 // Order is lifecycle order so the dropdown reads as a process:
-// requested → approved → active → (denied | expired).
+// requested → approved → active → (denied | expired | revoked).
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All statuses" },
   { value: "requested", label: "requested" },
@@ -83,23 +87,8 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "active", label: "active" },
   { value: "denied", label: "denied" },
   { value: "expired", label: "expired" },
+  { value: "revoked", label: "revoked" },
 ];
-
-function statusPillClass(status: string): string {
-  switch (status) {
-    case "active":
-      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
-    case "requested":
-    case "approved":
-      return "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
-    case "denied":
-      return "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300";
-    case "expired":
-      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 /**
  * Truncate a justification string to a single-line preview. Sensitive
@@ -258,14 +247,20 @@ function ExceptionsPageInner() {
       id: "status",
       header: "Status",
       cell: (row) => (
-        <span
-          className={
-            "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-            statusPillClass(row.status)
-          }
-          data-testid="exceptions-row-status"
-        >
-          {row.status}
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className={
+              "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
+              statusPillClass(row.status)
+            }
+            data-testid="exceptions-row-status"
+          >
+            {row.status}
+          </span>
+          <SelfApprovedBadge
+            selfApproved={row.self_approved}
+            testId="exceptions-row-self-approved"
+          />
         </span>
       ),
     },
@@ -394,7 +389,7 @@ function ExceptionsPageInner() {
   if (exceptionsQ.isLoading) {
     return (
       <ListPage
-        title="Exceptions"
+        title={pageTitle("/exceptions")}
         subtitle="Time-bounded waivers from active controls · approved deviations live here"
         actions={actions}
         filterRow={
@@ -409,7 +404,7 @@ function ExceptionsPageInner() {
   if (exceptionsQ.isError) {
     return (
       <ListPage
-        title="Exceptions"
+        title={pageTitle("/exceptions")}
         subtitle="Time-bounded waivers from active controls · approved deviations live here"
         actions={actions}
       >
@@ -425,7 +420,7 @@ function ExceptionsPageInner() {
 
   return (
     <ListPage
-      title="Exceptions"
+      title={pageTitle("/exceptions")}
       subtitle="Time-bounded waivers from active controls · approved deviations live here"
       actions={actions}
       filterRow={
@@ -441,13 +436,10 @@ function ExceptionsPageInner() {
         rows={visible}
         rowKey={(row) => row.id}
         onRowClick={(row) =>
-          // Per P0-A-176-1 the list view is read-only; clicking a row
-          // routes to the control detail page where the slice 022
-          // lifecycle workflow (approve / deny / activate / expire)
-          // lives. The drawer pattern would be nice but is deferred —
-          // navigating the operator to the control where the
-          // exception lives is the more honest interaction.
-          router.push(`/controls/${encodeURIComponent(row.control_id)}`)
+          // Per P0-A-176-1 the list view is read-only; a row opens the
+          // exception's detail page (#2113), where its lifecycle
+          // actions (approve / deny / activate / revoke) live.
+          router.push(`/exceptions/${encodeURIComponent(row.id)}`)
         }
         emptyFallback={emptyState}
       />

@@ -1,0 +1,111 @@
+{
+  "name": "policy",
+  "title": "Policy",
+  "entity": "policies",
+  "column": "status",
+  "states": [
+    "draft",
+    "under_review",
+    "approved",
+    "published",
+    "superseded"
+  ],
+  "initial": [
+    {
+      "state": "draft",
+      "action": "create",
+      "routes": [
+        "POST /v1/policies"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    },
+    {
+      "state": "published",
+      "action": "import",
+      "routes": [
+        "POST /v1/admin/policies/import"
+      ],
+      "roles": [
+        "admin"
+      ]
+    }
+  ],
+  "terminal": [
+    "superseded"
+  ],
+  "transitions": [
+    {
+      "from": "draft",
+      "to": "under_review",
+      "action": "submit",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/policies/{id}/submit"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "A policy under review whose submitter was recorded as a session id (before #1807) may be submitted again, so approval has a person to compare."
+    },
+    {
+      "from": "under_review",
+      "to": "approved",
+      "action": "approve",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/policies/{id}/approve"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": true,
+      "second_person": true,
+      "self_approval_opt_in": true
+    },
+    {
+      "from": "approved",
+      "to": "published",
+      "action": "publish",
+      "actor": "person",
+      "routes": [
+        "POST /v1/policies/{id}/publish"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "published",
+      "to": "superseded",
+      "action": "supersede",
+      "actor": "person",
+      "routes": [
+        "POST /v1/policies/{id}/publish"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Publishing a policy's next version supersedes it, in the same transaction."
+    }
+  ]
+}

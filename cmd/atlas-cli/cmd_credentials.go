@@ -85,7 +85,7 @@ func newCredentialsIssueCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.tenant, "tenant", "", credentialTenantFlagHelp)
 	cmd.Flags().StringVar(&f.scope, "scope", "", "scope predicate (JSON string)")
 	cmd.Flags().StringVar(&f.kinds, "kinds", "", "comma-separated evidence_kind identifiers (empty = all)")
-	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 = no expiry). With --reset-bootstrap: 0 = the server default of 24h, at most 168h")
+	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 or 0d = no expiry). With --reset-bootstrap: 0 = the server default of 24h, at most 168h")
 	// Slice 073 — recovery flags. --reset-bootstrap is the discoverable
 	// flag; --force is the foot-gun gate. See docs/issues/073-*.md AC-8.
 	cmd.Flags().BoolVar(&f.resetBootstrap, "reset-bootstrap", false,

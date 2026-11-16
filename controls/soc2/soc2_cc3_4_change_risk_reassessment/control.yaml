@@ -10,8 +10,8 @@ description: |
   log and asserts that every push to a protected branch in the period was
   preceded by a pull-request approval from a non-author reviewer.
 
-scf_anchor_id: CFG-04
-control_family: CFG
+scf_anchor_id: CHG-03
+control_family: CHG
 implementation_type: automated
 owner_role: security-engineering
 lifecycle_state: active

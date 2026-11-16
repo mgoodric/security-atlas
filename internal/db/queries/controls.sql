@@ -327,6 +327,77 @@ SET description = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
+-- name: RebindControlAnchorInPlace :execrows
+-- Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
+-- whose code now resolves to a different anchor row because a new SCF
+-- release was imported (#1768 mints new anchor rows per release), moves the
+-- active row to the current release's anchor in place. The manifest itself
+-- is unchanged, so superseding would orphan owners, evidence and links for
+-- nothing; coverage joins controls to edges by anchor row, so leaving the
+-- control on the legacy row would drop it out of coverage.
+UPDATE controls
+SET scf_anchor_id = $3,
+    scf_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
+
+-- name: ListControlsOnLegacySCFAnchors :many
+-- Issue #1971 (D3): active controls still bound to an anchor of an SCF
+-- release that is no longer current. Coverage joins controls to crosswalk
+-- edges by anchor row, so these controls earn no framework credit until they
+-- move. For each one: the legacy anchor; the current release's anchor with
+-- the same code, if any (current_anchor_id is NULL when the code is gone);
+-- and the current anchor that SCF lists the legacy code as the legacy ID of
+-- (#1769), if any. The upgrade re-binds a control only when the current
+-- anchor has the same code AND the same title; every other row is reported
+-- as needing re-anchoring. tenant_id NULL lists every tenant (the migrate
+-- role, at upgrade); a tenant id lists that tenant's controls.
+SELECT
+    c.id                  AS control_id,
+    c.tenant_id,
+    c.bundle_id,
+    c.title               AS control_title,
+    -- The stored control.yaml: a bundle that declares scf_release (#1770)
+    -- is pinned to that release and is never re-bound.
+    c.bundle_manifest_yaml,
+    la.id                 AS legacy_anchor_id,
+    la.scf_id             AS legacy_scf_id,
+    la.title              AS legacy_anchor_title,
+    lfv.version           AS legacy_release,
+    cfv.version           AS current_release,
+    ca.id                 AS current_anchor_id,
+    ca.title              AS current_anchor_title,
+    -- '' when SCF lists no current anchor with this legacy code.
+    COALESCE((SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id,
+    -- #1775 remap queue: the current release's id, the legacy ID of the
+    -- current anchor with this code ('' when it lists none, or the code is
+    -- gone), every current anchor that SCF lists the legacy code as the
+    -- legacy ID of (codes and titles in the same order), and whether the
+    -- current release carries any legacy IDs at all.
+    cfv.id                AS current_framework_version_id,
+    COALESCE(ca.legacy_scf_id, '')::text AS current_anchor_legacy_scf_id,
+    ARRAY(SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_scf_ids,
+    ARRAY(SELECT s.title FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_titles,
+    EXISTS (SELECT 1 FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id
+        AND COALESCE(btrim(s.legacy_scf_id), '') <> '') AS current_release_has_legacy_ids
+FROM controls c
+JOIN scf_anchors la            ON la.id = c.scf_anchor_id
+JOIN framework_versions lfv    ON lfv.id = la.framework_version_id
+JOIN frameworks f              ON f.id = lfv.framework_id AND f.slug = 'scf' AND f.tenant_id IS NULL
+JOIN framework_versions cfv    ON cfv.framework_id = f.id AND cfv.status = 'current'
+LEFT JOIN scf_anchors ca       ON ca.framework_version_id = cfv.id AND ca.scf_id = la.scf_id
+WHERE c.superseded_by IS NULL
+  AND lfv.id <> cfv.id
+  AND (sqlc.narg(tenant_id)::uuid IS NULL OR c.tenant_id = sqlc.narg(tenant_id)::uuid)
+ORDER BY c.tenant_id, c.bundle_id, c.id;
+
 -- NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
 -- from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
 -- in internal/control/parser.go calls them through the same dbx.Queries
@@ -366,14 +437,18 @@ worst_per_control AS (
     SELECT
         le.control_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -432,3 +507,57 @@ SELECT count(*)::bigint AS total
 FROM controls
 WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
   AND (sqlc.narg('anchor_fit')::text IS NULL OR anchor_fit = sqlc.narg('anchor_fit')::text);
+
+-- name: InsertSCFRemapProposal :execrows
+-- Issue #1775: queue one remap proposal for a control on a legacy SCF
+-- anchor. Written by the migrate role during `catalog import-scf` (source
+-- 'boot') and by the app role when an upload re-binds or flags a control in
+-- place (source 'upload', #2236). A re-run leaves the existing proposal
+-- alone, except that an open proposal whose control this run re-bound
+-- becomes rebound, taking the run's target anchor and source (#2321: a stock
+-- control flagged before the title-only rule moves on the re-run).
+-- target_anchor_id is the anchor a 'rebound' control moved to, NULL for an
+-- 'open' one.
+INSERT INTO scf_remap_proposals (
+    tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
+    legacy_release, target_framework_version_id, target_release, class,
+    status, successor_scf_ids, target_anchor_id, source
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(control_id), sqlc.arg(bundle_id),
+    sqlc.arg(legacy_anchor_id), sqlc.arg(legacy_scf_id),
+    sqlc.arg(legacy_release), sqlc.arg(target_framework_version_id),
+    sqlc.arg(target_release), sqlc.arg(class), sqlc.arg(status),
+    sqlc.arg(successor_scf_ids)::text[], sqlc.narg(target_anchor_id),
+    sqlc.arg(source)
+)
+ON CONFLICT (control_id, target_framework_version_id) DO UPDATE
+    SET status = 'rebound',
+        target_anchor_id = EXCLUDED.target_anchor_id,
+        source = EXCLUDED.source
+    WHERE scf_remap_proposals.status = 'open' AND EXCLUDED.status = 'rebound';
+
+-- name: ListSCFRemapProposals :many
+-- Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
+-- proposals, newest target release first, optionally filtered by class and
+-- status. RLS (tenant_read) and the explicit tenant id both bind the read.
+SELECT p.id, p.control_id, p.bundle_id, c.title AS control_title,
+       p.legacy_scf_id, p.legacy_release, p.target_release, p.class,
+       p.status, p.successor_scf_ids, p.created_at
+FROM scf_remap_proposals p
+JOIN controls c ON c.id = p.control_id
+WHERE p.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.narg(class)::text IS NULL OR p.class = sqlc.narg(class)::text)
+  AND (sqlc.narg(status)::text IS NULL OR p.status = sqlc.narg(status)::text)
+ORDER BY p.created_at DESC, p.bundle_id, p.id;
+
+-- name: IsApprovedRemapRevision :one
+-- Issue #1776: whether a control row is the revision a person's approved SCF
+-- remap decision created. The upload path keeps such a revision when the
+-- boot seed re-uploads the stock manifest it replaced, so a reviewed
+-- re-anchor is never undone silently.
+SELECT EXISTS (
+    SELECT 1 FROM scf_remap_decisions
+    WHERE tenant_id = sqlc.arg(tenant_id)
+      AND new_control_id = sqlc.arg(control_id)
+      AND decision = 'approved'
+) AS approved;

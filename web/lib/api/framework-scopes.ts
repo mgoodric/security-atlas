@@ -23,6 +23,13 @@ export type FrameworkScope = {
   predicate_hash_at_approval?: string;
   approval_evidence_file_url?: string;
   approval_evidence_file_hash?: string;
+  /** #2101 — who submitted the scope for review (a user id). */
+  submitted_by?: string;
+  /**
+   * #2101 — true when the submitter approved the scope under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   effective_from?: string;
   superseded_by?: string;
   superseded_at?: string;
@@ -30,11 +37,16 @@ export type FrameworkScope = {
   updated_at: string;
 };
 
-export type FrameworkScopeCreate = {
-  framework_version_id: string;
-  name: string;
-  predicate: unknown;
-};
+// With from_scope_id the new draft is a revision of that scope (#1965): the
+// other fields default to the source's, and its decisions are copied.
+export type FrameworkScopeCreate =
+  | { framework_version_id: string; name: string; predicate: unknown }
+  | {
+      from_scope_id: string;
+      framework_version_id?: string;
+      name?: string;
+      predicate?: unknown;
+    };
 
 export type FrameworkScopePatchResponse = {
   framework_scope: FrameworkScope;

@@ -2,7 +2,6 @@ package featureflag
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -52,7 +51,7 @@ func cacheFrom(ctx context.Context) *requestCache {
 // On Looker error, Enabled returns the Seed default and SWALLOWS the
 // error (logged inside Store.Get). The boolean returned is best-effort
 // available; the error return is reserved for ErrNotFound (which
-// indicates a typo'd key in a Gate(key) call -- a code bug, not a
+// indicates a registry key missing from Seed -- a code bug, not a
 // runtime degradation).
 //
 // Anti-criterion P0: a DB-down Looker MUST NOT fail closed. The
@@ -95,58 +94,11 @@ func Enabled(ctx context.Context, looker Looker, key string) (bool, error) {
 
 // CacheMiddleware attaches a fresh per-request memoization cache to
 // every incoming request. Wire it in the HTTP server's middleware
-// stack BEFORE any Gate(key) middleware so handlers downstream see the
+// stack BEFORE ModuleGate so the gate and the handlers downstream see the
 // same cache instance.
 func CacheMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := WithCache(r.Context())
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
-}
-
-// Gate is the chi middleware factory. Wrap a route with Gate(looker, key)
-// to 404 the request when the flag is disabled.
-//
-// Response shape:
-//
-//	HTTP/1.1 404 Not Found
-//	X-Feature-Disabled: <key>
-//	Content-Type: application/json
-//
-//	{"error":"feature disabled"}
-//
-// The 404 (instead of 403) is deliberate -- a disabled capability
-// should be indistinguishable from a non-existent route to an
-// unauthorized caller. The X-Feature-Disabled header is OBSERVABLE
-// (operators can see which gate fired in logs) without leaking which
-// keys exist to an unauthenticated caller.
-//
-// On unknown key (ErrNotFound from Looker), Gate returns 500 -- this
-// is a code bug, not a runtime condition. The middleware should never
-// be wired with a key that isn't in Seed.
-func Gate(looker Looker, key string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			on, err := Enabled(r.Context(), looker, key)
-			if err != nil {
-				if errors.Is(err, ErrNotFound) {
-					http.Error(w, "feature flag misconfigured: unknown key", http.StatusInternalServerError)
-					return
-				}
-				// Any other error from Enabled -- log already happened
-				// in Store.Get. Fall open with Seed default.
-				if def, ok := DefaultByKey(key); ok {
-					on = def.Enabled
-				}
-			}
-			if !on {
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Feature-Disabled", key)
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "feature disabled"})
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
 }

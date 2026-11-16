@@ -43,14 +43,18 @@ export function FilterPills({ pills, onChange, meta }: FilterPillsProps) {
         <label
           key={pill.id}
           data-testid={`list-filter-pill-${pill.id}`}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-card border rounded-md text-xs"
+          // #2213 — `max-w-full` + the select's `min-w-0`: a native
+          // select sizes itself to its longest option, so one long
+          // control title would otherwise push the pill past a phone's
+          // column. Capped, the select shrinks and clips its label.
+          className="flex max-w-full items-center gap-1.5 px-2.5 py-1.5 bg-card border rounded-md text-xs"
         >
           <span className="text-muted-foreground">{pill.label}</span>
           <select
             aria-label={pill.label}
             value={pill.value}
             onChange={(e) => onChange(pill.id, e.target.value)}
-            className="bg-transparent text-foreground font-medium focus:outline-none"
+            className="min-w-0 max-w-full rounded-sm bg-transparent text-foreground font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             {pill.options.map((opt) => (
               <option key={opt.value} value={opt.value}>

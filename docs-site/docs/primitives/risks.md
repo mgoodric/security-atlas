@@ -45,7 +45,9 @@ treatment, owner, and review due date.
 The register supports a hierarchy view (slice 113): roll risks up by
 business unit, by category, or by parent risk. The hierarchy is also
 exportable (slice 136) as CSV / JSON / XLSX for board reporting; the
-`parent_risk_ids` column lists the risks each row rolls up to.
+`parent_risk_ids` column lists the risks each row rolls up to. The
+`category` column carries the category's slug and `category_name` your
+organisation's name for it, so a renamed category still round-trips.
 
 ## Rolling risks up into a parent risk
 
@@ -62,6 +64,12 @@ risks it rolls up to.
   treatment. The page shows the **roll-up** from the children beside
   the assessed severity, and flags the parent when the children roll
   up higher than it was assessed.
+- A risk with at least one child is a **roll-up**. The register, its
+  count, the dashboard's top risks and the board's top risks leave
+  roll-ups out, so the same exposure is not counted twice. Tick **Show
+  roll-ups** on the register to list them; each carries a **Roll-up**
+  marker that links to its children. `GET /v1/risks?include_rollups=true`
+  is the API equivalent.
 - The API is `POST /v1/risks/{id}/children` with
   `{"child_risk_ids": [...]}`, `DELETE /v1/risks/{id}/children/{child_id}`,
   and `GET` on `/v1/risks/{id}/children` and `/v1/risks/{id}/parents`.

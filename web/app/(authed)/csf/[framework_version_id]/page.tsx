@@ -16,6 +16,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -34,6 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CsfGapView, CsfTier } from "@/lib/api/csf";
+import { pageTitle } from "@/lib/page-titles";
 
 const TIER_LABEL: Record<CsfTier, string> = {
   tier1_partial: "Tier 1 — Partial",
@@ -79,33 +81,34 @@ export default function CsfAssessmentPage() {
 
   if (error instanceof NotCsfVersion) {
     return (
-      <div className="space-y-2" data-testid="csf-not-found">
-        <h1 className="text-2xl font-semibold">Assessment not found</h1>
-        <p className="text-muted-foreground text-sm">
-          This framework version is not a NIST CSF version, so it has no CSF
-          assessment.
-        </p>
-      </div>
+      <PageShell
+        title="Assessment not found"
+        subtitle="This framework version is not a NIST CSF version, so it has no CSF assessment."
+        data-testid="csf-not-found"
+      />
     );
   }
 
   return (
-    <div className="space-y-6" data-testid="csf-assessment">
-      <div>
-        {data ? (
-          <h1 className="text-2xl font-semibold" data-testid="csf-title">
-            {data.framework_name} {data.framework_version} Assessment
-          </h1>
-        ) : isLoading ? (
-          <Skeleton className="h-8 w-64" />
-        ) : (
-          <h1 className="text-2xl font-semibold">CSF Assessment</h1>
-        )}
-        <p className="text-muted-foreground text-sm">
+    <PageShell
+      // #2081 — the H1 is the sidebar entry's label; the framework name
+      // and version that titled the page before move into the subtitle.
+      title={pageTitle("/csf")}
+      subtitle={
+        <>
+          {data ? (
+            <span data-testid="csf-title">
+              {data.framework_name} {data.framework_version}
+            </span>
+          ) : isLoading ? (
+            <Skeleton className="inline-block h-4 w-32 align-middle" />
+          ) : null}
+          {data || isLoading ? " — " : null}
           Tier rating and Current-vs-Target profile gap for this CSF version.
-        </p>
-      </div>
-
+        </>
+      }
+      data-testid="csf-assessment"
+    >
       <Card data-testid="csf-tier-card">
         <CardHeader>
           <CardTitle>Tier rating</CardTitle>
@@ -200,6 +203,6 @@ export default function CsfAssessmentPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

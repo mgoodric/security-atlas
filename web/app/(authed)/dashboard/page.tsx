@@ -28,6 +28,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { ActivityFeedPanel } from "@/components/dashboard/activity-feed-panel";
 import {
   DashboardHeaderSubtitle,
@@ -36,6 +37,7 @@ import {
 import { EvidenceFreshnessPanel } from "@/components/dashboard/evidence-freshness-panel";
 import { FrameworkPosturePanel } from "@/components/dashboard/framework-posture-panel";
 import { PortfolioSummaryPanel } from "@/components/dashboard/portfolio-summary-panel";
+import { ReanchoringBanner } from "@/components/dashboard/reanchoring-banner";
 import { RecentDriftPanel } from "@/components/dashboard/recent-drift-panel";
 import { TopRisksPanel } from "@/components/dashboard/top-risks-panel";
 import { UpcomingPanel } from "@/components/dashboard/upcoming-panel";
@@ -46,8 +48,9 @@ import {
   fetchDashboardFrameworkPosture,
   fetchDashboardFreshness,
   fetchDashboardRisks,
-  fetchDashboardUpcoming,
+  fetchDashboardComingUp,
 } from "@/lib/api/dashboard";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -64,9 +67,10 @@ export default function DashboardPage() {
     queryKey: ["dashboard", "risks"],
     queryFn: fetchDashboardRisks,
   });
+  // #2130: "Coming up" reads the compliance calendar for the next 14 days.
   const upcomingQ = useQuery({
-    queryKey: ["dashboard", "upcoming"],
-    queryFn: fetchDashboardUpcoming,
+    queryKey: ["dashboard", "coming-up"],
+    queryFn: fetchDashboardComingUp,
   });
   const postureQ = useQuery({
     queryKey: ["dashboard", "framework-posture"],
@@ -95,30 +99,26 @@ export default function DashboardPage() {
   }, [firstError, router]);
 
   return (
-    <div className="space-y-6" data-testid="program-dashboard">
-      {/* ============ HEADER ============ */}
-      {/*
-        Slice 229 — the H1 row carries the active tenant name (AC-1)
-        and the subtitle binds to the freshness pct / empty / error
-        state (AC-2, AC-3, AC-4, AC-5). The prior generic marketing
-        copy ("The home screen for the security program …") was
-        decoration that did not communicate which tenant the operator
-        was viewing nor the aggregate freshness posture; the mockup
-        (`Plans/_archive/mockups/dashboard.html` lines 117-120) encodes the
-        right design intent (operator orientation in one line).
-        Snapshot timestamp is OMITTED until the FreshnessReport wire
-        shape exposes a `received_at` — see slice header comment in
-        `dashboard-header-subtitle.tsx` for the JUDGMENT note.
-      */}
-      <header className="flex items-baseline justify-between">
-        <div>
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">Program</h1>
-            <TenantContext />
-          </div>
-          <DashboardHeaderSubtitle />
-        </div>
-      </header>
+    // ============ HEADER ============
+    // Slice 229 — the H1 row carries the active tenant name (AC-1)
+    // and the subtitle binds to the freshness pct / empty / error
+    // state (AC-2, AC-3, AC-4, AC-5). The prior generic marketing
+    // copy ("The home screen for the security program …") was
+    // decoration that did not communicate which tenant the operator
+    // was viewing nor the aggregate freshness posture; the mockup
+    // (`Plans/_archive/mockups/dashboard.html` lines 117-120) encodes the
+    // right design intent (operator orientation in one line).
+    // Snapshot timestamp is OMITTED until the FreshnessReport wire
+    // shape exposes a `received_at` — see slice header comment in
+    // `dashboard-header-subtitle.tsx` for the JUDGMENT note.
+    <PageShell
+      title={pageTitle("/dashboard")}
+      titleAdornment={<TenantContext />}
+      subtitle={<DashboardHeaderSubtitle />}
+      data-testid="program-dashboard"
+    >
+      {/* ============ SCF RE-ANCHORING WARNING (#2176) ============ */}
+      <ReanchoringBanner />
 
       {/* ============ FRAMEWORK POSTURE TILES ============ */}
       <FrameworkPosturePanel
@@ -201,6 +201,6 @@ export default function DashboardPage() {
           refetch: () => void activityQ.refetch(),
         }}
       />
-    </div>
+    </PageShell>
   );
 }

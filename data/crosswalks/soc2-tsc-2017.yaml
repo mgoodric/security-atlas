@@ -269,9 +269,9 @@ mappings:
     scf_anchor: RSK-04
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Change-based risk reassessment is part of RSK-04; also overlaps CFG-04 change control."
+    rationale: "Change-based risk reassessment is part of RSK-04; also overlaps CHG-03 change control."
   - tsc_code: CC3.4
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Configuration change control assesses change-related risk. LOW CONFIDENCE — overlap is partial."
@@ -280,20 +280,20 @@ mappings:
   # CC4 — Monitoring — anchors to MON-* + CPL-* families
   # =====================================================================
   - tsc_code: CC4.1
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: subset_of
     strength: 0.8
-    rationale: "MON-01 (Continuous Monitoring) is the broader anchor; CC4.1 ongoing+separate eval is a subset."
+    rationale: "MON-02 (Continuous Monitoring) is the broader anchor; CC4.1 ongoing+separate eval is a subset."
   - tsc_code: CC4.1
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Internal Audit Function carries the 'separate evaluation' half of CC4.1."
   - tsc_code: CC4.2
-    scf_anchor: AAA-12
+    scf_anchor: MON-05.1
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Audit Log Review surfaces deficiencies for communication."
+    rationale: "Centralized Event Log & Security-Relevant Telemetry Review & Analysis surfaces deficiencies for communication."
 
   # =====================================================================
   # CC5 — Control Activities — broad; multiple anchors
@@ -323,17 +323,17 @@ mappings:
     strength: 0.9
     rationale: "IAC-01 (I&A Policy) fully covers logical access security software/infrastructure."
   - tsc_code: CC6.2
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 1.0
-    rationale: "User Provisioning & Lifecycle is the direct STRM equivalent."
+    rationale: "User Provisioning & De-Provisioning is the direct STRM equivalent."
   - tsc_code: CC6.3
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 0.9
     rationale: "Authorize/modify/remove access is the user lifecycle."
   - tsc_code: CC6.3
-    scf_anchor: IAC-15
+    scf_anchor: IAC-12
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Account Review enforces the 'remove access' half of CC6.3."
@@ -343,17 +343,17 @@ mappings:
     strength: 1.0
     rationale: "Physical Access Control is the direct STRM equivalent of CC6.4."
   - tsc_code: CC6.5
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: equal
     strength: 0.9
-    rationale: "Asset Disposal covers data sanitization before discontinuing protections."
+    rationale: "Secure Disposal, Destruction or Re-Use of Equipment covers data sanitization before discontinuing protections."
   - tsc_code: CC6.6
     scf_anchor: NET-04
     relationship_type: subset_of
     strength: 0.8
     rationale: "Boundary Protection fully covers external-threat logical access measures."
   - tsc_code: CC6.6
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: intersects_with
     strength: 0.7
     rationale: "MFA is the canonical external-threat authentication control."
@@ -387,15 +387,15 @@ mappings:
     strength: 0.7
     rationale: "Vulnerability Remediation Process is the operational half of CC7.1."
   - tsc_code: CC7.2
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: subset_of
     strength: 0.9
     rationale: "Continuous Monitoring fully covers anomaly detection across system components."
   - tsc_code: CC7.2
-    scf_anchor: MON-08
+    scf_anchor: MON-16
     relationship_type: equal
     strength: 1.0
-    rationale: "Anomalous Behavior Detection is the direct STRM equivalent of CC7.2's anomaly-detection language."
+    rationale: "Anomalous Behavior is the direct STRM equivalent of CC7.2's anomaly-detection language."
   - tsc_code: CC7.2
     scf_anchor: THR-01
     relationship_type: intersects_with
@@ -407,10 +407,10 @@ mappings:
     strength: 0.6
     rationale: "Threat Hunting (slice 641 THR-04) is the proactive operational activity that detects malicious-act anomalies evading existing controls — a partial overlap with CC7.2's anomaly monitoring (hunting is one technique within the broader monitoring concept; CC7.2 also covers natural-disaster/error anomalies hunting does not). Added by slice 646."
   - tsc_code: CC7.3
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Auditing & Accountability supports event evaluation."
+    rationale: "System Generated Event Logs & Security-Relevant Telemetry supports event evaluation."
   - tsc_code: CC7.3
     scf_anchor: THR-01
     relationship_type: intersects_with
@@ -432,10 +432,10 @@ mappings:
     strength: 0.7
     rationale: "Recovery activities are part of the IR Plan; BCD anchors also intersect."
   - tsc_code: CC7.5
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Business Continuity Plan covers recovery infrastructure."
+    rationale: "Business Continuity & Disaster Recovery (BC/DR) Plans cover recovery infrastructure."
 
   # =====================================================================
   # CC8 — Change Management — anchors to CHG-* + CFG-*
@@ -444,9 +444,9 @@ mappings:
     scf_anchor: CHG-02
     relationship_type: equal
     strength: 1.0
-    rationale: "Change Control Process is the direct STRM equivalent of CC8.1."
+    rationale: "Change Management Program is the direct STRM equivalent of CC8.1."
   - tsc_code: CC8.1
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: intersects_with
     strength: 0.8
     rationale: "Configuration Change Control is the technical half of CC8.1."
@@ -455,44 +455,44 @@ mappings:
   # CC9 — Risk Mitigation — anchors to BCD-*, TPM-*
   # =====================================================================
   - tsc_code: CC9.1
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: subset_of
     strength: 0.8
-    rationale: "Business Continuity Plan addresses risks arising from disruptions."
+    rationale: "Business Continuity & Disaster Recovery (BC/DR) Plans address risks arising from disruptions."
   - tsc_code: CC9.2
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 1.0
     rationale: "Third-Party Management is the direct STRM equivalent of CC9.2."
   - tsc_code: CC9.2
-    scf_anchor: TPM-04
+    scf_anchor: TPM-10
     relationship_type: intersects_with
     strength: 0.8
-    rationale: "Third-Party Risk Assessments are the operational half of CC9.2."
+    rationale: "Third-Party Risk Assessments & Approvals are the operational half of CC9.2."
 
   # =====================================================================
   # A1 — Availability — anchors to BCD-* + capacity management
   # =====================================================================
   - tsc_code: A1.1
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Capacity monitoring is a special case of continuous monitoring. LOW CONFIDENCE — review."
   - tsc_code: A1.2
-    scf_anchor: BCD-09
+    scf_anchor: BCD-24
     relationship_type: subset_of
     strength: 0.9
-    rationale: "Backups fully cover the data backup half of A1.2."
+    rationale: "Data Backups fully cover the data backup half of A1.2."
   - tsc_code: A1.2
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: subset_of
     strength: 0.8
     rationale: "BCP covers environmental protections + recovery infrastructure."
   - tsc_code: A1.3
-    scf_anchor: BCD-11
+    scf_anchor: BCD-32
     relationship_type: equal
     strength: 1.0
-    rationale: "Backup Testing is the direct STRM equivalent of A1.3 recovery testing."
+    rationale: "Testing for Reliability & Integrity is the direct STRM equivalent of A1.3 recovery testing."
 
   # =====================================================================
   # C1 — Confidentiality — anchors to DCH-* + AST-*
@@ -503,10 +503,10 @@ mappings:
     strength: 1.0
     rationale: "Data Classification & Handling is the direct STRM equivalent of C1.1."
   - tsc_code: C1.2
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: equal
     strength: 0.9
-    rationale: "Asset Disposal covers secure disposal of confidential information."
+    rationale: "Secure Disposal, Destruction or Re-Use of Equipment covers secure disposal of confidential information."
   - tsc_code: C1.2
     scf_anchor: DCH-03
     relationship_type: intersects_with

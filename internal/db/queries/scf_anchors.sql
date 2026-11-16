@@ -114,7 +114,7 @@ LIMIT $1 OFFSET $2;
 SELECT * FROM scf_anchors WHERE id = $1;
 
 -- name: GetSCFAnchorBySCFID :one
--- Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+-- Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 -- framework version.
 SELECT a.*
 FROM scf_anchors a
@@ -204,14 +204,18 @@ worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -356,14 +360,18 @@ worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -477,8 +485,8 @@ ORDER BY a.scf_id
 LIMIT $1;
 
 -- name: ListAllFwToScfEdgesForExport :many
--- Slice 174: anchor catalog export edges projection. Returns EVERY
--- fw_to_scf_edges row whose target anchor is in the current SCF
+-- Slice 174: anchor catalog export edges projection. Returns EVERY live
+-- (not retired) fw_to_scf_edges row whose target anchor is in the current SCF
 -- framework_version, joined to framework_requirements +
 -- framework_versions + frameworks so consumers get the natural-key
 -- (`framework_slug:version:code`) without a second query.
@@ -524,6 +532,8 @@ JOIN frameworks f                 ON f.id = fv.framework_id
 WHERE af.slug = 'scf'
   AND afv.status = 'current'
   AND af.tenant_id IS NULL
+  -- A retired edge (#1971) is no longer part of the catalog.
+  AND e.retired_at IS NULL
 ORDER BY a.scf_id, f.slug, fv.version, r.code;
 
 -- name: CountSCFAnchorsLatest :one

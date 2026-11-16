@@ -19,6 +19,7 @@ import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import { treatmentBadge } from "@/components/dashboard/treatment-badge";
 import { Badge } from "@/components/ui/badge";
 import type { DashboardRisk } from "@/lib/api/dashboard";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 export function TopRisksPanel({
   risks,
@@ -30,7 +31,7 @@ export function TopRisksPanel({
   return (
     <PanelCard
       title="Top risks · in treatment"
-      description="Risks with treatment = mitigate · ranked by residual score, then age in treatment"
+      description="Risks being mitigated, ranked by residual score, then age in treatment"
       action={
         <Link href="/risks" className="text-xs text-primary hover:underline">
           View register →
@@ -45,7 +46,7 @@ export function TopRisksPanel({
           className="py-6 text-sm text-muted-foreground"
           data-testid="top-risks-empty"
         >
-          No risks are currently in the mitigate treatment state.
+          No risks are being mitigated.
         </p>
       ) : (
         <ul
@@ -62,12 +63,17 @@ export function TopRisksPanel({
               >
                 <div className="col-span-7">
                   <div className="font-medium">{risk.title}</div>
-                  <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-                    {risk.id.slice(0, 8)} · {risk.methodology || "—"}
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {enumLabel("RiskMethodology", risk.methodology)}
                   </div>
                 </div>
                 <div className="col-span-2">
-                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                  <Badge
+                    variant={badge.variant}
+                    data-testid="top-risk-treatment"
+                  >
+                    {badge.label}
+                  </Badge>
                 </div>
                 <div className="col-span-3 truncate text-xs text-muted-foreground">
                   {risk.treatment_owner || "unassigned"}

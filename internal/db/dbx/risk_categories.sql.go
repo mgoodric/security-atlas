@@ -258,39 +258,6 @@ func (q *Queries) LockRiskCategory(ctx context.Context, arg LockRiskCategoryPara
 	return i, err
 }
 
-const resolveRiskCategory = `-- name: ResolveRiskCategory :one
-SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
-FROM org_risk_categories
-WHERE tenant_id = $1
-  AND (slug = $2::text OR id::text = $2::text)
-LIMIT 1
-`
-
-type ResolveRiskCategoryParams struct {
-	TenantID pgtype.UUID `json:"tenant_id"`
-	Ref      string      `json:"ref"`
-}
-
-// Find one of the tenant's categories by slug or by id (its text form).
-// Slugs cannot be UUID-shaped strings that collide with another row's id
-// in practice, and the tenant predicate keeps both arms tenant-local.
-func (q *Queries) ResolveRiskCategory(ctx context.Context, arg ResolveRiskCategoryParams) (OrgRiskCategory, error) {
-	row := q.db.QueryRow(ctx, resolveRiskCategory, arg.TenantID, arg.Ref)
-	var i OrgRiskCategory
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Slug,
-		&i.Name,
-		&i.Description,
-		&i.Archived,
-		&i.IsDefault,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const riskCategoryUsage = `-- name: RiskCategoryUsage :one
 SELECT
     (SELECT count(*) FROM risks r
@@ -383,6 +350,94 @@ type SetRiskCategoryDefaultParams struct {
 
 func (q *Queries) SetRiskCategoryDefault(ctx context.Context, arg SetRiskCategoryDefaultParams) (OrgRiskCategory, error) {
 	row := q.db.QueryRow(ctx, setRiskCategoryDefault, arg.TenantID, arg.ID)
+	var i OrgRiskCategory
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.Archived,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const shareLockRiskCategoriesByName = `-- name: ShareLockRiskCategoriesByName :many
+SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+FROM org_risk_categories
+WHERE tenant_id = $1
+  AND lower(btrim(name)) = lower(btrim($2::text))
+ORDER BY slug
+FOR SHARE
+`
+
+type ShareLockRiskCategoriesByNameParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Name     string      `json:"name"`
+}
+
+// #1815: the tenant's categories whose display name matches name, case-
+// insensitively on the trimmed value, archived included, each held FOR
+// SHARE as ShareLockRiskCategory does (#2233). Active names are unique per
+// tenant, but an archived category can share one, so a caller gets every
+// match and picks the single active one.
+func (q *Queries) ShareLockRiskCategoriesByName(ctx context.Context, arg ShareLockRiskCategoriesByNameParams) ([]OrgRiskCategory, error) {
+	rows, err := q.db.Query(ctx, shareLockRiskCategoriesByName, arg.TenantID, arg.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrgRiskCategory
+	for rows.Next() {
+		var i OrgRiskCategory
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.Archived,
+			&i.IsDefault,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const shareLockRiskCategory = `-- name: ShareLockRiskCategory :one
+SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+FROM org_risk_categories
+WHERE tenant_id = $1
+  AND (slug = $2::text OR id::text = $2::text)
+LIMIT 1
+FOR SHARE
+`
+
+type ShareLockRiskCategoryParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Ref      string      `json:"ref"`
+}
+
+// Find one of the tenant's categories by slug or by id (its text form) and
+// hold it FOR SHARE for the rest of the transaction (#2233). Every caller
+// is about to assign a risk to the row: the share lock makes a concurrent
+// archive (LockRiskCategory, FOR UPDATE) wait for this write to commit, or
+// this read wait for the archive and see archived = true. Share locks do
+// not conflict with each other, so concurrent risk writes do not queue.
+// Slugs cannot be UUID-shaped strings that collide with another row's id
+// in practice, and the tenant predicate keeps both arms tenant-local.
+func (q *Queries) ShareLockRiskCategory(ctx context.Context, arg ShareLockRiskCategoryParams) (OrgRiskCategory, error) {
+	row := q.db.QueryRow(ctx, shareLockRiskCategory, arg.TenantID, arg.Ref)
 	var i OrgRiskCategory
 	err := row.Scan(
 		&i.ID,

@@ -26,6 +26,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RowActions } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -46,6 +47,7 @@ import {
   AdminCredentialListResponse,
   AdminCredentialRotateResponse,
 } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -103,9 +105,6 @@ export default function APIKeysPage() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["admin-creds"], queryFn: fetchCreds });
   const [freshSecret, setFreshSecret] = useState<FreshSecret>({ kind: "none" });
-  const [revokeConfirm, setRevokeConfirm] = useState<AdminCredential | null>(
-    null,
-  );
 
   const issueMut = useMutation({
     mutationFn: issueCred,
@@ -137,22 +136,21 @@ export default function APIKeysPage() {
   const revokeMut = useMutation({
     mutationFn: revokeCred,
     onSuccess: () => {
-      setRevokeConfirm(null);
       qc.invalidateQueries({ queryKey: ["admin-creds"] });
     },
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">API keys</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="API keys"
+      subtitle={
+        <>
           Issue, rotate, and revoke bearer credentials for connectors and the
           CLI. The bearer plaintext is returned exactly once at issue and
           rotate; this UI shows it and discards it.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <FreshSecretCallout
         value={freshSecret}
         onDismiss={() => setFreshSecret({ kind: "none" })}
@@ -172,7 +170,15 @@ export default function APIKeysPage() {
             the last 4 characters. Rotate to mint a successor; revoke kills it.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          {revokeMut.error ? (
+            <Alert variant="destructive" aria-live="polite">
+              <AlertTitle>Revoke failed</AlertTitle>
+              <AlertDescription data-testid="cred-revoke-error">
+                {(revokeMut.error as Error).message}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {list.isLoading ? (
             <ListSkeleton />
           ) : list.error ? (
@@ -212,7 +218,7 @@ export default function APIKeysPage() {
                     </TableCell>
                     <TableCell>
                       {c.is_admin ? (
-                        <Badge variant="destructive">admin</Badge>
+                        <Badge variant="secondary">admin</Badge>
                       ) : (
                         <Badge variant="outline">no</Badge>
                       )}
@@ -223,23 +229,36 @@ export default function APIKeysPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => rotateMut.mutate(c.id)}
-                          disabled={rotateMut.isPending}
-                        >
-                          Rotate
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => setRevokeConfirm(c)}
-                        >
-                          Revoke
-                        </Button>
-                      </div>
+                      {/* #2090: Rotate runs from the menu; Revoke is
+                          irreversible and confirms inline. */}
+                      <RowActions
+                        label={`Actions for credential ending ${c.last4}`}
+                        data-testid={`cred-actions-${c.id}`}
+                        items={[
+                          {
+                            id: "rotate",
+                            label: "Rotate",
+                            disabledReason: rotateMut.isPending
+                              ? "A rotation is already running."
+                              : undefined,
+                            onSelect: () => rotateMut.mutate(c.id),
+                            "data-testid": `cred-rotate-${c.id}`,
+                          },
+                          {
+                            id: "revoke",
+                            label: "Revoke",
+                            destructive: true,
+                            confirmPrompt: `Revoke the credential ending ${
+                              c.last4
+                            }? Revocation is immediate: any connector using this bearer fails on its next push. Last used: ${
+                              c.last_used_at ?? "never"
+                            }.`,
+                            confirmLabel: "Revoke now",
+                            onSelect: () => revokeMut.mutate(c.id),
+                            "data-testid": `cred-revoke-${c.id}`,
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -252,16 +271,7 @@ export default function APIKeysPage() {
           )}
         </CardContent>
       </Card>
-
-      {revokeConfirm ? (
-        <RevokeConfirmModal
-          cred={revokeConfirm}
-          onCancel={() => setRevokeConfirm(null)}
-          onConfirm={() => revokeMut.mutate(revokeConfirm.id)}
-          submitting={revokeMut.isPending}
-        />
-      ) : null}
-    </div>
+    </PageShell>
   );
 }
 
@@ -278,7 +288,7 @@ function FreshSecretCallout({
       ? "API key issued — copy it now"
       : "API key rotated — copy the new bearer now";
   return (
-    <Alert variant="destructive" data-testid="fresh-secret-callout">
+    <Alert variant="info" data-testid="fresh-secret-callout">
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription className="space-y-2">
         <p className="font-medium">
@@ -427,55 +437,6 @@ function IssueForm({
         ) : null}
       </CardContent>
     </Card>
-  );
-}
-
-function RevokeConfirmModal({
-  cred,
-  onCancel,
-  onConfirm,
-  submitting,
-}: {
-  cred: AdminCredential;
-  onCancel: () => void;
-  onConfirm: () => void;
-  submitting: boolean;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-    >
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Revoke credential?</CardTitle>
-          <CardDescription>
-            Last 4 <code>{cred.last4}</code> · ID{" "}
-            <code className="text-xs">{cred.id.slice(0, 12)}…</code>
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p>
-            Revocation is immediate. Any connector currently using this bearer
-            will start failing on its next push. Best-effort last-seen:{" "}
-            <code>{cred.last_used_at ?? "never"}</code>.
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onCancel} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={onConfirm}
-              disabled={submitting}
-            >
-              {submitting ? "Revoking…" : "Revoke now"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
   );
 }
 

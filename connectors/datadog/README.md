@@ -35,7 +35,7 @@ connectors. Slice 488 reads which alerts are **configured** (CC7.2); this reads
 what actually **fired** and resolved (CC7.3/CC7.4 — the entity evaluates events
 and responds). One record per firing event: `rule_id`, `source_vendor`, `state`
 (alerting / resolved / no_data / pending), `fired_at`, `resolved_at`, and the
-routing-target **handle** the alert notified. Anchors: SCF **MON-01** + **IRO-09**
+routing-target **handle** the alert notified. Anchors: SCF **MON-02** + **IRO-09**
 (the spec candidate IRO-02 is absent from the bundled SCF fixture; IRO-09 is the
 closest present incident anchor — see slice-535 decisions log D3).
 
@@ -129,7 +129,7 @@ atlas-datadog permissions
 | `--token`                   | both       | yes      | env `SECURITY_ATLAS_TOKEN`           | security-atlas bearer token                                 |
 | `--insecure`                | both       | no       | `false`                              | disables TLS; loopback endpoints only                       |
 | `--environment`             | `run`      | yes      | —                                    | environment scope tag; records are never emitted un-scoped  |
-| `--monitor-control`         | `run`      | no       | `scf:MON-01`                         | control id attached to `monitoring.alert_config.v1` records |
+| `--monitor-control`         | `run`      | no       | `scf:MON-02`                         | control id attached to `monitoring.alert_config.v1` records |
 | `--siem-control`            | `run`      | no       | `scf:THR-01`                         | control id attached to `datadog.siem_rule.v1` records       |
 | `--siem-signal-control`     | `run`      | no       | `scf:IRO-09`                         | control id attached to `datadog.siem_signal.v1` records     |
 | `--firing-control`          | `run`      | no       | `scf:IRO-09`                         | control id attached to `monitoring.alert_firing.v1` records |

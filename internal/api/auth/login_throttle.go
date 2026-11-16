@@ -4,8 +4,9 @@
 // unthrottled endpoint is both a password-guessing surface and a CPU and
 // memory sink. Two token buckets run before any of that work:
 //
-//   - per client IP (clientIP, which honors TRUSTED_PROXY_CIDRS): caps the
-//     argon2id cost one source can impose;
+//   - per client IP (clientIP, which honors TRUSTED_PROXY_CIDRS, keyed by
+//     ratekey.IP so an IPv6 /64 is one source — #2047): caps the argon2id
+//     cost one source can impose;
 //   - per account, keyed on tenant + lowercased email as submitted: caps
 //     guesses against one account however many sources they come from.
 //
@@ -13,9 +14,10 @@
 // unknown email is throttled exactly like a known one and a 429 says
 // nothing about whether the account exists.
 //
-// Known limit (decisions log 1913): browser logins reach this endpoint
-// through the web BFF, which does not forward the client IP yet (#2040),
-// so they all share the BFF's per-IP bucket.
+// Browser logins reach this endpoint through the web BFF, which forwards
+// the browser's IP in X-Forwarded-For (#2040, web/lib/client-ip.ts). That
+// header counts only when the BFF's address is in TRUSTED_PROXY_CIDRS;
+// otherwise every UI login shares the BFF's per-IP bucket.
 package auth
 
 import (
@@ -43,7 +45,9 @@ const (
 
 // loginLimiter is an in-memory token bucket keyed on a string. v1 is a
 // single-process platform; the OAuth token endpoint's limiter makes the
-// same trade-off.
+// same trade-off. Each replica keeps its own buckets, so behind N replicas
+// (HA compose, Helm replicaCount) the effective limits are N times the
+// constants below (#2047; docs/audit-log/1913-login-throttling-decisions.md).
 type loginLimiter struct {
 	mu        sync.Mutex
 	burst     float64

@@ -57,6 +57,10 @@ grc_writable_resources := {
     # task tracking only; no route provisions or deprovisions access
     # (the OE-630 boundary).
     "personnel-security",
+    # #1797: tenant overlay edges (requirement -> SCF anchor) under
+    # /v1/mapping-overlays. Tenant-owned mappings, RLS-scoped; the catalog
+    # edges stay read-only.
+    "mapping-overlays",
 }
 
 grc_actions := {
@@ -81,4 +85,16 @@ allow if {
     input.action == "write"
     input.resource.type == "calendar"
     input.request.path == "/v1/calendar/subscription"
+}
+
+# #2113: grc_engineer revokes an active exception (PATCH
+# /v1/exceptions/{id}/revoke). The path's terminal segment promotes the
+# action to "revoke", which grc_actions does not hold because revoke on
+# other resources (API keys, sessions, grants) stays admin's. This admit
+# is bound to exceptions only. The handler still requires the approver
+# flag, so a grc_engineer without it is refused with 403 there.
+allow if {
+    has_role("grc_engineer")
+    input.action == "revoke"
+    input.resource.type == "exceptions"
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 // Report summarizes one import run. Used by the CLI to print a one-line
@@ -57,6 +59,30 @@ type Report struct {
 	// audit row by SystemReviewerID.
 	EdgesTierReseeded []ReseededEdge
 
+	// EdgesRetired lists the catalog edges this import retired because the
+	// crosswalk no longer lists them (#1971). A retired edge keeps its row and
+	// tier history but drops out of coverage. Only edges this crosswalk's
+	// source wrote are retired; see staleEdges.
+	EdgesRetired []CatalogEdge
+
+	// EdgesRestored lists retired edges this crosswalk lists again; their
+	// retired_at is cleared (#1971).
+	EdgesRestored []CatalogEdge
+
+	// EdgesUnlisted lists live edges the crosswalk does not list but did not
+	// retire, because another source wrote them (another crosswalk_source or
+	// source_attribution). They are reported so an operator can see them.
+	EdgesUnlisted []CatalogEdge
+
+	// SCFRelease is the SCF release the mappings were bound in: the
+	// crosswalk's declared release, or "" when it declared none and the
+	// codes bound in the current release (#1771).
+	SCFRelease string
+
+	// Warnings are non-fatal notes for the operator, such as
+	// SCFReleaseDeprecationWarning.
+	Warnings []string
+
 	// MappingsByAttribution tallies edges by their source_attribution
 	// label. Exposed for the HITL audit summary so the orchestrator
 	// can read "X community-draft mappings ingested, 0 scf_official"
@@ -88,6 +114,125 @@ type ReseededEdge struct {
 	PreviousTier    string
 	NewTier         string
 }
+
+// CatalogEdge names one catalog edge in an import report. Source is the
+// edge's recorded crosswalk_source, or LegacySource when it has none.
+type CatalogEdge struct {
+	RequirementCode string
+	SCFAnchor       string
+	Attribution     string
+	Tier            string
+	Source          string
+}
+
+// LegacySource is how a report names an edge with no recorded
+// crosswalk_source: one written before #1971 added the column, or by a seed
+// that does not set it.
+const LegacySource = "(none)"
+
+// edgeKey identifies an edge the way the edges table does: one edge per
+// (requirement row, anchor row) pair. It is keyed on row ids, not codes, so
+// an edge on the same SCF code in an older SCF release (a different anchor
+// row) counts as unlisted and is retired (#1971).
+type edgeKey struct {
+	requirementID [16]byte
+	anchorID      [16]byte
+}
+
+// ownsEdge reports whether an import from source may retire an edge recorded
+// under edgeSource. Each source owns the edges it wrote. An edge with no
+// recorded source predates #1971, when the YAML crosswalks were the only
+// importer, so a YAML import (or an in-memory crosswalk with no Source)
+// owns it too; a workbook import never retires one.
+func ownsEdge(source string, edgeSource *string) bool {
+	if edgeSource == nil {
+		return source == "" || strings.HasPrefix(source, yamlSourcePrefix)
+	}
+	return *edgeSource == source
+}
+
+// staleEdges splits the stored edges of one framework version that the
+// crosswalk does not list into the ones to retire and the ones to leave.
+//
+// A crosswalk is the source of truth for the edges it writes, so an edge it
+// stopped listing is retired: after an SCF remap or a new SCF release moves a
+// mapping to another anchor row, the edge left on the old one would otherwise
+// keep counting as coverage (#1971). An import only retires what it owns, though: an edge
+// another source wrote (see ownsEdge), or one with a source_attribution the
+// crosswalk never uses, is left in place and reported. fw_to_scf_edges holds
+// catalog (platform) edges only; it has no tenant rows to touch.
+func staleEdges(stored []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[edgeKey]bool, source string, owned map[dbx.CrosswalkSourceAttribution]bool) (retire []dbx.ListFwToScfEdgesForVersionForUpdateRow, keep []dbx.ListFwToScfEdgesForVersionForUpdateRow) {
+	for _, e := range stored {
+		if listed[edgeKey{e.FrameworkRequirementID.Bytes, e.ScfAnchorID.Bytes}] {
+			continue
+		}
+		if ownsEdge(source, e.CrosswalkSource) && owned[e.SourceAttribution] {
+			retire = append(retire, e)
+		} else {
+			keep = append(keep, e)
+		}
+	}
+	return retire, keep
+}
+
+func catalogEdge(e dbx.ListFwToScfEdgesForVersionForUpdateRow) CatalogEdge {
+	return CatalogEdge{
+		RequirementCode: e.RequirementCode,
+		SCFAnchor:       e.ScfID,
+		Attribution:     string(e.SourceAttribution),
+		Tier:            string(e.MappingTier),
+		Source:          sourceLabel(e.CrosswalkSource),
+	}
+}
+
+// sourceLabel names a recorded crosswalk_source for a report or audit note.
+func sourceLabel(s *string) string {
+	if s == nil {
+		return LegacySource
+	}
+	return *s
+}
+
+// RetiredBySource counts the retired edges by their recorded source, for the
+// import summary.
+func (r Report) RetiredBySource() map[string]int {
+	out := map[string]int{}
+	for _, p := range r.EdgesRetired {
+		out[p.Source]++
+	}
+	return out
+}
+
+// retireNote and restoreNote are the tier-transition notes the importer
+// writes when it retires or restores an edge. The tier does not change, so
+// from_tier = to_tier; the row exists to keep the edge's history complete.
+func retireNote(source string) string {
+	return "retired: dropped by crosswalk " + sourceLabel(sourceParam(source))
+}
+
+func restoreNote(source string) string {
+	return "restored: listed again by crosswalk " + sourceLabel(sourceParam(source))
+}
+
+// sourceParam is the crosswalk_source an import stamps on the edges it
+// writes; NULL for a crosswalk with no Source.
+func sourceParam(source string) *string {
+	if source == "" {
+		return nil
+	}
+	return &source
+}
+
+// SCFReleaseDeprecationWarning is reported for a crosswalk that declares no
+// scf_release (#1771). Its codes bind in the current SCF release, as before;
+// the declaration becomes required in a later release (#1774).
+const SCFReleaseDeprecationWarning = "crosswalk declares no scf_release, so its scf_anchor codes were bound in the current SCF release; declare scf_release (or, for a workbook, pass --scf-release), which will become required"
+
+// SheetReleaseNotLoadedWarning is reported, formatted with the sheet's
+// release three times, for a workbook whose "SCF <release>" sheet names a release
+// that is not loaded (#1771). Its codes bind in the current SCF release, as
+// before. An explicit --scf-release is never relaxed this way.
+const SheetReleaseNotLoadedWarning = "workbook sheet \"SCF %s\" names SCF release %q, which is not loaded, so its scf_anchor codes were bound in the current SCF release; load that release with `atlas-cli catalog import-scf` to bind in it, or pass --scf-release %s to refuse the import instead of falling back"
 
 // SystemReviewerID is the reviewer_id on a tier-transition audit row written
 // by the importer rather than a person. fw_to_scf_edge_tier_transitions has a
@@ -163,6 +308,17 @@ func Import(ctx context.Context, db pgxBeginner, cw *Crosswalk) (Report, error) 
 func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error) {
 	q := dbx.New(tx)
 
+	// 0. Pick the SCF release the mappings bind in before writing anything,
+	//    so an unknown release fails the import cleanly (#1771).
+	release, releaseWarning, err := effectiveSCFRelease(ctx, q, cw)
+	if err != nil {
+		return Report{}, err
+	}
+	bind, err := newAnchorBinder(ctx, q, release)
+	if err != nil {
+		return Report{}, err
+	}
+
 	// 1. Upsert the framework row. Deterministic UUID derived from the
 	//    framework slug so re-imports never duplicate.
 	frameworkID := uuidFromString("framework-" + cw.FrameworkSlug)
@@ -223,7 +379,11 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		FrameworkID:           uuidString(framework.ID),
 		FrameworkVersionID:    uuidString(version.ID),
 		IsNewVersion:          isNew,
+		SCFRelease:            release,
 		MappingsByAttribution: map[string]int{},
+	}
+	if releaseWarning != "" {
+		report.Warnings = append(report.Warnings, releaseWarning)
 	}
 
 	// 3. Upsert requirement rows. Track ids for the mapping pass. The
@@ -299,23 +459,25 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		return Report{}, fmt.Errorf("crosswalk: update requirement_count: %w", err)
 	}
 
-	// 5. Upsert edges. Resolve scf_anchor strings to anchor IDs against
-	//    the current SCF version (slice 006). An edge whose scf_anchor does
+	// 5. Upsert edges. Resolve scf_anchor strings to anchor IDs within the
+	//    crosswalk's SCF release (#1771), or the current SCF version when it
+	//    declares none (slice 006). An edge whose scf_anchor does
 	//    not resolve to a real anchor is a hard, clear loader error — never
 	//    a panic and never a dangling edge (AC-2 / P0-438-4 / threat-model
 	//    T). Every edge is requirement -> SCF anchor; there is no
 	//    requirement -> requirement path (invariant #7 / P0-438-1).
+	//
+	//    listed collects every (requirement row, anchor row) pair the
+	//    crosswalk names, skipped rows included, for the retire pass (6).
+	listed := make(map[edgeKey]bool, len(cw.Mappings))
 	for _, m := range cw.Mappings {
 		reqID, ok := reqIDByCode[m.RequirementCode]
 		if !ok {
 			return Report{}, fmt.Errorf("crosswalk: mapping references unknown requirement_code %q after requirement pass", m.RequirementCode)
 		}
-		anchor, err := q.GetSCFAnchorBySCFID(ctx, m.SCFAnchor)
+		anchor, err := bind(m.SCFAnchor)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return Report{}, fmt.Errorf("crosswalk: scf_anchor %q not found — import the SCF catalog first (slice 006)", m.SCFAnchor)
-			}
-			return Report{}, fmt.Errorf("crosswalk: lookup scf_anchor %s: %w", m.SCFAnchor, err)
+			return Report{}, err
 		}
 
 		attribution := m.SourceAttribution
@@ -325,18 +487,51 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		relType := dbx.StrmRelationshipType(m.RelationshipType)
 		srcAttr := dbx.CrosswalkSourceAttribution(attribution)
 
-		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor)
+		listed[edgeKey{reqID.Bytes, anchor.ID.Bytes}] = true
+
+		// The anchor row id is in the seed: a new SCF release mints new
+		// anchor rows under the same codes, and the edge to the new row must
+		// not collide with the (now retired) edge to the old one (#1971).
+		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor + "-" + uuidString(anchor.ID))
 
 		// FOR UPDATE: the precedence check below reads, then writes. Without
 		// the row lock a concurrent weaker import that passed its check
 		// against the old row would overwrite a just-committed stronger edge.
+		// This lookup also finds a retired edge.
 		existing, lookupErr := q.GetFwToScfEdgeForUpdate(ctx, dbx.GetFwToScfEdgeForUpdateParams{
 			FrameworkRequirementID: reqID,
 			ScfAnchorID:            anchor.ID,
 		})
 		switch {
 		case lookupErr == nil:
-			if attributionRank(srcAttr) < attributionRank(existing.SourceAttribution) {
+			// A retired edge the crosswalk lists again comes back (#1971).
+			// Its old content no longer stands for anything, so the
+			// precedence check below does not protect it: the restore
+			// precedes the normal content comparison.
+			restored := false
+			if existing.RetiredAt.Valid {
+				if err := q.RestoreFwToScfEdge(ctx, existing.ID); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: restore edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+				}
+				if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
+					EdgeID:     existing.ID,
+					ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
+					FromTier:   existing.MappingTier,
+					ToTier:     existing.MappingTier,
+					Note:       restoreNote(cw.Source),
+				}); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: audit restore %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+				}
+				report.EdgesRestored = append(report.EdgesRestored, CatalogEdge{
+					RequirementCode: m.RequirementCode,
+					SCFAnchor:       m.SCFAnchor,
+					Attribution:     string(existing.SourceAttribution),
+					Tier:            string(existing.MappingTier),
+					Source:          sourceLabel(existing.CrosswalkSource),
+				})
+				restored = true
+			}
+			if !restored && attributionRank(srcAttr) < attributionRank(existing.SourceAttribution) {
 				report.EdgesSkipped = append(report.EdgesSkipped, SkippedEdge{
 					RequirementCode:     m.RequirementCode,
 					SCFAnchor:           m.SCFAnchor,
@@ -356,6 +551,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Strength:          m.Strength,
 				SourceAttribution: srcAttr,
 				Rationale:         m.Rationale,
+				CrosswalkSource:   sourceParam(cw.Source),
 			}); err != nil {
 				return Report{}, fmt.Errorf("crosswalk: update edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
@@ -398,6 +594,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Strength:               m.Strength,
 				SourceAttribution:      srcAttr,
 				Rationale:              m.Rationale,
+				CrosswalkSource:        sourceParam(cw.Source),
 			}); err != nil {
 				return Report{}, fmt.Errorf("crosswalk: insert edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
@@ -415,7 +612,106 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		}
 	}
 
+	// 6. Retire the edges this crosswalk wrote and no longer lists (#1971),
+	//    in the same transaction as the upsert so coverage never sees a
+	//    half-applied crosswalk. A retired edge keeps its row and its
+	//    append-only tier history; a transition row records the retirement.
+	owned := map[dbx.CrosswalkSourceAttribution]bool{dbx.CrosswalkSourceAttribution(cw.SourceAttribution): true}
+	for _, m := range cw.Mappings {
+		if m.SourceAttribution != "" {
+			owned[dbx.CrosswalkSourceAttribution(m.SourceAttribution)] = true
+		}
+	}
+	stored, err := q.ListFwToScfEdgesForVersionForUpdate(ctx, version.ID)
+	if err != nil {
+		return Report{}, fmt.Errorf("crosswalk: list edges to retire: %w", err)
+	}
+	retire, keep := staleEdges(stored, listed, cw.Source, owned)
+	for _, e := range retire {
+		if err := q.RetireFwToScfEdge(ctx, e.ID); err != nil {
+			return Report{}, fmt.Errorf("crosswalk: retire edge %s->%s: %w", e.RequirementCode, e.ScfID, err)
+		}
+		if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
+			EdgeID:     e.ID,
+			ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
+			FromTier:   e.MappingTier,
+			ToTier:     e.MappingTier,
+			Note:       retireNote(cw.Source),
+		}); err != nil {
+			return Report{}, fmt.Errorf("crosswalk: audit retire %s->%s: %w", e.RequirementCode, e.ScfID, err)
+		}
+		report.EdgesRetired = append(report.EdgesRetired, catalogEdge(e))
+	}
+	for _, e := range keep {
+		report.EdgesUnlisted = append(report.EdgesUnlisted, catalogEdge(e))
+	}
+
 	return report, nil
+}
+
+// effectiveSCFRelease decides the release a crosswalk binds in, and the
+// warning (if any) to report:
+//
+//   - none declared: the current release, with SCFReleaseDeprecationWarning;
+//   - a release read from a workbook's sheet name alone that is not loaded:
+//     the current release, as before #1771, with a warning naming the sheet
+//     release and the remedy (#1774 may make this strict);
+//   - anything else (YAML scf_release, --scf-release, a loaded sheet
+//     release): that release, strictly.
+func effectiveSCFRelease(ctx context.Context, q *dbx.Queries, cw *Crosswalk) (string, string, error) {
+	if cw.SCFRelease == "" {
+		return "", SCFReleaseDeprecationWarning, nil
+	}
+	if !cw.SCFReleaseFromSheet {
+		return cw.SCFRelease, "", nil
+	}
+	_, err := scfrelease.Lookup(ctx, q, cw.SCFRelease)
+	switch {
+	case err == nil:
+		return cw.SCFRelease, "", nil
+	case errors.Is(err, scfrelease.ErrUnknownRelease):
+		return "", fmt.Sprintf(SheetReleaseNotLoadedWarning, cw.SCFRelease, cw.SCFRelease, cw.SCFRelease), nil
+	default:
+		return "", "", fmt.Errorf("crosswalk: scf_release: %w", err)
+	}
+}
+
+// newAnchorBinder returns the function that turns a mapping's scf_anchor
+// code into an anchor row. With a release declared, the release is looked up
+// once (scfrelease.ErrUnknownRelease when it is not loaded) and each code
+// binds within it only (scfrelease.ErrCodeNotInRelease when it is not
+// there): a declared release never re-binds to the current one. With none,
+// codes bind in the current release exactly as before #1771.
+func newAnchorBinder(ctx context.Context, q *dbx.Queries, release string) (func(code string) (dbx.ScfAnchor, error), error) {
+	if release == "" {
+		return func(code string) (dbx.ScfAnchor, error) {
+			anchor, err := q.GetSCFAnchorBySCFID(ctx, code)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return dbx.ScfAnchor{}, fmt.Errorf("crosswalk: scf_anchor %q not found — import the SCF catalog first (slice 006)", code)
+			}
+			if err != nil {
+				return dbx.ScfAnchor{}, fmt.Errorf("crosswalk: lookup scf_anchor %s: %w", code, err)
+			}
+			return anchor, nil
+		}, nil
+	}
+	rel, err := scfrelease.Lookup(ctx, q, release)
+	if err != nil {
+		return nil, fmt.Errorf("crosswalk: scf_release: %w", err)
+	}
+	return func(code string) (dbx.ScfAnchor, error) {
+		anchor, err := q.GetSCFAnchorByVersionAndSCFID(ctx, dbx.GetSCFAnchorByVersionAndSCFIDParams{
+			FrameworkVersionID: rel.ID,
+			ScfID:              code,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.ScfAnchor{}, fmt.Errorf("crosswalk: %w: scf_anchor %q is not in SCF release %q", scfrelease.ErrCodeNotInRelease, code, rel.Version)
+		}
+		if err != nil {
+			return dbx.ScfAnchor{}, fmt.Errorf("crosswalk: lookup scf_anchor %s in SCF release %s: %w", code, rel.Version, err)
+		}
+		return anchor, nil
+	}, nil
 }
 
 // marshalPointsOfFocus encodes a requirement's points of focus for the

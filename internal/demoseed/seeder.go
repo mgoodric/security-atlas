@@ -136,6 +136,11 @@ type Seeder struct {
 	// beforeRecord, when set, runs after ApplyInPlace's writers and before
 	// it records the rows it added. Test-only (export_test.go).
 	beforeRecord func(ctx context.Context)
+
+	// scfRelease is the SCF release the posture spine adopts anchors from
+	// (#1772). DemoSCFRelease; test-overridable (export_test.go) so a test
+	// can name one of the #1770 fixture releases.
+	scfRelease string
 }
 
 // NewSeeder constructs a Seeder over the BYPASSRLS auth pool. authPool
@@ -149,9 +154,10 @@ func NewSeeder(authPool *pgxpool.Pool, scale float64) (*Seeder, error) {
 		return nil, fmt.Errorf("demoseed: scale %g out of range [%g, %g]", scale, MinScale, MaxScale)
 	}
 	return &Seeder{
-		authPool: authPool,
-		clock:    time.Now,
-		scale:    scale,
+		authPool:   authPool,
+		clock:      time.Now,
+		scale:      scale,
+		scfRelease: DemoSCFRelease,
 		resolveTenant: func(ctx context.Context) (tenancy.TenantRef, error) {
 			return tenancy.ResolveImplicitTenant(ctx, authPool)
 		},
@@ -403,7 +409,7 @@ func (s *Seeder) writeDataset(ctx context.Context, tx pgx.Tx, fixtures *fixtureS
 	// writeAuditPeriodsAndSamples (the framework-version creation order is
 	// settled) but BEFORE writeFrameworkScopes (which reuses the demo
 	// framework_version the spine guarantees is current).
-	reqCount, edgeCount, ctrlAnchored, err := writeFrameworkPostureSpine(ctx, tx, fixtures)
+	reqCount, edgeCount, ctrlAnchored, err := writeFrameworkPostureSpine(ctx, tx, fixtures, s.scfRelease)
 	if err != nil {
 		return Result{}, err
 	}
@@ -536,37 +542,58 @@ func (s *Seeder) teardownTenant(ctx context.Context, tenantID uuid.UUID, slug st
 		return fmt.Errorf("demoseed: teardown begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := deleteDemoTenant(ctx, tx, tenantID, slug, actorUserID, actorTenantID, nil); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("demoseed: teardown commit: %w", err)
+	}
+	return nil
+}
 
+// deleteDemoTenant writes the demo_seed_teardown audit rows, then deletes
+// the tenant's rows from every teardownTables table, then the tenant row,
+// and returns the rows each DELETE removed (FK cascades not counted).
+// extra is merged into the audit payload. The caller owns tx and commits it.
+func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string,
+	actorUserID uuid.UUID, actorTenantID uuid.UUID, extra map[string]any,
+) (map[string]int64, error) {
+	payload := map[string]any{"slug": slug, "demo_seed_v": DemoSeedVersion}
+	for k, v := range extra {
+		payload[k] = v
+	}
 	// Write the teardown meta-audit row FIRST (before deleting).
 	if err := writeAuditLogRow(ctx, tx, "demo_seed_teardown",
-		actorUserID, actorTenantID, tenantID,
-		map[string]any{"slug": slug, "demo_seed_v": DemoSeedVersion},
+		actorUserID, actorTenantID, tenantID, payload,
 	); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Now cascade-delete, bottom-up, then the tenant row itself.
+	deleted := make(map[string]int64, len(teardownTables)+1)
 	for _, table := range append(teardownTables, "tenants") {
 		stmt := fmt.Sprintf(`DELETE FROM %s WHERE tenant_id = $1`, pgx.Identifier{table}.Sanitize())
 		if table == "tenants" {
 			stmt = `DELETE FROM tenants WHERE id = $1`
 		}
-		if _, err := tx.Exec(ctx, stmt, tenantID); err != nil {
-			// Ignore unknown-table errors — older / missing tables
-			// won't have any rows for this tenant anyway; the
-			// teardown is meant to be best-effort. Fail loudly on
-			// other errors.
+		tag, err := tx.Exec(ctx, stmt, tenantID)
+		if err != nil {
+			// An undefined-table error is skipped here, but it is not
+			// best-effort: Postgres has already aborted tx, so the next
+			// statement fails with 25P02 (in_failed_sql_transaction) and
+			// the whole teardown rolls back. That fails safe (nothing is
+			// deleted); a table removed from the schema must come out of
+			// teardownTables for teardown to work again.
 			if pgIsUndefinedTable(err) {
 				continue
 			}
-			return fmt.Errorf("demoseed: teardown exec %s: %w", table, err)
+			return nil, fmt.Errorf("demoseed: teardown exec %s: %w", table, err)
+		}
+		if n := tag.RowsAffected(); n > 0 {
+			deleted[table] = n
 		}
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("demoseed: teardown commit: %w", err)
-	}
-	return nil
+	return deleted, nil
 }
 
 // teardownTables lists every tenant-scoped table the demo seed writes, in
@@ -604,6 +631,11 @@ var teardownTables = []string{
 	"questionnaires",
 	"risk_control_links",
 	"risks",
+	// risks_category_sync_trg seeds the tenant's risk categories when the
+	// first risk lands, so the seed writes them. After risks: risks'
+	// (tenant_id, category_id) references them. #2153: without this a
+	// whole-tenant teardown left them behind.
+	"org_risk_categories",
 	"org_units",
 	"policy_acknowledgments",
 	"policies",
@@ -712,9 +744,9 @@ func (s *Seeder) tenantIsPopulated(ctx context.Context, tenantID uuid.UUID) (boo
 }
 
 // pgIsUndefinedTable returns true when err is a Postgres SQLSTATE
-// 42P01 (undefined_table). Used by Teardown so a future schema delta
-// that removes a table the seeder used to write into doesn't break
-// teardown of older demo data.
+// 42P01 (undefined_table). deleteDemoTenant skips such a table, but the
+// error has already aborted its transaction, so the teardown still fails
+// (25P02) and rolls back: safe, not best-effort (#2153).
 func pgIsUndefinedTable(err error) bool {
 	if err == nil {
 		return false

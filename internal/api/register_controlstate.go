@@ -48,6 +48,14 @@ func (s *Server) registerControlState(root *chi.Mux) {
 	// no migration and no write path (constitutional invariant #2).
 	controlDetailH := controldetailapi.New(controldetailapi.NewStore(s.dbPool))
 	root.Get("/v1/evidence", controlDetailH.Evidence)
+	// #2137: one evidence record with its payload. The schema registry,
+	// when DB-backed, supplies the kind's current redaction rules so they
+	// are re-applied on read. chi matches the literal /v1/evidence/freshness
+	// and /v1/evidence/receipts/... routes before this {id} pattern.
+	if lookup, ok := s.registry.(controldetailapi.RedactionLookup); ok {
+		controlDetailH.WithRedaction(lookup)
+	}
+	root.Get("/v1/evidence/{id}", controlDetailH.EvidenceDetail)
 	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
 	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
 	root.Get("/v1/controls/{id}/history", controlDetailH.History)

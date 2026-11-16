@@ -25,16 +25,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TONE_CHIP } from "@/components/board-pack/tone";
-import { FeatureDisabledState } from "@/components/feature-disabled-state";
+import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
 import { BoardPack, generateBoardPack, listBoardPacks } from "@/lib/api/board";
-import { isFeatureDisabledError } from "@/lib/feature-nav";
 
 import {
   GenerateFieldErrors,
   hasErrors,
   validateGenerateForm,
 } from "./validate";
+import { pageTitle } from "@/lib/page-titles";
 
 // Slice 032 — quarterly board pack list + generate.
 //
@@ -105,33 +105,15 @@ export default function BoardPacksPage() {
     generate.mutate(periodEnd);
   }
 
-  // Slice 660: the `board.reporting` flag gates this module. A flag-off
-  // tenant reaches here only by direct navigation (the nav entry is
-  // hidden server-side); the gated API returns 404 "feature disabled".
-  // Render the clean disabled panel instead of the raw error state.
-  if (packsQuery.isError && isFeatureDisabledError(packsQuery.error)) {
-    return (
-      <div className="mx-auto max-w-4xl p-8">
-        <FeatureDisabledState moduleName="Board packs" />
-      </div>
-    );
-  }
-
+  // The Board reporting module is checked server-side by FeatureGate in
+  // ./layout.tsx (#2092); this page only mounts when the module is on.
   return (
-    <div
-      className="mx-auto max-w-4xl space-y-6 p-8"
+    <PageShell
+      width="reading"
       data-testid="board-packs-page"
+      title={pageTitle("/board-packs")}
+      subtitle="Quarterly board-meeting reports — posture, top risks, coverage trend, open findings, operational metrics, investment vs coverage, and asks of the board. Each pack is reviewed and approved section-by-section, then published as a frozen artifact."
     >
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Board packs</h1>
-        <p className="mt-1 text-muted-foreground">
-          Quarterly board-meeting reports — posture, top risks, coverage trend,
-          open findings, operational metrics, investment vs coverage, and asks
-          of the board. Each pack is reviewed and approved section-by-section,
-          then published as a frozen artifact.
-        </p>
-      </div>
-
       <Card>
         <CardHeader>
           <CardTitle>Generate a quarterly pack</CardTitle>
@@ -262,6 +244,6 @@ export default function BoardPacksPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

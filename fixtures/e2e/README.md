@@ -47,6 +47,11 @@ cross-references slice 050 sanitization rules and slice 057 P0-A2):
 | `admin-bootstrap.sql`      | `web/e2e/admin-bootstrap.spec.ts`      |
 | `settings.sql`             | `web/e2e/settings.spec.ts`             |
 | `global-search.sql`        | `web/e2e/global-search.spec.ts`        |
+| `framework-scope-soa.sql`  | `web/e2e/framework-scope-soa.spec.ts`  |
+| `framework-scope-diff.sql` | `web/e2e/framework-scope-diff.spec.ts` |
+| `attest.sql`               | `web/e2e/attest.spec.ts`               |
+| `theme.sql`                | `web/e2e/settings-theme.spec.ts`       |
+| `sidebar-nav.sql`          | `web/e2e/sidebar-nav.spec.ts`          |
 
 Each file builds on `fixtures/walkthroughs/00-seed.sql` (the harness
 applies that file first, then the per-spec file). All inserts use

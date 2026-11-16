@@ -5,32 +5,19 @@
 // Mockup parity target: `Plans/_archive/mockups/control.html` lines 92-102. The
 // top-right header well carries:
 //
-//   1. A row of three action buttons (in mockup order):
-//        Run query · Edit YAML · Request exception
+//   1. One action link: Request exception. Run query and Edit YAML
+//      were disabled placeholder buttons; #2082 removed them until the
+//      features ship, so the header shows only what the user can do.
 //   2. A sub-line: "last evaluated <relative-time>" with a status icon.
 //
 // JUDGMENT decisions (see docs/audit-log/255-header-actions-decisions.md):
 //
-//   D1: Run query + Edit YAML render as DISABLED buttons (shadcn outline
-//       size=sm) with title/aria-label tooltips naming the canvas section
-//       and the v2 status. They are NOT `<a href="#">` (slice 178
-//       dead-link anti-pattern) and they are NOT links to "coming in v2"
-//       routes (slice 152 empty-state route would 2× the slice size).
-//       The slice 183/184 audit pattern (`title` + `aria-label` on a
-//       static element, same line of copy) is the chosen analog.
+//   D1: (retired by #2082) Run query + Edit YAML were disabled buttons
+//       with tooltips; they are no longer rendered.
 //
 //   D2: Request exception renders as a LINK (shadcn outline size=sm) to
-//       `/exceptions?control_id=<id>`. That route exists on main
-//       (`web/app/(authed)/exceptions/page.tsx`) and its `filters.ts`
-//       accepts `?control_id=…` as a URL-driven filter — so the
-//       destination is real, not a placeholder. This is the closest
-//       honest behavior we can ship without a new endpoint
-//       (anti-criterion P0-255-4). The button label still says
-//       "Request exception" — the navigation lands on the tenant-wide
-//       exception register filtered to this control, where the operator
-//       sees the existing exception requests for the control. The
-//       "create exception" affordance itself is a v2 surface (the
-//       exception-request workflow per canvas §4.6).
+//       the request form, `/exceptions/new?control_id=<id>` (#2113),
+//       which opens with this control pre-filled.
 //
 //   D3: relative-time formatter lives in `web/lib/relative-time.ts` (new
 //       — see that file's preamble). The freshness-clock's `humanizeSince`
@@ -47,17 +34,17 @@
 //   but has no `last_observed_at` we render "never".
 //
 // Anti-criteria honored:
-//   - P0-255-1: no Run query execution path. Disabled button + tooltip.
-//   - P0-255-2: no YAML editor. Disabled button + tooltip.
+//   - P0-255-1/2: no Run query execution path and no YAML editor; no
+//     entry point is rendered for either (#2082).
 //   - P0-255-3: no `<a href="#">` anywhere. Request exception links to a
-//     real, existing route; Run query + Edit YAML are <button disabled>.
-//   - P0-255-4: no new API endpoint. /exceptions?control_id is an
-//     existing URL-driven filter on a merged page.
+//     real, existing route.
+//   - P0-255-4: no new API endpoint. The request form posts to the
+//     existing POST /v1/exceptions.
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import type {
   ControlStateResponse,
   ControlStateEntry,
@@ -69,8 +56,6 @@ import { cn } from "@/lib/utils";
 // inlined here as constants so the same string drives `title`,
 // `aria-label`, and the test assertion — the slice 183 / slice 184
 // pattern (visible copy + tooltip + aria-label all read the same line).
-const RUN_QUERY_TOOLTIP = "Rule-based control evaluation is not available yet";
-const EDIT_YAML_TOOLTIP = "In-app control-text editing is not available yet";
 
 // mostRecentObservedAt picks the freshest `last_observed_at` across all
 // scope-cell entries — the same reduce-to-newest rule the freshness
@@ -167,28 +152,8 @@ export function ControlHeaderActions({
         className="flex items-center gap-2"
         data-testid="control-header-action-buttons"
       >
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          title={RUN_QUERY_TOOLTIP}
-          aria-label={RUN_QUERY_TOOLTIP}
-          data-testid="control-action-run-query"
-        >
-          Run query
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          title={EDIT_YAML_TOOLTIP}
-          aria-label={EDIT_YAML_TOOLTIP}
-          data-testid="control-action-edit-yaml"
-        >
-          Edit YAML
-        </Button>
         <Link
-          href={`/exceptions?control_id=${encodeURIComponent(controlID)}`}
+          href={`/exceptions/new?control_id=${encodeURIComponent(controlID)}`}
           className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
           data-testid="control-action-request-exception"
         >

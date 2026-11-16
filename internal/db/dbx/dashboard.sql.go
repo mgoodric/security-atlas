@@ -20,8 +20,10 @@ WITH version_reqs AS (
         fv.id            AS framework_version_id,
         fv.framework_id  AS framework_id,
         fv.version       AS framework_version,
+        f.name           AS framework_name,
         fr.id            AS requirement_id
     FROM framework_versions fv
+    JOIN frameworks f ON f.id = fv.framework_id
     JOIN framework_requirements fr ON fr.framework_version_id = fv.id
     WHERE fv.status = 'current'
       AND NOT EXISTS (
@@ -80,10 +82,13 @@ covered_now AS (
 ),
 control_passed_then AS (
     -- For each covering control, whether its latest evaluation on/before the
-    -- 90-day cutoff was a pass. DISTINCT ON picks the latest row per control.
+    -- 90-day cutoff counted toward coverage: a pass, or ` + "`" + `excepted` + "`" + ` (#2112).
+    -- The engine writes ` + "`" + `excepted` + "`" + ` only while an exception is in force, so an
+    -- excepted row at the cutoff means the exception was active then.
+    -- DISTINCT ON picks the latest row per control.
     SELECT DISTINCT ON (ce.control_id)
         ce.control_id,
-        (ce.result = 'pass') AS passed_then
+        (ce.result IN ('pass', 'excepted')) AS passed_then
     FROM control_evaluations ce
     WHERE ce.tenant_id = $1
       AND ce.evaluated_at <= $2
@@ -91,11 +96,50 @@ control_passed_then AS (
 ),
 covered_then AS (
     -- Requirements covered 90 days ago: at least one covering control that
-    -- was passing on/before the cutoff.
+    -- was passing (or excepted) on/before the cutoff.
     SELECT DISTINCT cc.framework_version_id, cc.requirement_id
     FROM covering_control cc
     JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
     WHERE cpt.passed_then
+),
+control_excepted_now AS (
+    -- #2112: covering controls whose coverage rests on an exception today:
+    -- the latest evaluation of at least one of their scope cells is
+    -- ` + "`" + `excepted` + "`" + `. DISTINCT ON picks the latest row per (control, cell).
+    SELECT DISTINCT le.control_id
+    FROM (
+        SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
+            ce.control_id,
+            ce.result
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = $1
+        ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+    ) le
+    WHERE le.result = 'excepted'
+),
+covered_by_exception AS (
+    -- Requirements covered today only by exception: every covering control
+    -- rests on an exception. A requirement with one covering control that is
+    -- not excepted does not depend on a waiver and is not counted.
+    SELECT cc.framework_version_id, cc.requirement_id
+    FROM covering_control cc
+    LEFT JOIN control_excepted_now cen ON cen.control_id = cc.control_id
+    GROUP BY cc.framework_version_id, cc.requirement_id
+    HAVING BOOL_AND(cen.control_id IS NOT NULL)
+),
+history_versions AS (
+    -- Framework versions with at least one covering control evaluated on or
+    -- before the cutoff.
+    SELECT DISTINCT cc.framework_version_id
+    FROM covering_control cc
+    JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
+),
+scoped_versions AS (
+    -- Framework versions with an activated scope revision in the tenant.
+    SELECT DISTINCT fs.framework_version_id
+    FROM framework_scopes fs
+    WHERE fs.tenant_id = $1
+      AND fs.state = 'activated'
 ),
 control_freshness AS (
     -- Per covering control, whether it is fresh per the slice-016 read
@@ -112,12 +156,25 @@ control_freshness AS (
 SELECT
     vr.framework_id,
     vr.framework_version,
+    vr.framework_version_id,
+    -- framework_name (#2083): callers label a version by name plus
+    -- version ("ISO/IEC 27001:2022"), never the version alone.
+    vr.framework_name,
     -- coverage_pct: covered requirements / total requirements, 0..100.
     CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
          ELSE ROUND(
              100.0 * COUNT(DISTINCT cn.requirement_id)
                    / COUNT(DISTINCT vr.requirement_id), 2)
     END::float8 AS coverage_pct,
+    -- covered_by_exception_pct (#2112): requirements covered only by
+    -- excepted controls / total requirements, 0..100. A subset of
+    -- coverage_pct, reported separately so a waiver never reads as a
+    -- demonstrated control.
+    CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
+         ELSE ROUND(
+             100.0 * COUNT(DISTINCT cbe.requirement_id)
+                   / COUNT(DISTINCT vr.requirement_id), 2)
+    END::float8 AS covered_by_exception_pct,
     -- freshness_composite: fresh covering controls / all covering controls,
     -- 0..100. 0 when the version has no covering controls.
     CASE WHEN COUNT(DISTINCT cf.control_id) = 0 THEN 0.0
@@ -133,14 +190,20 @@ SELECT
                    / COUNT(DISTINCT vr.requirement_id)
            - 100.0 * COUNT(DISTINCT ct.requirement_id)
                    / COUNT(DISTINCT vr.requirement_id), 2)
-    END::float8 AS trend_delta_90d
+    END::float8 AS trend_delta_90d,
+    BOOL_OR(sv.framework_version_id IS NOT NULL)::bool AS scope_activated,
+    BOOL_OR(hv.framework_version_id IS NOT NULL)::bool AS trend_history
 FROM version_reqs vr
 LEFT JOIN covered_now      cn ON cn.framework_version_id = vr.framework_version_id
                               AND cn.requirement_id      = vr.requirement_id
 LEFT JOIN covered_then     ct ON ct.framework_version_id = vr.framework_version_id
                               AND ct.requirement_id      = vr.requirement_id
+LEFT JOIN covered_by_exception cbe ON cbe.framework_version_id = vr.framework_version_id
+                                  AND cbe.requirement_id      = vr.requirement_id
 LEFT JOIN control_freshness cf ON cf.framework_version_id = vr.framework_version_id
-GROUP BY vr.framework_id, vr.framework_version
+LEFT JOIN scoped_versions  sv ON sv.framework_version_id = vr.framework_version_id
+LEFT JOIN history_versions hv ON hv.framework_version_id = vr.framework_version_id
+GROUP BY vr.framework_id, vr.framework_version, vr.framework_version_id, vr.framework_name
 ORDER BY vr.framework_id, vr.framework_version
 `
 
@@ -150,20 +213,26 @@ type FrameworkPostureParams struct {
 }
 
 type FrameworkPostureRow struct {
-	FrameworkID        pgtype.UUID `json:"framework_id"`
-	FrameworkVersion   string      `json:"framework_version"`
-	CoveragePct        float64     `json:"coverage_pct"`
-	FreshnessComposite float64     `json:"freshness_composite"`
-	TrendDelta90d      float64     `json:"trend_delta_90d"`
+	FrameworkID           pgtype.UUID `json:"framework_id"`
+	FrameworkVersion      string      `json:"framework_version"`
+	FrameworkVersionID    pgtype.UUID `json:"framework_version_id"`
+	FrameworkName         string      `json:"framework_name"`
+	CoveragePct           float64     `json:"coverage_pct"`
+	CoveredByExceptionPct float64     `json:"covered_by_exception_pct"`
+	FreshnessComposite    float64     `json:"freshness_composite"`
+	TrendDelta90d         float64     `json:"trend_delta_90d"`
+	ScopeActivated        bool        `json:"scope_activated"`
+	TrendHistory          bool        `json:"trend_history"`
 }
 
 // Slice 066 — dashboard backend read endpoints.
 //
-// Three pure SELECT families that surface existing data behind the
+// Pure SELECT families that surface existing data behind the
 // dashboard-grained read paths slice 040's program dashboard view shipped
 // binding placeholders for. This slice adds NO migration and NO write
-// surface — it reads framework_versions + the UCF graph, the slice-062
-// admin_audit_log_v view, and four upcoming-item source tables.
+// surface — it reads framework_versions + the UCF graph and the slice-062
+// admin_audit_log_v view. (The upcoming rollup it once also served was
+// retired by #2130; the compliance calendar is the one list of what is due.)
 //
 // All tenant-scoped reads run inside the request's app.current_tenant GUC
 // (set by the slice-033 tenancy middleware); RLS is the defense-in-depth
@@ -172,7 +241,7 @@ type FrameworkPostureRow struct {
 // frameworks, framework_requirements, fw_to_scf_edges, scf_anchors) carry
 // no tenant_id and no RLS — they are global, platform-bundled.
 //
-// Cursor pagination over the activity feed and the upcoming rollup is
+// Cursor pagination over the activity feed is
 // keyset, not OFFSET: a (timestamp, id) keyset is stable under concurrent
 // appends. The keyset predicate is decomposed (ts < cursor_ts OR (ts =
 // cursor_ts AND id < cursor_id)) rather than a ROW(...) tuple comparison —
@@ -206,8 +275,14 @@ type FrameworkPostureRow struct {
 // trend_delta_90d: coverage_pct now minus the coverage_pct as it stood ~90
 // days ago. "As it stood" is reconstructed from the control_evaluations
 // ledger (slice 012): a control counted toward coverage 90 days ago iff its
-// latest evaluation on/before the cutoff had result='pass'. The delta is in
+// latest evaluation on/before the cutoff had result 'pass' or 'excepted'
+// (#2112: excepted counts as covered, now and then). The delta is in
 // percentage points (e.g. +12.5 means coverage rose 12.5 points).
+//
+// covered_by_exception_pct (#2112): the share of requirements covered today
+// only by controls that rest on an active exception (at least one of the
+// control's cells evaluates `excepted`). It is part of coverage_pct, and
+// callers show it beside it so a waiver never reads as a demonstrated control.
 //
 // Statement of Applicability (#1788): a requirement the tenant's ACTIVATED
 // framework-scope revision for the version marks `excluded` leaves the
@@ -216,6 +291,17 @@ type FrameworkPostureRow struct {
 // trend uses today's exclusions for the 90-day-ago half too, so excluding a
 // requirement never shows up as a jump. Exclusions on draft, review or
 // approved revisions have no effect; undecided requirements stay in.
+//
+// scope_activated (#2056, #2114): whether the tenant has an ACTIVATED
+// framework-scope revision for the version. Without one, nothing has been
+// decided out of scope, so the percentage is over the whole requirement set;
+// callers show "Scope not set" for that version instead of the number.
+//
+// trend_history (#2056): whether any control covering the version has an
+// evaluation (pass or fail) on or before the cutoff. Without one there is no
+// 90-day-ago state to compare against, covered_then is empty, and
+// trend_delta_90d equals coverage_pct; callers show "no baseline yet"
+// instead of that delta.
 //
 // The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 // $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
@@ -231,9 +317,14 @@ func (q *Queries) FrameworkPosture(ctx context.Context, arg FrameworkPosturePara
 		if err := rows.Scan(
 			&i.FrameworkID,
 			&i.FrameworkVersion,
+			&i.FrameworkVersionID,
+			&i.FrameworkName,
 			&i.CoveragePct,
+			&i.CoveredByExceptionPct,
 			&i.FreshnessComposite,
 			&i.TrendDelta90d,
+			&i.ScopeActivated,
+			&i.TrendHistory,
 		); err != nil {
 			return nil, err
 		}
@@ -309,240 +400,6 @@ func (q *Queries) ListEvidenceActivity(ctx context.Context, arg ListEvidenceActi
 			&i.ResourceType,
 			&i.ResourceID,
 			&i.Summary,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUpcomingItems = `-- name: ListUpcomingItems :many
-SELECT due_date, category, title, resource_type, resource_id
-FROM (
-    -- expiring exceptions: active waivers, ordered by when they lapse.
-    -- Slice 732: resolve the control UUID to its SCF code + control name so
-    -- the dashboard "Upcoming" panel reads "Exception on AAA-01 — <name>"
-    -- instead of "Exception on control <uuid>". Same fix + same resolution
-    -- as the calendar's exception branch (internal/db/queries/calendar.sql);
-    -- the two surfaces share the upcoming-event vocabulary (slice 675), so
-    -- the exception label must read identically on both. The SCF code is
-    -- COALESCEd from controls.scf_id then the global scf_anchors.scf_id via
-    -- the structured controls.scf_anchor_id FK (slice 009). The control JOIN
-    -- is on the tenant-scoped (tenant_id, control_id) FK target — no tenant
-    -- boundary crossed; scf_anchors is the global catalog (no RLS). When
-    -- neither code resolves, the title falls back to the control name; never
-    -- a bare UUID (AC-2).
-    SELECT
-        e.expires_at::timestamptz                 AS due_date,
-        'exception'::text                          AS category,
-        ('Exception on ' || CASE
-            WHEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) IS NOT NULL
-                THEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) || ' — ' || c.title
-            ELSE c.title
-        END)                                       AS title,
-        'exception'::text                          AS resource_type,
-        e.id::text                                 AS resource_id
-    FROM exceptions e
-    JOIN controls c
-      ON c.tenant_id = e.tenant_id
-     AND c.id = e.control_id
-    LEFT JOIN scf_anchors a
-      ON a.id = c.scf_anchor_id
-    WHERE e.tenant_id = $1
-      AND e.status = 'active'
-      AND ($2::text = '' OR $2::text = 'exception')
-      AND (
-            e.expires_at::timestamptz > $3::timestamptz
-            OR (e.expires_at::timestamptz = $3::timestamptz
-                AND e.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- policy-ack expirations: the latest ack per (policy_version, user) plus
-    -- 365 days. DISTINCT ON picks the freshest ack; the +365d interval is
-    -- when that attestation falls due for renewal.
-    SELECT
-        (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz AS due_date,
-        'policy_ack'::text                         AS category,
-        ('Policy acknowledgment ' || latest_ack.policy_version_id::text) AS title,
-        'policy_acknowledgment'::text              AS resource_type,
-        latest_ack.id::text                        AS resource_id
-    FROM (
-        SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
-            pa.id, pa.policy_version_id, pa.user_id, pa.acknowledged_at
-        FROM policy_acknowledgments pa
-        WHERE pa.tenant_id = $1
-        ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
-    ) latest_ack
-    WHERE ($2::text = '' OR $2::text = 'policy_ack')
-      AND (
-            (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz > $3::timestamptz
-            OR ((latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz = $3::timestamptz
-                AND latest_ack.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- vendor reviews: last_review_date + cadence interval. Vendors with no
-    -- last_review_date are excluded — there is no anchor to project from.
-    SELECT
-        (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-         END)::timestamptz                         AS due_date,
-        'vendor_review'::text                      AS category,
-        ('Vendor review: ' || v.name)              AS title,
-        'vendor'::text                             AS resource_type,
-        v.id::text                                 AS resource_id
-    FROM vendors v
-    WHERE v.tenant_id = $1
-      AND v.last_review_date IS NOT NULL
-      AND ($2::text = '' OR $2::text = 'vendor_review')
-      AND (
-            (v.last_review_date + CASE v.review_cadence
-                WHEN 'monthly'   THEN INTERVAL '1 month'
-                WHEN 'quarterly' THEN INTERVAL '3 months'
-                WHEN 'biannual'  THEN INTERVAL '6 months'
-                WHEN 'annual'    THEN INTERVAL '12 months'
-             END)::timestamptz > $3::timestamptz
-            OR ((v.last_review_date + CASE v.review_cadence
-                WHEN 'monthly'   THEN INTERVAL '1 month'
-                WHEN 'quarterly' THEN INTERVAL '3 months'
-                WHEN 'biannual'  THEN INTERVAL '6 months'
-                WHEN 'annual'    THEN INTERVAL '12 months'
-             END)::timestamptz = $3::timestamptz
-                AND v.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- vendor contract renewals: explicit renewal_date from the commercial
-    -- tooling register. This is intentionally separate from vendor reviews:
-    -- review cadence is risk work; renewal_date is commercial spend work.
-    SELECT
-        v.renewal_date::timestamptz                 AS due_date,
-        'vendor_renewal'::text                      AS category,
-        ('Vendor renewal: ' || v.name)              AS title,
-        'vendor'::text                              AS resource_type,
-        v.id::text                                  AS resource_id
-    FROM vendors v
-    WHERE v.tenant_id = $1
-      AND v.renewal_date IS NOT NULL
-      AND v.commercial_status <> 'churned'
-      AND ($2::text = '' OR $2::text = 'vendor_renewal')
-      AND (
-            v.renewal_date::timestamptz > $3::timestamptz
-            OR (v.renewal_date::timestamptz = $3::timestamptz
-                AND v.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- audit-period milestones: open periods, ordered by when they close.
-    SELECT
-        ap.period_end::timestamptz                 AS due_date,
-        'audit_period'::text                       AS category,
-        ('Audit period closes: ' || ap.name)       AS title,
-        'audit_period'::text                       AS resource_type,
-        ap.id::text                                AS resource_id
-    FROM audit_periods ap
-    WHERE ap.tenant_id = $1
-      AND ap.status = 'open'
-      AND ($2::text = '' OR $2::text = 'audit_period')
-      AND (
-            ap.period_end::timestamptz > $3::timestamptz
-            OR (ap.period_end::timestamptz = $3::timestamptz
-                AND ap.id::text > $4::text)
-          )
-) rollup
-ORDER BY due_date ASC, resource_id ASC
-LIMIT $5
-`
-
-type ListUpcomingItemsParams struct {
-	TenantID       pgtype.UUID        `json:"tenant_id"`
-	CategoryFilter string             `json:"category_filter"`
-	CursorDate     pgtype.Timestamptz `json:"cursor_date"`
-	CursorID       string             `json:"cursor_id"`
-	RowLimit       int32              `json:"row_limit"`
-}
-
-type ListUpcomingItemsRow struct {
-	DueDate      pgtype.Timestamptz `json:"due_date"`
-	Category     string             `json:"category"`
-	Title        interface{}        `json:"title"`
-	ResourceType string             `json:"resource_type"`
-	ResourceID   string             `json:"resource_id"`
-}
-
-// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
-// sources — expiring exceptions (021), policy-ack expirations (023), vendor
-// reviews and contract renewals (024/OE-623), audit-period milestones (028) — projected to the AC-4 row
-// shape {due_date, category, title, resource_type, resource_id}. NOT four
-// round-trips (anti-criterion P0: no N+1).
-//
-// SHARED UPCOMING-EVENT VOCABULARY (slice 675, ADR-0015): this query and
-// the compliance calendar's `ListCalendarEvents`
-// (internal/db/queries/calendar.sql) both answer "what's coming up?" and
-// MUST source the same entity types. The vendor branch below is mirrored
-// by the calendar's vendor branch (same last_review_date + cadence math).
-// If you add or remove an event source here, make the matching change in
-// calendar.sql (or note why the two intentionally differ) so the dashboard
-// and the calendar cannot silently drift again.
-//
-// due_date semantics per source:
-//
-//	exception        — expires_at (the waiver lapses)
-//	policy_ack       — latest ack's acknowledged_at + 365d (the annual
-//	                   re-ack falls due); only the freshest ack per
-//	                   (policy_version, user) is considered
-//	vendor_review    — last_review_date + the cadence interval (next review
-//	                   falls due)
-//	vendor_renewal   — renewal_date (contract renewal falls due)
-//	audit_period     — period_end (the audit period closes)
-//
-// All four are tenant-scoped; RLS fires on each underlying SELECT and the
-// explicit tenant_id predicates are the primary guarantee.
-//
-// Keyset paginated date-sorted ascending over (due_date, resource_id). The
-// decomposed keyset predicate + the optional category filter are pushed
-// INTO each UNION branch: sqlc v1.31's analyzer cannot resolve column names
-// in an outer WHERE over a UNION-ALL CTE whose columns are all expressions
-// (it has no base-column lineage to bind to). Pushing the predicates into
-// each branch lets sqlc analyze each against real tables. The named args
-// (cursor_date, cursor_id, category_filter, row_limit) are deduplicated by
-// sqlc — each appears once in the generated Params struct. This is still
-// ONE statement / ONE UNION ALL — no N+1 (anti-criterion P0). A sentinel
-// cursor (cursor_date = '-infinity', cursor_id = ”) selects the first
-// page; the empty category filter (” = all) narrows to one source.
-func (q *Queries) ListUpcomingItems(ctx context.Context, arg ListUpcomingItemsParams) ([]ListUpcomingItemsRow, error) {
-	rows, err := q.db.Query(ctx, listUpcomingItems,
-		arg.TenantID,
-		arg.CategoryFilter,
-		arg.CursorDate,
-		arg.CursorID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUpcomingItemsRow
-	for rows.Next() {
-		var i ListUpcomingItemsRow
-		if err := rows.Scan(
-			&i.DueDate,
-			&i.Category,
-			&i.Title,
-			&i.ResourceType,
-			&i.ResourceID,
 		); err != nil {
 			return nil, err
 		}

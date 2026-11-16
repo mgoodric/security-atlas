@@ -19,14 +19,14 @@ Grafana and Datadog connectors. Slice 488 reads which alerts are **configured**
 (CC7.2); this reads what actually **fired** and resolved (CC7.3/CC7.4). One record
 per alert-instance state transition: `rule_id` (rule UID), `source_vendor`,
 `state` (alerting / resolved / no_data / pending), `fired_at`, `resolved_at`, and
-the routing-target **contact-point handle**. Anchors: SCF `MON-01` + `IRO-09`
+the routing-target **contact-point handle**. Anchors: SCF `MON-02` + `IRO-09`
 (the spec candidate IRO-02 is absent from the bundled SCF fixture; IRO-09 is the
 closest present incident anchor — see slice-535 decisions log D3).
 
 The `grafana.access_config.v1` kind (slice 534) is the authn/authz surface 488
 deferred (P0-488-7): it proves SSO is enforced and access is role-based for SOC 2
 CC6.1/CC6.2/CC6.3 — an IAM surface, so it is a **sibling** kind, not a widening of
-the monitoring kind. Default SCF anchors `IAC-06` (Authenticator Management) +
+the monitoring kind. Default SCF anchors `IAC-37` (Authenticator Management) +
 `IAC-22` (Least Privilege).
 
 The connector is **API-based**, not an in-host agent — consistent with the
@@ -107,8 +107,8 @@ atlas-grafana permissions
 | `--token`                   | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                 |
 | `--insecure`                | both       | no       | `false`                       | disables TLS; loopback endpoints only                       |
 | `--environment`             | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped  |
-| `--rule-control`            | `run`      | no       | `scf:MON-01`                  | control id attached to `monitoring.alert_config.v1` records |
-| `--access-control`          | `run`      | no       | `scf:IAC-06`                  | control id attached to `grafana.access_config.v1` records   |
+| `--rule-control`            | `run`      | no       | `scf:MON-02`                  | control id attached to `monitoring.alert_config.v1` records |
+| `--access-control`          | `run`      | no       | `scf:IAC-37`                  | control id attached to `grafana.access_config.v1` records   |
 | `--firing-control`          | `run`      | no       | `scf:IRO-09`                  | control id attached to `monitoring.alert_firing.v1` records |
 | `--grafana-firing-lookback` | `run`      | no       | `24h`                         | bounded look-back window for the alert-firing-history pull  |
 | `--grafana-url`             | `run`      | no       | env `GRAFANA_URL`             | Grafana base URL override                                   |

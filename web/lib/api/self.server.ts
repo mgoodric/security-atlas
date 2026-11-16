@@ -55,7 +55,11 @@
 // as `lib/feature-nav.server.ts`). Never import this from a client
 // component.
 
-import type { EnabledModules } from "@/lib/feature-nav";
+import type {
+  EffectiveFeature,
+  EffectiveModule,
+  EffectiveModules,
+} from "@/lib/feature-nav";
 
 import { apiBaseURL } from "./base";
 
@@ -99,23 +103,43 @@ export function normalizeAdminMe(parsed: unknown): AdminMe {
 }
 
 /**
- * normalizeEnabledModules coerces an upstream `/v1/features/enabled`
- * body into the nav-gate map. Fail-closed: anything that is not an
- * object-valued `modules` field collapses to `{}`, and `gateNavItems`
- * reads a missing key as "off".
- *
- * Shared by the `/api/features/enabled` BFF route handler and
- * `fetchEnabledModules` below.
+ * normalizeEffectiveModules coerces an upstream `/v1/me/modules` body
+ * into the module list. Anything that is not an array-valued `modules`
+ * field is `null` (unknown); an entry missing a field is dropped, and so
+ * is a malformed feature inside a module.
  */
-export function normalizeEnabledModules(parsed: unknown): EnabledModules {
+export function normalizeEffectiveModules(parsed: unknown): EffectiveModules {
   if (parsed === null || typeof parsed !== "object") {
-    return {};
+    return null;
   }
   const body = parsed as { modules?: unknown };
-  if (typeof body.modules !== "object" || body.modules === null) {
-    return {};
+  if (!Array.isArray(body.modules)) {
+    return null;
   }
-  return body.modules as EnabledModules;
+  return body.modules.filter(isEntry).map(
+    (m): EffectiveModule => ({
+      key: m.key,
+      name: m.name,
+      state: m.state,
+      pages: m.pages,
+      features: Array.isArray((m as EffectiveModule).features)
+        ? ((m as EffectiveModule).features as unknown[]).filter(isEntry)
+        : [],
+    }),
+  );
+}
+
+function isEntry(m: unknown): m is EffectiveFeature {
+  return (
+    typeof m === "object" &&
+    m !== null &&
+    typeof (m as EffectiveFeature).key === "string" &&
+    typeof (m as EffectiveFeature).name === "string" &&
+    ((m as EffectiveFeature).state === "on" ||
+      (m as EffectiveFeature).state === "switched_off") &&
+    Array.isArray((m as EffectiveFeature).pages) &&
+    (m as EffectiveFeature).pages.every((p) => typeof p === "string")
+  );
 }
 
 /**
@@ -188,18 +212,16 @@ export async function fetchSelfProfile(
 }
 
 /**
- * fetchEnabledModules reads the caller's tenant's gating flags from
- * `GET /v1/features/enabled` (authed, NOT admin-only). Fail-closed to
- * `{}` so every gated nav item hides rather than rendering a pre-GA link
- * the route would 404 on (slice 660).
- *
- * Replaces the self-fetch of the `/api/features/enabled` BFF route.
+ * fetchEffectiveModules reads the caller's effective modules from
+ * `GET /v1/me/modules` (every signed-in role, own tenant). `null` when the
+ * read fails: the sidebar then gates nothing, and FeatureGate fails
+ * closed to the off state.
  */
-export async function fetchEnabledModules(
+export async function fetchEffectiveModules(
   bearer: string,
-): Promise<EnabledModules> {
-  return normalizeEnabledModules(
-    await fetchPlatformJSON("/v1/features/enabled", bearer),
+): Promise<EffectiveModules> {
+  return normalizeEffectiveModules(
+    await fetchPlatformJSON("/v1/me/modules", bearer),
   );
 }
 
@@ -217,4 +239,49 @@ export async function fetchDemoSeedEnabled(bearer: string): Promise<boolean> {
     return false;
   }
   return (parsed as { enabled?: unknown }).enabled === true;
+}
+
+// The catalog slug of NIST CSF. Mirrors internal/csfassessment
+// CSFFrameworkSlug: the CSF assessment refuses any other framework.
+const CSF_FRAMEWORK_SLUG = "nist_csf";
+
+/**
+ * csfVersionFromFrameworks picks the loaded NIST CSF framework version
+ * out of a `GET /v1/frameworks` body: the `nist_csf` framework's
+ * `latest_version_id`, or `null` when the framework is absent, has no
+ * version, or the body is malformed. Exported for vitest coverage.
+ */
+export function csfVersionFromFrameworks(parsed: unknown): string | null {
+  if (parsed === null || typeof parsed !== "object") {
+    return null;
+  }
+  const list = (parsed as { frameworks?: unknown }).frameworks;
+  if (!Array.isArray(list)) {
+    return null;
+  }
+  for (const f of list) {
+    if (f === null || typeof f !== "object") continue;
+    const { slug, latest_version_id: id } = f as {
+      slug?: unknown;
+      latest_version_id?: unknown;
+    };
+    if (slug === CSF_FRAMEWORK_SLUG && typeof id === "string" && id !== "") {
+      return id;
+    }
+  }
+  return null;
+}
+
+/**
+ * fetchCsfVersionId reads the framework catalog (`GET /v1/frameworks`)
+ * and returns the loaded NIST CSF version id, or `null` (#2081). The
+ * sidebar lists CSF assessment only when this is non-null, so a failure
+ * hides the entry rather than linking to a version that is not there.
+ */
+export async function fetchCsfVersionId(
+  bearer: string,
+): Promise<string | null> {
+  return csfVersionFromFrameworks(
+    await fetchPlatformJSON("/v1/frameworks", bearer),
+  );
 }

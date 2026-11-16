@@ -260,7 +260,7 @@ test.describe("control detail view", () => {
     //     placeholder pattern — visible copy + tooltip + aria-label
     //     read the same line). They are NOT `<a href="#">` (slice 178
     //     anti-pattern).
-    //   - Request exception is a real link to /exceptions?control_id=<id>,
+    //   - Request exception is a real link to /exceptions/new?control_id=<id>,
     //     which is a merged URL-driven filter on the existing
     //     /exceptions list page.
     //
@@ -280,6 +280,9 @@ test.describe("control detail view", () => {
     //    await page.goto(`/controls/${KNOWN_CONTROL_ID}`);
     //    await expect(page.getByTestId("control-header-actions")).toBeVisible();
     //
+    //    // Retired by #2082: Run query and Edit YAML are no longer
+    //    // rendered; only Request exception remains. Drop the first two
+    //    // assertions when un-quarantining.
     //    // AC-2: three buttons in mockup order.
     //    const runQuery = page.getByTestId("control-action-run-query");
     //    const editYaml = page.getByTestId("control-action-edit-yaml");

@@ -20,6 +20,10 @@ Every subcommand that talks to a running platform accepts these:
 | `--token`    | `SECURITY_ATLAS_TOKEN`    | Bearer token                              |
 | `--insecure` | —                         | Disable TLS. Loopback endpoints only.     |
 
+`--insecure` is refused unless the endpoint's host is `localhost`, an address
+in `127.0.0.0/8`, or `::1`. The host is parsed, not prefix-matched, so
+`localhost.example.com` is refused too.
+
 Commands that write directly to Postgres (`catalog`, `policy seed-stock`,
 `demo`, `evidence verify`) take a `--dsn` / `--database-url` instead and read
 `DATABASE_URL` or `DATABASE_URL_APP` from the environment. The import
@@ -95,6 +99,11 @@ security-atlas-cli evidence push \
 `--control` takes the control's UUID or its bundle ID; a bundle ID links the
 record to the tenant's active version of that bundle. Any other value is kept
 as a free-form reference and does not link to a control.
+The receipt's `linkedControlId` is the UUID of the control the record linked
+to, and is absent when it linked to none. When `--control` is not a UUID and
+the record did not link, the CLI also prints a warning on stderr, which is
+usually a mistyped bundle ID. A bundle ID cannot be UUID-shaped: the push
+reads a UUID as a control ID, so `controls upload` rejects such a bundle.
 Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `service_account`), `--session-id`, `--payload-uri`.
 
@@ -123,7 +132,8 @@ security-atlas-cli credentials revoke --id <credential id>
 
 The bearer is printed exactly once, at issue time. `--kinds` empty means all
 evidence kinds; `--ttl` takes a Go duration (`24h`, `90m`) or whole days
-(`30d`), and `--ttl 0` (the default) means no expiry.
+(`30d`), and `--ttl 0` (the default) means no expiry. So does any zero
+duration, such as `0d` or `0h`.
 
 These commands need an admin `--token`, and they act only in that
 credential's tenant: a `--tenant` naming another tenant is refused, and
@@ -150,6 +160,12 @@ with `internal/api/scfimport/catalog.go` as the contract. Each control may
 carry an optional `legacy_scf_id`, its code in the previous SCF release;
 the anchor API returns it as `legacy_scf_id`.
 
+After importing a new release, `import-scf` re-binds controls that are
+still on the previous release's anchors. A control moves only when the new
+anchor has the same code and the same title. Every other control is printed
+as `control needs re-anchoring`, with a note saying where its concept went
+(see the [upgrade guide](upgrade.md#4-verify-the-upgrade)).
+
 `import-scf` also reads SCF's published Excel workbook directly, with no
 conversion step. Download it from the
 [SCF website](https://securecontrolsframework.com/) or the
@@ -165,7 +181,7 @@ It reads the `SCF <release>` sheet (`SCF #`, `SCF Control`, and the
 `import-crosswalk` reads from that workbook. The release version comes from the
 sheet name (`2026.3`); `--release-version` overrides it. The workbook carries
 no release date; pass `--release-date YYYY-MM-DD` to record one. Family is the `SCF #`
-prefix (`IAC` for `IAC-06`), as in the JSON catalog.
+prefix (`IAC` for `IAC-37`), as in the JSON catalog.
 
 To import a full OSCAL catalog (NIST 800-53 and friends), use the separate
 `atlas-oscal import-catalog` binary — see

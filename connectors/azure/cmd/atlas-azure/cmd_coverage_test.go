@@ -327,7 +327,7 @@ func TestBuildEntraRecord_Shape(t *testing.T) {
 		RoleDisplayName: "Reader", DirectoryScopeID: "/", IsPrivileged: false,
 		TenantID: "tenant-1", ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildEntraRecord(a, "prod", "scf:IAC-21")
+	rec, err := buildEntraRecord(a, "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildEntraRecord: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBuildEntraRecord_OmitsEmptyOptionals(t *testing.T) {
 		RoleDefinitionID: "role", TenantID: "t",
 		ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildEntraRecord(a, "prod", "scf:IAC-21")
+	rec, _ := buildEntraRecord(a, "prod", "scf:IAC-10")
 	pl := rec.GetPayload().AsMap()
 	if _, ok := pl["principal_display_name"]; ok {
 		t.Error("empty display name should be omitted")
@@ -423,7 +423,7 @@ func TestBuildAKSRecord_Shape(t *testing.T) {
 		OIDCIssuerEnabled: true, NodePoolCount: 2,
 		Result: aks.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildAKSRecord(c, "prod", "scf:CFG-02")
+	rec, err := buildAKSRecord(c, "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAKSRecord: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestBuildAKSRecord_OmitsEmptyOptionals(t *testing.T) {
 		RBACEnabled: true, PrivateCluster: true, AuthorizedIPRanges: true,
 		Result: aks.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildAKSRecord(c, "prod", "scf:CFG-02")
+	rec, _ := buildAKSRecord(c, "prod", "scf:CFG-04")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location", "kubernetes_version", "network_policy"} {
 		if _, ok := pl[k]; ok {
