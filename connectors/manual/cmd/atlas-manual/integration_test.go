@@ -185,7 +185,7 @@ func TestLocal_NoCredentialsInLog(t *testing.T) {
 	// asserting is that the captured output never echoes the sentinel.
 	doErr := doLocal(t.Context(), localFlags{
 		file:          csvPath,
-		controlID:     "scf:GOV-04",
+		controlID:     "scf:GOV-05",
 		scope:         []string{"environment=test"},
 		maxRows:       100,
 		maxFieldBytes: 1024,

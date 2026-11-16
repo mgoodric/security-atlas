@@ -4,7 +4,7 @@
   "x-evidence-kind": "jira.ticket_evidence.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["CHG-02", "GOV-04"],
+  "x-default-scf-anchors": ["CHG-02", "GOV-05"],
   "title": "Jira ticket evidence",
   "description": "One Jira ticket cited as evidence (e.g., a change ticket).",
   "type": "object",

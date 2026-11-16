@@ -9,7 +9,7 @@ description: |
   The evidence query reads the `policy.acknowledgment` ledger and asserts
   the population of acknowledgments matches active users for each policy.
 
-scf_anchor_id: GOV-01
+scf_anchor_id: GOV-02
 control_family: GOV
 implementation_type: automated
 owner_role: ciso

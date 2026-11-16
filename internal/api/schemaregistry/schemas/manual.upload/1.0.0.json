@@ -4,7 +4,7 @@
   "x-evidence-kind": "manual.upload.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["GOV-04"],
+  "x-default-scf-anchors": ["GOV-05"],
   "title": "Manual file upload",
   "description": "A human-uploaded artifact (PDF, screenshot, signed letter) cited as evidence.",
   "type": "object",
