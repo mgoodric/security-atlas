@@ -14,8 +14,9 @@ type Querier interface {
 	ActionPlanControlExists(ctx context.Context, arg ActionPlanControlExistsParams) (bool, error)
 	// AC-19: same cross-tenant deny for controls.
 	ActionPlanControlExistsInTenant(ctx context.Context, arg ActionPlanControlExistsInTenantParams) (bool, error)
-	// AC-10 tampering guard: owner_id must resolve to a user in the caller's
-	// tenant. RLS hides cross-tenant users.
+	// AC-10 tampering guard: owner_id must resolve to an active user in the
+	// caller's tenant (#2108: a disabled user cannot be handed a plan). RLS
+	// hides cross-tenant users.
 	ActionPlanOwnerExistsInTenant(ctx context.Context, arg ActionPlanOwnerExistsInTenantParams) (bool, error)
 	ActionPlanRiskExists(ctx context.Context, arg ActionPlanRiskExistsParams) (bool, error)
 	// ===== existence probes for cross-tenant linkage guards =====
