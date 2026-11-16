@@ -99,6 +99,9 @@ type decisionResponse struct {
 	Status      string `json:"status"`
 	ReviewerID  string `json:"reviewer_id"`
 	DecidedAt   string `json:"decided_at"`
+	// OverlayEdgesCopied counts the tenant overlay edges an approved
+	// exact_code carry-over copied to the new requirement (#1803).
+	OverlayEdgesCopied int `json:"overlay_edges_copied"`
 }
 
 type migrationRow struct {
@@ -271,10 +274,11 @@ func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, decisionResponse{
-		MigrationID: d.MigrationID.String(),
-		Status:      d.Status,
-		ReviewerID:  d.ReviewerID.String(),
-		DecidedAt:   d.DecidedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		MigrationID:        d.MigrationID.String(),
+		Status:             d.Status,
+		ReviewerID:         d.ReviewerID.String(),
+		DecidedAt:          d.DecidedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		OverlayEdgesCopied: d.OverlayEdgesCopied,
 	})
 }
 
