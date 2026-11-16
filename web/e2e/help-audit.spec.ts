@@ -71,7 +71,7 @@ const ROUTES = [
     route: "/oscal/component-definitions",
     id: "vendor-claims",
     title: "Vendor claims",
-    body: "A claim is the vendor's word, not evidence",
+    body: "Each of those statements is a vendor claim",
     term: "vendor-claim",
   },
 ] as const;
