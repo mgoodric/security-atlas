@@ -17,12 +17,20 @@
 # this does too before exporting it. A URL with no password (the bundled
 # stack's trust / .pgpass path) leaves PGPASSWORD as the caller had it.
 #
-# A `?password=...` query parameter is not moved; put the password in the
+# A raw `@` inside the password splits at the first `@` (the rest lands in
+# the host part), so write it `%40`; likewise write `/` as `%2F`.
+#
+# A `?password=...` query parameter is not moved and still reaches psql's
+# argv, so pg_conn_split warns about it on stderr. Put the password in the
 # userinfo, PGPASSWORD or a .pgpass file instead.
 
 # pct_decode STRING — print STRING with %XX escapes decoded. POSIX sh only:
 # each escape becomes an octal printf escape, which dash, busybox ash and
-# bash all accept.
+# bash all accept. Command substitution strips trailing newlines, so each
+# one here (and the caller's) ends with an `x` sentinel that is removed
+# afterwards; without it a decoded `%0A` would vanish. An invalid escape
+# such as `%zz` stays literal. `%00` cannot survive: a shell variable
+# cannot hold a NUL byte.
 pct_decode() {
     _pd_s=$1
     _pd_out=
@@ -32,7 +40,8 @@ pct_decode() {
                 _pd_hex=${_pd_s#%}
                 _pd_hex=${_pd_hex%"${_pd_hex#??}"}
                 # shellcheck disable=SC2059 # the format IS the escape
-                _pd_out=$_pd_out$(printf "\\$(printf '%03o' "0x$_pd_hex")")
+                _pd_ch=$(printf "\\$(printf '%03o' "0x$_pd_hex")x")
+                _pd_out=$_pd_out${_pd_ch%x}
                 _pd_s=${_pd_s#%??}
                 ;;
             *)
@@ -45,6 +54,17 @@ pct_decode() {
 }
 
 pg_conn_split() {
+    pg_conn_split_url
+    case $PSQL_URL in
+        *://*\?password=* | *://*\?*\&password=*)
+            echo "pg-conn: DATABASE_URL has password= in its query string," \
+                "which still reaches psql's argv; put the password in the" \
+                "userinfo, PGPASSWORD or a .pgpass file instead." >&2
+            ;;
+    esac
+}
+
+pg_conn_split_url() {
     PSQL_URL=$DATABASE_URL
     case $DATABASE_URL in
         *://*) ;;
@@ -64,7 +84,11 @@ pg_conn_split() {
         *) return 0 ;; # user but no password
     esac
     _pc_user=${_pc_userinfo%%:*}
-    PGPASSWORD=$(pct_decode "${_pc_userinfo#*:}")
+    PGPASSWORD=$(
+        pct_decode "${_pc_userinfo#*:}"
+        printf x
+    )
+    PGPASSWORD=${PGPASSWORD%x}
     export PGPASSWORD
     if [ -n "$_pc_user" ]; then
         PSQL_URL="$_pc_scheme://$_pc_user@$_pc_host"
