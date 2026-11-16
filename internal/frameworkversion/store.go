@@ -295,6 +295,9 @@ type Decision struct {
 	Status      string
 	ReviewerID  uuid.UUID
 	DecidedAt   time.Time
+	// OverlayEdgesCopied is how many tenant overlay edges an approved
+	// exact_code carry-over copied to the new version's requirement (#1803).
+	OverlayEdgesCopied int
 }
 
 // DecideMigration records a human's approve/reject on ONE review-queue row and
@@ -303,6 +306,12 @@ type Decision struct {
 // NOT auto-apply the carryover to the catalog — it records human acceptance of
 // the SUGGESTION (P0-484-1: the platform suggests, the human approves; applying
 // the carryover edges is the loader's job under a separate human-driven import).
+//
+// Approving an exact_code row does carry tenant overlay edges over (#1803):
+// every tenant's active overlay edges on the old requirement are copied to the
+// new one, each in its own tenant, logged per copy, in this same tx. Overlay
+// edges are tenant-owned attestations, not catalog edges, so P0-484-1 does not
+// apply to them.
 func (s *Store) DecideMigration(ctx context.Context, migrationID, reviewerID uuid.UUID, approve bool, note string) (Decision, error) {
 	newStatus := dbx.FrameworkVersionMigrationStatusRejected
 	auditAction := dbx.FrameworkVersionAuditActionMigrationReject
@@ -349,11 +358,24 @@ func (s *Store) DecideMigration(ctx context.Context, migrationID, reviewerID uui
 			return fmt.Errorf("frameworkversion: audit migration decision: %w", aErr)
 		}
 
+		copied := 0
+		if approve && row.MatchKind == dbx.FrameworkVersionMigrationMatchKindExactCode {
+			n, cErr := q.CarryOverOverlayEdges(ctx, dbx.CarryOverOverlayEdgesParams{
+				MigrationID: pgUUID(migrationID),
+				Actor:       reviewerID.String(),
+			})
+			if cErr != nil {
+				return fmt.Errorf("frameworkversion: carry over overlay edges: %w", cErr)
+			}
+			copied = int(n)
+		}
+
 		result = Decision{
-			MigrationID: migrationID,
-			Status:      string(decided.Status),
-			ReviewerID:  reviewerID,
-			DecidedAt:   decided.DecidedAt.Time,
+			MigrationID:        migrationID,
+			Status:             string(decided.Status),
+			ReviewerID:         reviewerID,
+			DecidedAt:          decided.DecidedAt.Time,
+			OverlayEdgesCopied: copied,
 		}
 		return nil
 	})

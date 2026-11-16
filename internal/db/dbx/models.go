@@ -2442,19 +2442,20 @@ type FrameworkVersionAudit struct {
 }
 
 type FrameworkVersionMigration struct {
-	ID                pgtype.UUID                        `json:"id"`
-	FrameworkID       pgtype.UUID                        `json:"framework_id"`
-	FromVersionID     pgtype.UUID                        `json:"from_version_id"`
-	ToVersionID       pgtype.UUID                        `json:"to_version_id"`
-	FromRequirementID pgtype.UUID                        `json:"from_requirement_id"`
-	ToRequirementID   pgtype.UUID                        `json:"to_requirement_id"`
-	RequirementCode   string                             `json:"requirement_code"`
-	MatchKind         FrameworkVersionMigrationMatchKind `json:"match_kind"`
-	Status            FrameworkVersionMigrationStatus    `json:"status"`
-	ReviewerID        pgtype.UUID                        `json:"reviewer_id"`
-	Note              string                             `json:"note"`
-	CreatedAt         pgtype.Timestamptz                 `json:"created_at"`
-	DecidedAt         pgtype.Timestamptz                 `json:"decided_at"`
+	ID                   pgtype.UUID                        `json:"id"`
+	FrameworkID          pgtype.UUID                        `json:"framework_id"`
+	FromVersionID        pgtype.UUID                        `json:"from_version_id"`
+	ToVersionID          pgtype.UUID                        `json:"to_version_id"`
+	FromRequirementID    pgtype.UUID                        `json:"from_requirement_id"`
+	ToRequirementID      pgtype.UUID                        `json:"to_requirement_id"`
+	RequirementCode      string                             `json:"requirement_code"`
+	MatchKind            FrameworkVersionMigrationMatchKind `json:"match_kind"`
+	Status               FrameworkVersionMigrationStatus    `json:"status"`
+	ReviewerID           pgtype.UUID                        `json:"reviewer_id"`
+	Note                 string                             `json:"note"`
+	CreatedAt            pgtype.Timestamptz                 `json:"created_at"`
+	DecidedAt            pgtype.Timestamptz                 `json:"decided_at"`
+	OverlayCarriedOverAt pgtype.Timestamptz                 `json:"overlay_carried_over_at"`
 }
 
 type FwToScfEdge struct {
