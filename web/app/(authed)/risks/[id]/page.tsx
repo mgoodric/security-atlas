@@ -31,7 +31,9 @@
 // closed risk shows its closure and leads with Reopen, a one-click
 // transition confirmed inline, in place of the acceptance actions.
 // The roll-up from the children sits beside the assessed severity and never
-// replaces it.
+// replaces it. #2106 adds the Linked controls section (link with the shared
+// picker, unlink confirmed inline) and "Add action plan", which opens the
+// create form pre-linked to this risk.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -48,6 +50,7 @@ import { useToast } from "@/components/ui/toast";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { Markdown } from "@/components/markdown";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
+import { RiskControls } from "@/components/risks/risk-controls";
 import { RiskHistory } from "@/components/risks/risk-history";
 import { DetailHeader } from "@/components/detail/detail-header";
 import { SelfApprovedBadge } from "@/components/self-approved-badge";
@@ -496,8 +499,20 @@ export default function RiskDetailPage({
       {/* ============ PARENTS / CHILDREN (#1748) ============ */}
       <RiskHierarchyLinks risk={risk} />
 
+      {/* ============ LINKED CONTROLS (#2106) ============ */}
+      <RiskControls risk={risk} />
+
       {/* ============ LINKED ACTION PLANS (slice 384, AC-25) ============ */}
-      <LinkedActionPlans target="risk" targetId={id} />
+      {/* #2106: "Add action plan" opens the create form pre-linked. */}
+      <LinkedActionPlans
+        target="risk"
+        targetId={id}
+        addHref={
+          closed
+            ? undefined
+            : `/action-plans/new?risk_id=${encodeURIComponent(id)}`
+        }
+      />
 
       {/* ============ HIERARCHY LINK ============ */}
       <div data-testid="risk-detail-hierarchy-link">

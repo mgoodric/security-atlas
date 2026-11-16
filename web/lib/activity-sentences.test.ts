@@ -70,6 +70,12 @@ describe("describeEvent", () => {
       "approved acceptance of",
     );
     expect(describeEvent(row("risk", "reopened")).phrase).toBe("reopened");
+    expect(describeEvent(row("risk", "control_linked")).phrase).toBe(
+      "linked a control to",
+    );
+    expect(describeEvent(row("risk", "control_unlinked")).phrase).toBe(
+      "unlinked a control from",
+    );
     expect(describeEvent(row("risk", "something_new")).phrase).toBe("changed");
     expect(
       describeEvent(row("feature_flag", "feature_flag.disable")).phrase,

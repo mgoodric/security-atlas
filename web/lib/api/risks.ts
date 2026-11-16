@@ -446,6 +446,8 @@ export type RiskAuditEntry = {
     | "acceptance_revoked"
     | "closed"
     | "reopened"
+    | "control_linked"
+    | "control_unlinked"
     | string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
@@ -513,6 +515,39 @@ export async function transitionRisk(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },
+  )) as { risk: Risk };
+  return decoded.risk;
+}
+
+/** #2106: link a control to the risk through the BFF. */
+export async function linkRiskControl(
+  id: string,
+  controlId: string,
+): Promise<Risk> {
+  const decoded = (await hierarchyRequest<{ risk: Risk }>(
+    `/api/risks/${encodeURIComponent(id)}/controls`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ control_id: controlId }),
+    },
+  )) as { risk: Risk };
+  return decoded.risk;
+}
+
+/**
+ * #2106: unlink a control from the risk through the BFF. The platform
+ * refuses the last control of a mitigate risk with no live action plan.
+ */
+export async function unlinkRiskControl(
+  id: string,
+  controlId: string,
+): Promise<Risk> {
+  const decoded = (await hierarchyRequest<{ risk: Risk }>(
+    `/api/risks/${encodeURIComponent(id)}/controls/${encodeURIComponent(
+      controlId,
+    )}`,
+    { method: "DELETE" },
   )) as { risk: Risk };
   return decoded.risk;
 }
