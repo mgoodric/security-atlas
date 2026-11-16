@@ -324,11 +324,16 @@ func UnlinkChildTx(ctx context.Context, q *dbx.Queries, tenantID, parentID, chil
 	return nil
 }
 
-// LinkChildren attaches childIDs under parentID (see LinkChildrenTx).
+// LinkChildren attaches childIDs under parentID (see LinkChildrenTx). A
+// deadlock against a concurrent risk write is retried in a fresh
+// transaction (retryOnDeadlock); the link is idempotent, so a retry
+// re-validates and re-inserts from scratch.
 func (s *Store) LinkChildren(ctx context.Context, parentID uuid.UUID, childIDs []uuid.UUID) error {
-	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		_, err := LinkChildrenTx(ctx, q, tenantID, parentID, childIDs)
-		return err
+	return retryOnDeadlock(ctx, func() error {
+		return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+			_, err := LinkChildrenTx(ctx, q, tenantID, parentID, childIDs)
+			return err
+		})
 	})
 }
 
