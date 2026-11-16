@@ -101,6 +101,7 @@ describe("AUDIT_LOG_KINDS", () => {
       "mapping_overlay",
       "control_import",
       "risk",
+      "posture_target",
     ]);
   });
 });
