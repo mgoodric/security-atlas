@@ -624,8 +624,14 @@ func (s *Store) Heatmap(ctx context.Context) ([]HeatmapCell, error) {
 	return out, err
 }
 
-// Delete removes a risk by id. ErrNotFound if no row was matched.
+// Delete removes a risk by id. ErrNotFound if no row was matched. A
+// deadlock against a concurrent link is retried in a fresh transaction
+// (retryOnDeadlock).
 func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
+	return retryOnDeadlock(ctx, func() error { return s.deleteOnce(ctx, id) })
+}
+
+func (s *Store) deleteOnce(ctx context.Context, id uuid.UUID) error {
 	return s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		// Check existence first so we can return ErrNotFound rather than a
 		// silent success on a missing row.
