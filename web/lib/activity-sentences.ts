@@ -148,6 +148,8 @@ const RISK_PHRASES: Record<string, string> = {
   closed: "closed",
   reopened: "reopened",
   deleted: "deleted",
+  control_linked: "linked a control to",
+  control_unlinked: "unlinked a control from",
 };
 
 const FLAG_PHRASES: Record<string, string> = {

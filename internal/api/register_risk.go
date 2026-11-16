@@ -74,6 +74,9 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// Literal-suffix route declared before the generic /v1/risks/{id} so
 	// chi's declaration-order match keeps it ahead.
 	root.Post("/v1/risks/{id}/controls", risksH.LinkControl)
+	// #2106: unlink one control; refused for the last link of a mitigate
+	// risk with no live action plan.
+	root.Delete("/v1/risks/{id}/controls/{control_id}", risksH.UnlinkControl)
 	// #1748: hierarchy links into an existing risk. Literal-suffix routes
 	// declared before the generic /v1/risks/{id}.
 	root.Get("/v1/risks/{id}/children", risksH.ListChildren)
