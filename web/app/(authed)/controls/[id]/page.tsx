@@ -592,12 +592,21 @@ function ControlDetailPageInner() {
           shared tabs primitive; introducing one would violate
           P0-254-1's "do not introduce a new component primitive"). The
           tab key is URL-bound (`?tab=<key>`) and the count chip reads
-          from each tab's underlying query payload. */}
+          from each tab's underlying query payload.
+          #2096: <main> is the scroll container (the top bar sits outside
+          it) and a sticky offset counts from main's padding edge, so the
+          old top-12 left a 48px band plus main's padding that table rows
+          scrolled through. The negative top equal to main's padding (p-4,
+          sm:p-6 in app-shell.tsx) pins the strip flush to main's top edge,
+          the negative margins span its side padding so no content shows
+          beside it, and `data-sticky-tabs` turns on main's scroll padding
+          so focus and anchor jumps land below it. */}
         <div
           role="tablist"
           aria-label="Control detail sections"
           data-testid="control-tabs"
-          className="sticky top-12 z-10 -mx-4 flex items-center gap-1 overflow-x-auto border-b bg-background px-4 md:mx-0 md:px-0"
+          data-sticky-tabs
+          className="sticky -top-4 z-20 -mx-4 flex items-center gap-1 overflow-x-auto border-b bg-background px-4 sm:-top-6 sm:-mx-6 sm:px-6"
         >
           {CONTROL_TABS.map((t) => {
             const isActive = activeTab === t.key;

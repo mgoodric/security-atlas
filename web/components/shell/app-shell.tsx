@@ -49,7 +49,9 @@ export async function AppShell({
         <Sidebar />
         {/* min-w-0: without it this flex item's minimum width is its
           content's, so a wide table widens the column and the page
-          scrolls sideways instead of the table's own container. */}
+          scrolls sideways instead of the table's own container.
+          A page with a sticky tab strip marks it `data-sticky-tabs`;
+          the scroll padding keeps focused rows clear of it (#2096). */}
         <main
           id="main-content"
           tabIndex={-1}
@@ -57,7 +59,7 @@ export async function AppShell({
             "min-w-0 flex-1",
             bleed
               ? "flex flex-col overflow-hidden"
-              : "overflow-y-auto p-4 sm:p-6",
+              : "overflow-y-auto p-4 sm:p-6 has-[[data-sticky-tabs]]:scroll-pt-16",
           )}
         >
           {children}
