@@ -96,28 +96,64 @@ func RecordRemapProposal(ctx context.Context, q *dbx.Queries, r dbx.ListControls
 
 // RemapClassFor classifies one row of ListControlsOnLegacySCFAnchors and
 // returns the successor codes it proposes, sorted.
+func RemapClassFor(r dbx.ListControlsOnLegacySCFAnchorsRow) (RemapClass, []string) {
+	return ClassifyLineage(AnchorLineage{
+		LegacySCFID:                r.LegacyScfID,
+		LegacyAnchorTitle:          r.LegacyAnchorTitle,
+		HasCurrentAnchor:           r.CurrentAnchorID.Valid,
+		CurrentAnchorTitle:         r.CurrentAnchorTitle,
+		CurrentAnchorLegacySCFID:   r.CurrentAnchorLegacyScfID,
+		LegacySuccessorSCFIDs:      r.LegacySuccessorScfIds,
+		LegacySuccessorTitles:      r.LegacySuccessorTitles,
+		CurrentReleaseHasLegacyIDs: r.CurrentReleaseHasLegacyIds,
+	})
+}
+
+// AnchorLineage is what the current release says about one legacy anchor:
+// the anchor with the same code, if any, and the anchors that list the
+// legacy code as their legacy ID. Control proposals (#1775) and crosswalk
+// edge proposals (#1777) both classify from it, so the two queues cannot
+// disagree about an anchor.
+type AnchorLineage struct {
+	LegacySCFID       string
+	LegacyAnchorTitle string
+	// HasCurrentAnchor: the current release has an anchor with the legacy
+	// code; CurrentAnchorTitle and CurrentAnchorLegacySCFID describe it
+	// ("" when it lists no legacy ID).
+	HasCurrentAnchor         bool
+	CurrentAnchorTitle       *string
+	CurrentAnchorLegacySCFID string
+	// The current anchors whose legacy ID is the legacy code, codes and
+	// titles in the same order.
+	LegacySuccessorSCFIDs      []string
+	LegacySuccessorTitles      []string
+	CurrentReleaseHasLegacyIDs bool
+}
+
+// ClassifyLineage classifies a legacy anchor and returns the successor
+// codes it proposes, sorted.
 //
 // A current anchor continues the legacy anchor when SCF lists the legacy
 // code as its legacy ID, or when it has the same code and lists no other
 // code as its legacy ID. A release with no legacy IDs at all gives no
-// lineage, so every row is no_successor.
-func RemapClassFor(r dbx.ListControlsOnLegacySCFAnchorsRow) (RemapClass, []string) {
-	if !r.CurrentReleaseHasLegacyIds {
+// lineage, so every anchor is no_successor.
+func ClassifyLineage(l AnchorLineage) (RemapClass, []string) {
+	if !l.CurrentReleaseHasLegacyIDs {
 		return RemapNoSuccessor, []string{}
 	}
-	codes := append([]string{}, r.LegacySuccessorScfIds...)
-	titles := append([]string{}, r.LegacySuccessorTitles...)
-	sameCode := r.CurrentAnchorID.Valid
-	if sameCode && r.CurrentAnchorLegacyScfID != "" && r.CurrentAnchorLegacyScfID != r.LegacyScfID {
+	codes := append([]string{}, l.LegacySuccessorSCFIDs...)
+	titles := append([]string{}, l.LegacySuccessorTitles...)
+	sameCode := l.HasCurrentAnchor
+	if sameCode && l.CurrentAnchorLegacySCFID != "" && l.CurrentAnchorLegacySCFID != l.LegacySCFID {
 		return RemapReusedID, codes
 	}
-	if sameCode && r.CurrentAnchorLegacyScfID == "" {
+	if sameCode && l.CurrentAnchorLegacySCFID == "" {
 		// The same code with no legacy ID of its own continues itself. When
 		// it lists the legacy code it is already among the legacy successors.
-		codes = insertSorted(codes, r.LegacyScfID)
+		codes = insertSorted(codes, l.LegacySCFID)
 		title := ""
-		if r.CurrentAnchorTitle != nil {
-			title = *r.CurrentAnchorTitle
+		if l.CurrentAnchorTitle != nil {
+			title = *l.CurrentAnchorTitle
 		}
 		titles = append(titles, title)
 	}
@@ -125,7 +161,7 @@ func RemapClassFor(r dbx.ListControlsOnLegacySCFAnchorsRow) (RemapClass, []strin
 	case 0:
 		return RemapNoSuccessor, codes
 	case 1:
-		if titles[0] == r.LegacyAnchorTitle {
+		if titles[0] == l.LegacyAnchorTitle {
 			return RemapUnchanged, codes
 		}
 		return RemapRenamed, codes
