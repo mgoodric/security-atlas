@@ -585,10 +585,10 @@ mappings:
     strength: 0.75
     rationale: "Prioritizing assets by criticality/classification is governed by the SCF Asset Management Policy."
   - requirement_code: "ID.AM-07"
-    scf_anchor: "DCH-01"
+    scf_anchor: "DCH-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Inventorying and classifying data is covered by SCF Data Classification & Handling."
+    rationale: "Inventorying and classifying data is covered by SCF Data & Asset Classification."
   - requirement_code: "ID.AM-08"
     scf_anchor: "AST-01"
     relationship_type: "subset_of"

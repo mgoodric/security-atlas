@@ -203,10 +203,10 @@ mappings:
     rationale: "Disabling unnecessary services is a subset of the broader Configuration Change Control anchor (least-functionality facet)."
   # --- Req 3: Protect stored account data ---
   - requirement_code: 3.2.1
-    scf_anchor: DCH-01
+    scf_anchor: DCH-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Minimizing account-data storage via retention overlaps with Data Classification & Handling; PCI's retention-minimization emphasis is narrower (CDE-specific)."
+    rationale: "Minimizing account-data storage via retention overlaps with Data & Asset Classification; PCI's retention-minimization emphasis is narrower (CDE-specific)."
   - requirement_code: 3.5.1
     scf_anchor: CRY-02
     relationship_type: equal
@@ -294,7 +294,7 @@ mappings:
     strength: 0.9
     rationale: "Facility entry controls for the CDE map to SCF Physical Access Control — shared with SOC 2 CC6.4 and ISO A.7.2."
   - requirement_code: 9.4.1
-    scf_anchor: DCH-03
+    scf_anchor: DCH-27
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Physically securing media containing cardholder data overlaps with SCF Media & Physical Storage handling."
