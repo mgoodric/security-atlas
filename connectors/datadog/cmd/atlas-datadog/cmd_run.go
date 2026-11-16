@@ -115,7 +115,7 @@ time-series.`,
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.monitorControl, "monitor-control", "scf:MON-02", "control_id to attach to monitoring.alert_config.v1 records")
-	cmd.Flags().StringVar(&f.siemControl, "siem-control", "scf:THR-01", "control_id to attach to datadog.siem_rule.v1 records")
+	cmd.Flags().StringVar(&f.siemControl, "siem-control", "scf:THR-02", "control_id to attach to datadog.siem_rule.v1 records")
 	cmd.Flags().StringVar(&f.siemSignalControl, "siem-signal-control", "scf:IRO-16", "control_id to attach to datadog.siem_signal.v1 records")
 	cmd.Flags().StringVar(&f.firingControl, "firing-control", "scf:IRO-16", "control_id to attach to monitoring.alert_firing.v1 records")
 	cmd.Flags().DurationVar(&f.siemLookback, "siem-lookback", 24*time.Hour, "bounded look-back window for the SIEM signal-history pull (honest interval — NOT continuous monitoring)")
