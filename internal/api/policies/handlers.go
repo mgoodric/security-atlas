@@ -18,7 +18,8 @@
 // and applies the tenant GUC.
 //
 // Approver-role gate: PATCH approve, POST publish and PATCH review-date
-// require cred.IsApprover || cred.IsAdmin. Publish is gated because it
+// require authz.IsTenantApprover (admin or grc_engineer, by flag or live
+// tenant role, #2428). Publish is gated because it
 // creates an audit-binding artifact; defense in depth.
 package policies
 
@@ -581,8 +582,8 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 }
 
 // Publish handles POST /v1/policies/{id}/publish (AC-1 versioned row,
-// AC-7 orphan block). Gated by IsApprover (defense in depth — publish is
-// audit-binding).
+// AC-7 orphan block). Gated by authz.IsTenantApprover (defense in depth —
+// publish is audit-binding).
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
