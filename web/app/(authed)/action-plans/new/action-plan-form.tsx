@@ -10,19 +10,15 @@
 // surface (P0-384-12). Native <textarea>/<label> per the vendor-form
 // precedent (no new shadcn primitives).
 
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { EntityPicker } from "@/components/ui/entity-picker";
+import { EntityMultiPicker, EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
 import { type CreateActionPlanInput } from "@/lib/api/action-plans";
-import { fetchTenantControlsList } from "@/lib/api/controls-list";
-import { fetchRisksListWithRollUps } from "@/lib/api/risks";
 import type { EntityKind } from "@/lib/entity-picker";
 
-import { EntityMultiSelect, type SelectOption } from "./entity-multi-select";
 import {
   hasErrors,
   MAX_LINKED,
@@ -35,6 +31,8 @@ type Props = {
 };
 
 const OWNER_KINDS: readonly EntityKind[] = ["user"];
+const RISK_KINDS: readonly EntityKind[] = ["risk"];
+const CONTROL_KINDS: readonly EntityKind[] = ["control"];
 
 export function ActionPlanForm({ onSubmit }: Props) {
   const [title, setTitle] = useState("");
@@ -47,36 +45,6 @@ export function ActionPlanForm({ onSubmit }: Props) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  const risksQ = useQuery({
-    queryKey: ["action-plans", "risk-picker"],
-    queryFn: fetchRisksListWithRollUps,
-    staleTime: 30_000,
-  });
-  const controlsQ = useQuery({
-    queryKey: ["action-plans", "control-picker"],
-    queryFn: fetchTenantControlsList,
-    staleTime: 30_000,
-  });
-
-  const riskOptions: SelectOption[] = useMemo(
-    () =>
-      (risksQ.data?.risks ?? []).map((r) => ({
-        id: r.id,
-        label: r.title,
-        hint: r.category,
-      })),
-    [risksQ.data],
-  );
-  const controlOptions: SelectOption[] = useMemo(
-    () =>
-      (controlsQ.data ?? []).map((c) => ({
-        id: c.id,
-        label: c.title,
-        hint: c.control_family,
-      })),
-    [controlsQ.data],
-  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,31 +185,25 @@ export function ActionPlanForm({ onSubmit }: Props) {
         ) : null}
       </div>
 
-      <EntityMultiSelect
+      <EntityMultiPicker
+        kinds={RISK_KINDS}
         legend="Linked risks"
         searchPlaceholder="Search risks…"
-        testIdPrefix="action-plan-risks"
+        testId="action-plan-risks"
         max={MAX_LINKED}
-        options={riskOptions}
-        selectedIds={riskIds}
+        value={riskIds}
         onChange={setRiskIds}
-        isLoading={risksQ.isLoading}
-        isError={risksQ.isError}
-        errorMessage={(risksQ.error as Error | undefined)?.message}
         emptyHint="No risks in this tenant yet — create one from the risk register first."
       />
 
-      <EntityMultiSelect
+      <EntityMultiPicker
+        kinds={CONTROL_KINDS}
         legend="Linked controls"
         searchPlaceholder="Search controls…"
-        testIdPrefix="action-plan-controls"
+        testId="action-plan-controls"
         max={MAX_LINKED}
-        options={controlOptions}
-        selectedIds={controlIds}
+        value={controlIds}
         onChange={setControlIds}
-        isLoading={controlsQ.isLoading}
-        isError={controlsQ.isError}
-        errorMessage={(controlsQ.error as Error | undefined)?.message}
         emptyHint="No controls in this tenant yet — upload a control bundle first."
       />
 
