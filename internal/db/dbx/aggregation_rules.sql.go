@@ -296,7 +296,7 @@ func (q *Queries) GetLastFiredEvaluation(ctx context.Context, arg GetLastFiredEv
 }
 
 const getRuleMetaRiskByKey = `-- name: GetRuleMetaRiskByKey :one
-SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks
 WHERE tenant_id = $1
   AND inherent_score->>'aggregation_key' = $2::text
@@ -352,6 +352,7 @@ func (q *Queries) GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskB
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -537,7 +538,7 @@ func (q *Queries) ListAggregationRules(ctx context.Context, tenantID pgtype.UUID
 
 const listCandidateRisksForRule = `-- name: ListCandidateRisksForRule :many
 
-SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks
 WHERE tenant_id = $1
   AND themes @> ARRAY[$2::text]
@@ -612,6 +613,7 @@ func (q *Queries) ListCandidateRisksForRule(ctx context.Context, arg ListCandida
 			&i.ClosureNote,
 			&i.ClosedAt,
 			&i.ClosedBy,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -709,7 +711,7 @@ UPDATE risks
 SET inherent_score = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type UpdateMetaRiskInherentScoreParams struct {
@@ -758,6 +760,7 @@ func (q *Queries) UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMet
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }

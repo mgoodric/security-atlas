@@ -25,6 +25,7 @@
 // tokens.
 
 import { expect, test } from "./fixtures";
+import { pickFirstUser } from "./owner-picker";
 
 const CONTROL_ACCESS_ID = "33333333-3333-3333-3333-3333000ac001";
 const CONTROL_OTHER_ID = "33333333-3333-3333-3333-3333000bk002";
@@ -117,7 +118,7 @@ test.describe("/risks/new control-link multi-select", () => {
       timeout: 30_000,
     });
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     // Slice 663: explicitly select mitigate (no longer the opening
     // default). With no controls selected → submit is blocked
     // client-side with the required-error.
@@ -196,7 +197,7 @@ test.describe("/risks/new control-link multi-select", () => {
       timeout: 30_000,
     });
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     // Slice 663: mitigate is no longer the opening default — select it
     // so the control picker renders.
     await page.getByTestId("risks-create-treatment").selectOption("mitigate");

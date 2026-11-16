@@ -203,6 +203,11 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 		categoryChanged := in.CategoryRef != "" && category.ID != current.CategoryID
 		// Record fields are checked before any write, so a refused field
 		// leaves placement and category untouched too.
+		if in.Fields.OwnerUserSet && !sameUserID(in.Fields.OwnerUserID, current.OwnerUserID) {
+			if err := checkOwnerUser(ctx, q, tenantID, in.Fields.OwnerUserID); err != nil {
+				return err
+			}
+		}
 		_, fieldsBefore, fieldsAfter, err := applyRecordFields(current, in.Fields)
 		if err != nil {
 			return err

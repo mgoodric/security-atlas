@@ -35,8 +35,10 @@ import {
   uniqueOwners,
 } from "./filters";
 
+// A fixture's treatment_owner is its unlinked owner (#2129), as the wire
+// returns it when no user is linked.
 function risk(id: string, overrides: Partial<Risk> = {}): Risk {
-  return {
+  const r: Risk = {
     id: `00000000-0000-0000-0000-0000000000${id}`,
     title: `test risk ${id}`,
     description: "",
@@ -55,6 +57,7 @@ function risk(id: string, overrides: Partial<Risk> = {}): Risk {
     severity: 9,
     ...overrides,
   };
+  return { ...r, owner_unlinked: r.owner_unlinked ?? r.treatment_owner };
 }
 
 describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
@@ -297,6 +300,23 @@ describe("applyFilters", () => {
     });
     expect(out).toHaveLength(1);
     expect(out[0]?.treatment_owner).toBe("");
+  });
+
+  test("#2129: a linked owner filters by user id, ahead of any text", () => {
+    const userId = "a1a1a1a1-0000-4000-8000-000000002129";
+    const rows = [
+      risk("01", {
+        owner_user_id: userId,
+        treatment_owner: "",
+        owner_unlinked: "",
+      }),
+      risk("02", { treatment_owner: "alpha" }),
+    ];
+    expect(uniqueOwners(rows)).toEqual(
+      ["a1a1a1a1-0000-4000-8000-000000002129", "alpha"].sort(),
+    );
+    const out = applyFilters(rows, { ...DEFAULT_FILTERS, owner: userId });
+    expect(out.map((r) => r.id)).toEqual([rows[0]!.id]);
   });
 
   test("combining filters narrows on every active predicate", () => {

@@ -82,6 +82,7 @@ import {
   closureReasonLabel,
   primaryAcceptanceAction,
 } from "../lifecycle";
+import { RiskOwner } from "./owner";
 
 export default function RiskDetailPage({
   params,
@@ -277,11 +278,8 @@ export default function RiskDetailPage({
         <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
           <div>
             <dt className="inline text-muted-foreground">Owner </dt>
-            <dd
-              className="inline text-foreground"
-              data-testid="risk-detail-owner"
-            >
-              {risk.treatment_owner.trim() || "unassigned"}
+            <dd className="inline text-foreground">
+              <RiskOwner risk={risk} />
             </dd>
           </div>
           <div>

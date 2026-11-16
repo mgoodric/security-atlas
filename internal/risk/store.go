@@ -168,8 +168,12 @@ type Risk struct {
 	Treatment     dbx.RiskTreatment
 	// AcceptanceStatus is proposed | approved when Treatment is accept,
 	// empty otherwise (#1746).
-	AcceptanceStatus    dbx.RiskAcceptanceStatus
-	TreatmentOwner      string
+	AcceptanceStatus dbx.RiskAcceptanceStatus
+	TreatmentOwner   string
+	// OwnerUserID is the risk's owner, a user of its tenant (#2129). While
+	// it is nil, a non-empty TreatmentOwner is the "Owner (unlinked)" text
+	// a free-text owner left behind.
+	OwnerUserID         *uuid.UUID
 	ResidualScore       []byte
 	ReviewDueAt         *time.Time
 	CreatedAt           time.Time
@@ -225,9 +229,12 @@ type CreateInput struct {
 	InherentScore []byte
 	// Treatment defaults to untreated when empty: no create path records a
 	// treatment decision nobody made (#1746).
-	Treatment           dbx.RiskTreatment
-	AcceptanceStatus    dbx.RiskAcceptanceStatus
-	TreatmentOwner      string
+	Treatment        dbx.RiskTreatment
+	AcceptanceStatus dbx.RiskAcceptanceStatus
+	TreatmentOwner   string
+	// OwnerUserID is the owner, an active user of the tenant (#2129). When
+	// set, TreatmentOwner is not stored.
+	OwnerUserID         *uuid.UUID
 	ResidualScore       []byte
 	ReviewDueAt         *time.Time
 	AcceptedUntil       *time.Time
@@ -301,8 +308,15 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		return Risk{}, err
 	}
 
+	if in.OwnerUserID != nil {
+		in.TreatmentOwner = ""
+	}
+
 	var out Risk
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		if err := checkOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
+			return err
+		}
 		unitLevel, err := orgUnitLevel(ctx, q, tenantID, in.OrgUnitID)
 		if err != nil {
 			return err
@@ -336,6 +350,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			OrgUnitID:            pgUUIDPtr(in.OrgUnitID),
 			AcceptanceProposedBy: proposedBy,
 			AcceptanceProposedAt: pgTimestamptzPtr(proposedAt),
+			OwnerUserID:          pgUUIDPtr(in.OwnerUserID),
 		})
 		if err != nil {
 			return fmt.Errorf("create risk: %w", err)
@@ -881,6 +896,7 @@ func riskFromRow(r dbx.Risk) Risk {
 		ResidualScore:       r.ResidualScore,
 		Accepter:            r.Accepter,
 		InstrumentReference: r.InstrumentReference,
+		OwnerUserID:         uuidPtr(r.OwnerUserID),
 	}
 	if r.CreatedAt.Valid {
 		risk.CreatedAt = r.CreatedAt.Time

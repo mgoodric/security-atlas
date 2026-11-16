@@ -92,14 +92,16 @@ func (h *Handler) WithDeriver(d *risk.ResidualDeriver) *Handler {
 // ----- wire shapes -----
 
 type createReq struct {
-	Title               string          `json:"title"`
-	Description         string          `json:"description"`
-	Category            string          `json:"category"`
-	Methodology         string          `json:"methodology"`
-	InherentScore       json.RawMessage `json:"inherent_score"`
-	Treatment           string          `json:"treatment"`
-	AcceptanceStatus    string          `json:"acceptance_status"`
-	TreatmentOwner      string          `json:"treatment_owner"`
+	Title            string          `json:"title"`
+	Description      string          `json:"description"`
+	Category         string          `json:"category"`
+	Methodology      string          `json:"methodology"`
+	InherentScore    json.RawMessage `json:"inherent_score"`
+	Treatment        string          `json:"treatment"`
+	AcceptanceStatus string          `json:"acceptance_status"`
+	TreatmentOwner   string          `json:"treatment_owner"`
+	// OwnerUserID is the owner, an active user of the tenant (#2129).
+	OwnerUserID         *string         `json:"owner_user_id"`
 	ResidualScore       json.RawMessage `json:"residual_score"`
 	ReviewDueAt         *time.Time      `json:"review_due_at,omitempty"`
 	AcceptedUntil       *string         `json:"accepted_until,omitempty"` // YYYY-MM-DD
@@ -128,7 +130,13 @@ type riskWire struct {
 	Treatment     string          `json:"treatment"`
 	// AcceptanceStatus is proposed | approved for treatment=accept and
 	// omitted otherwise (#1746).
-	AcceptanceStatus    string          `json:"acceptance_status,omitempty"`
+	AcceptanceStatus string `json:"acceptance_status,omitempty"`
+	// OwnerUserID is the owner, a user of the tenant, or null (#2129).
+	// OwnerUnlinked is the free-text owner no user matched, shown as
+	// "Owner (unlinked)"; it is empty whenever OwnerUserID is set.
+	// TreatmentOwner is the stored free text, kept for older clients.
+	OwnerUserID         *string         `json:"owner_user_id"`
+	OwnerUnlinked       string          `json:"owner_unlinked"`
 	TreatmentOwner      string          `json:"treatment_owner"`
 	ResidualScore       json.RawMessage `json:"residual_score"`
 	ReviewDueAt         *time.Time      `json:"review_due_at,omitempty"`
@@ -214,6 +222,11 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "org_unit_id must be a UUID")
 		return
 	}
+	ownerUserID, err := parseUUIDPtr(req.OwnerUserID)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "owner_user_id must be a UUID")
+		return
+	}
 
 	in := risk.CreateInput{
 		Title:               req.Title,
@@ -232,6 +245,7 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		LinkedControlIDs:    linkedIDs,
 		Level:               dbx.RiskLevel(req.Level),
 		OrgUnitID:           orgUnitID,
+		OwnerUserID:         ownerUserID,
 	}
 	// A create proposing an acceptance records its creator as the proposer,
 	// as the propose transition does, so they cannot approve it (#2371).
@@ -253,6 +267,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			risk.IsPlacementValidation(err),
 			risk.IsCategoryRefusal(err):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, risk.ErrOwnerNotActiveUser):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, "owner_user_id: target owner is not an active user in this tenant")
 		default:
 			httperr.WriteInternal(w, r, "create risk", err)
 		}
@@ -472,11 +488,13 @@ type patchReq struct {
 	// slug, id or display name (#1812, #1815).
 	Category *string `json:"category"`
 	// The record fields (#2104). An omitted field keeps its value.
-	Title               *string         `json:"title"`
-	Description         *string         `json:"description"`
-	Methodology         *string         `json:"methodology"`
-	InherentScore       json.RawMessage `json:"inherent_score"`
-	TreatmentOwner      *string         `json:"treatment_owner"`
+	Title          *string         `json:"title"`
+	Description    *string         `json:"description"`
+	Methodology    *string         `json:"methodology"`
+	InherentScore  json.RawMessage `json:"inherent_score"`
+	TreatmentOwner *string         `json:"treatment_owner"`
+	// OwnerUserID sets the owner (a user id) or clears it (null) (#2129).
+	OwnerUserID         json.RawMessage `json:"owner_user_id"`
 	ReviewDueAt         json.RawMessage `json:"review_due_at"`
 	InstrumentReference *string         `json:"instrument_reference"`
 }
@@ -492,12 +510,14 @@ var patchRefusedFields = []string{
 
 // patchFieldList names the fields PATCH /v1/risks/{id} accepts.
 const patchFieldList = "level, org_unit_id, category, title, description, methodology, " +
-	"inherent_score, treatment_owner, review_due_at, instrument_reference"
+	"inherent_score, treatment_owner, owner_user_id, review_due_at, instrument_reference"
 
 // PatchRisk handles PATCH /v1/risks/{id}: move a risk between hierarchy
 // levels and org units (#1749), onto another category (#1812), and change
 // its record fields (#2104): title, description, methodology,
-// inherent_score, treatment_owner, review_due_at, instrument_reference.
+// inherent_score, treatment_owner, owner_user_id, review_due_at,
+// instrument_reference. An owner_user_id that is not an active user of the
+// tenant is a 422 (#2129).
 // A treatment or acceptance field is a 400 naming it, as is any other
 // unknown field. Each change writes one risk_audit_log row naming the
 // caller, with the before and after values; a PATCH that changes nothing
@@ -534,6 +554,8 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		case risk.IsPlacementValidation(err), risk.IsCategoryRefusal(err),
 			risk.IsRecordValidation(err):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, risk.ErrOwnerNotActiveUser):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, "owner_user_id: target owner is not an active user in this tenant")
 		default:
 			httperr.WriteInternal(w, r, "update risk", err)
 		}
@@ -603,6 +625,20 @@ func decodePatch(r *http.Request) (risk.PlacementInput, string) {
 			return risk.PlacementInput{}, "inherent_score cannot be null"
 		}
 		f.InherentScore = req.InherentScore
+	}
+	if req.OwnerUserID != nil {
+		f.OwnerUserSet = true
+		if string(req.OwnerUserID) != "null" {
+			var s string
+			if err := json.Unmarshal(req.OwnerUserID, &s); err != nil {
+				return risk.PlacementInput{}, "owner_user_id must be a UUID or null"
+			}
+			ownerID, err := uuid.Parse(s)
+			if err != nil {
+				return risk.PlacementInput{}, "owner_user_id must be a UUID or null"
+			}
+			f.OwnerUserID = &ownerID
+		}
 	}
 	if req.ReviewDueAt != nil {
 		var t time.Time
@@ -756,6 +792,12 @@ func riskWireFrom(r risk.Risk) riskWire {
 	}
 	if r.CategoryID != uuid.Nil {
 		w.CategoryID = r.CategoryID.String()
+	}
+	if r.OwnerUserID != nil {
+		s := r.OwnerUserID.String()
+		w.OwnerUserID = &s
+	} else {
+		w.OwnerUnlinked = strings.TrimSpace(r.TreatmentOwner)
 	}
 	if r.ReviewDueAt != nil {
 		t := *r.ReviewDueAt
