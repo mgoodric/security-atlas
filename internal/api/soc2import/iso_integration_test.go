@@ -178,7 +178,7 @@ func TestISOImport_FullAnnexA_PreservesSlice438Subset(t *testing.T) {
 		"A.5.1":  "GOV-02",
 		"A.5.15": "IAC-01", // the invariant-#1 shared anchor
 		"A.5.18": "IAC-04",
-		"A.5.24": "IRO-04",
+		"A.5.24": "IRO-08",
 		"A.6.3":  "SAT-04",
 		"A.7.2":  "PES-08",
 		"A.8.2":  "IAC-10",

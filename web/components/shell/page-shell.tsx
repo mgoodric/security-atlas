@@ -17,11 +17,14 @@
 // metadata and a second <title> in the body would race Next's own.
 //
 // No hooks, so this renders from server and client pages alike. The **?**
-// help action (#2143) is a client component that reads the route itself.
+// help action (#2143) and the first-visit hint (#2145) are client
+// components inside a client <HelpScope>, which reads the route and holds
+// the panel's open state so the hint's link can open the same panel.
 
 import type { ReactNode } from "react";
 
-import { HelpButton } from "@/components/help/help-panel";
+import { HelpButton, HelpScope } from "@/components/help/help-panel";
+import { OnboardingHint } from "@/components/help/onboarding-hint";
 import { cn } from "@/lib/utils";
 
 export type PageShellWidth = "full" | "reading";
@@ -59,42 +62,46 @@ export function PageShell({
   children,
 }: PageShellProps) {
   return (
-    <div
-      data-page-shell=""
-      data-width={width}
-      data-testid={testId}
-      className={cn(
-        "w-full min-w-0 space-y-4",
-        width === "reading" && cn("mx-auto", READING_MAX_WIDTH_CLASS),
-        className,
-      )}
-    >
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-baseline gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            {titleAdornment}
-          </div>
-          {subtitle ? (
-            <div className="mt-0.5 text-sm text-muted-foreground">
-              {subtitle}
+    <HelpScope>
+      <div
+        data-page-shell=""
+        data-width={width}
+        data-testid={testId}
+        className={cn(
+          "w-full min-w-0 space-y-4",
+          width === "reading" && cn("mx-auto", READING_MAX_WIDTH_CLASS),
+          className,
+        )}
+      >
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-baseline gap-3">
+              <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+              {titleAdornment}
             </div>
-          ) : null}
-        </div>
-        {/* #2213 — the actions wrap onto as many rows as they need and
+            {subtitle ? (
+              <div className="mt-0.5 text-sm text-muted-foreground">
+                {subtitle}
+              </div>
+            ) : null}
+          </div>
+          {/* #2213 — the actions wrap onto as many rows as they need and
             never exceed the column, so every action stays reachable on
             a 390px phone. A page that groups actions in its own flex
             row must let that row wrap too (vendors' export buttons). */}
-        {/* #2143 — the **?** help action sits after the page's own
+          {/* #2143 — the **?** help action sits after the page's own
             actions. It renders nothing on a page no module's help
             covers, so the wrapper is empty there. */}
-        <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
-          {actions}
-          <HelpButton />
-        </div>
-      </header>
-      {tabs ? <div>{tabs}</div> : null}
-      <div className={cn("min-w-0", bodyClassName)}>{children}</div>
-    </div>
+          <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+            {actions}
+            <HelpButton />
+          </div>
+        </header>
+        {/* #2145 — "New to <module>?" on a module's page until dismissed. */}
+        <OnboardingHint />
+        {tabs ? <div>{tabs}</div> : null}
+        <div className={cn("min-w-0", bodyClassName)}>{children}</div>
+      </div>
+    </HelpScope>
   );
 }

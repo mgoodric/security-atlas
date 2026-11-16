@@ -252,20 +252,20 @@
     },
 
     {
-      "scf_id": "IRO-04",
+      "scf_id": "IRO-08",
       "family": "IRO",
-      "title": "Incident Response Plan",
+      "title": "Incident Response Plan (IRP)",
       "description": "Mechanisms exist to maintain and make available a current and viable Incident Response Plan."
     },
     {
-      "scf_id": "IRO-09",
+      "scf_id": "IRO-16",
       "family": "IRO",
-      "title": "Incident Reporting",
+      "title": "Incident Stakeholder Reporting",
       "description": "Mechanisms exist to report incidents within defined time frames."
     },
 
     {
-      "scf_id": "MNT-02",
+      "scf_id": "MNT-03",
       "family": "MNT",
       "title": "Controlled Maintenance",
       "description": "Mechanisms exist to conduct controlled maintenance and repair activities on facilities and system components, and to retain records of the repairs and modifications performed."
@@ -354,13 +354,13 @@
     },
 
     {
-      "scf_id": "RSK-01",
+      "scf_id": "RSK-02",
       "family": "RSK",
       "title": "Risk Management Program",
       "description": "Mechanisms exist to facilitate the implementation of risk management controls."
     },
     {
-      "scf_id": "RSK-04",
+      "scf_id": "RSK-13",
       "family": "RSK",
       "title": "Risk Assessment",
       "description": "Mechanisms exist to conduct routine risk assessments."

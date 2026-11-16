@@ -9,7 +9,7 @@ description: |
   evidence), and (c) for each declared incident, a link to the
   post-incident report or ticket showing the IR playbook was followed.
 
-scf_anchor_id: IRO-04
+scf_anchor_id: IRO-08
 control_family: IRO
 implementation_type: semi_automated
 owner_role: security-engineering

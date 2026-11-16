@@ -3825,7 +3825,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/frameworks:
     get:
-      summary: GET /v1/frameworks
+      summary: GET /v1/frameworks — the global framework catalog; ?include=versions adds each framework's versions (#2086)
       tags: [frameworks]
       operationId: get-v1-frameworks
       security:

@@ -18,7 +18,7 @@ func TestBuildOnCall(t *testing.T) {
 		ID: "PABC", Name: "Primary", NumTier: 1, Covered: true,
 		Tiers: []oncall.Tier{{Level: 1, OnCall: []oncall.OnCall{{Kind: "user", ID: "U1", Name: "Alice"}}}},
 	}
-	rec, err := BuildOnCall(p, "scf:IRO-04", "connector:pagerduty:oncall@dev", "pagerduty", "prod", fixedNow)
+	rec, err := BuildOnCall(p, "scf:IRO-08", "connector:pagerduty:oncall@dev", "pagerduty", "prod", fixedNow)
 	if err != nil {
 		t.Fatalf("BuildOnCall: %v", err)
 	}
