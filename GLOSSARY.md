@@ -83,6 +83,18 @@ How the program has decided to handle a risk. `risks.treatment` is the `risk_tre
 - `proposed` — acceptance pending sign-off. No accepter or expiry required.
 - `approved` — signed off. Requires `accepter` and `accepted_until`, enforced by `ValidateTreatment` (`internal/risk/treatment.go`) and the `risks_accept_fields_required` CHECK.
 
+**Acceptance lifecycle (#2105)** — treatment and acceptance are not record fields: `PATCH /v1/risks/{id}` refuses them, and they change only through transitions, each written to the risk audit log with its before and after:
+
+| Transition         | From                       | To                                             | Who and what                                                                                                                                                                                            |
+| ------------------ | -------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Change treatment   | any treatment but `accept` | `untreated`, `mitigate`, `transfer` or `avoid` | A risk writer. Validated as at create.                                                                                                                                                                  |
+| Propose acceptance | any treatment but `accept` | `accept` (`proposed`)                          | A risk writer, with a justification and a proposed expiry. The proposer is recorded.                                                                                                                    |
+| Approve acceptance | `accept` (`proposed`)      | `accept` (`approved`)                          | An approver, with `accepted_until` (may differ from the proposed expiry). The approver becomes the `accepter`. Never the proposer, unless [self-approval](#self-approval-2101) is on, and then flagged. |
+| Reject acceptance  | `accept` (`proposed`)      | `untreated`                                    | An approver, with an optional reason.                                                                                                                                                                   |
+| Revoke acceptance  | `accept` (`approved`)      | `untreated`                                    | An approver, with a required reason.                                                                                                                                                                    |
+
+A risk with an acceptance proposed or approved changes treatment only by rejecting or revoking it first. A rejected or revoked acceptance leaves the risk `untreated`, so it counts as open exposure until its owner decides again; the audit row keeps the acceptance that was ended. A confirmed MCP `update_risk_treatment` proposal runs the same transitions, with the confirming person as proposer or approver.
+
 **Open exposure** — a risk counts as open unless it is an `approved` acceptance. `untreated` risks and `proposed` acceptances stay open (`risk.IsOpenTreatment`, the `open_risk_financial_exposure` metric). `untreated` is never grouped with `avoid`.
 
 ## Risk hierarchy links (#1748)
@@ -153,7 +165,7 @@ In the app, an exception is requested from its control (`/exceptions/new?control
 
 ## Self-approval (#2101)
 
-An approval made by the person who requested it: the submitter of a policy or framework scope, or the requester of an exception. Refused by default. Approvals require a second person, and only a person (never an API key, OAuth client or bootstrap credential) approves.
+An approval made by the person who requested it: the submitter of a policy or framework scope, the requester of an exception, or the proposer of a risk acceptance. Refused by default. Approvals require a second person, and only a person (never an API key, OAuth client or bootstrap credential) approves.
 
 An organisation may turn on **Allow self-approval** (`tenants.allow_self_approval`; admin-only; every change written to the audit log). While it is on, the requester may approve their own record, and the record is flagged `self_approved` and shown as **Self-approved** in the UI, the exports and the audit log. The setting relaxes only "same person": a machine credential still never approves. One rule decides every approval (`internal/approval`); see [ADR 0024](docs/adr/0024-approvals-require-a-second-person.md).
 

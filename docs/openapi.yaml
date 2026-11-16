@@ -5804,6 +5804,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/acceptance/approve:
+    patch:
+      summary: PATCH /v1/risks/{id}/acceptance/approve — approve a proposed acceptance; approver role; body {accepted_until (YYYY-MM-DD, after today)}; only a person approves and never the proposer unless the organisation allows self-approval, then flagged self_approved (403); audit-logged
+      tags: [risks]
+      operationId: patch-v1-risks-id-acceptance-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/acceptance/propose:
+    patch:
+      summary: PATCH /v1/risks/{id}/acceptance/propose — propose accepting a risk; body {justification, proposed_until (YYYY-MM-DD, after today)}; refused when an acceptance is already proposed or approved (409); audit-logged
+      tags: [risks]
+      operationId: patch-v1-risks-id-acceptance-propose
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/acceptance/reject:
+    patch:
+      summary: PATCH /v1/risks/{id}/acceptance/reject — reject a proposed acceptance; approver role; body {reason?}; the risk returns to untreated; audit-logged
+      tags: [risks]
+      operationId: patch-v1-risks-id-acceptance-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/acceptance/revoke:
+    patch:
+      summary: PATCH /v1/risks/{id}/acceptance/revoke — revoke an approved acceptance; approver role; body {reason} (required); the risk returns to untreated; audit-logged
+      tags: [risks]
+      operationId: patch-v1-risks-id-acceptance-revoke
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/action-plans:
     get:
       summary: GET /v1/risks/{id}/action-plans
@@ -6002,6 +6082,26 @@ paths:
           schema:
             type: string
         - name: theme
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/treatment:
+    patch:
+      summary: PATCH /v1/risks/{id}/treatment — change a risk's treatment to untreated, mitigate, transfer or avoid; body {treatment, instrument_reference?}; mitigate needs a linked control or action plan, transfer an instrument reference (400); refused while an acceptance is proposed or approved (409); audit-logged
+      tags: [risks]
+      operationId: patch-v1-risks-id-treatment
+      security:
+        - bearer: []
+      parameters:
+        - name: id
           in: path
           required: true
           schema:

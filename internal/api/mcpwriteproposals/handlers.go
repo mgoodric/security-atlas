@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -214,7 +215,12 @@ func (h *Handler) ConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	confirmed, err := h.store.Confirm(ctx, id, cred.ID)
+	// The confirming person is handed to the applier, so a confirmed
+	// acceptance approval runs the approval rule against them (#2105).
+	confirmed, err := h.store.ConfirmAs(ctx, id, cred.ID, approval.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -301,11 +307,18 @@ type transitionErrBody struct {
 // The risk appliers' treatment-validation refusal carries the code
 // POST /v1/risks uses (internal/api/risks/handlers.go, #1844). The
 // hierarchy-link appliers' refusals take the statuses
-// POST /v1/risks/{id}/children returns (#1748).
+// POST /v1/risks/{id}/children returns (#1748). The treatment applier's
+// transition refusals take the statuses the #2105 transition routes return.
 func applyErrStatus(err error) (int, string, bool) {
 	switch {
 	case risk.IsTreatmentValidation(err):
 		return http.StatusBadRequest, "treatment_validation_failed", true
+	case risk.IsTransitionInput(err):
+		return http.StatusBadRequest, "invalid_input", true
+	case errors.Is(err, risk.ErrTransitionState):
+		return http.StatusConflict, "transition_not_allowed", true
+	case risk.IsApprovalRefusal(err):
+		return http.StatusForbidden, "approval_refused", true
 	case errors.Is(err, risk.ErrAggregationCycle):
 		return http.StatusConflict, "hierarchy_cycle", true
 	case risk.IsChildLinkValidation(err):
