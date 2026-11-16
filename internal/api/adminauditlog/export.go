@@ -273,6 +273,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 	)
 
 	rowCap := defaultExportRowCap
+	gate := h.newPayloadGate(r, userIdentifier)
 
 	err = h.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		// AC-12: clamp the effective `to` if a frozen audit_period
@@ -320,6 +321,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 			queryErr = err.Error()
 			return err
 		}
+		gate.apply(entries)
 
 		if len(entries) > rowCap {
 			statusToSend = http.StatusRequestEntityTooLarge
@@ -342,12 +344,11 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 		// emits the empty string for the payload_json column. CSV +
 		// XLSX render that as an empty cell; JSON renders it as the
 		// literal `null` token via WriteOpts.NullForEmpty.
+		// A payload the gate withheld (#2375) is empty too, so the
+		// JSON encoder renders every empty payload as null.
 		rowIter := entriesToRowIter(entries, includePayload)
-		writeOpts := export.WriteOpts{}
-		if !includePayload {
-			writeOpts.NullForEmpty = map[string]bool{
-				"payload_json": true,
-			}
+		writeOpts := export.WriteOpts{
+			NullForEmpty: map[string]bool{"payload_json": true},
 		}
 
 		cw := &countingWriter{w: w}
