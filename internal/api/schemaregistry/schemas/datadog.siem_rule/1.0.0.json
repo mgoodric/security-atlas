@@ -4,7 +4,7 @@
   "x-evidence-kind": "datadog.siem_rule.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["MON-02", "THR-01"],
+  "x-default-scf-anchors": ["MON-02", "THR-02"],
   "title": "Datadog Cloud-SIEM detection-rule inventory",
   "description": "One record per Datadog Cloud-SIEM / Security-Monitoring detection rule: the rule's name, detection class (log / signal_correlation / threshold), enabled state, highest case severity, and the NAMES/HANDLES of the notification targets it routes to. Pulled read-only from the Datadog Security-Monitoring API (GET /api/v2/security_monitoring/rules, security_monitoring_rules_read scope). This is the slice-533 sibling of monitoring.alert_config.v1 (slice 488 decision D1): a detection rule carries a severity + a detection-class field the operational alert-config shape lacks, so it gets its own kind rather than widening the shared monitoring kind into a lowest-common-denominator blob. Rule CONFIGURATION only — never firing signals, the detection query's raw log samples, matched-event payloads, the secret webhook URL behind a notification, an integration token, a recipient email address (PII), or the raw detection query. The connector reports a descriptive enabled/severity posture; the platform evaluator owns the final pass/fail per (control, scope).",
   "type": "object",

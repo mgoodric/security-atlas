@@ -19,14 +19,14 @@ func sampleSignal() Signal {
 
 func TestBuild_RecordShape(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleSignal(), "scf:THR-01", "connector:datadog:siemsignals@dev", "datadog", "prod")
+	rec, err := Build(sampleSignal(), "scf:THR-02", "connector:datadog:siemsignals@dev", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if rec.GetEvidenceKind() != EvidenceKind || rec.GetSchemaVersion() != SchemaVersion {
 		t.Errorf("kind/version wrong: %s %s", rec.GetEvidenceKind(), rec.GetSchemaVersion())
 	}
-	if rec.GetControlId() != "scf:THR-01" {
+	if rec.GetControlId() != "scf:THR-02" {
 		t.Errorf("control_id = %q", rec.GetControlId())
 	}
 	if rec.GetResult().String() != "RESULT_INCONCLUSIVE" {
@@ -52,7 +52,7 @@ func TestBuild_RecordShape(t *testing.T) {
 // assertion pin the boundary (P0-636).
 func TestBuild_NoOverCollectedFields(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleSignal(), "scf:THR-01", "a", "datadog", "prod")
+	rec, err := Build(sampleSignal(), "scf:THR-02", "a", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestBuild_OmitsZeroTimestampsAndEmptyOptionals(t *testing.T) {
 		ObservedAt: time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC),
 		// no rule name, no triager, no timestamps
 	}
-	rec, err := Build(s, "scf:THR-01", "a", "datadog", "prod")
+	rec, err := Build(s, "scf:THR-02", "a", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

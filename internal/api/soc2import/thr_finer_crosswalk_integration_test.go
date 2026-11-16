@@ -10,10 +10,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// Slice 646 — the FINER SCF Threat-Management controls (THR-02..THR-10) carry
+// Slice 646 — the FINER SCF Threat-Management controls (every sample THR anchor but THR-02) carry
 // framework crosswalk edges.
 //
-// Slice 641 imported THR-02..THR-10 into the sample catalog, but only THR-01
+// Slice 641 imported the finer THR anchors into the sample catalog, but only THR-02
 // (from slice 635) carried framework crosswalk edges — the finer controls
 // resolved in the catalog yet no framework requirement pointed at them. This
 // slice authors the requirement -> SCF-anchor STRM edges (invariant #7) that
@@ -24,7 +24,7 @@ import (
 // /v1/requirements/{id}/coverage runs), mirroring slice 635's
 // TestTHRAnchor_DetectionCrosswalkEdgesExist.
 //
-// Coverage note: THR-05 (Insider Threat Program) and THR-06 (Insider Threat
+// Coverage note: THR-15 (Insider Threat Program) and THR-16 (Insider Threat
 // Awareness) intentionally carry NO edges — none of the five bundled framework
 // crosswalks has a dedicated insider-threat requirement, and mapping general
 // security-awareness or personnel-monitoring requirements onto them would
@@ -32,7 +32,7 @@ import (
 // recorded per-framework search (docs/audit-log/651-thr-insider-vdp-crosswalk-
 // decisions.md D2) for the evidence.
 //
-// THR-07 (Vulnerability Disclosure Program) DID gain an edge in slice 651:
+// THR-12 (Vulnerability Disclosure Program) DID gain an edge in slice 651:
 // NIST CSF 2.0 ID.RA-08 is a dedicated coordinated-disclosure Subcategory that
 // slice 646 overlooked. Its assertions live in
 // thr_vdp_crosswalk_integration_test.go.
@@ -62,16 +62,16 @@ func TestTHRFinerCrosswalk_EdgesResolve(t *testing.T) {
 		slug, version, code, anchor string
 	}{
 		// SOC 2
-		{"soc2", "2017", "CC7.2", "THR-04"}, // Threat Hunting
+		{"soc2", "2017", "CC7.2", "THR-13"}, // Threat Hunting
 		// ISO 27001:2022
-		{"iso27001", "2022", "A.5.7", "THR-03"},  // Threat Intelligence Feeds
-		{"iso27001", "2022", "A.8.16", "THR-04"}, // Threat Hunting
-		{"iso27001", "2022", "A.8.8", "THR-02"},  // Indicators of Exposure
+		{"iso27001", "2022", "A.5.7", "THR-04"},  // Threat Intelligence Feeds
+		{"iso27001", "2022", "A.8.16", "THR-13"}, // Threat Hunting
+		{"iso27001", "2022", "A.8.8", "THR-11"},  // Indicators of Exposure
 		// NIST CSF 2.0
-		{"nist_csf", "2.0", "ID.RA-02", "THR-03"}, // Threat Intelligence Feeds
-		{"nist_csf", "2.0", "ID.RA-03", "THR-09"}, // Threat Catalog
-		{"nist_csf", "2.0", "ID.RA-03", "THR-10"}, // Threat Analysis
-		{"nist_csf", "2.0", "DE.AE-07", "THR-01"}, // Threat Intelligence Program
+		{"nist_csf", "2.0", "ID.RA-02", "THR-04"}, // Threat Intelligence Feeds
+		{"nist_csf", "2.0", "ID.RA-03", "THR-06"}, // Threat Catalog
+		{"nist_csf", "2.0", "ID.RA-03", "THR-08"}, // Threat Analysis
+		{"nist_csf", "2.0", "DE.AE-07", "THR-02"}, // Threat Intelligence Program
 	}
 	for _, c := range cases {
 		c := c
@@ -87,9 +87,9 @@ func TestTHRFinerCrosswalk_EdgesResolve(t *testing.T) {
 
 // TestTHRFinerCrosswalk_RelationshipsAreHonest spot-checks the STRM
 // relationship_type on the two edges whose strength selection is the
-// load-bearing JUDGMENT of this slice: ID.RA-02 -> THR-03 is the dedicated
+// load-bearing JUDGMENT of this slice: ID.RA-02 -> THR-04 is the dedicated
 // `equal` upgrade of the slice-480 LOW-confidence MON-08 placeholder (MON-16 since the SCF 2026.3 remap), and
-// CC7.2 -> THR-04 is the honest `intersects_with` (hunting is one technique
+// CC7.2 -> THR-13 is the honest `intersects_with` (hunting is one technique
 // within CC7.2's broader anomaly monitoring, not an equivalence).
 func TestTHRFinerCrosswalk_RelationshipsAreHonest(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
@@ -107,8 +107,8 @@ func TestTHRFinerCrosswalk_RelationshipsAreHonest(t *testing.T) {
 	cases := []struct {
 		slug, version, code, anchor, wantRel string
 	}{
-		{"nist_csf", "2.0", "ID.RA-02", "THR-03", "equal"},
-		{"soc2", "2017", "CC7.2", "THR-04", "intersects_with"},
+		{"nist_csf", "2.0", "ID.RA-02", "THR-04", "equal"},
+		{"soc2", "2017", "CC7.2", "THR-13", "intersects_with"},
 	}
 	for _, c := range cases {
 		c := c
