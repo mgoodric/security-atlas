@@ -7,6 +7,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
+	"github.com/mgoodric/security-atlas/internal/api/admincrosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/api/admincrosswalktier"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/adminframeworkversions"
@@ -25,6 +26,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/crosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkversion"
@@ -170,6 +172,13 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// at "/").
 	crosswalkTierH := admincrosswalktier.New(crosswalktier.NewStore(s.dbPool))
 	root.Post("/v1/admin/crosswalk-edges/{id}/tier", crosswalkTierH.Transition)
+
+	// #1777: crosswalk-edge remap proposals. After a new SCF release, every
+	// catalog edge left on an older release's anchor is queued; approving one
+	// copies the edge onto the successor anchor. Global catalog rows, so every
+	// route (the list included) is super_admin-gated in the handler and in
+	// policies/authz (a tenant admin is 403, #1757).
+	admincrosswalkremap.New(crosswalkremap.NewStore(s.dbPool)).RegisterRoutes(root)
 
 	// Slice 484: framework-versioning capability (ADR 0019). The write routes
 	// are super_admin-gated (global catalog rows; a tenant admin is 403 —

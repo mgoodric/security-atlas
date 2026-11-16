@@ -216,10 +216,15 @@ func (h *Handler) ConfirmProposal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The confirming person is handed to the applier, so a confirmed
-	// acceptance approval runs the approval rule against them (#2105).
-	confirmed, err := h.store.ConfirmAs(ctx, id, cred.ID, approval.Approver{
-		UserID:       credstore.MinterUserID(cred),
-		CredentialID: cred.ID,
+	// acceptance approval runs the approval rule against them (#2105). The
+	// principal is the actor the applier records, as REST records it
+	// (#2371).
+	confirmed, err := h.store.ConfirmAs(ctx, id, cred.ID, writeproposals.Confirmer{
+		Approver: approval.Approver{
+			UserID:       credstore.MinterUserID(cred),
+			CredentialID: cred.ID,
+		},
+		Principal: credstore.PrincipalOf(cred),
 	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)

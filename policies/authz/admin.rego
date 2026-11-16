@@ -16,4 +16,5 @@ package authz
 
 allow if {
     has_role("admin")
+    not super_admin_only_resource
 }

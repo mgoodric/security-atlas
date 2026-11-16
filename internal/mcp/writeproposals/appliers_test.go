@@ -15,7 +15,8 @@ package writeproposals
 //
 // Load-bearing functions / branches covered here:
 //
-//   - ApplyCreateRisk         — invalid JSON, empty title, empty category
+//   - ApplyCreateRisk         — invalid JSON, empty title, empty category,
+//                               approved acceptance (#2371)
 //   - NewUpdateControlStateApplier — invalid JSON, missing control_id, missing
 //                               state, non-UUID control_id, invalid state
 //   - NewPushEvidenceApplier  — invalid JSON, missing required fields,
@@ -37,6 +38,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // ----- ApplyCreateRisk -----
@@ -53,6 +56,21 @@ func TestApplyCreateRisk_RejectsInvalidJSON(t *testing.T) {
 	}
 	if subj != "" {
 		t.Fatalf("subj = %q on err, want empty", subj)
+	}
+}
+
+// TestApplyCreateRisk_RefusesApprovedAcceptance pins #2371: create_risk
+// cannot create an approved acceptance; it goes through propose, approve.
+func TestApplyCreateRisk_RefusesApprovedAcceptance(t *testing.T) {
+	t.Parallel()
+	p := Proposal{
+		ToolName: ToolCreateRisk,
+		ToolInput: json.RawMessage(`{"title":"DC outage","category":"operational",` +
+			`"treatment":"accept","acceptance_status":"approved"}`),
+	}
+	_, err := ApplyCreateRisk(context.Background(), nil, p)
+	if !risk.IsTreatmentValidation(err) || !strings.Contains(err.Error(), "approved acceptance") {
+		t.Fatalf("ApplyCreateRisk(approved) = %v, want the create-acceptance refusal", err)
 	}
 }
 

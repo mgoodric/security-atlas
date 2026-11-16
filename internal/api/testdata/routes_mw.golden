@@ -45,6 +45,7 @@ GET /v1/admin/audit-log/export 9
 GET /v1/admin/audit-log/unified 9
 GET /v1/admin/audit-periods/export 9
 GET /v1/admin/credentials 9
+GET /v1/admin/crosswalk-edge-remap-proposals 9
 GET /v1/admin/demo/status 9
 GET /v1/admin/evidence/export 9
 GET /v1/admin/exceptions/export 9
@@ -263,6 +264,10 @@ POST /v1/admin/authz-bundle/reload 9
 POST /v1/admin/credentials 9
 POST /v1/admin/credentials/{id}/revoke 9
 POST /v1/admin/credentials/{id}/rotate 9
+POST /v1/admin/crosswalk-edge-remap-proposals/approve-unchanged 9
+POST /v1/admin/crosswalk-edge-remap-proposals/{id}/approve 9
+POST /v1/admin/crosswalk-edge-remap-proposals/{id}/keep-legacy 9
+POST /v1/admin/crosswalk-edge-remap-proposals/{id}/reject 9
 POST /v1/admin/crosswalk-edges/{id}/tier 9
 POST /v1/admin/demo/seed 9
 POST /v1/admin/demo/teardown 9

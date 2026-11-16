@@ -52,6 +52,7 @@ tags:
   - name: admin-audit-periods
   - name: admin-authz-bundle
   - name: admin-credentials
+  - name: admin-crosswalk-remap
   - name: admin-crosswalk-tier
   - name: admin-demo
   - name: admin-evidence
@@ -636,6 +637,94 @@ paths:
       summary: POST /v1/admin/credentials/{id}/rotate
       tags: [admin-credentials]
       operationId: post-v1-admin-credentials-id-rotate
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edge-remap-proposals:
+    get:
+      summary: GET /v1/admin/crosswalk-edge-remap-proposals — list crosswalk-edge remap proposals after an SCF release (super_admin; #1777)
+      tags: [admin-crosswalk-remap]
+      operationId: get-v1-admin-crosswalk-edge-remap-proposals
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edge-remap-proposals/approve-unchanged:
+    post:
+      summary: POST /v1/admin/crosswalk-edge-remap-proposals/approve-unchanged — approve every open unchanged edge remap (super_admin; #1777)
+      tags: [admin-crosswalk-remap]
+      operationId: post-v1-admin-crosswalk-edge-remap-proposals-approve-unchanged
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edge-remap-proposals/{id}/approve:
+    post:
+      summary: POST /v1/admin/crosswalk-edge-remap-proposals/{id}/approve — copy the edge onto its successor anchor (super_admin; #1777)
+      tags: [admin-crosswalk-remap]
+      operationId: post-v1-admin-crosswalk-edge-remap-proposals-id-approve
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edge-remap-proposals/{id}/keep-legacy:
+    post:
+      summary: POST /v1/admin/crosswalk-edge-remap-proposals/{id}/keep-legacy — keep the edge on its legacy anchor only, final (super_admin; #1777)
+      tags: [admin-crosswalk-remap]
+      operationId: post-v1-admin-crosswalk-edge-remap-proposals-id-keep-legacy
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edge-remap-proposals/{id}/reject:
+    post:
+      summary: POST /v1/admin/crosswalk-edge-remap-proposals/{id}/reject — reject an edge remap, revisitable (super_admin; #1777)
+      tags: [admin-crosswalk-remap]
+      operationId: post-v1-admin-crosswalk-edge-remap-proposals-id-reject
       security:
         - adminBearer: []
       parameters:
