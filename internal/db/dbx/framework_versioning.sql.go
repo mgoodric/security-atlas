@@ -130,7 +130,7 @@ func (q *Queries) GetFrameworkVersionByIDForUpdate(ctx context.Context, id pgtyp
 }
 
 const getFrameworkVersionMigrationForUpdate = `-- name: GetFrameworkVersionMigrationForUpdate :one
-SELECT id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at FROM framework_version_migrations WHERE id = $1 FOR UPDATE
+SELECT id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at, overlay_carried_over_at FROM framework_version_migrations WHERE id = $1 FOR UPDATE
 `
 
 // Row-lock one queue entry inside the approve/reject tx. Returns ErrNoRows for
@@ -152,6 +152,7 @@ func (q *Queries) GetFrameworkVersionMigrationForUpdate(ctx context.Context, id 
 		&i.Note,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.OverlayCarriedOverAt,
 	)
 	return i, err
 }
@@ -216,7 +217,7 @@ INSERT INTO framework_version_migrations (
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (from_version_id, to_version_id, requirement_code, match_kind)
 DO NOTHING
-RETURNING id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at
+RETURNING id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at, overlay_carried_over_at
 `
 
 type InsertFrameworkVersionMigrationParams struct {
@@ -259,6 +260,7 @@ func (q *Queries) InsertFrameworkVersionMigration(ctx context.Context, arg Inser
 		&i.Note,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.OverlayCarriedOverAt,
 	)
 	return i, err
 }
@@ -302,7 +304,7 @@ func (q *Queries) ListFrameworkVersionAudit(ctx context.Context, frameworkID pgt
 }
 
 const listFrameworkVersionMigrations = `-- name: ListFrameworkVersionMigrations :many
-SELECT id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at FROM framework_version_migrations
+SELECT id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at, overlay_carried_over_at FROM framework_version_migrations
 WHERE from_version_id = $1 AND to_version_id = $2
 ORDER BY match_kind, requirement_code
 `
@@ -336,6 +338,7 @@ func (q *Queries) ListFrameworkVersionMigrations(ctx context.Context, arg ListFr
 			&i.Note,
 			&i.CreatedAt,
 			&i.DecidedAt,
+			&i.OverlayCarriedOverAt,
 		); err != nil {
 			return nil, err
 		}
@@ -389,7 +392,7 @@ SET status      = $2,
     note        = $4,
     decided_at  = now()
 WHERE id = $1 AND status = 'pending'
-RETURNING id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at
+RETURNING id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at, overlay_carried_over_at
 `
 
 type SetFrameworkVersionMigrationDecisionParams struct {
@@ -424,6 +427,7 @@ func (q *Queries) SetFrameworkVersionMigrationDecision(ctx context.Context, arg 
 		&i.Note,
 		&i.CreatedAt,
 		&i.DecidedAt,
+		&i.OverlayCarriedOverAt,
 	)
 	return i, err
 }

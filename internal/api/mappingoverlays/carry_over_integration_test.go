@@ -222,17 +222,68 @@ func TestOverlayCarryOver_CopiesActiveEdgesWithIdenticalFieldsAndLogs(t *testing
 		}
 	}
 
-	// Idempotent: a second decide is refused and a re-run of the copy adds nothing.
+	// One-shot: a second decide is refused, and so is a re-run of the copy,
+	// so tenant A retiring its N+1 copy is not undone by one.
 	if _, err := f.store.DecideMigration(ctx, f.migration(t, "C2", "exact_code"), f.reviewer, true, "again"); !errors.Is(err, frameworkversion.ErrAlreadyDecided) {
 		t.Errorf("second approve: err = %v; want ErrAlreadyDecided", err)
 	}
-	var again int
-	if err := f.admin.QueryRow(ctx, `SELECT carry_over_overlay_edges($1, $2)`,
-		f.migration(t, "C2", "exact_code"), f.reviewer.String()).Scan(&again); err != nil {
-		t.Fatalf("re-run carry-over: %v", err)
+	if status, resp := call(t, f.tenantA, http.MethodPost, "/v1/mapping-overlays/"+copyA.id.String()+"/retire",
+		f.tenantA.admin, map[string]any{"reason": "not tested under C2 in 2027"}); status != http.StatusOK {
+		t.Fatalf("retire tenant A copy: status %d (%v)", status, resp)
 	}
-	if again != 0 || len(edgesOn(t, f.admin, f.next["C2"])) != 2 {
-		t.Errorf("re-run copied %d; want 0 and still 2 edges on N+1", again)
+	if _, err := f.admin.Exec(ctx, `SELECT carry_over_overlay_edges($1, $2)`,
+		f.migration(t, "C2", "exact_code"), f.reviewer.String()); err == nil {
+		t.Error("re-run of carry_over_overlay_edges succeeded; want refused")
+	}
+	for _, e := range edgesOn(t, f.admin, f.next["C2"]) {
+		if e.tenant == copyA.tenant && e.status != "retired" {
+			t.Errorf("tenant A N+1 C2 edge %s is %s after the re-run; want only the retired copy", e.id, e.status)
+		}
+	}
+	if got := edgesOn(t, f.admin, f.next["C2"]); len(got) != 2 {
+		t.Errorf("N+1 C2 edges after re-run = %d; want 2", len(got))
+	}
+}
+
+// The function checks the queue row's requirements against its versions
+// and refuses a caller in a tenant context.
+func TestOverlayCarryOver_FunctionRefusesMismatchedRowAndTenantContext(t *testing.T) {
+	f := newCarryOverFixture(t)
+	ctx := context.Background()
+
+	// An approved exact_code row whose "from" requirement is in N+1, not N.
+	bad := uuid.New()
+	if _, err := f.admin.Exec(ctx, `
+		INSERT INTO framework_version_migrations (id, framework_id, from_version_id, to_version_id,
+			from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, decided_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'C2-mismatch', 'exact_code', 'approved', $7, now())`,
+		bad, f.frameworkID, f.versionN, f.versionN1, f.next["C2"], f.next["C2"], f.reviewer); err != nil {
+		t.Fatalf("seed mismatched migration row: %v", err)
+	}
+	if _, err := f.admin.Exec(ctx, `SELECT carry_over_overlay_edges($1, $2)`, bad, f.reviewer.String()); err == nil {
+		t.Error("carry-over on a row whose requirement is outside its version succeeded; want refused")
+	}
+
+	// A genuine approved row, called under tenant A's context, is refused.
+	c2 := f.migration(t, "C2", "exact_code")
+	if _, err := f.admin.Exec(ctx, `UPDATE framework_version_migrations
+		SET status = 'approved', reviewer_id = $2, decided_at = now() WHERE id = $1`, c2, f.reviewer); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.current_tenant', $1, true)`, f.tenantA.tenant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT carry_over_overlay_edges($1, $2)`, c2, f.reviewer.String()); err == nil {
+		t.Error("carry-over under a tenant context succeeded; want refused")
+	}
+	_ = tx.Rollback(ctx)
+	if got := edgesOn(t, f.admin, f.next["C2"]); len(got) != 0 {
+		t.Errorf("refused calls left N+1 C2 edges %+v", got)
 	}
 }
 

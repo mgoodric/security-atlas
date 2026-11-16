@@ -7,6 +7,8 @@
 
 DROP FUNCTION IF EXISTS carry_over_overlay_edges(UUID, TEXT);
 
+ALTER TABLE framework_version_migrations DROP COLUMN IF EXISTS overlay_carried_over_at;
+
 ALTER TABLE fw_to_scf_overlay_edge_audit_log
     DROP CONSTRAINT fw_to_scf_overlay_edge_audit_log_action_check;
 ALTER TABLE fw_to_scf_overlay_edge_audit_log

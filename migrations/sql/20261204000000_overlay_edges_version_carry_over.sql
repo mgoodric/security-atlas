@@ -11,16 +11,23 @@
 --   * Edges on N are untouched; retired edges are not copied.
 --   * Requirements new in N+1 ('added' rows) get none: only exact_code rows
 --     carry anything over.
---   * Idempotent: the copy skips a (tenant, requirement, anchor) pair that
---     already has an active overlay edge, via the active-pair unique index,
---     so a re-run never duplicates.
+--   * One-shot: the function stamps the queue row's overlay_carried_over_at
+--     and refuses a row already stamped, so a re-run can neither duplicate a
+--     copy nor bring back an N+1 copy a tenant has since retired. Within the
+--     one run, the active-pair unique index skips a pair the tenant already
+--     holds on N+1.
 --
 -- Why SECURITY DEFINER: the approval is a global catalog act (super_admin,
 -- no tenant GUC), but the overlay table is tenant-scoped under FORCE RLS.
 -- The function runs as its owner (the BYPASSRLS migration role) and never
 -- moves a row across tenants: every copy and its audit row carry the source
 -- edge's tenant_id. It does only what the approved migration row implies,
--- and refuses a row that is not an approved exact_code carry-over.
+-- and refuses a row that is not an approved exact_code carry-over between
+-- two catalog versions of one framework, or a call made under a tenant GUC.
+
+-- When the approved carry-over copied its overlay edges; NULL until then.
+ALTER TABLE framework_version_migrations
+    ADD COLUMN overlay_carried_over_at TIMESTAMPTZ NULL;
 
 ALTER TABLE fw_to_scf_overlay_edge_audit_log
     DROP CONSTRAINT fw_to_scf_overlay_edge_audit_log_action_check;
@@ -35,15 +42,21 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-    m       framework_version_migrations%ROWTYPE;
-    copied  INTEGER;
+    m        framework_version_migrations%ROWTYPE;
+    inserted INTEGER;
+    audited  INTEGER;
 BEGIN
+    -- A catalog act: a caller in a tenant context has no business here.
+    IF coalesce(current_setting('app.current_tenant', true), '') <> '' THEN
+        RAISE EXCEPTION 'carry_over_overlay_edges: refused under a tenant context'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
     IF p_actor IS NULL OR length(p_actor) = 0 THEN
         RAISE EXCEPTION 'carry_over_overlay_edges: actor required'
             USING ERRCODE = 'check_violation';
     END IF;
 
-    SELECT * INTO m FROM framework_version_migrations WHERE id = p_migration_id;
+    SELECT * INTO m FROM framework_version_migrations WHERE id = p_migration_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'carry_over_overlay_edges: migration % not found', p_migration_id
             USING ERRCODE = 'no_data_found';
@@ -53,6 +66,33 @@ BEGIN
         RAISE EXCEPTION 'carry_over_overlay_edges: migration % is not an approved carry-over', p_migration_id
             USING ERRCODE = 'check_violation';
     END IF;
+    IF m.overlay_carried_over_at IS NOT NULL THEN
+        RAISE EXCEPTION 'carry_over_overlay_edges: migration % already carried over at %',
+            p_migration_id, m.overlay_carried_over_at
+            USING ERRCODE = 'check_violation';
+    END IF;
+    -- Each requirement belongs to its side's version, and both versions are
+    -- catalog versions of the migration row's framework.
+    PERFORM 1
+    FROM framework_requirements fr_from
+    JOIN framework_versions v_from ON v_from.id = fr_from.framework_version_id
+    JOIN framework_requirements fr_to ON fr_to.id = m.to_requirement_id
+    JOIN framework_versions v_to ON v_to.id = fr_to.framework_version_id
+    WHERE fr_from.id = m.from_requirement_id
+      AND v_from.id = m.from_version_id
+      AND v_to.id = m.to_version_id
+      AND v_from.framework_id = m.framework_id
+      AND v_to.framework_id = m.framework_id
+      AND v_from.tenant_id IS NULL
+      AND v_to.tenant_id IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'carry_over_overlay_edges: migration % requirements do not match its catalog versions', p_migration_id
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE framework_version_migrations
+    SET overlay_carried_over_at = now()
+    WHERE id = p_migration_id;
 
     WITH src AS (
         SELECT e.*
@@ -102,9 +142,16 @@ BEGIN
         JOIN framework_versions av ON av.id = a.framework_version_id
         RETURNING 1
     )
-    SELECT count(*) INTO copied FROM aud;
+    SELECT (SELECT count(*) FROM ins), (SELECT count(*) FROM aud)
+    INTO inserted, audited;
 
-    RETURN copied;
+    -- Every copy has its audit row, or nothing is copied.
+    IF inserted <> audited THEN
+        RAISE EXCEPTION 'carry_over_overlay_edges: % edges copied but % audited', inserted, audited
+            USING ERRCODE = 'internal_error';
+    END IF;
+
+    RETURN inserted;
 END;
 $$;
 

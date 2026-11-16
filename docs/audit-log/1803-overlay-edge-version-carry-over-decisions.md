@@ -31,12 +31,22 @@ that is not `approved` + `exact_code` with both requirement ids, so calling it
 can do no more than an approval already implies. EXECUTE is revoked from
 PUBLIC and granted to `atlas_app` only.
 
-## D3 — idempotent through the active-pair unique index
+## D3 — one-shot per queue row, checked against its versions
 
-The insert is `ON CONFLICT (tenant, requirement, anchor) WHERE status =
-'active' DO NOTHING`, and audit rows are written only for rows actually
-inserted. A double approval is already refused (`ErrAlreadyDecided`), and a
-direct re-run of the function copies nothing.
+The function stamps `framework_version_migrations.overlay_carried_over_at`
+and refuses a row already stamped. A double approval is already refused
+(`ErrAlreadyDecided`); the stamp also stops a direct re-run, which would
+otherwise copy N edges created after the approval and bring back an N+1
+copy a tenant has since retired (the active-pair unique index only skips
+active pairs). Within the one run, `ON CONFLICT ... WHERE status = 'active'
+DO NOTHING` skips a pair the tenant already holds on N+1.
+
+Before copying, it checks that `from_requirement_id` is in the row's
+`from_version_id`, `to_requirement_id` is in its `to_version_id`, and both
+are catalog versions (`tenant_id IS NULL`) of the row's framework. It also
+refuses a call made with `app.current_tenant` set, since the copy is a
+catalog act. The number of edges inserted must equal the number of audit
+rows written, or it raises and the approval rolls back.
 
 ## D4 — the copy keeps `created_by`; the audit row names the approver
 
