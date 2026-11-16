@@ -129,6 +129,7 @@ GET /v1/exceptions/{id}/audit-log 9
 GET /v1/framework-scopes 9
 GET /v1/framework-scopes/applicability 9
 GET /v1/framework-scopes/applicability/export 9
+GET /v1/framework-scopes/posture-targets/{framework_version_id} 9
 GET /v1/framework-scopes/{id} 9
 GET /v1/framework-scopes/{id}/applicability 9
 GET /v1/framework-scopes/{id}/applicability/diff 9
@@ -387,6 +388,7 @@ PUT /v1/controls/imports/settings 9
 PUT /v1/csf/profiles/{kind} 9
 PUT /v1/csf/profiles/{kind}/selections 9
 PUT /v1/csf/tier 9
+PUT /v1/framework-scopes/posture-targets/{framework_version_id} 9
 PUT /v1/framework-scopes/{id}/applicability/{requirement_id} 9
 PUT /v1/me/email-channel 9
 PUT /v1/me/slack-channel 9

@@ -96,6 +96,18 @@ func (s *Store) FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timesta
 	return rows, err
 }
 
+// PostureTargets reads the tenant's posture targets (#2136), one per
+// framework version that has one.
+func (s *Store) PostureTargets(ctx context.Context) ([]dbx.FrameworkPostureTarget, error) {
+	var rows []dbx.FrameworkPostureTarget
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var qerr error
+		rows, qerr = q.ListFrameworkPostureTargets(ctx, pgUUID(tenantID))
+		return qerr
+	})
+	return rows, err
+}
+
 // ActivityFeed reads one page of the evidence-ingest activity feed,
 // newest-first, bounded by the keyset cursor. It returns up to limit rows.
 func (s *Store) ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error) {

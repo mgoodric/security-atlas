@@ -60,11 +60,24 @@ const (
 // real row->wire transformation records on the unit surface.
 type stubReader struct {
 	posture  []dbx.FrameworkPostureRow
+	targets  []dbx.FrameworkPostureTarget
 	activity []dbx.ListEvidenceActivityRow
 }
 
 func (s stubReader) FrameworkPosture(_ context.Context, _ pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error) {
 	return s.posture, nil
+}
+
+func (s stubReader) PostureTargets(_ context.Context) ([]dbx.FrameworkPostureTarget, error) {
+	return s.targets, nil
+}
+
+func pgNumeric(s string) pgtype.Numeric {
+	var n pgtype.Numeric
+	if err := n.Scan(s); err != nil {
+		panic("contract fixture: bad numeric " + s)
+	}
+	return n
 }
 
 func (s stubReader) ActivityFeed(_ context.Context, _ keyset, _ int32) ([]dbx.ListEvidenceActivityRow, error) {
@@ -142,6 +155,18 @@ func TestContract_FrameworkPosture(t *testing.T) {
 			FreshnessComposite: 100,
 			TrendDelta90d:      100,
 			ScopeActivated:     false,
+		},
+	}, targets: []dbx.FrameworkPostureTarget{
+		// #2136: version A has a posture target; B has none (target null).
+		{
+			TenantID:           pgUUIDFromString(contractTenantID),
+			FrameworkVersionID: pgUUIDFromString(contractVersionA),
+			TargetValue:        pgNumeric("90.00"),
+			WarningThreshold:   pgNumeric("80.00"),
+			CriticalThreshold:  pgNumeric("60.00"),
+			Direction:          "higher_is_better",
+			UpdatedBy:          "contract-recorder",
+			UpdatedAt:          pgTS("2026-11-15T12:00:00Z"),
 		},
 	}}
 	empty := stubReader{posture: []dbx.FrameworkPostureRow{}}
