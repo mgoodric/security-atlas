@@ -86,6 +86,15 @@ CREATE TYPE risk_acceptance_status AS ENUM (
     'approved'
 );
 
+-- #2107: the risk lifecycle.
+CREATE TYPE risk_status AS ENUM ('open', 'closed');
+
+CREATE TYPE risk_closure_reason AS ENUM (
+    'not_applicable',
+    'merged',
+    'realised_and_handled'
+);
+
 CREATE TYPE scope_environment AS ENUM (
     'prod',
     'staging',

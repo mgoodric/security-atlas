@@ -8,7 +8,7 @@ description: |
   repo's most recent scan surfaces zero unsuppressed findings in the rule
   set covering injection, deserialization, and schema-violation patterns.
 
-scf_anchor_id: SEA-05
+scf_anchor_id: TDA-05
 control_family: SEA
 implementation_type: automated
 owner_role: product-engineering

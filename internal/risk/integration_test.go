@@ -630,7 +630,7 @@ func TestCrossTenant_RisksAreIsolated(t *testing.T) {
 	}
 
 	// Tenant B DELETE should also surface ErrNotFound (RLS hides the row).
-	if err := store.Delete(ctxB, created.ID); !errors.Is(err, risk.ErrNotFound) {
+	if err := store.Delete(ctxB, created.ID, "test-actor"); !errors.Is(err, risk.ErrNotFound) {
 		t.Fatalf("tenant B Delete expected ErrNotFound; got %v", err)
 	}
 
@@ -638,7 +638,7 @@ func TestCrossTenant_RisksAreIsolated(t *testing.T) {
 	if _, err := store.Get(ctxA, created.ID); err != nil {
 		t.Fatalf("tenant A Get own: %v", err)
 	}
-	if err := store.Delete(ctxA, created.ID); err != nil {
+	if err := store.Delete(ctxA, created.ID, "test-actor"); err != nil {
 		t.Fatalf("tenant A Delete own: %v", err)
 	}
 }

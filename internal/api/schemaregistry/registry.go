@@ -264,7 +264,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 555: MDM connectors (Jamf + Intune) — shared managed-device
 		// installed-software inventory evidence kind, the deliberate slice-490
 		// over-collection follow-on (patch-/vuln-mgmt + asset inventory:
-		// SCF VPM-04 / AST-04).
+		// SCF VPM-06 / AST-04).
 		{Kind: "endpoint.software_inventory.v1", Version: "1.0.0"},
 		// Slice 556: MDM connectors (Jamf + Intune) — shared managed-device
 		// configuration-profile detail evidence kind (which compliance/config

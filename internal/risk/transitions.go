@@ -14,6 +14,8 @@
 //	reject acceptance  accept (proposed) -> untreated (acceptance_rejected)
 //	revoke acceptance  accept (approved) -> untreated (acceptance_revoked)
 //
+// A closed risk takes none of them (#2107); it is reopened first.
+//
 // A risk with an acceptance in flight, proposed or approved, changes
 // treatment only by rejecting or revoking it first. A rejected or revoked
 // acceptance leaves the risk untreated: no treatment decision stands, and
@@ -181,7 +183,7 @@ func ChangeTreatmentTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UU
 	if in.InstrumentReference != nil && in.Treatment != dbx.RiskTreatmentTransfer {
 		return Risk{}, fmt.Errorf("%w: instrument_reference applies only to treatment=transfer", ErrTransitionInput)
 	}
-	current, err := lockRisk(ctx, q, tenantID, id)
+	current, err := lockOpenRisk(ctx, q, tenantID, id)
 	if err != nil {
 		return Risk{}, err
 	}
@@ -232,7 +234,7 @@ func ProposeAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 	if in.Proposer == "" {
 		return Risk{}, fmt.Errorf("%w: proposer is required", ErrTransitionInput)
 	}
-	current, err := lockRisk(ctx, q, tenantID, id)
+	current, err := lockOpenRisk(ctx, q, tenantID, id)
 	if err != nil {
 		return Risk{}, err
 	}
@@ -268,7 +270,7 @@ func ApproveAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 	if err := checkExpiry("accepted_until", in.AcceptedUntil, now); err != nil {
 		return Risk{}, err
 	}
-	current, err := lockRisk(ctx, q, tenantID, id)
+	current, err := lockOpenRisk(ctx, q, tenantID, id)
 	if err != nil {
 		return Risk{}, err
 	}
@@ -339,7 +341,7 @@ func RevokeAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.U
 }
 
 func endAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID, in EndAcceptanceInput, from dbx.RiskAcceptanceStatus, action string) (Risk, error) {
-	current, err := lockRisk(ctx, q, tenantID, id)
+	current, err := lockOpenRisk(ctx, q, tenantID, id)
 	if err != nil {
 		return Risk{}, err
 	}
@@ -377,6 +379,20 @@ func acceptanceState(r Risk) map[string]any {
 		s["self_approved"] = r.Acceptance.SelfApproved
 	}
 	return s
+}
+
+// lockOpenRisk locks a risk for a treatment or acceptance transition and
+// refuses a closed one (#2107): a closed risk is retired, so its
+// treatment and acceptance stand as they were until it is reopened.
+func lockOpenRisk(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID) (Risk, error) {
+	r, err := lockRisk(ctx, q, tenantID, id)
+	if err != nil {
+		return Risk{}, err
+	}
+	if r.Status == dbx.RiskStatusClosed {
+		return Risk{}, fmt.Errorf("%w: the risk is closed; reopen it first", ErrTransitionState)
+	}
+	return r, nil
 }
 
 func lockRisk(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID) (Risk, error) {

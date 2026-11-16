@@ -254,7 +254,7 @@ func (s *IngestSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	controlID, err := uuid.Parse(rec.ControlId)
 	if err != nil {
 		// control_id is a free-form string in the SDK (may be an SCF anchor
-		// like "scf:VPM-04"). When it is not a UUID there is no control row
+		// like "scf:VPM-06"). When it is not a UUID there is no control row
 		// to evaluate by id — slice 015's ledger writer still stores the
 		// record under control_ref. Ack and move on; the scheduled sweep
 		// picks up anchor-ref controls via their UUID.

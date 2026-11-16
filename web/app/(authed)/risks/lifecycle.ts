@@ -9,7 +9,12 @@
 // by rejecting or revoking it first, so the page offers no treatment
 // change then.
 
-import type { Risk, RiskTransitionBody } from "@/lib/api/risks";
+import type {
+  Risk,
+  RiskClosureReason,
+  RiskTransitionBody,
+} from "@/lib/api/risks";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 /** Where a risk stands in the acceptance lifecycle. */
 export type AcceptanceState = "none" | "proposed" | "approved";
@@ -196,4 +201,35 @@ export function validateTreatmentChange(draft: TreatmentDraft): ActionResult {
     };
   }
   return { ok: true, body: { treatment: draft.treatment } };
+}
+
+// ----- #2107: the open/closed lifecycle -----
+
+/** The closure reasons, in the order the close form lists them. */
+export const CLOSURE_REASONS: readonly RiskClosureReason[] = [
+  "not_applicable",
+  "merged",
+  "realised_and_handled",
+];
+
+/** A closure reason's label, from the shared enum labels. */
+export function closureReasonLabel(reason: RiskClosureReason): string {
+  return enumLabel("RiskClosureReason", reason);
+}
+
+export function isClosureReason(s: string): s is RiskClosureReason {
+  return (CLOSURE_REASONS as readonly string[]).includes(s);
+}
+
+export type CloseDraft = { reason: string; note: string };
+
+/** Checks the close form and builds its request body. */
+export function validateClose(draft: CloseDraft): ActionResult {
+  if (!isClosureReason(draft.reason))
+    return { ok: false, error: "Choose why the risk is closed." };
+  const note = draft.note.trim();
+  return {
+    ok: true,
+    body: note ? { reason: draft.reason, note } : { reason: draft.reason },
+  };
 }

@@ -341,15 +341,15 @@
     },
 
     {
-      "scf_id": "PRI-01",
+      "scf_id": "PRI-02",
       "family": "PRI",
-      "title": "Privacy Governance",
+      "title": "Data Privacy Program",
       "description": "Mechanisms exist to facilitate the implementation of personal data governance."
     },
     {
-      "scf_id": "PRI-04",
+      "scf_id": "PRI-39",
       "family": "PRI",
-      "title": "Data Subject Rights",
+      "title": "Data Subject Rights Management",
       "description": "Mechanisms exist to support data subject rights."
     },
 
@@ -380,23 +380,23 @@
     },
 
     {
-      "scf_id": "SEA-01",
+      "scf_id": "SEA-05",
       "family": "SEA",
       "title": "Secure Engineering Principles",
       "description": "Mechanisms exist to facilitate the implementation of secure engineering practices."
     },
-    {
-      "scf_id": "SEA-05",
-      "family": "SEA",
-      "title": "Secure Software Development",
-      "description": "Mechanisms exist to govern secure software development."
-    },
 
     {
-      "scf_id": "TDA-01",
+      "scf_id": "TDA-02",
       "family": "TDA",
       "title": "Technology Development & Acquisition",
       "description": "Mechanisms exist to govern technology development and acquisition."
+    },
+    {
+      "scf_id": "TDA-05",
+      "family": "TDA",
+      "title": "Secure Software Development Practices (SSDP)",
+      "description": "Mechanisms exist to govern secure software development."
     },
 
     {
@@ -480,7 +480,7 @@
       "description": "Mechanisms exist to facilitate the implementation of vulnerability and patch management controls."
     },
     {
-      "scf_id": "VPM-04",
+      "scf_id": "VPM-06",
       "family": "VPM",
       "title": "Vulnerability Remediation Process",
       "description": "Mechanisms exist to identify, assess, prioritize, and remediate vulnerabilities."

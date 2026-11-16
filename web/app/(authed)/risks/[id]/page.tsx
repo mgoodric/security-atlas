@@ -26,20 +26,25 @@
 // acceptance transitions: the header's primary action is the acceptance
 // lifecycle's next step (propose, approve, revoke), the overflow holds
 // Change treatment and Reject, and an Acceptance card shows the proposal
-// and its approval, marked when self-approved.
+// and its approval, marked when self-approved. #2107 adds the open/closed
+// lifecycle: "Close risk…" in the overflow opens /risks/[id]/close; a
+// closed risk shows its closure and leads with Reopen, a one-click
+// transition confirmed inline, in place of the acceptance actions.
 // The roll-up from the children sits beside the assessed severity and never
 // replaces it.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { use, useEffect } from "react";
+import { use, useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Timestamp } from "@/components/ui/timestamp";
+import { useToast } from "@/components/ui/toast";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { Markdown } from "@/components/markdown";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
@@ -51,6 +56,7 @@ import { APIError } from "@/lib/api/base";
 import {
   fetchRiskCategories,
   fetchRiskDetail,
+  transitionRisk,
   treatmentLabel,
   type Risk,
 } from "@/lib/api/risks";
@@ -73,6 +79,7 @@ import { SeverityPill } from "../severity-pill";
 import {
   ACTION_COPY,
   acceptanceState,
+  closureReasonLabel,
   primaryAcceptanceAction,
 } from "../lifecycle";
 
@@ -83,6 +90,24 @@ export default function RiskDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [confirmingReopen, setConfirmingReopen] = useState(false);
+
+  // #2107: reopen is one click, confirmed inline.
+  const reopen = useMutation({
+    mutationFn: () => transitionRisk(id, "reopen", {}),
+    onSuccess: async () => {
+      setConfirmingReopen(false);
+      await qc.invalidateQueries({ queryKey: ["risk", id] });
+      await qc.invalidateQueries({ queryKey: ["risks"] });
+      toast("Risk reopened");
+    },
+    onError: (err) => {
+      setConfirmingReopen(false);
+      toast(`Could not reopen: ${(err as Error).message}`);
+    },
+  });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["risk", id],
@@ -163,6 +188,7 @@ export default function RiskDetailPage({
   const base = `/risks/${encodeURIComponent(id)}`;
   const accState = acceptanceState(risk);
   const nextAcceptance = primaryAcceptanceAction(accState);
+  const closed = risk.status === "closed";
 
   return (
     <DetailHeader
@@ -175,15 +201,32 @@ export default function RiskDetailPage({
         href: `${base}/edit`,
         "data-testid": "risk-detail-edit",
       }}
-      primaryAction={{
-        label: ACTION_COPY[nextAcceptance].title,
-        href: `${base}/acceptance/${nextAcceptance}`,
-        "data-testid": `risk-detail-${nextAcceptance}-acceptance`,
-      }}
+      primaryAction={
+        closed
+          ? {
+              label: reopen.isPending ? "Reopening…" : "Reopen",
+              onClick: () => setConfirmingReopen(true),
+              disabled: confirmingReopen || reopen.isPending,
+              "data-testid": "risk-detail-reopen",
+            }
+          : {
+              label: ACTION_COPY[nextAcceptance].title,
+              href: `${base}/acceptance/${nextAcceptance}`,
+              "data-testid": `risk-detail-${nextAcceptance}-acceptance`,
+            }
+      }
       overflow={[
+        {
+          id: "close",
+          label: "Close risk…",
+          hidden: closed,
+          onSelect: () => router.push(`${base}/close`),
+          "data-testid": "risk-detail-close",
+        },
         {
           id: "treatment",
           label: "Change treatment…",
+          hidden: closed,
           onSelect: () => router.push(`${base}/treatment`),
           disabledReason:
             accState === "none"
@@ -194,13 +237,18 @@ export default function RiskDetailPage({
         {
           id: "reject",
           label: "Reject acceptance…",
-          hidden: accState !== "proposed",
+          hidden: closed || accState !== "proposed",
           onSelect: () => router.push(`${base}/acceptance/reject`),
           "data-testid": "risk-detail-reject-acceptance",
         },
       ]}
       status={
         <>
+          {closed ? (
+            <Badge variant="outline" data-testid="risk-detail-closed">
+              Closed
+            </Badge>
+          ) : null}
           <Badge variant="secondary" data-testid="risk-detail-treatment">
             {treatmentLabel(risk)}
           </Badge>
@@ -263,6 +311,46 @@ export default function RiskDetailPage({
         </dl>
       }
     >
+      {closed && confirmingReopen ? (
+        <ConfirmInline
+          prompt="Reopen this risk?"
+          confirmLabel="Reopen"
+          ariaLabel="Confirm: reopen risk"
+          busy={reopen.isPending}
+          onCancel={() => setConfirmingReopen(false)}
+          onConfirm={() => reopen.mutate()}
+          data-testid="risk-detail-reopen-confirm"
+        >
+          <span className="text-muted-foreground">
+            It returns to the register and its counts.
+          </span>
+        </ConfirmInline>
+      ) : null}
+
+      {closed && risk.closure ? (
+        <Alert data-testid="risk-detail-closure">
+          <AlertTitle>
+            Closed: {closureReasonLabel(risk.closure.reason)}
+          </AlertTitle>
+          <AlertDescription>
+            {risk.closure.note ? (
+              <p data-testid="risk-detail-closure-note">{risk.closure.note}</p>
+            ) : null}
+            <p className="text-xs">
+              Closed
+              {risk.closure.closed_at ? (
+                <>
+                  {" "}
+                  <Timestamp value={risk.closure.closed_at} />
+                </>
+              ) : null}
+              . A closed risk is left out of the register, its counts and the
+              top risks until it is reopened.
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {patternNoLongerMet(risk.inherent_score) ? (
         <Alert data-testid="risk-detail-pattern-lapsed">
           <AlertTitle>Pattern no longer met</AlertTitle>

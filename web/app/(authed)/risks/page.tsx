@@ -72,9 +72,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
+  fetchRegisterRisks,
   fetchRiskCategories,
-  fetchRisksList,
-  fetchRisksListWithRollUps,
   treatmentLabel,
   type Risk,
   type RiskCategory,
@@ -173,6 +172,10 @@ const ROLLUPS_PARAM = "rollups";
 // toggle on (`?archived=1`) it lists archived ones too. It narrows only
 // the pill's options, so it composes with the roll-ups toggle.
 const ARCHIVED_PARAM = "archived";
+
+// #2107 — URL query-string key for the "Show closed" toggle. Closed risks
+// are left out of the rows and the count unless it is on (`?closed=1`).
+const CLOSED_PARAM = "closed";
 
 // Slice 680 / ATLAS-038 — column-header clarity copy.
 //
@@ -339,6 +342,18 @@ function RisksPageInner() {
     router.replace(`/risks?${sp.toString()}`);
   };
 
+  const showClosed = search.get(CLOSED_PARAM) === "1";
+  const toggleClosed = () => {
+    const sp = new URLSearchParams(search.toString());
+    if (showClosed) {
+      sp.delete(CLOSED_PARAM);
+    } else {
+      sp.set(CLOSED_PARAM, "1");
+    }
+    sp.delete(PAGE_PARAM);
+    router.replace(`/risks?${sp.toString()}`);
+  };
+
   const showArchived = search.get(ARCHIVED_PARAM) === "1";
   const toggleArchived = () => {
     const sp = new URLSearchParams(search.toString());
@@ -362,10 +377,14 @@ function RisksPageInner() {
   const categories = useMemo(() => categoriesQ.data ?? [], [categoriesQ.data]);
 
   const risksQ = useQuery<RisksListResponse>({
-    queryKey: showRollUps
-      ? ["risks", "list", "with-rollups"]
-      : ["risks", "list"],
-    queryFn: showRollUps ? fetchRisksListWithRollUps : fetchRisksList,
+    queryKey: [
+      "risks",
+      "list",
+      ...(showRollUps ? ["with-rollups"] : []),
+      ...(showClosed ? ["with-closed"] : []),
+    ],
+    queryFn: () =>
+      fetchRegisterRisks({ rollups: showRollUps, closed: showClosed }),
   });
 
   // Slice 244 — Org unit pill options need org-unit *names*, not just
@@ -524,6 +543,15 @@ function RisksPageInner() {
       <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
         <input
           type="checkbox"
+          checked={showClosed}
+          onChange={toggleClosed}
+          data-testid="risks-show-closed"
+        />
+        Show closed
+      </label>
+      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
           checked={showArchived}
           onChange={toggleArchived}
           data-testid="risks-show-archived"
@@ -560,6 +588,16 @@ function RisksPageInner() {
               </span>
             ) : null}
           </Link>
+          {/* #2107: a closed risk only shows with "Show closed" on. */}
+          {row.status === "closed" ? (
+            <span
+              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              data-testid="risks-row-closed"
+              title="Closed risk. It is left out of the register and its count unless closed risks are shown."
+            >
+              Closed
+            </span>
+          ) : null}
           {/* #2060: a roll-up only shows with the toggle on. The marker
             links to the children it summarises on the detail page. */}
           {row.child_count ? (

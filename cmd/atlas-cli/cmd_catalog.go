@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -206,7 +207,10 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			if n := soc2import.CodeOnlyTitleCount(cw); n > 0 {
 				fmt.Printf("requirements titled with their own code=%d\n", n)
 			}
-			printDifferedWarnings(os.Stderr, report.FrameworkVersion, report.RequirementsDiffered)
+			printDifferedWarnings(os.Stderr, report.FrameworkVersion, report.RequirementsDiffered, report.RequirementsDifferedFields)
+			if w := report.LegacyPointsOfFocusWarning(); w != "" {
+				_, _ = fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+			}
 			for _, line := range cw.PointsOfFocusRollUp.Summary() {
 				fmt.Println(line)
 			}
@@ -253,7 +257,10 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			for _, k := range keys {
 				fmt.Printf("edges by source_attribution[%s]=%d\n", k, report.MappingsByAttribution[k])
 			}
-			return strictDifferedErr(strict, report.RequirementsDiffered)
+			return errors.Join(
+				strictDifferedErr(strict, report.RequirementsDiffered),
+				strictLegacyPointsOfFocusErr(strict, report.LegacyPointsOfFocus),
+			)
 		},
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
@@ -266,19 +273,51 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	cmd.Flags().StringVar(&titlesPath, "titles", "", "crosswalk-format YAML whose requirement titles and bodies override the bundled crosswalk's for SCF workbook imports (its mappings are ignored)")
 	cmd.Flags().BoolVar(&allowCodeTitles, "allow-code-titles", false, "let SCF workbook requirements that no title source covers import titled with their code")
 	cmd.Flags().StringVar(&scfRelease, "scf-release", "", "SCF release the crosswalk's SCF codes belong to; the only way to declare it for an OLIR STRM workbook, which names none (a wide workbook takes it from its \"SCF <release>\" sheet, a YAML file from scf_release)")
-	cmd.Flags().BoolVar(&strict, "strict", false, "exit non-zero when a frozen framework version kept its stored text for a requirement whose incoming title or body differs")
+	cmd.Flags().BoolVar(&strict, "strict", false, "exit non-zero when a frozen framework version kept its stored text for a requirement whose incoming title, body or points of focus differ, or when the target version keeps point-of-focus requirement rows from before the roll-up")
 	return cmd
 }
 
 // printDifferedWarnings writes one warning per requirement whose incoming
-// title or body differed from a frozen framework version's stored text
-// (#2008). It goes to stderr so scripted imports and the bootstrap log
-// surface it instead of burying it in the stdout summary.
-func printDifferedWarnings(w io.Writer, frameworkVersion string, codes []string) {
+// title, body or points of focus differed from a frozen framework version's
+// stored text (#2008), naming the fields that differed (#2026). It goes to
+// stderr so scripted imports and the bootstrap log surface it instead of
+// burying it in the stdout summary.
+func printDifferedWarnings(w io.Writer, frameworkVersion string, codes []string, fields map[string][]string) {
 	for _, code := range codes {
-		_, _ = fmt.Fprintf(w, "warning: requirement kept %s: incoming title or body differs, but framework version %s is frozen; ship a new version to change it\n",
-			code, frameworkVersion)
+		_, _ = fmt.Fprintf(w, "warning: requirement kept %s: incoming %s, but framework version %s is frozen; ship a new version to change it\n",
+			code, differedPhrase(fields[code]), frameworkVersion)
 	}
+}
+
+// differedPhrase renders the differed fields as "title differs", "title and
+// body differ" or "title, body and points of focus differ". With none
+// recorded it falls back to the pre-#2026 "title or body differs".
+func differedPhrase(fields []string) string {
+	names := make([]string, len(fields))
+	for i, f := range fields {
+		names[i] = strings.ReplaceAll(f, "_", " ")
+	}
+	switch {
+	case len(names) == 0:
+		return "title or body differs"
+	case len(names) == 1 && names[0] == "points of focus":
+		return "points of focus differ"
+	case len(names) == 1:
+		return names[0] + " differs"
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] + " differ"
+	}
+}
+
+// strictLegacyPointsOfFocusErr fails a --strict import whose target version
+// keeps point-of-focus requirement rows from before the roll-up (#2026). The
+// import has already committed; the error changes only the exit status.
+func strictLegacyPointsOfFocusErr(strict bool, codes []string) error {
+	if !strict || len(codes) == 0 {
+		return nil
+	}
+	return fmt.Errorf("crosswalk: --strict: %d point-of-focus requirement row(s) from before the roll-up still count toward coverage (the import committed); import into a new --framework-version: %s",
+		len(codes), strings.Join(codes, ", "))
 }
 
 // strictDifferedErr fails a --strict import whose frozen framework version

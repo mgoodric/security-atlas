@@ -309,11 +309,13 @@ stage. A later import into the same slug and version therefore:
   incoming file differs;
 - still adds new requirements and new edges, and updates edges as described
   under [Provenance Precedence](#provenance-precedence);
-- prints a warning to stderr for each requirement whose incoming title or
-  body differed, and by default does not fail for that reason:
+- prints a warning to stderr for each requirement whose incoming title,
+  body or points of focus differed, naming the fields that did, and by
+  default does not fail for that reason:
 
   ```text
-  warning: requirement kept CC6.1: incoming title or body differs, but framework version 2017 is frozen; ship a new version to change it
+  warning: requirement kept CC6.1: incoming title differs, but framework version 2017 is frozen; ship a new version to change it
+  warning: requirement kept CC1.1: incoming points of focus differ, but framework version 2017 is frozen; ship a new version to change it
   ```
 
   The stdout summary counts them as `differed=<n>`. Pass `--strict` to make
@@ -364,8 +366,24 @@ frozen version's requirements can't be updated afterwards. SOC 2 versions
 imported before this roll-up existed are not rewritten; import the workbook
 into a new version to get the rolled-up shape.
 
+An import into such a version warns on stderr. The importer never deletes a
+requirement, so the old `-POF<n>` rows stay in `requirement_count` and the
+coverage denominator. Their edges were written by the same workbook source,
+and the import no longer lists them, so it retires those edges and the rows
+are left uncovered:
+
+```text
+warning: framework version 2017 keeps 2 point-of-focus requirement row(s) from before points of focus rolled up onto their criterion (CC1.1-POF1, CC1.1-POF2); they still count toward requirement_count and coverage, and this import retired 2 edge(s) on them; import into a new --framework-version to drop them
+```
+
+`--strict` makes this warning a non-zero exit as well.
+
 YAML crosswalks are not rolled up. A YAML requirement may list its points of
-focus explicitly, but none of the bundled files does:
+focus explicitly, but none of the bundled files does. Each point of focus must
+be one of that requirement's own (`CC1.1-POF<n>` under `CC1.1`), listed once,
+with at least one SCF anchor, and every anchor must exist in the SCF release
+the crosswalk binds in; the loader or the import rejects the file otherwise.
+The database holds `points_of_focus` to a JSON array.
 
 ```yaml
 requirements:

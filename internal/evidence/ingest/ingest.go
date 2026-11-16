@@ -736,7 +736,7 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	})
 
 	// Try parsing control_id as a UUID. If it parses, set both columns.
-	// If not (e.g., "scf:VPM-04"), leave control_id NULL and set
+	// If not (e.g., "scf:VPM-06"), leave control_id NULL and set
 	// control_ref only.
 	var controlID pgtype.UUID
 	if u, perr := uuid.Parse(rec.ControlId); perr == nil {
@@ -812,7 +812,7 @@ func (s *Service) persist(ctx context.Context, tx pgx.Tx, p *prepared, opts Ledg
 	// to the tenant's active control so the record links; before this the
 	// row kept only control_ref, which every reader matches against the
 	// control's UUID, so the evidence never reached the control. A value
-	// naming no bundle (e.g. "scf:VPM-04") stays a free-form control_ref.
+	// naming no bundle (e.g. "scf:VPM-06") stays a free-form control_ref.
 	// control_ref keeps the wire value either way: verify rebuilds the
 	// hashed record from it.
 	controlID := p.controlID

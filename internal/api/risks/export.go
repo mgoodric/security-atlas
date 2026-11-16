@@ -145,6 +145,10 @@ type riskRow struct {
 	UpdatedAt        time.Time
 	// ParentIDs are the risks this one rolls up to (#1748).
 	ParentIDs []uuid.UUID
+	// Status is open | closed and ClosureReason the closed risk's reason
+	// (#2107). The export carries every risk, closed ones included.
+	Status        string
+	ClosureReason string
 }
 
 // NewExportHandler constructs the slice 136 export handler. The pool
@@ -417,6 +421,10 @@ func riskExportHeader() []string {
 		// #1814: the organisation's name for the category whose slug is in
 		// `category`. Appended for the same reason.
 		"category_name",
+		// #2107: open | closed, and a closed risk's closure reason.
+		// Appended for the same reason.
+		"status",
+		"closure_reason",
 	}
 }
 
@@ -481,6 +489,8 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 				r.AcceptanceStatus,
 				strings.Join(parents, ";"),
 				r.CategoryName,
+				r.Status,
+				r.ClosureReason,
 			}
 			if !yield(row) {
 				return
@@ -579,6 +589,10 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 			Themes:         append([]string(nil), r.Themes...),
 			Severity:       severityOf(r.InherentScore),
 			ParentIDs:      parentsOf[uuid.UUID(r.ID.Bytes)],
+			Status:         string(r.Status),
+		}
+		if r.ClosureReason != nil {
+			out[i].ClosureReason = string(*r.ClosureReason)
 		}
 		if c, ok := categoryOf[uuid.UUID(r.CategoryID.Bytes)]; ok {
 			out[i].Category, out[i].CategoryName = c.Slug, c.Name

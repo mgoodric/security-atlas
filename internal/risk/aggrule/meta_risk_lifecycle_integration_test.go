@@ -290,7 +290,7 @@ func TestEngine_ThemeRemovalAndDeleteRefreshMetaRisk_1861(t *testing.T) {
 
 	// Delete a child. The meta-risk is now below threshold; it stays (no
 	// auto-close) but no longer reports the deleted child's score.
-	if err := risks.Delete(ctx, r3); err != nil {
+	if err := risks.Delete(ctx, r3, "test-actor"); err != nil {
 		t.Fatalf("Delete r3: %v", err)
 	}
 	if got := metaSeverity(t, admin, tenant, meta); got != 4 {
@@ -304,7 +304,7 @@ func TestEngine_ThemeRemovalAndDeleteRefreshMetaRisk_1861(t *testing.T) {
 	}
 
 	// Deleting the meta-risk itself does not re-create it in the same write.
-	if err := risks.Delete(ctx, meta); err != nil {
+	if err := risks.Delete(ctx, meta, "test-actor"); err != nil {
 		t.Fatalf("Delete meta-risk: %v", err)
 	}
 	if n := metaRiskCount(t, admin, tenant); n != 0 {

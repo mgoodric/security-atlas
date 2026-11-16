@@ -10,15 +10,18 @@ import (
 func TestPrintDifferedWarnings(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	printDifferedWarnings(&buf, "2017", []string{"CC6.1", "CC7.2"})
-	want := "warning: requirement kept CC6.1: incoming title or body differs, but framework version 2017 is frozen; ship a new version to change it\n" +
-		"warning: requirement kept CC7.2: incoming title or body differs, but framework version 2017 is frozen; ship a new version to change it\n"
+	printDifferedWarnings(&buf, "2017", []string{"CC6.1", "CC7.2"}, map[string][]string{
+		"CC6.1": {"title"},
+		"CC7.2": {"title", "body"},
+	})
+	want := "warning: requirement kept CC6.1: incoming title differs, but framework version 2017 is frozen; ship a new version to change it\n" +
+		"warning: requirement kept CC7.2: incoming title and body differ, but framework version 2017 is frozen; ship a new version to change it\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("output =\n%s\nwant\n%s", got, want)
 	}
 
 	buf.Reset()
-	printDifferedWarnings(&buf, "2017", nil)
+	printDifferedWarnings(&buf, "2017", nil, nil)
 	if buf.Len() != 0 {
 		t.Fatalf("no differed codes wrote %q", buf.String())
 	}
