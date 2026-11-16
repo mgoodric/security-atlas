@@ -63,7 +63,7 @@ func newLocalCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.file, "file", "", "path to the CSV file to ingest [required]")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-04", "control id to attach to each record")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-05", "control id to attach to each record")
 	cmd.Flags().StringArrayVar(&f.scope, "scope", nil, "scope tag in key=value form (repeatable, at least one required)")
 	cmd.Flags().IntVar(&f.maxRows, "max-rows", DefaultMaxRows, "maximum CSV data rows to accept (DoS guard)")
 	cmd.Flags().IntVar(&f.maxFieldBytes, "max-field-bytes", DefaultMaxFieldBytes, "maximum bytes per CSV field (DoS guard)")

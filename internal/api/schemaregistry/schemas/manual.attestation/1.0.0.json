@@ -4,7 +4,7 @@
   "x-evidence-kind": "manual.attestation.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["GOV-04"],
+  "x-default-scf-anchors": ["GOV-05"],
   "title": "Manual attestation",
   "description": "A human attestation that a control state holds at a moment in time.",
   "type": "object",

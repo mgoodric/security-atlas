@@ -33,7 +33,7 @@ func provenanceCrosswalk(attribution, rationale string) *soc2import.Crosswalk {
 		},
 		Mappings: []soc2import.Mapping{{
 			RequirementCode:  "P-1",
-			SCFAnchor:        "GOV-01",
+			SCFAnchor:        "GOV-02",
 			RelationshipType: "equal",
 			Strength:         0.9,
 			Rationale:        rationale,
@@ -92,7 +92,7 @@ func TestImport_WeakerSourceNeverDowngradesOfficialEdge(t *testing.T) {
 			t.Fatalf("%s re-import skipped = %+v; want exactly one", weaker, report.EdgesSkipped)
 		}
 		sk := report.EdgesSkipped[0]
-		if sk.RequirementCode != "P-1" || sk.SCFAnchor != "GOV-01" ||
+		if sk.RequirementCode != "P-1" || sk.SCFAnchor != "GOV-02" ||
 			sk.ExistingAttribution != "scf_official" || sk.IncomingAttribution != weaker {
 			t.Fatalf("%s skipped entry = %+v", weaker, sk)
 		}
@@ -184,7 +184,7 @@ func TestImport_UpgradeOntoRejectedEdgeIsReported(t *testing.T) {
 		t.Fatalf("upgraded-onto-rejected = %+v; want exactly one", report.EdgesUpgradedOntoRejected)
 	}
 	up := report.EdgesUpgradedOntoRejected[0]
-	if up.RequirementCode != "P-1" || up.SCFAnchor != "GOV-01" ||
+	if up.RequirementCode != "P-1" || up.SCFAnchor != "GOV-02" ||
 		up.PreviousAttribution != "community_draft" || up.IncomingAttribution != "scf_official" {
 		t.Fatalf("upgraded entry = %+v", up)
 	}

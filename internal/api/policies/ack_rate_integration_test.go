@@ -83,7 +83,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 }
 
 // seedSCFAnchor mirrors slice 023's helper so the schema registry's
-// GOV-04 default_scf_anchors validation passes for policy.acknowledgment.v1.
+// GOV-05 default_scf_anchors validation passes for policy.acknowledgment.v1.
 func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) {
 	t.Helper()
 	ctx := context.Background()
@@ -246,7 +246,7 @@ func setup(t *testing.T) setupResult {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
-	seedSCFAnchor(t, admin, "GOV-04", "GOV")
+	seedSCFAnchor(t, admin, "GOV-05", "GOV")
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 

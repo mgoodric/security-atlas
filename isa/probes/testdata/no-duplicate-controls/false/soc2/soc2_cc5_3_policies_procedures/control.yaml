@@ -2,7 +2,7 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc5_3_policies_procedures
 title: "Policies and procedures deployed"
-scf_anchor_id: GOV-01
+scf_anchor_id: GOV-02
 control_family: GOV
 implementation_type: manual_attested
 lifecycle_state: active

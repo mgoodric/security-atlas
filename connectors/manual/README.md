@@ -29,7 +29,7 @@ atlas-manual local \
   --endpoint platform.example.com:443 \
   --token "$SECURITY_ATLAS_TOKEN" \
   --file ./audit-findings.csv \
-  --control-id scf:GOV-04 \
+  --control-id scf:GOV-05 \
   --scope environment=prod \
   --scope business_unit=corp
 
@@ -40,7 +40,7 @@ atlas-manual s3 \
   --bucket evidence-bucket \
   --prefix audits/2026/ \
   --region us-east-1 \
-  --control-id scf:GOV-04 \
+  --control-id scf:GOV-05 \
   --scope environment=prod
 
 # Pull files matching a glob from SFTP; emit one record per file.
@@ -52,7 +52,7 @@ atlas-manual sftp \
   --path '/inbox/*.pdf' \
   --key-file ~/.ssh/atlas_ed25519 \
   --known-hosts ~/.ssh/known_hosts \
-  --control-id scf:GOV-04 \
+  --control-id scf:GOV-05 \
   --scope environment=prod
 ```
 

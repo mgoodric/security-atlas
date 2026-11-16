@@ -4,7 +4,7 @@
   "x-evidence-kind": "security_awareness.training_completion.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["HRS-04"],
+  "x-default-scf-anchors": ["SAT-04"],
   "title": "Security awareness training completion",
   "description": "A per-person security-awareness training assignment completion. Produced by the security awareness tracking surface from manual entry, CSV import, or an LMS connector import. The record contains training/campaign identifiers, completion timestamp/source, and optional phishing-simulation outcome metadata; it does not contain course content or sensitive HRIS PII.",
   "type": "object",
