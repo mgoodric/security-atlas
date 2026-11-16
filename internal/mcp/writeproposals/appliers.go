@@ -120,16 +120,31 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
 
+	// A proposed acceptance records its proposer, so the approval rule can
+	// refuse them as approver (#2371). The proposer is the confirming
+	// person, not the proposal's created_by: created_by is the credential
+	// id the AI-assisted proposal was filed under (a per-session "jwt:" id
+	// for a browser caller), which names no person to compare with, and the
+	// confirmer is the person who decides to make the proposal.
+	proposedBy := ""
+	var proposedAt *time.Time
+	if status == dbx.RiskAcceptanceStatusProposed {
+		now := time.Now().UTC()
+		proposedBy, proposedAt = p.Confirmer.Actor(), &now
+	}
+
 	id := uuid.New()
 	_, err = tx.Exec(ctx, `
 		INSERT INTO risks (
 			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
-			accepted_until, accepter, instrument_reference, acceptance_status
+			accepted_until, accepter, instrument_reference, acceptance_status,
+			acceptance_proposed_by, acceptance_proposed_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NULL, '', '', $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NULL, '', '', $10, $11, $12)
 	`, id, p.TenantID, in.Title, in.Description, category.ID, methodology,
-		[]byte(inherent), treatment, in.TreatmentOwner, risk.NullAcceptanceStatus(status))
+		[]byte(inherent), treatment, in.TreatmentOwner, risk.NullAcceptanceStatus(status),
+		proposedBy, proposedAt)
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)
 	}
@@ -391,10 +406,10 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 			return "", fmt.Errorf("apply update_risk_treatment: %w: accepted_until must be YYYY-MM-DD", risk.ErrTransitionInput)
 		}
 	}
-	actor := p.Confirmer.UserID
-	if actor == "" {
-		actor = p.Confirmer.CredentialID
-	}
+	// The confirmer's principal, as REST's credstore.PrincipalOf records
+	// the actor and proposer (#2371). As with create_risk, a proposed
+	// acceptance's proposer is the confirming person, not created_by.
+	actor := p.Confirmer.Actor()
 	q := dbx.New(tx)
 	now := time.Now().UTC()
 	treatment := dbx.RiskTreatment(in.Treatment)
@@ -416,7 +431,7 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 	case status == dbx.RiskAcceptanceStatusApproved:
 		_, err = risk.ApproveAcceptanceTx(ctx, q, p.TenantID, riskID, risk.ApproveAcceptanceInput{
 			AcceptedUntil: until,
-			Approver:      p.Confirmer,
+			Approver:      p.Confirmer.Approver,
 		}, now)
 	default:
 		err = fmt.Errorf("%w: treatment=accept requires acceptance_status (proposed or approved)", risk.ErrTransitionInput)

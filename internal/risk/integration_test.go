@@ -329,6 +329,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+		Proposer:         "creator",
 	})
 	if err != nil {
 		t.Fatalf("Create proposed accept: %v", err)
@@ -339,6 +340,23 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 	}
 	if got.AcceptanceStatus != dbx.RiskAcceptanceStatusProposed {
 		t.Fatalf("acceptance_status = %q; want proposed", got.AcceptanceStatus)
+	}
+	// #2371: the creator is the proposer the approval rule compares with.
+	if got.Acceptance.ProposedBy != "creator" || got.Acceptance.ProposedAt == nil {
+		t.Fatalf("acceptance = %+v; want proposed by the creator, with a time", got.Acceptance)
+	}
+
+	// A proposed acceptance with no proposer is refused: nobody could be
+	// shown to differ from it at approval.
+	_, err = store.Create(ctx, risk.CreateInput{
+		Title:            "Pending, no proposer",
+		CategoryRef:      "operational",
+		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
+		Treatment:        dbx.RiskTreatmentAccept,
+		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+	})
+	if !risk.IsTransitionInput(err) {
+		t.Fatalf("want transition input error for a proposal with no proposer; got %v", err)
 	}
 
 	// Approved without accepter / expiry: the domain layer rejects it.
@@ -462,6 +480,7 @@ func TestList_Filters(t *testing.T) {
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+		Proposer:         "creator",
 	}); err != nil {
 		t.Fatalf("A: %v", err)
 	}
