@@ -27,7 +27,7 @@ this surface reads what **fired** and how it was **triaged** (CC7.3 incident
 response — "rules actually fired and were triaged over the audit period, when,
 and by whom"). It carries triage **metadata only** — the signal id, firing rule
 id, severity, triage status, timeline timestamps, and the opaque triager handle.
-Anchors: SCF **THR-01** (detection lineage) + **IRO-16** (incident reporting).
+Anchors: SCF **THR-02** (detection lineage) + **IRO-16** (incident reporting).
 
 `monitoring.alert_firing.v1` (slice 535) is the **firing-history sibling** of the
 shared config kind — vendor-neutral, emitted by **both** the Datadog and Grafana
@@ -130,7 +130,7 @@ atlas-datadog permissions
 | `--insecure`                | both       | no       | `false`                              | disables TLS; loopback endpoints only                       |
 | `--environment`             | `run`      | yes      | —                                    | environment scope tag; records are never emitted un-scoped  |
 | `--monitor-control`         | `run`      | no       | `scf:MON-02`                         | control id attached to `monitoring.alert_config.v1` records |
-| `--siem-control`            | `run`      | no       | `scf:THR-01`                         | control id attached to `datadog.siem_rule.v1` records       |
+| `--siem-control`            | `run`      | no       | `scf:THR-02`                         | control id attached to `datadog.siem_rule.v1` records       |
 | `--siem-signal-control`     | `run`      | no       | `scf:IRO-16`                         | control id attached to `datadog.siem_signal.v1` records     |
 | `--firing-control`          | `run`      | no       | `scf:IRO-16`                         | control id attached to `monitoring.alert_firing.v1` records |
 | `--siem-lookback`           | `run`      | no       | `24h`                                | bounded look-back window for the signal-history pull        |

@@ -116,7 +116,7 @@ func okFlags() runFlags {
 	return runFlags{
 		environment:       "prod",
 		monitorControl:    "scf:MON-02",
-		siemControl:       "scf:THR-01",
+		siemControl:       "scf:THR-02",
 		siemSignalControl: "scf:IRO-16",
 		firingControl:     "scf:IRO-16",
 		siemLookback:      24 * time.Hour,

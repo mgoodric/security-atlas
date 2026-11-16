@@ -605,25 +605,25 @@ mappings:
     strength: 0.6
     rationale: "Receiving/analyzing cyber threat intelligence overlaps SCF Anomalous Behavior (the closest threat-analysis anchor in the sample fixture); a dedicated threat-intelligence anchor is absent (LOW)."
   - requirement_code: "ID.RA-02"
-    scf_anchor: "THR-03"
+    scf_anchor: "THR-04"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-03) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-08 placeholder above (MON-16 since the SCF 2026.3 remap) stays as a secondary anomaly-detection overlap; THR-03 is now the primary dedicated anchor. Added by slice 646."
+    rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-04) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-08 placeholder above (MON-16 since the SCF 2026.3 remap) stays as a secondary anomaly-detection overlap; THR-04 is now the primary dedicated anchor. Added by slice 646."
   - requirement_code: "ID.RA-03"
     scf_anchor: "RSK-13"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Identifying and recording internal/external threats is part of SCF Risk Assessment."
   - requirement_code: "ID.RA-03"
-    scf_anchor: "THR-09"
+    scf_anchor: "THR-06"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "ID.RA-03 'internal and external threats are identified and recorded' is the threat-cataloging activity; Threat Catalog (slice 641 THR-09) is the dedicated record of identified threats — a subset of ID.RA-03 alongside the RSK-13 risk-assessment edge. Added by slice 646."
+    rationale: "ID.RA-03 'internal and external threats are identified and recorded' is the threat-cataloging activity; Threat Catalog (slice 641 THR-06) is the dedicated record of identified threats — a subset of ID.RA-03 alongside the RSK-13 risk-assessment edge. Added by slice 646."
   - requirement_code: "ID.RA-03"
-    scf_anchor: "THR-10"
+    scf_anchor: "THR-08"
     relationship_type: "subset_of"
     strength: 0.6
-    rationale: "ID.RA-03's 'identified' half (distinct from the 'recorded' half THR-09 carries) is the threat-analysis activity that surfaces internal/external threats; Threat Analysis (slice 641 THR-10) is the dedicated anchor for that analysis. Partial — ID.RA-03 spans both analysis (THR-10) and cataloging (THR-09). Added by slice 646."
+    rationale: "ID.RA-03's 'identified' half (distinct from the 'recorded' half THR-06 carries) is the threat-analysis activity that surfaces internal/external threats; Threat Analysis (slice 641 THR-08) is the dedicated anchor for that analysis. Partial — ID.RA-03 spans both analysis (THR-08) and cataloging (THR-06). Added by slice 646."
   - requirement_code: "ID.RA-04"
     scf_anchor: "RSK-13"
     relationship_type: "subset_of"
@@ -650,10 +650,10 @@ mappings:
     strength: 0.75
     rationale: "Receiving/analyzing/responding to vulnerability disclosures is part of the SCF Vulnerability Remediation Process."
   - requirement_code: "ID.RA-08"
-    scf_anchor: "THR-07"
+    scf_anchor: "THR-12"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "ID.RA-08 'processes for receiving, analyzing, and responding to vulnerability disclosures are established' is the direct STRM match for the Vulnerability Disclosure Program (slice 641 THR-07), whose SCF text is 'establish a Vulnerability Disclosure Program (VDP) ... that receives unsolicited reports about potential security vulnerabilities'. Both name the same control concept: an established intake process for externally-reported vulnerabilities. 0.9 rather than 1.0 because ID.RA-08 also spans the downstream 'analyzing and responding' half (carried by the VPM-06 edge above, which stays as the remediation-side secondary) and THR-07 scopes the VDP to products and services. This is the ONLY dedicated coordinated-disclosure requirement across the five bundled crosswalks. Added by slice 651."
+    rationale: "ID.RA-08 'processes for receiving, analyzing, and responding to vulnerability disclosures are established' is the direct STRM match for the Vulnerability Disclosure Program (slice 641 THR-12), whose SCF text is 'establish a Vulnerability Disclosure Program (VDP) ... that receives unsolicited reports about potential security vulnerabilities'. Both name the same control concept: an established intake process for externally-reported vulnerabilities. 0.9 rather than 1.0 because ID.RA-08 also spans the downstream 'analyzing and responding' half (carried by the VPM-06 edge above, which stays as the remediation-side secondary) and THR-12 scopes the VDP to products and services. This is the ONLY dedicated coordinated-disclosure requirement across the five bundled crosswalks. Added by slice 651."
   - requirement_code: "ID.RA-09"
     scf_anchor: "TDA-02"
     relationship_type: "subset_of"
@@ -851,10 +851,10 @@ mappings:
     strength: 0.6
     rationale: "Integrating cyber threat intelligence into event analysis overlaps SCF Anomalous Behavior; a dedicated threat-intelligence anchor is absent from the fixture (LOW)."
   - requirement_code: "DE.AE-07"
-    scf_anchor: "THR-01"
+    scf_anchor: "THR-02"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-01, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-08 (MON-16 since the SCF 2026.3 remap) '(LOW)' placeholder above as the primary anchor. Added by slice 646."
+    rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-02, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-08 (MON-16 since the SCF 2026.3 remap) '(LOW)' placeholder above as the primary anchor. Added by slice 646."
   - requirement_code: "DE.AE-08"
     scf_anchor: "IRO-08"
     relationship_type: "subset_of"

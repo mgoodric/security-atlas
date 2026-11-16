@@ -48,22 +48,15 @@ const (
 )
 
 // knownMismatchCeiling caps knownMismatch at its seeded size. Lower it as
-// family groups land; never raise it.
-const knownMismatchCeiling = 9
+// family groups land; never raise it. The THR group (#1982) drained the last
+// entries, so it is locked at 0: every sample row matches the pin, and a new
+// mismatch is fixed in the sample, never allowlisted.
+const knownMismatchCeiling = 0
 
 // knownMismatch: sample scf_id -> the sample title that does not match the
-// pin. Seeded 2026-11-13 with every mismatching row; drained by family.
-var knownMismatch = map[string]string{
-	"THR-01": "Threat Intelligence Program",
-	"THR-02": "Indicators of Exposure (IOE)",
-	"THR-03": "Threat Intelligence Feeds",
-	"THR-04": "Threat Hunting",
-	"THR-05": "Insider Threat Program",
-	"THR-06": "Insider Threat Awareness",
-	"THR-07": "Vulnerability Disclosure Program (VDP)",
-	"THR-09": "Threat Catalog",
-	"THR-10": "Threat Analysis",
-}
+// pin. Seeded 2026-11-13 with every mismatching row; drained by family,
+// empty since #1982.
+var knownMismatch = map[string]string{}
 
 type scfPinControl struct {
 	SCFID string `json:"scf_id"`

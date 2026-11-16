@@ -28,7 +28,7 @@ func scopeValue(dims []*evidencev1.ScopeDimension, key string) string {
 
 func TestBuild_Shape(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleRule(), "scf:THR-01", "connector:datadog:siemrules@dev", "datadog", "prod")
+	rec, err := Build(sampleRule(), "scf:THR-02", "connector:datadog:siemrules@dev", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestBuild_OmitsEmptyTargets(t *testing.T) {
 	t.Parallel()
 	r := sampleRule()
 	r.Targets = nil
-	rec, _ := Build(r, "scf:THR-01", "a", "datadog", "prod")
+	rec, _ := Build(r, "scf:THR-02", "a", "datadog", "prod")
 	if _, ok := rec.GetPayload().AsMap()["notification_targets"]; ok {
 		t.Error("empty notification_targets should be omitted")
 	}
@@ -84,7 +84,7 @@ func TestBuild_PayloadIsConfigOnly(t *testing.T) {
 		"url", "secret", "token", "password", "webhook", "email", "recipient",
 		"query", "signal", "sample", "event", "payload", "condition", "filter",
 	}
-	rec, _ := Build(sampleRule(), "scf:THR-01", "a", "datadog", "prod")
+	rec, _ := Build(sampleRule(), "scf:THR-02", "a", "datadog", "prod")
 	for k := range rec.GetPayload().AsMap() {
 		if !allowed[k] {
 			t.Errorf("non-allow-listed payload key %q", k)
