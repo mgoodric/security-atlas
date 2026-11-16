@@ -3,7 +3,7 @@
 // Slice 384 — action-plan create form (AC-24).
 //
 // Fields: title, description, triggering_event (free-text per P0-384-11),
-// owner_id (user UUID), due_date, + searchable multi-select for linked risks
+// owner_id (picked by name, #2086), due_date, + searchable multi-select for linked risks
 // (max 50) and linked controls (max 50). Bound to the BFF create flow
 // (`createActionPlan` in lib/api/action-plans.ts), which POSTs the plan then
 // links the selected risks + controls. No invented fields; no AI on this
@@ -15,10 +15,12 @@ import { useMemo, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
 import { type CreateActionPlanInput } from "@/lib/api/action-plans";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
 import { fetchRisksListWithRollUps } from "@/lib/api/risks";
+import type { EntityKind } from "@/lib/entity-picker";
 
 import { EntityMultiSelect, type SelectOption } from "./entity-multi-select";
 import {
@@ -31,6 +33,8 @@ import {
 type Props = {
   onSubmit: (body: CreateActionPlanInput) => Promise<void>;
 };
+
+const OWNER_KINDS: readonly EntityKind[] = ["user"];
 
 export function ActionPlanForm({ onSubmit }: Props) {
   const [title, setTitle] = useState("");
@@ -140,26 +144,18 @@ export function ActionPlanForm({ onSubmit }: Props) {
 
       <div className="space-y-1">
         <label htmlFor="ap-owner" className="text-sm font-medium">
-          Owner (user UUID)
+          Owner
         </label>
-        <Input
+        <EntityPicker
+          kinds={OWNER_KINDS}
           id="ap-owner"
           value={ownerId}
-          onChange={(e) => setOwnerId(e.target.value)}
-          placeholder="00000000-0000-0000-0000-000000000000"
-          data-testid="action-plan-owner"
-          aria-invalid={errors.ownerId ? true : undefined}
-          aria-describedby={errors.ownerId ? "ap-owner-error" : undefined}
+          onChange={setOwnerId}
+          placeholder="Search people, or paste a user ID"
+          testId="action-plan-owner"
+          errorId="action-plan-owner-error"
+          error={errors.ownerId}
         />
-        {errors.ownerId ? (
-          <p
-            id="ap-owner-error"
-            className="text-xs text-rose-600"
-            data-testid="action-plan-owner-error"
-          >
-            {errors.ownerId}
-          </p>
-        ) : null}
       </div>
 
       <div className="space-y-1">
