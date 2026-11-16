@@ -3,10 +3,14 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  CLOSURE_REASONS,
   acceptanceState,
+  closureReasonLabel,
   dayAfter,
+  isClosureReason,
   primaryAcceptanceAction,
   validateAcceptance,
+  validateClose,
   validateTreatmentChange,
 } from "./lifecycle";
 
@@ -131,5 +135,35 @@ describe("validateTreatmentChange", () => {
       ok: true,
       body: { treatment: "avoid" },
     });
+  });
+});
+
+describe("#2107 close", () => {
+  test("requires a listed reason", () => {
+    expect(validateClose({ reason: "", note: "" })).toEqual({
+      ok: false,
+      error: "Choose why the risk is closed.",
+    });
+    expect(validateClose({ reason: "duplicate", note: "" }).ok).toBe(false);
+  });
+
+  test("sends the note only when there is one, trimmed", () => {
+    expect(validateClose({ reason: "merged", note: "  " })).toEqual({
+      ok: true,
+      body: { reason: "merged" },
+    });
+    expect(
+      validateClose({ reason: "not_applicable", note: " Lease ended. " }),
+    ).toEqual({
+      ok: true,
+      body: { reason: "not_applicable", note: "Lease ended." },
+    });
+  });
+
+  test("labels every reason", () => {
+    for (const r of CLOSURE_REASONS) {
+      expect(isClosureReason(r)).toBe(true);
+      expect(closureReasonLabel(r)).not.toBe(r);
+    }
   });
 });

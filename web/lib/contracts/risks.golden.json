@@ -6,6 +6,57 @@
       "count": 0,
       "risks": []
     },
+    "lifecycle_states": {
+      "count": 2,
+      "risks": [
+        {
+          "accepter": "",
+          "category": "operational",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "level": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "residual_score": {},
+          "severity": 0,
+          "status": "open",
+          "themes": [],
+          "title": "Intake risk not yet triaged",
+          "treatment": "untreated",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        },
+        {
+          "accepter": "",
+          "category": "operational",
+          "closure": {
+            "closed_at": "2026-05-20T00:00:00Z",
+            "closed_by": "user-2107",
+            "note": "Lease ended; site decommissioned.",
+            "reason": "not_applicable"
+          },
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "level": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "residual_score": {},
+          "severity": 0,
+          "status": "closed",
+          "themes": [],
+          "title": "Retired data-centre lease risk",
+          "treatment": "mitigate",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        }
+      ]
+    },
     "populated": {
       "count": 2,
       "risks": [
@@ -35,6 +86,7 @@
           },
           "review_due_at": "2026-08-01T00:00:00Z",
           "severity": 20,
+          "status": "open",
           "themes": [],
           "title": "Unpatched perimeter dependency",
           "treatment": "mitigate",
@@ -54,6 +106,7 @@
           "methodology": "nist_800_30",
           "residual_score": {},
           "severity": 0,
+          "status": "open",
           "themes": [],
           "title": "Vendor SOC 2 report pending renewal",
           "treatment": "mitigate",
@@ -78,6 +131,7 @@
           "methodology": "nist_800_30",
           "residual_score": {},
           "severity": 0,
+          "status": "open",
           "themes": [],
           "title": "Intake risk not yet triaged",
           "treatment": "untreated",
@@ -102,6 +156,7 @@
           "methodology": "nist_800_30",
           "residual_score": {},
           "severity": 0,
+          "status": "open",
           "themes": [],
           "title": "Legacy TLS endpoint, acceptance pending sign-off",
           "treatment": "accept",

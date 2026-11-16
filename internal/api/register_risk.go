@@ -90,6 +90,10 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	root.Patch("/v1/risks/{id}/acceptance/approve", risksH.ApproveAcceptance)
 	root.Patch("/v1/risks/{id}/acceptance/reject", risksH.RejectAcceptance)
 	root.Patch("/v1/risks/{id}/acceptance/revoke", risksH.RevokeAcceptance)
+	// #2107: the open/closed lifecycle. Literal-suffix routes, declared
+	// before the generic /v1/risks/{id}.
+	root.Patch("/v1/risks/{id}/close", risksH.CloseRisk)
+	root.Patch("/v1/risks/{id}/reopen", risksH.ReopenRisk)
 	// Slice 384: read-only "Linked Action Plans" section on /risks/{id}
 	// (AC-25). Literal-suffix route declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps it ahead.

@@ -140,6 +140,8 @@ sql:
       - "migrations/sql/20261204000000_overlay_edges_version_carry_over.sql"
       # #2105: risks gain the acceptance record (proposal, approval, self-approved).
       - "migrations/sql/20261206000000_risk_acceptance_transitions.sql"
+      # #2107: the risk open/closed lifecycle.
+      - "migrations/sql/20261212000000_risk_lifecycle.sql"
       # #2145: first-visit onboarding hint dismissals, per user.
       - "migrations/sql/20261213000000_onboarding_hint_dismissals.sql"
       # #2136: posture targets per framework version, and their audit log.

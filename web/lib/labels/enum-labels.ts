@@ -102,6 +102,16 @@ export const ENUM_LABELS = {
     proposed: "Proposed",
     approved: "Approved",
   },
+  // #2107: the risk lifecycle.
+  RiskStatus: {
+    open: "Open",
+    closed: "Closed",
+  },
+  RiskClosureReason: {
+    not_applicable: "No longer applicable",
+    merged: "Merged into another risk",
+    realised_and_handled: "Realised and handled",
+  },
   RiskLevel: {
     company: "Company",
     org: "Organisation",

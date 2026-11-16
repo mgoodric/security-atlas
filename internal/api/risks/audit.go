@@ -13,7 +13,10 @@ import (
 )
 
 // auditEntryWire is one row of GET /v1/risks/{id}/audit-log (#2104).
-// Action is placement_changed, category_changed or fields_changed; Before
+// Action is placement_changed, category_changed or fields_changed, one of
+// the #2105 treatment and acceptance transitions, or closed or reopened
+// (#2107); a deleted row outlives its risk, so this route never shows it.
+// Before
 // and After hold the changed values (for fields_changed, only the fields
 // that changed, keyed by their wire names).
 type auditEntryWire struct {

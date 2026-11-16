@@ -155,13 +155,17 @@ func TestUnifiedAuditLog_DeletedRiskKeepsRows_1954(t *testing.T) {
 	if r.StatusCode != http.StatusOK {
 		t.Fatalf("unified audit log: status %d (%v)", r.StatusCode, unified)
 	}
+	// Newest first: the deleted row the delete writes (#2107), then the
+	// placement row from before it.
 	entries, _ := unified["entries"].([]any)
-	if len(entries) != 1 {
-		t.Fatalf("entries = %v, want the deleted risk's placement row", entries)
+	if len(entries) != 2 {
+		t.Fatalf("entries = %v, want the deleted risk's deleted and placement rows", entries)
 	}
-	e := entries[0].(map[string]any)
-	if e["target_id"] != id || e["action"] != "placement_changed" || e["actor_id"] == "" {
-		t.Fatalf("entry = %v", e)
+	for i, want := range []string{"deleted", "placement_changed"} {
+		e := entries[i].(map[string]any)
+		if e["target_id"] != id || e["action"] != want || e["actor_id"] == "" {
+			t.Fatalf("entry %d = %v, want %s", i, e, want)
+		}
 	}
 }
 

@@ -118,6 +118,8 @@ WHERE tenant_id = $1 AND id = $2;
 -- Hits idx_risks_tenant_created_themes for the (tenant_id, created_at)
 -- range scan, then the GIN-backed theme containment narrows the slice.
 -- The methodology filter mirrors slice 053's IsAggregableMethodology.
+-- Closed risks are not candidates (#2107): a closed child stops counting
+-- toward the thresholds and the severity at the next evaluation.
 --
 -- target_theme is a SCALAR text parameter — the explicit `::text` cast on
 -- sqlc.arg keeps sqlc from inferring it as text[] just because it appears
@@ -128,6 +130,7 @@ WHERE tenant_id = $1
   AND themes @> ARRAY[sqlc.arg(target_theme)::text]
   AND created_at >= sqlc.arg(window_start)
   AND methodology IN ('nist_800_30', 'qualitative_5x5')
+  AND status = 'open'
 ORDER BY created_at ASC, id ASC;
 
 -- name: GetRuleMetaRiskByKey :one
