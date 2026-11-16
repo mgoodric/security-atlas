@@ -22,7 +22,11 @@
 // Parents / Children sections attach and detach child risks
 // (RiskHierarchyLinks). #2104 renders the page through the shared
 // DetailHeader, whose Edit links to `/risks/[id]/edit`, and adds the
-// History section (the risk audit trail).
+// History section (the risk audit trail). #2105 adds the treatment and
+// acceptance transitions: the header's primary action is the acceptance
+// lifecycle's next step (propose, approve, revoke), the overflow holds
+// Change treatment and Reject, and an Acceptance card shows the proposal
+// and its approval, marked when self-approved.
 // The roll-up from the children sits beside the assessed severity and never
 // replaces it.
 
@@ -41,12 +45,14 @@ import { Markdown } from "@/components/markdown";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
 import { RiskHistory } from "@/components/risks/risk-history";
 import { DetailHeader } from "@/components/detail/detail-header";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
 import {
   fetchRiskCategories,
   fetchRiskDetail,
   treatmentLabel,
+  type Risk,
 } from "@/lib/api/risks";
 
 import {
@@ -64,6 +70,11 @@ import {
 } from "../filters";
 import { enumLabel } from "@/lib/labels/enum-labels";
 import { SeverityPill } from "../severity-pill";
+import {
+  ACTION_COPY,
+  acceptanceState,
+  primaryAcceptanceAction,
+} from "../lifecycle";
 
 export default function RiskDetailPage({
   params,
@@ -149,6 +160,10 @@ export default function RiskDetailPage({
     : formatResidualScore(risk.residual_score, risk.methodology);
   const residualN = isFair ? null : residualSeverity(risk.residual_score);
 
+  const base = `/risks/${encodeURIComponent(id)}`;
+  const accState = acceptanceState(risk);
+  const nextAcceptance = primaryAcceptanceAction(accState);
+
   return (
     <DetailHeader
       data-testid="risk-detail"
@@ -157,14 +172,42 @@ export default function RiskDetailPage({
       back={<BackLink />}
       title={risk.title}
       edit={{
-        href: `/risks/${encodeURIComponent(id)}/edit`,
+        href: `${base}/edit`,
         "data-testid": "risk-detail-edit",
       }}
+      primaryAction={{
+        label: ACTION_COPY[nextAcceptance].title,
+        href: `${base}/acceptance/${nextAcceptance}`,
+        "data-testid": `risk-detail-${nextAcceptance}-acceptance`,
+      }}
+      overflow={[
+        {
+          id: "treatment",
+          label: "Change treatment…",
+          onSelect: () => router.push(`${base}/treatment`),
+          disabledReason:
+            accState === "none"
+              ? undefined
+              : "Reject or revoke the acceptance first.",
+          "data-testid": "risk-detail-change-treatment",
+        },
+        {
+          id: "reject",
+          label: "Reject acceptance…",
+          hidden: accState !== "proposed",
+          onSelect: () => router.push(`${base}/acceptance/reject`),
+          "data-testid": "risk-detail-reject-acceptance",
+        },
+      ]}
       status={
         <>
           <Badge variant="secondary" data-testid="risk-detail-treatment">
             {treatmentLabel(risk)}
           </Badge>
+          <SelfApprovedBadge
+            selfApproved={Boolean(risk.acceptance?.self_approved)}
+            testId="risk-detail-self-approved"
+          />
           <span
             className="text-xs text-muted-foreground"
             data-testid="risk-detail-category"
@@ -339,6 +382,9 @@ export default function RiskDetailPage({
         </Card>
       </div>
 
+      {/* ============ ACCEPTANCE (#2105) ============ */}
+      {risk.acceptance ? <AcceptanceCard risk={risk} /> : null}
+
       {/* ============ DESCRIPTION ============ */}
       <Card data-testid="risk-detail-description-card">
         <CardHeader className="border-b">
@@ -380,6 +426,83 @@ export default function RiskDetailPage({
       {/* ============ HISTORY (#2104) ============ */}
       <RiskHistory riskId={id} />
     </DetailHeader>
+  );
+}
+
+// The proposed or approved acceptance: why, until when, and who. People
+// show as their ids, as on the exception page.
+function AcceptanceCard({ risk }: { risk: Risk }) {
+  const a = risk.acceptance;
+  if (!a) return null;
+  const by = (who: string | undefined) => ` by ${who || "unknown"}`;
+  const rows: [string, React.ReactNode, string][] = [
+    [
+      "Proposed",
+      <>
+        <Timestamp value={a.proposed_at} />
+        {by(a.proposed_by)}
+      </>,
+      "proposed",
+    ],
+    [
+      "Proposed expiry",
+      <Timestamp key="v" value={a.proposed_until} style="date" />,
+      "proposed-until",
+    ],
+  ];
+  if (risk.acceptance_status === "approved") {
+    rows.push(
+      [
+        "Approved",
+        <>
+          <Timestamp value={a.approved_at} />
+          {by(risk.accepter)}
+        </>,
+        "approved",
+      ],
+      [
+        "Accepted until",
+        <Timestamp key="v" value={risk.accepted_until} style="date" />,
+        "accepted-until",
+      ],
+    );
+  }
+  return (
+    <Card data-testid="risk-detail-acceptance-card">
+      <CardHeader className="border-b">
+        <CardTitle>
+          Acceptance{" "}
+          <span
+            className="text-sm font-normal text-muted-foreground"
+            data-testid="risk-detail-acceptance-status"
+          >
+            {risk.acceptance_status === "approved"
+              ? "approved"
+              : "awaiting approval"}
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {a.justification.trim() ? (
+          <Markdown
+            source={a.justification}
+            data-testid="risk-detail-acceptance-justification"
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No justification was recorded.
+          </p>
+        )}
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          {rows.map(([label, value, key]) => (
+            <div key={key} className="contents">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd data-testid={`risk-detail-acceptance-${key}`}>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 

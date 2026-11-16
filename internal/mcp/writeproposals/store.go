@@ -42,6 +42,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -120,6 +121,10 @@ type Proposal struct {
 	CreatedBy      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// Confirmer is the person confirming the proposal, set only on the
+	// Proposal Confirm hands an Applier (not stored). An applier whose
+	// write is an approval applies the approval rule to it (#2105).
+	Confirmer approval.Approver
 }
 
 // CreateInput captures the tool-handler-supplied fields. The store fills
@@ -358,6 +363,14 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]Proposal, error) {
 //   - ErrUnknownTool when no Applier is registered for the proposal's
 //     tool_name (caller mis-wired the store).
 func (s *Store) Confirm(ctx context.Context, id uuid.UUID, approver string) (Proposal, error) {
+	return s.ConfirmAs(ctx, id, approver, approval.Approver{CredentialID: approver})
+}
+
+// ConfirmAs is Confirm with the confirming person named: by.UserID is the
+// users(id) behind the confirming credential, empty for a machine. The
+// Applier sees it as Proposal.Confirmer (#2105). approver is still what
+// human_approver records.
+func (s *Store) ConfirmAs(ctx context.Context, id uuid.UUID, approver string, by approval.Approver) (Proposal, error) {
 	if approver == "" {
 		return Proposal{}, fmt.Errorf("%w: approver is required", ErrInvalidInput)
 	}
@@ -397,6 +410,7 @@ func (s *Store) Confirm(ctx context.Context, id uuid.UUID, approver string) (Pro
 		// so the apply step sees a fully-approved row. We re-fetch
 		// post-update for the return shape.
 		now := time.Now().UTC()
+		current.Confirmer = by
 		subject, applyErr := applier(ctx, tx, current)
 		if applyErr != nil {
 			return fmt.Errorf("apply: %w", applyErr)

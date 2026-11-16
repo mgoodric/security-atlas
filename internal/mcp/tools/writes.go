@@ -284,15 +284,15 @@ const updateRiskTreatmentInputSchema = `{
     "acceptance_status": {
       "type": "string",
       "enum": ["proposed", "approved"],
-      "description": "Required with treatment=accept, forbidden otherwise. proposed = pending sign-off; approved requires an accepter and accepted_until (on the risk already, or set here)."
+      "description": "Required with treatment=accept, forbidden otherwise. proposed = propose accepting the risk (needs justification and accepted_until as the proposed expiry); approved = approve the risk's proposed acceptance until accepted_until, with the confirming person as the approver, who cannot be the proposer unless the organisation allows self-approval. An approved or proposed acceptance is ended in the app (reject, revoke), not here."
     },
-    "accepter": {
+    "justification": {
       "type": "string",
-      "description": "Optional; who signed off the acceptance. Overwrites the risk's accepter."
+      "description": "Required with acceptance_status=proposed: why the risk should be accepted."
     },
     "accepted_until": {
       "type": "string",
-      "description": "Optional; YYYY-MM-DD date the acceptance lapses. Overwrites the risk's accepted_until."
+      "description": "YYYY-MM-DD, after today. With proposed, the proposed expiry; with approved, the approved expiry."
     },
     "treatment_owner": {
       "type": "string",

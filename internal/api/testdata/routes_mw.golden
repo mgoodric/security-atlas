@@ -238,6 +238,11 @@ PATCH /v1/policies/{id}/submit 9
 PATCH /v1/questionnaires/{id}/answers/{qid} 9
 PATCH /v1/risks/categories/{ref} 9
 PATCH /v1/risks/{id} 9
+PATCH /v1/risks/{id}/acceptance/approve 9
+PATCH /v1/risks/{id}/acceptance/propose 9
+PATCH /v1/risks/{id}/acceptance/reject 9
+PATCH /v1/risks/{id}/acceptance/revoke 9
+PATCH /v1/risks/{id}/treatment 9
 PATCH /v1/tenants/{id} 9
 PATCH /v1/themes/{ref} 9
 PATCH /v1/vendors/{id} 9
