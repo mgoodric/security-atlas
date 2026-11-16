@@ -62,8 +62,8 @@ func seedEveryCalendarType(t *testing.T, tenant string) {
 		{"ack", `INSERT INTO policy_acknowledgments (id, tenant_id, policy_id, policy_version_id, user_id, acknowledged_at, ack_token)
 			VALUES ($1, $2, $3, $3, $4, $5, $6)`,
 			[]any{uuid.New(), tenant, policyID, userID, now.Add(-355 * day), "export-access-" + userID.String()}},
-		{"risk", `INSERT INTO risks (id, tenant_id, title, category, treatment, treatment_owner, inherent_score, residual_score, review_due_at)
-			VALUES ($1, $2, 'Export access risk', 'operational'::risk_category, 'mitigate'::risk_treatment, 'owner',
+		{"risk", `INSERT INTO risks (id, tenant_id, title, category_id, treatment, treatment_owner, inherent_score, residual_score, review_due_at)
+			VALUES ($1, $2, 'Export access risk', risk_category_id($2, 'operational'), 'mitigate'::risk_treatment, 'owner',
 			        '{"likelihood": 3, "impact": 4}'::jsonb, '{"likelihood": 2, "impact": 3}'::jsonb, $3)`,
 			[]any{uuid.New(), tenant, now.Add(5 * day)}},
 		{"action plan", `INSERT INTO action_plans (id, tenant_id, title, owner_id, due_date, status) VALUES ($1, $2, 'Export access plan', $3, $4::date, 'draft')`,
