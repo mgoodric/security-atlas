@@ -135,8 +135,8 @@ var (
 	ErrTriggeringEventTooLong = errors.New("actionplan: triggering_event exceeds 500 characters")
 	// ErrOwnerRequired — create owner_id is empty. 400.
 	ErrOwnerRequired = errors.New("actionplan: owner_id is required")
-	// ErrOwnerNotInTenant — owner_id does not resolve to a tenant user. 400.
-	ErrOwnerNotInTenant = errors.New("actionplan: owner_id is not a user in this tenant")
+	// ErrOwnerNotInTenant — owner_id does not resolve to an active tenant user. 400.
+	ErrOwnerNotInTenant = errors.New("actionplan: owner_id is not an active user in this tenant")
 	// ErrDueDateTooFar — due_date is more than 5 years out (P0-384-8). 400.
 	ErrDueDateTooFar = errors.New("actionplan: due_date exceeds 5-year horizon")
 	// ErrInvalidStatus — a status value outside the five-state enum. 400.
@@ -149,6 +149,18 @@ var (
 	ErrAlreadyLinked = errors.New("actionplan: already linked")
 	// ErrNotLinked — an unlink targets a non-existent link. 404.
 	ErrNotLinked = errors.New("actionplan: link does not exist")
+	// ErrVerifyThroughVerify — a PATCH asked for status verified. A person
+	// verifies through POST .../verify (#2108). 422.
+	ErrVerifyThroughVerify = errors.New("actionplan: verify a plan through its verify action, not by setting its status")
+	// ErrVerifyHasControls — verify on a plan with linked controls; their
+	// evaluations verify it (#2109). 409.
+	ErrVerifyHasControls = errors.New("actionplan: a plan with linked controls is verified by their evaluations, not by hand")
+	// ErrOwnerCannotVerify — the plan's owner tried to verify it. The owner
+	// never verifies their own plan, whatever the self-approval setting
+	// (#2108). 403.
+	ErrOwnerCannotVerify = errors.New("actionplan: the plan's owner cannot verify it")
+	// ErrVerifierNotPerson — the verifying credential belongs to no user. 403.
+	ErrVerifierNotPerson = errors.New("actionplan: only a person can verify a plan")
 	// ErrLimitExceeded — the per-plan 50-risk / 50-control cap is hit
 	// (P0-384-7). 422 with code limit_exceeded.
 	ErrLimitExceeded = errors.New("actionplan: linkage limit exceeded")

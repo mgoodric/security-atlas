@@ -147,7 +147,10 @@ export type FixtureName =
   // #2136 — two framework versions, one with an activated scope and no
   // posture target (reset each run), one with no scope, for
   // posture-targets.spec.ts.
-  | "posture-targets";
+  | "posture-targets"
+  // #2115 — a framework version with no scope (reset each run) and an
+  // admin approver user, for framework-scope-wizard.spec.ts.
+  | "framework-scope-wizard";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

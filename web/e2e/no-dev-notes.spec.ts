@@ -8,7 +8,8 @@
 // "WIP".
 //
 // Framework scope: the scope list is mocked empty so the empty state, and
-// its ComingSoon line, render without depending on another spec's seed.
+// its link to the scope wizard (#2115), render without depending on
+// another spec's seed.
 
 import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
@@ -67,7 +68,9 @@ test.describe("no developer notes in UI text (#2082)", () => {
       }),
     );
     await page.goto("/framework-scopes/e2e20820-0000-0000-0000-000000000001");
-    await expect(page.getByTestId("coming-soon")).toBeVisible();
+    await expect(
+      page.getByTestId("framework-scope-empty-create"),
+    ).toBeVisible();
     await expectNoDevNotes(page);
   });
 });
