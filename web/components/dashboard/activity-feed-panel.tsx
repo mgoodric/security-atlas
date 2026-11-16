@@ -20,25 +20,8 @@
 import Link from "next/link";
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
+import { Timestamp } from "@/components/ui/timestamp";
 import type { ActivityEvent, ActivityFeedResponse } from "@/lib/api/dashboard";
-
-// relativeTime renders an RFC3339Nano timestamp as a short human-readable
-// "Nm ago" / "Nh ago" / "Nd ago" string. Future timestamps degrade to
-// "just now" (a server clock skew shouldn't break the feed render).
-function relativeTime(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return iso;
-  const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
-}
 
 function eventTypeBadgeClass(eventType: string): string {
   const lower = eventType.toLowerCase();
@@ -61,12 +44,11 @@ function ActivityRow({ event }: { event: ActivityEvent }) {
         >
           {event.event_type}
         </span>
-        <span
+        <Timestamp
+          value={event.ts}
           className="shrink-0 text-xs text-muted-foreground"
-          data-testid="activity-feed-row-ts"
-        >
-          {relativeTime(event.ts)}
-        </span>
+          testId="activity-feed-row-ts"
+        />
       </div>
       <div className="mt-1 text-xs text-muted-foreground">
         <span className="font-mono">{event.resource_type}</span>

@@ -6,7 +6,6 @@ import {
   HASH_PREFIX_LEN,
   hashPrefix,
   ledgerSubtitleSuffix,
-  observedAtLabel,
   prettyJSON,
   recordCountMeta,
   scopeLabel,
@@ -85,14 +84,6 @@ describe("prettyJSON", () => {
     expect(out).toContain("\n");
     expect(out).toContain('"a": 1');
     expect(out).toContain('"b": [');
-  });
-});
-
-describe("observedAtLabel", () => {
-  test("passes the timestamp through verbatim today", () => {
-    expect(observedAtLabel("2026-05-16T09:42:00Z")).toBe(
-      "2026-05-16T09:42:00Z",
-    );
   });
 });
 
