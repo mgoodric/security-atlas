@@ -36,22 +36,3 @@ func TestDeleteRisk_RefusesNonAdmins(t *testing.T) {
 		}
 	}
 }
-
-func TestIsTenantAdmin(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		name string
-		cred credstore.Credential
-		want bool
-	}{
-		{"admin flag", credstore.Credential{IsAdmin: true}, true},
-		{"tenant admin role", credstore.Credential{OwnerRoles: []string{"grc_engineer", "admin"}}, true},
-		{"approver flag", credstore.Credential{IsApprover: true}, false},
-		{"grc_engineer", credstore.Credential{OwnerRoles: []string{"grc_engineer"}}, false},
-		{"none", credstore.Credential{}, false},
-	} {
-		if got := isTenantAdmin(c.cred); got != c.want {
-			t.Errorf("%s: isTenantAdmin = %v, want %v", c.name, got, c.want)
-		}
-	}
-}

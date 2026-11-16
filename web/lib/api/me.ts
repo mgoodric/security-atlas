@@ -20,6 +20,12 @@ export type MeProfile = {
   // users row (nowhere to store a choice); the browser cache rules there.
   theme: Theme | null;
   is_admin: boolean;
+  // #2428: tenant admin, and may approve (admin or grc_engineer), by flag
+  // or live tenant role. Approve buttons show on whichever matches the role
+  // set the platform admits on that resource; is_admin is the super-admin
+  // bit that gates /admin.
+  is_tenant_admin: boolean;
+  is_approver: boolean;
   owner_roles: string[];
   // Slice 130 (extended by slice 154): canonical `user_roles` list.
   // Always present on the wire — empty array, never omitted — so

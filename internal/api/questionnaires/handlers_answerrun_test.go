@@ -52,7 +52,7 @@ func TestStartAnswerRun_NilServiceUnavailable(t *testing.T) {
 	t.Parallel()
 	// Service nil but caller is authorized -> 503, not a panic.
 	h := New(nil) // New leaves answerRuns nil
-	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 	if w := route(h.StartAnswerRun, reqWith(t, "POST", "/x", testTenant, &cred), nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("nil-service: got %d, want 503", w.Code)
 	}
@@ -61,7 +61,7 @@ func TestStartAnswerRun_NilServiceUnavailable(t *testing.T) {
 func TestStartAnswerRun_BadQuestionnaireID(t *testing.T) {
 	t.Parallel()
 	h := answerRunHandler()
-	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 	w := route(h.StartAnswerRun, reqWith(t, "POST", "/x", testTenant, &cred),
 		map[string]string{"id": "not-a-uuid"})
 	if w.Code != http.StatusBadRequest {

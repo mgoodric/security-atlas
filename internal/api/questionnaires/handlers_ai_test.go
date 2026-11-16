@@ -85,7 +85,7 @@ func TestAISuggest_NilServiceUnavailable(t *testing.T) {
 	t.Parallel()
 	// Service nil but caller is authorized -> 503, not a panic.
 	h := New(nil) // New leaves suggest nil
-	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 	w := route(h.AISuggest, reqWith(t, "POST", "/x", testTenant, &cred),
 		map[string]string{"qid": "22222222-2222-2222-2222-222222222222"})
 	if w.Code != http.StatusServiceUnavailable {
@@ -121,7 +121,7 @@ func TestAISuggest_BadUUID(t *testing.T) {
 	// branch via the nil-service handler returning 503 only AFTER a valid
 	// parse — here qid is bad, so the handler must 400 before the nil check.
 	h := New(nil)
-	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsApprover: true}
+	cred := credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 	w := route(h.AISuggest, reqWith(t, "POST", "/x", testTenant, &cred),
 		map[string]string{"qid": "not-a-uuid"})
 	// Note: the nil-service 503 check runs BEFORE the uuid parse in the

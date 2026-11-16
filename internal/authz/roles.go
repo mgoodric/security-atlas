@@ -33,15 +33,38 @@ package authz
 
 import "github.com/mgoodric/security-atlas/internal/api/credstore"
 
-// IsTenantAdmin reports whether cred administers its tenant: a platform
-// admin credential, or one holding the admin role in the tenant. Tenant
-// configuration endpoints (LLM routing, control import settings) gate on it.
+// IsTenantAdmin reports whether cred administers its tenant: the admin
+// flag, or the live tenant admin role authzmw resolved from user_roles
+// (cred.TenantRoles, #2428). Tenant-scoped admin gates (LLM routing,
+// control import settings, audit-period populations) use it; the
+// install-wide and /v1/admin/* gates stay on cred.IsAdmin (#2216 D2).
+//
+// A JWT session's role claim (OwnerRoles) does not count: it outlives a
+// revoke until the token expires (#2381). An API key's owner_roles label
+// still does, as it did before #2428, so no key loses access.
 func IsTenantAdmin(cred credstore.Credential) bool {
-	if cred.IsAdmin {
+	if cred.IsAdmin || hasLabel(cred.TenantRoles, RoleAdmin) {
 		return true
 	}
-	for _, role := range cred.OwnerRoles {
-		if role == string(RoleAdmin) {
+	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleAdmin)
+}
+
+// IsTenantApprover reports whether cred may approve: a tenant admin, the
+// approver flag, or the live tenant grc_engineer role (#2428). It matches
+// grc_engineer.rego, which grants grc_engineer the approve action, so a
+// handler gate and the OPA decision admit the same callers. As in
+// IsTenantAdmin, an API key's owner_roles label counts and a JWT role
+// claim does not.
+func IsTenantApprover(cred credstore.Credential) bool {
+	if IsTenantAdmin(cred) || cred.IsApprover || hasLabel(cred.TenantRoles, RoleGRCEngineer) {
+		return true
+	}
+	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
+}
+
+func hasLabel(labels []string, role Role) bool {
+	for _, l := range labels {
+		if l == string(role) {
 			return true
 		}
 	}

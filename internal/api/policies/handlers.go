@@ -18,7 +18,8 @@
 // and applies the tenant GUC.
 //
 // Approver-role gate: PATCH approve, POST publish and PATCH review-date
-// require cred.IsApprover || cred.IsAdmin. Publish is gated because it
+// require authz.IsTenantApprover (admin or grc_engineer, by flag or live
+// tenant role, #2428). Publish is gated because it
 // creates an audit-binding artifact; defense in depth.
 package policies
 
@@ -40,6 +41,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	policypdf "github.com/mgoodric/security-atlas/internal/policy/pdf"
@@ -556,7 +558,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
@@ -580,15 +582,15 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 }
 
 // Publish handles POST /v1/policies/{id}/publish (AC-1 versioned row,
-// AC-7 orphan block). Gated by IsApprover (defense in depth — publish is
-// audit-binding).
+// AC-7 orphan block). Gated by authz.IsTenantApprover (defense in depth —
+// publish is audit-binding).
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required for publish")
 		return
 	}
@@ -650,7 +652,7 @@ func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsApprover && !cred.IsAdmin {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required to change a policy review date")
 		return
 	}

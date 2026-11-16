@@ -94,7 +94,7 @@ func ownerCred(tenant string) credstore.Credential {
 }
 
 func approverCred(tenant string) credstore.Credential {
-	return credstore.Credential{ID: "grc-1", TenantID: tenant, IsApprover: true}
+	return credstore.Credential{ID: "grc-1", TenantID: tenant, IsAdmin: true}
 }
 
 func bareCred(tenant string) credstore.Credential {

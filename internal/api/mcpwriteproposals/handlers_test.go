@@ -86,9 +86,9 @@ func validCred() credstore.Credential {
 	}
 }
 
-func approverCred() credstore.Credential {
+func adminCred() credstore.Credential {
 	c := validCred()
-	c.IsApprover = true
+	c.IsAdmin = true
 	return c
 }
 
@@ -311,7 +311,7 @@ func TestConfirmProposal_403WhenNotApprover(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "approver role required") {
+	if !strings.Contains(w.Body.String(), "admin role required") {
 		t.Fatalf("body = %s, want approver-required message", w.Body.String())
 	}
 }
@@ -321,7 +321,7 @@ func TestConfirmProposal_400OnNonUUID(t *testing.T) {
 	h := New(nil)
 	r := httptest.NewRequest(http.MethodPost, "/v1/mcp/write-proposals/abc/confirm", nil)
 	r = withURLParam(r, "id", "abc")
-	r = r.WithContext(withTenantAndCred(t, approverCred()))
+	r = r.WithContext(withTenantAndCred(t, adminCred()))
 	w := httptest.NewRecorder()
 	h.ConfirmProposal(w, r)
 	if w.Code != http.StatusBadRequest {
@@ -361,7 +361,7 @@ func TestRejectProposal_400OnNonUUID(t *testing.T) {
 	h := New(nil)
 	r := httptest.NewRequest(http.MethodPost, "/v1/mcp/write-proposals/abc/reject", nil)
 	r = withURLParam(r, "id", "abc")
-	r = r.WithContext(withTenantAndCred(t, approverCred()))
+	r = r.WithContext(withTenantAndCred(t, adminCred()))
 	w := httptest.NewRecorder()
 	h.RejectProposal(w, r)
 	if w.Code != http.StatusBadRequest {
