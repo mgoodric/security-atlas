@@ -43,6 +43,8 @@ Departures from the prep comment's list:
 
 The low-confidence calls are P6.3 (recording a breach is a narrow part of breach handling) and P8.1 (SCF has no single control for privacy complaints plus compliance monitoring; PRI-11 and PRI-37 each cover half). Their rationales carry `LOW CONFIDENCE — review`, the file's existing convention.
 
+**Matt's decision (2026-11-16, relayed by the dispatcher):** P6.3 → IRO-22 (0.6), and P8.1 → PRI-11 (0.6) + PRI-37 (0.5), keeping both. These are Matt's picks, not the agent's. The other departures above (PRI-17.1, AST-22, TPM-14) were confirmed as well. The Privacy control kit (D5) is a follow-up Matt is filing.
+
 ## D3 — Sample rows
 
 17 rows are added to `migrations/fixtures/scf-sample.json`: PRI-08, PRI-11, PRI-12, PRI-14, PRI-16, PRI-17, PRI-17.1, PRI-21, PRI-24, PRI-27, PRI-29, PRI-30, PRI-31, PRI-35, PRI-37, PRI-38 and IRO-22. Titles are verbatim from the pin (`TestSCFSampleMatchesPinnedRelease` passes with no new `knownMismatch` entry; the ceiling stays at 9). Descriptions are our own, in the sample's "Mechanisms exist to ..." form; the pin carries no SCF descriptions to copy. The sample stays on the open working label `test-2026.3`, so the release-label rule in `fixturepin_test.go` allows the re-pin.
@@ -53,7 +55,7 @@ The bootstrap re-imports the bundled crosswalk on every boot (#1884) into framew
 
 Not a new `framework_version`: the P criteria were always part of TSC 2017, nothing already stored changes, and a new version would push every tenant through the version-migration review queue for a pure addition.
 
-**Effect on tenants:** SOC 2 coverage denominators grow by 18. A tenant whose SOC 2 scope excludes Privacy sees its SOC 2 coverage percentage fall until its framework scope excludes the P criteria. The changelog fragment says so.
+**Effect on tenants:** SOC 2 coverage denominators grow by 18. A tenant whose SOC 2 scope excludes Privacy sees its SOC 2 coverage percentage fall until it marks P1.1-P8.1 `excluded` in its framework scope's Statement of Applicability; the dashboard leaves excluded requirements out of the denominator (`internal/db/queries/dashboard.sql`). The changelog fragment says so.
 
 Test: `TestImport_FrozenSOC2VersionGainsPrivacyCriteria` imports the bundled file without the P rows, confirms the version is `current`, re-imports the full file into it, and asserts 18 created / 43 unchanged / 0 updated / 0 differed, the 28 new edges, and `requirement_count = 61`.
 
