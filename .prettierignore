@@ -8,6 +8,11 @@
 # output authoritative.
 CHANGELOG.md
 
+# Changelog fragments (#2357) are slices of CHANGELOG.md, so the same
+# reasoning applies: a reflow would change the assembled CHANGELOG.
+changelog.d/*.md
+!changelog.d/README.md
+
 # Helm chart templates (slice 038) embed Go-template `{{ ... }}` directives
 # that are NOT valid YAML — prettier would mangle the control flow and the
 # `nindent` whitespace that Helm rendering depends on. The pure-YAML chart
