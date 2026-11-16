@@ -46,7 +46,10 @@ this guard is defence in depth, covered by `scope.TestMatchRecordScope`.
 ### D4: malformed denies, with the reason audited
 
 Decoding is strict: unknown fields, trailing data, and non-object JSON are all
-refused, along with unknown ops. A malformed predicate is denied at push, and
+refused, along with unknown ops. An empty `and`/`or` is refused by the shared
+`validate`. An `in` with no values is refused by the predicate decoder only,
+so other users of the grammar are unchanged. It would match nothing, so a key
+carrying one would look scoped and never push (raised in the #2438 review). A malformed predicate is denied at push, and
 the audit row records the parse error. Both issue paths refuse it up front:
 HTTP returns 400 and gRPC returns `InvalidArgument`. Before this change, HTTP
 issue sent the raw string to the JSONB insert and returned 500.

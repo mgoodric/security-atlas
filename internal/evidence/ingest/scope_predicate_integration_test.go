@@ -177,6 +177,8 @@ func TestScopePredicate_IssueRejectsMalformed(t *testing.T) {
 		`{"environment":"prod"}`,
 		`{"op":"xor"}`,
 		`{"op":"eq","dim":"environment"}`,
+		`{"op":"and","args":[]}`,
+		`{"op":"in","dim":"environment","values":[]}`,
 		`not a predicate`,
 	} {
 		body, _ := json.Marshal(map[string]string{"scope_predicate": p})

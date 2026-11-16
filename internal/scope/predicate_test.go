@@ -57,6 +57,11 @@ func TestMatchRecordScope(t *testing.T) {
 		// Malformed: denied with an error, never unrestricted.
 		{"bare dimension map", `{"environment":"prod"}`, prod, false, true},
 		{"unknown op", `{"op":"xor","args":[]}`, prod, false, true},
+		// An empty combinator or empty "in" must never read as unrestricted.
+		{"empty and", `{"op":"and","args":[]}`, prod, false, true},
+		{"empty or", `{"op":"or","args":[]}`, prod, false, true},
+		{"empty in", `{"op":"in","dim":"environment","values":[]}`, prod, false, true},
+		{"nested empty in", `{"op":"and","args":[{"op":"not","arg":{"op":"in","dim":"environment","values":[]}}]}`, prod, false, true},
 		{"unknown field", `{"op":"eq","dim":"environment","value":"prod","extra":1}`, prod, false, true},
 		{"missing value", `{"op":"eq","dim":"environment"}`, prod, false, true},
 		{"truncated json", `{"op":"eq"`, prod, false, true},

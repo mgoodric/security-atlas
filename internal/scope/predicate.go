@@ -108,7 +108,29 @@ func parsePredicate(b []byte) (*node, error) {
 	if err := validate(&n); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadPredicate, err)
 	}
+	if err := rejectEmptyIn(&n); err != nil {
+		return nil, err
+	}
 	return &n, nil
+}
+
+// rejectEmptyIn refuses an "in" with no values anywhere in the tree. It
+// would match nothing, so a key carrying one looks scoped but can never
+// push; refusing it at issue surfaces the mistake. (An empty "and"/"or"
+// is already refused by validate.)
+func rejectEmptyIn(n *node) error {
+	if n.Op == "in" && len(n.Values) == 0 {
+		return fmt.Errorf("%w: in on %q requires at least one value", ErrBadPredicate, n.Dim)
+	}
+	for i := range n.Args {
+		if err := rejectEmptyIn(&n.Args[i]); err != nil {
+			return err
+		}
+	}
+	if n.Arg != nil {
+		return rejectEmptyIn(n.Arg)
+	}
+	return nil
 }
 
 // legacyToExpr converts "k=v[,k=v...]" into {"op":"and","args":[eq...]}.
