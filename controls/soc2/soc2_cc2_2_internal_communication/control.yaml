@@ -9,7 +9,7 @@ description: |
   communicate security expectations, incidents (post-mortem summaries),
   and policy changes to all personnel.
 
-scf_anchor_id: GOV-04
+scf_anchor_id: GOV-05
 control_family: GOV
 implementation_type: manual_periodic
 owner_role: security-engineering

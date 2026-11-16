@@ -384,11 +384,11 @@ func TestImport_KeepsUnlistedEdgeFromAnotherSource(t *testing.T) {
 	if len(report.EdgesRetired) != 0 {
 		t.Fatalf("community import retired %+v; the scf_official edge is not its to retire", report.EdgesRetired)
 	}
-	if len(report.EdgesUnlisted) != 1 || report.EdgesUnlisted[0].SCFAnchor != "GOV-01" || report.EdgesUnlisted[0].Attribution != "scf_official" {
-		t.Fatalf("EdgesUnlisted = %+v; want the scf_official P-1->GOV-01 edge", report.EdgesUnlisted)
+	if len(report.EdgesUnlisted) != 1 || report.EdgesUnlisted[0].SCFAnchor != "GOV-02" || report.EdgesUnlisted[0].Attribution != "scf_official" {
+		t.Fatalf("EdgesUnlisted = %+v; want the scf_official P-1->GOV-02 edge", report.EdgesUnlisted)
 	}
-	if attr, retired, _ := readProvenanceEdgeTo(t, pool, "GOV-01"); attr != "scf_official" || retired {
-		t.Fatalf("P-1->GOV-01 = %q retired=%v; want the scf_official edge kept live", attr, retired)
+	if attr, retired, _ := readProvenanceEdgeTo(t, pool, "GOV-02"); attr != "scf_official" || retired {
+		t.Fatalf("P-1->GOV-02 = %q retired=%v; want the scf_official edge kept live", attr, retired)
 	}
 
 	// A same-source crosswalk that drops the mapping does retire it.
@@ -398,11 +398,11 @@ func TestImport_KeepsUnlistedEdgeFromAnotherSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("moved official Import: %v", err)
 	}
-	if len(report.EdgesRetired) != 1 || report.EdgesRetired[0].SCFAnchor != "GOV-01" {
-		t.Fatalf("EdgesRetired = %+v; want the dropped P-1->GOV-01 edge", report.EdgesRetired)
+	if len(report.EdgesRetired) != 1 || report.EdgesRetired[0].SCFAnchor != "GOV-02" {
+		t.Fatalf("EdgesRetired = %+v; want the dropped P-1->GOV-02 edge", report.EdgesRetired)
 	}
-	if _, retired, ok := readProvenanceEdgeTo(t, pool, "GOV-01"); !ok || !retired {
-		t.Fatalf("P-1->GOV-01 ok=%v retired=%v; want the row kept and retired", ok, retired)
+	if _, retired, ok := readProvenanceEdgeTo(t, pool, "GOV-02"); !ok || !retired {
+		t.Fatalf("P-1->GOV-02 ok=%v retired=%v; want the row kept and retired", ok, retired)
 	}
 }
 
@@ -427,7 +427,7 @@ func TestImport_RetiredEdgeKeepsTierHistoryAndComesBack(t *testing.T) {
 		}
 		return c
 	}
-	if _, err := soc2import.Import(ctx, pool, cw("GOV-01")); err != nil {
+	if _, err := soc2import.Import(ctx, pool, cw("GOV-02")); err != nil {
 		t.Fatalf("first Import: %v", err)
 	}
 	var edgeID uuid.UUID
@@ -437,7 +437,7 @@ func TestImport_RetiredEdgeKeepsTierHistoryAndComesBack(t *testing.T) {
 		JOIN framework_versions fv ON fv.id = fr.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
 		JOIN scf_anchors a ON a.id = e.scf_anchor_id
-		WHERE f.slug = $1 AND f.tenant_id IS NULL AND a.scf_id = 'GOV-01'`, provenanceSlug).Scan(&edgeID); err != nil {
+		WHERE f.slug = $1 AND f.tenant_id IS NULL AND a.scf_id = 'GOV-02'`, provenanceSlug).Scan(&edgeID); err != nil {
 		t.Fatalf("read edge id: %v", err)
 	}
 	// A reviewer verified the mapping.
@@ -461,13 +461,13 @@ func TestImport_RetiredEdgeKeepsTierHistoryAndComesBack(t *testing.T) {
 		return countRows(t, pool, `SELECT count(*) FROM effective_fw_to_scf_edges WHERE id = $1`, edgeID)
 	}
 
-	// The crosswalk drops GOV-01: retired, history intact, out of coverage.
+	// The crosswalk drops GOV-02: retired, history intact, out of coverage.
 	r, err := soc2import.Import(ctx, pool, cw("IAC-01"))
 	if err != nil {
 		t.Fatalf("dropping Import: %v", err)
 	}
-	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "GOV-01" || r.EdgesRetired[0].Tier != "verified" {
-		t.Fatalf("EdgesRetired = %+v; want the verified P-1->GOV-01 edge", r.EdgesRetired)
+	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "GOV-02" || r.EdgesRetired[0].Tier != "verified" {
+		t.Fatalf("EdgesRetired = %+v; want the verified P-1->GOV-02 edge", r.EdgesRetired)
 	}
 	want := []string{"draft>verified reviewed", "verified>verified retired: dropped by crosswalk " + src}
 	if got := history(); !slices.Equal(got, want) {
@@ -477,13 +477,13 @@ func TestImport_RetiredEdgeKeepsTierHistoryAndComesBack(t *testing.T) {
 		t.Fatal("a retired edge is still in effective_fw_to_scf_edges")
 	}
 
-	// The crosswalk lists GOV-01 again: restored, same row, tier kept.
-	r, err = soc2import.Import(ctx, pool, cw("GOV-01", "IAC-01"))
+	// The crosswalk lists GOV-02 again: restored, same row, tier kept.
+	r, err = soc2import.Import(ctx, pool, cw("GOV-02", "IAC-01"))
 	if err != nil {
 		t.Fatalf("re-listing Import: %v", err)
 	}
-	if len(r.EdgesRestored) != 1 || r.EdgesRestored[0].SCFAnchor != "GOV-01" {
-		t.Fatalf("EdgesRestored = %+v; want P-1->GOV-01", r.EdgesRestored)
+	if len(r.EdgesRestored) != 1 || r.EdgesRestored[0].SCFAnchor != "GOV-02" {
+		t.Fatalf("EdgesRestored = %+v; want P-1->GOV-02", r.EdgesRestored)
 	}
 	if live() != 1 {
 		t.Fatal("the re-listed edge is not back in effective_fw_to_scf_edges")
@@ -492,7 +492,7 @@ func TestImport_RetiredEdgeKeepsTierHistoryAndComesBack(t *testing.T) {
 	if len(got) != 3 || got[2] != "verified>verified restored: listed again by crosswalk "+src {
 		t.Fatalf("history after restore = %v; want the review, the retirement and a restore row", got)
 	}
-	if attr, retired, _ := readProvenanceEdgeTo(t, pool, "GOV-01"); retired || attr != "community_draft" {
+	if attr, retired, _ := readProvenanceEdgeTo(t, pool, "GOV-02"); retired || attr != "community_draft" {
 		t.Fatalf("restored edge attribution=%q retired=%v", attr, retired)
 	}
 	if tier := queryStrings(t, pool, `SELECT mapping_tier::text FROM fw_to_scf_edges WHERE id = $1`, edgeID); !slices.Equal(tier, []string{"verified"}) {
@@ -563,10 +563,10 @@ func TestImport_YAMLAndWorkbookRetireOnlyTheirOwnEdges(t *testing.T) {
 		}
 		return r
 	}
-	importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}, [2]string{"R-2", "IAC-01"}))
+	importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-02"}, [2]string{"R-2", "IAC-01"}))
 	importCW(coexistCrosswalk(wbSrc, [2]string{"R-1", "IAC-37"}, [2]string{"R-2", "IAC-04"}))
 	want := []string{
-		"R-1->GOV-01@" + yamlSrc, "R-1->IAC-37@" + wbSrc,
+		"R-1->GOV-02@" + yamlSrc, "R-1->IAC-37@" + wbSrc,
 		"R-2->IAC-01@" + yamlSrc, "R-2->IAC-04@" + wbSrc,
 	}
 	if got := coexistEdges(t, pool); !slices.Equal(got, want) {
@@ -575,7 +575,7 @@ func TestImport_YAMLAndWorkbookRetireOnlyTheirOwnEdges(t *testing.T) {
 
 	// A YAML re-import that moves R-2 to IAC-14 retires its own old edge and
 	// leaves the workbook's edges untouched.
-	r := importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}, [2]string{"R-2", "IAC-14"}))
+	r := importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-02"}, [2]string{"R-2", "IAC-14"}))
 	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "IAC-01" || r.EdgesRetired[0].Source != yamlSrc {
 		t.Fatalf("YAML re-import retired %+v; want only its own R-2->IAC-01", r.EdgesRetired)
 	}
@@ -583,7 +583,7 @@ func TestImport_YAMLAndWorkbookRetireOnlyTheirOwnEdges(t *testing.T) {
 		t.Fatalf("YAML re-import reported %d unlisted edges; want the workbook's 2", len(r.EdgesUnlisted))
 	}
 	want = []string{
-		"R-1->GOV-01@" + yamlSrc, "R-1->IAC-37@" + wbSrc,
+		"R-1->GOV-02@" + yamlSrc, "R-1->IAC-37@" + wbSrc,
 		"R-2->IAC-04@" + wbSrc, "R-2->IAC-14@" + yamlSrc,
 	}
 	if got := coexistEdges(t, pool); !slices.Equal(got, want) {
@@ -596,7 +596,7 @@ func TestImport_YAMLAndWorkbookRetireOnlyTheirOwnEdges(t *testing.T) {
 	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "IAC-04" || r.EdgesRetired[0].Source != wbSrc {
 		t.Fatalf("workbook re-import retired %+v; want only its own R-2->IAC-04", r.EdgesRetired)
 	}
-	want = []string{"R-1->GOV-01@" + yamlSrc, "R-1->IAC-37@" + wbSrc, "R-2->IAC-14@" + yamlSrc}
+	want = []string{"R-1->GOV-02@" + yamlSrc, "R-1->IAC-37@" + wbSrc, "R-2->IAC-14@" + yamlSrc}
 	if got := coexistEdges(t, pool); !slices.Equal(got, want) {
 		t.Fatalf("after workbook re-import edges = %v; want %v", got, want)
 	}
@@ -612,7 +612,7 @@ func TestImport_YAMLAndWorkbookRetireOnlyTheirOwnEdges(t *testing.T) {
 	if len(r.EdgesRetired) != 0 {
 		t.Fatalf("workbook import retired legacy edges %+v", r.EdgesRetired)
 	}
-	r = importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}))
+	r = importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-02"}))
 	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "IAC-14" || r.EdgesRetired[0].Source != soc2import.LegacySource {
 		t.Fatalf("YAML import retired %+v; want the legacy R-2->IAC-14", r.EdgesRetired)
 	}

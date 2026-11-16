@@ -140,7 +140,7 @@ func TestParseStockPolicy_NoFrontMatter(t *testing.T) {
 // controls table is populated.
 func TestNoopAnchorResolver_AllMissing(t *testing.T) {
 	resolver := seed.NoopAnchorResolver{}
-	codes := []string{"GOV-01", "IAC-04", "CHG-02"}
+	codes := []string{"GOV-02", "IAC-04", "CHG-02"}
 	resolved, missing, err := resolver.Resolve(context.TODO(), "", codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -162,8 +162,8 @@ version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
 linked_control_ids:
-  - GOV-01
-  - GOV-04
+  - GOV-02
+  - GOV-05
   - RSK-01
 acknowledgment_required_roles:
   - employee

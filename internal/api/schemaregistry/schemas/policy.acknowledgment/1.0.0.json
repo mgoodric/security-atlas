@@ -4,7 +4,7 @@
   "x-evidence-kind": "policy.acknowledgment.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["GOV-04"],
+  "x-default-scf-anchors": ["GOV-05"],
   "title": "Policy acknowledgment",
   "description": "An affirmative, per-user attestation that a published policy version has been read and accepted. Emitted to the evidence ledger by POST /v1/policies/{id}/acknowledge (slice 023). Annual recurrence is enforced at the handler (365-day freshness window); each policy publish creates a new policies row id so an ack of the prior version cannot satisfy the new version.",
   "type": "object",

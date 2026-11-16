@@ -290,7 +290,7 @@ func DefaultSeed() []KindVersion {
 		{Kind: "policy.acknowledgment.v1", Version: "1.0.0"},
 		// OPENENGINE-626: security-awareness training completion evidence.
 		// Manual and CSV entries are first-class; future LMS connector imports
-		// feed the same kind. Anchors HRS-04, mapped by the bundled crosswalks
+		// feed the same kind. Anchors SAT-04, mapped by the bundled crosswalks
 		// to SOC 2 CC1.4 and ISO 27001 A.6.3.
 		{Kind: "security_awareness.training_completion.v1", Version: "1.0.0"},
 		// Slice 443: Slack connector — three high-signal evidence surfaces for

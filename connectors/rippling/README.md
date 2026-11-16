@@ -138,7 +138,7 @@ The bundled schema carries default SCF-anchor hints, flagged for maintainer
 accuracy recheck:
 
 - `hris.worker_lifecycle.v1` → `IAC-22` (Termination of employment), `IAC-09`
-  (Account management / provisioning), `HRS-04` (Personnel security) —
+  (Account management / provisioning), `HRS-02` (Human Resources Security Management) —
   consistent with the existing `okta.user_lifecycle.v1` anchors (same
   joiner/mover/leaver control question).
 
