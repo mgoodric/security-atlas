@@ -230,6 +230,60 @@
       "name": "Vendor claim",
       "short": "A vendor's own statement that their product meets a control, imported from their OSCAL file. It is the vendor's word, not evidence security-atlas has checked.",
       "long": "Each claim names a control and the vendor's explanation. You can accept it, reject it, or mark that you need more information. Accepting records that you rely on the vendor's statement and includes it, labelled as vendor-attested, in your OSCAL security plan export. It doesn't make any of your controls pass."
+    },
+    {
+      "id": "policy-acknowledgment",
+      "name": "Policy acknowledgment",
+      "short": "A person's record that they have read the published version of a policy. It counts for that version only and lasts a year.",
+      "long": "Each policy lists the roles whose members must acknowledge it. When a new version is published, or a year has passed, earlier acknowledgments no longer count and the person is asked again. Each acknowledgment is kept as evidence, so an auditor can see who read which version and when."
+    },
+    {
+      "id": "vendor-criticality",
+      "name": "Vendor criticality",
+      "short": "How much harm a vendor could do to you if it failed or was breached: low, medium or high.",
+      "long": "Criticality is your organisation's own judgement, usually based on what data the vendor holds and how much of your product depends on it. It helps you decide how often to review each vendor and which reviews to do first."
+    },
+    {
+      "id": "review-cadence",
+      "name": "Review cadence",
+      "short": "How often a vendor must be reviewed: monthly, quarterly, every six months or yearly. The next review is due one cadence after the last.",
+      "long": "A vendor that has never been reviewed is due its first review a set time after it was added. Once the due date passes, the vendor shows as overdue until a review is recorded."
+    },
+    {
+      "id": "dpa",
+      "name": "Data processing agreement (DPA)",
+      "short": "A contract in which a vendor commits to how it will handle personal data it processes for you. Privacy laws such as GDPR require one with such vendors.",
+      "long": "The vendor register records whether a DPA is signed and when. A missing DPA with a vendor that holds personal data is a gap an auditor or a customer will ask about."
+    },
+    {
+      "id": "personnel-checklist",
+      "name": "Personnel checklist",
+      "short": "The security steps for one person joining (onboarding) or leaving (offboarding), each item recorded when done. Offboarding is due within 24 hours.",
+      "long": "Onboarding covers approving and granting access; offboarding covers revoking access and ending sessions. Each completed item is kept as evidence for your access controls. The checklist records the work; it doesn't grant or remove access itself."
+    },
+    {
+      "id": "questionnaire",
+      "name": "Security questionnaire",
+      "short": "A list of questions a customer sends to check how you protect their data before they buy, usually as a spreadsheet.",
+      "long": "Common questionnaires repeat the same topics in different words. Answering each question from your controls, policies and evidence, with citations, keeps your answers consistent and lets you reuse them for the next customer."
+    },
+    {
+      "id": "prior-answer",
+      "name": "Prior answer",
+      "short": "An answer you gave to an earlier questionnaire question linked to the same SCF anchor, offered as a starting point for a new one.",
+      "long": "Answers you save to the library are matched to new questions through their SCF anchor, so a question worded differently by another customer still finds your earlier answer. Using one copies its text; you can still edit it."
+    },
+    {
+      "id": "scf",
+      "name": "Secure Controls Framework (SCF)",
+      "short": "A free catalog of about 1,400 security controls, mapped to more than 200 frameworks. security-atlas uses it as the common language between frameworks.",
+      "long": "Instead of mapping every framework to every other framework, each framework's requirements are mapped to SCF controls. Your controls point at SCF controls, called anchors, so a control earns credit in every framework whose requirements map to its anchor."
+    },
+    {
+      "id": "strm",
+      "name": "STRM relationship",
+      "short": "How a framework requirement relates to an SCF control in a mapping: equal, a subset, a superset, or overlapping. Each mapping also carries a strength.",
+      "long": "STRM (set theory relationship mapping) comes from NIST IR 8477, the method the SCF uses for its crosswalks. A subset means the requirement asks for less than the SCF control covers; a superset means it asks for more."
     }
   ]
 }

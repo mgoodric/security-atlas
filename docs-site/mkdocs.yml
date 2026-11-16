@@ -127,6 +127,11 @@ nav:
       - Board packs: help/board-packs.md
       - CSF assessment: help/csf.md
       - Vendor claims: help/vendor-claims.md
+      - Policies: help/policies.md
+      - Vendors: help/vendors.md
+      - Personnel security: help/personnel-security.md
+      - Questionnaires: help/questionnaires.md
+      - SCF catalog: help/scf-catalog.md
   - Audit logs: audit-logs.md
   - Operations:
       - Backup and restore: backup-restore.md

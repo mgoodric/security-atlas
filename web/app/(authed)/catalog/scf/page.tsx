@@ -43,6 +43,7 @@ import {
   searchAnchors,
 } from "./view";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 export default function SCFCatalogPage() {
   const router = useRouter();
@@ -73,7 +74,13 @@ export default function SCFCatalogPage() {
   return (
     <PageShell
       title={pageTitle("/catalog/scf")}
-      subtitle="Browse the Secure Controls Framework anchor catalog. Click any anchor to see the framework requirements that map to it."
+      subtitle={
+        <>
+          Browse the <Term id="scf">Secure Controls Framework</Term>{" "}
+          <Term id="anchor">anchor</Term> catalog. Click any anchor to see the
+          framework requirements that map to it.
+        </>
+      }
       // Slice 174: Export buttons (CSV / JSON / XLSX) wire to the BFF
       // proxy at `/api/anchors/export?format=...`, which forwards to the
       // platform `GET /v1/anchors/export` endpoint. Each link is an

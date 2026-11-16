@@ -41,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 interface Questionnaire {
   id: string;
@@ -145,7 +146,15 @@ export default function QuestionnairesPage() {
   return (
     <PageShell
       title={pageTitle("/questionnaires")}
-      subtitle="Vendor security diligence questionnaires. Upload an Excel workbook to import questions; author answers with prior-answer suggestions and policy / evidence citations."
+      subtitle={
+        <>
+          Vendor security diligence{" "}
+          <Term id="questionnaire">questionnaires</Term>. Upload an Excel
+          workbook to import questions; author answers with{" "}
+          <Term id="prior-answer">prior-answer</Term> suggestions and policy /
+          evidence citations.
+        </>
+      }
       actions={
         !isEmpty && !listQ.isLoading ? (
           <Button

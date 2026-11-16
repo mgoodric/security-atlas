@@ -213,6 +213,34 @@ describe("the real help files", () => {
     expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual([lifecycle]);
   });
 
+  // #2154 — every Library page resolves to its own module.
+  it.each([
+    ["/policies", "policies"],
+    ["/policies/new", "policies"],
+    ["/policies/abc", "policies"],
+    ["/policies/abc/edit", "policies"],
+    ["/policies/abc/publish", "policies"],
+    ["/vendors", "vendors"],
+    ["/vendors/new", "vendors"],
+    ["/vendors/abc/reviews/new", "vendors"],
+    ["/personnel-security", "personnel-security"],
+    ["/personnel-security/new", "personnel-security"],
+    ["/personnel-security/abc", "personnel-security"],
+    ["/questionnaires", "questionnaires"],
+    ["/questionnaires/abc", "questionnaires"],
+    ["/catalog/scf", "scf-catalog"],
+    ["/catalog/scf/abc", "scf-catalog"],
+    ["/catalog/audited-under", "scf-catalog"],
+  ])("covers %s with the %s help", (route, id) => {
+    expect(helpModuleForPath(route)?.id).toBe(id);
+  });
+
+  // #2154 — the policy lifecycle is embedded.
+  it("embeds the policy lifecycle diagram", () => {
+    const mod = HELP_MODULES.find((m) => m.id === "policies");
+    expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual(["policy"]);
+  });
+
   // #2145 — a module's hint dismissal is refused unless its id is in
   // userprefs.HintModules and the migration's CHECK, so the three lists
   // move together.
