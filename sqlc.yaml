@@ -141,7 +141,7 @@ sql:
       # #2105: risks gain the acceptance record (proposal, approval, self-approved).
       - "migrations/sql/20261206000000_risk_acceptance_transitions.sql"
       # #2107: the risk open/closed lifecycle.
-      - "migrations/sql/20261211000000_risk_lifecycle.sql"
+      - "migrations/sql/20261212000000_risk_lifecycle.sql"
     queries: "internal/db/queries"
     gen:
       go:

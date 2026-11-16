@@ -32,7 +32,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
-// Audit actions the lifecycle writes (migration 20261211000000).
+// Audit actions the lifecycle writes (migration 20261212000000).
 const (
 	ActionClosed   = "closed"
 	ActionReopened = "reopened"
