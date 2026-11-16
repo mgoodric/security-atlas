@@ -35,6 +35,7 @@ import {
   validateGenerateForm,
 } from "./validate";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 // Slice 032 — quarterly board pack list + generate.
 //
@@ -112,7 +113,15 @@ export default function BoardPacksPage() {
       width="reading"
       data-testid="board-packs-page"
       title={pageTitle("/board-packs")}
-      subtitle="Quarterly board-meeting reports — posture, top risks, coverage trend, open findings, operational metrics, investment vs coverage, and asks of the board. Each pack is reviewed and approved section-by-section, then published as a frozen artifact."
+      subtitle={
+        <>
+          Quarterly <Term id="board-pack">board-meeting reports</Term> —{" "}
+          <Term id="posture">posture</Term>, top risks, coverage trend, open
+          findings, operational metrics, investment vs coverage, and asks of the
+          board. Each pack is reviewed and approved section-by-section, then
+          published as a frozen artifact.
+        </>
+      }
     >
       <Card>
         <CardHeader>

@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 import { newScopeHref } from "./wizard";
 
@@ -44,8 +45,14 @@ async function fetchFrameworks(): Promise<Framework[]> {
   return ((await res.json()) as { frameworks: Framework[] }).frameworks;
 }
 
-const SUBTITLE =
-  "Which systems each framework applies to. Open a framework to edit, review and activate its scope, or start a new one.";
+const SUBTITLE = (
+  <>
+    Which systems each framework applies to. Open a framework to edit, review
+    and activate its <Term id="framework-scope">scope</Term> and its{" "}
+    <Term id="statement-of-applicability">Statement of Applicability</Term>, or
+    start a new one.
+  </>
+);
 
 export default function FrameworkScopesIndexPage() {
   const frameworksQ = useQuery({

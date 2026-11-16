@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 
 import { PageShell } from "@/components/shell/page-shell";
+import { Term } from "@/components/help/term";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -104,7 +105,8 @@ export default function CsfAssessmentPage() {
             <Skeleton className="inline-block h-4 w-32 align-middle" />
           ) : null}
           {data || isLoading ? " — " : null}
-          Tier rating and Current-vs-Target profile gap for this CSF version.
+          <Term id="csf-tier">Tier rating</Term> and Current-vs-Target{" "}
+          <Term id="csf-profile">profile</Term> gap for this CSF version.
         </>
       }
       data-testid="csf-assessment"
