@@ -100,7 +100,7 @@ func okEnv(t *testing.T) {
 }
 
 func okFlags() runFlags {
-	return runFlags{environment: "prod", service: "pagerduty", onCallControl: "scf:IRO-04", incidentControl: "scf:IRO-02", postmortemControl: "scf:IRO-13", metricsControl: "scf:IRO-02", lookbackDays: 90}
+	return runFlags{environment: "prod", service: "pagerduty", onCallControl: "scf:IRO-08", incidentControl: "scf:IRO-02", postmortemControl: "scf:IRO-13", metricsControl: "scf:IRO-02", lookbackDays: 90}
 }
 
 func oneServiceMetric() []metrics.ServiceMetrics {

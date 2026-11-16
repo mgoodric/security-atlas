@@ -139,7 +139,7 @@ func TestRun_PushesOnCallAndIncidentRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("oncall.Collect: %v", err)
 	}
-	ocRec, err := pdrecord.BuildOnCall(policies[0], "scf:IRO-04", actorID("oncall"), "pagerduty", "prod", now)
+	ocRec, err := pdrecord.BuildOnCall(policies[0], "scf:IRO-08", actorID("oncall"), "pagerduty", "prod", now)
 	if err != nil {
 		t.Fatalf("BuildOnCall: %v", err)
 	}
@@ -180,8 +180,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 	client := sdk.NewClientFromConn(conn, bearer)
 	now := time.Date(2026, 6, 7, 12, 0, 0, 0, time.UTC)
 	p := oncall.Policy{ID: "P1", Name: "n", NumTier: 0, Covered: false}
-	r1, _ := pdrecord.BuildOnCall(p, "scf:IRO-04", actorID("oncall"), "pagerduty", "prod", now)
-	r2, _ := pdrecord.BuildOnCall(p, "scf:IRO-04", actorID("oncall"), "pagerduty", "prod", now.Add(30*time.Minute))
+	r1, _ := pdrecord.BuildOnCall(p, "scf:IRO-08", actorID("oncall"), "pagerduty", "prod", now)
+	r2, _ := pdrecord.BuildOnCall(p, "scf:IRO-08", actorID("oncall"), "pagerduty", "prod", now.Add(30*time.Minute))
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -211,7 +211,7 @@ func TestEmittedRecords_NoPIIorFreeText(t *testing.T) {
 		}},
 	}}
 	policies, _ := oncall.Collect(context.Background(), ocAPI)
-	ocRec, _ := pdrecord.BuildOnCall(policies[0], "scf:IRO-04", actorID("oncall"), "pagerduty", "prod", now)
+	ocRec, _ := pdrecord.BuildOnCall(policies[0], "scf:IRO-08", actorID("oncall"), "pagerduty", "prod", now)
 
 	ocAllowed := map[string]bool{
 		"escalation_policy_id": true, "escalation_policy_name": true,

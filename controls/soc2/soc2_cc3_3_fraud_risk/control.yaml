@@ -10,7 +10,7 @@ description: |
   rather than a document upload because the same risk-assessment PDF
   satisfies CC3.2.
 
-scf_anchor_id: RSK-04
+scf_anchor_id: RSK-13
 control_family: RSK
 implementation_type: manual_attested
 owner_role: ciso
