@@ -60,6 +60,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
@@ -106,8 +107,14 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 	// Caller's stable identity for both the SQL-layer row-visibility
 	// predicate AND the meta-audit row. Prefer the resolved user_id
 	// (slice-108 IssuedBy → UserID bridge); fall back to the credential
-	// id when no user row resolves (bootstrap-key shape).
+	// id when no user row resolves (bootstrap-key shape). A JWT session's
+	// "user:<uuid>" subject resolves to the bare uuid me_audit_log.user_id
+	// holds, so the caller's own me-rows match and the meta-audit row
+	// records the user rather than the nil uuid (#2239).
 	userIdentifier := cred.UserID
+	if u, ok := credstore.CallerUserID(cred); ok {
+		userIdentifier = u.String()
+	}
 	if userIdentifier == "" {
 		userIdentifier = cred.ID
 	}
