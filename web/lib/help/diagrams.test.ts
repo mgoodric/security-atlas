@@ -266,19 +266,19 @@ describe("assertSafeSvg", () => {
   });
 
   it.each([
-    ["a script", "<svg><script>alert(1)</script></svg>", /<script>/],
-    ["an event handler", '<svg onload="x()"></svg>', /event-handler/],
+    ["a script", "<svg><script>alert(1)</script></svg>", "<script>"],
+    ["an event handler", '<svg onload="x()"></svg>', "event-handler"],
     [
       "a javascript: link",
       '<svg><a href="javascript:x()"/></svg>',
-      /javascript/,
+      "javascript: URL",
     ],
     [
       "an external link",
       '<svg><a href="https://e.example"/></svg>',
-      /external/,
+      "external link",
     ],
-    ["HTML labels", "<svg><foreignObject/></svg>", /foreignObject/],
+    ["HTML labels", "<svg><foreignObject/></svg>", "<foreignObject>"],
   ])("refuses %s", (_, svg, why) => {
     expect(() => assertSafeSvg(svg)).toThrow(why);
   });
