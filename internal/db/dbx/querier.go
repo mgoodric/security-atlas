@@ -14,6 +14,10 @@ type Querier interface {
 	ActionPlanControlExists(ctx context.Context, arg ActionPlanControlExistsParams) (bool, error)
 	// AC-19: same cross-tenant deny for controls.
 	ActionPlanControlExistsInTenant(ctx context.Context, arg ActionPlanControlExistsInTenantParams) (bool, error)
+	// ===== #2109: verified from evidence =====
+	// A completed plan whose linked controls do not all pass their latest
+	// evaluation: the plan page's "Completed · linked controls still failing".
+	ActionPlanControlsFailing(ctx context.Context, arg ActionPlanControlsFailingParams) (bool, error)
 	// AC-10 tampering guard: owner_id must resolve to an active user in the
 	// caller's tenant (#2108: a disabled user cannot be handed a plan). RLS
 	// hides cross-tenant users.
@@ -3342,6 +3346,10 @@ type Querier interface {
 	// nothing; coverage joins controls to edges by anchor row, so leaving the
 	// control on the legacy row would drop it out of coverage.
 	RebindControlAnchorInPlace(ctx context.Context, arg RebindControlAnchorInPlaceParams) (int64, error)
+	// After a control's evaluation, inside the evaluation's transaction: the
+	// system moves completed <-> verified for the plans linked to it. The
+	// function reads the tenant from app.current_tenant and refuses without it.
+	ReconcileActionPlanVerification(ctx context.Context, controlID pgtype.UUID) (int32, error)
 	// Clears every member of a group (Replace `members`, or Delete soft-disable).
 	// Returns affected-row count.
 	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)

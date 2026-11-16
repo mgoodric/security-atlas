@@ -42,7 +42,12 @@ import {
   viewerCanVerify,
   type PlanTransition,
 } from "../lifecycle";
-import { dateLabel, statusLabel, statusPillClass } from "../status";
+import {
+  dateLabel,
+  planStatusLabel,
+  statusLabel,
+  statusPillClass,
+} from "../status";
 
 export default function ActionPlanDetailPage() {
   const params = useParams<{ id: string }>();
@@ -156,7 +161,7 @@ export default function ActionPlanDetailPage() {
             }
             data-testid="action-plan-detail-status"
           >
-            {statusLabel(plan.status)}
+            {planStatusLabel(plan.status, plan.controls_failing)}
           </span>
           <span className="text-xs text-muted-foreground">
             Due {dateLabel(plan.due_date)}
