@@ -5,7 +5,13 @@ import { redirect } from "next/navigation";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import {
+  devTokenFlagEnabled,
+  devTokenSignInAllowed,
+} from "@/lib/auth/dev-token-signin";
 import { localLoginBody } from "@/lib/auth/login-tenant";
+import { fetchInstallState } from "@/lib/auth/login.server";
+import { forwardedForHeaders } from "@/lib/client-ip";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 
@@ -35,11 +41,29 @@ import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 //   2. Happy-path redirect — the post-sign-in destination.
 //
 // Both call sites fall back to `/dashboard` on any non-safe target.
+//
+// #2062 — the action is the server-side gate for the developer token card:
+// it re-checks devTokenSignInAllowed on every call (install-state is read
+// fresh, never cached), so hiding the card is not the only defence. An
+// unreadable install-state refuses unless ATLAS_WEB_DEV_TOKEN_SIGNIN=true.
 export async function signIn(formData: FormData): Promise<void> {
   const token = String(formData.get("token") ?? "").trim();
   const target = safeRedirectTarget(
     String(formData.get("from") ?? "/dashboard"),
   );
+
+  const flagEnabled = devTokenFlagEnabled(process.env);
+  if (
+    !devTokenSignInAllowed(
+      flagEnabled,
+      flagEnabled ? null : await fetchInstallState(),
+    )
+  ) {
+    redirect(
+      `/login?error=${encodeURIComponent("token sign-in is not enabled")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
 
   if (!token) {
     redirect(
@@ -112,11 +136,18 @@ export async function signInLocal(formData: FormData): Promise<void> {
     );
   }
 
+  // #2040 — forward the browser's IP, derived from this server's own
+  // trusted chain (lib/client-ip.ts), so the API's per-IP login bucket
+  // is per browser rather than one bucket for the whole BFF.
+  const reqHeaders = await headers();
   let response: Response;
   try {
     response = await fetch(`${apiBaseURL()}/auth/local/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...forwardedForHeaders(reqHeaders),
+      },
       body: JSON.stringify(localLoginBody(tenantID, email, password)),
     });
   } catch {
@@ -171,7 +202,6 @@ export async function signInLocal(formData: FormData): Promise<void> {
   }
 
   const jar = await cookies();
-  const reqHeaders = await headers();
   jar.set(ATLAS_JWT_COOKIE, body.token, {
     httpOnly: true,
     sameSite: "lax",

@@ -25,8 +25,8 @@
 // Backend: slice 268's unified `GET /v1/search` endpoint (merged on
 // main at d9d8e69b). Wire shape:
 //
-//   IN:  ?q=<query>&types=controls,risks,evidence&limit=N
-//   OUT: { hits: [...], count: N, partial_types: [...] }
+//   IN:  ?q=<query>&types=controls,risks,policies,evidence,anchors&limit=N
+//   OUT: { hits: [...], count: N, groups: [{type, count}], partial_types: [...] }
 //
 // Slice 398b (OE-466) — reconciled against the contract slice 398a
 // (OE-465) pinned in `docs/openapi.yaml` (`get-v1-search`): `q` is
@@ -68,12 +68,20 @@
 //     risks → /risks/hierarchy?focus=<id>, evidence → /evidence).
 //   * Arrow keys move selection; Enter follows the active link; Esc
 //     closes the popover.
+//   * #2213 — below `lg` (1,024px) the input is folded behind a search
+//     icon button so the top bar fits a phone or a 768px tablet. The
+//     button (or ⌘K) reveals the input as a full-width row under the
+//     bar; Esc or an outside click folds it again and returns focus to
+//     the button. From `lg` up nothing changes: the input is always
+//     visible and the button is not rendered.
 
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+import { cn } from "@/lib/utils";
 
 const DEBOUNCE_MS = 250; // AC-6
 
@@ -98,13 +106,13 @@ export const SEARCH_MAX_LIMIT = 50;
  * when slice 661 added the `anchors` group and left the multiplier at
  * three, asking for 36 merged hits while the comment claimed 48.
  */
-const PER_TYPE_TARGET = 12;
+const PER_TYPE_TARGET = 10;
 
 // SearchHitType is the discriminator union. Slice 661 added `anchors` —
 // the bundled SCF anchor catalog — so an empty tenant (zero instantiated
 // controls) can still find controls by their SCF code (CRY-04) or name
-// (encryption). See web/app/api/search/route.ts.
-type SearchHitType = "anchors" | "controls" | "risks" | "evidence";
+// (encryption). #2067 added `policies`. See web/app/api/search/route.ts.
+type SearchHitType = "controls" | "risks" | "policies" | "evidence" | "anchors";
 
 interface SearchHit {
   id: string;
@@ -114,31 +122,35 @@ interface SearchHit {
   relevance_score: number;
 }
 
+/** One type's full match count (#2067). May exceed the rows returned. */
+interface SearchGroupCount {
+  type: string;
+  count: number;
+}
+
 interface SearchResponse {
   hits?: SearchHit[];
   count?: number;
+  groups?: SearchGroupCount[];
   partial_types?: string[];
 }
 
-interface Grouped {
-  anchors: SearchHit[];
-  controls: SearchHit[];
-  risks: SearchHit[];
-  evidence: SearchHit[];
-}
+type Grouped = Record<SearchHitType, SearchHit[]>;
 
 /**
  * GROUP_ORDER is the canonical render + arrow-navigation order for the
- * grouped popover. Anchors render first so an empty tenant's
- * SCF-catalog matches (the slice 661 fix) are the most prominent group.
- * The flat navigation order and the JSX both consume this single source
- * of truth so they can never drift.
+ * grouped popover, and the order the upstream returns hits in (#2067):
+ * the organisation's own records first, the bundled SCF catalog last,
+ * so a common word never lists catalog anchors above the tenant's own
+ * controls. The flat navigation order and the JSX both consume this
+ * single source of truth so they can never drift.
  */
 export const GROUP_ORDER: readonly SearchHitType[] = [
-  "anchors",
   "controls",
   "risks",
+  "policies",
   "evidence",
+  "anchors",
 ] as const;
 
 /**
@@ -179,16 +191,49 @@ export function buildSearchRequestURL(rawQuery: string): string {
 }
 
 /**
+ * buildShowAllURL returns the BFF URL that fetches one group on its own
+ * (#2067 "show all"): the same query narrowed to `type`, at the
+ * contract's hard ceiling. Pure; exported for unit coverage.
+ */
+export function buildShowAllURL(rawQuery: string, type: SearchHitType): string {
+  const trimmed = rawQuery.trim();
+  return `/api/search?q=${encodeURIComponent(
+    trimmed,
+  )}&types=${type}&limit=${SEARCH_MAX_LIMIT}`;
+}
+
+/**
  * groupByType partitions a hits array by their `type` field. Pure;
  * exported for unit coverage.
  */
 export function groupByType(hits: SearchHit[]): Grouped {
-  const out: Grouped = { anchors: [], controls: [], risks: [], evidence: [] };
+  const out: Grouped = {
+    controls: [],
+    risks: [],
+    policies: [],
+    evidence: [],
+    anchors: [],
+  };
   for (const h of hits) {
-    if (h.type === "anchors") out.anchors.push(h);
-    else if (h.type === "controls") out.controls.push(h);
-    else if (h.type === "risks") out.risks.push(h);
-    else if (h.type === "evidence") out.evidence.push(h);
+    out[h.type]?.push(h);
+  }
+  return out;
+}
+
+/**
+ * groupCounts maps each type to its full match count (#2067). A type the
+ * response's `groups` array does not mention falls back to the number of
+ * rows it returned, so an older payload still renders a count. Pure;
+ * exported for unit coverage.
+ */
+export function groupCounts(
+  groups: SearchGroupCount[] | undefined,
+  grouped: Grouped,
+): Record<SearchHitType, number> {
+  const out = {} as Record<SearchHitType, number>;
+  for (const t of GROUP_ORDER) {
+    const reported = groups?.find((g) => g.type === t)?.count;
+    out[t] = Math.max(reported ?? 0, grouped[t].length);
   }
   return out;
 }
@@ -213,6 +258,10 @@ export function hrefForHit(hit: SearchHit): string {
       return `/controls/${encodeURIComponent(hit.id)}`;
     case "risks":
       return `/risks/hierarchy?focus=${encodeURIComponent(hit.id)}`;
+    case "policies":
+      // #2067 — the policy hit id is that version's row id, which the
+      // /policies/[id] detail page reads directly.
+      return `/policies/${encodeURIComponent(hit.id)}`;
     case "evidence":
       return `/evidence`;
   }
@@ -275,18 +324,34 @@ export function GlobalSearch() {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
+  // #2067 — per-type full match counts from the response's `groups`,
+  // and the groups the operator expanded with "show all" (that type's
+  // rows fetched on their own, replacing the shared-limit preview).
+  const [reportedGroups, setReportedGroups] = useState<SearchGroupCount[]>([]);
+  const [expanded, setExpanded] = useState<Partial<Grouped>>({});
   const [partialTypes, setPartialTypes] = useState<string[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  // #2213 — whether the input is unfolded below `lg`. Ignored from `lg`
+  // up, where the input is always shown.
+  const [revealed, setRevealed] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus the input once the unfolded row has rendered. It is
+  // `display:none` until then, so focusing in the click handler is lost.
+  useEffect(() => {
+    if (revealed) inputRef.current?.focus();
+  }, [revealed]);
 
   // ⌘K / Ctrl+K global focus shortcut.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isShortcutTrigger(e)) {
         e.preventDefault();
+        setRevealed(true);
         inputRef.current?.focus();
         inputRef.current?.select();
         setOpen(true);
@@ -302,7 +367,10 @@ export function GlobalSearch() {
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+      if (!containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setRevealed(false);
+      }
     };
     document.addEventListener("mousedown", onDown);
     return () => {
@@ -327,6 +395,8 @@ export function GlobalSearch() {
       const microTimer = setTimeout(() => {
         if (cancelled) return;
         setResults([]);
+        setReportedGroups([]);
+        setExpanded({});
         setPartialTypes([]);
         setLoading(false);
       }, 0);
@@ -357,6 +427,8 @@ export function GlobalSearch() {
         const data = (await resp.json()) as SearchResponse;
         if (cancelled) return;
         setResults(Array.isArray(data?.hits) ? data.hits : []);
+        setReportedGroups(Array.isArray(data?.groups) ? data.groups : []);
+        setExpanded({});
         setPartialTypes(
           Array.isArray(data?.partial_types) ? data.partial_types : [],
         );
@@ -377,7 +449,42 @@ export function GlobalSearch() {
     };
   }, [query]);
 
-  const grouped = useMemo(() => groupByType(results), [results]);
+  const previewGrouped = useMemo(() => groupByType(results), [results]);
+  const counts = useMemo(
+    () => groupCounts(reportedGroups, previewGrouped),
+    [reportedGroups, previewGrouped],
+  );
+  // The rows each group renders: the shared-limit preview, or the
+  // type's own fetch once the operator chose "show all".
+  const grouped = useMemo<Grouped>(
+    () => ({ ...previewGrouped, ...expanded }),
+    [previewGrouped, expanded],
+  );
+
+  // #2067 "show all": fetch this one type at the contract's ceiling and
+  // render every row it returns in place of the preview.
+  const showAll = useCallback(
+    async (type: SearchHitType) => {
+      const trimmed = query.trim();
+      try {
+        const resp = await fetch(buildShowAllURL(trimmed, type), {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as SearchResponse;
+        if (query.trim() !== trimmed) return;
+        const rows = groupByType(Array.isArray(data?.hits) ? data.hits : [])[
+          type
+        ];
+        setExpanded((prev) => ({ ...prev, [type]: rows }));
+        inputRef.current?.focus();
+      } catch {
+        // Keep the preview; the group still shows its count.
+      }
+    },
+    [query],
+  );
 
   // Flattened list in render order — the same order the UI lists,
   // used for arrow-key navigation. Stays in lockstep with the JSX
@@ -391,7 +498,15 @@ export function GlobalSearch() {
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Escape") {
         setOpen(false);
-        inputRef.current?.blur();
+        // Below `lg` the input folds away again; hand focus back to the
+        // button that unfolded it. From `lg` up the button is hidden, so
+        // the input just blurs as before.
+        if (revealed && toggleRef.current?.offsetParent) {
+          toggleRef.current.focus();
+        } else {
+          inputRef.current?.blur();
+        }
+        setRevealed(false);
         return;
       }
       if (e.key === "ArrowDown") {
@@ -413,11 +528,12 @@ export function GlobalSearch() {
         if (!hit) return;
         const href = hrefForHit(hit);
         setOpen(false);
+        setRevealed(false);
         setQuery("");
         router.push(href);
       }
     },
-    [activeIndex, flatHits, router],
+    [activeIndex, flatHits, revealed, router],
   );
 
   // Stable flat index for each (type, idx-within-type) tuple so we
@@ -447,37 +563,70 @@ export function GlobalSearch() {
 
   return (
     <div ref={containerRef} data-testid="global-search" className="relative">
-      <div className="relative">
-        <SearchIcon />
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Search controls, evidence, risks…"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
+      <button
+        ref={toggleRef}
+        type="button"
+        data-testid="global-search-toggle"
+        aria-label="Search"
+        aria-expanded={revealed}
+        onClick={() => {
+          if (revealed) {
+            setRevealed(false);
+            setOpen(false);
+          } else {
+            setRevealed(true);
             setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={onKeyDown}
-          data-testid="global-search-input"
-          aria-label="Global search"
-          role="combobox"
-          aria-haspopup="listbox"
-          aria-expanded={showPopover}
-          aria-controls={LISTBOX_ID}
-          aria-activedescendant={activeOptionId || undefined}
-          aria-autocomplete="list"
-          className="pl-8 pr-12 py-1.5 w-64 text-sm bg-muted/40 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background"
-        />
-        <kbd
-          aria-hidden
-          className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground bg-background border border-border px-1 rounded"
-        >
-          ⌘K
-        </kbd>
-      </div>
+          }
+        }}
+        className="lg:hidden inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <SearchIcon className="h-4 w-4 text-muted-foreground" />
+      </button>
       {/*
+        #2213 — below `lg` this row is hidden until the button above
+        unfolds it, then it spans the viewport under the 56px top bar.
+        From `lg` up it is the inline input it always was.
+      */}
+      <div
+        data-testid="global-search-field"
+        className={cn(
+          "lg:static lg:block lg:border-0 lg:bg-transparent lg:p-0",
+          revealed
+            ? "fixed inset-x-0 top-14 z-40 border-b bg-background p-3"
+            : "hidden",
+        )}
+      >
+        <div className="relative">
+          <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search controls, evidence, risks…"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={onKeyDown}
+            data-testid="global-search-input"
+            aria-label="Global search"
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded={showPopover}
+            aria-controls={LISTBOX_ID}
+            aria-activedescendant={activeOptionId || undefined}
+            aria-autocomplete="list"
+            className="pl-8 pr-12 py-1.5 w-full lg:w-64 text-sm bg-muted/40 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background"
+          />
+          <kbd
+            aria-hidden
+            className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground bg-background border border-border px-1 rounded"
+          >
+            ⌘K
+          </kbd>
+        </div>
+        {/*
         Slice 361 — visually-hidden aria-live=polite region announcing
         the result count whenever it updates. Only mounted when the
         popover is open + not in the loading flash; otherwise an SR
@@ -485,65 +634,69 @@ export function GlobalSearch() {
         OUTSIDE the popover so SR users hear the count without having
         to focus into the listbox. WCAG 4.1.3 Status Messages.
       */}
-      {showPopover && !loading ? (
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          data-testid="global-search-live-region"
-          className="sr-only"
-        >
-          {resultCountAnnouncement(flatHits.length)}
-        </div>
-      ) : null}
-      {showPopover ? (
-        <div
-          id={LISTBOX_ID}
-          role="listbox"
-          aria-label="Search results"
-          data-testid="global-search-popover"
-          className="absolute right-0 top-full mt-1 w-96 max-h-96 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg z-50"
-        >
-          {loading ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
-              Searching…
-            </div>
-          ) : flatHits.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
-              No matches
-            </div>
-          ) : (
-            <>
-              {GROUP_ORDER.map((type) => {
-                const rows = grouped[type];
-                if (rows.length === 0) return null;
-                return (
-                  <ResultGroup
-                    key={type}
-                    type={type}
-                    rows={rows}
-                    activeIndex={activeIndex}
-                    flatIndexFor={(idx) => flatIndexFor(type, idx)}
-                    onRowClick={() => {
-                      setOpen(false);
-                      setQuery("");
-                    }}
-                  />
-                );
-              })}
-              {partialTypes.length > 0 ? (
-                <div
-                  data-testid="global-search-partial"
-                  className="px-3 py-2 text-[10px] text-muted-foreground border-t border-border"
-                >
-                  Some result types are hidden by your role:{" "}
-                  {partialTypes.join(", ")}
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-      ) : null}
+        {showPopover && !loading ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            data-testid="global-search-live-region"
+            className="sr-only"
+          >
+            {resultCountAnnouncement(flatHits.length)}
+          </div>
+        ) : null}
+        {showPopover ? (
+          <div
+            id={LISTBOX_ID}
+            role="listbox"
+            aria-label="Search results"
+            data-testid="global-search-popover"
+            className="absolute right-0 top-full mt-1 w-96 max-w-[calc(100vw-1rem)] max-h-96 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg z-50"
+          >
+            {loading ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                Searching…
+              </div>
+            ) : flatHits.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                No matches
+              </div>
+            ) : (
+              <>
+                {GROUP_ORDER.map((type) => {
+                  const rows = grouped[type];
+                  if (rows.length === 0) return null;
+                  return (
+                    <ResultGroup
+                      key={type}
+                      type={type}
+                      rows={rows}
+                      total={counts[type]}
+                      onShowAll={() => void showAll(type)}
+                      activeIndex={activeIndex}
+                      flatIndexFor={(idx) => flatIndexFor(type, idx)}
+                      onRowClick={() => {
+                        setOpen(false);
+                        setRevealed(false);
+                        setQuery("");
+                      }}
+                    />
+                  );
+                })}
+                {partialTypes.length > 0 ? (
+                  <div
+                    data-testid="global-search-partial"
+                    className="px-3 py-2 text-[10px] text-muted-foreground border-t border-border"
+                  >
+                    Some result types are hidden by your role:{" "}
+                    {partialTypes.join(", ")}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -551,6 +704,9 @@ export function GlobalSearch() {
 interface ResultGroupProps {
   type: SearchHitType;
   rows: SearchHit[];
+  /** Every match of this type the caller can see (#2067). */
+  total: number;
+  onShowAll: () => void;
   activeIndex: number;
   flatIndexFor: (idx: number) => number;
   onRowClick: () => void;
@@ -559,17 +715,41 @@ interface ResultGroupProps {
 function ResultGroup({
   type,
   rows,
+  total,
+  onShowAll,
   activeIndex,
   flatIndexFor,
   onRowClick,
 }: ResultGroupProps) {
+  // "Show all" while the group renders fewer rows than it matched and
+  // has not yet been expanded to the contract's ceiling.
+  const canShowAll = total > rows.length && rows.length < SEARCH_MAX_LIMIT;
   return (
     <div
       data-testid={`global-search-group-${type}`}
       className="border-b border-border last:border-b-0"
     >
-      <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-        {GROUP_LABELS[type]}
+      <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span>
+          {GROUP_LABELS[type]}{" "}
+          <span
+            data-testid={`global-search-group-count-${type}`}
+            className="ml-1 rounded bg-muted px-1 font-mono normal-case tabular-nums"
+            aria-label={`${total} ${total === 1 ? "match" : "matches"}`}
+          >
+            {total}
+          </span>
+        </span>
+        {canShowAll ? (
+          <button
+            type="button"
+            data-testid={`global-search-show-all-${type}`}
+            onClick={onShowAll}
+            className="normal-case tracking-normal text-primary hover:underline"
+          >
+            Show all {total}
+          </button>
+        ) : null}
       </div>
       <ul className="pb-1">
         {rows.map((hit, idx) => {
@@ -609,16 +789,17 @@ function ResultGroup({
 }
 
 const GROUP_LABELS: Record<SearchHitType, string> = {
-  anchors: "SCF anchors",
   controls: "Controls",
   risks: "Risks",
+  policies: "Policies",
   evidence: "Evidence",
+  anchors: "SCF anchors",
 };
 
-function SearchIcon() {
+function SearchIcon({ className }: { className: string }) {
   return (
     <svg
-      className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground"
+      className={className}
       viewBox="0 0 20 20"
       fill="currentColor"
       aria-hidden

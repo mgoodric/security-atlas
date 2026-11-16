@@ -8,6 +8,7 @@ package anchors
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/catalog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -314,19 +316,31 @@ func includesState(r *http.Request) bool {
 }
 
 // getAnchor returns one anchor. `:id` may be a UUID or an scf_id
-// (e.g., "IAC-06"); scf_id resolves against the current SCF version.
+// (e.g., "IAC-37").
+//
+// #1770: `?scf_release=<label>` resolves the scf_id within that SCF
+// release; without it the scf_id resolves in the current release (a UUID
+// resolves in whichever release holds it). The response's `scf_release`
+// names the release the anchor was read from. An unknown release and a
+// code missing from the release are both 404, with messages naming which.
 func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	anchor, ok, err := h.lookupAnchor(r.Context(), id)
-	if err != nil {
+	row, rel, err := scfrelease.Resolve(r.Context(), h.q, r.URL.Query().Get("scf_release"), id)
+	switch {
+	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrCodeNotInRelease):
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	case errors.Is(err, scfrelease.ErrNoCurrentRelease):
+		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
+		return
+	case err != nil:
 		httperr.WriteInternal(w, r, "lookup anchor", err)
 		return
 	}
-	if !ok {
-		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
-		return
-	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchor": anchor})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"anchor":      anchorWireFromRow(row),
+		"scf_release": rel.Version,
+	})
 }
 
 // listFrameworks returns the framework catalog (global only).
@@ -419,6 +433,8 @@ func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) 
 			Code:  req.Code,
 			Title: req.Title,
 			Body:  req.Body,
+
+			PointsOfFocus: pointsOfFocusWire(req.PointsOfFocus),
 		},
 		"anchors": out,
 	})
@@ -467,27 +483,6 @@ func (h *Handler) lookupRequirement(ctx context.Context, idOrCode string) (dbx.F
 	return row, err == nil, err
 }
 
-func (h *Handler) lookupAnchor(ctx context.Context, idOrSCFID string) (anchorWire, bool, error) {
-	if uid, err := uuid.Parse(idOrSCFID); err == nil {
-		row, err := h.q.GetSCFAnchorByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return anchorWire{}, false, nil
-		}
-		if err != nil {
-			return anchorWire{}, false, err
-		}
-		return anchorWireFromRow(row), true, nil
-	}
-	row, err := h.q.GetSCFAnchorBySCFID(ctx, idOrSCFID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return anchorWire{}, false, nil
-	}
-	if err != nil {
-		return anchorWire{}, false, err
-	}
-	return anchorWireFromRow(row), true, nil
-}
-
 func (h *Handler) pagination(r *http.Request) (int32, int32) {
 	limit := h.defaultLimit
 	offset := int32(0)
@@ -515,6 +510,9 @@ type anchorWire struct {
 	Family      string `json:"family"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// LegacySCFID is the anchor's code in the previous SCF release
+	// (#1769); absent when the imported catalog did not give one.
+	LegacySCFID *string `json:"legacy_scf_id,omitempty"`
 }
 
 type frameworkWire struct {
@@ -538,6 +536,21 @@ type requirementWire struct {
 	Code  string `json:"code"`
 	Title string `json:"title"`
 	Body  string `json:"body,omitempty"`
+	// PointsOfFocus is the requirement's rolled-up SOC 2 points of focus
+	// (#1731): [{code, scf_anchors[]}]. Omitted when there are none, so the
+	// requirement object keeps its all-string shape for every other
+	// framework. Metadata only; points of focus are never requirements.
+	PointsOfFocus json.RawMessage `json:"points_of_focus,omitempty"`
+}
+
+// pointsOfFocusWire passes the stored points_of_focus JSONB through, or nil
+// (omitted) when the requirement has none.
+func pointsOfFocusWire(stored []byte) json.RawMessage {
+	var pofs []json.RawMessage
+	if err := json.Unmarshal(stored, &pofs); err != nil || len(pofs) == 0 {
+		return nil
+	}
+	return json.RawMessage(stored)
 }
 
 // requirementEdgeWire is one row of "anchors for a requirement" — the
@@ -713,6 +726,7 @@ func latestRowsToStateWire(rows []dbx.ListSCFAnchorsLatestWithStateRow) []anchor
 				Family:      r.Family,
 				Name:        r.Title,
 				Description: r.Description,
+				LegacySCFID: r.LegacyScfID,
 			},
 			State:      anchorStateWireFrom(latestStateRow{r: r}),
 			Frameworks: frameworksWire(r.FrameworkSlugs),
@@ -737,6 +751,7 @@ func forVersionRowsToStateWire(rows []dbx.ListSCFAnchorsForVersionWithStateRow) 
 				Family:      r.Family,
 				Name:        r.Title,
 				Description: r.Description,
+				LegacySCFID: r.LegacyScfID,
 			},
 			State:      anchorStateWireFrom(forVersionStateRow{r: r}),
 			Frameworks: frameworksWire(r.FrameworkSlugs),
@@ -770,6 +785,7 @@ func anchorWireFromRow[R anchorRow](r R) anchorWire {
 		Family:      a.Family,
 		Name:        a.Title,
 		Description: a.Description,
+		LegacySCFID: a.LegacyScfID,
 	}
 }
 

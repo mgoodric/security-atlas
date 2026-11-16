@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 	"github.com/mgoodric/security-atlas/internal/controlimport"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -68,6 +69,7 @@ func newControlsImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&framework, "framework", "", "slug of the framework the tested-under codes belong to (e.g. soc2)")
 	cmd.Flags().StringArrayVar(&columnMap, "column-map", nil, "field=Header override of header detection; repeatable")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the API response as JSON")
+	cmd.AddCommand(newControlsImportShowCmd(), newControlsImportApproveCmd(), newControlsImportRejectCmd(), newControlsImportApproveClearCmd(), newControlsImportExportCmd())
 	return cmd
 }
 
@@ -107,7 +109,10 @@ func uploadControlImport(path, framework string, columnMap []string) (controlimp
 	req.Header.Set("Content-Type", mp.FormDataContentType())
 	req.Header.Set(sdk.MetadataAuthorization, sdk.BearerPrefix+common.token)
 
-	client := &http.Client{Timeout: 2 * time.Minute}
+	// #2257: Guard refuses plain http:// to a non-loopback endpoint. It wraps
+	// the default transport, not cmdhttp.Client, to keep this upload free of
+	// that client's 20s response-header timeout.
+	client := &http.Client{Timeout: 2 * time.Minute, Transport: cmdhttp.Guard(nil)}
 	resp, err := client.Do(req)
 	if err != nil {
 		return controlimport.Batch{}, nil, fmt.Errorf("upload: %w", err)

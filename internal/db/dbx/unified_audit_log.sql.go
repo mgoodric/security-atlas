@@ -186,6 +186,58 @@ WITH unified AS (
         (to_jsonb(fs) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'framework_scope_id' - 'subject_module')::jsonb AS payload_json
     FROM framework_scope_workflow_log fs
+
+    UNION ALL
+
+    -- 11. taxonomy_audit_log (#1810)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'taxonomy'::text AS kind,
+        subject_kind   AS target_type,
+        subject_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(tx) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'subject_id' - 'subject_kind' - 'subject_module')::jsonb AS payload_json
+    FROM taxonomy_audit_log tx
+
+    UNION ALL
+
+    -- 12. fw_to_scf_overlay_edge_audit_log (#1797)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'mapping_overlay'::text AS kind,
+        'overlay_edge'::text AS target_type,
+        overlay_edge_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ov) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'overlay_edge_id' - 'subject_module')::jsonb AS payload_json
+    FROM fw_to_scf_overlay_edge_audit_log ov
+
+    UNION ALL
+
+    -- 13. control_import_audit_log (#1782): import approvals, rejections
+    -- and duplicates, one per staged row decided.
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'control_import'::text AS kind,
+        'control_import_row'::text AS target_type,
+        row_id::text   AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ci) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'row_id' - 'subject_module')::jsonb AS payload_json
+    FROM control_import_audit_log ci
 )
 SELECT
     unified.occurred_at,

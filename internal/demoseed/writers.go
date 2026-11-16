@@ -11,6 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 // writeTenantRow inserts the demo tenant row into `tenants`. Pattern
@@ -24,29 +27,51 @@ func writeTenantRow(ctx context.Context, tx pgx.Tx, t tenantRow, actorUserID uui
 	if err != nil {
 		return fmt.Errorf("demoseed: insert tenant: %w", err)
 	}
+	// The tenant's seven seeded risk categories (#1809).
+	if _, err := tx.Exec(ctx, `SELECT seed_risk_categories($1)`, t.ID); err != nil {
+		return fmt.Errorf("demoseed: seed risk categories: %w", err)
+	}
 	return nil
 }
 
 // writeScopeDimensionAndCell inserts the default `environment`
 // dimension + "All" cell. Mirrors the admintenants Create path.
 func writeScopeDimensionAndCell(ctx context.Context, tx pgx.Tx, fs *fixtureSet) error {
+	if err := writeScopeDimension(ctx, tx, fs.tenant.ID, fs.scope.DimensionID); err != nil {
+		return err
+	}
+	return writeScopeCell(ctx, tx, fs.tenant.ID, fs.scope.CellID)
+}
+
+// prodScopeCellHash is the dimensions_hash of the {"environment":"prod"}
+// cell, matching deploy/docker/bootstrap/seed.sql.
+func prodScopeCellHash() string {
+	hash := sha256.Sum256([]byte(`{"environment":"prod"}`))
+	return hex.EncodeToString(hash[:])
+}
+
+// writeScopeDimension inserts the built-in `environment` dimension.
+func writeScopeDimension(ctx context.Context, tx pgx.Tx, tenantID, dimensionID uuid.UUID) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO scope_dimensions
 		 (id, tenant_id, name, value_type, allowed_values, is_required, is_builtin)
 		 VALUES ($1, $2, 'environment', 'string', $3::jsonb, FALSE, TRUE)`,
-		fs.scope.DimensionID, fs.tenant.ID,
+		dimensionID, tenantID,
 		`["prod", "staging", "dev"]`,
 	); err != nil {
 		return fmt.Errorf("demoseed: insert scope_dimension: %w", err)
 	}
-	dimensions := `{"environment":"prod"}`
-	hash := sha256.Sum256([]byte(dimensions))
+	return nil
+}
+
+// writeScopeCell inserts the "All" {"environment":"prod"} scope cell.
+func writeScopeCell(ctx context.Context, tx pgx.Tx, tenantID, cellID uuid.UUID) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO scope_cells
 		 (id, tenant_id, label, dimensions, dimensions_hash)
 		 VALUES ($1, $2, $3, $4::jsonb, $5)`,
-		fs.scope.CellID, fs.tenant.ID, "All",
-		`{"environment": "prod"}`, hex.EncodeToString(hash[:]),
+		cellID, tenantID, "All",
+		`{"environment": "prod"}`, prodScopeCellHash(),
 	); err != nil {
 		return fmt.Errorf("demoseed: insert scope_cell: %w", err)
 	}
@@ -87,9 +112,11 @@ func writeUserAndCreds(ctx context.Context, tx pgx.Tx, u userRow, passwordHash s
 // or 'demo_seed_teardown'). The payload_json carries the slice-205
 // forensic mark (`demo_seed_v`).
 //
-// If actorTenantID is uuid.Nil (CLI-direct invocation without a
-// session-tenant context), the me_audit_log row anchors to the demo
-// tenant instead so the row is still tagged for forensic filtering.
+// The me_audit_log row always anchors to demoTenantID, the tenant the seed
+// wrote into, never to the actor's tenant (#2043). That row is the mark
+// tenantWasSeeded reads, so anchoring it to the actor's tenant made the
+// clicking admin's real organisation look like a demo tenant. The actor stays
+// on record in the super_admin_audit_log row.
 func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 	actorUserID uuid.UUID, actorTenantID uuid.UUID, demoTenantID uuid.UUID,
 	payload map[string]any,
@@ -98,6 +125,28 @@ func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 	if err != nil {
 		return fmt.Errorf("demoseed: marshal audit payload: %w", err)
 	}
+	if err := writeSuperAdminAuditRow(ctx, tx, action, actorUserID, actorTenantID, demoTenantID, payloadBytes); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO me_audit_log (tenant_id, user_id, action, before, after)
+		 VALUES ($1, $2, $3, '{}'::jsonb, $4::jsonb)`,
+		demoTenantID, nonZeroOrSelf(actorUserID), action, payloadBytes,
+	); err != nil {
+		return fmt.Errorf("demoseed: insert me_audit_log: %w", err)
+	}
+	return nil
+}
+
+// writeSuperAdminAuditRow writes the super_admin_audit_log half of
+// writeAuditLogRow: the install-wide record of who ran the seed or teardown.
+// actor_tenant_id is the actor's tenant, or demoTenantID when the actor has
+// none (the column is NOT NULL). assertFreshDemoTenant reads the
+// demo_seed_apply row written here.
+func writeSuperAdminAuditRow(ctx context.Context, tx pgx.Tx, action string,
+	actorUserID uuid.UUID, actorTenantID uuid.UUID, demoTenantID uuid.UUID,
+	payloadBytes []byte,
+) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO super_admin_audit_log
 		 (action, target_user_id, actor_user_id, actor_tenant_id, payload_json)
@@ -109,17 +158,6 @@ func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 		payloadBytes,
 	); err != nil {
 		return fmt.Errorf("demoseed: insert super_admin_audit_log: %w", err)
-	}
-	tenantForMe := actorTenantID
-	if tenantForMe == uuid.Nil {
-		tenantForMe = demoTenantID
-	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO me_audit_log (tenant_id, user_id, action, before, after)
-		 VALUES ($1, $2, $3, '{}'::jsonb, $4::jsonb)`,
-		tenantForMe, nonZeroOrSelf(actorUserID), action, payloadBytes,
-	); err != nil {
-		return fmt.Errorf("demoseed: insert me_audit_log: %w", err)
 	}
 	return nil
 }
@@ -160,6 +198,12 @@ func writeControls(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) 
 
 // writeRisks bulk-inserts the risks fixture set + their risk_control_links.
 func writeRisks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
+	// An in-place seed writes into an existing tenant, which may predate its
+	// categories. Seeding them is idempotent, and the category_id lookup
+	// below needs them.
+	if _, err := tx.Exec(ctx, `SELECT seed_risk_categories($1)`, fs.tenant.ID); err != nil {
+		return 0, fmt.Errorf("demoseed: seed risk categories: %w", err)
+	}
 	for _, r := range fs.risks {
 		// org_unit_id + themes are slice-052 columns the slice-678 seed
 		// populates so /risks/hierarchy renders (org tree needs the
@@ -167,14 +211,19 @@ func writeRisks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
 		// non-NULL org_unit_id AND a non-empty themes array). org_unit_id
 		// is nil-safe: nullableUUID passes NULL when the org tree is empty.
 		if _, err := tx.Exec(ctx,
+			// category_id is the tenant's own category, looked up by slug
+			// (#1816). The enum is still dual-written until the contract
+			// step drops it; the sync trigger rejects a mismatched pair.
 			`INSERT INTO risks
-			 (id, tenant_id, title, description, category, treatment, treatment_owner,
+			 (id, tenant_id, title, description, category, category_id, treatment, treatment_owner,
 			  inherent_score, residual_score, review_due_at, org_unit_id, themes)
-			 VALUES ($1, $2, $3, $4, $5::risk_category, $6::risk_treatment, $7, $8::jsonb, $9::jsonb, $10, $11, $12)`,
+			 VALUES ($1, $2, $3, $4, $5::risk_category,
+			         (SELECT id FROM org_risk_categories WHERE tenant_id = $2 AND slug = $13),
+			         $6::risk_treatment, $7, $8::jsonb, $9::jsonb, $10, $11, $12)`,
 			r.ID, fs.tenant.ID, r.Title, r.Description,
 			r.Category, r.Treatment, r.TreatmentOwner,
 			r.InherentScoreJ, r.ResidualScoreJ, r.ReviewDueAt,
-			nullableUUID(r.OrgUnitID), r.Themes,
+			nullableUUID(r.OrgUnitID), r.Themes, r.Category,
 		); err != nil {
 			return 0, fmt.Errorf("demoseed: insert risk %s: %w", r.Title, err)
 		}
@@ -607,17 +656,24 @@ type demoSCFAnchor struct {
 	Title  string
 }
 
+// DemoSCFRelease is the SCF release the demoSCFAnchors codes are drawn
+// from. The spine adopts global anchors from this release, or from the
+// current one while it is not loaded (#1772); every code below is in SCF
+// 2026.3 (the release pinned in
+// internal/api/scfseed/testdata/scf-pin.json).
+const DemoSCFRelease = "2026.3"
+
 // demoSCFAnchors is the fixed thin-slice SCF anchor set the self-contained
 // spine branch synthesizes. The codes/families are drawn verbatim from the
 // SCF catalog (securecontrolsframework.com) so anchoring to them is anchoring
 // to real SCF controls, not fabricated ones.
 var demoSCFAnchors = []demoSCFAnchor{
-	{"IAC-06", "Identification & Authentication", "Multi-Factor Authentication"},
+	{"IAC-37", "Identification & Authentication", "Multi-Factor Authentication"},
 	{"CRY-05", "Cryptographic Protections", "Encryption of Data at Rest"},
-	{"BCD-11", "Business Continuity & Disaster Recovery", "Data Backups"},
+	{"BCD-24", "Business Continuity & Disaster Recovery", "Data Backups"},
 	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
-	{"TPM-03", "Third-Party Management", "Supply Chain Risk Management"},
-	{"MON-01", "Continuous Monitoring", "Continuous Monitoring"},
+	{"TPM-04", "Third-Party Management", "Supply Chain Risk Management (SCRM)"},
+	{"MON-02", "Continuous Monitoring", "Continuous Monitoring"},
 	{"VPM-02", "Vulnerability & Patch Management", "Vulnerability Remediation"},
 	{"IRO-04", "Incident Response", "Incident Handling"},
 }
@@ -640,9 +696,11 @@ var demoSCFAnchors = []demoSCFAnchor{
 // (tenant_id IS NULL framework_versions + scf_anchors) is NOT loaded — that
 // is the state of the CI integration DB and of a fresh self-host before any
 // catalog import. So the seed is SELF-CONTAINED: it builds the whole spine on
-// a tenant-scoped demo framework_version. When the global SCF catalog IS
-// present, the seed ADOPTS its real anchors (same scf_id codes resolve to the
-// global rows) rather than duplicating them; the demo requirements + edges
+// a tenant-scoped demo framework_version. When an SCF release is loaded,
+// the seed ADOPTS its real anchors: the release the slice declares
+// (scfRelease, DemoSCFRelease outside tests), else the current one, and
+// every code resolves in that one release (#1772). It never duplicates
+// them; the demo requirements + edges
 // still hang off the tenant-scoped demo framework_version, so the global
 // catalog is never mutated (AC-4 / invariant #6). See
 // docs/audit-log/682-demo-posture-decisions.md.
@@ -653,7 +711,7 @@ var demoSCFAnchors = []demoSCFAnchor{
 // the spine from scratch with identical cardinality — no duplicate edges.
 //
 // Returns (requirements, edges, controlsAnchored).
-func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, int, int, error) {
+func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet, scfRelease string) (int, int, int, error) {
 	// 1. Find-or-create a tenant-scoped demo framework_version with
 	//    status='current'. writeAuditPeriodsAndSamples may already have
 	//    created one (when the global catalog is absent) OR adopted a global
@@ -699,25 +757,37 @@ func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) 
 	}
 
 	// 2. For each anchor in the thin SCF slice: resolve the real global
-	//    scf_anchors row by scf_id when the catalog is loaded (ADOPT), else
-	//    synthesize a tenant-scoped demo anchor on the demo framework_version
-	//    (SELF-CONTAINED). Build a requirement + a STRM edge per anchor.
+	//    anchor in one SCF release (ADOPT), else synthesize a tenant-scoped
+	//    demo anchor on the demo framework_version (SELF-CONTAINED). The
+	//    release is the one the slice declares (scfRelease) when it is
+	//    loaded, else the current one (the #1771 D5 fallback; #1774 makes
+	//    it strict); with no current release, every anchor is synthesized.
+	//    Every code resolves in that one release (#1772). Build a
+	//    requirement + a STRM edge per anchor.
+	q := dbx.New(tx)
+	rel, relErr := scfrelease.Lookup(ctx, q, scfRelease)
+	if errors.Is(relErr, scfrelease.ErrUnknownRelease) {
+		rel, relErr = scfrelease.Lookup(ctx, q, "")
+	}
+	if relErr != nil && !errors.Is(relErr, scfrelease.ErrNoCurrentRelease) {
+		return 0, 0, 0, fmt.Errorf("demoseed: spine look up SCF release %s: %w", scfRelease, relErr)
+	}
 	reqCount := 0
 	edgeCount := 0
 	anchorIDs := make([]uuid.UUID, 0, len(demoSCFAnchors))
 	for i, a := range demoSCFAnchors {
-		// ADOPT: a global anchor (tenant_id IS NULL framework_version) with
-		// this scf_id already exists in the catalog.
 		var anchorID uuid.UUID
-		adoptErr := tx.QueryRow(ctx, `
-			SELECT sa.id
-			FROM scf_anchors sa
-			JOIN framework_versions fv ON fv.id = sa.framework_version_id
-			WHERE sa.scf_id = $1 AND fv.tenant_id IS NULL
-			ORDER BY sa.created_at ASC
-			LIMIT 1
-		`, a.SCFID).Scan(&anchorID)
-		if errors.Is(adoptErr, pgx.ErrNoRows) {
+		adopted := false
+		if relErr == nil {
+			row, _, err := scfrelease.Resolve(ctx, q, rel.Version, a.SCFID)
+			switch {
+			case err == nil:
+				anchorID, adopted = uuid.UUID(row.ID.Bytes), true
+			case !errors.Is(err, scfrelease.ErrCodeNotInRelease):
+				return 0, 0, 0, fmt.Errorf("demoseed: spine adopt scf_anchor %s: %w", a.SCFID, err)
+			}
+		}
+		if !adopted {
 			// SELF-CONTAINED: synthesize a demo anchor on the demo version.
 			anchorID = uuid.New()
 			if _, err := tx.Exec(ctx,
@@ -729,8 +799,6 @@ func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) 
 			); err != nil {
 				return 0, 0, 0, fmt.Errorf("demoseed: spine insert scf_anchor %s: %w", a.SCFID, err)
 			}
-		} else if adoptErr != nil {
-			return 0, 0, 0, fmt.Errorf("demoseed: spine adopt scf_anchor %s: %w", a.SCFID, adoptErr)
 		}
 		anchorIDs = append(anchorIDs, anchorID)
 
@@ -1038,10 +1106,17 @@ const ctxKeyTenantID ctxKey = 1
 // writer is pointed at a tenant that tx did not create and demo-mark.
 var ErrNotDemoSeedContext = errors.New("demoseed: evidence writes are confined to a tenant created and demo-marked in the same transaction")
 
-// assertFreshDemoTenant guards the demoseed ingest exception (#1830): it
-// passes only when tx itself inserted the tenants row (its xmin is tx's
-// transaction id) and tx has written the demo_seed_apply
-// super_admin_audit_log row for its slug. A real tenant, or a demo tenant seeded by an earlier transaction,
+// assertFreshDemoTenant guards the demoseed ingest exception (#1830). It
+// passes in one of two demo-seed contexts:
+//
+//   - tx itself inserted the tenants row (its xmin is tx's transaction id)
+//     and wrote the demo_seed_apply super_admin_audit_log row for its slug
+//     (Apply: a new demo tenant); or
+//   - tx wrote an in-place demo_seed_apply row naming this tenant id, and
+//     the tenant holds no evidence that tx did not write (ApplyInPlace,
+//     #1765: the sole tenant of a fresh install, still evidence-free).
+//
+// A tenant holding real evidence, or one seeded by an earlier transaction,
 // fails, so the backdated raw insert cannot reach live tenant data.
 func assertFreshDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 	var fresh bool
@@ -1055,6 +1130,19 @@ func assertFreshDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) e
 			 AND a.xmin::text::bigint = (txid_current() & 4294967295)
 			WHERE t.id = $1
 			  AND t.xmin::text::bigint = (txid_current() & 4294967295)
+		) OR (
+			EXISTS (
+				SELECT 1 FROM super_admin_audit_log a
+				WHERE a.action = 'demo_seed_apply'
+				  AND a.payload_json->>'in_place' = 'true'
+				  AND a.payload_json->>'tenant_id' = $1::text
+				  AND a.xmin::text::bigint = (txid_current() & 4294967295)
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM evidence_records e
+				WHERE e.tenant_id = $1
+				  AND e.xmin::text::bigint <> (txid_current() & 4294967295)
+			)
 		)
 	`, tenantID).Scan(&fresh)
 	if err != nil {

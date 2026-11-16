@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
 import {
   Card,
   CardContent,
@@ -9,121 +11,104 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useToast } from "@/components/ui/toast";
 
-import { applyThemeClass } from "@/lib/theme-class";
+import { APIError } from "@/lib/api/base";
+import { getMe, patchMe } from "@/lib/api/me";
+import { applyThemeToDocument } from "@/lib/theme-class";
 
+import { isCredentialBearer } from "../credential-bearer";
 import { DEFAULT_THEME, readTheme, Theme, writeTheme } from "../theme";
 
 // --- Section 2: Appearance ------------------------------------------------
 
-// Slice 154: each theme option carries a swatch preview class (the
-// mockup shows a 48-px-tall card-shaped preview above the label so the
-// user picks visually instead of reading three descriptions). The
-// `swatch` class is a Tailwind utility composition — no new components
-// added (Article VIII Anti-Abstraction).
-const THEMES: {
-  value: Theme;
-  label: string;
-  description: string;
-  swatch: string;
-}[] = [
-  {
-    value: "light",
-    label: "Light",
-    description: "Bright background",
-    swatch: "bg-white border border-border",
-  },
-  {
-    value: "dark",
-    label: "Dark",
-    description: "Low-light reading",
-    swatch: "bg-slate-900 border border-slate-700",
-  },
-  {
-    value: "system",
-    label: "System",
-    description: "Follow OS preference",
-    swatch: "bg-gradient-to-br from-white to-slate-900 border border-border",
-  },
+// #2142: System first (it is the default), then Light, then Dark.
+const THEMES: { value: Theme; label: string; description: string }[] = [
+  { value: "system", label: "System", description: "Follow OS preference" },
+  { value: "light", label: "Light", description: "Bright background" },
+  { value: "dark", label: "Dark", description: "Low-light reading" },
 ];
 
+// The profile query key the Profile tab already uses, so the two share one
+// GET /v1/me.
+const PROFILE_QUERY_KEY = ["settings-me-profile"] as const;
+
 export function AppearanceSection() {
-  // The theme starts at DEFAULT_THEME during SSR (no localStorage on the
-  // server). On mount, the AppearanceSelector child re-reads from
-  // localStorage with a lazy initializer to avoid a hydration mismatch
-  // while sidestepping the react-hooks/set-state-in-effect rule.
+  const profileQuery = useQuery({
+    queryKey: PROFILE_QUERY_KEY,
+    queryFn: getMe,
+  });
+  // A credential bearer (API key, bootstrap admin) has no users row, so
+  // PATCH /v1/me would 404: its choice lives in this browser only.
+  const browserOnly = isCredentialBearer(profileQuery.data);
   return (
     <Card id="appearance" data-testid="settings-section-appearance">
       <CardHeader>
         <CardTitle>Appearance</CardTitle>
-        <CardDescription>
-          Theme preference is stored in your browser (no cross-device sync in
-          this release).
+        <CardDescription data-testid="settings-appearance-description">
+          {browserOnly
+            ? "This credential has no user profile, so the theme is saved in this browser only."
+            : "Saved to your account, so the theme follows you to other browsers."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <AppearanceSelector />
-        {/*
-         * Slice 203 — the slice-170 "Dark-mode stylesheet pending" banner is
-         * retired. The class wire is live: selecting Dark or System (with
-         * OS=dark) now activates the `.dark { ... }` token block in
-         * globals.css; data-theme stays written for ThemeAwareLogo
-         * compatibility.
-         */}
+        <AppearanceSelector
+          storedTheme={profileQuery.data?.theme ?? null}
+          browserOnly={browserOnly}
+        />
       </CardContent>
     </Card>
   );
 }
 
-function AppearanceSelector() {
-  // Slice 170 D1 (Pattern A: useEffect post-mount sync) — the prior
-  // implementation used `useState` with an SSR-guarded lazy initializer.
-  // That initializer runs exactly once per server-or-client render PASS,
-  // and React reuses the server-rendered state on hydration: the client
-  // never re-ran the initializer, so `localStorage` was never consulted
-  // on a fresh page load. Result: the picker always booted to
-  // `DEFAULT_THEME` regardless of the user's persisted choice. The fix:
-  // seed state with `DEFAULT_THEME` (matching the SSR pass for
-  // hydration-mismatch safety per AC-2) and read `localStorage` in a
-  // single-shot `useEffect` after mount. The post-mount setState causes
-  // a one-frame flicker from "system" to the stored value; per slice 170
-  // P0-A5 / Notes-for-Implementing-Agent, that's acceptable below the
-  // fold. See docs/audit-log/170-settings-theme-picker-hydration-decisions.md.
+function AppearanceSelector({
+  storedTheme,
+  browserOnly,
+}: {
+  storedTheme: Theme | null;
+  browserOnly: boolean;
+}) {
+  const { toast } = useToast();
+  // Slice 170 D1: seed with DEFAULT_THEME to match the SSR pass, then read
+  // the browser cache after mount. See
+  // docs/audit-log/170-settings-theme-picker-hydration-decisions.md.
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
   useEffect(() => {
-    // Post-mount synchronization from a non-React state source
-    // (localStorage) is the canonical pattern for this scenario; see
-    // react.dev "synchronizing with external systems". The set-state runs
-    // exactly once on mount and seeds the picker from the persisted
-    // choice. Removing this would re-introduce the slice 170 hydration
-    // bug. The react-hooks/set-state-in-effect rule is intentionally
-    // disabled on the next line.
+    // Post-mount sync from a non-React source (localStorage); removing it
+    // re-introduces the slice 170 hydration bug.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTheme(readTheme(window.localStorage));
   }, []);
+  // #2142: the account's stored choice outranks the browser cache once the
+  // profile arrives. `<ThemeServerSync>` has already applied it to the page.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (storedTheme !== null) setTheme(storedTheme);
+  }, [storedTheme]);
+
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (next: Theme) => patchMe({ theme: next }),
+    // Keep the shared profile cache current so a background refetch cannot
+    // hand the picker the pre-PATCH theme.
+    onSuccess: (profile) => qc.setQueryData(PROFILE_QUERY_KEY, profile),
+    onError: (err) => {
+      // 404: a credential bearer clicked before its profile loaded. There
+      // is no account to save to, and the browser copy already stands.
+      if (err instanceof APIError && err.status === 404) return;
+      toast(
+        "Couldn't save the theme to your account. It's set in this browser.",
+      );
+    },
+  });
 
   function choose(next: Theme) {
     setTheme(next);
-    if (typeof window !== "undefined") {
-      writeTheme(window.localStorage, next);
-      // Slice 170 contract: set `data-theme` on <html> -- the
-      // ThemeAwareLogo (slice 176) keys off this attribute, and any
-      // future consumer that prefers attribute-based reads stays
-      // wire-compatible. P0-A1 (slice 203): data-theme remains the
-      // source-of-truth; the class below is in ADDITION, not a
-      // replacement.
-      document.documentElement.setAttribute("data-theme", next);
-      // Slice 203: write the `dark` class so the Tailwind v4 custom
-      // variant `@custom-variant dark (&:is(.dark *))` configured in
-      // `web/app/globals.css:5` matches and the `.dark { ... }` token
-      // block at globals.css:86+ activates. Without this, the picker
-      // persists a choice but the page never themes (the slice-170
-      // deferred-work banner).
-      const prefersDark = window.matchMedia(
-        "(prefers-color-scheme: dark)",
-      ).matches;
-      applyThemeClass(document.documentElement, next, prefersDark);
-    }
+    // The browser cache drives first paint (the inline script in
+    // web/app/layout.tsx); the account copy makes the choice per user.
+    writeTheme(window.localStorage, next);
+    applyThemeToDocument(next);
+    if (!browserOnly) save.mutate(next);
   }
 
   return (
@@ -149,11 +134,7 @@ function AppearanceSelector() {
                 : "rounded-md border border-border bg-background p-3 text-left hover:border-foreground/40"
             }
           >
-            <div
-              className={`mb-2 h-12 rounded ${opt.swatch}`}
-              aria-hidden="true"
-              data-testid={`settings-theme-swatch-${opt.value}`}
-            />
+            <ThemeSwatch theme={opt.value} />
             <div className="text-sm font-medium">{opt.label}</div>
             <div className="text-xs text-muted-foreground">
               {opt.description}
@@ -161,6 +142,43 @@ function AppearanceSelector() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// #2142: a swatch is a miniature of the app drawn in the theme's own tokens,
+// not hand-picked colours. `.paper` and `.dark` (web/app/globals.css) each
+// re-declare the full token set on their element, so `bg-background`,
+// `bg-card` and `border-border` inside them resolve to that theme's values
+// whatever theme the page itself is in. System shows both halves.
+function ThemeSwatch({ theme }: { theme: Theme }) {
+  return (
+    <div
+      className="mb-2 flex h-12 overflow-hidden rounded border border-border"
+      aria-hidden="true"
+      data-testid={`settings-theme-swatch-${theme}`}
+    >
+      {theme !== "dark" && <SwatchPane scope="paper" theme={theme} />}
+      {theme !== "light" && <SwatchPane scope="dark" theme={theme} />}
+    </div>
+  );
+}
+
+function SwatchPane({
+  scope,
+  theme,
+}: {
+  scope: "paper" | "dark";
+  theme: Theme;
+}) {
+  const pane = scope === "paper" ? "light" : "dark";
+  return (
+    <div
+      className={`${scope} flex-1 bg-background p-1.5`}
+      data-testid={`settings-theme-swatch-${theme}-${pane}`}
+    >
+      <div className="h-1.5 w-1/2 rounded-sm bg-foreground/70" />
+      <div className="mt-1.5 h-4 rounded-sm border border-border bg-card" />
     </div>
   );
 }

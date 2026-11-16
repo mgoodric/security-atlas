@@ -442,6 +442,7 @@ const (
 	EvidenceResultFail         EvidenceResult = "fail"
 	EvidenceResultNa           EvidenceResult = "na"
 	EvidenceResultInconclusive EvidenceResult = "inconclusive"
+	EvidenceResultExcepted     EvidenceResult = "excepted"
 )
 
 func (e *EvidenceResult) Scan(src interface{}) error {
@@ -485,6 +486,7 @@ func AllEvidenceResultValues() []EvidenceResult {
 		EvidenceResultFail,
 		EvidenceResultNa,
 		EvidenceResultInconclusive,
+		EvidenceResultExcepted,
 	}
 }
 
@@ -1945,7 +1947,9 @@ type Control struct {
 	BundleUploadedAt     pgtype.Timestamptz        `json:"bundle_uploaded_at"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 	// control.yaml external_refs[]: [{system, kind, id, note?}], kind in (reference, tested_under). Validated by the bundle parser (#1737).
-	ExternalRefs []byte `json:"external_refs"`
+	ExternalRefs  []byte  `json:"external_refs"`
+	AnchorFit     string  `json:"anchor_fit"`
+	AnchorFitNote *string `json:"anchor_fit_note"`
 }
 
 type ControlDriftSnapshot struct {
@@ -1973,6 +1977,104 @@ type ControlEvaluation struct {
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControlImportAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
+	RowID         pgtype.UUID        `json:"row_id"`
+	RowNumber     int32              `json:"row_number"`
+	OrgControlID  string             `json:"org_control_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	ScfAnchorID   pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID         *string            `json:"scf_id"`
+	ScfRelease    *string            `json:"scf_release"`
+	ControlID     pgtype.UUID        `json:"control_id"`
+	BundleID      *string            `json:"bundle_id"`
+	Reason        *string            `json:"reason"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
+type ControlImportBatch struct {
+	ID                    pgtype.UUID        `json:"id"`
+	TenantID              pgtype.UUID        `json:"tenant_id"`
+	FrameworkSlug         string             `json:"framework_slug"`
+	FrameworkVersionID    pgtype.UUID        `json:"framework_version_id"`
+	FrameworkVersion      string             `json:"framework_version"`
+	SourceFilename        string             `json:"source_filename"`
+	SourceFormat          string             `json:"source_format"`
+	UploadedBy            string             `json:"uploaded_by"`
+	Status                string             `json:"status"`
+	TotalRows             int32              `json:"total_rows"`
+	StagedCount           int32              `json:"staged_count"`
+	RejectedCount         int32              `json:"rejected_count"`
+	UnmappedColumns       []byte             `json:"unmapped_columns"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	ScfFrameworkVersionID pgtype.UUID        `json:"scf_framework_version_id"`
+	ScfRelease            *string            `json:"scf_release"`
+	SuggestionsStatus     string             `json:"suggestions_status"`
+}
+
+type ControlImportCandidate struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
+	RowID         pgtype.UUID        `json:"row_id"`
+	Rank          int32              `json:"rank"`
+	ScfAnchorID   pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID         string             `json:"scf_id"`
+	Title         string             `json:"title"`
+	Source        string             `json:"source"`
+	Reaches       []byte             `json:"reaches"`
+	Strength      float64            `json:"strength"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	Rationale     *string            `json:"rationale"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+}
+
+type ControlImportRejectedRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	BatchID      pgtype.UUID        `json:"batch_id"`
+	RowNumber    int32              `json:"row_number"`
+	OrgControlID string             `json:"org_control_id"`
+	Reason       string             `json:"reason"`
+	Detail       string             `json:"detail"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControlImportRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	BatchID            pgtype.UUID        `json:"batch_id"`
+	RowNumber          int32              `json:"row_number"`
+	OrgControlID       string             `json:"org_control_id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	TestedUnder        []byte             `json:"tested_under"`
+	ImplementationType *string            `json:"implementation_type"`
+	Applicability      *string            `json:"applicability"`
+	Status             string             `json:"status"`
+	RejectionReason    *string            `json:"rejection_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	NoCandidateReaches bool               `json:"no_candidate_reaches"`
+	LlmRerank          string             `json:"llm_rerank"`
+	DecidedBy          *string            `json:"decided_by"`
+	DecidedAt          pgtype.Timestamptz `json:"decided_at"`
+	ControlID          pgtype.UUID        `json:"control_id"`
+	BundleID           *string            `json:"bundle_id"`
+	ScfAnchorID        pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID              *string            `json:"scf_id"`
+	AiAssisted         bool               `json:"ai_assisted"`
+	HumanApproved      bool               `json:"human_approved"`
+	HumanApprover      *string            `json:"human_approver"`
 }
 
 type ControlManifestRevision struct {
@@ -2124,6 +2226,14 @@ type DecisionsAudit struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type DemoSeedRow struct {
+	ID        int64              `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TableName string             `json:"table_name"`
+	RowKey    []byte             `json:"row_key"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type EffectiveFwToScfEdge struct {
 	ID                     pgtype.UUID                `json:"id"`
 	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
@@ -2135,6 +2245,7 @@ type EffectiveFwToScfEdge struct {
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 }
 
 type EmailChannelOptin struct {
@@ -2251,6 +2362,9 @@ type Exception struct {
 	Status               string             `json:"status"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	SelfApproved         bool               `json:"self_approved"`
+	RevokedBy            *string            `json:"revoked_by"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type ExceptionAuditLog struct {
@@ -2308,6 +2422,7 @@ type FrameworkRequirement struct {
 	Body               string             `json:"body"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	PointsOfFocus      []byte             `json:"points_of_focus"`
 }
 
 type FrameworkScope struct {
@@ -2328,6 +2443,8 @@ type FrameworkScope struct {
 	EffectiveFrom            pgtype.Timestamptz `json:"effective_from"`
 	SupersededBy             pgtype.UUID        `json:"superseded_by"`
 	SupersededAt             pgtype.Timestamptz `json:"superseded_at"`
+	SelfApproved             bool               `json:"self_approved"`
+	SubmittedBy              *string            `json:"submitted_by"`
 }
 
 type FrameworkScopeApplicability struct {
@@ -2410,6 +2527,10 @@ type FwToScfEdge struct {
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	// Crosswalk source that wrote this edge (yaml:<file>, scf-workbook:<columns>, scf-olir:<sheet>); NULL = predates #1971. The importer retires only its own source's edges.
+	CrosswalkSource *string `json:"crosswalk_source"`
+	// Set when the crosswalk that wrote this edge stopped listing it (#1971); cleared when it lists it again. Retired edges are excluded from effective_fw_to_scf_edges.
+	RetiredAt pgtype.Timestamptz `json:"retired_at"`
 }
 
 type FwToScfEdgeTierTransition struct {
@@ -2420,6 +2541,36 @@ type FwToScfEdgeTierTransition struct {
 	ToTier     CrosswalkMappingTier `json:"to_tier"`
 	Note       string               `json:"note"`
 	CreatedAt  pgtype.Timestamptz   `json:"created_at"`
+}
+
+type FwToScfOverlayEdge struct {
+	ID                     pgtype.UUID          `json:"id"`
+	TenantID               pgtype.UUID          `json:"tenant_id"`
+	FrameworkRequirementID pgtype.UUID          `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID          `json:"scf_anchor_id"`
+	RelationshipType       StrmRelationshipType `json:"relationship_type"`
+	Strength               float64              `json:"strength"`
+	Rationale              string               `json:"rationale"`
+	SourceRef              string               `json:"source_ref"`
+	Status                 string               `json:"status"`
+	RetirementReason       *string              `json:"retirement_reason"`
+	CreatedBy              string               `json:"created_by"`
+	CreatedAt              pgtype.Timestamptz   `json:"created_at"`
+	RetiredBy              *string              `json:"retired_by"`
+	RetiredAt              pgtype.Timestamptz   `json:"retired_at"`
+	UpdatedAt              pgtype.Timestamptz   `json:"updated_at"`
+}
+
+type FwToScfOverlayEdgeAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	OverlayEdgeID pgtype.UUID        `json:"overlay_edge_id"`
+	Action        string             `json:"action"`
+	Before        []byte             `json:"before"`
+	After         []byte             `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
 }
 
 type GroupRoleAuditLog struct {
@@ -2500,6 +2651,7 @@ type ImportedComponentClaim struct {
 	DispositionedBy     *string            `json:"dispositioned_by"`
 	DispositionedAt     pgtype.Timestamptz `json:"dispositioned_at"`
 	DispositionNote     string             `json:"disposition_note"`
+	ScfRelease          *string            `json:"scf_release"`
 }
 
 type ImportedComponentClaimDisposition struct {
@@ -2681,16 +2833,17 @@ type Notification struct {
 }
 
 type OidcIdpConfig struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Name                string             `json:"name"`
-	IssuerUrl           string             `json:"issuer_url"`
-	ClientID            string             `json:"client_id"`
-	ClientSecretEnc     []byte             `json:"client_secret_enc"`
-	RedirectUrl         string             `json:"redirect_url"`
-	AllowedEmailDomains []string           `json:"allowed_email_domains"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Name                        string             `json:"name"`
+	IssuerUrl                   string             `json:"issuer_url"`
+	ClientID                    string             `json:"client_id"`
+	ClientSecretEnc             []byte             `json:"client_secret_enc"`
+	RedirectUrl                 string             `json:"redirect_url"`
+	AllowedEmailDomains         []string           `json:"allowed_email_domains"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	TrustUnverifiedEmailForLink bool               `json:"trust_unverified_email_for_link"`
 }
 
 type OidcIdpGroupMapping struct {
@@ -2701,6 +2854,18 @@ type OidcIdpGroupMapping struct {
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	CreatedBy   pgtype.UUID        `json:"created_by"`
+}
+
+type OrgRiskCategory struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Slug        string             `json:"slug"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Archived    bool               `json:"archived"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type OrgTheme struct {
@@ -2788,6 +2953,7 @@ type Policy struct {
 	SourceUrl                   *string            `json:"source_url"`
 	ImportedBy                  *string            `json:"imported_by"`
 	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
+	SelfApproved                bool               `json:"self_approved"`
 }
 
 type PolicyAcknowledgment struct {
@@ -2816,6 +2982,10 @@ type PolicyAuditLog struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	PreviousNextReviewAt   pgtype.Timestamptz `json:"previous_next_review_at"`
 	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle            *string            `json:"policy_title"`
+	PolicyVersion          *string            `json:"policy_version"`
+	PreviousState          *string            `json:"previous_state"`
+	NewState               *string            `json:"new_state"`
 }
 
 type Population struct {
@@ -2898,6 +3068,7 @@ type Risk struct {
 	OrgUnitID           pgtype.UUID           `json:"org_unit_id"`
 	Themes              []string              `json:"themes"`
 	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
+	CategoryID          pgtype.UUID           `json:"category_id"`
 }
 
 type RiskAggregation struct {
@@ -2995,6 +3166,44 @@ type ScfAnchor struct {
 	Subtopics          []byte             `json:"subtopics"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	LegacyScfID        *string            `json:"legacy_scf_id"`
+}
+
+type ScfRemapDecision struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ProposalID      pgtype.UUID        `json:"proposal_id"`
+	Decision        string             `json:"decision"`
+	Bulk            bool               `json:"bulk"`
+	LegacyControlID pgtype.UUID        `json:"legacy_control_id"`
+	LegacyAnchorID  pgtype.UUID        `json:"legacy_anchor_id"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	NewControlID    pgtype.UUID        `json:"new_control_id"`
+	NewAnchorID     pgtype.UUID        `json:"new_anchor_id"`
+	NewScfID        *string            `json:"new_scf_id"`
+	NewRelease      *string            `json:"new_release"`
+	Reason          *string            `json:"reason"`
+	DecidedBy       string             `json:"decided_by"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
+type ScfRemapProposal struct {
+	ID                       pgtype.UUID        `json:"id"`
+	TenantID                 pgtype.UUID        `json:"tenant_id"`
+	ControlID                pgtype.UUID        `json:"control_id"`
+	BundleID                 string             `json:"bundle_id"`
+	LegacyAnchorID           pgtype.UUID        `json:"legacy_anchor_id"`
+	LegacyScfID              string             `json:"legacy_scf_id"`
+	LegacyRelease            string             `json:"legacy_release"`
+	TargetFrameworkVersionID pgtype.UUID        `json:"target_framework_version_id"`
+	TargetRelease            string             `json:"target_release"`
+	Class                    string             `json:"class"`
+	Status                   string             `json:"status"`
+	SuccessorScfIds          []string           `json:"successor_scf_ids"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetAnchorID           pgtype.UUID        `json:"target_anchor_id"`
+	Source                   string             `json:"source"`
 }
 
 type ScimAuditLog struct {
@@ -3172,6 +3381,40 @@ type StalenessRollupLog struct {
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
 }
 
+// Slice 198: platform-global super_admin identity rows. NOT tenant-scoped (no RLS). The DBUserResolver (slice 192) consults this table when populating the `atlas:super_admin` JWT claim. Write surface: exactly one — the bootstrap branch in users.Store.BootstrapFirstInstallOrUpsert (slice 198), which writes via the BYPASSRLS atlas_migrate pool during first install.
+type SuperAdmin struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
+	// Slice 198: provenance of the grant. v2 admits only 'bootstrap_first_install'. Future slices extending the source of grants (e.g., maintainer-CLI 'cli_grant') extend the CHECK constraint in their own migration.
+	GrantedVia string `json:"granted_via"`
+}
+
+// Slice 142: append-only forensic record of super_admin grant + demote events. Platform-global (no tenant_id, no RLS) because super_admin itself is platform-global. The grant + demote handlers dual-write a tenant-scoped me_audit_log row anchored to the actor's session tenant so the unified slice-124 aggregator surfaces the event to that tenant's admins/auditors without breaching RLS.
+type SuperAdminAuditLog struct {
+	AuditID      pgtype.UUID `json:"audit_id"`
+	Action       string      `json:"action"`
+	TargetUserID pgtype.UUID `json:"target_user_id"`
+	ActorUserID  pgtype.UUID `json:"actor_user_id"`
+	// Slice 142: the actor's session tenant at grant/demote time. Captured as data, not FK — the audit row survives tenant deletion.
+	ActorTenantID pgtype.UUID        `json:"actor_tenant_id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	PayloadJson   []byte             `json:"payload_json"`
+}
+
+type TaxonomyAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	SubjectKind   string             `json:"subject_kind"`
+	SubjectID     pgtype.UUID        `json:"subject_id"`
+	SubjectSlug   string             `json:"subject_slug"`
+	Action        string             `json:"action"`
+	Before        []byte             `json:"before"`
+	After         []byte             `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
 // Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.
 type Tenant struct {
 	ID pgtype.UUID `json:"id"`
@@ -3183,6 +3426,12 @@ type Tenant struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	// Slice 608: per-tenant control-bundle upload test-gate policy. strict (default, = slice-574 global behaviour) | advisory (red tests warn, not block) | mandatory_tests (a bundle with no tests/ is rejected). Set via PATCH /v1/tenants/{id}.
 	BundleGateMode string `json:"bundle_gate_mode"`
+	// #2059: days between a risk's creation and its default review_due_at. Default 365, range 1..3650. Set via PATCH /v1/tenants/{id}; a change affects new risks only.
+	RiskReviewCadenceDays int32 `json:"risk_review_cadence_days"`
+	// #2061: days after a vendor's creation (UTC date) that its first review is due. A never-reviewed vendor is overdue only after that day. Default 30.
+	VendorInitialReviewDays int32 `json:"vendor_initial_review_days"`
+	// #2101: when true, the requester of a policy, framework-scope or exception approval may approve it themselves. Such approvals are flagged self_approved. Default false; admin-only; changes are written to me_audit_log.
+	AllowSelfApproval bool `json:"allow_self_approval"`
 }
 
 // Slice 499 per-tenant cloud-LLM opt-in routing. Absence of a row => local-ollama (the off-by-default posture). provider is a closed enum (no free-text URL). api_key_ciphertext is AES-256-GCM, never plaintext, never returned/logged.
@@ -3208,6 +3457,7 @@ type User struct {
 	Active         bool               `json:"active"`
 	ScimExternalID *string            `json:"scim_external_id"`
 	ScimManaged    bool               `json:"scim_managed"`
+	Theme          string             `json:"theme"`
 }
 
 type UserNotificationPreference struct {

@@ -15,7 +15,18 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
+
+// releaseLabel is the `scf_release` a coverage read echoes: the pinned
+// release's label, or nil (JSON null) when no SCF release is current and
+// the read was not pinned.
+func releaseLabel(r *scfrelease.Release) *string {
+	if r == nil {
+		return nil
+	}
+	return &r.Version
+}
 
 // ===== /v1/requirements/{id}/coverage =====
 
@@ -35,8 +46,11 @@ import (
 //   - ?as-of=<RFC3339> — accepted no-op; slice 012 will wire evidence
 //     filtering. Caller-friendly so dashboards can start sending the
 //     param ahead of slice 012's eval engine.
-//   - ?scf_release=<version> — accepted no-op until multiple SCF
-//     releases are importable in the same DB.
+//   - ?scf_release=<version> — pin the anchors to one SCF release
+//     (#1770); an unknown label is 404. Absent, the read is pinned to the
+//     current SCF release (#2203). `scf_release` in the response names the
+//     release the read was pinned to; it is null only when no SCF release
+//     is current (an empty catalog), and the read is then unpinned.
 //
 // Returns:
 //   - 200 { requirement, anchors[], controls[] } on success
@@ -61,8 +75,16 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scfFV := h.resolveSCFRelease(ctx, r)
-	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfFV)
+	scfRel, err := h.resolveSCFRelease(ctx, r)
+	if errors.Is(err, scfrelease.ErrUnknownRelease) {
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		httperr.WriteInternal(w, r, "resolve scf release", err)
+		return
+	}
+	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfRel)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list anchors for requirement", err)
 		return
@@ -108,12 +130,15 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 			Code:  req.Code,
 			Title: req.Title,
 			Body:  req.Body,
+
+			PointsOfFocus: pointsOfFocusWire(req.PointsOfFocus),
 		},
 		"anchors":           anchorWiresFromAnchors(anchors),
 		"controls":          controlWiresFromRows(controls),
 		"coverage_strength": score,
 		"confidence_band":   string(band),
 		"exclusion":         exclusion,
+		"scf_release":       releaseLabel(scfRel),
 	})
 
 }
@@ -295,18 +320,51 @@ type anchorEdge struct {
 	strength          float64
 	sourceAttribution string
 	mappingTier       string
+	origin            string
 	rationale         string
+	overlay           *overlayWire
 }
 
 // listAnchorsForRequirement runs either the unpinned or pinned variant
-// based on whether an SCF framework_version filter was supplied.
-func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UUID, scfFV *dbx.FrameworkVersion) ([]anchorEdge, error) {
-	if scfFV == nil {
-		rows, err := h.q.ListAnchorsForRequirementWithEdges(ctx, reqID)
-		if err != nil {
-			return nil, err
+// based on whether an SCF framework_version filter was supplied. It reads
+// inside the request's tenant GUC: effective_fw_to_scf_edges carries the
+// caller tenant's active overlay edges (#1798), which RLS hides without it.
+func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UUID, scfFV *scfrelease.Release) ([]anchorEdge, error) {
+	var out []anchorEdge
+	err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		if scfFV == nil {
+			rows, err := q.ListAnchorsForRequirementWithEdges(ctx, reqID)
+			if err != nil {
+				return err
+			}
+			out = make([]anchorEdge, len(rows))
+			for i, r := range rows {
+				out[i] = anchorEdge{
+					edgeID:            r.EdgeID,
+					scfAnchorID:       r.ScfAnchorID,
+					scfID:             r.ScfID,
+					family:            r.Family,
+					anchorTitle:       r.AnchorTitle,
+					anchorDescription: r.AnchorDescription,
+					relationshipType:  string(r.RelationshipType),
+					strength:          r.Strength,
+					sourceAttribution: string(r.SourceAttribution),
+					mappingTier:       string(r.MappingTier),
+					origin:            r.Origin,
+					rationale:         r.Rationale,
+					overlay:           overlayFrom(r.Origin, r.OverlaySourceRef, r.OverlayCreatedBy, r.OverlayCreatedAt),
+				}
+			}
+			return nil
 		}
-		out := make([]anchorEdge, len(rows))
+		rows, err := q.ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx, dbx.ListAnchorsForRequirementWithEdgesByFrameworkVersionParams{
+			FrameworkRequirementID: reqID,
+			FrameworkVersionID:     scfFV.ID,
+		})
+		if err != nil {
+			return err
+		}
+		out = make([]anchorEdge, len(rows))
 		for i, r := range rows {
 			out[i] = anchorEdge{
 				edgeID:            r.EdgeID,
@@ -319,34 +377,14 @@ func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UU
 				strength:          r.Strength,
 				sourceAttribution: string(r.SourceAttribution),
 				mappingTier:       string(r.MappingTier),
+				origin:            r.Origin,
 				rationale:         r.Rationale,
+				overlay:           overlayFrom(r.Origin, r.OverlaySourceRef, r.OverlayCreatedBy, r.OverlayCreatedAt),
 			}
 		}
-		return out, nil
-	}
-	rows, err := h.q.ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx, dbx.ListAnchorsForRequirementWithEdgesByFrameworkVersionParams{
-		FrameworkRequirementID: reqID,
-		FrameworkVersionID:     scfFV.ID,
+		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]anchorEdge, len(rows))
-	for i, r := range rows {
-		out[i] = anchorEdge{
-			edgeID:            r.EdgeID,
-			scfAnchorID:       r.ScfAnchorID,
-			scfID:             r.ScfID,
-			family:            r.Family,
-			anchorTitle:       r.AnchorTitle,
-			anchorDescription: r.AnchorDescription,
-			relationshipType:  string(r.RelationshipType),
-			strength:          r.Strength,
-			sourceAttribution: string(r.SourceAttribution),
-			rationale:         r.Rationale,
-		}
-	}
-	return out, nil
+	return out, err
 }
 
 // listControlsForAnchors runs the tenant-scoped controls lookup inside
@@ -371,23 +409,27 @@ func (h *Handler) listControlsForAnchors(ctx context.Context, anchorIDs []pgtype
 	return out, nil
 }
 
-// resolveSCFRelease parses ?scf_release=<version> into a framework_version
-// row for the SCF framework. Returns nil on absence (no filter) or
-// when the version doesn't resolve. Distinct from
-// resolveFrameworkVersion because the slug is fixed to "scf".
-func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) *dbx.FrameworkVersion {
-	v := r.URL.Query().Get("scf_release")
-	if v == "" {
-		return nil
+// resolveSCFRelease resolves ?scf_release=<label> to the SCF release the
+// coverage read is pinned to (#1770). An unknown label is
+// scfrelease.ErrUnknownRelease.
+//
+// Absent, it pins the read to the current SCF release (#2203, the contract
+// step of #1770 D1). The boot-time re-bind (#1971) and the crosswalk
+// re-import move controls and edges onto the current release's anchors, so
+// on an upgraded install this matches the unpinned read. An edge left on a
+// legacy release on purpose (a crosswalk declaring an old scf_release)
+// drops out of the default read; ?scf_release=<old> still reads it. See
+// docs/audit-log/2203-coverage-default-release-decisions.md. With no
+// current release at all (an empty catalog) the read stays unpinned.
+func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) (*scfrelease.Release, error) {
+	rel, err := scfrelease.Lookup(ctx, h.q, r.URL.Query().Get("scf_release"))
+	if errors.Is(err, scfrelease.ErrNoCurrentRelease) {
+		return nil, nil
 	}
-	row, err := h.q.GetFrameworkVersionBySlugAndVersion(ctx, dbx.GetFrameworkVersionBySlugAndVersionParams{
-		Slug:    "scf",
-		Version: v,
-	})
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &row
+	return &rel, nil
 }
 
 // anchorWiresFromAnchors maps the internal anchorEdge slice to the
@@ -406,7 +448,9 @@ func anchorWiresFromAnchors(anchors []anchorEdge) []anchorWire {
 			Strength:          a.strength,
 			SourceAttribution: a.sourceAttribution,
 			MappingTier:       a.mappingTier,
+			Origin:            a.origin,
 			Rationale:         a.rationale,
+			Overlay:           a.overlay,
 		})
 	}
 	return out

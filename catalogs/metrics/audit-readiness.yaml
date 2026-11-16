@@ -50,9 +50,9 @@ metrics:
     category: audit
     name: AuditPeriod currency
     description: |
-      Days since the latest non-frozen AuditPeriod's period_end. A
-      currency above the auditor-agreed window (typically 90d) means
-      the next audit will need a new period and a fresh evidence sweep.
+      Days since the end of the most recent open audit period. Past the
+      window agreed with your auditor (typically 90 days), the next
+      audit needs a new period and a fresh evidence sweep.
     unit: days
     cadence: daily
     compute_strategy: manual_input
@@ -69,9 +69,9 @@ metrics:
     category: audit
     name: SSP currency by framework
     description: |
-      For each in-scope framework, days since the SSP (system security
-      plan) was last regenerated via the OSCAL export pipeline
-      (slice 030). A current SSP is the artifact the auditor reads first.
+      For each in-scope framework, days since its system security plan
+      (SSP) was last exported. A current SSP is the first thing the
+      auditor reads.
     unit: days
     cadence: weekly
     compute_strategy: manual_input
@@ -88,9 +88,9 @@ metrics:
     category: audit
     name: Walkthrough completion rate
     description: |
-      Within the latest AuditPeriod, the fraction of in-scope controls
-      that have at least one finalised walkthrough (slice 027) attached.
-      A control without a walkthrough is an audit-day surprise.
+      In the latest audit period, the share of in-scope controls with at
+      least one finished walkthrough. A control without a walkthrough is
+      an audit-day surprise.
     unit: percent
     cadence: weekly
     compute_strategy: manual_input

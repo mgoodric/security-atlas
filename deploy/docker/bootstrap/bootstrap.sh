@@ -264,7 +264,12 @@ log "uploading control bundles from $CONTROLS_DIR ..."
 uploaded=0
 for dir in "$CONTROLS_DIR"/*/; do
     [ -f "$dir/control.yaml" ] || continue
+    # --allow-insecure-http: atlas-cli refuses plain http:// to a
+    # non-loopback host (#2257). $ATLAS_HTTP_URL is http://atlas:8080 on
+    # the compose network, which is private to this bundle and never
+    # leaves the host, so the opt-out is deliberate here.
     atlas-cli controls upload "$dir" \
+        --allow-insecure-http \
         --endpoint "$ATLAS_HTTP_URL" \
         --issuer "$ATLAS_HTTP_URL" \
         --client-id "$OAUTH_CLIENT_ID" \

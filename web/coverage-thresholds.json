@@ -61,12 +61,6 @@
       "functions": 98,
       "lines": 98
     },
-    "app/(authed)/controls/new-control-future.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
     "app/(authed)/controls/saved-views.ts": {
       "statements": 98,
       "branches": 95,
@@ -421,12 +415,6 @@
       "functions": 98,
       "lines": 98
     },
-    "app/api/dashboard/upcoming/route.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
     "app/api/evidence/route.ts": {
       "statements": 98,
       "branches": 98,
@@ -434,12 +422,6 @@
       "lines": 98
     },
     "app/api/exceptions/route.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
-    "app/api/features/enabled/route.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -896,6 +878,18 @@
       "lines": 98
     },
     "lib/feature-nav.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/help/term-checks.ts": {
+      "statements": 96,
+      "branches": 89,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/help/terms.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,

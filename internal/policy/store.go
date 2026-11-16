@@ -8,6 +8,10 @@
 //
 //	draft        -> under_review -> approved -> published -> superseded   (happy path)
 //
+// A draft can also be discarded (DiscardDraft, #1987): the row is deleted
+// and the discard is recorded in policy_audit_log. No other state is
+// deletable.
+//
 // Each version is its own row. A later version starts as a draft created
 // with predecessor_id naming the published chain tip; publishing it
 // transitions the prior row to 'superseded' and the draft row to
@@ -25,13 +29,15 @@
 //
 // Approver role gate: under_review->approved and approved->published both
 // require cred.IsApprover || cred.IsAdmin. Publish is gated because it
-// creates an audit-binding artifact; defense in depth.
+// creates an audit-binding artifact; defense in depth. Approve also
+// refuses the person who submitted the policy (#1807).
 package policy
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +46,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -76,6 +83,19 @@ var (
 	// ErrWrongState is returned when a transition is requested from a
 	// state that doesn't permit it. HTTP 409.
 	ErrWrongState = errors.New("policy: not in expected state")
+	// ErrSelfApproval is returned when the approver is the person who
+	// submitted the policy for review (#1807, segregation of duties) and
+	// the organisation does not allow self-approval (#2101). HTTP 403.
+	ErrSelfApproval = errors.New("policy: the submitter cannot approve their own policy; a second approver must approve it")
+	// ErrApproverNotPerson is returned when the approving credential
+	// belongs to no user: an unbound API key, an OAuth client or the
+	// bootstrap admin. Only people approve policies (#1807). HTTP 403.
+	ErrApproverNotPerson = errors.New("policy: only a person can approve a policy; approve with your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
+	// ErrSubmitterUnknown is returned when the policy was submitted
+	// before #1807 under a session or credential id rather than a
+	// person (#2200), so no
+	// approver can be shown to differ from the submitter. HTTP 409.
+	ErrSubmitterUnknown = errors.New("policy: this policy was submitted before submitters were recorded by person, so a second approver cannot be verified; it must be re-submitted before it can be approved")
 	// ErrOrphanPublish is returned when publish is attempted on a policy
 	// with empty linked_control_ids (AC-7 + anti-criterion P0).
 	ErrOrphanPublish = errors.New("policy: cannot publish orphan policy (no linked controls)")
@@ -98,10 +118,10 @@ var (
 	// predecessor that is not the published chain tip. HTTP 409.
 	ErrPredecessorNotPublished = errors.New("policy: predecessor must be a published policy")
 	// ErrPredecessorTaken is returned when the predecessor already has a
-	// successor (version chains are linear). HTTP 409. There is no API to
-	// discard a draft, so the message points the caller at the existing
-	// successor rather than a discard step.
-	ErrPredecessorTaken = errors.New("policy: predecessor already has a successor version; continue that version (submit, approve, publish) instead of creating another, since drafts cannot be discarded through the API")
+	// successor (version chains are linear). HTTP 409. The message points
+	// the caller at both ways forward: continue the existing successor, or
+	// discard it while it is still a draft (DELETE /v1/policies/{id}, #1987).
+	ErrPredecessorTaken = errors.New("policy: predecessor already has a successor version; continue that version (submit, approve, publish), or if it is still a draft discard it with DELETE /v1/policies/{id} and create the new version again")
 	// ErrInvalidSourceAttribution is returned when Create is given a
 	// source_attribution outside the accepted set, or 'imported' (which
 	// only Import sets). HTTP 400.
@@ -140,10 +160,13 @@ type Policy struct {
 	SubmittedBy                 *string
 	ApprovedAt                  *time.Time
 	ApprovedBy                  *string
-	PublishedAt                 *time.Time
-	PublishedBy                 *string
-	SupersededAt                *time.Time
-	NextReviewAt                *time.Time
+	// SelfApproved is true when the submitter approved the policy under
+	// the organisation's Allow self-approval setting (#2101).
+	SelfApproved bool
+	PublishedAt  *time.Time
+	PublishedBy  *string
+	SupersededAt *time.Time
+	NextReviewAt *time.Time
 	// Import fields (#1747). Set only when SourceAttribution is
 	// SourceImported. HistoricalApproverName is a free-text name, never a
 	// credential id; ApprovedBy stays nil on imported rows.
@@ -310,8 +333,27 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Policy, error) {
 	return out, err
 }
 
+// policy_audit_log actions for the review transitions (#2200). A
+// self-approval writes auditActionSelfApproved instead of
+// auditActionApproved, so each approval is one row.
+const (
+	auditActionSubmitted   = "submitted"
+	auditActionResubmitted = "resubmitted"
+	auditActionApproved    = "approved"
+)
+
+// legacyKeyPrefix marks a submitter recorded by credential id before
+// #1807, when a key bound to a user recorded its own id. It names a key,
+// not a person (#2200).
+const legacyKeyPrefix = "key_"
+
 // SubmitForReview transitions draft -> under_review. Operator action; no
-// role gate.
+// role gate. It also re-submits an under_review policy whose submitter
+// was recorded before #1807 as a session or credential id, so that
+// approval, which refuses such a row (ErrSubmitterUnknown), has a person
+// to compare; the re-submitter becomes the submitter of record. Either
+// way a policy_audit_log row naming the actor and the states is appended
+// in the same transaction.
 func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string) (Policy, error) {
 	if actor == "" {
 		return Policy{}, ErrCreatedByRequired
@@ -320,32 +362,145 @@ func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string)
 		expectedPrior: StateDraft,
 		newState:      StateUnderReview,
 		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Policy, error) {
-			return q.SubmitPolicyForReview(ctx, dbx.SubmitPolicyForReviewParams{
+			prior, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(id),
+			})
+			if err != nil {
+				return dbx.Policy{}, err
+			}
+			row, err := q.SubmitPolicyForReview(ctx, dbx.SubmitPolicyForReviewParams{
 				TenantID:    pgUUID(tenantID),
 				ID:          pgUUID(id),
 				SubmittedBy: stringPtr(actor),
 			})
+			if err != nil {
+				return dbx.Policy{}, err
+			}
+			action := auditActionSubmitted
+			if prior.Status == StateUnderReview {
+				action = auditActionResubmitted
+			}
+			if err := insertTransitionAudit(ctx, q, tenantID, row, action, actor, prior.Status); err != nil {
+				return dbx.Policy{}, fmt.Errorf("submit: audit log: %w", err)
+			}
+			return row, nil
 		},
 	})
 }
 
+// insertTransitionAudit appends the policy_audit_log row for a status
+// transition of row, from previous to row's current status.
+func insertTransitionAudit(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row dbx.Policy, action, actor, previous string) error {
+	_, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+		TenantID:      pgUUID(tenantID),
+		PolicyID:      row.ID,
+		Action:        action,
+		Actor:         actor,
+		PolicyTitle:   &row.Title,
+		PolicyVersion: &row.Version,
+		PreviousState: &previous,
+		NewState:      &row.Status,
+	})
+	return err
+}
+
+// Approver names who is approving a policy (#1807). UserID is the person:
+// the users(id) uuid behind the credential, empty when the credential
+// belongs to no user. CredentialID is the credential itself, compared
+// against submitters recorded by credential id before #1807.
+type Approver = approval.Approver
+
+// auditActionSelfApproved is the policy_audit_log action written when the
+// submitter approves their own policy under Allow self-approval (#2101).
+const auditActionSelfApproved = "self_approved"
+
 // Approve transitions under_review -> approved. Handler validates
-// IsApprover before calling.
-func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver string) (Policy, error) {
-	if approver == "" {
+// IsApprover before calling; the store applies checkApprover (#1807) in
+// the same transaction as the approval, reading the organisation's Allow
+// self-approval setting there too (#2101). Every approval appends a
+// policy_audit_log row (#2200); a self-approval also flags the row and
+// records its audit row as self_approved.
+func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (Policy, error) {
+	if approver.UserID == "" && approver.CredentialID == "" {
 		return Policy{}, ErrCreatedByRequired
 	}
 	return s.transition(ctx, id, transitionParams{
 		expectedPrior: StateUnderReview,
 		newState:      StateApproved,
 		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Policy, error) {
-			return q.ApprovePolicy(ctx, dbx.ApprovePolicyParams{
-				TenantID:   pgUUID(tenantID),
-				ID:         pgUUID(id),
-				ApprovedBy: stringPtr(approver),
+			// submitted_by is written once, on draft -> under_review, and
+			// no transition returns a policy to draft, so reading it here
+			// and approving below in one transaction cannot race.
+			current, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(id),
 			})
+			if err != nil {
+				return dbx.Policy{}, err
+			}
+			var self bool
+			if current.Status == StateUnderReview {
+				allowSelf, err := approval.AllowSelf(ctx, q, tenantID)
+				if err != nil {
+					return dbx.Policy{}, err
+				}
+				if self, err = checkApprover(current, approver, allowSelf); err != nil {
+					return dbx.Policy{}, err
+				}
+			}
+			row, err := q.ApprovePolicy(ctx, dbx.ApprovePolicyParams{
+				TenantID:     pgUUID(tenantID),
+				ID:           pgUUID(id),
+				ApprovedBy:   stringPtr(approver.UserID),
+				SelfApproved: self,
+			})
+			if err != nil {
+				return row, err
+			}
+			action := auditActionApproved
+			if self {
+				action = auditActionSelfApproved
+			}
+			if err := insertTransitionAudit(ctx, q, tenantID, row, action, approver.UserID, current.Status); err != nil {
+				return dbx.Policy{}, fmt.Errorf("approve: audit log: %w", err)
+			}
+			return row, nil
 		},
 	})
+}
+
+// checkApprover applies the shared approval rule (internal/approval,
+// #1807 / #2101) to a policy and maps its errors onto this package's. Only
+// a person approves, and never the person who submitted the policy unless
+// the organisation allows self-approval; selfApproved reports that case.
+// A machine credential never approves, whatever the setting.
+//
+// A submitter recorded by credential id ("key_...", before #1807) is
+// compared against the approving credential, so the same key is still
+// caught; any other approver is refused with ErrSubmitterUnknown, because
+// the key's owner could be approving through a JWT or another key (#2200).
+// The policy is re-submitted to record the person.
+func checkApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
+	submitter := ""
+	if p.SubmittedBy != nil {
+		submitter = *p.SubmittedBy
+	}
+	self, err := approval.Check(submitter, a, allowSelf)
+	switch {
+	case errors.Is(err, approval.ErrNotPerson):
+		return false, ErrApproverNotPerson
+	case errors.Is(err, approval.ErrRequesterUnknown):
+		return false, ErrSubmitterUnknown
+	case errors.Is(err, approval.ErrSelfApproval):
+		return false, ErrSelfApproval
+	case err != nil:
+		return false, err
+	}
+	if !self && strings.HasPrefix(submitter, legacyKeyPrefix) && submitter != a.CredentialID {
+		return false, ErrSubmitterUnknown
+	}
+	return self, nil
 }
 
 // PublishInput is the API shape for POST /v1/policies/{id}/publish. The
@@ -517,6 +672,60 @@ func (s *Store) SetNextReviewAt(ctx context.Context, id uuid.UUID, next *time.Ti
 			NewNextReviewAt:      row.NextReviewAt,
 		}); err != nil {
 			return fmt.Errorf("review date: audit log: %w", err)
+		}
+		out = policyFromRow(row)
+		return nil
+	})
+	return out, err
+}
+
+// auditActionDraftDiscarded is the policy_audit_log action for a discarded
+// draft (#1987).
+const auditActionDraftDiscarded = "draft_discarded"
+
+// DiscardDraft deletes a policy that is still a draft and appends a
+// policy_audit_log row naming the actor and the discarded title and
+// version, in one transaction (#1987). Deleting a next-version draft frees
+// its predecessor's successor slot, so a new version can be created.
+// ErrNotFound when the id does not resolve; ErrWrongState when the policy
+// has left draft (submitted, approved, published or superseded rows are
+// never deleted). Returns the row as it was before the delete.
+func (s *Store) DiscardDraft(ctx context.Context, id uuid.UUID, actor string) (Policy, error) {
+	if actor == "" {
+		return Policy{}, ErrCreatedByRequired
+	}
+	var out Policy
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		row, err := q.DeleteDraftPolicy(ctx, dbx.DeleteDraftPolicyParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(id),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Either missing row or not a draft. Probe to disambiguate.
+				_, gErr := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+					TenantID: pgUUID(tenantID),
+					ID:       pgUUID(id),
+				})
+				if errors.Is(gErr, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				if gErr != nil {
+					return fmt.Errorf("discard draft: get policy: %w", gErr)
+				}
+				return ErrWrongState
+			}
+			return fmt.Errorf("discard draft: %w", err)
+		}
+		if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+			TenantID:      pgUUID(tenantID),
+			PolicyID:      row.ID,
+			Action:        auditActionDraftDiscarded,
+			Actor:         actor,
+			PolicyTitle:   stringPtr(row.Title),
+			PolicyVersion: stringPtr(row.Version),
+		}); err != nil {
+			return fmt.Errorf("discard draft: audit log: %w", err)
 		}
 		out = policyFromRow(row)
 		return nil
@@ -703,6 +912,7 @@ func policyFromRow(r dbx.Policy) Policy {
 		v := *r.ApprovedBy
 		out.ApprovedBy = &v
 	}
+	out.SelfApproved = r.SelfApproved
 	if r.PublishedAt.Valid {
 		t := r.PublishedAt.Time
 		out.PublishedAt = &t

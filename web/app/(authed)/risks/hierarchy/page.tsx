@@ -33,6 +33,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { buttonVariants } from "@/components/ui/button";
 
 import { OrgTreePanel } from "@/components/risk-hierarchy/org-tree-panel";
@@ -49,6 +50,7 @@ import {
   fetchHierarchyOverdueDecisions,
   fetchHierarchyThemes,
 } from "@/lib/api/risk-hierarchy";
+import { pageTitle } from "@/lib/page-titles";
 
 // ----- URL <-> filter-state codec -----
 
@@ -148,21 +150,15 @@ function HierarchyView() {
   }, [firstError, router]);
 
   return (
-    <div className="space-y-6" data-testid="risk-hierarchy-dashboard">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Risk hierarchy
-          </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Navigate risks by org_unit and level, watch theme patterns emerge,
-            and track decision-revisit dates.
-          </p>
-        </div>
-        {/* Slice 100 AC-8: reciprocal page-header link to the flat list. The
-            hierarchy was lifted out of the sidebar in slice 100 to close
-            audit F-3; this link is how a user pivots back to the flat
-            register without re-entering through the sidebar. */}
+    <PageShell
+      data-testid="risk-hierarchy-dashboard"
+      title={pageTitle("/risks/hierarchy")}
+      subtitle="Navigate risks by org_unit and level, watch theme patterns emerge, and track decision-revisit dates."
+      actions={
+        // Slice 100 AC-8: reciprocal page-header link to the flat list. The
+        // hierarchy was lifted out of the sidebar in slice 100 to close
+        // audit F-3; this link is how a user pivots back to the flat
+        // register without re-entering through the sidebar.
         <Link
           href="/risks"
           data-testid="risk-hierarchy-list-view-link"
@@ -170,13 +166,18 @@ function HierarchyView() {
         >
           List view →
         </Link>
-      </header>
-
+      }
+    >
       {/* Three-panel layout: tree | heatmap | timeline. Stacks to a
-          single column below the md breakpoint (AC-1). The heatmap gets
-          the widest column on xl. */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-        <div className="md:col-span-3" data-testid="risk-hierarchy-col-tree">
+          single column below the lg breakpoint (AC-1; #2213 moved it from md, where a 768px tablet clipped the org-tree names). The heatmap gets
+          the widest column on xl. #2080: `min-w-0` on each column, so
+          a wide heatmap scrolls in its own container instead of
+          widening its grid column and the page. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div
+          className="min-w-0 lg:col-span-3"
+          data-testid="risk-hierarchy-col-tree"
+        >
           <OrgTreePanel
             units={orgUnitsQ.data}
             state={{
@@ -187,7 +188,10 @@ function HierarchyView() {
             }}
           />
         </div>
-        <div className="md:col-span-5" data-testid="risk-hierarchy-col-heatmap">
+        <div
+          className="min-w-0 lg:col-span-5"
+          data-testid="risk-hierarchy-col-heatmap"
+        >
           <ThemeHeatmapPanel
             orgUnits={orgUnitsQ.data}
             themes={themesQ.data}
@@ -207,7 +211,7 @@ function HierarchyView() {
           />
         </div>
         <div
-          className="md:col-span-4"
+          className="min-w-0 lg:col-span-4"
           data-testid="risk-hierarchy-col-timeline"
         >
           <DecisionTimelinePanel
@@ -224,7 +228,7 @@ function HierarchyView() {
           />
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -233,12 +237,14 @@ export default function RiskHierarchyPage() {
   return (
     <Suspense
       fallback={
-        <div
-          className="p-6 text-sm text-muted-foreground"
-          data-testid="risk-hierarchy-loading"
-        >
-          Loading risk hierarchy…
-        </div>
+        <PageShell title={pageTitle("/risks/hierarchy")}>
+          <div
+            className="text-sm text-muted-foreground"
+            data-testid="risk-hierarchy-loading"
+          >
+            Loading risk hierarchy…
+          </div>
+        </PageShell>
       }
     >
       <HierarchyView />

@@ -3,10 +3,9 @@
 // AC-6 coverage: assert the exception + policy branches return the
 // no-link sentinel value, and that no branch ever returns `"#"`.
 //
-// The default branch is exercised via a deliberate `as never` cast —
-// TypeScript can't reach it at compile time (the union is closed), but
-// the runtime fallback (assertNever throwing) is the safety net the
-// slice 178 audit cares about.
+// The default branch is exercised via a deliberate cast — TypeScript
+// can't reach it at compile time (the union is closed), but the runtime
+// fallback (a plain, unlinked event; #2215) is the safety net.
 
 import { describe, expect, it } from "vitest";
 
@@ -50,6 +49,25 @@ describe("linkFor", () => {
     expect(result).toEqual({ kind: "link", href: "/vendors/vnd-7" });
   });
 
+  it("risk review event returns a link to the risk detail route (#2130)", () => {
+    const result = linkFor(
+      makeEvent({ type: "risk", related_entity_id: "rsk-3" }),
+    );
+    expect(result).toEqual({ kind: "link", href: "/risks/rsk-3" });
+  });
+
+  it("policy-ack event returns the policy static result (#2130)", () => {
+    const result = linkFor(makeEvent({ type: "policy_ack" }));
+    expect(result.kind).toBe("static");
+  });
+
+  it("action-plan event returns a link to the plan detail route (#2130)", () => {
+    const result = linkFor(
+      makeEvent({ type: "action_plan", related_entity_id: "ap-5" }),
+    );
+    expect(result).toEqual({ kind: "link", href: "/action-plans/ap-5" });
+  });
+
   it("exception event returns a static (no-link) result with an explanatory reason", () => {
     const result = linkFor(makeEvent({ type: "exception" }));
     expect(result.kind).toBe("static");
@@ -77,6 +95,10 @@ describe("linkFor", () => {
       "policy",
       "vendor",
       "control",
+      "risk",
+      "action_plan",
+      "policy_ack",
+      "offboarding",
     ];
     for (const t of types) {
       const result = linkFor(makeEvent({ type: t }));
@@ -95,13 +117,27 @@ describe("linkFor", () => {
     expect("href" in result).toBe(false);
   });
 
-  it("throws assertNever on an unexpected runtime event type (AC-1 default branch)", () => {
-    // Cast through `unknown` to bypass the closed union — the
-    // assertNever path is unreachable in well-typed code, but the
-    // runtime safety net is the load-bearing claim the slice 178 audit
-    // tests against.
+  it("offboarding event returns a link to the personnel-security checklist (#2215)", () => {
+    const result = linkFor(
+      makeEvent({ type: "offboarding", related_entity_id: "psc-4" }),
+    );
+    expect(result).toEqual({
+      kind: "link",
+      href: "/personnel-security/psc-4",
+    });
+  });
+
+  it("an unrecognised runtime event type renders as plain text, never throws (#2215)", () => {
+    // Cast through `unknown` to bypass the closed union: the API can
+    // emit a type before the frontend learns it, and that must not take
+    // down the page (it used to throw from assertNever).
     const rogue = makeEvent({}) as unknown as CalendarEvent;
     (rogue as { type: string }).type = "vendor_assessment";
-    expect(() => linkFor(rogue)).toThrow(/unreachable/i);
+    let result: ReturnType<typeof linkFor> | undefined;
+    expect(() => {
+      result = linkFor(rogue);
+    }).not.toThrow();
+    expect(result?.kind).toBe("static");
+    expect(result && "href" in result).toBe(false);
   });
 });

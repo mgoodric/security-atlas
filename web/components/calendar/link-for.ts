@@ -18,14 +18,15 @@
 // Consumers render a `<Link>` for `link` and a `<span title={...}>`
 // for `static`. The exception / policy branches return the static
 // shape (no link, tooltip explains the placeholder). The audit /
-// control branches return the link shape. The default branch calls
-// `assertNever` for exhaustiveness — TypeScript widens to `never`
-// once all four cases are handled, so adding a fifth event type to
-// the union becomes a compile error rather than a silent dead anchor.
+// control branches return the link shape. The default branch takes a
+// `never` argument for exhaustiveness, so adding an event type to the
+// union without a case is a compile error rather than a silent dead
+// anchor. At runtime an unrecognised type returns the static shape
+// (#2215: it used to throw, which crashed the page).
 //
 // AC mapping:
-//   AC-1 — default branch no longer returns "#"; assertNever throws if
-//          a divergent event type ever appears at runtime.
+//   AC-1 — default branch never returns "#"; an unrecognised runtime
+//          type renders as plain text.
 //   AC-2 — exception events return { kind: "static", reason: <copy> }.
 //   AC-3 — policy events return { kind: "static", reason: <copy> }.
 //   AC-6 — covered by `link-for.test.ts` (pure logic, node-env vitest).
@@ -46,12 +47,20 @@ const EXCEPTION_REASON =
 const POLICY_REASON =
   "A per-policy detail page is not available yet — view the policy register at /policies.";
 
-function assertNever(x: never): never {
-  throw new Error(
-    `unreachable: linkFor received an unexpected CalendarEvent type: ${JSON.stringify(
-      x,
-    )}`,
-  );
+const UNKNOWN_REASON =
+  "has no page in this version of the app, so it is shown without a link.";
+
+// unknownType keeps the switch exhaustive at compile time (a new member of
+// the union that linkFor does not handle is a type error) without throwing
+// at runtime. #2215: the API emitted `offboarding` before the union knew
+// it, and the old assertNever throw took down the whole /calendar page.
+// A type the frontend does not recognise renders as a plain, unlinked
+// event instead.
+function unknownType(type: never): LinkForResult {
+  return {
+    kind: "static",
+    reason: `Calendar event type ${JSON.stringify(type)} ${UNKNOWN_REASON}`,
+  };
 }
 
 export function linkFor(ev: CalendarEvent): LinkForResult {
@@ -61,6 +70,8 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
     case "exception":
       return { kind: "static", reason: EXCEPTION_REASON };
     case "policy":
+    case "policy_ack":
+      // #2130: an acknowledgement expiry has no page of its own either.
       return { kind: "static", reason: POLICY_REASON };
     case "vendor":
       // Slice 675: vendor review events link to the real per-vendor
@@ -68,7 +79,19 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
       return { kind: "link", href: `/vendors/${ev.related_entity_id}` };
     case "control":
       return { kind: "link", href: `/controls/${ev.related_entity_id}` };
+    case "risk":
+      // #2130: risk review events link to the risk detail page.
+      return { kind: "link", href: `/risks/${ev.related_entity_id}` };
+    case "action_plan":
+      // #2130: action-plan due dates link to the plan's detail page.
+      return { kind: "link", href: `/action-plans/${ev.related_entity_id}` };
+    case "offboarding":
+      // #2215: an open offboarding checklist links to its detail page.
+      return {
+        kind: "link",
+        href: `/personnel-security/${ev.related_entity_id}`,
+      };
     default:
-      return assertNever(ev.type);
+      return unknownType(ev.type);
   }
 }

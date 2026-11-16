@@ -24,6 +24,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 )
 
+// testStateKey signs the OIDC flow state in tests (#2177).
+var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
 // newDiscoveryOnlyIDP serves just the well-known config endpoint and
 // a stub JWKS — enough for go-oidc's NewProvider call to succeed,
 // but does not mint tokens (BeginLogin never calls the token
@@ -77,7 +80,7 @@ func runBeginLogin(t *testing.T) oidc.LoginResult {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver)
+	a := oidc.New(resolver, testStateKey)
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
 		IdpName:  "primary",
@@ -128,7 +131,7 @@ func (f failingResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (o
 // TestBeginLoginPropagatesResolverError confirms the resolver-error
 // branch returns the error verbatim and emits no cookies.
 func TestBeginLoginPropagatesResolverError(t *testing.T) {
-	a := oidc.New(failingResolver{err: oidc.ErrUnknownIdp})
+	a := oidc.New(failingResolver{err: oidc.ErrUnknownIdp}, testStateKey)
 	_, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: uuid.New(),
 		IdpName:  "missing",
@@ -155,7 +158,7 @@ func TestBeginLoginDiscoveryFailureIsProviderUnavailableAndTimeoutBounded(t *tes
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
-	}}, 25*time.Millisecond)
+	}}, testStateKey, 25*time.Millisecond)
 
 	start := time.Now()
 	_, err := a.BeginLogin(context.Background(), oidc.LoginInput{
@@ -263,5 +266,80 @@ func TestBeginLoginPreservesStateAndPKCECookies(t *testing.T) {
 	}
 	if q.Get("code_challenge") == "" || q.Get("code_challenge_method") != "S256" {
 		t.Fatalf("authorize URL missing PKCE params (P0-365-2)")
+	}
+}
+
+// TestBeginLoginBindsTenantCookie covers #1968: BeginLogin records the
+// login's tenant in TenantCookie, with the same flow-cookie shape.
+func TestBeginLoginBindsTenantCookie(t *testing.T) {
+	idp := newDiscoveryOnlyIDP(t)
+	tenantID := uuid.New()
+	a := oidc.New(unitStubResolver{cfg: oidc.IdpConfig{
+		TenantID: tenantID, Name: "primary", IssuerURL: idp.URL,
+		ClientID: "test-client", RedirectURL: "http://localhost:9999/auth/oidc/callback",
+	}}, testStateKey)
+	res, err := a.BeginLogin(context.Background(), oidc.LoginInput{TenantID: tenantID, IdpName: "primary"}, true)
+	if err != nil {
+		t.Fatalf("BeginLogin: %v", err)
+	}
+	c := findCookie(res.Cookies, oidc.CookieName(oidc.TenantCookie, true))
+	if c == nil {
+		t.Fatalf("BeginLogin did not emit %q", oidc.CookieName(oidc.TenantCookie, true))
+	}
+	if c.Value != tenantID.String() {
+		t.Errorf("tenant cookie = %q, want %q", c.Value, tenantID)
+	}
+	if !c.HttpOnly || !c.Secure || c.Path != "/" || c.MaxAge != int(oidc.FlowCookieMaxAge/time.Second) {
+		t.Errorf("tenant cookie shape = %+v, want a flow cookie", c)
+	}
+}
+
+// panicResolver fails the test if the callback reaches the IdP lookup.
+type panicResolver struct{ t *testing.T }
+
+func (p panicResolver) ResolveIdp(context.Context, uuid.UUID, string) (oidc.IdpConfig, error) {
+	p.t.Fatal("HandleCallback resolved the IdP despite a tenant that does not match the flow")
+	return oidc.IdpConfig{}, nil
+}
+
+// TestHandleCallbackRefusesTenantOutsideFlow covers #1968: the callback
+// refuses a tenant other than the one the login bound to the flow, and a
+// flow with no tenant cookie, before any IdP lookup or code exchange.
+func TestHandleCallbackRefusesTenantOutsideFlow(t *testing.T) {
+	flowTenant := uuid.New()
+	cases := map[string]struct {
+		cookie   string // "" = no tenant cookie
+		callback uuid.UUID
+	}{
+		"other-tenant":   {flowTenant.String(), uuid.New()},
+		"missing-cookie": {"", flowTenant},
+		"garbled-cookie": {"not-a-uuid", flowTenant},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=c&state=S", nil)
+			r.AddCookie(&http.Cookie{Name: oidc.StateCookie, Value: "S"})
+			r.AddCookie(&http.Cookie{Name: oidc.VerifierCookie, Value: "v"})
+			r.AddCookie(&http.Cookie{Name: oidc.IdpCookie, Value: "primary"})
+			r.AddCookie(&http.Cookie{Name: oidc.NonceCookie, Value: "n"})
+			if tc.cookie != "" {
+				r.AddCookie(&http.Cookie{Name: oidc.TenantCookie, Value: tc.cookie})
+			}
+			_, err := oidc.New(panicResolver{t}, testStateKey).HandleCallback(context.Background(), r, tc.callback, false)
+			if !errors.Is(err, oidc.ErrTenantMismatch) {
+				t.Fatalf("HandleCallback err = %v, want ErrTenantMismatch", err)
+			}
+		})
+	}
+}
+
+// TestClearFlowCookiesClearsTenantCookie covers #1968: the tenant cookie
+// is cleared with the other flow cookies.
+func TestClearFlowCookiesClearsTenantCookie(t *testing.T) {
+	rec := httptest.NewRecorder()
+	oidc.ClearFlowCookies(rec, false)
+	c := findCookie(rec.Result().Cookies(), oidc.TenantCookie)
+	if c == nil || c.MaxAge >= 0 {
+		t.Fatalf("ClearFlowCookies did not expire %q: %+v", oidc.TenantCookie, c)
 	}
 }

@@ -111,6 +111,7 @@ import {
   POLICIES_SCAFFOLD_FUTURE_BODY,
   POLICIES_SCAFFOLD_FUTURE_TESTID,
 } from "./scaffold-future";
+import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof PolicyFilters)[] = [
   "status",
@@ -455,10 +456,12 @@ function PoliciesPageInner() {
       // #1806 — next review date with an overdue / due-soon marker. Only
       // published policies have a review due (the API omits
       // review_status otherwise), so a draft's date shows without one.
+      // #2009 — a superseded version keeps the date it was due, as
+      // history; it has no next review, so the column shows none.
       id: "next_review_at",
       header: "Next review",
       cell: (row) => {
-        if (!row.next_review_at) {
+        if (!row.next_review_at || row.status === "superseded") {
           return (
             <span
               className="text-xs text-muted-foreground italic"
@@ -610,7 +613,7 @@ function PoliciesPageInner() {
   if (policiesQ.isLoading) {
     return (
       <ListPage
-        title="Policy library"
+        title={pageTitle("/policies")}
         subtitle="Versioned policies · acknowledgment tracked against the current version"
         actions={actions}
         filterRow={
@@ -625,7 +628,7 @@ function PoliciesPageInner() {
   if (policiesQ.isError) {
     return (
       <ListPage
-        title="Policy library"
+        title={pageTitle("/policies")}
         subtitle="Versioned policies · acknowledgment tracked against the current version"
         actions={actions}
       >
@@ -709,7 +712,7 @@ function PoliciesPageInner() {
 
   return (
     <ListPage
-      title="Policy library"
+      title={pageTitle("/policies")}
       titleAdornment={titleAdornment}
       subtitle="Versioned policies · acknowledgment tracked against the current version"
       actions={actions}

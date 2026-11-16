@@ -8,7 +8,7 @@ description: |
   test, and the pass/fail outcome with notes on any deviations from
   documented RTO.
 
-scf_anchor_id: BCD-11
+scf_anchor_id: BCD-32
 control_family: BCD
 implementation_type: manual_periodic
 owner_role: it-operations

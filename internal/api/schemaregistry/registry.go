@@ -112,7 +112,7 @@ func DefaultSeed() []KindVersion {
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},
 		{Kind: "azure.storage_account_config.v1", Version: "1.0.0"},
 		// Slice 519: Azure connector AKS managed-cluster hardening posture
-		// (cloud-config / network controls: SCF CFG-02 / NET-04). ARM Reader
+		// (cloud-config / network controls: SCF CFG-04 / NET-04). ARM Reader
 		// only — never admin kubeconfig, secrets, or workload manifests.
 		{Kind: "azure.aks_cluster_config.v1", Version: "1.0.0"},
 		// Slice 520: Azure connector NSG / firewall security-rule posture
@@ -121,7 +121,7 @@ func DefaultSeed() []KindVersion {
 		// traffic contents; read-only (never mutates a network resource).
 		{Kind: "azure.nsg_rules.v1", Version: "1.0.0"},
 		// Slice 521: Azure connector Key-Vault access-policy / RBAC posture
-		// (secrets-management / least-privilege controls: SCF IAC-21 / CRY-09).
+		// (secrets-management / least-privilege controls: SCF IAC-10 / CRY-09).
 		// ARM Reader only — management-plane CONFIGURATION + access-policy /
 		// role-assignment METADATA only, NEVER a secret/key/certificate VALUE
 		// (the connector never touches the Key-Vault data plane and is never
@@ -150,7 +150,7 @@ func DefaultSeed() []KindVersion {
 		// enforcement plane. Both fields are optional — no version bump.
 		{Kind: "k8s.networkpolicy_coverage.v1", Version: "1.0.0"},
 		// Slice 524: Kubernetes connector Pod-Security-Standards admission config
-		// (configuration-baseline control: SCF CFG-02). Read-only (get/list on
+		// (configuration-baseline control: SCF CFG-04). Read-only (get/list on
 		// core namespaces — NO new ClusterRole rule; reuses the base grant). PSS
 		// LABEL configuration only (the pod-security.kubernetes.io/enforce|audit|
 		// warn levels + optional pinned versions), NEVER pod specs, container env,
@@ -178,7 +178,7 @@ func DefaultSeed() []KindVersion {
 		// (gating k8s.admission_policy.v1). CONFIG metadata only — NEVER the webhook
 		// caBundle/TLS key, the policy Rego/CEL decision-logic body, or an intercepted
 		// payload (structural reflection guard + caBundle/Rego/CEL drop tests). Both
-		// anchored to CFG-02 (the same configuration-hardening anchor the PSS admission
+		// anchored to CFG-04 (the same configuration-hardening anchor the PSS admission
 		// + webhook kinds share). Read-only get,list, no wildcard, no `secrets`.
 		{Kind: "k8s.admission_webhook.v1", Version: "1.0.0"},
 		{Kind: "k8s.admission_policy.v1", Version: "1.0.0"},
@@ -190,7 +190,7 @@ func DefaultSeed() []KindVersion {
 		// monitoring.alert_config.v1. Slice 488 reads which alerts are CONFIGURED
 		// (CC7.2); this reads what actually FIRED and resolved (CC7.3/CC7.4): one
 		// record per firing event (rule_id, vendor, fired_at, resolved_at, state,
-		// routing-target HANDLE). Anchors MON-01 + IRO-09 (the spec candidate
+		// routing-target HANDLE). Anchors MON-02 + IRO-09 (the spec candidate
 		// IRO-02 is absent from the bundled SCF fixture; IRO-09 is the closest
 		// present incident anchor — decisions-log D3). Read-only (Datadog
 		// events_read GET /api/v1/events; Grafana Viewer GET /api/v1/rules/history),
@@ -203,7 +203,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 533: Datadog Cloud-SIEM / Security-Monitoring detection-rule
 		// inventory — the deliberate slice-488 D1 sibling-kind SPLIT (a detection
 		// rule carries a severity + detection-class field monitoring.alert_config
-		// lacks, so it gets its own kind: MON-01 + THR-01). Read-only
+		// lacks, so it gets its own kind: MON-02 + THR-01). Read-only
 		// (security_monitoring_rules_read); RULE configuration only — never firing
 		// signals, raw log samples, matched-event payloads, secret notification
 		// targets, recipient PII, or the raw detection query.
@@ -223,7 +223,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 534: Grafana connector authn/authz CONFIG evidence — the
 		// deliberate slice-488 deferred authn/authz surface (P0-488-7). Proves
 		// SSO is enforced + access is role-based (SOC 2 CC6.1/CC6.2/CC6.3): SCF
-		// IAC-06 Authenticator Management / IAC-22 Least Privilege. A SIBLING
+		// IAC-37 Multi-Factor Authentication (MFA) / IAC-22 Least Privilege. A SIBLING
 		// kind to monitoring.alert_config.v1 because this is an IAM surface, not
 		// a monitoring surface. Read-only (sso-settings + access-control reads);
 		// CONFIGURATION + COUNTS only — never a SAML private key, an OAuth client
@@ -264,12 +264,12 @@ func DefaultSeed() []KindVersion {
 		// Slice 555: MDM connectors (Jamf + Intune) — shared managed-device
 		// installed-software inventory evidence kind, the deliberate slice-490
 		// over-collection follow-on (patch-/vuln-mgmt + asset inventory:
-		// SCF VPM-04 / AST-03).
+		// SCF VPM-04 / AST-04).
 		{Kind: "endpoint.software_inventory.v1", Version: "1.0.0"},
 		// Slice 556: MDM connectors (Jamf + Intune) — shared managed-device
 		// configuration-profile detail evidence kind (which compliance/config
 		// profiles are deployed + their compliance-relevant settings), evidence
-		// for configuration-management controls (SCF CFG-02 / CFG-04). Secrets
+		// for configuration-management controls (SCF CFG-04 / CHG-03). Secrets
 		// embedded in profiles (Wi-Fi PSKs, VPN shared secrets, certificate
 		// private keys, SCEP challenges, payload blobs) are structurally redacted.
 		{Kind: "endpoint.config_profile.v1", Version: "1.0.0"},
@@ -302,9 +302,9 @@ func DefaultSeed() []KindVersion {
 		// platform wire stays push (invariant #3).
 		//   - workspace_member: access evidence (who has workspace access +
 		//     admin/owner role + 2FA enforcement). Anchors IAC-01 (identity &
-		//     access mgmt) + IAC-06 (authenticator mgmt — the 2FA dimension).
+		//     access mgmt) + IAC-37 (multi-factor authentication — the 2FA dimension).
 		//   - admin_audit_event: admin-action evidence from the audit-logs API.
-		//     Anchor MON-01 (continuous monitoring — same anchor as
+		//     Anchor MON-02 (continuous monitoring — same anchor as
 		//     github.audit_event.v1).
 		//   - retention_settings: data-retention evidence (message/file
 		//     retention durations + policy flags). Anchors DCH-01 (data
@@ -323,10 +323,10 @@ func DefaultSeed() []KindVersion {
 		// on an honest interval; platform wire stays push (invariant #3).
 		//   - iam_policy_binding: access evidence (one record per project-IAM
 		//     (role, member) binding + service-account inventory facts).
-		//     Anchors IAC-21 (Privileged Account Management — the "who has what
-		//     role" surface) + IAC-15 (Account Review — feeds access review).
+		//     Anchors IAC-10 (Privileged Account Management — the "who has what
+		//     role" surface) + IAC-12 (Account Review — feeds access review).
 		//     The spec candidate IAC-22 (Least Privilege) is ABSENT from the
-		//     bundled SCF catalog fixture, so IAC-21 — the closest present
+		//     bundled SCF catalog fixture, so IAC-10 — the closest present
 		//     privileged-access anchor — is the primary (decisions-log D3).
 		//   - storage_bucket_config: bucket hardening evidence (encryption,
 		//     public-access prevention, uniform access, versioning, retention).

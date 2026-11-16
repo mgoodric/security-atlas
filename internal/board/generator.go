@@ -7,13 +7,11 @@
 // the structured Brief, renders the templated narrative (NO LLM — narrative.go),
 // and writes both into one append-only row.
 //
-// Posture-attribution scope (decisions log D3): true per-framework control
-// attribution needs the SCF anchor graph + framework-scope intersection,
-// which is heavyweight. v1 reports the program's tenant-wide posture numbers
-// (coverage / freshness / drift) listed against each registered framework.
-// The brief is honest about this — it states the program posture and names
-// every framework the program runs against. A future slice does true
-// per-framework attribution.
+// Posture (#2210): each framework's posture and the program coverage figure
+// come from the dashboard's per-framework posture query, read and reduced the
+// way the board pack reads them (pack_posture.go), so a board member reading
+// both sees one coverage number. The slice-031 tenant-wide figure survives
+// only as the evidence freshness rate.
 package board
 
 import (
@@ -122,40 +120,30 @@ func (g *Generator) assemble(ctx context.Context, periodEnd, generatedAt time.Ti
 	if err != nil {
 		return Brief{}, fmt.Errorf("board: drift report: %w", err)
 	}
+	startedPassing := len(report.StartedPassing)
 	driftSummary := DriftSummary{
-		WindowDays:      int(DriftWindow.Hours() / 24),
-		Since:           report.SinceDate.UTC().Format("2006-01-02"),
-		Through:         report.ThroughDate.UTC().Format("2006-01-02"),
-		Delta:           report.Delta,
-		FlippedOutCount: len(report.FlippedToOut),
+		WindowDays:          int(DriftWindow.Hours() / 24),
+		Since:               report.SinceDate.UTC().Format("2006-01-02"),
+		Through:             report.ThroughDate.UTC().Format("2006-01-02"),
+		Delta:               report.Delta,
+		FlippedOutCount:     len(report.FlippedToOut),
+		StartedPassingCount: &startedPassing,
 	}
 
-	// --- freshness: program coverage + freshness percentages ---
+	// --- freshness: the tenant-wide evidence freshness rate ---
 	freshnessRows, err := g.freshness.List(ctx)
 	if err != nil {
 		return Brief{}, fmt.Errorf("board: freshness list: %w", err)
 	}
-	coveragePct, freshnessPct := programPosture(freshnessRows)
 
-	// --- frameworks: one posture row per registered framework ---
-	frameworks, err := g.store.ListFrameworks(ctx)
+	// --- posture: the board pack's per-framework posture and its coverage
+	//     figure, from the same query and the same 90-day trend (#2210) ---
+	postureRows, err := g.store.FrameworkPosture(ctx, generatedAt.Add(-PostureTrendWindow))
 	if err != nil {
 		return Brief{}, err
 	}
-	trendArrow := trendFromDelta(driftSummary.Delta)
-	postureState := stateFromCoverage(coveragePct)
-	postures := make([]FrameworkPosture, 0, len(frameworks))
-	for _, fw := range frameworks {
-		postures = append(postures, FrameworkPosture{
-			Slug:         fw.Slug,
-			Name:         fw.Name,
-			CoveragePct:  coveragePct,
-			FreshnessPct: freshnessPct,
-			TrendArrow:   trendArrow,
-			Delta:        driftSummary.Delta,
-			State:        postureState,
-		})
-	}
+	postures := packPostures(postureRows)
+	coveragePct, _, scopedCount, _ := coverageTrend(postures)
 
 	// --- risks: top-N aging, ranked by residual severity then age ---
 	riskRows, err := g.store.ListRisksAsOf(ctx, generatedAt)
@@ -177,9 +165,14 @@ func (g *Generator) assemble(ctx context.Context, periodEnd, generatedAt time.Ti
 		PeriodEnd:   periodEnd.Format("2006-01-02"),
 		GeneratedAt: generatedAt.Format(time.RFC3339),
 		Frameworks:  postures,
-		Drift:       driftSummary,
-		TopRisks:    topRisks,
-		Exceptions:  exceptionSummary(excAgg, generatedAt),
+		Coverage: &CoverageSummary{
+			CoveragePct:              coveragePct,
+			ScopedFrameworkCount:     scopedCount,
+			EvidenceFreshnessRatePct: evidenceFreshnessRate(freshnessRows),
+		},
+		Drift:      driftSummary,
+		TopRisks:   topRisks,
+		Exceptions: exceptionSummary(excAgg, generatedAt),
 	}, nil
 }
 
@@ -207,46 +200,21 @@ func exceptionSummary(agg exceptionAggRow, now time.Time) ExceptionSummary {
 	return out
 }
 
-// programPosture derives the program-wide coverage and freshness percentages
-// from the slice-016 freshness read model.
+// evidenceFreshnessRate is the tenant-wide evidence freshness rate: fresh
+// controls / total controls in the slice-016 freshness read model, rounded to
+// the nearest integer. Zero controls -> 0%.
 //
-//   - freshnessPct = fresh controls / total controls in the read model.
-//   - coveragePct  = controls with at least one evidence record that are NOT
-//     stale / controls with at least one evidence record. This is the
-//     canvas §7.1 control-coverage shape ("active controls with at least one
-//     passing evidence record in the freshness window" / "active controls
-//     with applicability") approximated over the freshness read model: a
-//     fresh control with evidence is "covered". A control with no evidence
-//     is neither fresh nor covered.
-//
-// Both round to the nearest integer. Zero controls -> 0% for both (a program
-// with no controls has nothing covered and nothing fresh — the honest read).
-func programPosture(rows []freshness.ControlFreshness) (coveragePct, freshnessPct int) {
-	if len(rows) == 0 {
-		return 0, 0
-	}
-	total := len(rows)
+// Until #2210 the brief also derived a "coverage" from this read model
+// (fresh controls / controls with evidence). That figure is gone: coverage is
+// the posture query's, and this rate is only ever labelled a freshness rate.
+func evidenceFreshnessRate(rows []freshness.ControlFreshness) int {
 	fresh := 0
-	withEvidence := 0
-	coveredWithEvidence := 0
 	for _, cf := range rows {
 		if !cf.IsStale {
 			fresh++
 		}
-		if cf.EvidenceCount > 0 {
-			withEvidence++
-			if !cf.IsStale {
-				coveredWithEvidence++
-			}
-		}
 	}
-	freshnessPct = roundPct(fresh, total)
-	if withEvidence == 0 {
-		coveragePct = 0
-	} else {
-		coveragePct = roundPct(coveredWithEvidence, withEvidence)
-	}
-	return coveragePct, freshnessPct
+	return roundPct(fresh, len(rows))
 }
 
 // roundPct computes round(100 * num / den) with den > 0. den == 0 -> 0.
@@ -255,20 +223,6 @@ func roundPct(num, den int) int {
 		return 0
 	}
 	return int((float64(num)*100.0)/float64(den) + 0.5)
-}
-
-// trendFromDelta maps the signed 30-day drift delta to a trend-arrow token.
-// A positive delta (more controls passing) is an up trend; negative is down;
-// zero is flat.
-func trendFromDelta(delta int) string {
-	switch {
-	case delta > 0:
-		return TrendUp
-	case delta < 0:
-		return TrendDown
-	default:
-		return TrendFlat
-	}
 }
 
 // stateFromCoverage maps a coverage percentage to the posture label the
@@ -311,6 +265,7 @@ func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 			ID:               r.ID.String(),
 			Title:            r.Title,
 			Category:         r.Category,
+			CategoryName:     r.CategoryName,
 			Treatment:        r.Treatment,
 			ResidualSeverity: severity,
 			AgeDays:          ageDays,

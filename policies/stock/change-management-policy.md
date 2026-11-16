@@ -3,9 +3,10 @@ title: Change Management Policy
 version: 1.0.0
 owner_role: tenant_admin
 approver_role: engineering_lead
+scf_release: "2026.3"
 linked_control_ids:
   - CHG-02
-  - CFG-02
+  - CFG-04
   - CHG-04
 acknowledgment_required_roles:
   - engineer

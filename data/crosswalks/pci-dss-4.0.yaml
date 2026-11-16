@@ -176,7 +176,7 @@ requirements:
 mappings:
   # --- Req 1: Network security controls ---
   - requirement_code: 1.2.1
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: intersects_with
     strength: 0.7
     rationale: "NSC configuration standards overlap with SCF Configuration Change Control; the firewall-rule baseline is the configuration-management surface."
@@ -192,12 +192,12 @@ mappings:
     rationale: "Controls between trusted and untrusted networks map to SCF Network Segmentation; CDE segmentation is the PCI scope-reduction lever."
   # --- Req 2: Secure configurations ---
   - requirement_code: 2.2.1
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Hardening configuration standards map to SCF System Hardening Through Baseline Configurations."
+    rationale: "Hardening configuration standards map to SCF Secure Baseline Configurations."
   - requirement_code: 2.2.4
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: subset_of
     strength: 0.7
     rationale: "Disabling unnecessary services is a subset of the broader Configuration Change Control anchor (least-functionality facet)."
@@ -257,12 +257,12 @@ mappings:
     rationale: "Protecting public-facing web apps (WAF / review) overlaps with Secure Engineering Principles; SCF sample lacks a dedicated WAF anchor (LOW CONFIDENCE)."
   # --- Req 7: Need-to-know access ---
   - requirement_code: 7.2.1
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 0.9
-    rationale: "An access-control model based on need-to-know/least-privilege maps to SCF User Provisioning & Lifecycle — shared with SOC 2 CC6.2/CC6.3 and ISO A.5.18."
+    rationale: "An access-control model based on need-to-know/least-privilege maps to SCF User Provisioning & De-Provisioning — shared with SOC 2 CC6.2/CC6.3 and ISO A.5.18."
   - requirement_code: 7.2.2
-    scf_anchor: IAC-15
+    scf_anchor: IAC-12
     relationship_type: equal
     strength: 0.8
     rationale: "Assigning access by job classification/function maps to SCF Role-Based Access Control."
@@ -278,12 +278,12 @@ mappings:
     strength: 0.7
     rationale: "Authenticating all users with at least one factor is a subset of the broader I&A policy anchor."
   - requirement_code: 8.4.1
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: equal
     strength: 0.9
     rationale: "MFA into the CDE maps to SCF Multi-Factor Authentication — shared with SOC 2 CC6.1 MFA mapping and ISO A.8.5."
   - requirement_code: 8.5.1
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: subset_of
     strength: 0.7
     rationale: "MFA replay/bypass resistance is a subset/hardening facet of the SCF Multi-Factor Authentication anchor."
@@ -300,12 +300,12 @@ mappings:
     rationale: "Physically securing media containing cardholder data overlaps with SCF Media & Physical Storage handling."
   # --- Req 10: Log and monitor ---
   - requirement_code: 10.2.1
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Audit logs capturing access events map to SCF Auditing & Accountability — shared with SOC 2 CC7.2 and ISO A.8.15."
+    rationale: "Audit logs capturing access events map to SCF System Generated Event Logs & Security-Relevant Telemetry — shared with SOC 2 CC7.2 and ISO A.8.15."
   - requirement_code: 10.4.1
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: equal
     strength: 0.8
     rationale: "Reviewing audit logs for anomalies maps to SCF Continuous Monitoring — shared with SOC 2 CC7.2 and ISO A.8.16."
@@ -332,7 +332,7 @@ mappings:
     strength: 0.9
     rationale: "A security awareness program maps to SCF Security Awareness Training — shared with SOC 2 CC1.4 and ISO A.6.3."
   - requirement_code: 12.8.1
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.9
     rationale: "Managing third-party service providers handling account data maps to SCF Third-Party Management — shared with SOC 2 CC9.2 and ISO A.5.19."

@@ -48,6 +48,10 @@ export const DEFAULT_TREATMENT: RiskTreatment = "untreated";
 
 export type RiskFormForValidation = {
   title: string;
+  // #1817: the category slug. Optional so a caller without a picker skips
+  // the check; "" means none is chosen (the list has not loaded, or the
+  // organisation has no active category).
+  category?: string;
   treatment_owner: string;
   treatment: RiskTreatment;
   linked_control_ids: string[];
@@ -55,6 +59,7 @@ export type RiskFormForValidation = {
 
 export type FieldErrors = Partial<{
   title: string;
+  category: string;
   treatment_owner: string;
   linked_control_ids: string;
 }>;
@@ -71,6 +76,9 @@ export function validateRiskForm(s: RiskFormForValidation): FieldErrors {
 
   if (!s.title.trim()) {
     errors.title = "Title is required.";
+  }
+  if (s.category !== undefined && !s.category.trim()) {
+    errors.category = "Category is required.";
   }
   if (!s.treatment_owner.trim()) {
     errors.treatment_owner = "Treatment owner is required.";

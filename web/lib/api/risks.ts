@@ -3,6 +3,7 @@
 
 import { apiBaseURL, APIError } from "./base";
 import { apiFetch } from "./_shared";
+import { enumLabel } from "../labels/enum-labels";
 
 // ----- Slice 100: /risks list view -----
 //
@@ -18,7 +19,10 @@ export type Risk = {
   id: string;
   title: string;
   description: string;
+  // #1812: the slug of the organisation category; category_name is its
+  // display name.
   category: string;
+  category_name?: string;
   methodology: string;
   inherent_score: unknown;
   treatment: string;
@@ -43,6 +47,9 @@ export type Risk = {
   // assessed `severity`. Only GET /v1/risks/{id} carries it, and only for a
   // risk with at least one scored child.
   rollup?: RiskRollUp;
+  // #2060: how many child risks roll up into this one. GET /v1/risks sets
+  // it on a roll-up, which the list only returns with include_rollups=true.
+  child_count?: number;
 };
 
 export type RiskLevel = "team" | "org" | "company";
@@ -167,10 +174,17 @@ export type RisksListResponse = {
 
 // Server-side fetcher used by the slice-100 BFF route. Mirrors the
 // slice-098 `listAnchors` shape: no query-string narrowing — the page
-// owns filter state client-side and the upstream `GET /v1/risks` ships
-// the full unfiltered list.
-export async function listRisks(bearer: string): Promise<Risk[]> {
-  const res = await apiFetch("/v1/risks", bearer);
+// owns filter state client-side. The one exception is roll-ups (#2060):
+// upstream leaves them out unless asked, so a parent never counts beside
+// the children it summarises.
+export async function listRisks(
+  bearer: string,
+  includeRollups = false,
+): Promise<Risk[]> {
+  const res = await apiFetch(
+    includeRollups ? "/v1/risks?include_rollups=true" : "/v1/risks",
+    bearer,
+  );
   const body = (await res.json()) as { risks: Risk[]; count: number };
   return body.risks;
 }
@@ -178,7 +192,18 @@ export async function listRisks(bearer: string): Promise<Risk[]> {
 // Browser-side fetcher used by the slice-100 page. Hits the BFF at
 // `/api/risks` which forwards the bearer cookie to upstream.
 export async function fetchRisksList(): Promise<RisksListResponse> {
-  const res = await fetch(`/api/risks`);
+  return fetchRisks(`/api/risks`);
+}
+
+// fetchRisksListWithRollUps is fetchRisksList with roll-up parents kept
+// (#2060): the register's "Show roll-ups" toggle, and the pickers where a
+// roll-up is a valid choice.
+export async function fetchRisksListWithRollUps(): Promise<RisksListResponse> {
+  return fetchRisks(`/api/risks?include_rollups=true`);
+}
+
+async function fetchRisks(url: string): Promise<RisksListResponse> {
+  const res = await fetch(url);
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {
@@ -190,6 +215,50 @@ export async function fetchRisksList(): Promise<RisksListResponse> {
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as RisksListResponse;
+}
+
+// ----- #1817: organisation risk categories -----
+//
+// The GET /v1/risks/categories wire shape (#1809, #1810). `slug` is the
+// stable reference: the form posts it and the register filter matches it,
+// so a renamed category never breaks a saved form or a bookmarked filter.
+// `name` is what the user reads. An archived category stays on the risks
+// that have it and is filterable, but takes no new risks.
+
+export type RiskCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  archived: boolean;
+  is_default: boolean;
+  risk_count: number;
+  rule_count: number;
+};
+
+// Browser-side fetcher for the `/api/risks/categories` BFF: active
+// categories only unless `includeArchived`.
+export async function fetchRiskCategories(
+  includeArchived = false,
+): Promise<RiskCategory[]> {
+  const res = await fetch(
+    includeArchived
+      ? "/api/risks/categories?include_archived=true"
+      : "/api/risks/categories",
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  const body = (await res.json()) as { categories?: RiskCategory[] };
+  return body.categories ?? [];
 }
 
 // ----- Slice 681: per-risk read-only detail -----
@@ -283,6 +352,65 @@ export type RiskCreateInput = {
   linked_control_ids?: string[];
 };
 
+// ----- #2104: risk record editing + audit trail -----
+//
+// `RiskPatchInput` is the record-field half of `patchReq`
+// (`internal/api/risks/handlers.go`). Treatment and acceptance are not
+// on it: the platform refuses them on PATCH. An omitted field keeps its
+// value, so the edit form sends only the fields the user changed.
+
+export type RiskPatchInput = {
+  title?: string;
+  description?: string;
+  category?: string;
+  methodology?: string;
+  inherent_score?: unknown;
+  treatment_owner?: string;
+  review_due_at?: string;
+  instrument_reference?: string;
+};
+
+// One row of GET /v1/risks/{id}/audit-log, newest first. For
+// fields_changed, before/after hold only the fields that changed.
+export type RiskAuditEntry = {
+  id: string;
+  actor: string;
+  action: "fields_changed" | "category_changed" | "placement_changed" | string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  created_at: string;
+};
+
+export type RiskAuditLogResponse = {
+  entries: RiskAuditEntry[];
+  count: number;
+};
+
+/** PATCH a risk's record fields through the BFF. */
+export async function updateRisk(
+  id: string,
+  body: RiskPatchInput,
+): Promise<Risk> {
+  const decoded = (await hierarchyRequest<{ risk: Risk }>(
+    `/api/risks/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  )) as { risk: Risk };
+  return decoded.risk;
+}
+
+/** The risk's change history through the BFF. */
+export async function fetchRiskAuditLog(
+  id: string,
+): Promise<RiskAuditLogResponse> {
+  return (await hierarchyRequest<RiskAuditLogResponse>(
+    `/api/risks/${encodeURIComponent(id)}/audit-log`,
+  )) as RiskAuditLogResponse;
+}
+
 export type RiskCreatedResponse = {
   risk: Risk;
 };
@@ -318,11 +446,14 @@ export async function createRisk(
 
 // treatmentLabel renders a risk's treatment for display (#1746): an
 // acceptance shows its status, so a pending one never reads as signed off.
+// #2083: the treatment and status read as labels ("Accept (proposed)").
 export function treatmentLabel(
   r: Pick<Risk, "treatment" | "acceptance_status">,
 ): string {
+  const label = enumLabel("RiskTreatment", r.treatment);
   if (r.treatment === "accept" && r.acceptance_status) {
-    return `accept (${r.acceptance_status})`;
+    const status = enumLabel("RiskAcceptanceStatus", r.acceptance_status);
+    return `${label} (${status.toLowerCase()})`;
   }
-  return r.treatment;
+  return label;
 }

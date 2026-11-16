@@ -18,7 +18,7 @@ INSERT INTO users (
 VALUES (
     $1, $2, $3, $4, $5, $6, $7
 )
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type CreateUserParams struct {
@@ -58,12 +58,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1 AND lower(email) = lower($2::text)
 `
@@ -91,12 +92,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) 
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1 AND id = $2
 `
@@ -123,36 +125,64 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (User,
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
-const updateUserProfile = `-- name: UpdateUserProfile :one
+const linkUserIdpByEmail = `-- name: LinkUserIdpByEmail :one
 UPDATE users
-SET display_name = $3,
-    time_zone    = $4,
+SET idp_issuer   = $1,
+    idp_subject  = $2,
+    display_name = $3,
     updated_at   = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+WHERE users.tenant_id = $4
+  AND lower(users.email) = lower($5::text)
+  AND users.idp_issuer = ''
+  AND users.idp_subject = ''
+  AND users.scim_managed
+  AND NOT EXISTS (
+      SELECT 1 FROM local_credentials lc WHERE lc.user_id = users.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM super_admins sa WHERE sa.user_id = users.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.tenant_id = $4
+        AND u.idp_issuer = $1
+        AND u.idp_subject = $2
+  )
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
-type UpdateUserProfileParams struct {
-	TenantID    pgtype.UUID `json:"tenant_id"`
-	ID          pgtype.UUID `json:"id"`
+type LinkUserIdpByEmailParams struct {
+	IdpIssuer   string      `json:"idp_issuer"`
+	IdpSubject  string      `json:"idp_subject"`
 	DisplayName string      `json:"display_name"`
-	TimeZone    string      `json:"time_zone"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	Email       string      `json:"email"`
 }
 
-// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
-// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
-// value to leave the column unchanged. The handler builds the diff from the request
-// body before calling this query.
-func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUserProfile,
-		arg.TenantID,
-		arg.ID,
+// #1944: first OIDC sign-in for a user SCIM already created. Binds the IdP
+// principal to the same-tenant row with the same email (case-insensitive,
+// matching GetSCIMUserByEmail) ONLY while that row's idp tuple is empty, so a
+// row already bound to another principal is never re-linked.
+//
+// Only scim_managed rows link. A row with a local password or a super_admins
+// grant never links even when SCIM manages it: an IdP the tenant admin
+// controls could otherwise assert that email and take the account over
+// (the #2007 review, B1). Those rows keep the OIDCFirstSignInEmailTaken 401.
+//
+// The last NOT EXISTS keeps a returning user on their own row. Status and
+// active are left untouched: a deprovisioned row stays refused.
+func (q *Queries) LinkUserIdpByEmail(ctx context.Context, arg LinkUserIdpByEmailParams) (User, error) {
+	row := q.db.QueryRow(ctx, linkUserIdpByEmail,
+		arg.IdpIssuer,
+		arg.IdpSubject,
 		arg.DisplayName,
-		arg.TimeZone,
+		arg.TenantID,
+		arg.Email,
 	)
 	var i User
 	err := row.Scan(
@@ -169,6 +199,99 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
+	)
+	return i, err
+}
+
+const oIDCFirstSignInEmailTaken = `-- name: OIDCFirstSignInEmailTaken :one
+SELECT (
+    EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.tenant_id = $1
+          AND lower(u.email) = lower($2::text)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.tenant_id = $1
+          AND u.idp_issuer = $3
+          AND u.idp_subject = $4
+    )
+)::boolean AS taken
+`
+
+type OIDCFirstSignInEmailTakenParams struct {
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	Email      string      `json:"email"`
+	IdpIssuer  string      `json:"idp_issuer"`
+	IdpSubject string      `json:"idp_subject"`
+}
+
+// #1944: true when this IdP principal has no row yet but another same-tenant
+// row holds the email (case-insensitive). UpsertOIDC asks only after
+// LinkUserIdpByEmail declined, so that row is bound to another principal or
+// the link was refused; the sign-in must not mint a second user for the
+// email. users_email_per_tenant_unique is case-sensitive and would miss a
+// case variant. A returning principal is never refused here.
+func (q *Queries) OIDCFirstSignInEmailTaken(ctx context.Context, arg OIDCFirstSignInEmailTakenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, oIDCFirstSignInEmailTaken,
+		arg.TenantID,
+		arg.Email,
+		arg.IdpIssuer,
+		arg.IdpSubject,
+	)
+	var taken bool
+	err := row.Scan(&taken)
+	return taken, err
+}
+
+const updateUserProfile = `-- name: UpdateUserProfile :one
+UPDATE users
+SET display_name = $3,
+    time_zone    = $4,
+    theme        = $5,
+    updated_at   = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
+`
+
+type UpdateUserProfileParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+	DisplayName string      `json:"display_name"`
+	TimeZone    string      `json:"time_zone"`
+	Theme       string      `json:"theme"`
+}
+
+// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
+// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
+// value to leave the column unchanged. The handler builds the diff from the request
+// body before calling this query.
+// #2142: theme (system | light | dark) rides the same PATCH; CHECK-constrained.
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserProfile,
+		arg.TenantID,
+		arg.ID,
+		arg.DisplayName,
+		arg.TimeZone,
+		arg.Theme,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Email,
+		&i.DisplayName,
+		&i.Status,
+		&i.IdpIssuer,
+		&i.IdpSubject,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TimeZone,
+		&i.Active,
+		&i.ScimExternalID,
+		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -186,7 +309,7 @@ DO UPDATE SET
     email = EXCLUDED.email,
     display_name = EXCLUDED.display_name,
     updated_at = now()
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type UpsertUserByIdpSubjectParams struct {
@@ -229,6 +352,7 @@ func (q *Queries) UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserById
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }

@@ -41,18 +41,23 @@ func (r *fakeRows) Next() bool {
 func (r *fakeRows) Scan(dest ...any) error {
 	row := r.data[r.i-1]
 	*dest[0].(*uuid.UUID) = row[0].(uuid.UUID)
-	*dest[1].(*string) = row[1].(string)
-	*dest[2].(*string) = row[2].(string)
+	// An id-only query (ResolveImplicitTenantID) scans one column.
+	if len(dest) == 3 {
+		*dest[1].(*string) = row[1].(string)
+		*dest[2].(*string) = row[2].(string)
+	}
 	return nil
 }
 
 type fakeQuerier struct {
 	rows *fakeRows
 	err  error
+	sql  string
 	args []any
 }
 
-func (q *fakeQuerier) Query(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
+func (q *fakeQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	q.sql = sql
 	q.args = args
 	if q.err != nil {
 		return nil, q.err

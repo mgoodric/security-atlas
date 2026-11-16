@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
+	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 )
 
@@ -43,6 +46,11 @@ var (
 
 	demoTeardownTenantSlug  string
 	demoTeardownDatabaseURL string
+
+	demoLegacyTenantSlug      string
+	demoLegacySuperAdminEmail string
+	demoLegacyDatabaseURL     string
+	demoLegacyDryRun          bool
 )
 
 // newDemoCmd wires `atlas-cli demo {seed,teardown}`.
@@ -62,17 +70,120 @@ docs/getting-started/demo-seed.md for the full operator workflow.`,
 	}
 	cmd.AddCommand(newDemoSeedCmd())
 	cmd.AddCommand(newDemoTeardownCmd())
+	cmd.AddCommand(newDemoTeardownLegacyCmd())
 	return cmd
+}
+
+// newDemoTeardownLegacyCmd wires `atlas-cli demo teardown-legacy` (#2153):
+// removal of a demo tenant the super-admin button created before #2043,
+// which `demo teardown` refuses because its mark sits in another tenant.
+func newDemoTeardownLegacyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "teardown-legacy",
+		Short: "remove a demo tenant the admin demo button created before #2043",
+		Long: `Remove a demo tenant the super-admin demo button created before #2043.
+
+Before #2043 the button wrote its demo seed mark into the clicking admin's
+organisation instead of the demo tenant, so "demo teardown --tenant-slug"
+refuses that tenant and the button can no longer remove it.
+
+REQUIRES the ATLAS_ENABLE_DEMO_SEED=true env var and --super-admin-email
+naming exactly one active super admin, who is recorded as the actor on the
+teardown audit rows.
+
+Refuses, and deletes nothing, unless all of these hold:
+  - another tenant holds a pre-#2043 demo button mark naming this slug,
+    written no earlier than this tenant was created, and no demo teardown
+    has named the slug since;
+  - the tenant carries no demo seed mark of its own and was not seeded in
+    place (use "demo teardown" for those);
+  - the tenant has at least one user, and every user is a demo user;
+  - no OAuth client is bound to the tenant;
+  - no table the demo seed does not write holds a row for the tenant.
+
+Run with --dry-run first: it runs every check and the delete, prints the
+rows per table, and rolls back.`,
+		RunE: runDemoTeardownLegacy,
+	}
+	cmd.Flags().StringVar(&demoLegacyTenantSlug, "tenant-slug", "demo", "slug of the legacy demo tenant (the button always used \"demo\")")
+	cmd.Flags().StringVar(&demoLegacySuperAdminEmail, "super-admin-email", "", "email of the super admin performing the teardown (required)")
+	cmd.Flags().StringVar(&demoLegacyDatabaseURL, "database-url", "", "BYPASSRLS DSN (env: DATABASE_URL)")
+	cmd.Flags().BoolVar(&demoLegacyDryRun, "dry-run", false, "run every check and print the per-table counts, then roll back")
+	return cmd
+}
+
+// runDemoTeardownLegacy executes `atlas-cli demo teardown-legacy`.
+func runDemoTeardownLegacy(cmd *cobra.Command, _ []string) error {
+	if !demoEnvEnabled() {
+		return fmt.Errorf(
+			"%s=true is required to run demo teardown-legacy (P0-A1 — opt-in only)",
+			demoEnableEnvVar,
+		)
+	}
+	if demoLegacySuperAdminEmail == "" {
+		return fmt.Errorf("--super-admin-email is required")
+	}
+	dsn, err := resolveDemoDSN(demoLegacyDatabaseURL)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("demo teardown-legacy: open pool: %w", err)
+	}
+	defer pool.Close()
+
+	seeder, err := demoseed.NewSeeder(pool, demoseed.DefaultScale)
+	if err != nil {
+		return fmt.Errorf("demo teardown-legacy: %w", err)
+	}
+	res, err := seeder.TeardownLegacyButtonTenant(ctx, demoLegacyTenantSlug, demoLegacySuperAdminEmail, demoLegacyDryRun)
+	if err != nil {
+		return fmt.Errorf("demo teardown-legacy: %w", err)
+	}
+	printLegacyTeardown(cmd.OutOrStdout(), demoLegacyTenantSlug, res)
+	return nil
+}
+
+// printLegacyTeardown writes the per-table counts, then one line saying
+// whether they were deleted or a dry run rolled them back.
+func printLegacyTeardown(w io.Writer, slug string, res demoseed.LegacyTeardownResult) {
+	tables := make([]string, 0, len(res.Deleted))
+	for t := range res.Deleted {
+		tables = append(tables, t)
+	}
+	sort.Strings(tables)
+	for _, t := range tables {
+		_, _ = fmt.Fprintf(w, "  %-32s %d\n", t, res.Deleted[t])
+	}
+	if res.DryRun {
+		_, _ = fmt.Fprintf(w, "demo teardown-legacy: dry run; every check passed for tenant %q (%s); the rows above were NOT deleted.\n", slug, res.TenantID)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "demo teardown-legacy: legacy demo tenant %q (%s) removed.\n", slug, res.TenantID)
 }
 
 // newDemoSeedCmd wires `atlas-cli demo seed --tenant-slug=<slug>`.
 func newDemoSeedCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "seed",
-		Short: "create a new demo tenant + populate it with the slice-205 dataset",
-		Long: `Create a NEW tenant identified by --tenant-slug and populate it with
-the slice-205 demo dataset (~50 controls, ~20 risks, ~200 evidence records,
-across 12 months + 3 frameworks + 3 audit periods).
+		Short: "load the slice-205 demo dataset into your organisation or a separate demo tenant",
+		Long: `Load the slice-205 demo dataset (~50 controls, ~20 risks, ~200 evidence
+records, across 12 months + 3 frameworks + 3 audit periods).
+
+Without --tenant-slug, the dataset goes into the install's only tenant (a
+single-tenant install), and only while that tenant holds nothing beyond the
+stock bootstrap seed: no non-stock controls, risks, evidence or policies.
+Every row it adds is recorded, so "demo teardown" removes exactly them. If the
+tenant holds real data, seed refuses rather than mix demo and real data.
+
+With --tenant-slug, it creates a NEW tenant for the dataset. On an install
+that already has a tenant this makes the install multi-tenant, so it needs
+ATLAS_ALLOW_MULTI_TENANT=true. Seeding never turns an install multi-tenant
+on its own (#1765).
 
 REQUIRES the ATLAS_ENABLE_DEMO_SEED=true env var (AC-14 / P0-A1).
 
@@ -81,24 +192,24 @@ The CLI:
   - Generates a fresh strong password (>= 16 chars, mixed alphabet).
   - Prints the demo admin email + the password ONCE to stdout.
   - Never logs the password, never writes it to disk.
-  - Is idempotent on --tenant-slug: re-running the same slug returns
-    the existing tenant's metadata without re-seeding (the password
-    is NOT re-printed; the operator must rotate via the standard
-    /v1/admin/users surface).
+  - Is idempotent: re-running against an already-seeded tenant returns
+    its metadata without re-seeding (the password is NOT re-printed;
+    the operator must rotate via the standard /v1/admin/users surface).
 
 Refuses to run if:
 
   - ATLAS_ENABLE_DEMO_SEED is unset.
-  - The target tenant exists AND was not created by demo seed.
-  - The target tenant exists AND has > 10 rows in any of
-    (controls / risks / evidence_records).`,
+  - No --tenant-slug, and the install has several tenants (pass one) or
+    the only tenant holds organisation data beyond the stock seed.
+  - --tenant-slug names a new tenant, another tenant exists, and
+    ATLAS_ALLOW_MULTI_TENANT is not true.
+  - The target tenant exists AND was not created by demo seed.`,
 		RunE: runDemoSeed,
 	}
-	cmd.Flags().StringVar(&demoSeedTenantSlug, "tenant-slug", "", "slug for the demo tenant (lower-case alnum + hyphen; suggest demo-*)")
+	cmd.Flags().StringVar(&demoSeedTenantSlug, "tenant-slug", "", "create a separate demo tenant with this slug (needs ATLAS_ALLOW_MULTI_TENANT=true beside an existing tenant); omit to seed your organisation")
 	cmd.Flags().Float64Var(&demoSeedScale, "scale", demoseed.DefaultScale, "row-count multiplier (0.1 to 5.0)")
 	cmd.Flags().StringVar(&demoSeedDatabaseURL, "database-url", "", "BYPASSRLS DSN (env: DATABASE_URL)")
 	cmd.Flags().StringVar(&demoSeedAppDatabaseURL, "app-database-url", "", "RLS-enforced app-role DSN for post-seed evaluation (env: DATABASE_URL_APP)")
-	_ = cmd.MarkFlagRequired("tenant-slug")
 	return cmd
 }
 
@@ -114,8 +225,13 @@ Refuses to run if:
 func newDemoTeardownCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "teardown",
-		Short: "delete the named demo tenant + every row anchored to it",
-		Long: `Delete the named demo tenant + every row anchored to it.
+		Short: "remove the demo dataset",
+		Long: `Remove the demo dataset.
+
+Without --tenant-slug, removes the demo rows "demo seed" added to the
+install's only tenant: exactly the rows it recorded, nothing else. The tenant
+stays. With --tenant-slug, deletes that demo tenant + every row anchored to
+it (or, if that tenant was seeded in place, only the recorded rows).
 
 REQUIRES the ATLAS_ENABLE_DEMO_SEED=true env var (AC-14 / P0-A1).
 
@@ -126,9 +242,8 @@ tenant. Writes one demo_seed_teardown audit-log row before
 deleting, so the operator's forensic trail includes the teardown.`,
 		RunE: runDemoTeardown,
 	}
-	cmd.Flags().StringVar(&demoTeardownTenantSlug, "tenant-slug", "", "slug of the demo tenant to delete")
+	cmd.Flags().StringVar(&demoTeardownTenantSlug, "tenant-slug", "", "slug of the demo tenant to delete; omit to remove the demo rows from your organisation")
 	cmd.Flags().StringVar(&demoTeardownDatabaseURL, "database-url", "", "BYPASSRLS DSN (env: DATABASE_URL)")
-	_ = cmd.MarkFlagRequired("tenant-slug")
 	return cmd
 }
 
@@ -169,10 +284,11 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("demo seed: %w", err)
 	}
-	res, err := seeder.Apply(ctx, demoseed.ApplyInput{
-		Slug:          demoSeedTenantSlug,
-		ActorUserID:   uuid.Nil, // CLI is invoked with no JWT context
-		ActorTenantID: uuid.Nil,
+	res, err := seeder.Seed(ctx, demoseed.SeedInput{
+		Slug:             demoSeedTenantSlug,
+		AllowMultiTenant: admintenants.DefaultAllowMultiTenant(),
+		ActorUserID:      uuid.Nil, // CLI is invoked with no JWT context
+		ActorTenantID:    uuid.Nil,
 	})
 	if err != nil {
 		return fmt.Errorf("demo seed: %w", err)
@@ -194,7 +310,6 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 		)
 		return nil
 	}
-
 	// Status line: AC-15 — tenant slug + user email + one-time password.
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 		"\n=== Slice 205 demo seed complete ===\n"+
@@ -229,6 +344,15 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 		res.FrameworkScopes, res.FrameworkReqs, res.STRMEdges, res.ControlsAnchored,
 		res.AuditLogRows, len(res.EvidenceKindsUsed),
 	)
+
+	if res.InPlace {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+			"\nThe demo data is in your organisation (tenant_id %s). Sign in as usual to see it.\n"+
+				"%d demo rows are recorded; `atlas-cli demo teardown` removes exactly them.\n",
+			res.TenantID, res.RecordedRows,
+		)
+		return nil
+	}
 
 	// Slice 476 — reach-it hint. The demo data lives in a SEPARATE tenant,
 	// so the operator who seeded it is not yet a member and the tenant does
@@ -318,11 +442,21 @@ func runDemoTeardown(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("demo teardown: %w", err)
 	}
+	if demoTeardownTenantSlug == "" {
+		ref, err := seeder.TeardownImplicit(ctx, uuid.Nil, uuid.Nil)
+		if err != nil {
+			return fmt.Errorf("demo teardown: %w", err)
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+			"demo teardown: demo rows removed from tenant %q; its other rows are unchanged.\n", ref.Name,
+		)
+		return nil
+	}
 	if err := seeder.Teardown(ctx, demoTeardownTenantSlug, uuid.Nil, uuid.Nil); err != nil {
 		return fmt.Errorf("demo teardown: %w", err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
-		"demo teardown: tenant %q deleted.\n", demoTeardownTenantSlug,
+		"demo teardown: demo data for tenant %q removed.\n", demoTeardownTenantSlug,
 	)
 	return nil
 }

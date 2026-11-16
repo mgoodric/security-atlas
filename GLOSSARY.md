@@ -33,6 +33,7 @@ The graph-traversal result that answers "what is the relationship between a fram
 - **Strength-aware** — each `(requirement, anchor)` row carries the STRM `relationship_type` + `strength` from `fw_to_scf_edges` (canvas §3.2). The handler returns these verbatim; weighted-sum coverage is computed upstream (slice 012's dashboard/eval territory).
 - **Effectiveness-free in v1** — the `effectiveness` field that canvas §3.3 mentions for the dashboard is **deferred to slice 012**. Slice 008 returns anchors + controls, not effectiveness numbers. The wire format omits the field rather than emitting null, so slice 012 can add it without a breaking change.
 - **`no_relationship` edges filtered out** — STRM stores "confirmed no overlap" as data (canvas §3.2). Coverage responses exclude these; they're surfaced only in the mapping-inspector UI (canvas §10), not the coverage view.
+- **Catalog edges plus the tenant's overlay edges** — edges are read through `effective_fw_to_scf_edges`: the catalog's `fw_to_scf_edges` plus the caller tenant's **active** `fw_to_scf_overlay_edges` (#1798). Every coverage view (dashboard posture and trend, dashboard export, MCP program reads, the three routes below) counts a requirement reached through an overlay edge. Each edge row says where it came from in `origin`: `catalog`, or `overlay` for the organisation's own mapping. A retired overlay edge, or another tenant's, never counts.
 
 Coverage queries hit three routes:
 
@@ -40,9 +41,21 @@ Coverage queries hit three routes:
 - `GET /v1/anchors/{id}/requirements` — given an SCF anchor (UUID or scf_id), list satisfied framework requirements (DB-backed replacement of the slice-006 in-memory placeholder).
 - `GET /v1/controls/{id}/coverage` — given a tenant control (UUID), list the framework requirements its anchor satisfies.
 
-All three accept optional `?framework_version=slug:version` to pin historical mappings. `?as-of=<timestamp>` and `?scf_release=<version>` are accepted-and-no-op in v1; slice 012 / future SCF-release-import work will activate them.
+All three accept optional `?framework_version=slug:version` to pin historical mappings. `?as-of=<timestamp>` is accepted-and-no-op in v1; slice 012 will activate it.
+
+`?scf_release=<version>` is live on `GET /v1/anchors/{id}`, `GET /v1/anchors/{id}/requirements` and `GET /v1/requirements/{id}/coverage` (#1770), and the response's `scf_release` names the release used. On the anchor reads an SCF code resolves in that release, or in the current release when the parameter is absent; an unknown release and a code missing from the release are distinct 404s. Requirement coverage pins its anchors to the named release, or to the current release when the parameter is absent (#2203); an edge left on a legacy release on purpose is read only with `?scf_release=<that release>`. Control bundles name their release the same way, with `scf_release` in `control.yaml`; without it, upload binds in the current release and returns a deprecation warning.
 
 **RLS interaction:** the catalog tables (`framework_requirements`, `fw_to_scf_edges`, `scf_anchors`) have no `tenant_id` and no RLS — they're platform-bundled and global. Only `controls` is tenant-scoped. A traversal across tenant boundaries returns the (global) requirement + anchors but an empty controls list — this is the correct shape (canvas §3.5) and is enforced by Postgres RLS, not by app code. The handler MUST NOT add `WHERE tenant_id = ?` to any query (constitutional invariant 6).
+
+## Anchor fit (#1736)
+
+How well a control's SCF anchor covers what the control does. Stored on the control as `controls.anchor_fit`, set from `anchor_fit` in `control.yaml`:
+
+- **`exact`** — the anchor covers the control. The default; a bundle that omits `anchor_fit` is stored as `exact`.
+- **`partial`** — the anchor covers the control's intent only in part.
+- **`none`** — no SCF control fits. The anchor is the nearest catch-all (SOC 2 CC1 audit committee independence on GOV-09, for example), or the control has no anchor at all. This is ADR 0013's honest "unmapped", and the only case where `scf_anchor_id` may be absent.
+
+A non-exact fit requires **`anchor_fit_note`**, which says what the anchor misses. The fit is a label, not a coverage input: framework credit still flows only through the anchor (see Coverage above), so an unanchored `none` control satisfies no framework requirement. An anchored control can be credited for a requirement its anchor misses through a tenant overlay edge (#1735, #1798). The user-guide handling is in `docs-site/docs/framework-setup.md` ("Controls with no SCF equivalent").
 
 ## Active control (two definitions, on purpose)
 
@@ -95,8 +108,10 @@ States (canvas §6.3):
 - `requested` — initial state. Set by `POST /v1/exceptions`.
 - `approved` — governance approval recorded. `approved_by` populated. **Approval is not the same as activation** — the effect doesn't take hold until `active`.
 - `denied` — terminal. To revisit, file a new exception.
-- `active` — the effect is in force. A control × scope cell with an active exception evaluates as `excepted` (not `fail`) in downstream dashboards (slice 020 consumer).
-- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. Reverts control evaluation to normal.
+- `active` — the effect is in force from `effective_from` until `expires_at`. The evaluation engine records the result `excepted` for every control × scope cell the predicate covers, whatever the evidence says (#2112). The whole-tenant evaluation (a control that resolves to no scope cells) is covered only by a predicate that matches every cell.
+- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. The engine stops honouring an exception at `expires_at` without waiting for the job, so the next evaluation is the normal result.
+
+**`excepted`** is a control evaluation result beside `pass`, `fail`, `na` and `inconclusive`. It is never a pass: it is not displayed as one (the controls list reads "Excepted") and it is not counted as one in drift, effectiveness, residual risk or any pass count. In a worst-state rollup across cells or controls it ranks below `fail` and `inconclusive` and above `pass`. Framework posture counts an excepted control as covered (now and in the 90-day baseline) and reports the share of requirements covered only by exception separately, as `covered_by_exception_pct`. Evidence can never carry it (`evidence_records_result_not_excepted`).
 
 Allowed transitions:
 
@@ -105,15 +120,26 @@ requested → approved   (approver-role required; segregation of duties: approve
 requested → denied     (approver-role required; segregation of duties: approver != requester)
 approved  → active     (operator action; sets effective_from)
 active    → expired    (system; daily cron tick)
+active    → revoked    (approver-role required; a reason is required; #2113)
 ```
 
-No other transitions. `denied` and `expired` are terminal.
+No other transitions. `denied`, `expired` and `revoked` are terminal.
+
+- `revoked` — terminal. An approver ended the active exception before `expires_at`, with a reason recorded on its audit row (`revoked_by`, `revoked_at` on the exception). `expires_at` keeps the window that was granted. The engine reads only `active` exceptions, so the control returns to its normal result on its next evaluation.
+
+In the app, an exception is requested from its control (`/exceptions/new?control_id=…`) and carried through its life on `/exceptions/{id}`. The request's scope is never a null predicate: the scope picker's null means an unfinished choice, and the API refuses it, because a stored null would match every cell. The whole control is `{"op":"true"}`.
 
 **`compensating_controls`** is a `TEXT[]` — free-form descriptions of what's being done instead. NOT an FK to `controls` (because compensating mitigations are often informal: "weekly manual review by SRE on-call until IAM federation lands"). A future slice can add `compensating_control_ids UUID[]` if a structured link becomes useful.
 
-**Segregation of duties** — `approved_by` MUST differ from `requested_by`. The same credential cannot both file and approve an exception.
+**Segregation of duties** — `approved_by` MUST differ from `requested_by`, compared by person, unless the organisation allows [self-approval](#self-approval-2101). See ADR 0024.
 
 **Calendar surface** — `GET /v1/exceptions/expiring?within=30d` powers the "Upcoming items" dashboard panel (canvas §6.3, dashboard mockup).
+
+## Self-approval (#2101)
+
+An approval made by the person who requested it: the submitter of a policy or framework scope, or the requester of an exception. Refused by default. Approvals require a second person, and only a person (never an API key, OAuth client or bootstrap credential) approves.
+
+An organisation may turn on **Allow self-approval** (`tenants.allow_self_approval`; admin-only; every change written to the audit log). While it is on, the requester may approve their own record, and the record is flagged `self_approved` and shown as **Self-approved** in the UI, the exports and the audit log. The setting relaxes only "same person": a machine credential still never approves. One rule decides every approval (`internal/approval`); see [ADR 0024](docs/adr/0024-approvals-require-a-second-person.md).
 
 ## Decision Log (slice 055)
 
@@ -232,12 +258,12 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 | File                             | Title                       | Linked SCF anchors           |
 | -------------------------------- | --------------------------- | ---------------------------- |
 | `information-security-policy.md` | Information Security Policy | `GOV-01`, `GOV-04`, `RSK-01` |
-| `access-control-policy.md`       | Access Control Policy       | `IAC-01`, `IAC-07`, `IAC-22` |
-| `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-01`, `TPM-03`, `TPM-04` |
+| `access-control-policy.md`       | Access Control Policy       | `IAC-01`, `IAC-04`, `IAC-22` |
+| `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-02`, `TPM-03`, `TPM-10` |
 | `incident-response-plan.md`      | Incident Response Plan      | `IRO-04`, `IRO-01`, `IRO-02` |
-| `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-02`, `CHG-04` |
+| `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-04`, `CHG-04` |
 
-Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes to UUIDs via `scf_anchors`, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
+Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes in the SCF release each file declares (`scf_release`, #1772) to the controls bound to those anchors, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
 
 ## AuditPeriod (slice 028)
 
@@ -294,6 +320,16 @@ P0 anti-criteria: anonymous ack rejected (slice 034 cred required); stale acks n
 - **Single-tenant install** — an install that holds exactly one tenant: the default, and how almost every adopter runs security-atlas. It is meant to be one where nobody chooses, enters or sees a tenant and everything happens in the bootstrap tenant; parts of the CLI and admin UI still ask for a tenant ID until #1758 is complete.
 - **Multi-tenant install** — an install that holds two or more tenants, so users choose which organisation they are working in. An operator opts into it deliberately; once an install is multi-tenant it does not go back.
 - **Bootstrap tenant** — the one tenant created when the install is first set up. On a single-tenant install it is the organisation; on a multi-tenant install it is the first of several.
+
+## Modules (in design)
+
+- **Module** — a top-level product area that a tenant switches on or off as a whole, such as Risk, Third-party risk, Policies, Questionnaires or Personnel security. _Avoid_: area, section, app.
+- **Core module** — a module that is always on because the platform's spine depends on it: Controls, Evidence, Frameworks and the SCF catalog, Scopes and framework scopes, Audit periods, Dashboard, and Settings & admin.
+- **Optional module** — a module a tenant can switch off: Risk, Third-party risk, Policies, Questionnaires, Personnel security, Exceptions and Board reporting.
+- **Feature** — a smaller switch inside one module, such as risk hierarchy inside Risk. A feature is on only when its module is on. _Avoid_: sub-module.
+- **Switched off** — the state of an optional module whose screens and API are hidden from everyone in the tenant. Its data is kept unchanged, and switching the module back on restores it. _Avoid_: disabled, deleted, archived.
+- **Module access** — the set of modules one member of a tenant may use. It says _where_ the member can work; the member's role says _what_ they can do there. Module access never reaches beyond the modules the tenant has switched on. Admins always have every switched-on module, and auditors are scoped by their audit periods instead.
+- **No access** — the state of a module that is switched on for the tenant but outside one member's module access. It is hidden from that member only. _Avoid_: forbidden, locked.
 
 ## User-tenant membership (slice 141, in design)
 

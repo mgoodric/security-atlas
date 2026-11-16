@@ -31,7 +31,7 @@
         "additionalProperties": false,
         "properties": {
           "anchor_id": {
-            "description": "The control identifier. Accepts either the tenant control UUID OR the SCF anchor short code (e.g., \"IAC-06\"). Required.",
+            "description": "The control identifier. Accepts either the tenant control UUID OR the SCF anchor short code (e.g., \"IAC-37\"). Required.",
             "type": "string"
           }
         },
@@ -43,13 +43,17 @@
     },
     {
       "name": "list_risks",
-      "description": "List risks from the bearer tenant's risk register. Optional filters: status (treatment), category. RLS scopes to the caller's tenant.",
+      "description": "List risks from the bearer tenant's risk register. Roll-ups (risks with at least one child linked) are left out unless include_rollups is true. Optional filters: status (treatment), category. RLS scopes to the caller's tenant.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "category": {
-            "description": "Filter by risk category (free-form string matching the platform's risk_categories list). Optional.",
+            "description": "Filter by risk category slug, one of the organisation's own categories (call list_risk_categories for the valid slugs; archived ones are filterable). An unknown slug is an error naming the valid ones. Optional.",
             "type": "string"
+          },
+          "include_rollups": {
+            "description": "Also list roll-ups (risks with at least one child risk linked). Default false: a roll-up summarises its children, so listing both would count the same exposure twice. Included roll-ups carry child_count.",
+            "type": "boolean"
           },
           "limit": {
             "description": "Result cap; default 100, max 500.",
@@ -83,6 +87,20 @@
         "required": [
           "risk_id"
         ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_risk_categories",
+      "description": "List the bearer tenant's own risk categories (slug, name, default flag, usage counts). These are the valid values for create_risk's category (by slug or name) and list_risks' category filter (by slug).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_archived": {
+            "description": "Also list archived categories. They stay on the risks that have them and are filterable, but cannot be given to a new risk. Default false.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       }
     },
@@ -215,7 +233,7 @@
     },
     {
       "name": "list_framework_posture",
-      "description": "List the bearer tenant's per-framework posture (coverage percentage, freshness composite, and 90-day trend delta — one row per active framework version). Returns canonical posture rows.",
+      "description": "List the bearer tenant's per-framework posture (coverage percentage, the share of requirements covered only by exception, freshness composite, and 90-day trend delta — one row per active framework version; excepted controls count as covered and are never a pass). A version with no activated framework scope has scope_set=false and null percentages: its scope is not set, so there is no coverage figure to report. Returns canonical posture rows.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -244,7 +262,8 @@
             "type": "string"
           },
           "category": {
-            "description": "Risk category slug (e.g., operational, technical, legal).",
+            "description": "One of the organisation's own risk categories, by slug or by display name (case-insensitive). Call list_risk_categories for the valid values; archived categories cannot be given to a new risk. An unknown category is refused with the list of valid slugs.",
+            "minLength": 1,
             "type": "string"
           },
           "description": {

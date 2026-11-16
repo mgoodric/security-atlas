@@ -3,6 +3,7 @@ package qmapsuggest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,12 +11,17 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/llm"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
+// Reader is what a suggestion reads. Every anchor read is pinned to one SCF
+// release (#1772): the release is looked up once, and candidates and the
+// model's pick both come from it.
 type Reader interface {
 	QuestionTextForMapping(ctx context.Context, questionID uuid.UUID) (string, error)
-	RetrieveCandidates(ctx context.Context, keywords []string) ([]Candidate, error)
-	ResolveAnchor(ctx context.Context, scfID string) (Candidate, bool, error)
+	LookupRelease(ctx context.Context, label string) (scfrelease.Release, error)
+	RetrieveCandidatesInRelease(ctx context.Context, scfVersionID string, keywords []string) ([]Candidate, error)
+	ResolveAnchorInRelease(ctx context.Context, release, scfID string) (Candidate, bool, error)
 }
 
 type ProposalStore interface {
@@ -43,8 +49,17 @@ func NewService(reader Reader, client llm.Client, store ProposalStore, audit Aud
 type SuggestParams struct {
 	QuestionID uuid.UUID
 	Actor      string
+	// SCFRelease is the label of the SCF release the caller works in. Empty
+	// means the current release. The output's SCFRelease names the release
+	// used either way.
+	SCFRelease string
 }
 
+// Suggest proposes one SCF anchor for a needs_mapping question. Candidates
+// come from one SCF release, which Proposal.SCFRelease names. An unknown
+// release is scfrelease.ErrUnknownRelease; with no release named and no SCF
+// release loaded at all, there is nothing to suggest from and the answer is
+// manual-only.
 func (s *Service) Suggest(ctx context.Context, p SuggestParams) (Proposal, error) {
 	out := Proposal{QuestionID: p.QuestionID.String(), PromptVersion: promptVersion}
 
@@ -53,9 +68,19 @@ func (s *Service) Suggest(ctx context.Context, p SuggestParams) (Proposal, error
 		return Proposal{}, err
 	}
 	keywords := keywordsFrom(questionText)
-	cands, err := s.reader.RetrieveCandidates(ctx, keywords)
-	if err != nil {
-		return Proposal{}, fmt.Errorf("qmapsuggest: retrieve: %w", err)
+	var cands []Candidate
+	rel, err := s.reader.LookupRelease(ctx, p.SCFRelease)
+	switch {
+	case err == nil:
+		out.SCFRelease = rel.Version
+		cands, err = s.reader.RetrieveCandidatesInRelease(ctx, uuid.UUID(rel.ID.Bytes).String(), keywords)
+		if err != nil {
+			return Proposal{}, fmt.Errorf("qmapsuggest: retrieve: %w", err)
+		}
+	case p.SCFRelease == "" && errors.Is(err, scfrelease.ErrNoCurrentRelease):
+		// No SCF catalog loaded: no candidates, as before releases existed.
+	default:
+		return Proposal{}, err
 	}
 	ranked := rankCandidates(cands, keywords, maxCandidates)
 	if len(ranked) == 0 {
@@ -134,7 +159,7 @@ func (s *Service) Suggest(ctx context.Context, p SuggestParams) (Proposal, error
 		out.Reason = ReasonOutOfGrounding
 		return out, nil
 	}
-	resolved, ok, err := s.reader.ResolveAnchor(ctx, pick.SCFID)
+	resolved, ok, err := s.reader.ResolveAnchorInRelease(ctx, rel.Version, pick.SCFID)
 	if err != nil {
 		return Proposal{}, fmt.Errorf("qmapsuggest: resolve anchor: %w", err)
 	}

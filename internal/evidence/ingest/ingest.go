@@ -226,6 +226,11 @@ type Receipt struct {
 	IngestedAt   time.Time
 	CredentialID string
 	Deduplicated bool
+	// LinkedControlID is the UUID of the control the stored record links
+	// to, or "" when control_id stayed a free-form, unlinked reference
+	// (#2165). Read from the stored row, so a deduplicated push reports the
+	// original record's linkage.
+	LinkedControlID string
 }
 
 // ReceiptStatus is the pusher-visible terminal status for a publish receipt.
@@ -802,11 +807,33 @@ func (s *Service) persist(ctx context.Context, tx pgx.Tx, p *prepared, opts Ledg
 		validUntil = pgtype.Timestamptz{Time: opts.ValidUntil, Valid: true}
 	}
 
+	// #2100: a control_id that is not a UUID may be a control bundle ID
+	// (what `atlas-cli controls upload` and the catalog show). Resolve it
+	// to the tenant's active control so the record links; before this the
+	// row kept only control_ref, which every reader matches against the
+	// control's UUID, so the evidence never reached the control. A value
+	// naming no bundle (e.g. "scf:VPM-04") stays a free-form control_ref.
+	// control_ref keeps the wire value either way: verify rebuilds the
+	// hashed record from it.
+	controlID := p.controlID
+	if !controlID.Valid && p.rec.ControlId != "" {
+		ctrl, cerr := q.GetActiveControlByBundleID(ctx, dbx.GetActiveControlByBundleIDParams{
+			TenantID: pgUUID(p.cred.TenantID),
+			BundleID: p.rec.ControlId,
+		})
+		switch {
+		case cerr == nil:
+			controlID = ctrl.ID
+		case !errors.Is(cerr, pgx.ErrNoRows):
+			return dbx.EvidenceRecord{}, false, fmt.Errorf("resolve control bundle id: %w", cerr)
+		}
+	}
+
 	observedAtNanos := p.observedAtNanos
 	params := dbx.InsertEvidenceRecordParams{
 		ID:                insertRecordID,
 		TenantID:          pgUUID(p.cred.TenantID),
-		ControlID:         p.controlID,
+		ControlID:         controlID,
 		ControlRef:        p.rec.ControlId,
 		ScopeID:           pgtype.UUID{},
 		ObservedAt:        pgtype.Timestamptz{Time: p.observed, Valid: true},
@@ -867,13 +894,17 @@ func (s *Service) auditPersistFailure(ctx context.Context, p *prepared, err erro
 }
 
 func receiptFor(cred credstore.Credential, rec dbx.EvidenceRecord, deduped bool) Receipt {
-	return Receipt{
+	r := Receipt{
 		RecordID:     uuid.UUID(rec.ID.Bytes).String(),
 		Hash:         rec.Hash,
 		IngestedAt:   rec.IngestedAt.Time,
 		CredentialID: cred.ID,
 		Deduplicated: deduped,
 	}
+	if rec.ControlID.Valid {
+		r.LinkedControlID = uuid.UUID(rec.ControlID.Bytes).String()
+	}
+	return r
 }
 
 // writeAudit lands one row in evidence_audit_log. Best-effort: a failure
@@ -1061,10 +1092,11 @@ func protoResultToEnum(r evidencev1.Result) (dbx.EvidenceResult, bool) {
 // ReceiptToProto returns the proto-shaped receipt the API handler returns.
 func ReceiptToProto(r Receipt) *evidencev1.EvidenceReceipt {
 	return &evidencev1.EvidenceReceipt{
-		RecordId:     r.RecordID,
-		Hash:         r.Hash,
-		IngestedAt:   timestamppb.New(r.IngestedAt),
-		CredentialId: r.CredentialID,
+		RecordId:        r.RecordID,
+		Hash:            r.Hash,
+		IngestedAt:      timestamppb.New(r.IngestedAt),
+		CredentialId:    r.CredentialID,
+		LinkedControlId: r.LinkedControlID,
 	}
 }
 

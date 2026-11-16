@@ -41,6 +41,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/controls"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
@@ -67,15 +68,27 @@ func New(pool *pgxpool.Pool) *Handler {
 // patchTenantRequest is the request body for PATCH /v1/tenants/{id}.
 //
 // Each field is a pointer so the absence of the field can be distinguished
-// from an explicit value. A PATCH may carry name, bundle_gate_mode, or both;
-// a PATCH that carries neither is a 400 (nothing to change).
+// from an explicit value. A PATCH may carry any subset of the fields; a PATCH
+// that carries none is a 400 (nothing to change).
 //
 //   - Name (slice 144): rename the tenant.
 //   - BundleGateMode (slice 608): set the control-bundle upload gate policy
 //     (strict | advisory | mandatory_tests).
+//   - RiskReviewCadenceDays (#2059): days from a risk's creation to its
+//     default review date (1..3650). Affects new risks only.
+//   - AllowSelfApproval (#2101): whether the requester of a policy,
+//     framework-scope or exception approval may approve it themselves.
+//     Such approvals are flagged self-approved. Admin-only, like every
+//     field here; each change is written to me_audit_log.
+//   - VendorInitialReviewDays (#2201): days after a vendor's creation that
+//     its first review is due (1..365). Moves the first review date of every
+//     vendor not yet reviewed.
 type patchTenantRequest struct {
-	Name           *string `json:"name"`
-	BundleGateMode *string `json:"bundle_gate_mode"`
+	Name                    *string `json:"name"`
+	BundleGateMode          *string `json:"bundle_gate_mode"`
+	RiskReviewCadenceDays   *int    `json:"risk_review_cadence_days"`
+	AllowSelfApproval       *bool   `json:"allow_self_approval"`
+	VendorInitialReviewDays *int    `json:"vendor_initial_review_days"`
 }
 
 // tenantWire is the JSON shape of a tenant row on the wire.
@@ -86,9 +99,21 @@ type tenantWire struct {
 	// BundleGateMode is the slice-608 per-tenant control-bundle upload gate
 	// policy: strict (default) | advisory | mandatory_tests. Settable via the
 	// PATCH body alongside (or instead of) name.
-	BundleGateMode string    `json:"bundle_gate_mode"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	BundleGateMode string `json:"bundle_gate_mode"`
+	// RiskReviewCadenceDays is the #2059 organisation risk review cadence: a
+	// risk created without a review date is due this many days after it was
+	// created. Default 365.
+	RiskReviewCadenceDays int `json:"risk_review_cadence_days"`
+	// AllowSelfApproval is the #2101 organisation setting: when true, the
+	// requester of an approval may approve it, and the record is flagged
+	// self-approved. Default false.
+	AllowSelfApproval bool `json:"allow_self_approval"`
+	// VendorInitialReviewDays is the #2061 vendor initial-review window: a
+	// vendor that has never been reviewed is due for its first review this
+	// many days after it was created. Default 30.
+	VendorInitialReviewDays int       `json:"vendor_initial_review_days"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }
 
 // Validation constants -----------------------------------------------
@@ -110,6 +135,32 @@ const (
 	// a successful control-bundle gate-policy change (slice 608). CHECK
 	// constraint extended in migration 20260608030000_tenant_bundle_gate_mode.sql.
 	auditActionTenantGatePolicy = "tenant_gate_policy_update"
+
+	// auditActionTenantRiskReviewCadence is the me_audit_log.action value
+	// written on a successful risk review cadence change (#2059). CHECK
+	// constraint extended in migration 20261015000000_risk_review_cadence.sql.
+	auditActionTenantRiskReviewCadence = "tenant_risk_review_cadence_update"
+
+	// auditActionTenantSelfApproval is the me_audit_log.action value written
+	// on a change to Allow self-approval (#2101). CHECK constraint extended
+	// in migration 20261031000000_self_approval.sql.
+	auditActionTenantSelfApproval = "tenant_self_approval_update"
+
+	// minRiskReviewCadenceDays / maxRiskReviewCadenceDays bound the cadence,
+	// mirroring tenants_risk_review_cadence_days_chk.
+	minRiskReviewCadenceDays = 1
+	maxRiskReviewCadenceDays = 3650
+
+	// auditActionTenantVendorInitialReview is the me_audit_log.action value
+	// written on a change to the vendor initial-review window (#2201). CHECK
+	// constraint extended in migration
+	// 20261116000000_vendor_initial_review_audit.sql.
+	auditActionTenantVendorInitialReview = "tenant_vendor_initial_review_update"
+
+	// minVendorInitialReviewDays / maxVendorInitialReviewDays bound the
+	// window, mirroring tenants_vendor_initial_review_days_chk.
+	minVendorInitialReviewDays = 1
+	maxVendorInitialReviewDays = 365
 )
 
 // PatchTenant handles PATCH /v1/tenants/{id}.
@@ -169,10 +220,18 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	// A PATCH must carry at least one mutator. Name and bundle_gate_mode are
-	// independently optional; neither present is a 400 (nothing to change).
-	if req.Name == nil && req.BundleGateMode == nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "name or bundle_gate_mode is required")
+	// A PATCH must carry at least one mutator. Each field is independently
+	// optional; none present is a 400 (nothing to change).
+	if req.Name == nil && req.BundleGateMode == nil && req.RiskReviewCadenceDays == nil && req.AllowSelfApproval == nil && req.VendorInitialReviewDays == nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "name, bundle_gate_mode, risk_review_cadence_days, allow_self_approval or vendor_initial_review_days is required")
+		return
+	}
+	if !validRiskReviewCadence(req.RiskReviewCadenceDays) {
+		httpresp.WriteError(w, http.StatusBadRequest, "risk_review_cadence_days must be between 1 and 3650")
+		return
+	}
+	if !validVendorInitialReviewDays(req.VendorInitialReviewDays) {
+		httpresp.WriteError(w, http.StatusBadRequest, "vendor_initial_review_days must be between 1 and 365")
 		return
 	}
 
@@ -275,6 +334,78 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 				return fmt.Errorf("audit insert (gate policy): %w", err)
 			}
 		}
+
+		if req.RiskReviewCadenceDays != nil {
+			updated, uerr := q.UpdateTenantRiskReviewCadence(ctx, dbx.UpdateTenantRiskReviewCadenceParams{
+				ID:                    pgtypeUUID(id),
+				RiskReviewCadenceDays: int32(*req.RiskReviewCadenceDays), //nolint:gosec // bounded to 1..3650 by validRiskReviewCadence
+			})
+			if uerr != nil {
+				return fmt.Errorf("update tenant risk review cadence: %w", uerr)
+			}
+			beforeDays := after.RiskReviewCadenceDays
+			after = tenantFromUpdateRiskReviewCadenceRow(updated)
+
+			beforeBlob, _ := json.Marshal(map[string]any{"risk_review_cadence_days": beforeDays})
+			afterBlob, _ := json.Marshal(map[string]any{"risk_review_cadence_days": after.RiskReviewCadenceDays})
+			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+				TenantID: pgtypeUUID(id),
+				UserID:   pgtypeUUID(actorUserID),
+				Action:   auditActionTenantRiskReviewCadence,
+				Before:   beforeBlob,
+				After:    afterBlob,
+			}); err != nil {
+				return fmt.Errorf("audit insert (risk review cadence): %w", err)
+			}
+		}
+
+		if req.AllowSelfApproval != nil {
+			updated, uerr := q.UpdateTenantAllowSelfApproval(ctx, dbx.UpdateTenantAllowSelfApprovalParams{
+				ID:                pgtypeUUID(id),
+				AllowSelfApproval: *req.AllowSelfApproval,
+			})
+			if uerr != nil {
+				return fmt.Errorf("update tenant allow self-approval: %w", uerr)
+			}
+			beforeAllow := after.AllowSelfApproval
+			after = tenantFromUpdateAllowSelfApprovalRow(updated)
+
+			beforeBlob, _ := json.Marshal(map[string]any{"allow_self_approval": beforeAllow})
+			afterBlob, _ := json.Marshal(map[string]any{"allow_self_approval": after.AllowSelfApproval})
+			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+				TenantID: pgtypeUUID(id),
+				UserID:   pgtypeUUID(actorUserID),
+				Action:   auditActionTenantSelfApproval,
+				Before:   beforeBlob,
+				After:    afterBlob,
+			}); err != nil {
+				return fmt.Errorf("audit insert (allow self-approval): %w", err)
+			}
+		}
+
+		if req.VendorInitialReviewDays != nil {
+			updated, uerr := q.UpdateTenantVendorInitialReviewDays(ctx, dbx.UpdateTenantVendorInitialReviewDaysParams{
+				ID:                      pgtypeUUID(id),
+				VendorInitialReviewDays: int32(*req.VendorInitialReviewDays), //nolint:gosec // bounded to 1..365 by validVendorInitialReviewDays
+			})
+			if uerr != nil {
+				return fmt.Errorf("update tenant vendor initial review window: %w", uerr)
+			}
+			beforeDays := after.VendorInitialReviewDays
+			after = tenantFromUpdateVendorInitialReviewRow(updated)
+
+			beforeBlob, _ := json.Marshal(map[string]any{"vendor_initial_review_days": beforeDays})
+			afterBlob, _ := json.Marshal(map[string]any{"vendor_initial_review_days": after.VendorInitialReviewDays})
+			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+				TenantID: pgtypeUUID(id),
+				UserID:   pgtypeUUID(actorUserID),
+				Action:   auditActionTenantVendorInitialReview,
+				Before:   beforeBlob,
+				After:    afterBlob,
+			}); err != nil {
+				return fmt.Errorf("audit insert (vendor initial review window): %w", err)
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -323,6 +454,60 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			TargetType:    "tenant",
 			TargetID:      id.String(),
 			Action:        auditActionTenantGatePolicy,
+			RowID:         uuid.New(),
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   sinkPayload,
+		})
+	}
+	if req.RiskReviewCadenceDays != nil {
+		sinkPayload, _ := json.Marshal(map[string]any{
+			"before": map[string]any{"risk_review_cadence_days": before.RiskReviewCadenceDays},
+			"after":  map[string]any{"risk_review_cadence_days": after.RiskReviewCadenceDays},
+		})
+		sink.EmitDefault(ctx, unifiedlog.Entry{
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       actorUserID.String(),
+			TenantID:      id,
+			Kind:          unifiedlog.KindMe,
+			TargetType:    "tenant",
+			TargetID:      id.String(),
+			Action:        auditActionTenantRiskReviewCadence,
+			RowID:         uuid.New(),
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   sinkPayload,
+		})
+	}
+	if req.AllowSelfApproval != nil {
+		sinkPayload, _ := json.Marshal(map[string]any{
+			"before": map[string]any{"allow_self_approval": before.AllowSelfApproval},
+			"after":  map[string]any{"allow_self_approval": after.AllowSelfApproval},
+		})
+		sink.EmitDefault(ctx, unifiedlog.Entry{
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       actorUserID.String(),
+			TenantID:      id,
+			Kind:          unifiedlog.KindMe,
+			TargetType:    "tenant",
+			TargetID:      id.String(),
+			Action:        auditActionTenantSelfApproval,
+			RowID:         uuid.New(),
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   sinkPayload,
+		})
+	}
+	if req.VendorInitialReviewDays != nil {
+		sinkPayload, _ := json.Marshal(map[string]any{
+			"before": map[string]any{"vendor_initial_review_days": before.VendorInitialReviewDays},
+			"after":  map[string]any{"vendor_initial_review_days": after.VendorInitialReviewDays},
+		})
+		sink.EmitDefault(ctx, unifiedlog.Entry{
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       actorUserID.String(),
+			TenantID:      id,
+			Kind:          unifiedlog.KindMe,
+			TargetType:    "tenant",
+			TargetID:      id.String(),
+			Action:        auditActionTenantVendorInitialReview,
 			RowID:         uuid.New(),
 			SubjectModule: unifiedlog.SubjectModuleCore,
 			PayloadJSON:   sinkPayload,
@@ -430,49 +615,114 @@ func actorFromContext(ctx context.Context) uuid.UUID {
 		}
 	}
 	if cred, ok := authctx.CredentialFromContext(ctx); ok {
-		if u, err := uuid.Parse(cred.UserID); err == nil {
+		if u, ok := credstore.CallerUserID(cred); ok {
 			return u
 		}
 	}
 	return uuid.Nil
 }
 
-// tenantFromGetRow / tenantFromUpdateNameRow / tenantFromUpdateGateModeRow
-// adapt the three sqlc row shapes (identical fields, distinct generated types)
-// to the wire shape. Slice 608 added bundle_gate_mode to all three.
+// tenantFromGetRow / tenantFromUpdateNameRow / tenantFromUpdateGateModeRow /
+// tenantFromUpdateRiskReviewCadenceRow adapt the sqlc row shapes (identical
+// fields, distinct generated types) to the wire shape. Slice 608 added
+// bundle_gate_mode and #2059 risk_review_cadence_days to all of them.
 func tenantFromGetRow(r dbx.GetTenantByIDRow) tenantWire {
 	return tenantWire{
-		ID:                uuid.UUID(r.ID.Bytes).String(),
-		Name:              r.Name,
-		IsBootstrapTenant: r.IsBootstrapTenant,
-		BundleGateMode:    r.BundleGateMode,
-		CreatedAt:         r.CreatedAt.Time,
-		UpdatedAt:         r.UpdatedAt.Time,
+		ID:                      uuid.UUID(r.ID.Bytes).String(),
+		Name:                    r.Name,
+		IsBootstrapTenant:       r.IsBootstrapTenant,
+		BundleGateMode:          r.BundleGateMode,
+		RiskReviewCadenceDays:   int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:       r.AllowSelfApproval,
+		VendorInitialReviewDays: int(r.VendorInitialReviewDays),
+		CreatedAt:               r.CreatedAt.Time,
+		UpdatedAt:               r.UpdatedAt.Time,
 	}
 }
 
 func tenantFromUpdateNameRow(r dbx.UpdateTenantNameRow) tenantWire {
 	return tenantWire{
-		ID:                uuid.UUID(r.ID.Bytes).String(),
-		Name:              r.Name,
-		IsBootstrapTenant: r.IsBootstrapTenant,
-		BundleGateMode:    r.BundleGateMode,
-		CreatedAt:         r.CreatedAt.Time,
-		UpdatedAt:         r.UpdatedAt.Time,
+		ID:                      uuid.UUID(r.ID.Bytes).String(),
+		Name:                    r.Name,
+		IsBootstrapTenant:       r.IsBootstrapTenant,
+		BundleGateMode:          r.BundleGateMode,
+		RiskReviewCadenceDays:   int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:       r.AllowSelfApproval,
+		VendorInitialReviewDays: int(r.VendorInitialReviewDays),
+		CreatedAt:               r.CreatedAt.Time,
+		UpdatedAt:               r.UpdatedAt.Time,
 	}
 }
 
 func tenantFromUpdateGateModeRow(r dbx.UpdateTenantBundleGateModeRow) tenantWire {
 	return tenantWire{
-		ID:                uuid.UUID(r.ID.Bytes).String(),
-		Name:              r.Name,
-		IsBootstrapTenant: r.IsBootstrapTenant,
-		BundleGateMode:    r.BundleGateMode,
-		CreatedAt:         r.CreatedAt.Time,
-		UpdatedAt:         r.UpdatedAt.Time,
+		ID:                      uuid.UUID(r.ID.Bytes).String(),
+		Name:                    r.Name,
+		IsBootstrapTenant:       r.IsBootstrapTenant,
+		BundleGateMode:          r.BundleGateMode,
+		RiskReviewCadenceDays:   int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:       r.AllowSelfApproval,
+		VendorInitialReviewDays: int(r.VendorInitialReviewDays),
+		CreatedAt:               r.CreatedAt.Time,
+		UpdatedAt:               r.UpdatedAt.Time,
 	}
+}
+
+func tenantFromUpdateRiskReviewCadenceRow(r dbx.UpdateTenantRiskReviewCadenceRow) tenantWire {
+	return tenantWire{
+		ID:                      uuid.UUID(r.ID.Bytes).String(),
+		Name:                    r.Name,
+		IsBootstrapTenant:       r.IsBootstrapTenant,
+		BundleGateMode:          r.BundleGateMode,
+		RiskReviewCadenceDays:   int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:       r.AllowSelfApproval,
+		VendorInitialReviewDays: int(r.VendorInitialReviewDays),
+		CreatedAt:               r.CreatedAt.Time,
+		UpdatedAt:               r.UpdatedAt.Time,
+	}
+}
+
+func tenantFromUpdateAllowSelfApprovalRow(r dbx.UpdateTenantAllowSelfApprovalRow) tenantWire {
+	return tenantWire{
+		ID:                      uuid.UUID(r.ID.Bytes).String(),
+		Name:                    r.Name,
+		IsBootstrapTenant:       r.IsBootstrapTenant,
+		BundleGateMode:          r.BundleGateMode,
+		RiskReviewCadenceDays:   int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:       r.AllowSelfApproval,
+		VendorInitialReviewDays: int(r.VendorInitialReviewDays),
+		CreatedAt:               r.CreatedAt.Time,
+		UpdatedAt:               r.UpdatedAt.Time,
+	}
+}
+
+func tenantFromUpdateVendorInitialReviewRow(r dbx.UpdateTenantVendorInitialReviewDaysRow) tenantWire {
+	return tenantWire{
+		ID:                      uuid.UUID(r.ID.Bytes).String(),
+		Name:                    r.Name,
+		IsBootstrapTenant:       r.IsBootstrapTenant,
+		BundleGateMode:          r.BundleGateMode,
+		RiskReviewCadenceDays:   int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:       r.AllowSelfApproval,
+		VendorInitialReviewDays: int(r.VendorInitialReviewDays),
+		CreatedAt:               r.CreatedAt.Time,
+		UpdatedAt:               r.UpdatedAt.Time,
+	}
+}
+
+// validRiskReviewCadence reports whether an optional cadence is absent or
+// within minRiskReviewCadenceDays..maxRiskReviewCadenceDays.
+func validRiskReviewCadence(days *int) bool {
+	return days == nil || (*days >= minRiskReviewCadenceDays && *days <= maxRiskReviewCadenceDays)
 }
 
 func pgtypeUUID(u uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: u, Valid: true}
+}
+
+// validVendorInitialReviewDays reports whether an optional vendor
+// initial-review window is absent or within
+// minVendorInitialReviewDays..maxVendorInitialReviewDays.
+func validVendorInitialReviewDays(days *int) bool {
+	return days == nil || (*days >= minVendorInitialReviewDays && *days <= maxVendorInitialReviewDays)
 }

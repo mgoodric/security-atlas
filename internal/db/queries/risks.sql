@@ -7,13 +7,13 @@ INSERT INTO risks (
     id, tenant_id, title, description, category, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
-    acceptance_status, level, org_unit_id
+    acceptance_status, level, org_unit_id, category_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15, $16, $17
+    $15, $16, $17, $18
 )
 RETURNING *;
 
@@ -236,6 +236,18 @@ SET level = $3,
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 
+-- name: UpdateRiskCategory :one
+-- #1812: move a risk onto another of the tenant's categories. Dual-writes
+-- the reference and the matching risk_category enum value until #1745's
+-- contract step drops the enum. The caller holds the row via LockRiskByID
+-- and has resolved the category as assignable.
+UPDATE risks
+SET category_id = sqlc.arg(category_id),
+    category = sqlc.arg(category),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
+RETURNING *;
+
 -- name: InsertRiskAuditLog :exec
 -- #1749: one append-only row per placement change, in the write's tx.
 INSERT INTO risk_audit_log (
@@ -248,3 +260,13 @@ SELECT *
 FROM risk_audit_log
 WHERE tenant_id = $1 AND risk_id = $2
 ORDER BY created_at DESC, id DESC;
+
+-- name: GetRiskReviewCadenceDays :one
+-- #2059: the tenant's risk review cadence in days, as the
+-- risks_review_due_default trigger reads it: the tenants row's
+-- risk_review_cadence_days, or 365 for a tenant with no row (a bare-UUID
+-- tenant predating slice 144). RLS scopes tenants to the caller's own row.
+SELECT COALESCE(
+    (SELECT t.risk_review_cadence_days FROM tenants t WHERE t.id = $1),
+    365
+)::int AS cadence_days;

@@ -53,6 +53,8 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect } from "react";
 
+import { DemoBadge } from "@/components/demo-badge";
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -86,8 +88,10 @@ import {
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { type AnchorDetail } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 import { classifyControlDetailError } from "../error-classifier";
+import { anchorFitLabel } from "../filters";
 import { CONTROL_TABS, formatTabCount, isTabKey, type TabKey } from "./tabs";
 
 import {
@@ -229,7 +233,7 @@ function ControlDetailPageInner() {
 
   // ATLAS-012 — when the coverage call 404s, the id in the URL is an SCF
   // anchor with no instantiated control. The empty-state copy should name
-  // the human-readable SCF code (e.g. "AAA-01"), not the raw UUID. The
+  // the human-readable SCF code (e.g. "MON-04"), not the raw UUID. The
   // anchor still resolves in the global catalog, so we look up its
   // requirements (same BFF the catalog detail page uses) purely to read
   // `anchor.scf_id`. Enabled only on the notfound branch so the happy
@@ -250,10 +254,12 @@ function ControlDetailPageInner() {
 
   if (coverageQ.isLoading) {
     return (
-      <div className="space-y-4" data-testid="control-detail-loading">
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
+      <PageShell title="Control">
+        <div className="space-y-4" data-testid="control-detail-loading">
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      </PageShell>
     );
   }
 
@@ -268,54 +274,58 @@ function ControlDetailPageInner() {
   // to 200.
   if (coverageQ.error && errorClass === "notfound") {
     return (
-      <div
-        className="rounded-xl border bg-card py-16 px-6 text-center"
-        data-testid="control-detail-empty"
-      >
-        <div className="mx-auto mb-3 text-muted-foreground">
-          <svg
-            className="w-12 h-12 mx-auto"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden
-          >
-            <path
-              d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
-        <div className="text-sm font-semibold text-foreground mb-1">
-          This SCF anchor has no control instantiated in your tenant yet
-        </div>
-        <div className="text-xs text-muted-foreground mb-4">
-          SCF anchor <span className="font-mono">{anchorCode ?? id}</span>{" "}
-          resolves in the global SCF catalog but no tenant control is bound to
-          it. This is the expected state on a fresh install — controls are
-          tenant-scoped and authored separately from the catalog.
-        </div>
-        <Link
-          href="/controls"
-          className={buttonVariants({ size: "sm" })}
-          data-testid="control-detail-empty-cta"
+      <PageShell title="Control">
+        <div
+          className="rounded-xl border bg-card py-16 px-6 text-center"
+          data-testid="control-detail-empty"
         >
-          Back to controls list
-        </Link>
-      </div>
+          <div className="mx-auto mb-3 text-muted-foreground">
+            <svg
+              className="w-12 h-12 mx-auto"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              aria-hidden
+            >
+              <path
+                d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15a2.25 2.25 0 002.25-2.25v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <div className="text-sm font-semibold text-foreground mb-1">
+            This SCF anchor has no control instantiated in your tenant yet
+          </div>
+          <div className="text-xs text-muted-foreground mb-4">
+            SCF anchor <span className="font-mono">{anchorCode ?? id}</span>{" "}
+            resolves in the global SCF catalog but no tenant control is bound to
+            it. This is the expected state on a fresh install — controls are
+            tenant-scoped and authored separately from the catalog.
+          </div>
+          <Link
+            href="/controls"
+            className={buttonVariants({ size: "sm" })}
+            data-testid="control-detail-empty-cta"
+          >
+            Back to controls list
+          </Link>
+        </div>
+      </PageShell>
     );
   }
 
   if (coverageQ.error && errorClass === "other") {
     return (
-      <Alert variant="destructive" data-testid="control-detail-error">
-        <AlertTitle>Could not load control</AlertTitle>
-        <AlertDescription>
-          {(coverageQ.error as Error).message}
-        </AlertDescription>
-      </Alert>
+      <PageShell title="Control">
+        <Alert variant="destructive" data-testid="control-detail-error">
+          <AlertTitle>Could not load control</AlertTitle>
+          <AlertDescription>
+            {(coverageQ.error as Error).message}
+          </AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
@@ -379,9 +389,9 @@ function ControlDetailPageInner() {
   };
 
   return (
-    <div className="space-y-6" data-testid="control-detail">
+    <div className="space-y-4">
       {/* breadcrumb — ATLAS-011: include the leaf crumb (the SCF anchor
-          code, e.g. "Controls › AAA-01") so the trail ends at the page the
+          code, e.g. "Controls › MON-04") so the trail ends at the page the
           operator is on, not at the section. Falls back to the control's
           bundle id when the row is unanchored. */}
       <nav
@@ -400,283 +410,302 @@ function ControlDetailPageInner() {
           {anchor ? anchor.scf_id : control.bundle_id}
         </span>
       </nav>
-
       {/* ============ CONTROL HEADER ============ */}
-      {/* Slice 255 — header now splits into a left "title + meta" well
-          and a right "action buttons + last-evaluated" well. The flex
-          row collapses to a stacked column at mobile widths so the
-          action well drops below the title rather than wrapping
-          mid-button-row. */}
-      <header
-        className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
-        data-testid="control-header"
-      >
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-muted-foreground">
-              {control.bundle_id}
-              {control.version ? ` · v${control.version}` : ""}
-            </span>
-            {anchor ? (
-              <Link
-                href={`/catalog/scf/${encodeURIComponent(anchor.id)}`}
-                className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary hover:bg-primary/20"
-                data-testid="scf-anchor-pill"
-              >
-                {anchor.scf_id}
-              </Link>
-            ) : (
-              <span
-                className="font-mono text-[11px] text-muted-foreground"
-                data-testid="scf-anchor-pill"
-              >
-                unanchored
+      {/* Slice 255 — the header splits into a "title + meta" well (the
+          PageShell title and subtitle) and an "action buttons +
+          last-evaluated" well (the PageShell actions slot). #2080 moved it
+          onto PageShell; the meta rows keep the `control-header` testid. */}
+      <PageShell
+        data-testid="control-detail"
+        title={<span data-testid="control-title">{control.title}</span>}
+        subtitle={
+          <div className="space-y-2" data-testid="control-header">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-xs text-muted-foreground">
+                {control.bundle_id}
+                {control.version ? ` · v${control.version}` : ""}
               </span>
-            )}
-            <Badge
-              variant="secondary"
-              data-testid="lifecycle-badge"
-              className="capitalize"
-            >
-              {control.lifecycle_state}
-            </Badge>
-            <span className="text-xs text-muted-foreground">
-              {control.control_family}
-            </span>
-          </div>
-
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            data-testid="control-title"
-          >
-            {control.title}
-          </h1>
-
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-            <span className="text-muted-foreground">
-              Owner role{" "}
-              <span className="text-foreground">{control.owner_role}</span>
-            </span>
-            <span className="text-muted-foreground">
-              Implementation{" "}
-              <span className="text-foreground">
-                {control.implementation_type}
-              </span>
-            </span>
-            <span className="text-muted-foreground">
-              Freshness class{" "}
-              <span className="font-mono text-foreground">
-                {control.freshness_class ?? "—"}
-              </span>
-            </span>
-          </div>
-
-          {/* #1737 — control.yaml external_refs: auditor control numbers
-              and the framework requirements this control was tested
-              under. Rendered only when the control carries any. */}
-          {groupExternalRefs(control.external_refs).map((group) => (
-            <div
-              key={group.kind}
-              className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
-              data-testid={`control-external-refs-${group.kind}`}
-            >
-              <span className="text-muted-foreground">{group.label}</span>
-              {group.refs.map((ref) => (
-                <Badge
-                  key={`${ref.system}:${ref.id}`}
-                  variant="outline"
-                  className="font-normal"
+              {anchor ? (
+                <Link
+                  href={`/catalog/scf/${encodeURIComponent(anchor.id)}`}
+                  className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary hover:bg-primary/20"
+                  data-testid="scf-anchor-pill"
                 >
-                  <span className="font-mono">{formatExternalRef(ref)}</span>
-                  {ref.note ? (
-                    <span className="text-muted-foreground">
-                      {" · "}
-                      {ref.note}
-                    </span>
-                  ) : null}
-                </Badge>
-              ))}
+                  {anchor.scf_id}
+                </Link>
+              ) : (
+                <span
+                  className="font-mono text-[11px] text-muted-foreground"
+                  data-testid="scf-anchor-pill"
+                >
+                  unanchored
+                </span>
+              )}
+              <Badge variant="secondary" data-testid="lifecycle-badge">
+                {enumLabel("ControlLifecycleState", control.lifecycle_state)}
+              </Badge>
+              {control.demo ? (
+                <DemoBadge className="ml-0" testId="control-demo-badge" />
+              ) : null}
+              <span className="text-xs text-muted-foreground">
+                {control.control_family}
+              </span>
             </div>
-          ))}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+              <span className="text-muted-foreground">
+                Owner role{" "}
+                <span className="text-foreground">{control.owner_role}</span>
+              </span>
+              <span className="text-muted-foreground">
+                Implementation{" "}
+                <span
+                  className="text-foreground"
+                  data-testid="control-implementation-type"
+                >
+                  {enumLabel(
+                    "ControlImplementationType",
+                    control.implementation_type,
+                  )}
+                </span>
+              </span>
+              <span className="text-muted-foreground">
+                Freshness class{" "}
+                <span className="text-foreground">
+                  {enumLabel("EvidenceFreshnessClass", control.freshness_class)}
+                </span>
+              </span>
+              <span
+                className="text-muted-foreground"
+                data-testid="control-anchor-fit"
+                data-anchor-fit={control.anchor_fit ?? "exact"}
+              >
+                Anchor fit{" "}
+                <span className="text-foreground">
+                  {anchorFitLabel(control.anchor_fit)}
+                </span>
+              </span>
+            </div>
+            {control.anchor_fit_note ? (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="control-anchor-fit-note"
+              >
+                {control.anchor_fit_note}
+              </p>
+            ) : null}
+
+            {/* #1737 — control.yaml external_refs: auditor control numbers
+                and the framework requirements this control was tested
+                under. Rendered only when the control carries any. */}
+            {groupExternalRefs(control.external_refs).map((group) => (
+              <div
+                key={group.kind}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+                data-testid={`control-external-refs-${group.kind}`}
+              >
+                <span className="text-muted-foreground">{group.label}</span>
+                {group.refs.map((ref) => (
+                  <Badge
+                    key={`${ref.system}:${ref.id}`}
+                    variant="outline"
+                    className="font-normal"
+                  >
+                    <span className="font-mono">{formatExternalRef(ref)}</span>
+                    {ref.note ? (
+                      <span className="text-muted-foreground">
+                        {" · "}
+                        {ref.note}
+                      </span>
+                    ) : null}
+                  </Badge>
+                ))}
+              </div>
+            ))}
+          </div>
+        }
+        actions={
+          <>
+            {/* Slice 255 — header actions well: Run query + Edit YAML +
+                Request exception, with "last evaluated <relative-time>"
+                sub-line. See web/components/control/header-actions.tsx for
+                the JUDGMENT decisions on disabled-vs-link semantics per
+                button. */}
+            <ControlHeaderActions controlID={id} state={state} />
+          </>
+        }
+      >
+        {/* ============ KPI STRIP ============ */}
+        <div
+          className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+          data-testid="kpi-strip"
+        >
+          <KpiCard
+            label="Effectiveness · 30d"
+            value={effectiveness ? effectiveness.pass_rate.toFixed(2) : "—"}
+            sub={
+              effectiveness
+                ? `${effectiveness.pass_count}/${effectiveness.total_count} evaluations`
+                : effectivenessQ.isLoading
+                  ? "loading…"
+                  : "no data"
+            }
+          />
+          <KpiCard
+            label="Frameworks satisfied"
+            value={String(frameworksSatisfied)}
+            sub="via SCF anchor"
+          />
+          <KpiCard
+            label="Evidence records · 30d"
+            value={
+              evidenceQ.isLoading
+                ? "…"
+                : evidenceQ.data
+                  ? evidenceQ.data.next_cursor
+                    ? `${evidenceQ.data.count}+`
+                    : String(evidenceQ.data.count)
+                  : "—"
+            }
+            sub={
+              evidenceQ.isLoading
+                ? "loading…"
+                : evidenceQ.error
+                  ? "error"
+                  : "in last 30 days"
+            }
+          />
+          <KpiCard
+            label="In-scope frameworks"
+            value={
+              scopeQueries.some((q) => q.isLoading)
+                ? "…"
+                : String(inScopeFrameworks)
+            }
+            sub={`of ${frameworksSatisfied} mapped`}
+          />
         </div>
 
-        {/* Slice 255 — header actions well: Run query + Edit YAML +
-            Request exception, with "last evaluated <relative-time>"
-            sub-line. See web/components/control/header-actions.tsx for
-            the JUDGMENT decisions on disabled-vs-link semantics per
-            button. */}
-        <ControlHeaderActions controlID={id} state={state} />
-      </header>
-
-      {/* ============ KPI STRIP ============ */}
-      <div
-        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
-        data-testid="kpi-strip"
-      >
-        <KpiCard
-          label="Effectiveness · 30d"
-          value={effectiveness ? effectiveness.pass_rate.toFixed(2) : "—"}
-          sub={
-            effectiveness
-              ? `${effectiveness.pass_count}/${effectiveness.total_count} evaluations`
-              : effectivenessQ.isLoading
-                ? "loading…"
-                : "no data"
-          }
-        />
-        <KpiCard
-          label="Frameworks satisfied"
-          value={String(frameworksSatisfied)}
-          sub="via SCF anchor"
-        />
-        <KpiCard
-          label="Evidence records · 30d"
-          value={
-            evidenceQ.isLoading
-              ? "…"
-              : evidenceQ.data
-                ? evidenceQ.data.next_cursor
-                  ? `${evidenceQ.data.count}+`
-                  : String(evidenceQ.data.count)
-                : "—"
-          }
-          sub={
-            evidenceQ.isLoading
-              ? "loading…"
-              : evidenceQ.error
-                ? "error"
-                : "in last 30 days"
-          }
-        />
-        <KpiCard
-          label="In-scope frameworks"
-          value={
-            scopeQueries.some((q) => q.isLoading)
-              ? "…"
-              : String(inScopeFrameworks)
-          }
-          sub={`of ${frameworksSatisfied} mapped`}
-        />
-      </div>
-
-      {/* ============ TAB STRIP ============ */}
-      {/* Slice 254 — sticky seven-tab strip per mockup
+        {/* ============ TAB STRIP ============ */}
+        {/* Slice 254 — sticky seven-tab strip per mockup
           (Plans/_archive/mockups/control.html lines 139-152). The strip uses
           the slice 044 inlined-tab-list pattern (the codebase has no
           shared tabs primitive; introducing one would violate
           P0-254-1's "do not introduce a new component primitive"). The
           tab key is URL-bound (`?tab=<key>`) and the count chip reads
           from each tab's underlying query payload. */}
-      <div
-        role="tablist"
-        aria-label="Control detail sections"
-        data-testid="control-tabs"
-        className="sticky top-12 z-10 -mx-4 flex items-center gap-1 overflow-x-auto border-b bg-background px-4 md:mx-0 md:px-0"
-      >
-        {CONTROL_TABS.map((t) => {
-          const isActive = activeTab === t.key;
-          const chip =
-            t.key === "overview" || t.key === "history"
-              ? null
-              : tabCounts[t.key as Exclude<TabKey, "overview" | "history">];
-          return (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              aria-controls={`control-tab-panel-${t.key}`}
-              id={`control-tab-${t.key}`}
-              data-testid={`control-tab-${t.key}`}
-              onClick={() => setTab(t.key)}
-              className={cn(
-                "-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors",
-                isActive
-                  ? "border-primary font-medium text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <span>{t.label}</span>
-              {chip ? (
-                <span
-                  className="font-mono text-xs text-muted-foreground"
-                  data-testid={`control-tab-${t.key}-chip`}
-                >
-                  {chip}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </div>
+        <div
+          role="tablist"
+          aria-label="Control detail sections"
+          data-testid="control-tabs"
+          className="sticky top-12 z-10 -mx-4 flex items-center gap-1 overflow-x-auto border-b bg-background px-4 md:mx-0 md:px-0"
+        >
+          {CONTROL_TABS.map((t) => {
+            const isActive = activeTab === t.key;
+            const chip =
+              t.key === "overview" || t.key === "history"
+                ? null
+                : tabCounts[t.key as Exclude<TabKey, "overview" | "history">];
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`control-tab-panel-${t.key}`}
+                id={`control-tab-${t.key}`}
+                data-testid={`control-tab-${t.key}`}
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  "-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors",
+                  isActive
+                    ? "border-primary font-medium text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span>{t.label}</span>
+                {chip ? (
+                  <span
+                    className="font-mono text-xs text-muted-foreground"
+                    data-testid={`control-tab-${t.key}-chip`}
+                  >
+                    {chip}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
 
-      {/* ============ TAB PANELS ============ */}
-      {/* Slice 254 — panels are conditionally rendered (no `hidden`-
+        {/* ============ TAB PANELS ============ */}
+        {/* Slice 254 — panels are conditionally rendered (no `hidden`-
           class mounting like slice 044's audit workspace) because the
           control-detail page does NOT have draft state that must
           survive tab flips. Switching tabs unmounts the previous
           panel's subtree; TanStack Query keeps the data in cache so
           flipping back is instant. */}
-      <div
-        role="tabpanel"
-        id={`control-tab-panel-${activeTab}`}
-        aria-labelledby={`control-tab-${activeTab}`}
-        data-testid={`control-tab-panel-${activeTab}`}
-      >
-        {activeTab === "overview" ? (
-          <OverviewPanel
-            id={id}
-            coverage={coverage}
-            outOfScopeFvIds={outOfScopeFvIds}
-            evidenceQ={evidenceQ}
-            stateQ={stateQ}
-            state={state}
-            fvIds={fvIds}
-            scopeQueries={scopeQueries}
-            requirements={requirements}
-            policiesQ={policiesQ}
-            risksQ={risksQ}
-            historyQ={historyQ}
-            anchorSCF={anchor ? anchor.scf_id : null}
-          />
-        ) : null}
+        <div
+          role="tabpanel"
+          id={`control-tab-panel-${activeTab}`}
+          aria-labelledby={`control-tab-${activeTab}`}
+          data-testid={`control-tab-panel-${activeTab}`}
+        >
+          {activeTab === "overview" ? (
+            <OverviewPanel
+              id={id}
+              coverage={coverage}
+              outOfScopeFvIds={outOfScopeFvIds}
+              evidenceQ={evidenceQ}
+              stateQ={stateQ}
+              state={state}
+              fvIds={fvIds}
+              scopeQueries={scopeQueries}
+              requirements={requirements}
+              policiesQ={policiesQ}
+              risksQ={risksQ}
+              historyQ={historyQ}
+              anchorSCF={anchor ? anchor.scf_id : null}
+            />
+          ) : null}
 
-        {/* Slice 384 (AC-26): read-only "Linked Action Plans" section,
+          {/* Slice 384 (AC-26): read-only "Linked Action Plans" section,
             rendered on the Overview tab. */}
-        {activeTab === "overview" ? (
-          <div className="mt-6">
-            <LinkedActionPlans target="control" targetId={id} />
-          </div>
-        ) : null}
+          {activeTab === "overview" ? (
+            <div className="mt-6">
+              <LinkedActionPlans target="control" targetId={id} />
+            </div>
+          ) : null}
 
-        {activeTab === "evidence" ? (
-          <EvidencePanel id={id} evidenceQ={evidenceQ} />
-        ) : null}
+          {activeTab === "evidence" ? (
+            <EvidencePanel id={id} evidenceQ={evidenceQ} />
+          ) : null}
 
-        {activeTab === "mappings" ? (
-          <MappingsPanel
-            coverage={coverage}
-            outOfScopeFvIds={outOfScopeFvIds}
-            anchorSCF={anchor ? anchor.scf_id : null}
-          />
-        ) : null}
+          {activeTab === "mappings" ? (
+            <MappingsPanel
+              coverage={coverage}
+              outOfScopeFvIds={outOfScopeFvIds}
+              anchorSCF={anchor ? anchor.scf_id : null}
+            />
+          ) : null}
 
-        {activeTab === "scope" ? (
-          <ScopePanel
-            fvIds={fvIds}
-            scopeQueries={scopeQueries}
-            requirements={requirements}
-          />
-        ) : null}
+          {activeTab === "scope" ? (
+            <ScopePanel
+              fvIds={fvIds}
+              scopeQueries={scopeQueries}
+              requirements={requirements}
+            />
+          ) : null}
 
-        {activeTab === "policies" ? (
-          <PoliciesPanel policiesQ={policiesQ} />
-        ) : null}
+          {activeTab === "policies" ? (
+            <PoliciesPanel policiesQ={policiesQ} />
+          ) : null}
 
-        {activeTab === "risks" ? <RisksPanel risksQ={risksQ} /> : null}
+          {activeTab === "risks" ? <RisksPanel risksQ={risksQ} /> : null}
 
-        {activeTab === "history" ? <HistoryPanel historyQ={historyQ} /> : null}
-      </div>
+          {activeTab === "history" ? (
+            <HistoryPanel historyQ={historyQ} />
+          ) : null}
+        </div>
+      </PageShell>
     </div>
   );
 }
@@ -689,10 +718,12 @@ export default function ControlDetailPage() {
   return (
     <Suspense
       fallback={
-        <div className="space-y-4" data-testid="control-detail-loading">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
+        <PageShell title="Control">
+          <div className="space-y-4" data-testid="control-detail-loading">
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-64 w-full" />
+          </div>
+        </PageShell>
       }
     >
       <ControlDetailPageInner />
@@ -801,7 +832,7 @@ function KpiCard({
 
 // ATLAS-012 — resolve an SCF anchor's human-readable code via the same
 // BFF the catalog detail page uses. Used only on the control-detail
-// 404 empty-state to print "AAA-01" instead of the raw anchor UUID.
+// 404 empty-state to print "MON-04" instead of the raw anchor UUID.
 async function fetchAnchorDetail(id: string): Promise<AnchorDetail> {
   const res = await fetch(
     `/api/anchors/${encodeURIComponent(id)}/requirements`,

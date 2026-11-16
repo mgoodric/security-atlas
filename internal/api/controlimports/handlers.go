@@ -4,6 +4,29 @@
 //
 //	POST /v1/controls/imports        multipart upload -> staged import batch
 //	GET  /v1/controls/imports/{id}   the batch with its counts and rows
+//	GET  /v1/controls/imports/{id}/rows
+//	                                 staged rows with their ranked SCF anchor
+//	                                 candidates (#1780); ?status= and
+//	                                 ?no_candidate_reaches=true filter
+//	POST /v1/controls/imports/{id}/rows/{row}/approve
+//	                                 approve a staged row with a candidate
+//	                                 or any anchor of the batch's SCF
+//	                                 release; creates a control (#1782)
+//	POST /v1/controls/imports/{id}/rows/{row}/reject
+//	                                 reject a staged row with a reason
+//	POST /v1/controls/imports/{id}/approve-clear
+//	                                 approve every pending row whose top
+//	                                 candidate is crosswalk-derived and
+//	                                 reaches all its tested criteria (#1783)
+//	GET  /v1/controls/imports/{id}/export
+//	                                 the approved rows' controls as a
+//	                                 gzip-tar of <bundle_id>/control.yaml
+//	                                 bundles (#1784)
+//	GET  /v1/controls/imports/settings
+//	PUT  /v1/controls/imports/settings
+//	                                 the tenant's import settings: the
+//	                                 local-Ollama rerank opt-in (#2079);
+//	                                 tenant-admin only
 //
 // The upload's multipart fields:
 //
@@ -19,6 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -36,15 +60,32 @@ const multipartOverhead = 64 * 1024
 
 // Handler serves the control import routes.
 type Handler struct {
-	stager *controlimport.Stager
+	stager    *controlimport.Stager
+	settings  SettingsStore
+	decisions controlimport.DecisionStore
+	exporter  BundleExporter
 }
 
 func New(stager *controlimport.Stager) *Handler { return &Handler{stager: stager} }
 
 // RegisterRoutes appends the routes onto the supplied router.
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	if h.settings != nil {
+		// Literal segment, ahead of /v1/controls/imports/{id}.
+		r.Get("/v1/controls/imports/settings", h.GetSettings)
+		r.Put("/v1/controls/imports/settings", h.PutSettings)
+	}
 	r.Post("/v1/controls/imports", h.Create)
 	r.Get("/v1/controls/imports/{id}", h.Get)
+	r.Get("/v1/controls/imports/{id}/rows", h.ListRows)
+	if h.exporter != nil {
+		r.Get("/v1/controls/imports/{id}/export", h.Export)
+	}
+	if h.decisions != nil {
+		r.Post("/v1/controls/imports/{id}/rows/{row}/approve", h.Approve)
+		r.Post("/v1/controls/imports/{id}/rows/{row}/reject", h.Reject)
+		r.Post("/v1/controls/imports/{id}/approve-clear", h.ApproveClear)
+	}
 }
 
 // Create stages an uploaded control sheet as an import batch.
@@ -119,6 +160,43 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, batch)
+}
+
+// ListRows returns a batch's staged rows with their candidates, filtered by
+// ?status= and ?no_candidate_reaches=true.
+func (h *Handler) ListRows(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	filter := controlimport.RowFilter{Status: r.URL.Query().Get("status")}
+	if v := r.URL.Query().Get("no_candidate_reaches"); v != "" {
+		flag, err := strconv.ParseBool(v)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "no_candidate_reaches must be true or false")
+			return
+		}
+		filter.NoCandidateReaches = flag
+	}
+	batch, rows, err := h.stager.ListRows(ctx, chi.URLParam(r, "id"), filter)
+	if err != nil {
+		switch {
+		case errors.Is(err, controlimport.ErrBatchNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "import batch not found")
+		case errors.Is(err, controlimport.ErrInvalidRowStatus):
+			httpresp.WriteError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "controlimport: "))
+		default:
+			httperr.WriteInternal(w, r, "controlimports", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, controlimport.RowList{
+		BatchID:           batch.ID,
+		SCFRelease:        batch.SCFRelease,
+		SuggestionsStatus: batch.SuggestionsStatus,
+		Rows:              rows,
+	})
 }
 
 func writeStageError(w http.ResponseWriter, r *http.Request, err error) {

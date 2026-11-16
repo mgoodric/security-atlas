@@ -107,12 +107,12 @@ func okFlags() runFlags {
 		cluster:         "cluster-1",
 		environment:     "prod",
 		authMode:        "kubeconfig-token",
-		rbacControl:     "scf:IAC-21",
-		workloadControl: "scf:CFG-02",
+		rbacControl:     "scf:IAC-10",
+		workloadControl: "scf:CFG-04",
 		netpolControl:   "scf:NET-04",
-		pssControl:      "scf:CFG-02",
-		webhookControl:  "scf:CFG-02",
-		policyControl:   "scf:CFG-02",
+		pssControl:      "scf:CFG-04",
+		webhookControl:  "scf:CFG-04",
+		policyControl:   "scf:CFG-04",
 		// Admission-webhook + policy-engine kinds default-skipped in the base
 		// fixture so existing per-kind tests keep their push counts; the dedicated
 		// admission tests enable them explicitly.

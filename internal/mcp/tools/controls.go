@@ -130,7 +130,7 @@ const getControlInputSchema = `{
   "properties": {
     "anchor_id": {
       "type": "string",
-      "description": "The control identifier. Accepts either the tenant control UUID OR the SCF anchor short code (e.g., \"IAC-06\"). Required."
+      "description": "The control identifier. Accepts either the tenant control UUID OR the SCF anchor short code (e.g., \"IAC-37\"). Required."
     }
   }
 }`

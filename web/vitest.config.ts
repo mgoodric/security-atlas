@@ -80,6 +80,18 @@ const perFileThresholds: Record<string, FileThresholds> =
   thresholdsFile.thresholds;
 
 export default defineConfig({
+  // #2143 — load `*.md` imports as their text, matching the Turbopack
+  // `raw` rule in next.config.ts (module help files, lib/help/modules.ts).
+  plugins: [
+    {
+      name: "help-markdown",
+      enforce: "pre",
+      transform(code: string, id: string) {
+        if (!id.endsWith(".md")) return null;
+        return { code: `export default ${JSON.stringify(code)};`, map: null };
+      },
+    },
+  ],
   resolve: {
     // Mirror the `@/*` path alias from tsconfig.json so test files can
     // `import { apiBaseURL } from "@/lib/api/base"` like production code

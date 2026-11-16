@@ -9,8 +9,8 @@ description: |
   creation. The query asserts every security-tagged GitHub event in the
   period was acknowledged in the evidence ledger within 24 hours.
 
-scf_anchor_id: AAA-01
-control_family: AAA
+scf_anchor_id: MON-04
+control_family: MON
 implementation_type: automated
 owner_role: security-engineering
 lifecycle_state: active

@@ -79,7 +79,7 @@ func TestHandlersRequireTenant(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		fn   http.HandlerFunc
-	}{{"create", h.Create}, {"get", h.Get}} {
+	}{{"create", h.Create}, {"get", h.Get}, {"list rows", h.ListRows}} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/v1/controls/imports", nil).WithContext(context.Background())
 		tc.fn(rec, req)

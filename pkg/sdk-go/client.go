@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"net"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -58,6 +57,25 @@ func NewClient(endpoint, bearer string, opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("sdk: bearer token is required")
 	}
 
+	conn, err := Dial(endpoint, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{
+		conn:     conn,
+		stub:     evidencev1.NewEvidenceIngestServiceClient(conn),
+		bearer:   bearer,
+		ownsConn: true,
+	}, nil
+}
+
+// Dial opens a gRPC connection to endpoint with the transport the options
+// select: TLS (system roots, TLS 1.2+) by default, or plaintext under
+// WithInsecure, which refuses any endpoint IsLoopbackEndpoint rejects.
+// NewClient dials through it, and so does every connector's
+// ConnectorRegistry dial, so --insecure is loopback-only on every gRPC path
+// and not only on the push path (#2257). The caller owns the returned conn.
+func Dial(endpoint string, opts ...Option) (*grpc.ClientConn, error) {
 	o := options{}
 	for _, opt := range opts {
 		opt(&o)
@@ -66,7 +84,7 @@ func NewClient(endpoint, bearer string, opts ...Option) (*Client, error) {
 	var transport grpc.DialOption
 	switch {
 	case o.insecure:
-		if !isLoopback(endpoint) {
+		if !IsLoopbackEndpoint(endpoint) {
 			return nil, fmt.Errorf("sdk: WithInsecure refuses non-loopback endpoint %q", endpoint)
 		}
 		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
@@ -82,12 +100,7 @@ func NewClient(endpoint, bearer string, opts ...Option) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sdk: dial %s: %w", endpoint, err)
 	}
-	return &Client{
-		conn:     conn,
-		stub:     evidencev1.NewEvidenceIngestServiceClient(conn),
-		bearer:   bearer,
-		ownsConn: true,
-	}, nil
+	return conn, nil
 }
 
 // Close releases the underlying gRPC connection if the Client owns it.
@@ -121,18 +134,4 @@ func NewClientFromConn(conn *grpc.ClientConn, bearer string) *Client {
 		bearer:   bearer,
 		ownsConn: false,
 	}
-}
-
-// isLoopback returns true for the loopback hosts WithInsecure accepts. Uses
-// net.SplitHostPort so IPv6 brackets are handled correctly.
-func isLoopback(endpoint string) bool {
-	host, _, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		host = endpoint
-	}
-	switch host {
-	case "", "localhost", "127.0.0.1", "::1":
-		return true
-	}
-	return false
 }

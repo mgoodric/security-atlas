@@ -61,9 +61,35 @@ type Crosswalk struct {
 	// it. The canonical use is "community_draft" for the agent-authored
 	// initial mapping set; "scf_official" when an SCF-published crosswalk
 	// is ingested later.
-	SourceAttribution string        `yaml:"source_attribution"`
-	Requirements      []Requirement `yaml:"requirements"`
-	Mappings          []Mapping     `yaml:"mappings"`
+	SourceAttribution string `yaml:"source_attribution"`
+	// SCFRelease is the SCF release (the SCF framework version label, e.g.
+	// "2026.3") whose anchors the mappings' scf_anchor codes name (#1771).
+	// The SCF reuses codes between releases, so the importer binds each
+	// code within this release only. Workbook loaders fill it from the
+	// workbook's "SCF <release>" sheet. Empty still binds in the current
+	// release, with a deprecation warning, until #1774 makes it required.
+	SCFRelease string `yaml:"scf_release"`
+	// SCFReleaseFromSheet marks a SCFRelease read from a workbook's
+	// "SCF <release>" sheet name with no --scf-release to confirm it. Until
+	// #1774 such a release binds strictly only when it is loaded; when it is
+	// not, the import binds in the current release with
+	// SheetReleaseNotLoadedWarning, as it did before #1771. Never read from
+	// YAML.
+	SCFReleaseFromSheet bool `yaml:"-"`
+
+	Requirements []Requirement `yaml:"requirements"`
+	Mappings     []Mapping     `yaml:"mappings"`
+	// Source names where this crosswalk came from, and is stamped on every
+	// edge the import writes (fw_to_scf_edges.crosswalk_source, #1971). The
+	// importer retires only the edges its own source wrote, so a YAML
+	// crosswalk and a workbook import into the same framework version leave
+	// each other's edges alone. Set by the loaders, never read from the file:
+	// "yaml:<file name>", "scf-workbook:<columns>" or "scf-olir:<sheet>".
+	Source string `yaml:"-"`
+
+	// PointsOfFocusRollUp reports what the workbook loaders folded into
+	// parent criteria, for the import summary. Never read from YAML.
+	PointsOfFocusRollUp PointsOfFocusRollUp `yaml:"-"`
 }
 
 // Requirement is one framework requirement/clause inside the crosswalk
@@ -73,6 +99,10 @@ type Requirement struct {
 	Code  string `yaml:"code"`  // e.g., "CC6.1" or "A.5.15"
 	Title string `yaml:"title"` // short label
 	Body  string `yaml:"body"`  // requirement/control description (NOT verbatim copyrighted standard text)
+	// PointsOfFocus is SOC 2 point-of-focus metadata on a criterion (#1731).
+	// The workbook loaders fill it by rolling points of focus up; a YAML
+	// crosswalk may list it but need not.
+	PointsOfFocus []PointOfFocus `yaml:"points_of_focus,omitempty"`
 }
 
 // Mapping is one STRM-typed edge from a framework requirement to an SCF
@@ -146,8 +176,14 @@ func Load(path string) (*Crosswalk, error) {
 	if err := validate(&cw); err != nil {
 		return nil, err
 	}
+	cw.Source = yamlSourcePrefix + filepath.Base(path)
 	return &cw, nil
 }
+
+// yamlSourcePrefix marks a YAML crosswalk's Source. A YAML import also owns
+// edges with no recorded source (written before #1971), since the bundled
+// YAML crosswalks were the only importer before workbook imports existed.
+const yamlSourcePrefix = "yaml:"
 
 // validate rejects malformed crosswalks. The strict checks (no silent
 // defaults, every row explicit) are the in-loader half of the slice's

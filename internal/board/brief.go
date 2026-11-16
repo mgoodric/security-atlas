@@ -28,12 +28,14 @@
 //     RLS is enforced. Cross-tenant brief reads return ErrNotFound.
 //   - Invariant 2 (separated stages): the Generator is a pure READER of the
 //     slice-012 / slice-016 read models (control_drift_snapshots,
-//     evidence_freshness) plus the risks + frameworks tables. Its only write
+//     evidence_freshness), the dashboard's per-framework posture query, and
+//     the risks + frameworks tables. Its only write
 //     target is `board_briefs` — it never writes a ledger.
 package board
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -60,9 +62,15 @@ type Brief struct {
 	PeriodEnd string `json:"period_end"`
 	// GeneratedAt is the wall-clock generation time (RFC3339).
 	GeneratedAt string `json:"generated_at"`
-	// Frameworks is the per-framework posture summary — one row per
-	// registered framework the program runs against (AC-2).
+	// Frameworks is the per-framework posture summary (AC-2). Since #2210 it
+	// is one row per framework version from the dashboard's posture query,
+	// the same rows the board pack's posture section carries.
 	Frameworks []FrameworkPosture `json:"frameworks"`
+	// Coverage is the program coverage figure, the same one the board pack's
+	// coverage_trend section reports (#2210). Nil on a brief stored before
+	// it existed: such a brief's framework rows hold the tenant-wide
+	// evidence freshness rate and render as they always did.
+	Coverage *CoverageSummary `json:"coverage,omitempty"`
 	// Drift is the 30-day control-drift summary (AC-2).
 	Drift DriftSummary `json:"drift"`
 	// TopRisks is the top-3 risks aging, ranked by residual severity then
@@ -105,33 +113,35 @@ type ExceptionSummary struct {
 	OldestActiveAgeDays int `json:"oldest_active_age_days"`
 }
 
-// FrameworkPosture is one framework's posture row in the brief.
+// FrameworkPosture is one framework version's posture row in the brief: the
+// board pack's row type (#2210), so the brief and the pack cannot drift
+// apart.
 //
-// v1 scope (decisions log D3): true per-framework control attribution
-// requires the SCF anchor graph + framework-scope intersection — heavyweight.
-// v1 reports the program's tenant-wide posture numbers (coverage / freshness
-// / drift) listed against each registered framework. The brief is honest
-// about this: it states the program posture and names every framework the
-// program runs against.
-type FrameworkPosture struct {
-	// Slug is the framework slug (e.g. "soc2").
-	Slug string `json:"slug"`
-	// Name is the human framework name (e.g. "SOC 2").
-	Name string `json:"name"`
-	// CoveragePct is the program control-coverage percentage [0,100]:
-	// controls passing today / controls with evidence, rounded.
-	CoveragePct int `json:"coverage_pct"`
-	// FreshnessPct is the program evidence-freshness percentage [0,100]:
-	// fresh controls / total controls in the freshness read model, rounded.
-	FreshnessPct int `json:"freshness_pct"`
-	// TrendArrow is the 30-day coverage-trend glyph: "up" | "down" | "flat".
-	TrendArrow string `json:"trend_arrow"`
-	// Delta is the signed 30-day drift count (controls_passing latest minus
-	// earliest in the window).
-	Delta int `json:"delta"`
-	// State is the posture label: "audit-ready" | "in-progress" | "at-risk".
-	State string `json:"state"`
+// A brief stored before #2210 carries the slice-031 shape under the same
+// JSON names: integer coverage_pct and freshness_pct holding the tenant-wide
+// evidence freshness figures, and delta as the 30-day drift count. Those
+// decode into this type unchanged; Brief.Coverage being nil marks them, and
+// the renderers word them as before.
+type FrameworkPosture = PackFrameworkPosture
+
+// CoverageSummary is the brief's program coverage figure (#2210).
+type CoverageSummary struct {
+	// CoveragePct is the unweighted mean of the scoped frameworks' coverage,
+	// the board pack's coverage_trend figure (#2056 decision D5). Zero and
+	// not reported when ScopedFrameworkCount is 0.
+	CoveragePct float64 `json:"coverage_pct"`
+	// ScopedFrameworkCount is how many framework versions have an activated
+	// scope, the frameworks the mean is over.
+	ScopedFrameworkCount int `json:"scoped_framework_count"`
+	// EvidenceFreshnessRatePct is the tenant-wide share of controls whose
+	// evidence is fresh [0,100], rounded. It is a freshness rate, not
+	// coverage, and is always labelled so.
+	EvidenceFreshnessRatePct int `json:"evidence_freshness_rate_pct"`
 }
+
+// NoScopedFrameworks reports that no framework has an activated scope, so
+// there is no coverage figure to state.
+func (c CoverageSummary) NoScopedFrameworks() bool { return c.ScopedFrameworkCount == 0 }
 
 // DriftSummary is the brief's 30-day control-drift section.
 type DriftSummary struct {
@@ -140,11 +150,37 @@ type DriftSummary struct {
 	// Since / Through bound the window (YYYY-MM-DD).
 	Since   string `json:"since"`
 	Through string `json:"through"`
-	// Delta is the signed drift count over the window.
+	// Delta is the net change in passing controls over the window
+	// (controls_passing on the latest snapshot minus the earliest). It is
+	// NOT started-passing minus flipped-out: a control can fail and recover
+	// inside the window, so render it beside both counts, labelled as net.
 	Delta int `json:"delta"`
 	// FlippedOutCount is how many controls drifted OUT of passing in the
 	// window.
 	FlippedOutCount int `json:"flipped_out_count"`
+	// StartedPassingCount is how many controls pass on the latest snapshot
+	// that were not passing on some earlier day in the window (#2195). Nil on
+	// a brief stored before it existed: those render without a gains count
+	// rather than claiming zero.
+	StartedPassingCount *int `json:"started_passing_count,omitempty"`
+}
+
+// MovementClause says which way controls moved in the window, for the
+// sentence that follows the net change: "3 control(s) started passing and 1
+// control(s) drifted out of passing". A brief stored before
+// StartedPassingCount existed states only the losses, as it always did.
+func (d DriftSummary) MovementClause() string {
+	out := "no controls drifted out of passing"
+	if d.FlippedOutCount > 0 {
+		out = fmt.Sprintf("%d control(s) drifted out of passing", d.FlippedOutCount)
+	}
+	if d.StartedPassingCount == nil {
+		return out
+	}
+	if *d.StartedPassingCount == 0 && d.FlippedOutCount == 0 {
+		return "no controls started or stopped passing"
+	}
+	return fmt.Sprintf("%d control(s) started passing and %s", *d.StartedPassingCount, out)
 }
 
 // RiskAging is one risk in the brief's "top-3 risks aging" section.
@@ -153,8 +189,12 @@ type RiskAging struct {
 	ID string `json:"id"`
 	// Title is the risk title.
 	Title string `json:"title"`
-	// Category is the risk category.
+	// Category is the slug of the risk's category.
 	Category string `json:"category"`
+	// CategoryName is the organisation's display name for the category
+	// (#1814). Briefs and packs stored before it existed lack it; render
+	// through Label, which falls back to the slug.
+	CategoryName string `json:"category_name,omitempty"`
 	// Treatment is the current treatment status.
 	Treatment string `json:"treatment"`
 	// ResidualSeverity is the residual-severity scalar used for ranking.
@@ -164,6 +204,16 @@ type RiskAging struct {
 	// AgeDays is the age-since-treatment proxy: now - updated_at, in days
 	// (decisions log D4 — risks have no treatment-applied timestamp).
 	AgeDays int `json:"age_days"`
+}
+
+// CategoryLabel is the category as a reader sees it: the organisation's
+// name, or the slug for a brief or pack stored before names were frozen
+// into it.
+func (r RiskAging) CategoryLabel() string {
+	if r.CategoryName != "" {
+		return r.CategoryName
+	}
+	return r.Category
 }
 
 // StoredBrief is a frozen brief as it lives in the `board_briefs` table —

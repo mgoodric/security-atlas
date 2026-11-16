@@ -33,6 +33,58 @@ import (
 	"github.com/mgoodric/security-atlas/internal/export"
 )
 
+// Issue #1736 — an unanchored control (anchor_fit: none) has a NULL
+// scf_anchor_id. Both the controls export and the history export must
+// write an empty cell for it, never the all-zero UUID.
+func TestIssue1736_UnanchoredControlExportsEmptyAnchorID(t *testing.T) {
+	t.Parallel()
+	cellOf := func(header, cells []string, col string) string {
+		t.Helper()
+		for i, h := range header {
+			if h == col {
+				return cells[i]
+			}
+		}
+		t.Fatalf("column %q missing from header", col)
+		return ""
+	}
+	first := func(it func(func([]string) bool)) []string {
+		var cells []string
+		it(func(r []string) bool { cells = r; return false })
+		return cells
+	}
+	anchor := uuid.New()
+
+	for _, tc := range []struct {
+		name   string
+		anchor uuid.UUID
+		want   string
+	}{
+		{"unanchored", uuid.Nil, ""},
+		{"anchored", anchor, anchor.String()},
+	} {
+		t.Run("controls/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			cells := first(controlsToRowIter([]controlExportRow{{
+				ID: uuid.New(), SCFAnchorID: tc.anchor, AnchorFit: "none",
+				AnchorFitNote: "no SCF control covers retention",
+			}}))
+			if got := cellOf(controlsExportHeader(), cells, "scf_anchor_id"); got != tc.want {
+				t.Errorf("scf_anchor_id = %q; want %q", got, tc.want)
+			}
+		})
+		t.Run("history/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			cells := first(controlsHistoryToRowIter([]controlHistoryExportRow{{
+				ID: uuid.New(), SCFAnchorID: tc.anchor,
+			}}))
+			if got := cellOf(controlsHistoryExportHeader(), cells, "scf_anchor_id"); got != tc.want {
+				t.Errorf("scf_anchor_id = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // controlsToRowIter must emit rows in canonical column order. Guards
 // against a future contributor reshuffling controlsExportHeader
 // without updating controlsToRowIter (or vice versa).
@@ -46,7 +98,7 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		ID:                 id,
 		BundleID:           "bundle-aws-iam",
 		Version:            3,
-		SCFID:              "IAC-06",
+		SCFID:              "IAC-37",
 		SCFAnchorID:        anchor,
 		Title:              "AWS IAM least-privilege",
 		ControlFamily:      "identity-access-management",
@@ -58,6 +110,9 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		BundleManifestHash: "sha256:abcdef0123456789",
 		CreatedAt:          now,
 		UpdatedAt:          now,
+		AnchorFit:          "none",
+		AnchorFitNote:      "no SCF control covers audit committee independence",
+		Demo:               true,
 	}
 
 	it := controlsToRowIter([]controlExportRow{row})
@@ -77,7 +132,7 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		"version":              "3",
 		"title":                "AWS IAM least-privilege",
 		"control_family":       "identity-access-management",
-		"scf_id":               "IAC-06",
+		"scf_id":               "IAC-37",
 		"scf_anchor_id":        anchor.String(),
 		"implementation_type":  "automated",
 		"owner_role":           "platform-eng",
@@ -85,6 +140,9 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		"applicability_expr":   "BU=eng AND env=prod",
 		"freshness_class":      "fresh",
 		"bundle_manifest_hash": "sha256:abcdef0123456789",
+		"anchor_fit":           "none",
+		"anchor_fit_note":      "no SCF control covers audit committee independence",
+		"demo":                 "true",
 	}
 	for col, want := range checks {
 		idx := -1
@@ -142,6 +200,9 @@ func TestSlice137_ControlsExportHeader_StableOrder(t *testing.T) {
 		"bundle_manifest_hash",
 		"created_at",
 		"updated_at",
+		"anchor_fit",
+		"anchor_fit_note",
+		"demo",
 	}
 	got := controlsExportHeader()
 	if len(got) != len(want) {
@@ -343,7 +404,7 @@ func TestSlice137_ListControlsForExport_StubSourceDispatch(t *testing.T) {
 			ID:                 uuid.New(),
 			BundleID:           "bundle-stub-1",
 			Version:            1,
-			SCFID:              "IAC-06",
+			SCFID:              "IAC-37",
 			SCFAnchorID:        uuid.New(),
 			Title:              "stub control 1",
 			ControlFamily:      "identity-access-management",

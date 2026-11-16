@@ -11,6 +11,12 @@
 //   - xlsx → two-sheet workbook. Sheet 1 = Anchors; Sheet 2 = Edges
 //            (one row per anchor → requirement edge).
 //
+// Every edge carries `mapping_tier` (draft | under_review | verified |
+// rejected; ADR 0018) in all three projections. The export does not
+// filter by tier: a reviewer-rejected edge stays in the dump, marked
+// `mapping_tier = rejected` (issue #1826), alongside `no_relationship`
+// edges.
+//
 // Reuses slice 135's `internal/export/` library for the CSV cell-
 // injection sanitizer + the filename builder; the JSON and XLSX
 // projections are slice-specific shapes built locally in this
@@ -147,6 +153,7 @@ type edgeExportRow struct {
 	Strength                  float64
 	SourceAttribution         string
 	Rationale                 string
+	MappingTier               string
 }
 
 // NewExportHandler constructs the slice 174 export handler.
@@ -384,6 +391,7 @@ func anchorsExportEdgesHeader() []string {
 		"strength",
 		"source_attribution",
 		"rationale",
+		"mapping_tier",
 	}
 }
 
@@ -450,6 +458,7 @@ type satisfactionWire struct {
 	Strength                  float64 `json:"strength"`
 	SourceAttribution         string  `json:"source_attribution"`
 	Rationale                 string  `json:"rationale,omitempty"`
+	MappingTier               string  `json:"mapping_tier"`
 }
 
 // nestedAnchorWire is one anchor with its framework satisfactions
@@ -528,6 +537,7 @@ func satisfactionsForAnchor(edges []edgeExportRow) []satisfactionWire {
 			Strength:                  e.Strength,
 			SourceAttribution:         e.SourceAttribution,
 			Rationale:                 e.Rationale,
+			MappingTier:               e.MappingTier,
 		})
 	}
 	return out
@@ -677,6 +687,7 @@ func writeAnchorsSheet2(w io.Writer, edges []edgeExportRow) error {
 			strconv.FormatFloat(e.Strength, 'f', -1, 64),
 			e.SourceAttribution,
 			e.Rationale,
+			e.MappingTier,
 		}
 		if err := writeAnchorsSheetRow(w, rowIndex, cells); err != nil {
 			return err
@@ -861,6 +872,7 @@ func (h *ExportHandler) listEdgesFor(ctx context.Context) ([]edgeExportRow, erro
 			Strength:                  r.Strength,
 			SourceAttribution:         string(r.SourceAttribution),
 			Rationale:                 r.Rationale,
+			MappingTier:               string(r.MappingTier),
 		}
 	}
 	return out, nil

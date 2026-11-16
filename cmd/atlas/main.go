@@ -46,6 +46,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/backup"
 	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
+	"github.com/mgoodric/security-atlas/internal/controlimport"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -92,8 +93,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "atlas: trusted-proxy config: %v\n", err)
 		os.Exit(1)
 	} else if deprecated {
-		fmt.Fprintln(os.Stderr, "atlas: WARNING — TRUST_FORWARDED_HEADERS=1 is deprecated; "+
-			"it is mapped to TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0 (trust any proxy). "+
+		// #2047: trust-any-proxy lets every client choose its own per-IP
+		// rate-limit key, so the warning says that, not just "deprecated".
+		fmt.Fprintln(os.Stderr, "atlas: WARNING — TRUST_FORWARDED_HEADERS=1 is deprecated and UNSAFE; "+
+			"it is mapped to TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0 (trust any proxy), so any client "+
+			"can set X-Forwarded-For to choose the IP recorded on its session and the key of every "+
+			"per-IP rate limit (login, OAuth client auth, demo seed). "+
 			"Set TRUSTED_PROXY_CIDRS to the specific CIDR(s) your reverse proxy connects from "+
 			"and remove TRUST_FORWARDED_HEADERS. See deploy/docker/.env.example.")
 	}
@@ -474,17 +479,31 @@ func main() {
 			// /oauth/introspect (RFC 7662) endpoints, the JWT
 			// validation middleware on /v1/*, and the revocation-
 			// list sweeper goroutine.
+			//
+			// #2041: both endpoints run an argon2id client-secret verify
+			// unauthenticated, so each throttles per client_id and per
+			// caller IP (resolved through TRUSTED_PROXY_CIDRS) first.
 			revokedStore := revocation.New(pool)
+			clientAuthRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN", oauthapi.DefaultClientAuthRatePerMin)
+			clientAuthIPRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN", oauthapi.DefaultClientAuthIPRatePerMin)
 			revokeEP := oauthapi.NewRevocationEndpoint(signer, revokedStore, clients, oauthapi.RevocationEndpointConfig{
-				Issuer: issuer,
+				Issuer:              issuer,
+				ClientRatePerMinute: clientAuthRate,
+				IPRatePerMinute:     clientAuthIPRate,
+				ClientIP:            authapi.ClientIP,
 			})
 			introspectEP := oauthapi.NewIntrospectionEndpoint(signer, revokedStore, clients, oauthapi.IntrospectionEndpointConfig{
-				Issuer:      issuer,
-				SuperAdmins: superAdmins,
+				Issuer:              issuer,
+				SuperAdmins:         superAdmins,
+				ClientRatePerMinute: clientAuthRate,
+				IPRatePerMinute:     clientAuthIPRate,
+				ClientIP:            authapi.ClientIP,
 			})
 			oauthHandler.AttachRevocationEndpoint(revokeEP)
 			oauthHandler.AttachIntrospectionEndpoint(introspectEP)
-			logger.Info("atlas: OAuth revocation + introspection endpoints wired")
+			logger.Info("atlas: OAuth revocation + introspection endpoints wired",
+				"client_auth_rate_per_min", clientAuthRate,
+				"client_auth_ip_rate_per_min", clientAuthIPRate)
 
 			// Slice 190: attach the JWT validator to the HTTP server
 			// so it prepends jwtmw to the /v1/* chain.
@@ -739,7 +758,15 @@ func main() {
 		// pre-slice-198 behaviour of erroring on "tenant_id required").
 		userStore := users.NewStoreWithAuthPool(pool, authPool)
 		sessionStore := sessions.NewStore(pool, 0)
-		oidcAuth := oidc.New(localModeIdpResolver{})
+		// #2177: the OIDC state HMAC key. ATLAS_OIDC_STATE_KEY when set,
+		// else derived from BEARER_HASH_KEY, so every replica signs and
+		// verifies with the same key.
+		oidcStateKey, err := oidc.StateKeyFromEnv(bearerHashKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: oidc state key: %v\n", err)
+			os.Exit(1)
+		}
+		oidcAuth := oidc.New(localModeIdpResolver{}, oidcStateKey)
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
 		// Slice 209: bundle the local-AS deps when OAuth wiring exists.
 		// nil when ATLAS_ISSUER_URL is unset OR pool is nil; LocalLogin
@@ -1259,6 +1286,31 @@ func main() {
 		}
 	}
 
+	// #2038: control import suggestion sweeper. A background suggestion run
+	// dies with its process, leaving the batch pending; this fails batches
+	// pending past a cutoff, once at start and every 10 minutes. The
+	// migrator pool only lists tenant IDs; each tenant's update runs on the
+	// app pool under tenancy.WithTenant. Safe on every replica (FOR UPDATE
+	// SKIP LOCKED).
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ciPool, err := atlasotel.NewTracedPool(cctx, migratorURL)
+		ccancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: control import sweeper pool: %v\n", err)
+		} else {
+			sweeper := controlimport.NewSweeper(ciPool, pool, logger, controlimport.DefaultStaleSuggestionsAfter)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer ciPool.Close()
+				if err := sweeper.Run(ctx, controlimport.DefaultSweepInterval); err != nil {
+					errCh <- fmt.Errorf("control import sweeper: %w", err)
+				}
+			}()
+		}
+	}
+
 	// Slice 582: notification-channel digest scheduler. An in-process
 	// tick-loop (mirroring the metrics + backup schedulers — no external
 	// cron, single-VM self-host target, D1) that, once per UTC day,
@@ -1446,6 +1498,22 @@ func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+	return fallback
+}
+
+// positiveIntEnv reads a positive integer from key, falling back when
+// it is unset, malformed or not positive. A set-but-unusable value is
+// logged so the operator learns their setting was ignored.
+func positiveIntEnv(logger *slog.Logger, key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+		return v
+	}
+	logger.Warn("atlas: ignoring invalid env value; using default",
+		"key", key, "value", raw, "default", fallback)
 	return fallback
 }
 

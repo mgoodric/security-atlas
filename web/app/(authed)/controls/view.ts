@@ -79,6 +79,10 @@ export function rowsFromControls(controls: ControlWithState[]): AnchorRow[] {
     },
     state: toRowState(c.state),
     frameworks: c.frameworks ?? [],
+    // Issue #1736: an omitted fit is the platform's `exact` default.
+    anchorFit: c.anchor_fit ?? "exact",
+    anchorFitNote: c.anchor_fit_note ?? null,
+    demo: c.demo === true,
   }));
 }
 
@@ -139,4 +143,18 @@ export function controlsViewSummary(
   return `${n(withControl)} of ${n(
     counts.catalogTotal,
   )} SCF anchors have a control in this tenant`;
+}
+
+/**
+ * Issue #1895 — the catalog walk stops at a page cap (10,000 anchors).
+ * When it stops short of the server's `total`, the page says how many
+ * it holds rather than presenting a partial list as the whole catalog.
+ * Empty when every anchor loaded or the server reported no total.
+ */
+export function catalogTruncationNote(loaded: number, total?: number): string {
+  if (total === undefined || loaded >= total) return "";
+  const n = (v: number) => v.toLocaleString("en-US");
+  return `Showing ${n(loaded)} of ${n(
+    total,
+  )} SCF anchors; the rest were not loaded`;
 }

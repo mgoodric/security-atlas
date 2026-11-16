@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,7 +83,7 @@ func newCredentialsIssueCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.tenant, "tenant", "", credentialTenantFlagHelp)
 	cmd.Flags().StringVar(&f.scope, "scope", "", "scope predicate (JSON string)")
 	cmd.Flags().StringVar(&f.kinds, "kinds", "", "comma-separated evidence_kind identifiers (empty = all)")
-	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 = no expiry). With --reset-bootstrap: 0 = the server default of 24h, at most 168h")
+	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 or 0d = no expiry). With --reset-bootstrap: 0 = the server default of 24h, at most 168h")
 	// Slice 073 — recovery flags. --reset-bootstrap is the discoverable
 	// flag; --force is the foot-gun gate. See docs/issues/073-*.md AC-8.
 	cmd.Flags().BoolVar(&f.resetBootstrap, "reset-bootstrap", false,
@@ -282,9 +284,18 @@ func splitKinds(s string) []string {
 	return out
 }
 
+// parseDuration reads --ttl: a Go duration (24h, 90m) or a whole number
+// of days (30d), which time.ParseDuration does not accept (#2100).
 func parseDuration(s string) (time.Duration, error) {
 	if s == "" || s == "0" {
 		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.ParseInt(days, 10, 64)
+		if err != nil || n < 0 || n > math.MaxInt64/int64(24*time.Hour) {
+			return 0, fmt.Errorf("--ttl %q: days must be a whole number, e.g. 30d", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil {

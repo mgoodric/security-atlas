@@ -10,7 +10,7 @@ description: |
   Manual-creation exceptions (consultants, break-glass) must be tagged
   with an approval ticket id in the lifecycle event metadata.
 
-scf_anchor_id: IAC-07
+scf_anchor_id: IAC-04
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -95,8 +96,23 @@ type PlacementInput struct {
 	Level      dbx.RiskLevel
 	OrgUnitSet bool
 	OrgUnitID  *uuid.UUID
+	// CategoryRef, when non-empty, moves the risk onto the tenant's
+	// category with that slug or id (#1812). It must be assignable: an
+	// unknown or archived category is refused (IsCategoryRefusal). A risk
+	// already on an archived category keeps it until moved off.
+	CategoryRef string
+	// Fields are the record fields to change (#2104). Each edit that
+	// changes something writes one fields_changed audit row.
+	Fields RecordFields
 	// Actor is recorded on the audit row. It must be non-empty.
 	Actor string
+}
+
+// categoryState is the before/after shape of a category_changed
+// risk_audit_log row.
+type categoryState struct {
+	CategoryID uuid.UUID `json:"category_id"`
+	Slug       string    `json:"category"`
 }
 
 // placementState is the before/after shape of a risk_audit_log row.
@@ -105,18 +121,36 @@ type placementState struct {
 	OrgUnitID *uuid.UUID    `json:"org_unit_id"`
 }
 
-// UpdatePlacement moves a risk to a new level and/or org unit and records
-// the move in risk_audit_log. A request that changes nothing writes no row
-// and returns the risk as it is. Returns ErrNotFound for an unknown risk and
-// a placement validation error (IsPlacementValidation) for a bad request.
+// UpdatePlacement moves a risk to a new level and/or org unit, onto
+// another category when in.CategoryRef is set, and changes the record
+// fields in in.Fields (#2104, IsRecordValidation on refusal), recording each change in
+// risk_audit_log. A request that changes nothing writes no row and returns
+// the risk as it is. Returns ErrNotFound for an unknown risk, a placement
+// validation error (IsPlacementValidation) for a bad level or unit, and a
+// category refusal (IsCategoryRefusal) for a category that cannot be
+// assigned.
 func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in PlacementInput) (Risk, error) {
 	if in.Actor == "" {
 		return Risk{}, errors.New("risk: placement actor is required")
 	}
 	var out Risk
 	err := s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
-		// Lock order (#1867): the rules' advisory locks before the row, as
-		// AssignThemes and Delete do.
+		// Lock order (#1867, #2204, #2233): the target category row FOR
+		// SHARE first (ResolveCategoryTx), then the rules' advisory locks,
+		// then the risk row, as AssignThemes and Delete take their
+		// vocabulary and rule locks. Category admin locks only category
+		// rows, so no path takes these in the reverse order.
+		var (
+			category     Category
+			categoryEnum dbx.RiskCategory
+		)
+		if in.CategoryRef != "" {
+			var err error
+			category, categoryEnum, err = ResolveCategoryTx(ctx, q, tenantID, in.CategoryRef)
+			if err != nil {
+				return err
+			}
+		}
 		unlocked, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(riskID),
@@ -168,56 +202,126 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 			return err
 		}
 
-		if after.Level == before.Level && sameUnit(after.OrgUnitID, before.OrgUnitID) {
-			out, err = s.withLinks(ctx, q, tenantID, current)
+		placementChanged := after.Level != before.Level || !sameUnit(after.OrgUnitID, before.OrgUnitID)
+		categoryChanged := in.CategoryRef != "" && category.ID != current.CategoryID
+		// Record fields are checked before any write, so a refused field
+		// leaves placement and category untouched too.
+		_, fieldsBefore, fieldsAfter, err := applyRecordFields(current, in.Fields)
+		if err != nil {
 			return err
+		}
+		fieldsChanged := len(fieldsAfter) > 0
+		if !placementChanged && !categoryChanged && !fieldsChanged {
+			return s.finishPatch(ctx, q, tenantID, current, &out, false)
 		}
 
-		updated, err := q.UpdateRiskPlacement(ctx, dbx.UpdateRiskPlacementParams{
-			TenantID:  pgUUID(tenantID),
-			ID:        pgUUID(riskID),
-			Level:     after.Level,
-			OrgUnitID: pgUUIDPtr(after.OrgUnitID),
-		})
-		if err != nil {
-			return fmt.Errorf("update risk placement: %w", err)
+		if placementChanged {
+			updated, err := q.UpdateRiskPlacement(ctx, dbx.UpdateRiskPlacementParams{
+				TenantID:  pgUUID(tenantID),
+				ID:        pgUUID(riskID),
+				Level:     after.Level,
+				OrgUnitID: pgUUIDPtr(after.OrgUnitID),
+			})
+			if err != nil {
+				return fmt.Errorf("update risk placement: %w", err)
+			}
+			if err := insertRiskAudit(ctx, q, tenantID, riskID, in.Actor, "placement_changed", before, after); err != nil {
+				return err
+			}
+			current = riskFromRow(updated)
 		}
-		beforeJSON, err := json.Marshal(before)
-		if err != nil {
-			return fmt.Errorf("marshal placement before: %w", err)
+		if categoryChanged {
+			byID, err := categoriesByID(ctx, q, tenantID)
+			if err != nil {
+				return err
+			}
+			oldCategory := categoryState{CategoryID: current.CategoryID, Slug: byID[current.CategoryID].Slug}
+			updated, err := q.UpdateRiskCategory(ctx, dbx.UpdateRiskCategoryParams{
+				TenantID:   pgUUID(tenantID),
+				ID:         pgUUID(riskID),
+				CategoryID: pgUUID(category.ID),
+				Category:   categoryEnum,
+			})
+			if err != nil {
+				return fmt.Errorf("update risk category: %w", err)
+			}
+			newCategory := categoryState{CategoryID: category.ID, Slug: category.Slug}
+			if err := insertRiskAudit(ctx, q, tenantID, riskID, in.Actor, "category_changed", oldCategory, newCategory); err != nil {
+				return err
+			}
+			current = riskFromRow(updated)
 		}
-		afterJSON, err := json.Marshal(after)
-		if err != nil {
-			return fmt.Errorf("marshal placement after: %w", err)
+		if fieldsChanged {
+			// Re-apply onto the row as the writes above left it, so the
+			// category enum and updated_at carried over are current.
+			next, _, _, err := applyRecordFields(current, in.Fields)
+			if err != nil {
+				return err
+			}
+			if current, err = updateRecordTx(ctx, q, tenantID, next, in.Actor, fieldsBefore, fieldsAfter); err != nil {
+				return err
+			}
 		}
-		if err := q.InsertRiskAuditLog(ctx, dbx.InsertRiskAuditLogParams{
-			TenantID:    pgUUID(tenantID),
-			RiskID:      pgUUID(riskID),
-			Actor:       in.Actor,
-			ActionType:  "placement_changed",
-			BeforeState: beforeJSON,
-			AfterState:  afterJSON,
-		}); err != nil {
-			return fmt.Errorf("insert risk audit log: %w", err)
-		}
-		out, err = s.withLinks(ctx, q, tenantID, riskFromRow(updated))
-		if err != nil {
-			return err
-		}
-		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
+		return s.finishPatch(ctx, q, tenantID, current, &out, true)
 	})
 	return out, err
 }
 
-// PlacementAuditEntry is one risk_audit_log row.
+// finishPatch fills the response shape of a PATCH (control links, category
+// slug and name) into out and, when the risk changed, runs the aggregation
+// hooks for its themes.
+func (s *Store) finishPatch(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, r Risk, out *Risk, changed bool) error {
+	r, err := s.withLinks(ctx, q, tenantID, r)
+	if err != nil {
+		return err
+	}
+	if err := withCategoryNames(ctx, q, tenantID, &r); err != nil {
+		return err
+	}
+	*out = r
+	if !changed {
+		return nil
+	}
+	return s.runAfterRiskWrite(ctx, q, tenantID, r.Themes)
+}
+
+// insertRiskAudit writes one risk_audit_log row in the write's transaction.
+func insertRiskAudit(ctx context.Context, q *dbx.Queries, tenantID, riskID uuid.UUID, actor, action string, before, after any) error {
+	beforeJSON, err := json.Marshal(before)
+	if err != nil {
+		return fmt.Errorf("marshal %s before: %w", action, err)
+	}
+	afterJSON, err := json.Marshal(after)
+	if err != nil {
+		return fmt.Errorf("marshal %s after: %w", action, err)
+	}
+	if err := q.InsertRiskAuditLog(ctx, dbx.InsertRiskAuditLogParams{
+		TenantID:    pgUUID(tenantID),
+		RiskID:      pgUUID(riskID),
+		Actor:       actor,
+		ActionType:  action,
+		BeforeState: beforeJSON,
+		AfterState:  afterJSON,
+	}); err != nil {
+		return fmt.Errorf("insert risk audit log: %w", err)
+	}
+	return nil
+}
+
+// PlacementAuditEntry is one risk_audit_log row: a placement, category or
+// record-field change (#2104).
 type PlacementAuditEntry struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
 	Actor       string
 	ActionType  string
 	BeforeState json.RawMessage
 	AfterState  json.RawMessage
 }
 
-// ListPlacementAudit returns a risk's audit rows, newest first.
+// ListPlacementAudit returns a risk's audit rows, newest first. A risk
+// that does not exist, or has been deleted, returns its trail (possibly
+// empty): the trail outlives the risk.
 func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID) ([]PlacementAuditEntry, error) {
 	var out []PlacementAuditEntry
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -231,6 +335,8 @@ func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID) ([]Pla
 		out = make([]PlacementAuditEntry, len(rows))
 		for i, r := range rows {
 			out[i] = PlacementAuditEntry{
+				ID:          uuid.UUID(r.ID.Bytes),
+				CreatedAt:   r.CreatedAt.Time,
 				Actor:       r.Actor,
 				ActionType:  r.ActionType,
 				BeforeState: json.RawMessage(r.BeforeState),

@@ -7,6 +7,7 @@ import type { AnchorWithState } from "@/lib/api/anchors";
 import type { ControlWithState } from "@/lib/api/controls-list";
 
 import {
+  catalogTruncationNote,
   controlHref,
   controlsViewSummary,
   parseControlsView,
@@ -23,7 +24,7 @@ function control(over: Partial<ControlWithState> = {}): ControlWithState {
     id: CONTROL_ID,
     title: "Quarterly access review",
     control_family: "Identity & Access Management",
-    scf_id: "IAC-06",
+    scf_id: "IAC-37",
     lifecycle_state: "active",
     bundle_id: "ctrl-iac-06",
     scf_anchor_id: ANCHOR_ID,
@@ -36,7 +37,7 @@ function control(over: Partial<ControlWithState> = {}): ControlWithState {
 function anchor(over: Partial<AnchorWithState> = {}): AnchorWithState {
   return {
     id: ANCHOR_ID,
-    scf_id: "IAC-06",
+    scf_id: "IAC-37",
     family: "Identification & Authentication",
     name: "Multi-factor authentication",
     description: "",
@@ -94,6 +95,26 @@ describe("rowsFromControls", () => {
       last_observed_at: null,
     });
   });
+  test("carries the demo mark; an omitted mark is a real control (#2043)", () => {
+    const [real, demo] = rowsFromControls([control(), control({ demo: true })]);
+    expect(real.demo).toBe(false);
+    expect(demo.demo).toBe(true);
+  });
+  test("carries the anchor fit and note; an omitted fit is exact", () => {
+    const [omitted, none] = rowsFromControls([
+      control(),
+      control({
+        anchor_fit: "none",
+        anchor_fit_note: "No SCF control covers recruitment and retention.",
+      }),
+    ]);
+    expect(omitted.anchorFit).toBe("exact");
+    expect(omitted.anchorFitNote).toBeNull();
+    expect(none.anchorFit).toBe("none");
+    expect(none.anchorFitNote).toBe(
+      "No SCF control covers recruitment and retention.",
+    );
+  });
 });
 
 describe("rowsFromAnchors", () => {
@@ -126,5 +147,17 @@ describe("controlsViewSummary", () => {
       }),
     ).toBe("37 of 1,451 SCF anchors have a control in this tenant");
     expect(controlsViewSummary("catalog", {})).toBe("");
+  });
+});
+
+describe("catalogTruncationNote (issue 1895)", () => {
+  test("states the loaded count when the walk stopped short", () => {
+    expect(catalogTruncationNote(10_000, 12_000)).toBe(
+      "Showing 10,000 of 12,000 SCF anchors; the rest were not loaded",
+    );
+  });
+  test("is empty when every anchor loaded or no total arrived", () => {
+    expect(catalogTruncationNote(1451, 1451)).toBe("");
+    expect(catalogTruncationNote(1451)).toBe("");
   });
 });

@@ -8,7 +8,7 @@ description: |
   contract status (active / expiring / lapsed), DPA status, and
   last-review date.
 
-scf_anchor_id: TPM-01
+scf_anchor_id: TPM-02
 control_family: TPM
 implementation_type: manual_periodic
 owner_role: ciso

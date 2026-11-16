@@ -32,8 +32,17 @@ func (s *Server) registerFrameworkScope(root *chi.Mux) {
 	// Issue #1787: Statement of Applicability decisions on a revision. The
 	// literal /applicability segment resolves before /{id}.
 	root.Get("/v1/framework-scopes/applicability", fwH.ApplicabilityAsOf)
+	// Issue #1791: SoA export as CSV or xlsx.
+	root.Get("/v1/framework-scopes/applicability/export", fwH.ExportApplicability)
 	root.Get("/v1/framework-scopes/{id}/applicability", fwH.ListApplicability)
+	// Issue #1795: what changed against the activated revision.
+	root.Get("/v1/framework-scopes/{id}/applicability/diff", fwH.DiffApplicability)
 	root.Put("/v1/framework-scopes/{id}/applicability/{requirement_id}", fwH.SetApplicability)
+	// Issue #1790: bulk-set and CSV import of decisions.
+	root.Post("/v1/framework-scopes/{id}/applicability/bulk", fwH.BulkSetApplicability)
+	root.Post("/v1/framework-scopes/{id}/applicability/import", fwH.ImportApplicability)
+	// Issue #1793: carry decisions over from the prior framework version.
+	root.Post("/v1/framework-scopes/{id}/applicability:carry-over", fwH.CarryOverApplicability)
 	// Sub-resource transitions are PATCH, distinct from the generic PATCH
 	// on /v1/framework-scopes/{id} (which edits predicate). chi resolves
 	// the literal-segment routes first within the same method.

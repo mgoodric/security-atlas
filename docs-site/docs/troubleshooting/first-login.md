@@ -1,6 +1,6 @@
 # Troubleshooting: First-time login
 
-A first-time user installing the docker-compose self-host bundle (slice 037) or the Helm chart (slice 038) lands on `/login` and needs the bootstrap admin bearer token. This page walks through every common failure mode.
+A first-time user installing the docker-compose self-host bundle (slice 037) or the Helm chart (slice 038) lands on `/login`. On a single-tenant install (the default) the page asks only for an email and password: sign in with `ATLAS_DEFAULT_USER_EMAIL` / `ATLAS_DEFAULT_USER_PASSWORD`, with no tenant ID. The email/password form stays available after the first sign-in. The bootstrap admin bearer token is the fallback when that account is not usable. This page walks through every common failure mode.
 
 The bootstrap admin token is generated at platform startup. You can find it via three orthogonal paths:
 
@@ -11,6 +11,8 @@ The bootstrap admin token is generated at platform startup. You can find it via 
 | Filesystem                      | `cat ${ATLAS_DATA_DIR:-/var/lib/atlas}/bootstrap-token`             |
 
 The token is **single-use**: on the first successful sign-in the platform atomically deletes the file AND marks `platform_status.first_signin_at` so the login page swaps back to the existing copy. Long-lived bootstrap tokens on disk are a credential leak shape this platform does not introduce.
+
+Paste the token into the **Developer sign-in** card on `/login`. That card is offered only while the install is in first-install state, which means no one has signed in yet, or a `--reset-bootstrap` (below) has put the install back into it. After the first sign-in, `/login` shows only the email and password form, and the web server refuses a pasted token. Set `ATLAS_WEB_DEV_TOKEN_SIGNIN=true` on the `web` service to keep the card available afterwards. See the [configuration reference](../configuration.md#web). If the web server cannot read the install state, it hides the card and refuses token sign-in.
 
 ---
 
@@ -42,12 +44,40 @@ The file was deleted (someone called `/v1/install/mark-first-signin` — typical
 
 Use the recovery flag on `atlas-cli credentials issue`:
 
-**Verified on docker-compose:**
+<!-- prettier-ignore-start -->
+!!! warning "Known issue: the bootstrap token is refused"
+
+    The reset is an HTTP call, and the HTTP API currently accepts only
+    JWTs. `--token "$ATLAS_BOOTSTRAP_TOKEN"`, as shown below, and admin API
+    keys both get `401 authorization must be Bearer <token>`. A super-admin
+    JWT works: on a single-tenant install, sign in with the default user's
+    email and password through `POST /auth/local/login` and pass the
+    `token` it returns as `--token`. The response carries `token` only when
+    `ATLAS_ISSUER_URL` is set on the `atlas` service. Tracked in
+    [#2121](https://github.com/mgoodric/security-atlas/issues/2121).
+
+    ```sh
+    printf 'Password: '; read -rs ATLAS_PASSWORD; echo
+    ATLAS_JWT=$(printf '{"email":"%s","password":"%s"}' admin@example.com "$ATLAS_PASSWORD" \
+      | curl -fsS -X POST http://atlas:8080/auth/local/login -H 'Content-Type: application/json' --data-binary @- \
+      | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+    unset ATLAS_PASSWORD
+    [ -n "$ATLAS_JWT" ] || echo 'no token: is ATLAS_ISSUER_URL set?'
+    ```
+
+    The password is read without echo and sent on stdin, so it stays out
+    of the process list and your shell history. A `"` or `\` in the
+    password breaks the JSON body that `printf` builds; the
+    [Getting Started sign-in step](../getting-started.md#3-sign-in-and-get-credentials)
+    uses the same pattern. Then pass `--token "$ATLAS_JWT"` in place of
+    `--token "$ATLAS_BOOTSTRAP_TOKEN"` below.
+<!-- prettier-ignore-end -->
+
+**On docker-compose** (affected by the known issue above):
 
 ```sh
 # From inside the atlas-cli container (sees the same network):
 atlas-cli credentials issue \
-  --tenant "$ATLAS_BOOTSTRAP_TENANT" \
   --reset-bootstrap --force \
   --endpoint atlas:50051 \
   --http-endpoint http://atlas:8080 \
@@ -57,12 +87,12 @@ atlas-cli credentials issue \
 The `--force` flag is the foot-gun gate: without it the CLI refuses because re-issuing bootstrap after a real user has signed in is rarely the right move. With it, the platform:
 
 1. Clears `platform_status.bootstrap_token_consumed_at` and `first_signin_at`.
-2. Mints a fresh admin bearer for `--tenant`, which must be the tenant of the `--token` credential. Signing in with it gives an admin session.
+2. Mints a fresh admin bearer for the tenant of the `--token` credential (your organisation, on a single-tenant install). On a multi-tenant install you may name it with `--tenant <tenant uuid>`, which must be that same tenant. Signing in with it gives an admin session.
 3. Writes the new token to `${ATLAS_DATA_DIR}/bootstrap-token` (mode 0600).
 4. Revokes any recovery key an earlier reset minted.
 5. Returns the new bearer plaintext, its `credential_id` and its `expires_at` to stdout.
 
-`--token` must be a super_admin JWT, or an admin API key on an install with one tenant. `--scope` and `--kinds` are refused with `--reset-bootstrap`.
+`--token` must be a super_admin JWT (admin API keys are currently refused; see the known issue above). `--scope` and `--kinds` are refused with `--reset-bootstrap`.
 
 **The recovery key expires.** It lasts 24h by default. Pass `--ttl` to change that, up to `168h` (7 days). The key cannot be made non-expiring.
 
@@ -72,12 +102,11 @@ The `--force` flag is the foot-gun gate: without it the CLI refuses because re-i
 atlas-cli credentials revoke --id <credential_id> --endpoint atlas:50051 --token <your admin token>
 ```
 
-**Verified on Helm:**
+**On Helm** (affected by the known issue above):
 
 ```sh
 kubectl exec -it deploy/atlas -- \
   atlas-cli credentials issue \
-  --tenant "$ATLAS_BOOTSTRAP_TENANT" \
   --reset-bootstrap --force \
   --endpoint atlas:50051 \
   --http-endpoint http://atlas:8080 \
@@ -129,7 +158,7 @@ Pods run as the non-root user configured in `deploy/helm/atlas/values.yaml`. The
 
 ## I'm running a multi-tenant install and I don't know which tenant the bootstrap admin is in
 
-The platform is intentionally single-tenant for the v1 self-host operator (canvas §5.4 + OQ #13 resolution). The bootstrap admin credential is bound to `ATLAS_BOOTSTRAP_TENANT` — the single seeded tenant. To verify:
+A single-tenant install is the default (see [ADR 0023](https://github.com/mgoodric/security-atlas/blob/main/docs/adr/0023-single-tenant-experience-by-default.md)), and on one nothing on this page needs a tenant ID. An install becomes multi-tenant only when a super-admin creates a second tenant with `ATLAS_ALLOW_MULTI_TENANT=true` set; see [Tenant membership](../tenant-membership.md#opting-in-to-multi-tenant). The bootstrap admin stays in the bootstrap tenant, `ATLAS_BOOTSTRAP_TENANT`. To list the tenants:
 
 **Verified on docker-compose:**
 
@@ -145,7 +174,7 @@ kubectl exec -it deploy/postgres -- psql -U atlas_migrate atlas \
   -c "SELECT id, name FROM tenants;"
 ```
 
-Expect exactly one row. If you see more than one, an admin operator has provisioned additional tenants; the bootstrap admin credential remains bound to `ATLAS_BOOTSTRAP_TENANT`. Use that tenant ID with the recovery `--reset-bootstrap --force` command if needed.
+One row means a single-tenant install. With several, pass the bootstrap tenant's ID as `--tenant` to the recovery `--reset-bootstrap --force` command if you need to name it.
 
 ---
 

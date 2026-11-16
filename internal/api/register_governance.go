@@ -40,6 +40,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+	root.Patch("/v1/exceptions/{id}/revoke", exceptionsH.Revoke)
 
 	// OE-631: incident register backend. Minimal writer/reader routes for
 	// log, list, detail, lifecycle transition, and post-mortem closure.
@@ -102,6 +103,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	root.Patch("/v1/policies/{id}/review-date", policiesH.SetReviewDate)
 	root.Get("/v1/policies/{id}/pdf", policiesH.PDF)
 	root.Get("/v1/policies/{id}", policiesH.GetPolicy)
+	root.Delete("/v1/policies/{id}", policiesH.DiscardDraft)
 	// Slice 023: policy acknowledgment workflow. Three routes appended
 	// per the parallel-batch convention (chi rejects two Mounts at "/").
 	// The literal-segment route /v1/policies/{id}/acknowledgment-rate is

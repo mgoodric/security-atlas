@@ -81,17 +81,17 @@ function Tile({
 }) {
   return (
     <div
-      className="rounded-lg border border-slate-200 p-4"
+      className="rounded-lg border border-border p-4"
       data-testid="operational-tile"
     >
-      <div className="mb-1 text-xs text-slate-500">{label}</div>
+      <div className="mb-1 text-xs text-muted-foreground">{label}</div>
       <div className="flex items-baseline gap-2">
         <span className="text-2xl font-semibold">{value}</span>
         {target && (
           <span
             className={cn(
               "text-xs font-medium",
-              tone === "good" ? "text-emerald-600" : "text-slate-500",
+              tone === "good" ? "text-pass" : "text-muted-foreground",
             )}
           >
             {target}

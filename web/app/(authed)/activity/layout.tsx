@@ -5,9 +5,10 @@
 // declares the metadata and passes `children` through unchanged.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Activity · security-atlas",
+  title: pageTitle("/activity"),
 };
 
 export default function ActivityLayout({

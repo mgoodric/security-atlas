@@ -100,7 +100,7 @@ type dispositionReq struct {
 }
 
 // mapScfAnchorReq is the body for PATCH /component-claims/{id}/scf-anchor. The
-// scf_anchor_id is the SCF code (e.g. "IAC-06"), validated server-side against
+// scf_anchor_id is the SCF code (e.g. "IAC-37"), validated server-side against
 // the bundled scf_anchors catalog. Requirement -> SCF anchor only (invariant
 // #7): there is no claim id here, only a crosswalk target.
 type mapScfAnchorReq struct {
@@ -265,7 +265,7 @@ func (h *Handler) disposition(w http.ResponseWriter, r *http.Request, toStatus s
 // It is gated on IsApprover (grc_engineer) | IsAdmin — mapping is a write that
 // records the human-approved crosswalk (the same write tier as disposition; a
 // bare read role is not enough). The body carries {scf_anchor_id} (the SCF
-// code, e.g. "IAC-06"), validated server-side against the bundled catalog.
+// code, e.g. "IAC-37"), validated server-side against the bundled catalog.
 //
 // THE LOAD-BEARING BOUNDARY: mapping sets the crosswalk only. The store writes
 // the claim's scf_anchor_id + an append-only mapping-audit row; it NEVER

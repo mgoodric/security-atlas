@@ -47,15 +47,21 @@ export type Policy = {
   submitted_by?: string | null;
   approved_at?: string | null;
   approved_by?: string | null;
+  /**
+   * #2101 — true when the submitter approved the policy under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   published_at?: string | null;
   published_by?: string | null;
   superseded_at?: string | null;
   next_review_at?: string | null;
   /**
    * #1806 — where a published policy stands against `next_review_at`,
-   * computed by the API at response time: `overdue` once the date has
-   * passed, `due-soon` within 30 days, else `upcoming`. Absent when the
-   * policy has no review date or is not published.
+   * computed by the API at response time: `overdue` once the due day (the
+   * UTC date of `next_review_at`) has ended, `due-soon` within 30 days of
+   * it, else `upcoming`. Absent when the policy has no review date or is
+   * not published; a superseded version keeps the date it was due (#2009).
    */
   review_status?: "overdue" | "due-soon" | "upcoming" | null;
   /**

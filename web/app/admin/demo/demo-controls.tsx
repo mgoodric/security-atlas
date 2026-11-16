@@ -315,7 +315,7 @@ export function DemoControls() {
         <CardFooter>
           <Button
             data-testid="demo-teardown-button"
-            variant="destructive"
+            variant="outline"
             onClick={handleTeardownClick}
             disabled={busy}
           >

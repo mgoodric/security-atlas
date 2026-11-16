@@ -11,12 +11,19 @@
 //        the page surfaces the action and reads back the 403 on upstream
 //        denial. Slice 035 will gate by reading IsApprover from /me.
 // AC-17: Activate action with effective_from picker (defaults to now()).
+//
+// #1794: a second tab holds the Statement of Applicability
+// (components/framework-scopes/soa-tab.tsx).
+// #1795: each revision in review shows what it changes against the
+// activated revision (components/framework-scopes/review-diff.tsx).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +33,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ComingSoon } from "@/components/coming-soon";
+import { ReviewDiff } from "@/components/framework-scopes/review-diff";
+import { SoATab, useSoATitle } from "@/components/framework-scopes/soa-tab";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -69,6 +79,24 @@ async function patchPredicate(id: string, predicate: unknown) {
   };
 }
 
+// #1965: an activated or superseded revision is immutable. A change starts
+// as a new draft revision copied from it (predicate and decisions).
+async function createRevision(fromID: string) {
+  const res = await fetch(`/api/framework-scopes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from_scope_id: fromID }),
+  });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as { framework_scope: FrameworkScope };
+}
+
+function isFrozen(state: FrameworkScopeState): boolean {
+  return state === "activated" || state === "superseded";
+}
+
 async function transition(
   id: string,
   t: "submit" | "approve" | "activate",
@@ -99,6 +127,8 @@ export default function FrameworkScopesPage() {
   });
 
   const [banner, setBanner] = useState<string | null>(null);
+  const [tab, setTab] = useState<"scopes" | "soa">("scopes");
+  const soaTitle = useSoATitle(fv);
 
   const reset = () =>
     qc.invalidateQueries({ queryKey: ["framework-scopes", fv] });
@@ -139,22 +169,42 @@ export default function FrameworkScopesPage() {
       }
       reset();
     },
+    onError: (e: unknown) => {
+      if (e instanceof APIError && e.status === 409) {
+        setBanner(
+          "This scope is frozen. Create a new revision to change its predicate.",
+        );
+      }
+    },
+  });
+  const revisionMut = useMutation({
+    mutationFn: (fromID: string) => createRevision(fromID),
+    onSuccess: () => {
+      setBanner(null);
+      reset();
+    },
+    onError: (e: unknown) => {
+      setBanner(
+        e instanceof APIError && e.status === 403
+          ? "You do not have permission to create a scope revision."
+          : "Could not create a new revision: " + (e as Error).message,
+      );
+    },
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Framework scope
-        </h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Framework scope"
+      subtitle={
+        <>
           One scope predicate per framework, versioned. Approval is the
           auditor&apos;s sign-off; activation is when it takes effect. Editing
           the predicate on a row in review or approved bounces it back to draft
-          — the auditor sees every change.
-        </p>
-      </div>
-
+          — the auditor sees every change. Activated and superseded rows are
+          frozen; change one by creating a new revision from it.
+        </>
+      }
+    >
       {banner && (
         <Alert variant="destructive">
           <AlertTitle>Heads up</AlertTitle>
@@ -173,6 +223,37 @@ export default function FrameworkScopesPage() {
       )}
 
       {scopesQ.data && (
+        <div className="flex gap-1 border-b" role="tablist">
+          {(
+            [
+              { key: "scopes", label: "Scopes" },
+              { key: "soa", label: soaTitle },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.key}
+              data-testid={`framework-scope-tab-${t.key}`}
+              onClick={() => setTab(t.key)}
+              className={`-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors ${
+                tab === t.key
+                  ? "border-primary font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {scopesQ.data && tab === "soa" && (
+        <SoATab frameworkVersionID={fv} scopes={scopesQ.data} />
+      )}
+
+      {scopesQ.data && tab === "scopes" && (
         <Card>
           <CardHeader>
             <CardTitle>All versions</CardTitle>
@@ -192,11 +273,18 @@ export default function FrameworkScopesPage() {
               onPatchPredicate={(id, predicate) =>
                 patchMut.mutate({ id, predicate })
               }
+              onNewRevision={(id) => revisionMut.mutate(id)}
             />
           </CardContent>
         </Card>
       )}
-    </div>
+
+      {scopesQ.data &&
+        tab === "scopes" &&
+        scopesQ.data
+          .filter((s) => s.state === "review")
+          .map((s) => <ReviewDiff key={s.id} scope={s} />)}
+    </PageShell>
   );
 }
 
@@ -206,19 +294,23 @@ function ScopeTable({
   onApprove,
   onActivate,
   onPatchPredicate,
+  onNewRevision,
 }: {
   scopes: FrameworkScope[];
   onSubmit: (id: string) => void;
   onApprove: (id: string) => void;
   onActivate: (id: string, effectiveFrom: string) => void;
   onPatchPredicate: (id: string, predicate: unknown) => void;
+  onNewRevision: (id: string) => void;
 }) {
   if (scopes.length === 0) {
     return (
-      <p className="py-12 text-center text-sm text-muted-foreground">
-        No scopes yet. Create one via the platform API (POST
-        /v1/framework-scopes); the in-app create form is not available yet.
-      </p>
+      <div className="space-y-3 py-12 text-center">
+        <p className="text-sm text-muted-foreground">
+          No scopes yet for this framework.
+        </p>
+        <ComingSoon what="Creating a scope in the app" />
+      </div>
     );
   }
   return (
@@ -244,13 +336,28 @@ function ScopeTable({
           >
             <TableCell className="font-medium">{s.name}</TableCell>
             <TableCell>
-              <StateBadge state={s.state} />
+              <span className="inline-flex items-center gap-1.5">
+                <StateBadge state={s.state} />
+                <SelfApprovedBadge
+                  selfApproved={s.self_approved}
+                  testId="framework-scope-self-approved"
+                />
+              </span>
             </TableCell>
             <TableCell>
-              <PredicateEditor
-                initial={s.predicate}
-                onSave={(predicate) => onPatchPredicate(s.id, predicate)}
-              />
+              {isFrozen(s.state) ? (
+                <pre
+                  className="max-h-32 overflow-auto rounded border bg-muted p-2 font-mono text-xs"
+                  data-testid="framework-scope-predicate-frozen"
+                >
+                  {JSON.stringify(s.predicate, null, 2)}
+                </pre>
+              ) : (
+                <PredicateEditor
+                  initial={s.predicate}
+                  onSave={(predicate) => onPatchPredicate(s.id, predicate)}
+                />
+              )}
             </TableCell>
             <TableCell className="text-xs">
               {s.effective_from ?? (
@@ -263,6 +370,7 @@ function ScopeTable({
                 onSubmit={() => onSubmit(s.id)}
                 onApprove={() => onApprove(s.id)}
                 onActivate={(ef) => onActivate(s.id, ef)}
+                onNewRevision={() => onNewRevision(s.id)}
               />
             </TableCell>
           </TableRow>
@@ -332,11 +440,13 @@ function ScopeActions({
   onSubmit,
   onApprove,
   onActivate,
+  onNewRevision,
 }: {
   scope: FrameworkScope;
   onSubmit: () => void;
   onApprove: () => void;
   onActivate: (effectiveFrom: string) => void;
+  onNewRevision: () => void;
 }) {
   const [activateOpen, setActivateOpen] = useState(false);
   const [effectiveFrom, setEffectiveFrom] = useState(() =>
@@ -388,10 +498,20 @@ function ScopeActions({
           </Button>
         </div>
       )}
-      {(scope.state === "activated" || scope.state === "superseded") && (
-        <span className="text-xs text-muted-foreground">
-          {scope.state === "activated" ? "Current scope" : "Superseded"}
-        </span>
+      {isFrozen(scope.state) && (
+        <>
+          <span className="text-xs text-muted-foreground">
+            {scope.state === "activated" ? "Current scope" : "Superseded"}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onNewRevision}
+            data-testid="framework-scope-new-revision"
+          >
+            New revision
+          </Button>
+        </>
       )}
     </div>
   );

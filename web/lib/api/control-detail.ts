@@ -4,6 +4,7 @@
 // policies/risks/history reads.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import type { EdgeOrigin, OverlayProvenance } from "./org-mapping";
 
 // ===== Slice 041 — Control detail view =====
 //
@@ -43,8 +44,15 @@ export type ControlWire = {
   lifecycle_state: string;
   owner_role: string;
   freshness_class?: string;
+  // Issue #1736 — how well the SCF anchor fits the control, and why a
+  // non-exact fit is not exact. Absent means exact.
+  anchor_fit?: "exact" | "partial" | "none";
+  anchor_fit_note?: string;
   // #1737 — control.yaml external_refs[]; omitted when the control has none.
   external_refs?: ExternalRefWire[];
+  // #2043 — true when the in-place demo seed added this control; omitted
+  // for real controls.
+  demo?: boolean;
 };
 
 // externalRefWire mirrors `externalRefWire` in internal/api/ucfcoverage/handlers.go.
@@ -89,7 +97,12 @@ export type CoverageRequirement = {
   strength: number;
   coverage: number | null;
   source_attribution: string;
+  // "catalog", or "overlay" when the path is the tenant's own org mapping
+  // (#1798); `overlay` carries that mapping's source, author and date
+  // (#1800).
+  origin?: EdgeOrigin;
   rationale?: string;
+  overlay?: OverlayProvenance;
 };
 
 export type ControlCoverage = {

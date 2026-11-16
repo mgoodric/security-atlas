@@ -1,13 +1,15 @@
-// Slice 660 — unit tests for the pure nav-gating helpers.
+// Slice 660 / #2170 — unit tests for the pure module-gating helpers.
 
 import { describe, expect, test } from "vitest";
 
 import { APIError } from "@/lib/api/base";
 import {
+  type EffectiveModule,
   FEATURE_DISABLED_MESSAGE,
   gateNavItems,
   isFeatureDisabledError,
-  NAV_FEATURE_GATES,
+  moduleForPage,
+  resolveFeatureGate,
 } from "@/lib/feature-nav";
 
 type Item = { href: string; label: string };
@@ -16,30 +18,44 @@ const NAV: Item[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/board-packs", label: "Board Packs" },
   { href: "/oscal/component-definitions", label: "Vendor Claims" },
+  { href: "/questionnaires", label: "Questionnaires" },
   { href: "/settings", label: "Settings" },
 ];
 
+function mod(
+  key: string,
+  page: string,
+  state: EffectiveModule["state"],
+): EffectiveModule {
+  return { key, name: key, state, pages: [page] };
+}
+
+const board = (s: EffectiveModule["state"]) => mod("board", "/board-packs", s);
+const claims = (s: EffectiveModule["state"]) =>
+  mod("claims", "/oscal/component-definitions", s);
+const questionnaires = (s: EffectiveModule["state"]) =>
+  mod("questionnaires", "/questionnaires", s);
+
 describe("gateNavItems", () => {
-  test("hides both gated items when both flags are off (Seed default)", () => {
-    const out = gateNavItems(NAV, {
-      "oscal.export": false,
-      "board.reporting": false,
-    });
-    const hrefs = out.map((i) => i.href);
-    expect(hrefs).toEqual(["/dashboard", "/settings"]);
+  test("hides the entries of every switched-off module", () => {
+    const out = gateNavItems(NAV, [
+      board("switched_off"),
+      claims("switched_off"),
+      questionnaires("on"),
+    ]);
+    expect(out.map((i) => i.href)).toEqual([
+      "/dashboard",
+      "/questionnaires",
+      "/settings",
+    ]);
   });
 
-  test("hides a gated item when its flag key is absent (fail-closed)", () => {
-    // Empty map: a missing key reads as off.
-    const out = gateNavItems(NAV, {});
-    expect(out.map((i) => i.href)).toEqual(["/dashboard", "/settings"]);
-  });
-
-  test("renders a gated item only when its flag is explicitly true", () => {
-    const out = gateNavItems(NAV, {
-      "oscal.export": true,
-      "board.reporting": false,
-    });
+  test("renders a module's entry only when it is on", () => {
+    const out = gateNavItems(NAV, [
+      board("switched_off"),
+      claims("on"),
+      questionnaires("switched_off"),
+    ]);
     expect(out.map((i) => i.href)).toEqual([
       "/dashboard",
       "/oscal/component-definitions",
@@ -47,29 +63,34 @@ describe("gateNavItems", () => {
     ]);
   });
 
-  test("renders both gated items when both flags are on", () => {
-    const out = gateNavItems(NAV, {
-      "oscal.export": true,
-      "board.reporting": true,
-    });
-    expect(out.map((i) => i.href)).toEqual([
-      "/dashboard",
-      "/board-packs",
-      "/oscal/component-definitions",
-      "/settings",
-    ]);
-  });
-
-  test("never gates an item with no mapping", () => {
-    const out = gateNavItems([{ href: "/risks", label: "Risks" }], {});
+  test("never gates an entry no module owns (core)", () => {
+    const out = gateNavItems([{ href: "/risks", label: "Risks" }], []);
     expect(out).toHaveLength(1);
   });
 
-  test("NAV_FEATURE_GATES binds the two slice 660 modules", () => {
-    expect(NAV_FEATURE_GATES["/oscal/component-definitions"]).toBe(
-      "oscal.export",
+  test("gates nothing when the modules are unknown", () => {
+    expect(gateNavItems(NAV, null)).toHaveLength(NAV.length);
+  });
+});
+
+describe("moduleForPage", () => {
+  const modules = [questionnaires("on")];
+
+  test("a module owns its page and the pages below it", () => {
+    expect(moduleForPage(modules, "/questionnaires")?.key).toBe(
+      "questionnaires",
     );
-    expect(NAV_FEATURE_GATES["/board-packs"]).toBe("board.reporting");
+    expect(moduleForPage(modules, "/questionnaires/abc")?.key).toBe(
+      "questionnaires",
+    );
+  });
+
+  test("a module does not own a page that only shares a prefix", () => {
+    expect(moduleForPage(modules, "/questionnaires-x")).toBeUndefined();
+  });
+
+  test("no module when the modules are unknown", () => {
+    expect(moduleForPage(null, "/questionnaires")).toBeUndefined();
   });
 });
 
@@ -94,5 +115,92 @@ describe("isFeatureDisabledError", () => {
     expect(isFeatureDisabledError(new Error("feature disabled"))).toBe(false);
     expect(isFeatureDisabledError(null)).toBe(false);
     expect(isFeatureDisabledError(undefined)).toBe(false);
+  });
+});
+
+describe("resolveFeatureGate", () => {
+  test("module on renders the page for anyone", () => {
+    const modules = [board("on")];
+    expect(resolveFeatureGate(modules, "/board-packs", true)).toBe("on");
+    expect(resolveFeatureGate(modules, "/board-packs", false)).toBe("on");
+  });
+
+  test("module off tells an admin where to enable it", () => {
+    expect(
+      resolveFeatureGate(
+        [questionnaires("switched_off")],
+        "/questionnaires",
+        true,
+      ),
+    ).toBe("off-admin");
+  });
+
+  test("module off tells a non-admin to ask an administrator", () => {
+    expect(
+      resolveFeatureGate([board("switched_off")], "/board-packs", false),
+    ).toBe("off-member");
+  });
+
+  test("unknown modules read as off (fail-closed)", () => {
+    expect(resolveFeatureGate(null, "/board-packs", false)).toBe("off-member");
+    expect(resolveFeatureGate([], "/board-packs", true)).toBe("off-admin");
+  });
+});
+
+describe("module features (#2171)", () => {
+  const tpr = (
+    moduleState: "on" | "switched_off",
+    claims: "on" | "switched_off",
+  ): EffectiveModule[] => [
+    {
+      key: "third_party_risk",
+      name: "Third-party risk",
+      state: moduleState,
+      pages: ["/vendors"],
+      features: [
+        {
+          key: "vendor_claims",
+          name: "Vendor claims",
+          state: claims,
+          pages: ["/oscal/component-definitions"],
+        },
+      ],
+    },
+  ];
+
+  test("a feature's page is gated by the feature's effective state", () => {
+    expect(
+      moduleForPage(tpr("on", "switched_off"), "/oscal/component-definitions/x")
+        ?.key,
+    ).toBe("vendor_claims");
+    expect(
+      resolveFeatureGate(
+        tpr("on", "on"),
+        "/oscal/component-definitions",
+        false,
+      ),
+    ).toBe("on");
+    expect(
+      resolveFeatureGate(
+        tpr("on", "switched_off"),
+        "/oscal/component-definitions",
+        true,
+      ),
+    ).toBe("off-admin");
+    expect(
+      resolveFeatureGate(tpr("on", "switched_off"), "/vendors", false),
+    ).toBe("on");
+  });
+
+  test("the nav hides a feature's entry when it is off", () => {
+    const items = [
+      { href: "/vendors" },
+      { href: "/oscal/component-definitions" },
+      { href: "/controls" },
+    ];
+    expect(
+      gateNavItems(items, tpr("on", "switched_off")).map((i) => i.href),
+    ).toEqual(["/vendors", "/controls"]);
+    expect(gateNavItems(items, tpr("on", "on"))).toEqual(items);
   });
 });

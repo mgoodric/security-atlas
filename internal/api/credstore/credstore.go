@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/identity"
 )
 
 // ErrUnknownKey indicates a lookup or operation referenced a key that
@@ -60,6 +62,9 @@ type Credential struct {
 	// scopes for tenant B. IsAdmin implies IsApprover (admins can do
 	// anything an approver can) but the converse is not true.
 	//
+	// Policy approval also requires a person (#1807): a credential bound
+	// to no user (MinterUserID == "") holding IsApprover is refused there.
+	//
 	// In v1 the approver role is minted via IssueApprover. Slice 035
 	// will graduate this to full OPA-driven RBAC; until then the
 	// flag-on-credential pattern matches slice 014's IsAdmin shape.
@@ -86,6 +91,10 @@ type Credential struct {
 	// UserID is. Nothing authorizes on it. Set on recovery keys (#1892);
 	// a Rotate successor inherits it.
 	MintedBy string
+	// RetiresAt is api_keys.retires_at: non-zero on a rotated-out
+	// predecessor, which stops authenticating after it. Set by the
+	// DB-backed list (#1953); the in-memory maps track retirement apart.
+	RetiresAt time.Time
 	// System marks an in-process platform credential, not an API key:
 	// the identity a domain writer ingests its evidence under
 	// (ingest.SystemCredential). Never persisted and never authenticated;
@@ -550,6 +559,19 @@ func (s *Store) Revoke(id string) error {
 	return nil
 }
 
+// TenantOf reports the tenant of the credential with id, in any state.
+// The gRPC admin service uses it to keep Rotate and Revoke inside the
+// caller's tenant (#2167).
+func (s *Store) TenantOf(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.byID[id]
+	if !ok {
+		return "", false
+	}
+	return r.cred.TenantID, true
+}
+
 // RevokePurpose revokes every live credential, in any tenant, marked with
 // purpose, except the one whose id is except (empty spares none). It
 // matches on the marker and the id only, never on a bearer. Returns the
@@ -683,14 +705,52 @@ func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, er
 // issued by a user carries the bare uuid; a bootstrap or machine
 // credential carries neither and records no minter.
 func MinterUserID(c Credential) string {
-	id := strings.TrimPrefix(c.UserID, "user:")
-	if id == c.ID {
+	u, ok := CallerUserID(c)
+	if !ok {
 		return ""
 	}
-	if _, err := uuid.Parse(id); err != nil {
-		return ""
+	return u.String()
+}
+
+// PrincipalOf names who is behind the caller c, stably across sessions:
+// the bare users(id) uuid for a person, else c.UserID (an unbound key's own
+// "key_..." id, "oauth_client:<id>", "bootstrap-admin"), else c.ID. It is
+// what approval records as the requester and compares against (#2101).
+// Never the JWT credential id when anything better exists: that is per
+// token ("jwt:<jti>"), and approval reads that prefix as a pre-#1807
+// session requester it cannot compare.
+func PrincipalOf(c Credential) string {
+	if u := MinterUserID(c); u != "" {
+		return u
 	}
-	return id
+	if c.UserID != "" {
+		return c.UserID
+	}
+	return c.ID
+}
+
+// CallerUserID returns the users(id) behind the caller c, and false when c
+// is not a user. It is the one place code turns cred.UserID into a users(id)
+// (#2183); never parse cred.UserID raw (TestNoRawCredUserIDParse guards it).
+//
+//   - A JWT session (local login, PKCE, device grant) carries "user:<uuid>":
+//     the prefix is stripped and the uuid resolves.
+//   - A key issued to a user carries that user's bare uuid: it resolves.
+//   - An unbound key (UserID == its own "key_..." ID), the bootstrap admin
+//     ("bootstrap-admin") and a machine token ("oauth_client:<id>") are not
+//     users and never resolve, even when the remainder happens to parse.
+//
+// authz.BuildInput keeps the raw cred.UserID. /v1/me's resolveRoles keys
+// user_roles by this value for a user caller (#2216). The prefix rule itself
+// lives in identity.UserID, shared with the auditor attrs resolver.
+func CallerUserID(c Credential) (uuid.UUID, bool) {
+	if c.UserID == "" || c.UserID == c.ID {
+		return uuid.Nil, false
+	}
+	if strings.TrimPrefix(c.UserID, "user:") == c.ID {
+		return uuid.Nil, false
+	}
+	return identity.UserID(c.UserID)
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)

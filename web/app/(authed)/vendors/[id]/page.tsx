@@ -31,9 +31,11 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { Markdown } from "@/components/markdown";
+import { PageShell } from "@/components/shell/page-shell";
+import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
@@ -112,23 +114,22 @@ export default function VendorDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6" data-testid="vendor-detail-loading">
+      <PageShell title="Vendor" data-testid="vendor-detail-loading">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !(error instanceof APIError && error.status === 401)) {
     return (
-      <div className="space-y-6">
-        <BackLink />
+      <PageShell title="Vendor" actions={<BackLink />}>
         <Alert variant="destructive" data-testid="vendor-detail-error">
           <AlertTitle>Could not load vendor</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -141,60 +142,52 @@ export default function VendorDetailPage({
   const mailto = ownerMailto(vendor.owner_user);
 
   return (
-    <div className="space-y-6" data-testid="vendor-detail">
-      <BackLink />
-
-      {/* ============ HEADER ============ */}
-      <header
-        className="flex flex-wrap items-start justify-between gap-4"
-        data-testid="vendor-detail-header"
-      >
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <CriticalityBadge value={vendor.criticality} />
-            {vendor.overdue ? (
-              <Badge variant="destructive" data-testid="vendor-detail-status">
-                overdue
-              </Badge>
-            ) : (
-              <Badge variant="secondary" data-testid="vendor-detail-status">
-                on time
-              </Badge>
-            )}
-          </div>
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            data-testid="vendor-detail-name"
+    // #2102: the shared detail-page header. Record review is the vendor's
+    // lifecycle action; there are no overflow items yet.
+    <DetailHeader
+      data-testid="vendor-detail"
+      titleTestId="vendor-detail-name"
+      headerTestId="vendor-detail-header"
+      title={vendor.name}
+      status={
+        <>
+          <CriticalityBadge value={vendor.criticality} />
+          {vendor.overdue ? (
+            <Badge variant="destructive" data-testid="vendor-detail-status">
+              overdue
+            </Badge>
+          ) : vendor.first_review_due ? (
+            <Badge variant="outline" data-testid="vendor-detail-status">
+              First review due {formatDetailDate(vendor.first_review_due)}
+            </Badge>
+          ) : (
+            <Badge variant="secondary" data-testid="vendor-detail-status">
+              on time
+            </Badge>
+          )}
+        </>
+      }
+      subtitle={
+        vendor.domain ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="vendor-detail-domain"
           >
-            {vendor.name}
-          </h1>
-          {vendor.domain ? (
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="vendor-detail-domain"
-            >
-              {vendor.domain}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/vendors/${id}/reviews/new`}
-            className={buttonVariants({ variant: "secondary" })}
-            data-testid="vendor-detail-record-review"
-          >
-            Record review
-          </Link>
-          <Link
-            href={`/vendors/${id}/edit`}
-            className={buttonVariants()}
-            data-testid="vendor-detail-edit"
-          >
-            Edit
-          </Link>
-        </div>
-      </header>
-
+            {vendor.domain}
+          </p>
+        ) : null
+      }
+      back={<BackLink />}
+      primaryAction={{
+        label: "Record review",
+        href: `/vendors/${id}/reviews/new`,
+        "data-testid": "vendor-detail-record-review",
+      }}
+      edit={{
+        href: `/vendors/${id}/edit`,
+        "data-testid": "vendor-detail-edit",
+      }}
+    >
       {/* ============ SUMMARY ============ */}
       <Card data-testid="vendor-detail-summary-card">
         <CardHeader className="border-b">
@@ -300,12 +293,7 @@ export default function VendorDetailPage({
         </CardHeader>
         <CardContent>
           {vendor.notes.trim() ? (
-            <p
-              className="whitespace-pre-wrap break-words text-sm text-foreground"
-              data-testid="vendor-detail-notes"
-            >
-              {vendor.notes}
-            </p>
+            <Markdown source={vendor.notes} data-testid="vendor-detail-notes" />
           ) : (
             <p
               className="text-sm text-muted-foreground"
@@ -359,7 +347,7 @@ export default function VendorDetailPage({
           )}
         </CardContent>
       </Card>
-    </div>
+    </DetailHeader>
   );
 }
 
@@ -393,12 +381,11 @@ function ReviewRow({ review }: { review: VendorReview }) {
         ) : null}
       </div>
       {review.notes.trim() ? (
-        <p
-          className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground"
+        <Markdown
+          source={review.notes}
+          className="mt-1 text-muted-foreground"
           data-testid="vendor-detail-review-notes"
-        >
-          {review.notes}
-        </p>
+        />
       ) : null}
     </li>
   );

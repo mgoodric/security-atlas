@@ -20,7 +20,9 @@
 //
 // Slice 681 made this page read-only. #1748 adds one write surface: the
 // Parents / Children sections attach and detach child risks
-// (RiskHierarchyLinks). Edit and delete of the risk itself stay elsewhere.
+// (RiskHierarchyLinks). #2104 renders the page through the shared
+// DetailHeader, whose Edit links to `/risks/[id]/edit`, and adds the
+// History section (the risk audit trail).
 // The roll-up from the children sits beside the assessed severity and never
 // replaces it.
 
@@ -34,24 +36,41 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
+import { Markdown } from "@/components/markdown";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
+import { RiskHistory } from "@/components/risks/risk-history";
+import { DetailHeader } from "@/components/detail/detail-header";
+import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
-import { fetchRiskDetail, treatmentLabel } from "@/lib/api/risks";
+import {
+  fetchRiskCategories,
+  fetchRiskDetail,
+  treatmentLabel,
+} from "@/lib/api/risks";
 
 import {
+  categoryDisplay,
   formatResidualScore,
   fairScore,
   formatDollars,
   patternNoLongerMet,
+  residualClass,
+  residualSeverity,
   residualState,
   reviewDuePending,
   severityBand,
   severityClasses,
 } from "../filters";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import { utcDay } from "../new/form-state";
+import { SeverityPill } from "../severity-pill";
 
+// The UTC calendar day, as the edit form and History read it (#2104): the
+// platform renders timestamps in its own zone, so slicing the string
+// would show a different day from the one saved.
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return iso.slice(0, 10);
+  return utcDay(iso) || iso.slice(0, 10);
 }
 
 export default function RiskDetailPage({
@@ -74,6 +93,14 @@ export default function RiskDetailPage({
       ) && count < 2,
   });
 
+  // #1817 — archived included, so a risk on an archived category shows
+  // that category by name, marked archived. Same query as the register.
+  const categoriesQ = useQuery({
+    queryKey: ["risks", "categories", "with-archived"],
+    queryFn: () => fetchRiskCategories(true),
+    staleTime: 60_000,
+  });
+
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
       router.push(`/login?from=/risks/${id}`);
@@ -88,23 +115,22 @@ export default function RiskDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6" data-testid="risk-detail-loading">
+      <PageShell title="Risk" data-testid="risk-detail-loading">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !(error instanceof APIError && error.status === 401)) {
     return (
-      <div className="space-y-6">
-        <BackLink />
+      <PageShell title="Risk" actions={<BackLink />}>
         <Alert variant="destructive" data-testid="risk-detail-error">
           <AlertTitle>Could not load risk</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -114,48 +140,57 @@ export default function RiskDetailPage({
   }
 
   const { risk } = data;
+  const category = categoryDisplay(risk, categoriesQ.data ?? []);
   const band = severityBand(risk.severity);
   const fairInherent =
     risk.methodology === "fair" ? fairScore(risk.inherent_score) : null;
-  const fairResidual =
-    risk.methodology === "fair" ? fairScore(risk.residual_score) : null;
+  const isFair = risk.methodology === "fair";
 
-  // Residual: prefer the live-derived magnitude when the BFF carried a
-  // deriver breakdown; otherwise fall back to the stored residual_score.
-  // A not-yet-evaluated residual renders as the same honest "Pending
-  // evaluation" affordance the list cell uses (slice 680).
+  // Residual: the stored residual_score in whichever shape the platform
+  // wrote it (#2058 — the deriver's `{score, ...}` included). A
+  // not-yet-evaluated residual renders as the same honest "Pending
+  // evaluation" affordance the list cell uses (slice 680). A 5x5
+  // residual shows on the inherent card's 1..25 scale and bands.
   const residualPending = residualState(risk.residual_score) !== "scored";
   const residualText = residualPending
     ? "Pending evaluation"
-    : formatResidualScore(risk.residual_score);
+    : formatResidualScore(risk.residual_score, risk.methodology);
+  const residualN = isFair ? null : residualSeverity(risk.residual_score);
 
   return (
-    <div className="space-y-6" data-testid="risk-detail">
-      <BackLink />
-
-      {/* ============ HEADER ============ */}
-      <header className="space-y-3" data-testid="risk-detail-header">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            variant="secondary"
-            data-testid="risk-detail-treatment"
-            className="capitalize"
-          >
+    <DetailHeader
+      data-testid="risk-detail"
+      titleTestId="risk-detail-title"
+      headerTestId="risk-detail-header"
+      back={<BackLink />}
+      title={risk.title}
+      edit={{
+        href: `/risks/${encodeURIComponent(id)}/edit`,
+        "data-testid": "risk-detail-edit",
+      }}
+      status={
+        <>
+          <Badge variant="secondary" data-testid="risk-detail-treatment">
             {treatmentLabel(risk)}
           </Badge>
           <span
-            className="font-mono text-xs text-muted-foreground"
+            className="text-xs text-muted-foreground"
             data-testid="risk-detail-category"
           >
-            {risk.category}
+            {category.name}
           </span>
-        </div>
-        <h1
-          className="text-2xl font-semibold tracking-tight"
-          data-testid="risk-detail-title"
-        >
-          {risk.title}
-        </h1>
+          {category.archived ? (
+            <Badge
+              variant="outline"
+              data-testid="risk-detail-category-archived"
+              title="This category is archived. It stays on the risks that have it but takes no new risks."
+            >
+              archived category
+            </Badge>
+          ) : null}
+        </>
+      }
+      subtitle={
         <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
           <div>
             <dt className="inline text-muted-foreground">Owner </dt>
@@ -168,7 +203,12 @@ export default function RiskDetailPage({
           </div>
           <div>
             <dt className="inline text-muted-foreground">Methodology </dt>
-            <dd className="inline text-foreground">{risk.methodology}</dd>
+            <dd
+              className="inline text-foreground"
+              data-testid="risk-detail-methodology"
+            >
+              {enumLabel("RiskMethodology", risk.methodology)}
+            </dd>
           </div>
           <div>
             <dt className="inline text-muted-foreground">Review due </dt>
@@ -177,13 +217,13 @@ export default function RiskDetailPage({
               data-testid="risk-detail-review-due"
             >
               {reviewDuePending(risk.review_due_at)
-                ? "Pending evaluation"
+                ? "Not set"
                 : formatDate(risk.review_due_at)}
             </dd>
           </div>
         </dl>
-      </header>
-
+      }
+    >
       {patternNoLongerMet(risk.inherent_score) ? (
         <Alert data-testid="risk-detail-pattern-lapsed">
           <AlertTitle>Pattern no longer met</AlertTitle>
@@ -220,22 +260,18 @@ export default function RiskDetailPage({
               <>
                 <div
                   className="text-[11px] uppercase tracking-wider text-muted-foreground"
-                  title="Inherent severity: likelihood × impact on the 5×5 grid, before any control mitigation."
+                  title="Inherent severity (1–25): likelihood × impact on the 5×5 grid, before any control mitigation."
                 >
                   Inherent severity
                 </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <span
-                    className={`inline-flex items-center justify-center w-7 h-7 text-sm font-semibold rounded ${severityClasses(
-                      band,
-                    )}`}
-                    data-testid="risk-detail-severity"
-                  >
-                    {risk.severity}
-                  </span>
-                  <span className="text-xs text-muted-foreground capitalize">
-                    {band}
-                  </span>
+                <div className="mt-1">
+                  <SeverityPill
+                    value={String(risk.severity)}
+                    band={band}
+                    className={severityClasses(band)}
+                    testId="risk-detail-severity"
+                    size="md"
+                  />
                 </div>
               </>
             )}
@@ -279,18 +315,30 @@ export default function RiskDetailPage({
           <CardContent>
             <div
               className="text-[11px] uppercase tracking-wider text-muted-foreground"
-              title="Residual: inherent severity reduced by the linked controls' measured effectiveness (0..1)."
+              title="Residual (1–25): inherent severity reduced by the linked controls' measured effectiveness, on the same scale and bands as inherent."
             >
-              {fairResidual
+              {isFair
                 ? "Residual annualized exposure"
                 : "Residual (after controls)"}
             </div>
-            <div
-              className="mt-1 text-2xl font-semibold"
-              data-testid="risk-detail-residual"
-            >
-              {residualText}
-            </div>
+            {residualN != null ? (
+              <div className="mt-1">
+                <SeverityPill
+                  value={residualText}
+                  band={severityBand(residualN)}
+                  className={residualClass(residualText)}
+                  testId="risk-detail-residual"
+                  size="md"
+                />
+              </div>
+            ) : (
+              <div
+                className="mt-1 text-2xl font-semibold"
+                data-testid="risk-detail-residual"
+              >
+                {residualText}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -302,12 +350,10 @@ export default function RiskDetailPage({
         </CardHeader>
         <CardContent>
           {risk.description.trim() ? (
-            <p
-              className="text-sm text-foreground whitespace-pre-wrap break-words"
+            <Markdown
+              source={risk.description}
               data-testid="risk-detail-description"
-            >
-              {risk.description}
-            </p>
+            />
           ) : (
             <p
               className="text-sm text-muted-foreground"
@@ -334,7 +380,10 @@ export default function RiskDetailPage({
           View in hierarchy →
         </Link>
       </div>
-    </div>
+
+      {/* ============ HISTORY (#2104) ============ */}
+      <RiskHistory riskId={id} />
+    </DetailHeader>
   );
 }
 

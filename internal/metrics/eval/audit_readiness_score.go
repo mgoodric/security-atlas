@@ -16,7 +16,8 @@ import (
 // = the product of "has the period been opened for every framework" and
 // "is the evidence fresh". Either factor missing knocks the score down.
 //
-// A tenant with zero framework_scopes returns 0 with sample=empty.
+// A tenant with zero activated framework_scopes, or zero evidence_freshness
+// rows, returns the empty marker (see noData).
 //
 // Schema note: `framework_scopes` carries `framework_version_id`, not
 // `framework_id` — the framework id lives one hop away on
@@ -65,14 +66,24 @@ func (e *auditReadinessScoreEvaluator) Compute(ctx context.Context) (Result, err
 	if err := e.pool.QueryRow(ctx, query).Scan(&fwTotal, &fwWithPeriod, &frTotal, &frFresh); err != nil {
 		return Result{}, fmt.Errorf("audit_readiness_score: query: %w", err)
 	}
+	return auditReadinessScoreResult(fwTotal, fwWithPeriod, frTotal, frFresh), nil
+}
+
+// auditReadinessScoreResult needs both factors' inputs: with no activated
+// framework scope, or no freshness rows to measure, the product is not a
+// score of 0 but an absent measurement.
+func auditReadinessScoreResult(fwTotal, fwWithPeriod, frTotal, frFresh int) Result {
 	if fwTotal == 0 {
-		return Result{Value: 0, Dimensions: map[string]string{"sample": "empty"}}, nil
+		return noData("No framework scope is activated", nil)
+	}
+	if frTotal == 0 {
+		return noData("No evidence freshness recorded for any control", map[string]string{
+			"frameworks_total":       fmt.Sprintf("%d", fwTotal),
+			"frameworks_with_period": fmt.Sprintf("%d", fwWithPeriod),
+		})
 	}
 	periodFactor := float64(fwWithPeriod) / float64(fwTotal)
-	freshFactor := 0.0
-	if frTotal > 0 {
-		freshFactor = float64(frFresh) / float64(frTotal)
-	}
+	freshFactor := float64(frFresh) / float64(frTotal)
 	return Result{
 		Value: periodFactor * freshFactor,
 		Dimensions: map[string]string{
@@ -81,5 +92,5 @@ func (e *auditReadinessScoreEvaluator) Compute(ctx context.Context) (Result, err
 			"freshness_total":        fmt.Sprintf("%d", frTotal),
 			"freshness_fresh":        fmt.Sprintf("%d", frFresh),
 		},
-	}, nil
+	}
 }

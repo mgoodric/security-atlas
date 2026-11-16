@@ -349,10 +349,10 @@ mappings:
     strength: 0.8
     rationale: "Slice 567 re-point (was HRS-01 @ 0.60). Sanction Policy (apply appropriate sanctions against workforce members who fail to comply) is the disciplinary-process control itself, not the HR-security program that contains it; HRS-07 Personnel Sanctions is the dedicated anchor and HRS-01 over-covered the requirement. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 1."
   - requirement_code: "164.308(a)(1)(ii)(D)"
-    scf_anchor: "AAA-12"
+    scf_anchor: "MON-05.1"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Information System Activity Review (regularly review audit logs, access reports, incident tracking) maps directly to SCF Audit Log Review."
+    rationale: "Information System Activity Review (regularly review audit logs, access reports, incident tracking) maps directly to SCF Centralized Event Log & Security-Relevant Telemetry Review & Analysis."
   - requirement_code: "164.308(a)(2)"
     scf_anchor: "GOV-04"
     relationship_type: "equal"
@@ -364,10 +364,10 @@ mappings:
     strength: 0.8
     rationale: "Workforce Security (appropriate access, prevent unauthorized access) is covered by SCF Human Resources Security."
   - requirement_code: "164.308(a)(3)(ii)(A)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Authorization and/or Supervision (authorize and supervise workforce that handles ePHI) overlaps SCF User Provisioning & Lifecycle; the supervision facet is broader than provisioning (MEDIUM)."
+    rationale: "Authorization and/or Supervision (authorize and supervise workforce that handles ePHI) overlaps SCF User Provisioning & De-Provisioning; the supervision facet is broader than provisioning (MEDIUM)."
   - requirement_code: "164.308(a)(3)(ii)(B)"
     scf_anchor: "HRS-01"
     relationship_type: "subset_of"
@@ -379,22 +379,22 @@ mappings:
     strength: 0.85
     rationale: "Termination Procedures map directly to the SCF Personnel Termination Process."
   - requirement_code: "164.308(a)(4)(i)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Information Access Management (authorizing access) is covered by SCF User Provisioning & Lifecycle."
+    rationale: "Information Access Management (authorizing access) is covered by SCF User Provisioning & De-Provisioning."
   - requirement_code: "164.308(a)(4)(ii)(A)"
     scf_anchor: "NET-06"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Slice 567 re-point (was DCH-01 @ 0.55). Isolating Health Care Clearinghouse Functions is structural isolation of the clearinghouse's ePHI from the larger organization — a segmentation control, not a data-classification one. NET-06 Network Segmentation is the closer concept, though the HIPAA obligation is organizational as well as technical, so the fit stays partial. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 2."
   - requirement_code: "164.308(a)(4)(ii)(B)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Access Authorization (granting access to a workstation/transaction/program/process) is covered by SCF User Provisioning & Lifecycle."
+    rationale: "Access Authorization (granting access to a workstation/transaction/program/process) is covered by SCF User Provisioning & De-Provisioning."
   - requirement_code: "164.308(a)(4)(ii)(C)"
-    scf_anchor: "IAC-15"
+    scf_anchor: "IAC-12"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Access Establishment and Modification (establish/review/modify access rights) overlaps SCF Account Review; provisioning facet sits elsewhere (MEDIUM)."
@@ -414,15 +414,15 @@ mappings:
     strength: 0.85
     rationale: "Protection from Malicious Software maps directly to SCF Malicious Code Protection."
   - requirement_code: "164.308(a)(5)(ii)(C)"
-    scf_anchor: "MON-08"
+    scf_anchor: "MON-16"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
+    rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior; broader correlation gap (MEDIUM)."
   - requirement_code: "164.308(a)(5)(ii)(D)"
-    scf_anchor: "IAC-10"
+    scf_anchor: "IAC-14"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Password Management (procedures for creating, changing, and safeguarding passwords) IS authenticator management; IAC-01 is the domain policy head that sits above it. IAC-10 Authenticator Management is the requirement's direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 3."
+    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Password Management (procedures for creating, changing, and safeguarding passwords) IS authenticator management; IAC-01 is the domain policy head that sits above it. IAC-14 Authenticator Management is the requirement's direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 3."
   - requirement_code: "164.308(a)(6)(i)"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"
@@ -434,47 +434,47 @@ mappings:
     strength: 0.85
     rationale: "Response and Reporting (respond, mitigate, document) maps directly to SCF Incident Response Plan execution."
   - requirement_code: "164.308(a)(7)(i)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "The HIPAA Contingency Plan standard is covered by the SCF Business Continuity Plan."
+    rationale: "The HIPAA Contingency Plan standard is covered by the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "164.308(a)(7)(ii)(A)"
-    scf_anchor: "BCD-09"
+    scf_anchor: "BCD-24"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Data Backup Plan (retrievable exact copies) maps directly to SCF Backups."
+    rationale: "Data Backup Plan (retrievable exact copies) maps directly to SCF Data Backups."
   - requirement_code: "164.308(a)(7)(ii)(B)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Disaster Recovery Plan (restore data after an emergency) is the recovery facet of the SCF Business Continuity Plan."
+    rationale: "Disaster Recovery Plan (restore data after an emergency) is the recovery facet of the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "164.308(a)(7)(ii)(C)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Emergency Mode Operation Plan (continue critical processes in emergency mode) is the continuity-operations facet of the SCF Business Continuity Plan."
+    rationale: "Emergency Mode Operation Plan (continue critical processes in emergency mode) is the continuity-operations facet of the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "164.308(a)(7)(ii)(D)"
-    scf_anchor: "BCD-11"
+    scf_anchor: "BCD-32"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Testing and Revision Procedures (periodic contingency testing) map directly to SCF Backup Testing."
+    rationale: "Testing and Revision Procedures (periodic contingency testing) map directly to SCF Testing for Reliability & Integrity."
   - requirement_code: "164.308(a)(7)(ii)(E)"
     scf_anchor: "RSK-08"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Slice 567 re-point (was BCD-02 @ 0.60). Applications and Data Criticality Analysis (assess the relative criticality of specific applications and data in support of the other contingency components) IS a Business Impact Analysis; mapping it to the continuity PLAN conflated the analysis input with the plan artifact it feeds. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 4."
+    rationale: "Slice 567 re-point (was BCD-02 @ 0.60; BCD-04 since the SCF 2026.3 remap). Applications and Data Criticality Analysis (assess the relative criticality of specific applications and data in support of the other contingency components) IS a Business Impact Analysis; mapping it to the continuity PLAN conflated the analysis input with the plan artifact it feeds. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 4."
   - requirement_code: "164.308(a)(8)"
-    scf_anchor: "CPL-01"
+    scf_anchor: "CPL-02"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Slice 516 D7 re-map (was CPL-03 @ 0.65 in slice 481). Periodic technical AND nontechnical Evaluation of how well policies/procedures meet the Security Rule is the self-assessment facet of SCF Compliance Management — a closer covering anchor in the palette than Internal Audit (CPL-03), whose scope is narrower than the nontechnical-evaluation requirement. Lift 0.65 -> 0.75 (LOW -> MEDIUM)."
+    rationale: "Slice 516 D7 re-map (was CPL-03 @ 0.65 in slice 481). Periodic technical AND nontechnical Evaluation of how well policies/procedures meet the Security Rule is the self-assessment facet of SCF Statutory, Regulatory & Contractual Compliance — a closer covering anchor in the palette than Internal Audit (CPL-07.1), whose scope is narrower than the nontechnical-evaluation requirement. Lift 0.65 -> 0.75 (LOW -> MEDIUM)."
   - requirement_code: "164.308(b)(1)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Business Associate Contracts (satisfactory-assurance safeguards) are governed by SCF Third-Party Management."
   - requirement_code: "164.308(b)(4)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Written Contract or Other Arrangement (document the BA satisfactory assurances) is the contracting facet of SCF Third-Party Management."
@@ -486,10 +486,10 @@ mappings:
     strength: 0.9
     rationale: "Facility Access Controls map directly to SCF Physical Access Control."
   - requirement_code: "164.310(a)(2)(i)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Contingency Operations (facility access supporting data restoration in an emergency) genuinely straddles continuity and physical access, and neither family carries a control at that intersection worth minting: an emergency-facility-access anchor would exist only to serve this one row. BCD-02 remains the honest covering anchor at 0.60 (LOW). See decisions log D6 row 5."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Contingency Operations (facility access supporting data restoration in an emergency) genuinely straddles continuity and physical access, and neither family carries a control at that intersection worth minting: an emergency-facility-access anchor would exist only to serve this one row. BCD-04 remains the honest covering anchor at 0.60 (LOW). See decisions log D6 row 5."
   - requirement_code: "164.310(a)(2)(ii)"
     scf_anchor: "PES-04"
     relationship_type: "subset_of"
@@ -521,25 +521,25 @@ mappings:
     strength: 0.7
     rationale: "Device and Media Controls (receipt/removal of hardware and media) overlap the SCF Asset Management Policy; the media-tracking facet is broader (MEDIUM)."
   - requirement_code: "164.310(d)(2)(i)"
-    scf_anchor: "AST-09"
+    scf_anchor: "AST-22"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Media Disposal (final disposition of ePHI and storage media) maps directly to SCF Asset Disposal."
+    rationale: "Media Disposal (final disposition of ePHI and storage media) maps directly to SCF Secure Disposal, Destruction or Re-Use of Equipment."
   - requirement_code: "164.310(d)(2)(ii)"
-    scf_anchor: "AST-09"
+    scf_anchor: "AST-22"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Media Re-use (remove ePHI from media before re-use) is the sanitization facet of SCF Asset Disposal."
+    rationale: "Media Re-use (remove ePHI from media before re-use) is the sanitization facet of SCF Secure Disposal, Destruction or Re-Use of Equipment."
   - requirement_code: "164.310(d)(2)(iii)"
     scf_anchor: "DCH-07"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Slice 567 re-point (was AST-01 @ 0.65). Accountability (record the movements of hardware and electronic media and any person responsible therefor) is media chain-of-custody, a specific control beneath the asset-management policy head rather than the head itself. DCH-07 Media Transportation & Custody carries the movement-and-accountability record. Lift 0.65 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 8."
   - requirement_code: "164.310(d)(2)(iv)"
-    scf_anchor: "BCD-09"
+    scf_anchor: "BCD-24"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Data Backup and Storage (retrievable exact copy before moving equipment) is the pre-move-backup facet of SCF Backups."
+    rationale: "Data Backup and Storage (retrievable exact copy before moving equipment) is the pre-move-backup facet of SCF Data Backups."
 
   # ===== TECHNICAL SAFEGUARDS (§164.312) → SCF =====
   # 164.312(a)(1) → IAC-01 is the FIVE-FRAMEWORK shared anchor (invariant #1, AC-4).
@@ -549,30 +549,30 @@ mappings:
     strength: 0.9
     rationale: "Technical Access Control (only authorized persons/programs access ePHI) maps directly to SCF Identification & Authentication Policy (five-framework shared anchor)."
   - requirement_code: "164.312(a)(2)(i)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "intersects_with"
     strength: 0.75
-    rationale: "Unique User Identification strongly overlaps SCF User Provisioning & Lifecycle (unique identity is a provisioning outcome)."
+    rationale: "Unique User Identification strongly overlaps SCF User Provisioning & De-Provisioning (unique identity is a provisioning outcome)."
   - requirement_code: "164.312(a)(2)(ii)"
-    scf_anchor: "IAC-24"
+    scf_anchor: "IAC-11"
     relationship_type: "equal"
     strength: 0.8
-    rationale: "Slice 567 re-point (was IAC-21 @ 0.60). Emergency Access Procedure (procedures for obtaining necessary ePHI during an emergency) IS the break-glass control; privileged-account management was the covering anchor only because no break-glass anchor existed. IAC-24 Emergency Access (Break-Glass) Accounts is the direct equivalent. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 9."
+    rationale: "Slice 567 re-point (was IAC-10 @ 0.60). Emergency Access Procedure (procedures for obtaining necessary ePHI during an emergency) IS the break-glass control; privileged-account management was the covering anchor only because no break-glass anchor existed. IAC-11 Emergency Accounts is the direct equivalent. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 9."
   - requirement_code: "164.312(a)(2)(iii)"
-    scf_anchor: "IAC-25"
+    scf_anchor: "CFG-04.5"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Automatic Logoff (electronic procedures that terminate an electronic session after a predetermined time of inactivity) IS session termination; IAC-01, the domain policy head, badly over-covered it. IAC-25 Session Termination is the direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 10."
+    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Automatic Logoff (electronic procedures that terminate an electronic session after a predetermined time of inactivity) IS session termination; IAC-01, the domain policy head, badly over-covered it. CFG-04.5 Session Termination is the direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 10."
   - requirement_code: "164.312(a)(2)(iv)"
     scf_anchor: "CRY-04"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Encryption and Decryption of ePHI at rest maps directly to SCF Encryption At Rest."
   - requirement_code: "164.312(b)"
-    scf_anchor: "AAA-01"
+    scf_anchor: "MON-04"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Audit Controls (record and examine system activity) map directly to SCF Auditing & Accountability."
+    rationale: "Audit Controls (record and examine system activity) map directly to SCF System Generated Event Logs & Security-Relevant Telemetry."
   - requirement_code: "164.312(c)(1)"
     scf_anchor: "DCH-05"
     relationship_type: "subset_of"
@@ -610,45 +610,45 @@ mappings:
   # SCF expresses as third-party management. CATALOG nodes only; the BAA workflow
   # is the deferred slice 517.
   - requirement_code: "164.314(a)(1)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Business Associate Contracts or Other Arrangements (the contract/arrangement must meet applicable requirements) is governed by SCF Third-Party Management."
   - requirement_code: "164.314(a)(2)(i)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "equal"
     strength: 0.8
     rationale: "Business Associate Contracts (BA complies, binds subcontractors, reports incidents) map directly to the SCF Third-Party Management contracting requirements."
   - requirement_code: "164.314(a)(2)(ii)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Other Arrangements (a governmental-entity memorandum of understanding in place of a business associate contract) is an alternative legal instrument, not a security control; no control catalog carries an anchor for it. TPM-01 is and remains the correct covering anchor at 0.65 (LOW). See decisions log D6 row 14."
+    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Other Arrangements (a governmental-entity memorandum of understanding in place of a business associate contract) is an alternative legal instrument, not a security control; no control catalog carries an anchor for it. TPM-02 is and remains the correct covering anchor at 0.65 (LOW). See decisions log D6 row 14."
   - requirement_code: "164.314(a)(2)(iii)"
-    scf_anchor: "TPM-04"
+    scf_anchor: "TPM-10"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Business Associate Contracts with Subcontractors (flow-down satisfactory assurances) is the subcontractor-assurance facet of SCF Third-Party Risk Assessments."
+    rationale: "Business Associate Contracts with Subcontractors (flow-down satisfactory assurances) is the subcontractor-assurance facet of SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: "164.314(b)(1)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.55
-    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Requirements for Group Health Plans (plan documents must require the plan sponsor to safeguard ePHI) is a plan-document amendment obligation on a HIPAA-specific regulatory relationship, not a security control; there is no SCF analog to find. TPM-01 as covering anchor at a deliberately low 0.55 is the honest mapping. See decisions log D6 row 15."
+    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Requirements for Group Health Plans (plan documents must require the plan sponsor to safeguard ePHI) is a plan-document amendment obligation on a HIPAA-specific regulatory relationship, not a security control; there is no SCF analog to find. TPM-02 as covering anchor at a deliberately low 0.55 is the honest mapping. See decisions log D6 row 15."
   - requirement_code: "164.314(b)(2)(i)"
-    scf_anchor: "TPM-05"
+    scf_anchor: "TPM-14"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Slice 567 re-point (was TPM-01 @ 0.55). Unlike 164.314(a)(2)(ii) and 164.314(b)(1), this row has a generic shape: require a counterparty to implement safeguards that protect data handled on your behalf. That is a contractual-security-requirements control, so TPM-05 fits better than the third-party-management head — but the plan-sponsor framing keeps it a modest lift. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 16."
+    rationale: "Slice 567 re-point (was TPM-01 @ 0.55). Unlike 164.314(a)(2)(ii) and 164.314(b)(1), this row has a generic shape: require a counterparty to implement safeguards that protect data handled on your behalf. That is a contractual-security-requirements control, so TPM-14 fits better than the third-party-management head — but the plan-sponsor framing keeps it a modest lift. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 16."
   - requirement_code: "164.314(b)(2)(ii)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.55
-    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Ensure Adequate Separation is ENTITY-level firewalling between the group health plan and its sponsor; the nearest finer concept, separation of duties, is ROLE-level within one organization. Re-pointing would trade a correct coarse anchor for a wrong-altitude finer one. TPM-01 stays at 0.55 (LOW). See decisions log D6 row 17."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Ensure Adequate Separation is ENTITY-level firewalling between the group health plan and its sponsor; the nearest finer concept, separation of duties, is ROLE-level within one organization. Re-pointing would trade a correct coarse anchor for a wrong-altitude finer one. TPM-02 stays at 0.55 (LOW). See decisions log D6 row 17."
   - requirement_code: "164.314(b)(2)(iii)"
-    scf_anchor: "TPM-05"
+    scf_anchor: "TPM-14"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Slice 567 re-point (was TPM-04 @ 0.60). Ensure Agents Safeguard requires that agents and subcontractors agree to the same protections — contractual flow-down, which is a different control from third-party risk ASSESSMENT. TPM-05 Third-Party Contract Requirements carries the flow-down obligation. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 18."
+    rationale: "Slice 567 re-point (was TPM-04 @ 0.60). Ensure Agents Safeguard requires that agents and subcontractors agree to the same protections — contractual flow-down, which is a different control from third-party risk ASSESSMENT. TPM-14 Third-Party Contract Requirements carries the flow-down obligation. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 18."
 
   # ===== POLICIES, PROCEDURES, AND DOCUMENTATION (§164.316) → SCF =====
   # New in slice 516. Program-governance + documentation-retention obligations.
@@ -658,10 +658,10 @@ mappings:
     strength: 0.7
     rationale: "Policies and Procedures (implement policies/procedures to comply with the Security Rule) is the policy-framework facet of SCF Information Security Governance."
   - requirement_code: "164.316(b)(1)"
-    scf_anchor: "CPL-01"
+    scf_anchor: "CPL-02"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Documentation (maintain policies/procedures and document required actions/assessments in writing) is the recordkeeping facet of SCF Compliance Management."
+    rationale: "Documentation (maintain policies/procedures and document required actions/assessments in writing) is the recordkeeping facet of SCF Statutory, Regulatory & Contractual Compliance."
   - requirement_code: "164.316(b)(2)(i)"
     scf_anchor: "DCH-03"
     relationship_type: "intersects_with"

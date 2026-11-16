@@ -30,6 +30,10 @@ const (
 // ActionApplicabilityUpdate is the workflow-log action for a decision change.
 const ActionApplicabilityUpdate = "applicability.update"
 
+// ActionApplicabilityCarryOver is the workflow-log action for a decision
+// copied from the prior framework version's revision (#1793).
+const ActionApplicabilityCarryOver = "applicability.carry_over"
+
 // constraintDecisionsFrozen is the constraint name the guard trigger raises
 // for a write on an activated or superseded revision.
 const constraintDecisionsFrozen = "framework_scope_applicability_frozen"
@@ -127,77 +131,139 @@ func ValidateDecision(decision, justification string) error {
 // revision in review or approved, the table's reset trigger sends it back to
 // draft and clears the approval; invalidated reports that. The change is
 // written to the workflow log in the same tx.
-func (s *Store) SetDecision(ctx context.Context, req SetDecisionRequest) (dec Decision, scope FrameworkScope, invalidated bool, err error) {
-	if verr := ValidateDecision(req.Decision, req.Justification); verr != nil {
-		return Decision{}, FrameworkScope{}, false, verr
+func (s *Store) SetDecision(ctx context.Context, req SetDecisionRequest) (Decision, FrameworkScope, bool, error) {
+	decs, scope, invalidated, err := s.SetDecisions(ctx, req.ScopeID, []DecisionInput{{
+		RequirementID:     req.RequirementID,
+		Decision:          req.Decision,
+		Justification:     req.Justification,
+		ImplementationRef: req.ImplementationRef,
+	}}, req.Actor)
+	if err != nil {
+		return Decision{}, FrameworkScope{}, false, err
+	}
+	return decs[0], scope, invalidated, nil
+}
+
+// DecisionInput is one requirement's decision in a multi-decision write.
+type DecisionInput struct {
+	RequirementID     uuid.UUID
+	Decision          string
+	Justification     string
+	ImplementationRef string
+
+	// carriedFrom is set only by CarryOverDecisions (#1793): the write is
+	// logged as applicability.carry_over and names its source.
+	carriedFrom *carrySource
+}
+
+// SetDecisions records several decisions on one scope revision as a single
+// change (#1790). Every input is validated first, and one bad input (invalid
+// decision, missing justification, requirement outside the revision's
+// framework version) writes nothing. Each decision gets its own
+// workflow-log row; on a revision in review or approved, the first row
+// carries the reset to draft.
+func (s *Store) SetDecisions(ctx context.Context, scopeID uuid.UUID, items []DecisionInput, actor string) (decs []Decision, scope FrameworkScope, invalidated bool, err error) {
+	for _, it := range items {
+		if verr := ValidateDecision(it.Decision, it.Justification); verr != nil {
+			return nil, FrameworkScope{}, false, verr
+		}
 	}
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		before, gerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
-			TenantID: pgUUID(tenantID),
-			ID:       pgUUID(req.ScopeID),
-		})
+		first, gerr := writableScope(ctx, q, tenantID, scopeID)
 		if gerr != nil {
-			if errors.Is(gerr, pgx.ErrNoRows) {
-				return ErrNotFound
+			return gerr
+		}
+		for _, it := range items {
+			if _, rerr := q.GetFrameworkRequirementInVersion(ctx, dbx.GetFrameworkRequirementInVersionParams{
+				ID:                 pgUUID(it.RequirementID),
+				FrameworkVersionID: first.FrameworkVersionID,
+			}); rerr != nil {
+				if errors.Is(rerr, pgx.ErrNoRows) {
+					return ErrRequirementNotFound
+				}
+				return fmt.Errorf("get framework_requirement: %w", rerr)
 			}
-			return fmt.Errorf("get framework_scope: %w", gerr)
 		}
-		if before.State == StateActivated || before.State == StateSuperseded {
-			return ErrDecisionsFrozen
+		var last dbx.FrameworkScope
+		decs, last, err = writeDecisions(ctx, q, tenantID, first, items, actor)
+		if err != nil {
+			return err
 		}
-		if _, rerr := q.GetFrameworkRequirementInVersion(ctx, dbx.GetFrameworkRequirementInVersionParams{
-			ID:                 pgUUID(req.RequirementID),
-			FrameworkVersionID: before.FrameworkVersionID,
-		}); rerr != nil {
-			if errors.Is(rerr, pgx.ErrNoRows) {
-				return ErrRequirementNotFound
-			}
-			return fmt.Errorf("get framework_requirement: %w", rerr)
+		scope = rowToScope(last)
+		invalidated = first.State != last.State && last.State == StateDraft
+		return nil
+	})
+	return decs, scope, invalidated, err
+}
+
+// writableScope reads the revision and refuses one whose decisions are
+// frozen.
+func writableScope(ctx context.Context, q *dbx.Queries, tenantID, scopeID uuid.UUID) (dbx.FrameworkScope, error) {
+	row, err := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+		TenantID: pgUUID(tenantID),
+		ID:       pgUUID(scopeID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.FrameworkScope{}, ErrNotFound
 		}
+		return dbx.FrameworkScope{}, fmt.Errorf("get framework_scope: %w", err)
+	}
+	if row.State == StateActivated || row.State == StateSuperseded {
+		return dbx.FrameworkScope{}, ErrDecisionsFrozen
+	}
+	return row, nil
+}
+
+// writeDecisions upserts validated decisions for requirements known to be in
+// the revision's version, logging each, and returns the scope row as it
+// stands after the last write (the reset trigger may have sent it back to
+// draft).
+func writeDecisions(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, before dbx.FrameworkScope, items []DecisionInput, actor string) ([]Decision, dbx.FrameworkScope, error) {
+	decs := make([]Decision, 0, len(items))
+	for _, it := range items {
 		var prior *dbx.FrameworkScopeApplicability
 		if p, perr := q.GetFrameworkScopeApplicability(ctx, dbx.GetFrameworkScopeApplicabilityParams{
 			TenantID:               pgUUID(tenantID),
-			FrameworkScopeID:       pgUUID(req.ScopeID),
-			FrameworkRequirementID: pgUUID(req.RequirementID),
+			FrameworkScopeID:       before.ID,
+			FrameworkRequirementID: pgUUID(it.RequirementID),
 		}); perr == nil {
 			prior = &p
 		} else if !errors.Is(perr, pgx.ErrNoRows) {
-			return fmt.Errorf("get prior decision: %w", perr)
+			return nil, before, fmt.Errorf("get prior decision: %w", perr)
 		}
 		row, uerr := q.UpsertFrameworkScopeApplicability(ctx, dbx.UpsertFrameworkScopeApplicabilityParams{
 			TenantID:               pgUUID(tenantID),
-			FrameworkScopeID:       pgUUID(req.ScopeID),
-			FrameworkRequirementID: pgUUID(req.RequirementID),
-			Decision:               req.Decision,
-			Justification:          req.Justification,
-			ImplementationRef:      req.ImplementationRef,
-			UpdatedBy:              req.Actor,
+			FrameworkScopeID:       before.ID,
+			FrameworkRequirementID: pgUUID(it.RequirementID),
+			Decision:               it.Decision,
+			Justification:          it.Justification,
+			ImplementationRef:      it.ImplementationRef,
+			UpdatedBy:              actor,
 		})
 		if uerr != nil {
 			// The guard trigger re-checks the state under FOR SHARE, so an
 			// activation that committed after the read above lands here.
 			var pgErr *pgconn.PgError
 			if errors.As(uerr, &pgErr) && pgErr.ConstraintName == constraintDecisionsFrozen {
-				return ErrDecisionsFrozen
+				return nil, before, ErrDecisionsFrozen
 			}
-			return fmt.Errorf("upsert decision: %w", uerr)
+			return nil, before, fmt.Errorf("upsert decision: %w", uerr)
 		}
 		after, aerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
 			TenantID: pgUUID(tenantID),
-			ID:       pgUUID(req.ScopeID),
+			ID:       before.ID,
 		})
 		if aerr != nil {
-			return fmt.Errorf("re-read framework_scope: %w", aerr)
+			return nil, before, fmt.Errorf("re-read framework_scope: %w", aerr)
 		}
-		if lerr := logDecisionChange(ctx, q, req.Actor, before, after, prior, row); lerr != nil {
-			return lerr
+		if lerr := logDecisionChange(ctx, q, actor, before, after, prior, row, it.carriedFrom); lerr != nil {
+			return nil, before, lerr
 		}
-		dec = rowToDecision(row)
-		scope = rowToScope(after)
-		invalidated = before.State != after.State && after.State == StateDraft
-		return nil
-	})
-	return dec, scope, invalidated, err
+		decs = append(decs, rowToDecision(row))
+		before = after
+	}
+	return decs, before, nil
 }
 
 // ListDecisions returns every requirement of the revision's framework
@@ -316,21 +382,27 @@ func listApplicability(ctx context.Context, q *dbx.Queries, tenantID, frameworkV
 // before/after images are the scope row snapshots (so a reset to draft shows
 // in from_state/to_state and the approval columns) with the decision under
 // an `applicability` key; before's decision is null when the requirement was
-// undecided.
-func logDecisionChange(ctx context.Context, q *dbx.Queries, actor string, before, after dbx.FrameworkScope, prior *dbx.FrameworkScopeApplicability, row dbx.FrameworkScopeApplicability) error {
-	beforeJSON, err := snapshotWithDecision(before, prior)
+// undecided. A carried-over decision (from non-nil) is logged as
+// applicability.carry_over with its source under `carried_over_from` in
+// after.
+func logDecisionChange(ctx context.Context, q *dbx.Queries, actor string, before, after dbx.FrameworkScope, prior *dbx.FrameworkScopeApplicability, row dbx.FrameworkScopeApplicability, from *carrySource) error {
+	beforeJSON, err := snapshotWithDecision(before, prior, nil)
 	if err != nil {
 		return err
 	}
-	afterJSON, err := snapshotWithDecision(after, &row)
+	afterJSON, err := snapshotWithDecision(after, &row, from)
 	if err != nil {
 		return err
+	}
+	action := ActionApplicabilityUpdate
+	if from != nil {
+		action = ActionApplicabilityCarryOver
 	}
 	fromState := before.State
 	if err := q.InsertFrameworkScopeWorkflowLog(ctx, dbx.InsertFrameworkScopeWorkflowLogParams{
 		TenantID:         after.TenantID,
 		FrameworkScopeID: after.ID,
-		Action:           ActionApplicabilityUpdate,
+		Action:           action,
 		FromState:        &fromState,
 		ToState:          after.State,
 		Before:           beforeJSON,
@@ -342,7 +414,7 @@ func logDecisionChange(ctx context.Context, q *dbx.Queries, actor string, before
 	return nil
 }
 
-func snapshotWithDecision(sc dbx.FrameworkScope, d *dbx.FrameworkScopeApplicability) ([]byte, error) {
+func snapshotWithDecision(sc dbx.FrameworkScope, d *dbx.FrameworkScopeApplicability, from *carrySource) ([]byte, error) {
 	base, err := snapshot(sc)
 	if err != nil {
 		return nil, err
@@ -360,6 +432,9 @@ func snapshotWithDecision(sc dbx.FrameworkScope, d *dbx.FrameworkScopeApplicabil
 			"justification":            d.Justification,
 			"implementation_ref":       d.ImplementationRef,
 		}
+	}
+	if from != nil {
+		m["carried_over_from"] = from
 	}
 	b, err := json.Marshal(m)
 	if err != nil {

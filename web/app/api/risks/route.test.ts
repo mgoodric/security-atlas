@@ -40,6 +40,8 @@ function makeReq(body: unknown): {
   };
 }
 
+const LIST_URL = "http://localhost/api/risks";
+
 describe("GET /api/risks", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -55,7 +57,7 @@ describe("GET /api/risks", () => {
 
   test("401 when bearer cookie missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await GET();
+    const res = await GET(new Request(LIST_URL));
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe("unauthenticated");
@@ -93,7 +95,7 @@ describe("GET /api/risks", () => {
       ),
     );
 
-    const res = await GET();
+    const res = await GET(new Request(LIST_URL));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { risks: unknown[] };
     expect(body.risks).toHaveLength(1);
@@ -106,13 +108,31 @@ describe("GET /api/risks", () => {
     expect(headers?.Authorization).toBe("Bearer test-bearer-100");
   });
 
+  // #2060: roll-ups stay out of the register unless the toggle asks.
+  test.each([
+    [LIST_URL, "/v1/risks"],
+    [`${LIST_URL}?include_rollups=true`, "/v1/risks?include_rollups=true"],
+  ])("%s asks upstream for %s", async (url, upstreamPath) => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-100" });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ risks: [], count: 0 }), { status: 200 }),
+      );
+
+    const res = await GET(new Request(url));
+    expect(res.status).toBe(200);
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL.endsWith(upstreamPath)).toBe(true);
+  });
+
   test("propagates upstream error status", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-100" });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response("server error", { status: 502 }),
     );
 
-    const res = await GET();
+    const res = await GET(new Request(LIST_URL));
     expect(res.status).toBe(502);
   });
 });

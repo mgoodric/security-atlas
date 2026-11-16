@@ -29,6 +29,16 @@ SELECT *
 FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: LockOpenFrameworkScope :one
+-- The applicability carry-over's target (#2179): a draft or review revision
+-- of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
+-- (approved, activated, superseded) or unknown revision.
+SELECT *
+FROM framework_scopes
+WHERE tenant_id = $1 AND id = $2
+  AND state IN ('draft', 'review')
+FOR UPDATE;
+
 -- name: ListFrameworkScopes :many
 -- Newest first. Caller filters by framework_version + state in the
 -- application layer because sqlc-static optional WHERE is noisy; the row
@@ -86,10 +96,16 @@ RETURNING *;
 -- name: SubmitFrameworkScope :one
 -- AC-6: draft -> review. Guarded so callers can never re-submit an already
 -- under-review row by accident (would still be valid but masks bugs).
+-- #2101: records the submitter as a person, so approval can compare. Also
+-- re-submits a review row whose submitter is unrecorded (NULL) or a session
+-- id ('jwt:<token id>'), which approval refuses because it names no person.
 UPDATE framework_scopes
 SET state = 'review',
+    submitted_by = sqlc.arg('submitted_by'),
     updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND state = 'draft'
+WHERE tenant_id = $1 AND id = $2
+  AND (state = 'draft'
+       OR (state = 'review' AND (submitted_by IS NULL OR submitted_by LIKE 'jwt:%')))
 RETURNING *;
 
 -- name: ApproveFrameworkScope :one
@@ -104,6 +120,7 @@ SET state = 'approved',
     predicate_hash_at_approval = predicate_hash,
     approval_evidence_file_url = $4,
     approval_evidence_file_hash = $5,
+    self_approved = sqlc.arg('self_approved'),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND state = 'review'
 RETURNING *;
@@ -270,3 +287,53 @@ JOIN LATERAL (
 WHERE fsa.tenant_id = @tenant_id
   AND fsa.framework_scope_id = @framework_scope_id
   AND fsa.decision = 'excluded';
+
+-- name: GetFrameworkVersionLabel :one
+-- The framework name, slug and version string that title an SoA export
+-- (#1791). Global catalog rows and the caller tenant's own rows are visible.
+SELECT f.name AS framework_name,
+       f.slug AS framework_slug,
+       fv.version AS framework_version
+FROM framework_versions fv
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE fv.id = @framework_version_id
+  AND (fv.tenant_id IS NULL OR fv.tenant_id = @tenant_id);
+
+-- name: ListFrameworkVersionLinkedControls :many
+-- The tenant controls behind each requirement of a framework version, for
+-- the SoA export's linked-controls column (#1791). The crosswalk and the
+-- "active control" rule are the ones ListFrameworkScopeContradictions uses,
+-- so an exported contradiction always lists the control behind it.
+SELECT DISTINCT e.framework_requirement_id AS requirement_id,
+       c.bundle_id
+FROM framework_requirements r
+JOIN effective_fw_to_scf_edges e
+  ON e.framework_requirement_id = r.id
+ AND e.relationship_type <> 'no_relationship'
+ AND e.mapping_tier <> 'rejected'
+JOIN controls c
+  ON c.scf_anchor_id = e.scf_anchor_id
+ AND c.tenant_id = @tenant_id
+ AND c.lifecycle_state = 'active'
+ AND c.superseded_by IS NULL
+WHERE r.framework_version_id = @framework_version_id
+ORDER BY e.framework_requirement_id, c.bundle_id;
+
+-- name: GetFrameworkScopeLatestApprover :one
+-- The actor of a revision's most recent approval, for the SoA export
+-- (#1791). approver_user_id holds it only when the credential id is a UUID;
+-- the workflow log always does.
+SELECT actor
+FROM framework_scope_workflow_log
+WHERE tenant_id = @tenant_id
+  AND framework_scope_id = @framework_scope_id
+  AND action = 'approve'
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1;
+
+-- name: ListFrameworkVersionMigrationsInto :many
+-- Every version-migration queue row (ADR 0019) whose target is one framework
+-- version, for the applicability carry-over (#1793). Catalog rows: no tenant.
+SELECT * FROM framework_version_migrations
+WHERE to_version_id = $1
+ORDER BY from_version_id, match_kind, requirement_code;

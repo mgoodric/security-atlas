@@ -38,6 +38,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -175,6 +176,7 @@ func cleanupCreatedTenants(t *testing.T, actorID uuid.UUID) {
 			_, _ = adminPool.Exec(context.Background(), `DELETE FROM scope_cells WHERE tenant_id = $1`, id)
 			_, _ = adminPool.Exec(context.Background(), `DELETE FROM scope_dimensions WHERE tenant_id = $1`, id)
 			_, _ = adminPool.Exec(context.Background(), `DELETE FROM me_audit_log WHERE tenant_id = $1`, id)
+			_, _ = adminPool.Exec(context.Background(), `DELETE FROM org_risk_categories WHERE tenant_id = $1`, id)
 			_, _ = adminPool.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, id)
 		}
 	})
@@ -360,6 +362,24 @@ func TestCreate_HappyPath_JoinsAsNone(t *testing.T) {
 	).Scan(&cellCount)
 	if cellCount != 1 {
 		t.Errorf("expected 1 default scope_cell, got %d", cellCount)
+	}
+
+	// #1809: the seven seeded risk categories, the old enum values as
+	// slugs, `operational` the only default.
+	var slugs []string
+	var defaultSlug string
+	_ = adminPool.QueryRow(context.Background(),
+		`SELECT array_agg(slug ORDER BY slug),
+		        coalesce(string_agg(slug, ',') FILTER (WHERE is_default), '')
+		 FROM org_risk_categories WHERE tenant_id = $1`,
+		newTenantID,
+	).Scan(&slugs, &defaultSlug)
+	wantSlugs := []string{"availability", "confidentiality", "financial", "integrity", "operational", "privacy", "regulatory"}
+	if !slices.Equal(slugs, wantSlugs) {
+		t.Errorf("risk categories = %v, want %v", slugs, wantSlugs)
+	}
+	if defaultSlug != "operational" {
+		t.Errorf("default risk category = %q, want operational", defaultSlug)
 	}
 
 	// NO users / user_roles row in the new tenant (creator_joins_as='none').

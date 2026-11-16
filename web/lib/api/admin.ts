@@ -33,6 +33,10 @@ export type AdminCredential = {
   is_approver: boolean;
   owner_roles: string[];
   rotated_from?: string | null;
+  // IssuedAt + TTL; absent for a key that never expires.
+  expires_at?: string | null;
+  // The admin who minted the key, for attribution only (#1947).
+  minted_by?: string | null;
 };
 
 export type AdminCredentialListResponse = { items: AdminCredential[] };
@@ -62,10 +66,14 @@ export type AdminCredentialRotateResponse = {
   predecessor_expires_at: string;
 };
 
+// listAdminCredentials lists the tenant's keys. With mintedBy (#1953) the
+// upstream narrows to the live keys that user minted.
 export async function listAdminCredentials(
   bearer: string,
+  mintedBy?: string,
 ): Promise<AdminCredential[]> {
-  const res = await apiFetch(`/v1/admin/credentials`, bearer);
+  const qs = mintedBy ? `?minted_by=${encodeURIComponent(mintedBy)}` : "";
+  const res = await apiFetch(`/v1/admin/credentials${qs}`, bearer);
   const body = (await res.json()) as AdminCredentialListResponse;
   return body.items;
 }
@@ -129,6 +137,15 @@ export type FeatureFlag = {
   last_changed_by?: string;
   last_changed_at?: string | null;
   has_override: boolean;
+  /** #2171: the module the flag belongs to, from the server's registry. */
+  module?: string;
+  module_name?: string;
+  /** True for the module's own switch; false for a feature inside it. */
+  module_switch?: boolean;
+  /** True when the module is core: always on, with no switch of its own. */
+  module_core?: boolean;
+  /** A feature's display name. */
+  feature_name?: string;
 };
 
 export type FeatureFlagListResponse = { items: FeatureFlag[] };
@@ -574,6 +591,9 @@ export type AdminSSOConfig = {
   client_id: string;
   redirect_url: string;
   allowed_email_domains: string[];
+  // #1944 D3: let a sign-in whose ID token omits email_verified link to a
+  // SCIM-provisioned user by email. Off (strict) by default.
+  trust_unverified_email_for_link: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -584,6 +604,7 @@ export type AdminSSOPatchRequest = {
   client_secret?: string;
   redirect_url: string;
   allowed_email_domains: string[];
+  trust_unverified_email_for_link?: boolean;
 };
 
 // getAdminSSO returns the tenant's primary IdP config, or null if none

@@ -62,9 +62,19 @@ WHERE framework_version_id = $1 AND scf_id = $2;
 -- name: InsertSCFAnchor :one
 -- Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 -- ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
-INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics, legacy_scf_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
+
+-- name: BackfillSCFAnchorLegacySCFID :execrows
+-- #1769: fill legacy_scf_id on an anchor imported without one. Only a
+-- NULL is filled, so a stored value is never rewritten; the importer
+-- refuses a re-import whose legacy_scf_id differs from a stored one.
+-- legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+UPDATE scf_anchors
+SET legacy_scf_id = $2,
+    updated_at    = now()
+WHERE id = $1 AND legacy_scf_id IS NULL;
 
 -- name: UpdateSCFAnchor :one
 -- Update an existing anchor in place. Touches updated_at; the caller
@@ -104,7 +114,7 @@ LIMIT $1 OFFSET $2;
 SELECT * FROM scf_anchors WHERE id = $1;
 
 -- name: GetSCFAnchorBySCFID :one
--- Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+-- Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 -- framework version.
 SELECT a.*
 FROM scf_anchors a
@@ -185,20 +195,27 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = sqlc.arg(tenant_id)
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -266,6 +283,7 @@ anchor_controls AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit `::evidence_result` /
     -- `::text` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -333,20 +351,27 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = sqlc.arg(tenant_id)
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (
     SELECT
         c.scf_anchor_id AS anchor_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -395,6 +420,7 @@ anchor_frameworks AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit `::evidence_result` /
     -- `::text` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -459,8 +485,8 @@ ORDER BY a.scf_id
 LIMIT $1;
 
 -- name: ListAllFwToScfEdgesForExport :many
--- Slice 174: anchor catalog export edges projection. Returns EVERY
--- fw_to_scf_edges row whose target anchor is in the current SCF
+-- Slice 174: anchor catalog export edges projection. Returns EVERY live
+-- (not retired) fw_to_scf_edges row whose target anchor is in the current SCF
 -- framework_version, joined to framework_requirements +
 -- framework_versions + frameworks so consumers get the natural-key
 -- (`framework_slug:version:code`) without a second query.
@@ -473,6 +499,11 @@ LIMIT $1;
 -- map to that requirement" as a recorded fact, not a silent
 -- omission. The slice 008 traversal views filter no_relationship
 -- out for coverage UI; the export does NOT.
+--
+-- Issue #1826: mapping_tier is projected so a reviewer-rejected edge
+-- appears in the export marked `rejected` rather than looking like a
+-- live mapping. Rejected edges are NOT filtered out — the export is
+-- the full catalog record, tier included.
 --
 -- Sorted by anchor_scf_id then framework_slug + framework_version
 -- + requirement_code so the rows group by anchor (matches the
@@ -489,7 +520,8 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
-    e.rationale
+    e.rationale,
+    e.mapping_tier
 FROM fw_to_scf_edges e
 JOIN scf_anchors a                ON a.id = e.scf_anchor_id
 JOIN framework_versions afv       ON afv.id = a.framework_version_id
@@ -500,6 +532,8 @@ JOIN frameworks f                 ON f.id = fv.framework_id
 WHERE af.slug = 'scf'
   AND afv.status = 'current'
   AND af.tenant_id IS NULL
+  -- A retired edge (#1971) is no longer part of the catalog.
+  AND e.retired_at IS NULL
 ORDER BY a.scf_id, f.slug, fv.version, r.code;
 
 -- name: CountSCFAnchorsLatest :one

@@ -26,22 +26,24 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
 import { fetchPolicyDetail } from "@/lib/api/policies";
-import { renderMarkdown } from "@/lib/markdown";
+import { Markdown } from "@/components/markdown";
 
 function statusPillVariant(
   status: string,
-): "default" | "secondary" | "destructive" | "outline" {
+): "default" | "secondary" | "outline" {
   switch (status) {
     case "published":
       return "default";
     case "retired":
-      return "destructive";
+      return "outline";
     default:
       return "secondary";
   }
@@ -99,23 +101,26 @@ export default function PolicyDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6" data-testid="policy-detail-loading">
-        <Skeleton className="h-10 w-2/3" />
+      <PageShell
+        title={
+          <Skeleton className="inline-block h-8 w-96 max-w-full align-middle" />
+        }
+        data-testid="policy-detail-loading"
+      >
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !(error instanceof APIError && error.status === 401)) {
     return (
-      <div className="space-y-6">
-        <BackLink />
+      <PageShell title="Policy" actions={<BackLink />}>
         <Alert variant="destructive" data-testid="policy-detail-error">
           <AlertTitle>Could not load policy</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -125,15 +130,12 @@ export default function PolicyDetailPage({
   }
 
   const { policy, ack_rate } = data;
-  const bodyHtml = renderMarkdown(policy.body_md);
   const sourceHref = safeHttpUrl(policy.source_url);
 
   return (
-    <div className="space-y-6" data-testid="policy-detail">
-      <BackLink />
-
-      {/* ============ HEADER ============ */}
-      <header className="space-y-3" data-testid="policy-detail-header">
+    <PageShell
+      title={<span data-testid="policy-detail-title">{policy.title}</span>}
+      titleAdornment={
         <div className="flex flex-wrap items-center gap-2">
           <Badge
             variant={statusPillVariant(policy.status)}
@@ -153,92 +155,102 @@ export default function PolicyDetailPage({
               Imported
             </Badge>
           ) : null}
+          <SelfApprovedBadge
+            selfApproved={policy.self_approved}
+            testId="policy-detail-self-approved"
+          />
         </div>
-        <h1
-          className="text-2xl font-semibold tracking-tight"
-          data-testid="policy-detail-title"
-        >
-          {policy.title}
-        </h1>
-        <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-          <div>
-            <dt className="inline text-muted-foreground">Owner role </dt>
-            <dd
-              className="inline text-foreground"
-              data-testid="policy-detail-owner"
-            >
-              {policy.owner_role}
-            </dd>
-          </div>
-          <div>
-            <dt className="inline text-muted-foreground">Effective </dt>
-            <dd className="inline font-mono text-foreground">
-              {formatDate(policy.effective_date)}
-            </dd>
-          </div>
-          <div>
-            <dt className="inline text-muted-foreground">Published </dt>
-            <dd className="inline font-mono text-foreground">
-              {formatDate(policy.published_at)}
-            </dd>
-          </div>
-          {policy.next_review_at ? (
+      }
+      subtitle={
+        <div className="mt-1 space-y-1" data-testid="policy-detail-header">
+          <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
             <div>
-              <dt className="inline text-muted-foreground">Next review </dt>
-              <dd
-                className="inline font-mono text-foreground"
-                data-testid="policy-detail-next-review"
-              >
-                {formatDate(policy.next_review_at)}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-        {policy.imported ? (
-          // #1747 — the history this policy carried in on import. The
-          // approver is the name recorded before the tool, not a user.
-          <dl
-            className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm"
-            data-testid="policy-detail-import-history"
-          >
-            <div>
-              <dt className="inline text-muted-foreground">Approved by </dt>
+              <dt className="inline text-muted-foreground">Owner role </dt>
               <dd
                 className="inline text-foreground"
-                data-testid="policy-detail-historical-approver"
+                data-testid="policy-detail-owner"
               >
-                {policy.historical_approver_name ?? "—"}
+                {policy.owner_role}
               </dd>
             </div>
             <div>
-              <dt className="inline text-muted-foreground">Approved </dt>
-              <dd
-                className="inline font-mono text-foreground"
-                data-testid="policy-detail-historical-approved-at"
-              >
-                {formatDate(policy.historical_approved_at)}
+              <dt className="inline text-muted-foreground">Effective </dt>
+              <dd className="inline font-mono text-foreground">
+                {formatDate(policy.effective_date)}
               </dd>
             </div>
-            {sourceHref ? (
+            <div>
+              <dt className="inline text-muted-foreground">Published </dt>
+              <dd className="inline font-mono text-foreground">
+                {formatDate(policy.published_at)}
+              </dd>
+            </div>
+            {policy.next_review_at ? (
               <div>
-                <dt className="inline text-muted-foreground">Source </dt>
-                <dd className="inline">
-                  <a
-                    href={sourceHref}
-                    className="text-primary hover:underline break-all"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    data-testid="policy-detail-source-link"
-                  >
-                    {sourceHref}
-                  </a>
+                {/* #2009 — a superseded version keeps the date it was due,
+                  as history; only the published version has a review next. */}
+                <dt className="inline text-muted-foreground">
+                  {policy.status === "superseded"
+                    ? "Review was due "
+                    : "Next review "}
+                </dt>
+                <dd
+                  className="inline font-mono text-foreground"
+                  data-testid="policy-detail-next-review"
+                >
+                  {formatDate(policy.next_review_at)}
                 </dd>
               </div>
             ) : null}
           </dl>
-        ) : null}
-      </header>
-
+          {policy.imported ? (
+            // #1747 — the history this policy carried in on import. The
+            // approver is the name recorded before the tool, not a user.
+            <dl
+              className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm"
+              data-testid="policy-detail-import-history"
+            >
+              <div>
+                <dt className="inline text-muted-foreground">Approved by </dt>
+                <dd
+                  className="inline text-foreground"
+                  data-testid="policy-detail-historical-approver"
+                >
+                  {policy.historical_approver_name ?? "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="inline text-muted-foreground">Approved </dt>
+                <dd
+                  className="inline font-mono text-foreground"
+                  data-testid="policy-detail-historical-approved-at"
+                >
+                  {formatDate(policy.historical_approved_at)}
+                </dd>
+              </div>
+              {sourceHref ? (
+                <div>
+                  <dt className="inline text-muted-foreground">Source </dt>
+                  <dd className="inline">
+                    <a
+                      href={sourceHref}
+                      className="text-primary hover:underline break-all"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="policy-detail-source-link"
+                    >
+                      {sourceHref}
+                    </a>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          ) : null}
+        </div>
+      }
+      actions={<BackLink />}
+      data-testid="policy-detail"
+    >
       {/* ============ ACK RATE (published only) ============ */}
       {ack_rate ? (
         <Card size="sm" data-testid="policy-detail-ack-rate">
@@ -266,15 +278,10 @@ export default function PolicyDetailPage({
           <CardTitle>Policy text</CardTitle>
         </CardHeader>
         <CardContent>
-          {bodyHtml ? (
-            <div
-              className="prose prose-sm max-w-none break-words"
+          {policy.body_md.trim() ? (
+            <Markdown
+              source={policy.body_md}
               data-testid="policy-detail-body"
-              // Safe: renderMarkdown HTML-escapes the input before any
-              // transform and only emits a fixed grammar of safe tags
-              // (see web/lib/markdown.ts). No raw body_md byte reaches
-              // the DOM unescaped.
-              dangerouslySetInnerHTML={{ __html: bodyHtml }}
             />
           ) : (
             <p
@@ -298,7 +305,7 @@ export default function PolicyDetailPage({
           Download as PDF →
         </Link>
       </div>
-    </div>
+    </PageShell>
   );
 }
 

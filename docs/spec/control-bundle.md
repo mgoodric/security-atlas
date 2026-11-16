@@ -40,28 +40,30 @@ When uploaded as a tarball, the archive **MUST**:
 
 ### 2.1 Required fields
 
-| Field                   | Type   | Notes                                                                                                                                                     |
-| ----------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bundle_schema_version` | string | Exactly `"1"` in this slice. Future v2 will gate breaking changes.                                                                                        |
-| `bundle_id`             | string | Stable natural key. Re-uploading the same `bundle_id` is a version bump. Format: `^[a-z][a-z0-9_.-]{2,63}$` (lowercase).                                  |
-| `title`                 | string | Human-readable, 1-200 chars.                                                                                                                              |
-| `scf_anchor_id`         | string | SCF code (e.g., `IAC-06`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). |
-| `implementation_type`   | enum   | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic`.                                                                                |
+| Field                   | Type   | Notes                                                                                                                                                                                                         |
+| ----------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bundle_schema_version` | string | Exactly `"1"` in this slice. Future v2 will gate breaking changes.                                                                                                                                            |
+| `bundle_id`             | string | Stable natural key. Re-uploading the same `bundle_id` is a version bump. Format: `^[a-z][a-z0-9_.-]{2,63}$` (lowercase).                                                                                      |
+| `title`                 | string | Human-readable, 1-200 chars.                                                                                                                                                                                  |
+| `scf_anchor_id`         | string | SCF code (e.g., `IAC-37`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). May be omitted only with `anchor_fit: none` (§2.2). |
+| `implementation_type`   | enum   | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic`.                                                                                                                                    |
 
 ### 2.2 Optional fields
 
-| Field                    | Type        | Notes                                                                                                                 |
-| ------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------- |
-| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                            |
-| `control_family`         | string      | SCF taxonomy family (AAA, AST, BCD, ...). Inferred from the SCF anchor if omitted.                                    |
-| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                 |
-| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                  |
-| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.          |
-| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.  |
-| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.          |
-| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                       |
-| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI. |
-| `external_refs`          | object[]    | Identifiers outside the platform that this control traces to. See §2.5.                                               |
+| Field                    | Type        | Notes                                                                                                                                                                                     |
+| ------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                                                                                                |
+| `control_family`         | string      | SCF taxonomy family (AST, BCD, CFG, ...). Inferred from the SCF anchor if omitted.                                                                                                        |
+| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                                                                                     |
+| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                                                                                      |
+| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.                                                                              |
+| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.                                                                      |
+| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.                                                                              |
+| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                                                                                           |
+| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI.                                                                     |
+| `anchor_fit`             | enum        | How well `scf_anchor_id` fits the control: `exact` (default when omitted), `partial`, or `none` (no SCF control fits; the anchor is the nearest catch-all or absent). Issue #1736.        |
+| `anchor_fit_note`        | string      | Why the fit is not exact. Required when `anchor_fit` is `partial` or `none`. Editing only the note updates the control in place; changing `anchor_fit` creates a new version (#2023, §4). |
+| `external_refs`          | object[]    | Identifiers outside the platform that this control traces to. See §2.5.                                                                                                                   |
 
 ### 2.3 Evidence queries
 
@@ -106,7 +108,7 @@ AC-5: a bundle whose `applicability_expr` references an undeclared scope dimensi
 
 A bundle may carry at most 100 entries, and no two may share the same `system` + `kind` + `id`. Length caps count characters, not bytes. The refs are stored per control version, shown in the control detail header, and matched by `/v1/search` (system, id and note).
 
-**Adding or editing refs updates the control in place (#1958).** Refs are trace metadata and do not feed evaluation, so a re-upload whose `control.yaml` differs from the active version only in `external_refs` and/or `description` keeps the control id and version. Owners, evidence, exceptions and links stay attached, and the prior manifest is kept in `control_manifest_revisions`. A refs change made together with any other field change still creates a new version. See §4 "Versioning + supersession".
+**Adding or editing refs updates the control in place (#1958).** Refs are trace metadata and do not feed evaluation, so a re-upload whose `control.yaml` differs from the active version only in `external_refs`, `description` and/or `anchor_fit_note` keeps the control id and version. Owners, evidence, exceptions and links stay attached, and the prior manifest is kept in `control_manifest_revisions`. A refs change made together with any other field change still creates a new version. See §4 "Versioning + supersession".
 
 ```yaml
 external_refs:
@@ -129,7 +131,7 @@ A complete `control.yaml` for an MFA control on production AWS:
 bundle_schema_version: "1"
 bundle_id: aws_iam_mfa_prod
 title: "MFA enforced for all human IAM users in production AWS"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 control_family: IAC
 owner_role: security-engineering
@@ -183,7 +185,7 @@ A minimal **manual** control:
 bundle_schema_version: "1"
 bundle_id: annual_access_review
 title: "Annual access review completed for all production systems"
-scf_anchor_id: IAC-15
+scf_anchor_id: IAC-12
 implementation_type: manual_periodic
 freshness_class: annual
 
@@ -241,11 +243,13 @@ Responses:
 | 404    | `scf_anchor_id` does not resolve to an `scf_anchors` row.                                                          |
 | 413    | Tarball over the size limit.                                                                                       |
 
+A successful response carries `anchor_warning` when the `scf_anchor_id` reaches no requirement in an enabled framework, so the control earns no framework credit (#1738). Enabled means the tenant's activated FrameworkScopes, or every current framework version when none is activated. The warning names the parent anchor (`NET-26.5` -> `NET-26`) when that one is mapped. It is non-fatal: the control is persisted, and `atlas-cli controls upload` repeats it on stderr. `validate` does not check it, because it is local-only and has no catalog.
+
 ### Versioning + supersession
 
 - Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6). Two exceptions:
   - A byte-identical `control.yaml` is a no-op: the active row is returned unchanged (slice 068).
-  - A `control.yaml` that differs from the active version's **only in the top-level `description` and/or `external_refs`** (rewording, reflow, adding, editing or removing either) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Any other change, including `title` or a nested `evidence_queries[].description`, still creates a new version. See `docs/audit-log/1908-control-description-in-place-decisions.md` and `docs/audit-log/1958-control-external-refs-in-place-decisions.md`.
+  - A `control.yaml` that differs from the active version's **only in the top-level `description`, `external_refs` and/or `anchor_fit_note`** (rewording, reflow, adding, editing or removing any of them) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Any other change, including `title`, `anchor_fit` (a fit change alters what the SCF mapping means, #2023) or a nested `evidence_queries[].description`, still creates a new version. See `docs/audit-log/1908-control-description-in-place-decisions.md` and `docs/audit-log/1958-control-external-refs-in-place-decisions.md`.
 - The partial unique index `controls_one_active_version_per_bundle` guarantees only one active version per `(tenant_id, bundle_id)`.
 - The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility. An in-place update overwrites both on the active row, so the prior manifest, its hash, uploader and upload time are first copied, in the same transaction, to the append-only `control_manifest_revisions` table. That table is where a control's prose and refs history lives. An upload locks the active row (`SELECT … FOR UPDATE`) before deciding, so concurrent uploads of one bundle run one after another and each in-place update records the manifest the previous one wrote. A concurrent upload that supersedes the row mid-update returns `409`.
 
@@ -296,7 +300,7 @@ cases:
 bundle_schema_version: "1"
 bundle_id: aws_iam_mfa_prod
 title: "MFA on every prod IAM user"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -352,16 +356,18 @@ bundle: aws_iam_mfa_prod
 
 ## 5. Anti-criteria (rejected at upload, never stored)
 
-| Reject                                                                  | Reason                                                        |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `scf_anchor_id` absent or unresolvable                                  | Canvas invariant 7 — SCF anchoring is non-negotiable.         |
-| `applicability_expr` malformed or references an unknown operator        | Slice 017 validator rejects up front.                         |
-| `evidence_queries[*].evidence_kind` not in the schema registry          | Slice 014 contract — every kind must be registered.           |
-| Tarball entry with `..` segment or absolute path                        | Tar slip protection (security review P0).                     |
-| Tarball over 5 MB compressed, 20 MB uncompressed, or 500 entries        | Decompression bomb protection.                                |
-| OSCAL `component-definition` files                                      | v2 extension; slice 009 is canonical-controls only.           |
-| Evidence-query execution payload                                        | Slice 009 stores only; execution is slice 012.                |
-| Bundle without `bundle_schema_version` or with a value other than `"1"` | Forward compatibility — unknown schema versions are rejected. |
+| Reject                                                                  | Reason                                                                                        |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `scf_anchor_id` absent (unless `anchor_fit: none`) or unresolvable      | Canvas invariant 7 — SCF anchoring is non-negotiable; `none` is ADR 0013's honest "unmapped". |
+| `anchor_fit` not one of `exact`, `partial`, `none`                      | Unknown fit values would read as a fit nobody defined.                                        |
+| `anchor_fit` `partial` or `none` without `anchor_fit_note`              | A non-exact fit must say what the anchor misses.                                              |
+| `applicability_expr` malformed or references an unknown operator        | Slice 017 validator rejects up front.                                                         |
+| `evidence_queries[*].evidence_kind` not in the schema registry          | Slice 014 contract — every kind must be registered.                                           |
+| Tarball entry with `..` segment or absolute path                        | Tar slip protection (security review P0).                                                     |
+| Tarball over 5 MB compressed, 20 MB uncompressed, or 500 entries        | Decompression bomb protection.                                                                |
+| OSCAL `component-definition` files                                      | v2 extension; slice 009 is canonical-controls only.                                           |
+| Evidence-query execution payload                                        | Slice 009 stores only; execution is slice 012.                                                |
+| Bundle without `bundle_schema_version` or with a value other than `"1"` | Forward compatibility — unknown schema versions are rejected.                                 |
 
 ---
 

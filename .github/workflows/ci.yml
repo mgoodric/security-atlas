@@ -81,6 +81,14 @@ jobs:
       # code on `main`; `resolve` forces `code=true` whenever the queue diff
       # base cannot be trusted.
       code: ${{ steps.resolve.outputs.code }}
+      # #2099 — the two tier outputs, resolved by the same `resolve` step.
+      # `go` gates the Go + Python jobs, `web` the frontend jobs. Each is
+      # `false` only when `code` is false, or on a `pull_request` whose every
+      # changed file sits in the OTHER tier's allowlist and none in the shared
+      # set. `push` and `merge_group` always resolve both to `code`. See
+      # docs/ci/PATH_FILTERING.md "Tiers".
+      go: ${{ steps.resolve.outputs.go }}
+      web: ${{ steps.resolve.outputs.web }}
       # Slice 179 — narrow filter for the schema-removal-age check. The
       # check only runs when a PR touches the canonical
       # `internal/api/schemaregistry/schemas/` tree, so we gate the job
@@ -176,6 +184,97 @@ jobs:
               - 'buf.gen.yaml'
               - 'scripts/**'
 
+      # #2099 — tier classification. A separate step because
+      # `predicate-quantifier` is per step, and the `code` filter above must
+      # keep its default `some` semantics.
+      #
+      # With `every`, a file matches a filter only when it matches EVERY
+      # pattern. Each filter below is `**` minus one tier's allowlist, so:
+      #   * `non_web` is true when some changed file is NOT web-only;
+      #   * `non_go`  is true when some changed file is NOT Go-only.
+      # A tier is skipped only when its `non_*` filter is false, i.e. every
+      # changed file sits in the other tier's allowlist. Anything unlisted
+      # (an `.nvmrc`, a `tools/` file, a new top-level dir) matches both
+      # `non_*` filters and runs both tiers.
+      #
+      # The two allowlists are deliberately narrow. Do NOT add a shared path
+      # here; add it to `shared` below.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: tiers
+        if: github.event_name == 'pull_request'
+        with:
+          predicate-quantifier: every
+          filters: |
+            non_web:
+              - '**'
+              - '!web/**'
+              - '!package.json'
+              - '!package-lock.json'
+              - '!**/package.json'
+              - '!**/package-lock.json'
+              - '!pnpm-lock.yaml'
+            non_go:
+              - '**'
+              - '!**/*.go'
+              - '!go.mod'
+              - '!go.sum'
+              - '!go.work'
+              - '!go.work.sum'
+              - '!internal/**'
+              - '!cmd/**'
+              - '!pkg/**'
+              - '!connectors/**'
+              - '!**/*.py'
+              - '!oscal-bridge/**'
+              - '!pyproject.toml'
+              - '!**/pyproject.toml'
+              - '!uv.lock'
+              - '!**/uv.lock'
+
+      # #2099 — the shared set: paths both tiers depend on. A match here runs
+      # both tiers even when the file also sits in a tier allowlist (a
+      # `scripts/x.py`, a `deploy/**/package.json`), so the allowlists'
+      # globs can never classify a shared path as single-tier. Default
+      # `some` quantifier: any one pattern matching is enough.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: shared
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            shared:
+              # Contract-tier goldens: recorded by Go provider tests under
+              # internal/api/** and asserted by web consumer tests, so a
+              # golden-only change must run both tiers. Any web/ file a Go
+              # test reads belongs here.
+              - 'web/lib/contracts/**'
+              # Go files a web test reads: web/lib/labels/enum-labels.test.ts
+              # fails when a backend enum value has no display label (#2083).
+              - 'internal/db/dbx/models.go'
+              - 'internal/featureflag/seed.go'
+              - 'migrations/**'
+              - 'sql/**'
+              - 'atlas.hcl'
+              - 'sqlc.yaml'
+              - 'proto/**'
+              - 'gen/**'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+              - 'policies/**'
+              - 'schemas/**'
+              - 'fixtures/**'
+              - 'deploy/**'
+              - 'Dockerfile*'
+              - '**/Dockerfile*'
+              - 'docker-compose*.yml'
+              - '**/docker-compose*.yml'
+              - '.github/**'
+              - 'justfile'
+              - 'scripts/**'
+              - '.golangci.yml'
+              - '.pre-commit-config.yaml'
+              - '.nvmrc'
+              - 'codecov.yml'
+
       # ================================================================
       # Slice 415 (threat T-1 / anti-criterion P0-2) — fail-closed
       # resolution of the `code` output.
@@ -206,6 +305,9 @@ jobs:
           MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
           MQ_HEAD_REF: ${{ github.event.merge_group.head_ref }}
           FILTER_CODE: ${{ steps.filter.outputs.code }}
+          FILTER_NON_WEB: ${{ steps.tiers.outputs.non_web }}
+          FILTER_NON_GO: ${{ steps.tiers.outputs.non_go }}
+          FILTER_SHARED: ${{ steps.shared.outputs.shared }}
         run: |
           set -euo pipefail
           code="${FILTER_CODE:-}"
@@ -235,6 +337,38 @@ jobs:
           echo "resolved code=${code} — ${reason}"
           echo "code=${code}" >> "$GITHUB_OUTPUT"
 
+          # #2099 — the `go` / `web` tiers. Every branch that is not an
+          # affirmative single-tier signal on a pull_request resolves a tier
+          # to `code`, so the failure mode is again spent minutes, never a
+          # skipped tier. `push` (main) and `merge_group` always run both.
+          go="$code"
+          web="$code"
+          tier_reason="both tiers follow code (${EVENT_NAME})"
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$code" = "true" ]; then
+            # An empty filter output reads as `true`: run the tier.
+            non_web="${FILTER_NON_WEB:-true}"
+            non_go="${FILTER_NON_GO:-true}"
+            shared="${FILTER_SHARED:-true}"
+            if [ "$shared" = "true" ]; then
+              tier_reason="a shared path changed, so both tiers run"
+            else
+              [ "$non_web" = "true" ] || go=false
+              [ "$non_go" = "true" ] || web=false
+              if [ "$go" = "false" ] && [ "$web" = "false" ]; then
+                # Every file matched both allowlists (e.g. a package.json
+                # under connectors/). code=true must never skip everything.
+                go=true
+                web=true
+                tier_reason="FAIL-OPEN: every file matched both tier allowlists; both tiers run"
+              else
+                tier_reason="pull_request diff: non_web=${non_web} non_go=${non_go} shared=${shared}"
+              fi
+            fi
+          fi
+          echo "resolved go=${go} web=${web} — ${tier_reason}"
+          echo "go=${go}" >> "$GITHUB_OUTPUT"
+          echo "web=${web}" >> "$GITHUB_OUTPUT"
+
           # Job summary so the merge_group run's path-filter decision is
           # inspectable without digging through step logs — this is the
           # artifact slice 415 AC-5 / AC-6 are verified against.
@@ -249,6 +383,9 @@ jobs:
             echo "| raw paths-filter \`code\` | \`${FILTER_CODE:-<empty>}\` |"
             echo "| resolved \`code\` | \`${code}\` |"
             echo "| basis | ${reason} |"
+            echo "| raw \`non_web\` / \`non_go\` / \`shared\` | \`${FILTER_NON_WEB:-<empty>}\` / \`${FILTER_NON_GO:-<empty>}\` / \`${FILTER_SHARED:-<empty>}\` |"
+            echo "| resolved \`go\` / \`web\` | \`${go}\` / \`${web}\` |"
+            echo "| tier basis | ${tier_reason} |"
             echo
             if [ "$code" = "true" ]; then
               echo "Real build/test/lint jobs run; the slice-061 stub-twins are skipped."
@@ -260,7 +397,7 @@ jobs:
   build-go:
     name: Go · build + test
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -312,6 +449,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-unit-coverage
+          retention-days: 7
           path: coverage.txt
           if-no-files-found: warn
 
@@ -321,7 +459,7 @@ jobs:
   build-go-stub:
     name: Go · build + test
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -347,12 +485,13 @@ jobs:
   # ~1 min instead of ~7.5 min: the dedup's billing win is kept (one host
   # compile shared 3×) WITHOUT the wall-clock regression. It is NOT a
   # required check (absent from branch-protection) and needs no stub twin —
-  # it is `if: code == 'true'` like `build-go`, so on docs-only PRs it skips
-  # alongside the real playwright jobs (whose stubs then post the checks).
+  # it is gated on the `web` tier (#2099) like the playwright jobs it feeds,
+  # so whenever they skip (docs-only or Go-only PRs) it skips with them and
+  # their stubs post the checks.
   build-atlas:
     name: Go · build atlas binary (shared)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -374,6 +513,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: atlas-binary
+          retention-days: 7
           path: atlas
           if-no-files-found: error
 
@@ -425,7 +565,7 @@ jobs:
   tests-integration-shard:
     name: Go · integration (shard ${{ matrix.leg }})
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -652,6 +792,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-integration-coverage-${{ matrix.leg }}
+          retention-days: 7
           path: coverage.txt
           if-no-files-found: warn
       # ================================================================
@@ -754,7 +895,7 @@ jobs:
   tests-integration:
     name: Go · integration (Postgres RLS)
     needs: [changes, build-go, tests-integration-shard]
-    if: always() && needs.changes.outputs.code == 'true'
+    if: always() && needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -833,13 +974,14 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-merged-coverage
+          retention-days: 7
           path: merged-coverage.txt
           if-no-files-found: warn
 
   tests-integration-stub:
     name: Go · integration (Postgres RLS)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -854,7 +996,7 @@ jobs:
   lint-go:
     name: Go · lint
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -905,7 +1047,7 @@ jobs:
   lint-go-stub:
     name: Go · lint
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -927,7 +1069,7 @@ jobs:
   fuzz:
     name: Go · fuzz (bounded)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -966,6 +1108,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fuzz-crashers
+          retention-days: 7
           path: "**/testdata/fuzz/**"
           if-no-files-found: ignore
 
@@ -975,7 +1118,7 @@ jobs:
   fuzz-stub:
     name: Go · fuzz (bounded)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1029,7 +1172,7 @@ jobs:
   build-frontend:
     name: Frontend · install + build
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1046,6 +1189,12 @@ jobs:
           cache: "npm"
       - name: Install workspaces
         run: npm ci --no-audit --no-fund
+      # `next build` typechecks tsconfig.json only, which excludes
+      # **/*.test.ts (slice 450). `typecheck` also runs tsconfig.test.json,
+      # so a type error in a vitest file reddens this job, and merge-gate
+      # with it (#1895).
+      - name: Typecheck web workspace (app + tests)
+        run: npm run typecheck --workspace @security-atlas/web
       - name: Build web workspace
         run: npm run build --workspace @security-atlas/web --if-present
       - name: Build sdk-typescript workspace
@@ -1054,7 +1203,7 @@ jobs:
   build-frontend-stub:
     name: Frontend · install + build
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1069,7 +1218,7 @@ jobs:
   lint-python:
     name: Python · ruff
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1096,7 +1245,7 @@ jobs:
   lint-python-stub:
     name: Python · ruff
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1206,7 +1355,7 @@ jobs:
   oscal-bridge:
     name: OSCAL bridge · Python (ruff + pytest)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1246,7 +1395,7 @@ jobs:
   oscal-bridge-stub:
     name: OSCAL bridge · Python (ruff + pytest)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1316,6 +1465,14 @@ jobs:
       # of DATABASE_URL before calling psql; the self-test pins that parse.
       - name: Run pg-conn self-test
         run: bash scripts/pg-conn_test.sh
+      # #2033: the scratch-cluster script must refuse a Postgres it did not
+      # start. The runner image ships PostgreSQL server binaries off PATH;
+      # the test skips (exit 0) if none are found. One matrix leg is enough.
+      - name: Run scratch-pg self-test
+        if: matrix.mode == 'bundled'
+        run: |
+          pgbin="$(find /usr/lib/postgresql -mindepth 2 -maxdepth 2 -name bin -type d 2>/dev/null | sort -V | tail -1)"
+          PATH="${pgbin:+$pgbin:}$PATH" bash scripts/scratch-pg_test.sh
       - name: Run self-host bundle smoke test (${{ matrix.mode }})
         run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
       - name: Dump compose logs on failure
@@ -1458,7 +1615,7 @@ jobs:
   frontend-vitest:
     name: Frontend · vitest
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -1486,13 +1643,14 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: frontend-vitest-coverage
+          retention-days: 7
           path: web/coverage/coverage-summary.json
           if-no-files-found: warn
 
   frontend-vitest-stub:
     name: Frontend · vitest
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1515,7 +1673,7 @@ jobs:
   frontend-lint:
     name: Frontend · lint
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -1542,7 +1700,7 @@ jobs:
   frontend-lint-stub:
     name: Frontend · lint
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1580,7 +1738,7 @@ jobs:
     # of recompiling). NOT build-go: gating on build-go's ~7.5-min -race
     # unit run regressed wall-clock; build-atlas is ~1 min (decisions D3).
     needs: [changes, build-atlas]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Slice 082 — un-quarantined. Slice 079's `continue-on-error: true`
@@ -1720,11 +1878,23 @@ jobs:
       - name: Run Playwright tests
         working-directory: web
         run: npx playwright test
+      # #2080 — the route sweep's axe findings (serious + critical) are
+      # REPORTED, not enforced: one JSON per route, uploaded on every run
+      # whether or not the suite passed.
+      - name: Upload route-sweep axe report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: route-sweep-axe-report
+          path: web/axe-report/
+          if-no-files-found: warn
+          retention-days: 3
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report
+          retention-days: 3
           path: |
             web/playwright-report/
             web/test-results/
@@ -1740,7 +1910,7 @@ jobs:
   frontend-playwright-stub:
     name: Frontend · Playwright e2e
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1795,7 +1965,7 @@ jobs:
     # Slice 695 — also depends on build-atlas (the lightweight shared-binary
     # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
     needs: [changes, build-atlas]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Slice 399 — BLOCKING. This leg builds + boots the Next.js
@@ -1852,6 +2022,11 @@ jobs:
       # logo-render-production-build.spec.ts (both `test.skip`-guarded
       # behind `!ATLAS_PROD_BUILD`). This is the ONLY job that sets it.
       ATLAS_PROD_BUILD: "1"
+      # #2062 — the opt-in leg for the developer token sign-in card. The
+      # dev-server leg leaves it unset (the default: card absent); this
+      # leg turns it on so login-dev-token-signin.spec.ts asserts the card
+      # renders and auth-open-redirect.spec.ts drives the token form.
+      ATLAS_WEB_DEV_TOKEN_SIGNIN: "true"
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -1908,6 +2083,13 @@ jobs:
         # assets resolve under `node .next/standalone/web/server.js`.
         working-directory: web
         run: npm run build:standalone
+      # #2040: a browser-forged X-Forwarded-For must not reach atlas via
+      # the /v1 rewrite or the login BFF. Runs before atlas starts because
+      # the script's stand-in atlas binds :8080, the build-time rewrite
+      # destination.
+      - name: Check web vets X-Forwarded-For (standalone + preload)
+        working-directory: web
+        run: node scripts/check-forwarded-for.mjs
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
@@ -1952,16 +2134,26 @@ jobs:
         # Slice 399 — runs BOTH prod-build specs: the slice-153 logo spec
         # and the slice-146 bff-cookie spec (its body re-shaped to be
         # RSC-aware). The job is now blocking (continue-on-error removed).
+        #
+        # #2062 — plus the two token-card specs, which need
+        # ATLAS_WEB_DEV_TOKEN_SIGNIN=true (job env) on the web server.
+        #
+        # #2080 — plus the route sweep, so every authenticated route's
+        # shell checks also hold against the standalone build.
         working-directory: web
         run: |
           npx playwright test \
             bff-cookie-production-build.spec.ts \
-            logo-render-production-build.spec.ts
+            logo-render-production-build.spec.ts \
+            login-dev-token-signin.spec.ts \
+            auth-open-redirect.spec.ts \
+            route-sweep.spec.ts
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report-prod-build
+          retention-days: 3
           path: |
             web/playwright-report/
             web/test-results/
@@ -1977,7 +2169,7 @@ jobs:
   frontend-playwright-prod-build-stub:
     name: Frontend · Playwright e2e (prod-build standalone)
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2007,7 +2199,7 @@ jobs:
     # Slice 695 — also depends on build-atlas (the lightweight shared-binary
     # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
     needs: [changes, build-atlas]
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true
@@ -2241,6 +2433,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ui-honesty-report-${{ github.run_id }}
+          retention-days: 3
           path: |
             web/e2e-audit/reports/
             comment-body.md
@@ -2256,7 +2449,7 @@ jobs:
   frontend-ui-honesty-stub:
     name: Frontend · UI honesty (advisory)
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2295,7 +2488,7 @@ jobs:
   govulncheck:
     name: Go · govulncheck
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2343,6 +2536,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: govulncheck-report
+          retention-days: 7
           path: |
             govulncheck.txt
             govulncheck.sarif
@@ -2351,7 +2545,7 @@ jobs:
   govulncheck-stub:
     name: Go · govulncheck
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2386,7 +2580,7 @@ jobs:
   sqlc-drift:
     name: Go · sqlc generate diff
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2427,7 +2621,7 @@ jobs:
   sqlc-drift-stub:
     name: Go · sqlc generate diff
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2569,6 +2763,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: audit-deps-tsv
+          retention-days: 7
           path: |
             audit-deps.tsv
             audit-deps.stderr
@@ -2709,7 +2904,7 @@ jobs:
   npm-audit:
     name: Frontend · npm audit
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2751,6 +2946,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-audit-report
+          retention-days: 7
           path: |
             npm-audit.txt
             npm-audit.json
@@ -2759,7 +2955,7 @@ jobs:
   npm-audit-stub:
     name: Frontend · npm audit
     needs: changes
-    if: needs.changes.outputs.code != 'true'
+    if: needs.changes.outputs.web != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2993,6 +3189,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: branch-protection-drift-report
+          retention-days: 7
           path: |
             drift.stdout
             drift.stderr
@@ -3057,6 +3254,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: trivy-report
+          retention-days: 7
           path: trivy-report.txt
           if-no-files-found: warn
 
@@ -3476,6 +3674,39 @@ jobs:
         run: bash scripts/check-merge-gate-needs.sh
 
   # ====================================================================
+  # #2099 — stub-twin guard (HARD FAIL).
+  #
+  # Refuses a path-filtered job whose slice-061 stub twin does not carry a
+  # byte-identical `name:` and the complementary `if:` on the SAME
+  # `changes` output (code / go / web). A real job moved to the `go` tier
+  # with its stub left on `code` would leave a web-only PR with neither
+  # job running and the required check waiting forever. A real job that
+  # deliberately has no stub goes on the script's NO_TWIN list with its
+  # reason. Fast, no network; unconditional, so merge-gate needs it.
+  #
+  # Local repro: `bash scripts/check-stub-twins.sh`
+  #   self-test: `bash scripts/check-stub-twins_test.sh`
+  # ====================================================================
+  stub-twin-check:
+    name: stub-twin-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run check-stub-twins self-test
+        run: bash scripts/check-stub-twins_test.sh
+
+      - name: Run check-stub-twins.sh
+        run: bash scripts/check-stub-twins.sh
+
+  # ====================================================================
   # Slice 393 (Q-6) — assertion-density advisory (INFORMATIONAL).
   #
   # Wires scripts/assertion-density.sh (shipped by slice 353) into CI as
@@ -3499,7 +3730,7 @@ jobs:
   assertion-density:
     name: QA · assertion density
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
@@ -3621,6 +3852,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: assertion-density-report
+          retention-days: 7
           path: |
             density.txt
             density.warn
@@ -3632,7 +3864,7 @@ jobs:
   assertion-density-stub:
     name: QA · assertion density
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -3767,10 +3999,12 @@ jobs:
     # list anywhere. Adding a job here is sufficient to have it asserted.
     #
     # Every entry must be a job whose `if:` is either unconditional or
-    # exactly `needs.changes.outputs.code == 'true'`. A job gated on a
-    # NARROWER filter (e.g. `changes.outputs.schemas`) would be `skipped`
-    # on an ordinary code PR and would brick the gate — verify the `if:`
-    # before adding one.
+    # gated on `needs.changes.outputs.code`, `.go` or `.web` (#2099). The
+    # step reads each job's tier from its own `if:` in this file, so a
+    # skipped leg is forgiven only when ITS tier resolved false. A job
+    # gated on a NARROWER filter (e.g. `changes.outputs.schemas`) would be
+    # `skipped` on an ordinary code PR and would brick the gate — verify
+    # the `if:` before adding one.
     needs:
       # Path-filter oracle. Asserted unconditionally: if this job does not
       # succeed, `code` is untrustworthy and the gate fails closed.
@@ -3796,6 +4030,7 @@ jobs:
       - cache-path-guard # cache-path-guard (unconditional, #1887)
       - integration-enrolment-check # integration-enrolment-check (unconditional, #1887)
       - merge-gate-needs-check # merge-gate-needs-check (unconditional, #1887)
+      - stub-twin-check # stub-twin-check (unconditional, #2099)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
@@ -3813,10 +4048,21 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
+      # #2099 — the gate reads each leg's tier from its `if:` in the
+      # workflow file itself, so there is no hand-kept job->tier list.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/workflows/ci.yml
+          sparse-checkout-cone-mode: false
+
       - name: Evaluate fail-closed merge-gate
         env:
           # Whether this PR/push touches Go-affecting paths (dorny/paths-filter).
           CODE: ${{ needs.changes.outputs.code }}
+          # #2099 tiers. A leg gated on `go` / `web` may be skipped only when
+          # that tier resolved to something other than 'true'.
+          TIER_GO: ${{ needs.changes.outputs.go }}
+          TIER_WEB: ${{ needs.changes.outputs.web }}
           # The path-filter oracle's own result. If this is not `success`,
           # CODE cannot be trusted and the gate fails closed.
           R_CHANGES: ${{ needs.changes.result }}
@@ -3854,14 +4100,16 @@ jobs:
           fi
 
           if [ "${CODE:-}" = "true" ]; then
-            echo "code='true' (Go-affecting PR) — EVERY leg in needs MUST be 'success'."
-            echo "A leg that is failure/cancelled/skipped fails this gate CLOSED (slice 474 hole)."
+            echo "code='true' (Go-affecting PR) — EVERY leg in needs MUST be 'success', except a"
+            echo "leg gated on a go/web tier that resolved false (#2099), which may be 'skipped'."
+            echo "A leg that is failure/cancelled, or skipped while its tier is 'true', fails this"
+            echo "gate CLOSED (slice 474 hole)."
           else
             echo "code='${CODE:-}' (no Go-affecting changes) — path-filtered legs may legitimately"
             echo "be 'skipped' (their slice-061 stub-twins post the green named checks)."
             echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes,"
             echo "migration-timestamps-check, coverage-excludes-check, cache-path-guard,"
-            echo "integration-enrolment-check, merge-gate-needs-check) still"
+            echo "integration-enrolment-check, merge-gate-needs-check, stub-twin-check) still"
             echo "MUST be 'success'. 'skipped' is the ONLY forgiven non-success result, and only here."
           fi
           echo "Asserting ${leg_count} legs derived from toJSON(needs)."
@@ -3896,11 +4144,59 @@ jobs:
               cache-path-guard)               echo "cache-path-guard" ;;
               integration-enrolment-check)    echo "integration-enrolment-check" ;;
               merge-gate-needs-check)         echo "merge-gate-needs-check" ;;
+              stub-twin-check)                echo "stub-twin-check" ;;
               *)                              echo "$1" ;;
             esac
           }
 
           pairs="$(printf '%s' "$NEEDS_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value.result)"' | sort)"
+
+          # #2099: "<job> <code|go|web>" for every job whose `if:` reads one of
+          # the three outputs. A job it cannot classify (unparseable file,
+          # no tier in its `if:`) falls back to `code`, the widest tier, so
+          # a parse failure can only refuse a skip, never grant one.
+          tiers="$(python3 - .github/workflows/ci.yml <<'PY' || true
+          import re, sys, yaml
+          jobs = yaml.safe_load(open(sys.argv[1]))["jobs"]
+          for name, job in jobs.items():
+              cond = job.get("if") if isinstance(job, dict) else None
+              m = re.search(r"needs\.changes\.outputs\.(code|go|web)\b", cond if isinstance(cond, str) else "")
+              if m:
+                  print(name, m.group(1))
+          PY
+          )"
+          tier_of() {
+            t="$(printf '%s\n' "$tiers" | awk -v j="$1" '$1 == j { print $2; exit }')"
+            echo "${t:-code}"
+          }
+          tier_value() {
+            case "$1" in
+              go)  echo "${TIER_GO:-}" ;;
+              web) echo "${TIER_WEB:-}" ;;
+              *)   echo "${CODE:-}" ;;
+            esac
+          }
+          echo "tiers: code='${CODE:-}' go='${TIER_GO:-}' web='${TIER_WEB:-}'"
+          if [ -z "$tiers" ]; then
+            echo "WARNING: tier parse of .github/workflows/ci.yml returned nothing;" >&2
+            echo "every leg falls back to tier 'code', so no go/web skip is forgiven." >&2
+          fi
+
+          # #2099: with code='true' the tiers must be well-formed, and at
+          # least one must be on. Anything else means `resolve` misbehaved,
+          # and forgiving skips against it would be unsafe.
+          if [ "${CODE:-}" = "true" ]; then
+            for tv in "${TIER_GO:-}" "${TIER_WEB:-}"; do
+              if [ "$tv" != "true" ] && [ "$tv" != "false" ]; then
+                echo "merge-gate is RED: code='true' but tiers are go='${TIER_GO:-}' web='${TIER_WEB:-}' (each must be true or false)." >&2
+                exit 1
+              fi
+            done
+            if [ "${TIER_GO}" != "true" ] && [ "${TIER_WEB}" != "true" ]; then
+              echo "merge-gate is RED: code='true' but both go and web tiers are false." >&2
+              exit 1
+            fi
+          fi
 
           fail=0
           while IFS="$(printf '\t')" read -r job result; do
@@ -3914,8 +4210,8 @@ jobs:
             name="$(display "$job")"
             if [ "$result" = "success" ]; then
               echo "  OK    ${job} — ${name}: ${result}"
-            elif [ "$result" = "skipped" ] && [ "${CODE:-}" != "true" ]; then
-              echo "  SKIP  ${job} — ${name}: ${result}  (allowed: no Go-affecting changes)"
+            elif [ "$result" = "skipped" ] && [ "$(tier_value "$(tier_of "$job")")" != "true" ]; then
+              echo "  SKIP  ${job} — ${name}: ${result}  (allowed: tier '$(tier_of "$job")' resolved false)"
             else
               echo "  BLOCK ${job} — ${name}: ${result}  <-- not 'success'" >&2
               fail=1

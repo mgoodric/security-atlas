@@ -46,9 +46,10 @@ describe("shouldShowAdminEntry", () => {
     );
   });
 
-  test("show: roles=['admin'] (AC-5 positive)", () => {
+  // #2216: /admin is super-admin only, so a tenant admin grant hides it.
+  test("hide: roles=['admin'] (tenant admin, not super-admin)", () => {
     expect(shouldShowAdminEntry({ is_admin: false, roles: ["admin"] })).toBe(
-      true,
+      false,
     );
   });
 
@@ -58,17 +59,17 @@ describe("shouldShowAdminEntry", () => {
     ).toBe(true);
   });
 
-  test("show: roles=['tenant_admin']", () => {
+  test("hide: roles=['tenant_admin']", () => {
     expect(
       shouldShowAdminEntry({ is_admin: false, roles: ["tenant_admin"] }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  test("show: one admin role among many is enough", () => {
+  test("show: super_admin among many roles is enough", () => {
     expect(
       shouldShowAdminEntry({
         is_admin: false,
-        roles: ["viewer", "admin", "control_owner"],
+        roles: ["viewer", "super_admin", "control_owner"],
       }),
     ).toBe(true);
   });
@@ -143,7 +144,7 @@ describe("shouldShowAdminEntry", () => {
     expect(
       shouldShowAdminEntry({
         is_admin: false,
-        roles: [42, null, "admin"],
+        roles: [42, null, "super_admin"],
       }),
     ).toBe(true);
   });

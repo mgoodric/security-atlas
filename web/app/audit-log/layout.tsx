@@ -42,14 +42,17 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { AppShell } from "@/components/shell/app-shell";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { fetchAdminMe } from "@/lib/api/self.server";
 
 // AUDIT_LOG_ROLES — the canonical set of roles permitted to reach
 // /audit-log. MUST match `internal/db/queries/unified_audit_log_role.sql`
 // (slice 124) — a divergence between this constant and that SQL is a
-// silent UI/backend gap. Treat as one literal in two languages.
-const AUDIT_LOG_ROLES = ["admin", "auditor", "grc_engineer"] as const;
+// silent UI/backend gap. Treat as one literal in two languages. Admins
+// reach it through `is_admin` (super-admin) only; a tenant `admin` grant
+// does not, matching the SQL (#2216, docs/audit-log/2216-admin-gate-decisions.md).
+const AUDIT_LOG_ROLES = ["auditor", "grc_engineer"] as const;
 type AuditLogRole = (typeof AUDIT_LOG_ROLES)[number];
 
 /**
@@ -95,5 +98,7 @@ export default async function AuditLogLayout({
   if (!canReachAuditLog(body)) {
     redirect("/dashboard?error=admin-only");
   }
-  return <>{children}</>;
+  // #2080 — rendered inside the app shell; before this the audit log was
+  // a bare page with no top bar or sidebar.
+  return <AppShell>{children}</AppShell>;
 }

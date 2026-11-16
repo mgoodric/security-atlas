@@ -76,6 +76,31 @@ func ResolveImplicitTenant(ctx context.Context, q Querier) (TenantRef, error) {
 	return pickImplicitTenant(tenants)
 }
 
+// ResolveImplicitTenantID is ResolveImplicitTenant for the anonymous login
+// path, which needs only the id (#1913). It reads at most two ids rather
+// than every tenant's id, slug and name, so an unauthenticated request
+// costs one bounded read however many tenants exist. Errors are
+// ResolveImplicitTenant's; an *AmbiguousTenantError carries the two ids it
+// read, without slug or name. q must be a BYPASSRLS connection.
+func ResolveImplicitTenantID(ctx context.Context, q Querier) (uuid.UUID, error) {
+	rows, err := q.Query(ctx,
+		`SELECT id FROM tenants WHERE id <> $1 ORDER BY created_at, id LIMIT 2`,
+		uuid.Nil)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("tenancy: list tenant ids: %w", err)
+	}
+	tenants, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (TenantRef, error) {
+		var t TenantRef
+		err := r.Scan(&t.ID)
+		return t, err
+	})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("tenancy: scan tenant ids: %w", err)
+	}
+	ref, err := pickImplicitTenant(tenants)
+	return ref.ID, err
+}
+
 func pickImplicitTenant(tenants []TenantRef) (TenantRef, error) {
 	switch len(tenants) {
 	case 0:

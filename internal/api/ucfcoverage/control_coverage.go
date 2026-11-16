@@ -15,6 +15,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 )
 
@@ -128,6 +129,7 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 	var (
 		controlOK bool
 		ctrl      dbx.GetControlByIDRow
+		demo      demoprov.Set
 	)
 	if err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		got, err := q.GetControlByID(ctx, dbx.GetControlByIDParams{
@@ -142,7 +144,9 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		}
 		ctrl = got
 		controlOK = true
-		return nil
+		// #2043: badge a control the in-place demo seed added.
+		demo, err = demoprov.Lookup(ctx, q, demoprov.TableControls, []uuid.UUID{cid})
+		return err
 	}); err != nil {
 		return coverageView{}, false, fmt.Errorf("lookup control: %w", err)
 	}
@@ -154,6 +158,7 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 	if err != nil {
 		return coverageView{}, false, err
 	}
+	cw.Demo = demo.Has(cid)
 	view := coverageView{Control: cw}
 	if !ctrl.ScfAnchorID.Valid {
 		// Control exists but isn't anchored.
@@ -176,23 +181,17 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 			view.Requirements = []requirementForAnchorWire{}
 			return view, true, nil
 		}
-		got, err := h.q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
-			ScfAnchorID:        ctrl.ScfAnchorID,
-			FrameworkVersionID: fv.ID,
-		})
+		got, err := h.listRequirementsForAnchor(ctx, ctrl.ScfAnchorID, &fv.ID)
 		if err != nil {
 			return coverageView{}, false, fmt.Errorf("list requirements for control (pinned): %w", err)
 		}
-		reqs = mapPinnedRequirements(got)
+		reqs = got
 	} else {
-		// slice 484 (AC-5 / ADR 0019 §4): absent a pin, default to each
-		// framework's CURRENT version — never bleed a legacy/superseded
-		// version's requirements into a control's coverage view (P0-484-5).
-		got, err := h.q.ListRequirementsForAnchorCurrentVersions(ctx, ctrl.ScfAnchorID)
+		got, err := h.listRequirementsForAnchor(ctx, ctrl.ScfAnchorID, nil)
 		if err != nil {
 			return coverageView{}, false, fmt.Errorf("list requirements for control (current): %w", err)
 		}
-		reqs = mapCurrentVersionRequirements(got)
+		reqs = got
 	}
 
 	// Slice 256 — per-row weighted Coverage column.
@@ -309,12 +308,16 @@ func controlWireFromControlRow(c dbx.GetControlByIDRow) (controlWire, error) {
 		ImplementationType: string(c.ImplementationType),
 		OwnerRole:          c.OwnerRole,
 		LifecycleState:     string(c.LifecycleState),
+		AnchorFit:          c.AnchorFit,
 	}
 	if c.ScfID != nil {
 		w.SCFID = *c.ScfID
 	}
 	if c.FreshnessClass != nil {
 		w.FreshnessClass = *c.FreshnessClass
+	}
+	if c.AnchorFitNote != nil {
+		w.AnchorFitNote = *c.AnchorFitNote
 	}
 	if len(c.ExternalRefs) > 0 {
 		if err := json.Unmarshal(c.ExternalRefs, &w.ExternalRefs); err != nil {

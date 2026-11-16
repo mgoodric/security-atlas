@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -214,7 +215,7 @@ func (s *Store) Disposition(ctx context.Context, claimID uuid.UUID, toStatus, ac
 // evidence ledger. The claim stays a claim (is_vendor_claim + claim_status are
 // untouched); mapping only sets the crosswalk (invariant #2 / #7 / P0-512-1).
 //
-// scfAnchorID is the SCF code (e.g. "IAC-06"), validated against the bundled
+// scfAnchorID is the SCF code (e.g. "IAC-37"), validated against the bundled
 // catalog. actor is the mapping operator's credential id. A claim id that does
 // not resolve in the tenant returns ErrClaimNotFound; an scf_id that does not
 // resolve to a bundled anchor returns ErrAnchorNotFound.
@@ -228,6 +229,12 @@ func (s *Store) MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID
 			if errors.Is(qerr, pgx.ErrNoRows) {
 				return ErrAnchorNotFound
 			}
+			return qerr
+		}
+		// The code was just validated in the current release, so that is
+		// the release the claim now names it in (#1771).
+		rel, qerr := scfrelease.Lookup(ctx, q, "")
+		if qerr != nil {
 			return qerr
 		}
 
@@ -247,6 +254,7 @@ func (s *Store) MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID
 			TenantID:    pgUUID(tenantID),
 			ID:          pgUUID(claimID),
 			ScfAnchorID: &anchorCopy,
+			ScfRelease:  &rel.Version,
 		})
 		if qerr != nil {
 			return qerr

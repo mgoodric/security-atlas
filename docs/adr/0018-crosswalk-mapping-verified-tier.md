@@ -27,16 +27,16 @@ The platform's confidence rollup (slice 482) and, downstream, board/audit narrat
 - `source_attribution` (provenance): _where did this mapping come from?_ — `scf_official` | `community_draft` (unchanged).
 - `mapping_tier` (trust): _how trusted is it now?_ — `draft` | `under_review` | `verified` | `rejected`.
 
-The tier ladder is the **three-state lifecycle plus a rejected terminal**:
+The tier ladder is the **three-state lifecycle plus a rejected terminal** (reopenable to draft, see the #1849 amendment):
 
 ```
 [draft] --claim--> [under_review] --verify--> [verified]
    |                     |
-   +---------------------+--reject--> [rejected]   (terminal)
+   +---------------------+--reject--> [rejected]   (terminal; reopenable to draft, see the #1849 amendment)
 ```
 
 - `under_review` is an explicit "a reviewer has claimed this mapping" state between `draft` and `verified`. We chose the three-state ladder over a bare `draft → verified` because the intermediate state makes "who is reviewing what" legible and produces a richer audit trail — worth the small extra ceremony for a trust signal that feeds audit-binding narratives.
-- `rejected` is a terminal state reachable from `draft` or `under_review` (a mapping judged wrong).
+- `rejected` is a terminal state reachable from `draft` or `under_review` (a mapping judged wrong) (reopenable to draft, see the #1849 amendment).
 - **No skip-to-verified** for a `community_draft` edge — it must pass through `under_review`. The state machine validates legal transitions server-side.
 
 ### 2. Seed policy
@@ -94,7 +94,8 @@ build-decision record is [`docs/audit-log/483-mapping-tier-governance-decisions.
 "<target>", "note": "<optional>" }`; `{id}` is the `fw_to_scf_edges.id`. The
   reviewer id is taken from the verified admin JWT subject, never the body.
   Status mapping: 200 success / 403 non-admin / 404 unknown edge / 422 illegal
-  transition (the `draft → verified` skip + moves out of a terminal tier) / 400
+  transition (the `draft → verified` skip + moves out of a terminal tier; `rejected` is
+  reopenable to draft, see the #1849 amendment) / 400
   malformed input. (Decisions log D2.)
 
 Migration: `migrations/sql/20260612080000_crosswalk_mapping_tier.sql`

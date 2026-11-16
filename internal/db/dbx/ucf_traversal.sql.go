@@ -56,12 +56,17 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     a.scf_id,
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
 FROM effective_fw_to_scf_edges e
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
@@ -76,7 +81,11 @@ type ListAnchorsForRequirementWithEdgesRow struct {
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin            string                     `json:"origin"`
 	Rationale         string                     `json:"rationale"`
+	OverlaySourceRef  *string                    `json:"overlay_source_ref"`
+	OverlayCreatedBy  *string                    `json:"overlay_created_by"`
+	OverlayCreatedAt  pgtype.Timestamptz         `json:"overlay_created_at"`
 	ScfID             string                     `json:"scf_id"`
 	Family            string                     `json:"family"`
 	AnchorTitle       string                     `json:"anchor_title"`
@@ -107,6 +116,8 @@ type ListAnchorsForRequirementWithEdgesRow struct {
 // non-`no_relationship` STRM edge to an SCF anchor, joined to scf_anchors
 // so callers get scf_id + family + title in one round-trip. Sorted by
 // strength DESC (strongest matches first) then scf_id (stable order).
+// #1800: an overlay row's source, author and date, for the "org mapping"
+// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 func (q *Queries) ListAnchorsForRequirementWithEdges(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListAnchorsForRequirementWithEdgesRow, error) {
 	rows, err := q.db.Query(ctx, listAnchorsForRequirementWithEdges, frameworkRequirementID)
 	if err != nil {
@@ -123,7 +134,11 @@ func (q *Queries) ListAnchorsForRequirementWithEdges(ctx context.Context, framew
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
+			&i.OverlaySourceRef,
+			&i.OverlayCreatedBy,
+			&i.OverlayCreatedAt,
 			&i.ScfID,
 			&i.Family,
 			&i.AnchorTitle,
@@ -147,12 +162,17 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     a.scf_id,
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
 FROM effective_fw_to_scf_edges e
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
@@ -173,7 +193,11 @@ type ListAnchorsForRequirementWithEdgesByFrameworkVersionRow struct {
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin            string                     `json:"origin"`
 	Rationale         string                     `json:"rationale"`
+	OverlaySourceRef  *string                    `json:"overlay_source_ref"`
+	OverlayCreatedBy  *string                    `json:"overlay_created_by"`
+	OverlayCreatedAt  pgtype.Timestamptz         `json:"overlay_created_at"`
 	ScfID             string                     `json:"scf_id"`
 	Family            string                     `json:"family"`
 	AnchorTitle       string                     `json:"anchor_title"`
@@ -185,6 +209,8 @@ type ListAnchorsForRequirementWithEdgesByFrameworkVersionRow struct {
 // SCF framework_version_id so callers can pin to a specific SCF
 // release. When no SCF release is pinned, callers use the unfiltered
 // variant above.
+// #1800: an overlay row's source, author and date, for the "org mapping"
+// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 func (q *Queries) ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx context.Context, arg ListAnchorsForRequirementWithEdgesByFrameworkVersionParams) ([]ListAnchorsForRequirementWithEdgesByFrameworkVersionRow, error) {
 	rows, err := q.db.Query(ctx, listAnchorsForRequirementWithEdgesByFrameworkVersion, arg.FrameworkRequirementID, arg.FrameworkVersionID)
 	if err != nil {
@@ -201,7 +227,11 @@ func (q *Queries) ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx conte
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
+			&i.OverlaySourceRef,
+			&i.OverlayCreatedBy,
+			&i.OverlayCreatedAt,
 			&i.ScfID,
 			&i.Family,
 			&i.AnchorTitle,
@@ -306,7 +336,11 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -316,6 +350,7 @@ SELECT
     f.slug             AS framework_slug,
     f.name             AS framework_name
 FROM effective_fw_to_scf_edges e
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
@@ -332,7 +367,11 @@ type ListRequirementsForAnchorRow struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 	Rationale              string                     `json:"rationale"`
+	OverlaySourceRef       *string                    `json:"overlay_source_ref"`
+	OverlayCreatedBy       *string                    `json:"overlay_created_by"`
+	OverlayCreatedAt       pgtype.Timestamptz         `json:"overlay_created_at"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
 	RequirementBody        string                     `json:"requirement_body"`
@@ -348,6 +387,8 @@ type ListRequirementsForAnchorRow struct {
 // callers see the full natural key (slug + version + code) in one
 // round-trip. Sorted by framework slug + version + code for stable
 // output. `no_relationship` edges excluded.
+// #1800: an overlay row's source, author and date, for the "org mapping"
+// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 func (q *Queries) ListRequirementsForAnchor(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorRow, error) {
 	rows, err := q.db.Query(ctx, listRequirementsForAnchor, scfAnchorID)
 	if err != nil {
@@ -364,7 +405,11 @@ func (q *Queries) ListRequirementsForAnchor(ctx context.Context, scfAnchorID pgt
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
+			&i.OverlaySourceRef,
+			&i.OverlayCreatedBy,
+			&i.OverlayCreatedAt,
 			&i.Code,
 			&i.RequirementTitle,
 			&i.RequirementBody,
@@ -392,7 +437,11 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -402,6 +451,7 @@ SELECT
     f.slug             AS framework_slug,
     f.name             AS framework_name
 FROM effective_fw_to_scf_edges e
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
@@ -424,7 +474,11 @@ type ListRequirementsForAnchorByFrameworkVersionRow struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 	Rationale              string                     `json:"rationale"`
+	OverlaySourceRef       *string                    `json:"overlay_source_ref"`
+	OverlayCreatedBy       *string                    `json:"overlay_created_by"`
+	OverlayCreatedAt       pgtype.Timestamptz         `json:"overlay_created_at"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
 	RequirementBody        string                     `json:"requirement_body"`
@@ -438,6 +492,8 @@ type ListRequirementsForAnchorByFrameworkVersionRow struct {
 // AC-2 + AC-4 (framework_version pinning). Same as
 // ListRequirementsForAnchor but filtered to a specific framework
 // version id. Used when the caller passes ?framework_version=slug:version.
+// #1800: an overlay row's source, author and date, for the "org mapping"
+// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 func (q *Queries) ListRequirementsForAnchorByFrameworkVersion(ctx context.Context, arg ListRequirementsForAnchorByFrameworkVersionParams) ([]ListRequirementsForAnchorByFrameworkVersionRow, error) {
 	rows, err := q.db.Query(ctx, listRequirementsForAnchorByFrameworkVersion, arg.ScfAnchorID, arg.FrameworkVersionID)
 	if err != nil {
@@ -454,7 +510,11 @@ func (q *Queries) ListRequirementsForAnchorByFrameworkVersion(ctx context.Contex
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
+			&i.OverlaySourceRef,
+			&i.OverlayCreatedBy,
+			&i.OverlayCreatedAt,
 			&i.Code,
 			&i.RequirementTitle,
 			&i.RequirementBody,
@@ -482,7 +542,11 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -492,6 +556,7 @@ SELECT
     f.slug             AS framework_slug,
     f.name             AS framework_name
 FROM effective_fw_to_scf_edges e
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
@@ -509,7 +574,11 @@ type ListRequirementsForAnchorCurrentVersionsRow struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 	Rationale              string                     `json:"rationale"`
+	OverlaySourceRef       *string                    `json:"overlay_source_ref"`
+	OverlayCreatedBy       *string                    `json:"overlay_created_by"`
+	OverlayCreatedAt       pgtype.Timestamptz         `json:"overlay_created_at"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
 	RequirementBody        string                     `json:"requirement_body"`
@@ -528,6 +597,8 @@ type ListRequirementsForAnchorCurrentVersionsRow struct {
 // A pinned read (ListRequirementsForAnchorByFrameworkVersion) can still reach a
 // legacy version when explicitly requested (ADR 0019 §4 — legacy readable when
 // pinned).
+// #1800: an overlay row's source, author and date, for the "org mapping"
+// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 func (q *Queries) ListRequirementsForAnchorCurrentVersions(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorCurrentVersionsRow, error) {
 	rows, err := q.db.Query(ctx, listRequirementsForAnchorCurrentVersions, scfAnchorID)
 	if err != nil {
@@ -544,7 +615,11 @@ func (q *Queries) ListRequirementsForAnchorCurrentVersions(ctx context.Context, 
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
+			&i.OverlaySourceRef,
+			&i.OverlayCreatedBy,
+			&i.OverlayCreatedAt,
 			&i.Code,
 			&i.RequirementTitle,
 			&i.RequirementBody,

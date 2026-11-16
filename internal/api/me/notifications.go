@@ -8,7 +8,8 @@
 //	GET   /v1/me/notifications                    caller's notifications (paged)
 //	PATCH /v1/me/notifications/{id}/read          mark a notification read
 //
-// Both endpoints scope to caller.UserID at the query layer; RLS is the
+// Both endpoints scope to the caller's users(id), resolved through
+// credstore.CallerUserID (#2183), at the query layer; RLS is the
 // defense-in-depth layer. The upstream authz middleware (slice 035)
 // allows any authenticated role to hit /v1/me; the query layer ensures
 // the data is the caller's own.
@@ -24,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
@@ -84,8 +86,15 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if cred.UserID == "" {
-		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
+	// Notifications are addressed to a users(id) (#2183). A caller that is
+	// not a user has none: an empty envelope, like /v1/me/acknowledgments.
+	userID, isUser := credstore.CallerUserID(cred)
+	if !isUser {
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+			"notifications": []notificationWire{},
+			"count":         0,
+			"unread_count":  0,
+		})
 		return
 	}
 
@@ -114,7 +123,7 @@ func (h *NotificationsHandler) List(w http.ResponseWriter, r *http.Request) {
 		offset = int32(n)
 	}
 
-	rows, unread, err := h.store.ListForRecipient(ctx, cred.UserID, limit, offset)
+	rows, unread, err := h.store.ListForRecipient(ctx, userID.String(), limit, offset)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list notifications", err)
 		return
@@ -141,8 +150,9 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if cred.UserID == "" {
-		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
+	userID, isUser := credstore.CallerUserID(cred)
+	if !isUser {
+		httpresp.WriteError(w, http.StatusNotFound, "notification not found")
 		return
 	}
 	raw := chi.URLParam(r, "id")
@@ -155,7 +165,7 @@ func (h *NotificationsHandler) MarkRead(w http.ResponseWriter, r *http.Request) 
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	n, err := h.store.MarkRead(ctx, id, cred.UserID)
+	n, err := h.store.MarkRead(ctx, id, userID.String())
 	if err != nil {
 		if errors.Is(err, notifications.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "notification not found")

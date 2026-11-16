@@ -128,7 +128,7 @@ func TestRowToQuestion_ScfAnchorPointerEmptyStringSetsNeedsMapping(t *testing.T)
 }
 
 func TestRowToQuestion_ScfAnchorPointerPopulatedClearsNeedsMapping(t *testing.T) {
-	a := "IAC-06"
+	a := "IAC-37"
 	row := dbx.QuestionnaireQuestion{
 		ID:          pgUUID("22222222-3333-4444-5555-666666666666"),
 		Code:        "Q-03",
@@ -139,7 +139,7 @@ func TestRowToQuestion_ScfAnchorPointerPopulatedClearsNeedsMapping(t *testing.T)
 	if got.NeedsMapping {
 		t.Fatal("populated ScfAnchorID must NOT set NeedsMapping")
 	}
-	if got.ScfAnchorID != "IAC-06" {
-		t.Fatalf("expected IAC-06, got %q", got.ScfAnchorID)
+	if got.ScfAnchorID != "IAC-37" {
+		t.Fatalf("expected IAC-37, got %q", got.ScfAnchorID)
 	}
 }

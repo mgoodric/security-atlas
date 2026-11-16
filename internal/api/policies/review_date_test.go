@@ -111,6 +111,25 @@ func TestSetReviewDate_BadRequests(t *testing.T) {
 	}
 }
 
+// TestDiscardDraft_BadRequests covers DELETE /v1/policies/{id} (#1987)
+// rejections that return before any store call.
+func TestDiscardDraft_BadRequests(t *testing.T) {
+	t.Parallel()
+	h := New(nil)
+
+	rec := httptest.NewRecorder()
+	h.DiscardDraft(rec, reviewDateRequest(t, "not-a-uuid", ""))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad id: status %d, want 400 (%s)", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.DiscardDraft(rec, httptest.NewRequest(http.MethodDelete, "/v1/policies/x", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no tenant: status %d, want 401", rec.Code)
+	}
+}
+
 func TestListPolicies_BadReviewFilter(t *testing.T) {
 	t.Parallel()
 	h := New(nil)

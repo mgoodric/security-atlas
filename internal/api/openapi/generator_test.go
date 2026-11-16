@@ -210,6 +210,37 @@ func TestParameterExtraction(t *testing.T) {
 	}
 }
 
+func TestSoAExportOperationDocumentsContract(t *testing.T) {
+	var out bytes.Buffer
+	if err := Generate(&out, RouteSpecs); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	yaml := out.String()
+	start := strings.Index(yaml, "  /v1/framework-scopes/applicability/export:")
+	if start < 0 {
+		t.Fatal("spec missing /v1/framework-scopes/applicability/export")
+	}
+	op := yaml[start:]
+	if end := strings.Index(op[1:], "\n  /"); end >= 0 {
+		op = op[:end+1]
+	}
+	for _, want := range []string{
+		"        - name: framework_version",
+		"        - name: format",
+		"            enum: [csv, xlsx]",
+		"        - name: revision",
+		"        - name: as_of",
+		"            format: date-time",
+		"            text/csv:",
+		"            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:",
+		"current\n            control results",
+	} {
+		if !strings.Contains(op, want) {
+			t.Errorf("SoA export contract missing marker: %q", want)
+		}
+	}
+}
+
 func TestSearchOperationDocumentsContract(t *testing.T) {
 	var out bytes.Buffer
 	if err := Generate(&out, RouteSpecs); err != nil {
@@ -222,14 +253,16 @@ func TestSearchOperationDocumentsContract(t *testing.T) {
 		"          in: query",
 		"            minLength: 2",
 		"        - name: types",
-		"            pattern: \"^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$\"",
+		"            pattern: \"^(controls|risks|policies|evidence|anchors)(,(controls|risks|policies|evidence|anchors))*$\"",
 		"        - name: limit",
 		"            maximum: 50",
 		"        \"200\":",
 		"                $ref: \"#/components/schemas/SearchResponse\"",
 		"    SearchResponse:",
+		"      required: [hits, count, groups, partial_types]",
+		"    SearchGroup:",
 		"    SearchHit:",
-		"          enum: [anchors, controls, risks, evidence]",
+		"          enum: [controls, risks, policies, evidence, anchors]",
 		"        relevance_score:",
 	} {
 		if !strings.Contains(yaml, want) {

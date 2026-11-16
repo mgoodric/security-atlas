@@ -65,32 +65,28 @@ WHERE tenant_id = @tenant_id
 ORDER BY criticality DESC, name ASC;
 
 -- name: ListOverdueVendors :many
--- AC-4 overdue calc — vendors whose last_review_date + cadence is older than
--- the cutoff date. NULL last_review_date means "never reviewed" which always
--- counts as overdue (a vendor with no review on file is by definition past
--- due). Cadence -> interval mapping happens with a CASE in SQL so the query
--- plan is stable. Cutoff is passed as DATE so the caller controls "now"
--- (testability) and timezone semantics (vendor reviews are date-granular,
--- not timestamp-granular).
+-- AC-4 overdue calc. A vendor is overdue once the UTC day its review is due
+-- has ended: vendor_review_due_date(...) < cutoff (#2232, the
+-- internal/duedate rule). The due date is last_review_date + cadence, or for
+-- a vendor never reviewed the UTC date of created_at plus the tenant's
+-- vendor_initial_review_days (default 30 when the tenant has no row, #2061).
+-- CountVendorsForBurndown, the compliance calendar and vendor.IsOverdueAsOf
+-- apply the same rule. Cutoff is passed as DATE so the caller controls "now"
+-- (testability) and the day it falls on (vendor reviews are date-granular).
 SELECT * FROM vendors
 WHERE tenant_id = @tenant_id
   AND (sqlc.narg('criticality')::vendor_criticality IS NULL
        OR criticality = sqlc.narg('criticality'))
-  AND (
-        last_review_date IS NULL
-     OR last_review_date + (
-            CASE review_cadence
-                WHEN 'monthly'   THEN INTERVAL '1 month'
-                WHEN 'quarterly' THEN INTERVAL '3 months'
-                WHEN 'biannual'  THEN INTERVAL '6 months'
-                WHEN 'annual'    THEN INTERVAL '1 year'
-            END
-        ) < @cutoff::date
-      )
-ORDER BY last_review_date ASC NULLS FIRST, name ASC;
+  AND vendor_review_due_date(
+          last_review_date, review_cadence, created_at,
+          COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = @tenant_id), 30)
+      ) < @cutoff::date
+ORDER BY last_review_date ASC NULLS FIRST, created_at ASC, name ASC;
 
 -- name: CountVendorsForBurndown :many
--- AC-3 burndown: returns total + overdue counts per criticality band. Used
+-- AC-3 burndown: returns total + overdue counts per criticality band. The
+-- overdue rule is ListOverdueVendors' (vendor_review_due_date before the
+-- cutoff day, #2232), so the counts match the overdue list. Used
 -- by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 -- Returns one row per criticality present in the result set; empty bands are
 -- not included (callers fill in zero where needed).
@@ -98,14 +94,9 @@ SELECT
     criticality,
     COUNT(*)::bigint AS total_count,
     COUNT(*) FILTER (
-        WHERE last_review_date IS NULL
-           OR last_review_date + (
-                  CASE review_cadence
-                      WHEN 'monthly'   THEN INTERVAL '1 month'
-                      WHEN 'quarterly' THEN INTERVAL '3 months'
-                      WHEN 'biannual'  THEN INTERVAL '6 months'
-                      WHEN 'annual'    THEN INTERVAL '1 year'
-                  END
+        WHERE vendor_review_due_date(
+                  last_review_date, review_cadence, created_at,
+                  COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = @tenant_id), 30)
               ) < @cutoff::date
     )::bigint AS overdue_count
 FROM vendors

@@ -24,6 +24,7 @@
 
 import { cookies } from "next/headers";
 
+import { parseTheme, type Theme } from "@/app/(authed)/settings/theme";
 import { deriveDisplayName, deriveInitials } from "@/lib/display-name";
 import { fetchSelfProfile } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
@@ -31,6 +32,7 @@ import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 interface MeBody {
   display_name?: unknown;
   email?: unknown;
+  theme?: unknown;
 }
 
 /**
@@ -56,7 +58,25 @@ function asString(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-export async function UserAvatar() {
+// `theme` is the user's stored /settings theme (#2142), or null when they
+// have never chosen one or have no users row; `<ThemeServerSync>` reads it.
+export type UserIdentity = {
+  name: string;
+  initials: string;
+  theme: Theme | null;
+};
+
+function storedTheme(v: unknown): Theme | null {
+  return typeof v === "string" && parseTheme(v) === v ? v : null;
+}
+
+/**
+ * #2213 — the operator's display name and initials, or `null` on any
+ * failure. Split out of `<UserAvatar>` so the top bar reads `/v1/me`
+ * once and hands the result to both the inline avatar (from `lg` up)
+ * and the account menu (below `lg`).
+ */
+export async function fetchUserIdentity(): Promise<UserIdentity | null> {
   const me = await fetchMe();
   if (!me) return null;
 
@@ -67,7 +87,16 @@ export async function UserAvatar() {
   const name = deriveDisplayName(profile);
   if (name.length === 0) return null;
 
-  const initials = deriveInitials(name);
+  return {
+    name,
+    initials: deriveInitials(name),
+    theme: storedTheme(me.theme),
+  };
+}
+
+export function UserAvatar({ identity }: { identity: UserIdentity | null }) {
+  if (!identity) return null;
+  const { name, initials } = identity;
 
   return (
     <div

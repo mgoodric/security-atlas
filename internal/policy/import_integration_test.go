@@ -299,10 +299,10 @@ func TestImport_NextVersionUsesNormalWorkflow(t *testing.T) {
 	if _, err := store.Publish(ctx, draft.ID, policy.PublishInput{NewVersion: "2.0", PublishedBy: "key_approver"}); !errors.Is(err, policy.ErrWrongState) {
 		t.Fatalf("publish of a draft: want ErrWrongState, got %v", err)
 	}
-	if _, err := store.SubmitForReview(ctx, draft.ID, "key_author"); err != nil {
+	if _, err := store.SubmitForReview(ctx, draft.ID, submitterPerson); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if _, err := store.Approve(ctx, draft.ID, "key_approver"); err != nil {
+	if _, err := store.Approve(ctx, draft.ID, approverPerson); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	published, err := store.Publish(ctx, draft.ID, policy.PublishInput{NewVersion: "2.0", PublishedBy: "key_approver"})
@@ -364,10 +364,10 @@ func TestImport_SameVersionAsPredecessorRejectedAtPublish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := store.SubmitForReview(ctx, draft.ID, "key_author"); err != nil {
+	if _, err := store.SubmitForReview(ctx, draft.ID, submitterPerson); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Approve(ctx, draft.ID, "key_approver"); err != nil {
+	if _, err := store.Approve(ctx, draft.ID, approverPerson); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Publish(ctx, draft.ID, policy.PublishInput{NewVersion: "1.0", PublishedBy: "key_approver"}); !errors.Is(err, policy.ErrInvalidVersion) {

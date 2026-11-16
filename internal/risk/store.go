@@ -153,11 +153,19 @@ func isRuleGeneratedScore(inherent []byte) bool {
 // Risk is the domain shape returned from store calls. It mirrors the sqlc Risk
 // but exposes more idiomatic Go types (uuid.UUID, time.Time, json.RawMessage).
 type Risk struct {
-	ID            uuid.UUID
-	TenantID      uuid.UUID
-	Title         string
-	Description   string
-	Category      dbx.RiskCategory
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Title       string
+	Description string
+	Category    dbx.RiskCategory
+	// CategoryID references the tenant's own category (#1809), the one
+	// whose slug equals Category.
+	CategoryID uuid.UUID
+	// CategorySlug and CategoryName are read from the category CategoryID
+	// references (#1812), not from the enum. Every Store read that returns
+	// a Risk sets them.
+	CategorySlug  string
+	CategoryName  string
 	Methodology   dbx.RiskMethodology
 	InherentScore []byte
 	Treatment     dbx.RiskTreatment
@@ -179,14 +187,21 @@ type Risk struct {
 	Level     dbx.RiskLevel
 	OrgUnitID *uuid.UUID
 	Themes    []string
+	// ChildCount is how many child risks roll up into this one (#2060).
+	// Non-zero marks a roll-up. Only List sets it; other reads leave it 0.
+	ChildCount int
 }
 
 // CreateInput is the API-shape for POST /v1/risks. The store re-validates
 // every rule the handler should have validated already; defense in depth.
 type CreateInput struct {
-	Title         string
-	Description   string
-	Category      dbx.RiskCategory
+	Title       string
+	Description string
+	Category    dbx.RiskCategory
+	// CategoryRef names the risk's category by slug or by id (#1809). When
+	// empty, Category is used as the slug. Either way the risk is written
+	// with both the tenant's category reference and the matching enum.
+	CategoryRef   string
 	Methodology   dbx.RiskMethodology
 	InherentScore []byte
 	// Treatment defaults to untreated when empty: no create path records a
@@ -260,13 +275,22 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		if err != nil {
 			return err
 		}
+		categoryRef := in.CategoryRef
+		if categoryRef == "" {
+			categoryRef = string(in.Category)
+		}
+		category, categoryEnum, err := resolveCategory(ctx, q, tenantID, categoryRef)
+		if err != nil {
+			return err
+		}
 		id := uuid.New()
 		row, err := q.CreateRisk(ctx, dbx.CreateRiskParams{
 			ID:                  pgUUID(id),
 			TenantID:            pgUUID(tenantID),
 			Title:               in.Title,
 			Description:         in.Description,
-			Category:            in.Category,
+			Category:            categoryEnum,
+			CategoryID:          pgUUID(category.ID),
 			Methodology:         in.Methodology,
 			InherentScore:       in.InherentScore,
 			Treatment:           in.Treatment,
@@ -294,6 +318,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			}
 		}
 		out = riskFromRow(row)
+		out.CategorySlug, out.CategoryName = category.Slug, category.Name
 		out.LinkedControlIDs = append([]uuid.UUID(nil), in.LinkedControlIDs...)
 		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
 	})
@@ -315,6 +340,9 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Risk, error) {
 			return fmt.Errorf("get risk: %w", err)
 		}
 		out = riskFromRow(row)
+		if err := withCategoryNames(ctx, q, tenantID, &out); err != nil {
+			return err
+		}
 		links, err := q.ListRiskControlLinks(ctx, dbx.ListRiskControlLinksParams{
 			TenantID: pgUUID(tenantID),
 			RiskID:   pgUUID(id),
@@ -371,8 +399,12 @@ var ErrInvalidSort = errors.New("risk: sort must be empty or 'residual,age'")
 // ListFilter narrows and orders the result set of List. Empty filter
 // fields are ignored; an empty Sort keeps the default ListRisks order.
 type ListFilter struct {
-	Treatment   dbx.RiskTreatment
-	Category    dbx.RiskCategory
+	Treatment dbx.RiskTreatment
+	// Categories, when non-empty, restricts to risks in any of these
+	// categories, each named by slug or id (#1812). Archived categories
+	// are valid filters. An unknown one is an UnknownCategoryError naming
+	// every slug the tenant has.
+	Categories  []string
 	Methodology dbx.RiskMethodology
 	// Sort selects the result ordering. Slice 066 (AC-3): additive — the
 	// slice-019 callers that leave it zero get the unchanged default order.
@@ -386,6 +418,10 @@ type ListFilter struct {
 	// org_unit. Slice 067 (AC-4): additive — the other half of the
 	// heatmap-cell-click filter (a cell is a (theme, org_unit) pair).
 	OrgUnitID *uuid.UUID
+	// IncludeRollUps keeps roll-up parents (risks with at least one child
+	// linked) in the result (#2060). Left false, List drops them so a
+	// parent is never counted beside the children it summarises.
+	IncludeRollUps bool
 }
 
 // List returns all risks for the active tenant, optionally filtered and
@@ -395,16 +431,45 @@ type ListFilter struct {
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 	var out []Risk
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		if len(filter.Categories) > 0 {
+			// A tenant with no risks may not have its seeded categories
+			// yet; filtering by `operational` must still be valid.
+			if err := q.SeedRiskCategories(ctx, pgUUID(tenantID)); err != nil {
+				return fmt.Errorf("seed risk categories: %w", err)
+			}
+		}
+		byID, err := categoriesByID(ctx, q, tenantID)
+		if err != nil {
+			return err
+		}
+		wantCategory, err := categoryFilter(byID, filter.Categories)
+		if err != nil {
+			return err
+		}
 		rows, err := q.ListRisks(ctx, pgUUID(tenantID))
 		if err != nil {
 			return fmt.Errorf("list risks: %w", err)
 		}
+		counts, err := q.ListRiskChildCountsForTenant(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("list risk child counts: %w", err)
+		}
+		childCount := make(map[uuid.UUID]int, len(counts))
+		for _, c := range counts {
+			childCount[uuid.UUID(c.ParentRiskID.Bytes)] = int(c.ChildCount)
+		}
 		out = make([]Risk, 0, len(rows))
 		for _, r := range rows {
+			n := childCount[uuid.UUID(r.ID.Bytes)]
+			if n > 0 && !filter.IncludeRollUps {
+				continue
+			}
 			if filter.Treatment != "" && r.Treatment != filter.Treatment {
 				continue
 			}
-			if filter.Category != "" && r.Category != filter.Category {
+			// After the roll-up exclusion above, so count still equals the
+			// rows returned (#2060).
+			if wantCategory != nil && !wantCategory[uuid.UUID(r.CategoryID.Bytes)] {
 				continue
 			}
 			if filter.Methodology != "" && r.Methodology != filter.Methodology {
@@ -424,7 +489,10 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 					continue
 				}
 			}
-			out = append(out, riskFromRow(r))
+			rk := riskFromRow(r)
+			setCategoryNames(byID, &rk)
+			rk.ChildCount = n
+			out = append(out, rk)
 		}
 		if filter.Sort == SortResidualAge {
 			sortByResidualThenAge(out)
@@ -464,25 +532,36 @@ func sortByResidualThenAge(risks []Risk) {
 }
 
 // residualMagnitude extracts a sortable scalar from the opaque
-// residual_score JSONB. The v1 residual shape is {likelihood, impact}
-// (canvas §2.2, the 5x5 grid); the magnitude is their product. A score
-// missing either numeric field yields 0 — a malformed or empty score ranks
-// below every properly-scored risk rather than erroring the whole list.
+// residual_score JSONB. It reads every shape the platform writes, in the
+// board generator's order (internal/board extractSeverity): the residual
+// deriver's `score` (residualBlob), a precomputed `severity`, then a 5x5
+// {likelihood, impact} whose magnitude is their product (canvas §2.2).
+// Before #2058 only the last shape counted, so every derived residual
+// ranked as 0. A score with none of them yields 0 — a malformed or empty
+// score ranks below every properly-scored risk rather than erroring the
+// whole list.
 func residualMagnitude(raw []byte) float64 {
 	if len(raw) == 0 {
 		return 0
 	}
 	var score struct {
+		Score      *float64 `json:"score"`
+		Severity   *float64 `json:"severity"`
 		Likelihood *float64 `json:"likelihood"`
 		Impact     *float64 `json:"impact"`
 	}
 	if err := json.Unmarshal(raw, &score); err != nil {
 		return 0
 	}
-	if score.Likelihood == nil || score.Impact == nil {
-		return 0
+	switch {
+	case score.Score != nil:
+		return *score.Score
+	case score.Severity != nil:
+		return *score.Severity
+	case score.Likelihood != nil && score.Impact != nil:
+		return *score.Likelihood * *score.Impact
 	}
-	return *score.Likelihood * *score.Impact
+	return 0
 }
 
 // HeatmapCell is one (likelihood, impact) bucket in the 5x5 grid.
@@ -737,6 +816,7 @@ func riskFromRow(r dbx.Risk) Risk {
 		Title:               r.Title,
 		Description:         r.Description,
 		Category:            r.Category,
+		CategoryID:          uuid.UUID(r.CategoryID.Bytes),
 		Methodology:         r.Methodology,
 		InherentScore:       r.InherentScore,
 		Treatment:           r.Treatment,

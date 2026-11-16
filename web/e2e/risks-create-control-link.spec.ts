@@ -38,7 +38,7 @@ function controlsBody() {
         id: CONTROL_ACCESS_ID,
         title: "Logical access controls",
         control_family: "IAC",
-        scf_id: "IAC-06",
+        scf_id: "IAC-37",
         lifecycle_state: "active",
         bundle_id: "soc2-starter",
       },
@@ -46,7 +46,7 @@ function controlsBody() {
         id: CONTROL_OTHER_ID,
         title: "Backup integrity verification",
         control_family: "BCD",
-        scf_id: "BCD-11",
+        scf_id: "BCD-32",
         lifecycle_state: "active",
         bundle_id: "soc2-starter",
       },
@@ -131,7 +131,7 @@ test.describe("/risks/new control-link multi-select", () => {
     expect(postFired).toBe(false);
   });
 
-  test("filter narrows the picker; selecting a control posts linked_control_ids and the row appears (AC-5 + AC-6)", async ({
+  test("filter narrows the picker; selecting a control posts linked_control_ids and lands on the new risk (AC-5 + AC-6)", async ({
     authedPage: page,
   }) => {
     let created = false;
@@ -247,13 +247,9 @@ test.describe("/risks/new control-link multi-select", () => {
 
     expect(postedLinkedIds).toEqual([CONTROL_ACCESS_ID]);
 
-    // Routed back; the new row appears.
-    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
-    await expect(
-      page
-        .getByTestId("risks-row-title")
-        .filter({ hasText: NEW_RISK_TITLE })
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    // #2089 create convention: lands on the new risk.
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
   });
 });

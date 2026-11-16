@@ -100,7 +100,15 @@ const geistMono = Geist_Mono({
 // use `<ThemeAwareLogo>`. See
 // docs/audit-log/176-logo-theme-coupling-decisions.md AC-7 audit.
 export const metadata: Metadata = {
-  title: "security-atlas",
+  // #2080 — every route names itself with a bare page name (`title:
+  // "Risks"`) and this template renders it as "Risks · security-atlas".
+  // `default` covers a route that sets nothing; the route sweep
+  // (`e2e/route-sweep.spec.ts`) fails any authenticated route that
+  // falls back to it.
+  title: {
+    default: "security-atlas",
+    template: "%s · security-atlas",
+  },
   description:
     "Open-source, self-hostable GRC — one control graph, every framework.",
   icons: {

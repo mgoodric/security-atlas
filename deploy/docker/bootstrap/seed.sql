@@ -57,6 +57,10 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
+-- The default tenant's seven seeded risk categories (#1809). Idempotent,
+-- so re-bootstraps are no-ops.
+SELECT seed_risk_categories(:'default_tenant_id');
+
 -- ===== 1 + 2. Builtin scope dimension for the default tenant =====
 --
 -- `environment` is the canonical builtin first dimension (prod / staging /

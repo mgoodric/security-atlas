@@ -99,7 +99,7 @@ export function UcfMiniViz({
           fontFamily="monospace"
           fill={edgeStroke}
         >
-          {req.relationship_type} · {req.strength.toFixed(2)}
+          {style.label} · {req.strength.toFixed(2)}
           {outOfScope ? " · out-of-scope" : ""}
         </text>
         <rect

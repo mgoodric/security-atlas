@@ -24,16 +24,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { FeatureDisabledState } from "@/components/feature-disabled-state";
+import { TONE_CHIP } from "@/components/board-pack/tone";
+import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
 import { BoardPack, generateBoardPack, listBoardPacks } from "@/lib/api/board";
-import { isFeatureDisabledError } from "@/lib/feature-nav";
 
 import {
   GenerateFieldErrors,
   hasErrors,
   validateGenerateForm,
 } from "./validate";
+import { pageTitle } from "@/lib/page-titles";
 
 // Slice 032 — quarterly board pack list + generate.
 //
@@ -45,13 +46,13 @@ import {
 function StatusBadge({ status }: { status: string }) {
   if (status === "published") {
     return (
-      <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+      <Badge variant="outline" className={TONE_CHIP.pass}>
         published
       </Badge>
     );
   }
   return (
-    <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+    <Badge variant="outline" className={TONE_CHIP.warning}>
       draft
     </Badge>
   );
@@ -104,30 +105,15 @@ export default function BoardPacksPage() {
     generate.mutate(periodEnd);
   }
 
-  // Slice 660: the `board.reporting` flag gates this module. A flag-off
-  // tenant reaches here only by direct navigation (the nav entry is
-  // hidden server-side); the gated API returns 404 "feature disabled".
-  // Render the clean disabled panel instead of the raw error state.
-  if (packsQuery.isError && isFeatureDisabledError(packsQuery.error)) {
-    return (
-      <div className="mx-auto max-w-4xl p-8">
-        <FeatureDisabledState moduleName="Board packs" />
-      </div>
-    );
-  }
-
+  // The Board reporting module is checked server-side by FeatureGate in
+  // ./layout.tsx (#2092); this page only mounts when the module is on.
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-8">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Board packs</h1>
-        <p className="mt-1 text-slate-600">
-          Quarterly board-meeting reports — posture, top risks, coverage trend,
-          open findings, operational metrics, investment vs coverage, and asks
-          of the board. Each pack is reviewed and approved section-by-section,
-          then published as a frozen artifact.
-        </p>
-      </div>
-
+    <PageShell
+      width="reading"
+      data-testid="board-packs-page"
+      title={pageTitle("/board-packs")}
+      subtitle="Quarterly board-meeting reports — posture, top risks, coverage trend, open findings, operational metrics, investment vs coverage, and asks of the board. Each pack is reviewed and approved section-by-section, then published as a frozen artifact."
+    >
       <Card>
         <CardHeader>
           <CardTitle>Generate a quarterly pack</CardTitle>
@@ -146,7 +132,7 @@ export default function BoardPacksPage() {
             <div className="space-y-1">
               <label
                 htmlFor="period-end"
-                className="text-sm font-medium text-slate-700"
+                className="text-sm font-medium text-foreground"
               >
                 Quarter end
               </label>
@@ -217,7 +203,7 @@ export default function BoardPacksPage() {
             </Alert>
           )}
           {packsQuery.data && packsQuery.data.length === 0 && (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-muted-foreground">
               No board packs yet. Generate one above.
             </p>
           )}
@@ -240,13 +226,13 @@ export default function BoardPacksPage() {
                     <TableCell>
                       <StatusBadge status={pack.status} />
                     </TableCell>
-                    <TableCell className="text-slate-600">
+                    <TableCell className="text-muted-foreground">
                       {pack.published_by || "—"}
                     </TableCell>
                     <TableCell className="text-right">
                       <Link
                         href={`/board-packs/${pack.id}`}
-                        className="text-sm font-medium text-slate-900 underline"
+                        className="text-sm font-medium text-foreground underline"
                       >
                         Review
                       </Link>
@@ -258,6 +244,6 @@ export default function BoardPacksPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

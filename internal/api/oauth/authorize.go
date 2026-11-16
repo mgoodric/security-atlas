@@ -8,6 +8,8 @@
 //     client_id, redirect_uri, scope, state, code_challenge,
 //     code_challenge_method).
 //  2. Rejects PKCE `plain` — only `S256` is accepted (P0-189-1).
+//     Then resolves the tenant: a client bound to a tenant authorizes
+//     only in it, and supplies it when tenant_id is omitted (#1968).
 //  3. Validates the redirect_uri against the oauth_client_redirect_uris
 //     registry (P0-189-2 — open-redirect prevention).
 //  4. Requires an active slice-034 atlas_session cookie. When missing,
@@ -37,6 +39,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -46,6 +49,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // AuthCodeByteLen is the entropy of the random authorization code.
@@ -59,6 +63,13 @@ const AuthCodeByteLen = 32
 // without the pgxpool.
 type SessionResolver interface {
 	Read(ctx context.Context, tenantID uuid.UUID, id string) (sessions.Session, error)
+}
+
+// ClientLookup loads a registered, enabled OAuth client by its public
+// client_id, returning oauthclient.ErrUnknownClient when there is none.
+// *oauthclient.Store satisfies it; tests stub it.
+type ClientLookup interface {
+	Lookup(ctx context.Context, clientID string) (*oauthclient.Client, error)
 }
 
 // UserResolver loads the user identity claims (roles + tenant scope)
@@ -81,7 +92,7 @@ type UserIdentity struct {
 // AuthorizeEndpoint owns the dependencies for GET /oauth/authorize.
 type AuthorizeEndpoint struct {
 	codes         *oauthcode.Store
-	clients       *oauthclient.Store
+	clients       ClientLookup
 	sessions      SessionResolver
 	users         UserResolver
 	issuer        string
@@ -95,7 +106,7 @@ type AuthorizeEndpoint struct {
 // AuthorizeEndpointConfig is the constructor parameter bag.
 type AuthorizeEndpointConfig struct {
 	Codes    *oauthcode.Store
-	Clients  *oauthclient.Store
+	Clients  ClientLookup
 	Sessions SessionResolver
 	Users    UserResolver
 	Issuer   string
@@ -229,29 +240,25 @@ func (a *AuthorizeEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tenantIDStr := q.Get("tenant_id")
-	var tenantID uuid.UUID
-	if tenantIDStr == "" {
-		// #1761: on a single-tenant install the sole tenant is implied.
-		// The error names no tenant: the caller is unauthenticated.
-		if a.implicit != nil {
-			if id, err := a.implicit(r.Context()); err == nil {
-				tenantID = id
-			}
-		}
-		if tenantID == uuid.Nil {
+	// A client bound to a tenant (oauth_clients.bound_tenant_id, #1854)
+	// authorizes only in that tenant (#1968). An unknown or disabled
+	// client gets the same answer as an unregistered redirect_uri.
+	client, err := a.clients.Lookup(r.Context(), clientID)
+	if err != nil {
+		if errors.Is(err, oauthclient.ErrUnknownClient) {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_request",
-				"tenant_id is required")
+				"redirect_uri is not registered for this client")
 			return
 		}
-	} else {
-		var err error
-		tenantID, err = uuid.Parse(tenantIDStr)
-		if err != nil {
-			writeOAuthError(w, http.StatusBadRequest, "invalid_request",
-				"tenant_id is not a valid UUID")
-			return
-		}
+		slog.ErrorContext(r.Context(), "oauth authorize: client lookup", "err", err)
+		writeOAuthError(w, http.StatusInternalServerError, "server_error",
+			"client lookup failed")
+		return
+	}
+	tenantID, status, errCode, errDesc := a.requestTenant(r.Context(), q.Get("tenant_id"), client.TenantID)
+	if status != 0 {
+		writeOAuthError(w, status, errCode, errDesc)
+		return
 	}
 
 	// AC-17: validate client_id against oauth_clients. We use the
@@ -396,6 +403,43 @@ func (a *AuthorizeEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	target.RawQuery = tq.Encode()
 	http.Redirect(w, r, target.String(), http.StatusFound)
+}
+
+// requestTenant picks the tenant an authorize request runs in. An explicit
+// tenant_id must be a UUID and, when the client is bound, equal the
+// binding. Without tenant_id a bound client's tenant is used, then the
+// implicit tenant of a single-tenant install (#1761). On failure it
+// returns the HTTP status and the OAuth error code and description.
+func (a *AuthorizeEndpoint) requestTenant(ctx context.Context, raw string, bound *uuid.UUID) (uuid.UUID, int, string, string) {
+	if raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil {
+			return uuid.Nil, http.StatusBadRequest, "invalid_request", "tenant_id is not a valid UUID"
+		}
+		if bound != nil && *bound != id {
+			return uuid.Nil, http.StatusBadRequest, "invalid_request",
+				"tenant_id does not match the client's tenant"
+		}
+		return id, 0, "", ""
+	}
+	if bound != nil {
+		return *bound, 0, "", ""
+	}
+	// The error names no tenant: the caller is unauthenticated.
+	if a.implicit == nil {
+		return uuid.Nil, http.StatusBadRequest, "invalid_request", "tenant_id is required"
+	}
+	id, err := a.implicit(ctx)
+	var ambiguous *tenancy.AmbiguousTenantError
+	switch {
+	case err == nil && id != uuid.Nil:
+		return id, 0, "", ""
+	case err == nil, errors.Is(err, tenancy.ErrNoTenants), errors.As(err, &ambiguous):
+		return uuid.Nil, http.StatusBadRequest, "invalid_request", "tenant_id is required"
+	default:
+		slog.ErrorContext(ctx, "oauth authorize: resolve implicit tenant", "err", err)
+		return uuid.Nil, http.StatusInternalServerError, "server_error", "tenant resolution failed"
+	}
 }
 
 // generateCode produces a 32-byte random URL-safe base64 (no padding)

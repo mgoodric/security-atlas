@@ -13,6 +13,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -63,6 +64,9 @@ type evidenceWindowReader interface {
 	EvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error)
 	EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.ListEvidencePagedRow, error)
 	CountEvidenceForTenant(ctx context.Context) (int64, error)
+	// DemoEvidence returns which of ids the in-place demo seed added
+	// (#2043), so each row can carry the demo badge.
+	DemoEvidence(ctx context.Context, ids []uuid.UUID) (demoprov.Set, error)
 }
 
 // Handler bundles the slice-064 control-detail read routes over a single
@@ -78,6 +82,10 @@ type Handler struct {
 	// (slice 692 per-control + slice 704 tenant-wide); New points it at store,
 	// so production behavior is identical.
 	evidence evidenceWindowReader
+	// detail is the GET /v1/evidence/{id} read seam (#2137); New points it
+	// at store. redaction, when set, re-applies current redaction rules.
+	detail    evidenceDetailReader
+	redaction RedactionLookup
 }
 
 // New constructs a Handler over the application pgx pool. The slice-411
@@ -85,7 +93,7 @@ type Handler struct {
 // the per-control and tenant-wide branches) are wired to the same store — the
 // public signature is unchanged (P0-409-2).
 func New(store *Store) *Handler {
-	return &Handler{store: store, reader: store, evidence: store}
+	return &Handler{store: store, reader: store, evidence: store, detail: store}
 }
 
 // newHandlerWithReader constructs a Handler whose policies/risks/history
@@ -122,6 +130,9 @@ type evidenceWire struct {
 	ContentHash  string          `json:"content_hash"`
 	ScopeCell    *string         `json:"scope_cell"`
 	Result       string          `json:"result"`
+	// Demo is true when the in-place demo seed added this record to the
+	// organisation (#2043). Omitted otherwise.
+	Demo bool `json:"demo,omitempty"`
 }
 
 // policyWire is the AC-2 row shape: one linked policy.
@@ -283,6 +294,9 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		for i, rec := range page {
 			out[i] = evidenceWireFromListRow(rec)
 		}
+		if !h.markDemoEvidence(w, r, out) {
+			return
+		}
 		httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 			"control_id":  "",
 			"evidence":    out,
@@ -319,6 +333,9 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	out := make([]evidenceWire, len(page))
 	for i, rec := range page {
 		out[i] = evidenceWireFrom(rec)
+	}
+	if !h.markDemoEvidence(w, r, out) {
+		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"control_id":  controlID.String(),
@@ -516,6 +533,28 @@ func evidenceWireFromListRow(rec dbx.ListEvidencePagedRow) evidenceWire {
 		ScopeCell:    uuidPtr(rec.ScopeID),
 		Result:       string(rec.Result),
 	}
+}
+
+// markDemoEvidence sets Demo on each row the in-place demo seed added
+// (#2043). It writes the 500 itself and returns false on a lookup error.
+func (h *Handler) markDemoEvidence(w http.ResponseWriter, r *http.Request, rows []evidenceWire) bool {
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		if id, err := uuid.Parse(row.EvidenceID); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	demo, err := h.evidence.DemoEvidence(r.Context(), ids)
+	if err != nil {
+		httperr.WriteInternal(w, r, "controldetail", err)
+		return false
+	}
+	for i := range rows {
+		if id, err := uuid.Parse(rows[i].EvidenceID); err == nil {
+			rows[i].Demo = demo.Has(id)
+		}
+	}
+	return true
 }
 
 // ===== helpers =====

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
-  "release_version": "test-2026.1",
-  "release_date": "2026-01-15",
+  "release_version": "test-2026.3",
+  "release_date": "2026-11-14",
   "attribution": "Control IDs and titles are from the Secure Controls Framework (SCF) 2026.3, (c) Secure Controls Framework Council, LLC, https://securecontrolsframework.com, used unmodified. Descriptions are security-atlas's own wording, not SCF text. Rows not yet aligned to SCF 2026.3 are tracked in internal/api/scfseed/scfpin_test.go (issue #1717).",
   "license": "SCF content: CC BY-ND 4.0, https://creativecommons.org/licenses/by-nd/4.0/ (SCF EULA: https://securecontrolsframework.com/terms-conditions/)",
   "controls": [
@@ -12,65 +12,40 @@
       "description": "Mechanisms exist to facilitate the implementation of identification and access management controls."
     },
     {
-      "scf_id": "IAC-06",
+      "scf_id": "IAC-37",
       "family": "IAC",
       "title": "Multi-Factor Authentication (MFA)",
       "description": "Mechanisms exist to require Multi-Factor Authentication for privileged accounts, network access, and remote access."
     },
     {
-      "scf_id": "IAC-07",
+      "scf_id": "IAC-04",
       "family": "IAC",
-      "title": "User Provisioning & Lifecycle",
+      "title": "User Provisioning & De-Provisioning",
       "description": "Mechanisms exist to establish, activate, modify, disable, and remove logical access for users."
     },
     {
-      "scf_id": "IAC-10",
+      "scf_id": "IAC-14",
       "family": "IAC",
       "title": "Authenticator Management",
       "description": "Mechanisms exist to securely manage authenticators, including the creation, distribution, strength, change, and safeguarding of passwords and other authenticators."
     },
     {
-      "scf_id": "IAC-15",
+      "scf_id": "IAC-12",
       "family": "IAC",
-      "title": "Account Review",
+      "title": "Periodic Review of Individual & Service Account Privileges",
       "description": "Mechanisms exist to periodically review and validate user accounts and access privileges."
     },
     {
-      "scf_id": "IAC-21",
+      "scf_id": "IAC-10",
       "family": "IAC",
-      "title": "Privileged Account Management",
+      "title": "Privileged Account Management (PAM)",
       "description": "Mechanisms exist to govern the privileged account lifecycle."
     },
     {
-      "scf_id": "IAC-24",
+      "scf_id": "IAC-11",
       "family": "IAC",
-      "title": "Emergency Access (Break-Glass) Accounts",
+      "title": "Emergency Accounts",
       "description": "Mechanisms exist to establish, govern, and monitor emergency access accounts that allow necessary data and systems to be reached during an emergency, with after-the-fact review of their use."
-    },
-    {
-      "scf_id": "IAC-25",
-      "family": "IAC",
-      "title": "Session Termination",
-      "description": "Mechanisms exist to automatically terminate a user session after a defined period of inactivity or on a defined trigger condition."
-    },
-
-    {
-      "scf_id": "AAA-01",
-      "family": "AAA",
-      "title": "Auditing & Accountability",
-      "description": "Mechanisms exist to facilitate the implementation of operational auditing and accountability."
-    },
-    {
-      "scf_id": "AAA-10",
-      "family": "AAA",
-      "title": "Event Log Retention",
-      "description": "Mechanisms exist to retain event logs for a defined period consistent with risk and legal requirements."
-    },
-    {
-      "scf_id": "AAA-12",
-      "family": "AAA",
-      "title": "Audit Log Review",
-      "description": "Mechanisms exist to provide for the review and analysis of audit records."
     },
 
     {
@@ -80,78 +55,78 @@
       "description": "Mechanisms exist to facilitate the implementation of asset management."
     },
     {
-      "scf_id": "AST-03",
+      "scf_id": "AST-04",
       "family": "AST",
-      "title": "Asset Inventory",
+      "title": "Asset Inventories",
       "description": "Mechanisms exist to maintain an authoritative inventory of technology assets."
     },
     {
-      "scf_id": "AST-09",
+      "scf_id": "AST-22",
       "family": "AST",
-      "title": "Asset Disposal",
+      "title": "Secure Disposal, Destruction or Re-Use of Equipment",
       "description": "Mechanisms exist to securely dispose of, destroy, or repurpose system components."
     },
 
     {
-      "scf_id": "BCD-02",
+      "scf_id": "BCD-04",
       "family": "BCD",
-      "title": "Business Continuity Plan",
+      "title": "Business Continuity & Disaster Recovery (BC/DR) Plans",
       "description": "Mechanisms exist to document and assign roles and responsibilities for the continuity of operations."
     },
     {
-      "scf_id": "BCD-09",
+      "scf_id": "BCD-24",
       "family": "BCD",
-      "title": "Backups",
+      "title": "Data Backups",
       "description": "Mechanisms exist to create recurring backups of data, software, and system configurations."
     },
     {
-      "scf_id": "BCD-11",
+      "scf_id": "BCD-32",
       "family": "BCD",
-      "title": "Backup Testing",
+      "title": "Testing for Reliability & Integrity",
       "description": "Mechanisms exist to routinely test backups to verify recoverability."
     },
 
     {
-      "scf_id": "CFG-02",
+      "scf_id": "CFG-04",
       "family": "CFG",
       "title": "Secure Baseline Configurations",
       "description": "Mechanisms exist to develop, document, and maintain secure baseline configurations for technology platforms."
     },
     {
-      "scf_id": "CFG-04",
+      "scf_id": "CFG-04.5",
       "family": "CFG",
-      "title": "Configuration Change Control",
-      "description": "Mechanisms exist to authorize, document, and track configuration changes."
+      "title": "Session Termination",
+      "description": "Mechanisms exist to automatically terminate a user session after a defined period of inactivity or on a defined trigger condition."
     },
 
     {
       "scf_id": "CHG-02",
       "family": "CHG",
-      "title": "Change Control Process",
-      "description": "Mechanisms exist to govern the technical configuration change control processes."
+      "title": "Change Management Program",
+      "description": "Mechanisms exist to run a change management program that governs how changes to technology assets are requested, reviewed, approved and tracked."
+    },
+    {
+      "scf_id": "CHG-03",
+      "family": "CHG",
+      "title": "Configuration Change Control",
+      "description": "Mechanisms exist to authorize, document, and track configuration changes."
     },
 
     {
-      "scf_id": "CLD-01",
+      "scf_id": "CLD-02",
       "family": "CLD",
-      "title": "Cloud Infrastructure Governance",
-      "description": "Mechanisms exist to govern the use of cloud computing infrastructure."
-    },
-    {
-      "scf_id": "CLD-09",
-      "family": "CLD",
-      "title": "Cloud Service Provider Risk Management",
-      "description": "Mechanisms exist to evaluate and manage cloud service provider risk."
+      "title": "Cloud Services",
+      "description": "Mechanisms exist to govern the cloud services the organization uses."
     },
 
     {
-      "scf_id": "CPL-01",
+      "scf_id": "CPL-02",
       "family": "CPL",
-      "title": "Compliance Management",
+      "title": "Statutory, Regulatory & Contractual Compliance",
       "description": "Mechanisms exist to facilitate the identification and implementation of relevant statutory, regulatory, and contractual requirements."
     },
     {
-      "scf_id": "CPL-03",
+      "scf_id": "CPL-07.1",
       "family": "CPL",
       "title": "Internal Audit Function",
       "description": "Mechanisms exist to plan and conduct internal audits."
@@ -309,15 +284,33 @@
     },
 
     {
-      "scf_id": "MON-01",
+      "scf_id": "MON-02",
       "family": "MON",
       "title": "Continuous Monitoring",
       "description": "Mechanisms exist to facilitate the implementation of enterprise-wide monitoring."
     },
     {
-      "scf_id": "MON-08",
+      "scf_id": "MON-04",
       "family": "MON",
-      "title": "Anomalous Behavior Detection",
+      "title": "System Generated Event Logs & Security-Relevant Telemetry",
+      "description": "Mechanisms exist to facilitate the implementation of operational auditing and accountability."
+    },
+    {
+      "scf_id": "MON-05.1",
+      "family": "MON",
+      "title": "Centralized Event Log & Security-Relevant Telemetry Review & Analysis",
+      "description": "Mechanisms exist to provide for the review and analysis of audit records."
+    },
+    {
+      "scf_id": "MON-13",
+      "family": "MON",
+      "title": "Event Log & Security-Relevant Telemetry Retention",
+      "description": "Mechanisms exist to retain event logs for a defined period consistent with risk and legal requirements."
+    },
+    {
+      "scf_id": "MON-16",
+      "family": "MON",
+      "title": "Anomalous Behavior",
       "description": "Mechanisms exist to detect anomalous behavior."
     },
 
@@ -461,19 +454,19 @@
     },
 
     {
-      "scf_id": "TPM-01",
+      "scf_id": "TPM-02",
       "family": "TPM",
       "title": "Third-Party Management",
       "description": "Mechanisms exist to facilitate the implementation of third-party management."
     },
     {
-      "scf_id": "TPM-04",
+      "scf_id": "TPM-10",
       "family": "TPM",
-      "title": "Third-Party Risk Assessments",
-      "description": "Mechanisms exist to conduct third-party risk assessments."
+      "title": "Third-Party Risk Assessments & Approvals",
+      "description": "Mechanisms exist to assess the risk a third party poses and to approve it before engagement."
     },
     {
-      "scf_id": "TPM-05",
+      "scf_id": "TPM-14",
       "family": "TPM",
       "title": "Third-Party Contract Requirements",
       "description": "Mechanisms exist to require contractual security and privacy obligations of third parties, and to flow those obligations down to the agents and subcontractors that handle the organization's data on their behalf."

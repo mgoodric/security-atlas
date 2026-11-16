@@ -10,6 +10,8 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { Markdown } from "@/components/markdown";
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -30,14 +32,20 @@ export default function ActionPlanDetailPage() {
   });
 
   if (planQ.isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return (
+      <PageShell width="reading" title="Action plan">
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </PageShell>
+    );
   }
   if (planQ.isError) {
     return (
-      <Alert variant="destructive" data-testid="action-plan-detail-error">
-        <AlertTitle>Could not load action plan</AlertTitle>
-        <AlertDescription>{(planQ.error as Error).message}</AlertDescription>
-      </Alert>
+      <PageShell width="reading" title="Action plan">
+        <Alert variant="destructive" data-testid="action-plan-detail-error">
+          <AlertTitle>Could not load action plan</AlertTitle>
+          <AlertDescription>{(planQ.error as Error).message}</AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
@@ -45,38 +53,35 @@ export default function ActionPlanDetailPage() {
   const linkage = planQ.data!.linkage;
 
   return (
-    <div className="space-y-6 max-w-3xl" data-testid="action-plan-detail">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            data-testid="action-plan-detail-title"
+    <PageShell
+      width="reading"
+      data-testid="action-plan-detail"
+      title={<span data-testid="action-plan-detail-title">{plan.title}</span>}
+      subtitle={
+        <div className="flex items-center gap-2">
+          <span
+            className={
+              "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
+              statusPillClass(plan.status)
+            }
+            data-testid="action-plan-detail-status"
           >
-            {plan.title}
-          </h1>
-          <div className="mt-1 flex items-center gap-2">
-            <span
-              className={
-                "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-                statusPillClass(plan.status)
-              }
-              data-testid="action-plan-detail-status"
-            >
-              {statusLabel(plan.status)}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Due {dateLabel(plan.due_date)}
-            </span>
-          </div>
+            {statusLabel(plan.status)}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            Due {dateLabel(plan.due_date)}
+          </span>
         </div>
+      }
+      actions={
         <Link
           href="/action-plans"
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
           Back to list
         </Link>
-      </div>
-
+      }
+    >
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Owner" value={plan.owner_id} mono />
         <Field label="Created" value={dateLabel(plan.created_at)} />
@@ -98,12 +103,11 @@ export default function ActionPlanDetailPage() {
       </Section>
 
       <Section title="Description">
-        <p
-          className="whitespace-pre-wrap text-sm text-foreground/80"
+        <Markdown
+          source={plan.description || "—"}
+          className="text-foreground/80"
           data-testid="action-plan-detail-description"
-        >
-          {plan.description || "—"}
-        </p>
+        />
       </Section>
 
       <Section title={`Linked risks (${linkage.risks.length})`}>
@@ -143,7 +147,7 @@ export default function ActionPlanDetailPage() {
           </ul>
         )}
       </Section>
-    </div>
+    </PageShell>
   );
 }
 

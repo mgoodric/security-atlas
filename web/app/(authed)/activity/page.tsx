@@ -13,20 +13,19 @@
 // predicate restricts non-privileged callers to tenant-public events
 // plus their own me-rows.
 
+import { PageShell } from "@/components/shell/page-shell";
+
 import { ActivityPageClient } from "./page-client";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function ActivityPage() {
   return (
-    <div className="mx-auto max-w-screen-2xl space-y-4 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Tenant activity ledger: state changes, evidence ingestion, audit
-          milestones, and your own audit trail. Filter by time window, actor, or
-          event kind; expand a row to see its raw payload. Read-only.
-        </p>
-      </div>
+    <PageShell
+      title={pageTitle("/activity")}
+      subtitle="Tenant activity ledger: state changes, evidence ingestion, audit milestones, and your own audit trail. Filter by time window, actor, or event kind; expand a row to see its raw payload. Read-only."
+      bodyClassName="space-y-4"
+    >
       <ActivityPageClient />
-    </div>
+    </PageShell>
   );
 }

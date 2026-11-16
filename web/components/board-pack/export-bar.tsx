@@ -23,7 +23,7 @@ import { PackBreadcrumb } from "./pack-breadcrumb";
 // we render export links as anchors (not <Button asChild>) because the
 // repo's shadcn button.tsx does not include the asChild slot prop.
 const linkButtonClasses =
-  "inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-xs transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-400";
+  "inline-flex h-9 items-center justify-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 type ExportBarProps = {
   packID: string;
@@ -44,7 +44,7 @@ export function ExportBar({
   return (
     <div
       className={cn(
-        "sticky top-0 z-20 flex items-center gap-2 border-b border-slate-200 bg-white px-4 py-2 print:hidden",
+        "sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-card px-4 py-2 print:hidden",
       )}
       data-testid="export-bar"
     >

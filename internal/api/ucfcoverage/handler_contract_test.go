@@ -99,7 +99,7 @@ func contractControlWire() controlWire {
 		ID:                 contractControlID,
 		BundleID:           "ctl.access-review",
 		Version:            3,
-		SCFID:              "IAC-06",
+		SCFID:              "IAC-37",
 		SCFAnchorID:        contractAnchorID,
 		Title:              "Periodic access review",
 		ControlFamily:      "IAC",
@@ -107,13 +107,15 @@ func contractControlWire() controlWire {
 		OwnerRole:          "grc_engineer",
 		LifecycleState:     "active",
 		FreshnessClass:     "30d",
+		AnchorFit:          "partial",
+		AnchorFitNote:      "IAC-37 covers the review cadence, not the reviewer's independence.",
 	}
 }
 
 func contractAnchorWire() anchorWire {
 	return anchorWire{
 		ID:          contractAnchorID,
-		SCFID:       "IAC-06",
+		SCFID:       "IAC-37",
 		Family:      "IAC",
 		Name:        "Identity & Access Management",
 		Description: "Govern logical access to systems and data.",
@@ -139,6 +141,7 @@ func contractRequirement(coverage *float64) requirementForAnchorWire {
 		Coverage:               coverage,
 		SourceAttribution:      "scf-strm",
 		MappingTier:            "verified",
+		Origin:                 "catalog",
 		Rationale:              "SCF anchor satisfies the SOC 2 logical-access requirement.",
 	}
 }

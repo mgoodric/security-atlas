@@ -287,7 +287,7 @@ type questionnaireQuestionFixture struct {
 	Text        string
 	Domain      string
 	AnswerType  string
-	SCFAnchorID *string // free-form scf_id like "IAC-06"; nil = needs mapping
+	SCFAnchorID *string // free-form scf_id like "IAC-37"; nil = needs mapping
 	SortOrder   int
 	// Answer, when non-empty, seeds a questionnaire_answers row so the
 	// question reads as answered (not a blank intake form).
@@ -314,6 +314,7 @@ type questionnaireFixture struct {
 // reads the available framework_versions from the catalog.
 type fixtureSet struct {
 	tenant       tenantRow
+	inPlace      bool // #1765: tenant existed before this seed (ApplyInPlace)
 	scope        scopeRow
 	user         userRow
 	controls     []controlFixture
@@ -364,18 +365,28 @@ type fixtureSet struct {
 // values live near each other so a reader can see the dataset shape
 // at a glance.
 func (s *Seeder) buildFixtures(slug string) *fixtureSet {
-	now := s.clock().UTC()
-	fs := &fixtureSet{
-		tenant: tenantRow{
+	return s.buildFixturesFor(
+		tenantRow{
 			ID:                uuid.New(),
 			Name:              capitalize(slug) + " " + fictionalCompanyName,
 			Slug:              slug,
 			IsBootstrapTenant: false,
 		},
-		scope: scopeRow{
+		scopeRow{
 			DimensionID: uuid.New(),
 			CellID:      uuid.New(),
 		},
+	)
+}
+
+// buildFixturesFor builds the fixture set for a given tenant + scope. The
+// in-place seed (#1765) passes the existing tenant and its existing scope
+// cell; buildFixtures passes a fresh tenant.
+func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet {
+	now := s.clock().UTC()
+	fs := &fixtureSet{
+		tenant: tenant,
+		scope:  scope,
 		user: userRow{
 			ID:    uuid.New(),
 			Email: "admin@" + personEmailDomain,
@@ -1061,7 +1072,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "IAM-01", Domain: "Identity & Access Management",
 			Text:        "Do you enforce multi-factor authentication for all administrative access?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("IAC-06"), SortOrder: 1,
+			SCFAnchorID: anchor("IAC-37"), SortOrder: 1,
 			AnswerValue: "Yes",
 			Narrative:   "MFA (WebAuthn + Okta Verify) is enforced for all human access to production via the production MFA policy.",
 			AuthoredBy:  authoredBy,
@@ -1079,7 +1090,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "BCR-03", Domain: "Business Continuity",
 			Text:        "Do you test disaster recovery at least annually?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("BCD-11"), SortOrder: 3,
+			SCFAnchorID: anchor("BCD-24"), SortOrder: 3,
 			AnswerValue: "Yes",
 			Narrative:   "A full DR restore drill is run quarterly; the annual tabletop exercise validates the runbook end to end.",
 			AuthoredBy:  authoredBy,

@@ -4,7 +4,7 @@
   "x-evidence-kind": "gcp.iam_policy_binding.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-21", "IAC-15"],
+  "x-default-scf-anchors": ["IAC-10", "IAC-12"],
   "title": "GCP project IAM policy binding",
   "description": "One record per (role, member) binding in a GCP project's IAM policy, enriched with service-account inventory facts (whether the member is a service account and whether that account is disabled). Pulled read-only from Cloud Resource Manager (getIamPolicy) + the IAM service-accounts list (roles/iam.securityReviewer). Binding + assignment METADATA only — never a service-account KEY, never object/secret contents. The platform evaluator decides least-privilege fit per (control, binding); the connector emits descriptive (INCONCLUSIVE) records, except a disabled service-account grant which is PASS (inert).",
   "type": "object",

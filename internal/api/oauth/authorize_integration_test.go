@@ -251,6 +251,64 @@ func TestIntegrationAuthorizeFlow_NoTenantID_SingleTenant(t *testing.T) {
 	}
 }
 
+// TestIntegrationAuthorizeFlow_BoundClient covers #1968: a client bound to
+// a tenant (oauth_clients.bound_tenant_id) authorizes only in that tenant.
+// Without tenant_id the binding supplies it, ahead of any implicit tenant;
+// a different tenant_id is refused before any session is read.
+func TestIntegrationAuthorizeFlow_BoundClient(t *testing.T) {
+	pool := openTokenIntegrationPool(t)
+	const redirectURI = "https://atlas.example.test/oauth/callback"
+	clientID, _, sess, identity := setupAuthorizeFixture(t, pool, redirectURI)
+	bound := seedOAuthTenantRow(t)
+	if _, err := oauthclient.New(pool).Bind(context.Background(), clientID, bound); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	implicit := func(context.Context) (uuid.UUID, error) {
+		t.Error("implicit tenant consulted for a bound client")
+		return uuid.New(), nil
+	}
+	srv, _, _ := newAuthorizeIntegrationServerWithImplicit(t, pool, sess, identity, implicit)
+
+	params := map[string]string{
+		"response_type":         "code",
+		"client_id":             clientID,
+		"redirect_uri":          redirectURI,
+		"state":                 "s1968",
+		"code_challenge":        oauth.ExportComputePKCEChallengeS256("atlas-test-verifier-" + uuid.NewString()),
+		"code_challenge_method": "S256",
+	}
+
+	// No tenant_id, not signed in: the login redirect carries the binding.
+	req, _ := http.NewRequest(http.MethodGet, authorizeURL(srv.URL, params), nil)
+	resp := doNoFollow(t, req)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("no tenant_id: status = %d, want 302", resp.StatusCode)
+	}
+	login, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("parse login Location: %v", err)
+	}
+	if login.Path != "/auth/oidc/login" || login.Query().Get("tenant_id") != bound.String() {
+		t.Errorf("login redirect = %q, want /auth/oidc/login with the bound tenant %s", login, bound)
+	}
+
+	// The bound tenant named explicitly is accepted the same way.
+	params["tenant_id"] = bound.String()
+	req, _ = http.NewRequest(http.MethodGet, authorizeURL(srv.URL, params), nil)
+	if resp := doNoFollow(t, req); resp.StatusCode != http.StatusFound {
+		t.Fatalf("bound tenant_id: status = %d, want 302", resp.StatusCode)
+	}
+
+	// Another tenant, even with a session: refused, no code issued.
+	params["tenant_id"] = uuid.NewString()
+	req, _ = http.NewRequest(http.MethodGet, authorizeURL(srv.URL, params), nil)
+	req.AddCookie(&http.Cookie{Name: sessions.CookieName, Value: sess.ID})
+	resp = doNoFollow(t, req)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("other tenant_id: status = %d, want 400; location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
+
 // TestIntegrationAuthorizeFlow_PlainPKCERejected — P0-189-1.
 func TestIntegrationAuthorizeFlow_PlainPKCERejected(t *testing.T) {
 	pool := openTokenIntegrationPool(t)

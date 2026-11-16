@@ -9,6 +9,7 @@
 //	PATCH  /v1/policies/{id}/approve               under_review -> approved (AC-4)
 //	POST   /v1/policies/{id}/publish               approved -> published (AC-1 versioned row + AC-7 orphan block)
 //	PATCH  /v1/policies/{id}/review-date           change a published policy's next_review_at (#1806)
+//	DELETE /v1/policies/{id}                       discard a draft, audit-logged (#1987)
 //	GET    /v1/policies/{id}/pdf                   PDF render via chromedp (AC-5)
 //	POST   /v1/admin/policies/import               import a policy library with its history (#1747, import.go)
 //
@@ -159,10 +160,13 @@ type policyWire struct {
 	SubmittedBy                 *string    `json:"submitted_by,omitempty"`
 	ApprovedAt                  *time.Time `json:"approved_at,omitempty"`
 	ApprovedBy                  *string    `json:"approved_by,omitempty"`
-	PublishedAt                 *time.Time `json:"published_at,omitempty"`
-	PublishedBy                 *string    `json:"published_by,omitempty"`
-	SupersededAt                *time.Time `json:"superseded_at,omitempty"`
-	NextReviewAt                *time.Time `json:"next_review_at,omitempty"`
+	// SelfApproved marks a policy its submitter approved under the
+	// organisation's Allow self-approval setting (#2101).
+	SelfApproved bool       `json:"self_approved"`
+	PublishedAt  *time.Time `json:"published_at,omitempty"`
+	PublishedBy  *string    `json:"published_by,omitempty"`
+	SupersededAt *time.Time `json:"superseded_at,omitempty"`
+	NextReviewAt *time.Time `json:"next_review_at,omitempty"`
 	// ReviewStatus is overdue / due-soon / upcoming for a published
 	// policy with a review date, computed at response time (#1806).
 	ReviewStatus string `json:"review_status,omitempty"`
@@ -429,6 +433,7 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		SubmittedBy:                 r.SubmittedBy,
 		ApprovedAt:                  timestamptzPtr(r.ApprovedAt),
 		ApprovedBy:                  r.ApprovedBy,
+		SelfApproved:                r.SelfApproved,
 		PublishedAt:                 timestamptzPtr(r.PublishedAt),
 		PublishedBy:                 r.PublishedBy,
 		SupersededAt:                timestamptzPtr(r.SupersededAt),
@@ -534,7 +539,9 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	updated, err := h.store.SubmitForReview(ctx, id, cred.ID)
+	// The submitter is recorded as the person, not the credential, so the
+	// approval check (#1807) sees the same person across sessions and keys.
+	updated, err := h.store.SubmitForReview(ctx, id, actorOf(cred))
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -558,7 +565,13 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	approved, err := h.store.Approve(ctx, id, cred.ID)
+	// Only a person approves (#1807): Approver.UserID is empty for an
+	// unbound key, an OAuth client or the bootstrap admin, and the store
+	// refuses it.
+	approved, err := h.store.Approve(ctx, id, policy.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -669,13 +682,7 @@ func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
 		}
 		next = &t
 	}
-	// The actor is the user behind the credential when there is one, else
-	// the credential id: the rule the import and export audits use.
-	actor := cred.UserID
-	if actor == "" {
-		actor = cred.ID
-	}
-	updated, err := h.store.SetNextReviewAt(ctx, id, next, actor)
+	updated, err := h.store.SetNextReviewAt(ctx, id, next, actorOf(cred))
 	if err != nil {
 		switch {
 		case errors.Is(err, policy.ErrNotFound):
@@ -688,6 +695,38 @@ func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
+}
+
+// DiscardDraft handles DELETE /v1/policies/{id} (#1987). It deletes a policy
+// only while it is a draft; the store appends a policy_audit_log row naming
+// the caller and the discarded title and version. Discarding a next-version
+// draft frees its predecessor for a new version. The role is the one that
+// edits a draft (create, submit): any credential in the tenant. Published,
+// superseded, approved and under-review policies answer 409 and are never
+// deleted. 204 on success.
+func (h *Handler) DiscardDraft(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	if _, err := h.store.DiscardDraft(ctx, id, actorOf(cred)); err != nil {
+		switch {
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrWrongState):
+			httpresp.WriteError(w, http.StatusConflict, "only a draft policy can be discarded; submitted, approved, published and superseded policies are kept")
+		default:
+			httperr.WriteInternal(w, r, "discard policy draft", err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // PDF handles GET /v1/policies/{id}/pdf (AC-5). Returns
@@ -762,10 +801,27 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 	}
 }
 
+// actorOf names the person behind a credential: the bare users(id) uuid,
+// whether the caller is a JWT ("user:<uuid>") or a key bound to the user
+// ("<uuid>"), else the credential's principal (credstore.PrincipalOf). A
+// JWT credential's id is per token ("jwt:"+jti), and the two UserID shapes
+// differ, so comparing either raw would let one person submit through one
+// and approve through another (#1807). A machine JWT is recorded by its
+// principal, not its token id, which approval would read as a pre-#1807
+// session submitter (#2101).
+func actorOf(cred credstore.Credential) string {
+	return credstore.PrincipalOf(cred)
+}
+
 func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+	case errors.Is(err, policy.ErrSelfApproval),
+		errors.Is(err, policy.ErrApproverNotPerson):
+		httpresp.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, policy.ErrSubmitterUnknown):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, policy.ErrWrongState):
 		httpresp.WriteError(w, http.StatusConflict, "policy not in expected state for this transition")
 	default:
@@ -816,6 +872,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		SubmittedBy:                 p.SubmittedBy,
 		ApprovedAt:                  p.ApprovedAt,
 		ApprovedBy:                  p.ApprovedBy,
+		SelfApproved:                p.SelfApproved,
 		PublishedAt:                 p.PublishedAt,
 		PublishedBy:                 p.PublishedBy,
 		SupersededAt:                p.SupersededAt,

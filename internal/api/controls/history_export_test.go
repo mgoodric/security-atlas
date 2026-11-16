@@ -39,11 +39,15 @@ import (
 func TestSlice175_HistoryHeader_LockedShape(t *testing.T) {
 	got := controlsHistoryExportHeader()
 
-	// First 15 columns MUST equal slice 137's controlsExportHeader().
+	// First 15 columns MUST equal slice 137's controlsExportHeader()
+	// baseline. That header has since appended anchor_fit and
+	// anchor_fit_note (issue #1736), which the history export does not
+	// carry, so compare against its first 15 columns.
 	slice137 := controlsExportHeader()
-	if len(slice137) != 15 {
-		t.Fatalf("slice 137 header length = %d; want 15 (slice 137 D2 baseline)", len(slice137))
+	if len(slice137) < 15 {
+		t.Fatalf("slice 137 header length = %d; want at least 15 (slice 137 D2 baseline)", len(slice137))
 	}
+	slice137 = slice137[:15]
 	if len(got) != 17 {
 		t.Fatalf("slice 175 header length = %d; want 17 (slice 175 AC-2)", len(got))
 	}
@@ -78,7 +82,7 @@ func TestSlice175_HistoryRowIter_ActiveAndSupersededShapes(t *testing.T) {
 			ID:                 activeID,
 			BundleID:           "bundle-aws-iam",
 			Version:            2,
-			SCFID:              "IAC-06",
+			SCFID:              "IAC-37",
 			SCFAnchorID:        anchor,
 			Title:              "AWS IAM least-privilege",
 			ControlFamily:      "identity-access-management",
@@ -98,7 +102,7 @@ func TestSlice175_HistoryRowIter_ActiveAndSupersededShapes(t *testing.T) {
 			ID:                 supersededID,
 			BundleID:           "bundle-aws-iam",
 			Version:            1,
-			SCFID:              "IAC-06",
+			SCFID:              "IAC-37",
 			SCFAnchorID:        anchor,
 			Title:              "AWS IAM least-privilege (v1)",
 			ControlFamily:      "identity-access-management",
@@ -275,7 +279,7 @@ func TestSlice175_ListHistoryForExport_StubSourceDispatch(t *testing.T) {
 			ID:                 uuid.New(),
 			BundleID:           "bundle-stub-1",
 			Version:            1,
-			SCFID:              "IAC-06",
+			SCFID:              "IAC-37",
 			SCFAnchorID:        uuid.New(),
 			Title:              "stub control 1",
 			ControlFamily:      "identity-access-management",

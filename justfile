@@ -178,6 +178,21 @@ db-up:
 db-down:
     docker rm -f security-atlas-pg
 
+# No Docker; needs initdb/pg_ctl on PATH. Safe beside other worktrees'
+# clusters: it refuses to run SQL against a server whose data_directory is
+# not its own (#2033). Load the URLs with: eval "$(scripts/scratch-pg.sh env)"
+# Per-worktree scratch Postgres on a free port, migrated
+scratch-pg-up:
+    bash scripts/scratch-pg.sh up
+
+# Stop and delete this worktree's scratch cluster
+scratch-pg-down:
+    bash scripts/scratch-pg.sh down
+
+# Self-test: scratch-pg.sh refuses a foreign cluster and drops nothing
+scratch-pg-test:
+    bash scripts/scratch-pg_test.sh
+
 # Pinned sqlc version. The committed `internal/db/dbx/*.go` files were
 # emitted by sqlc v1.31.1; running `sqlc generate` with any other version
 # will produce drift that no committer intended. The pin lives here as the
@@ -226,6 +241,13 @@ openapi-generate:
 # output or the chi registrations under internal/api/*/. Slice 140.
 openapi-drift-check:
     bash scripts/check-openapi-drift.sh
+
+# Export every declared lifecycle transition table (#2146) as JSON, one
+# document per lifecycle, to docs/lifecycles/. The in-app help's diagram
+# check (#2148) reads them. cmd/atlas-lifecycles' TestExport_MatchesCommitted
+# fails `just test` when the committed documents drift from the tables.
+lifecycles-export:
+    go run ./cmd/atlas-lifecycles --out docs/lifecycles
 
 # Reproduce the config-reference drift guard locally. Slice 430 — exits
 # non-zero when docs-site/docs/configuration.md and
@@ -287,6 +309,12 @@ check-migration-timestamps:
 # (#1887). Self-test: scripts/check-merge-gate-needs_test.sh
 check-merge-gate-needs:
     bash scripts/check-merge-gate-needs.sh
+
+# Assert every path-filtered job in ci.yml has a stub twin with an identical
+# `name:` and the complementary `if:` on the same changes output (code, go,
+# web). #2099. Self-test: scripts/check-stub-twins_test.sh
+check-stub-twins:
+    bash scripts/check-stub-twins.sh
 
 # Count assertions per Go test file and warn where assertion density is below
 # threshold (cheap mutation-testing proxy). Slice 333 Q-6; slice 353. ADVISORY
@@ -420,7 +448,7 @@ print-version version:
 #
 # Before the first `self-host-up`, copy the env template and edit it:
 #   cp deploy/docker/.env.example deploy/docker/.env
-# See docs/SELF_HOSTING.md and docs/getting-started/first-evidence.md.
+# See docs/SELF_HOSTING.md and docs-site/docs/getting-started.md.
 
 _self_host_compose := "docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env"
 

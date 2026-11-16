@@ -20,8 +20,12 @@ FROM security_training_assignments`
 	if err := e.pool.QueryRow(ctx, query).Scan(&assigned, &completed); err != nil {
 		return Result{}, fmt.Errorf("training_completion_rate: query: %w", err)
 	}
+	return trainingCompletionRateResult(assigned, completed), nil
+}
+
+func trainingCompletionRateResult(assigned, completed int64) Result {
 	if assigned == 0 {
-		return Result{Value: 0, Dimensions: map[string]string{"sample": "empty"}}, nil
+		return noData("No security training assigned", nil)
 	}
 	return Result{
 		Value: float64(completed) / float64(assigned),
@@ -29,5 +33,5 @@ FROM security_training_assignments`
 			"assigned":  fmt.Sprintf("%d", assigned),
 			"completed": fmt.Sprintf("%d", completed),
 		},
-	}, nil
+	}
 }

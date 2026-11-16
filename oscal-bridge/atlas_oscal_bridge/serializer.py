@@ -133,7 +133,7 @@ def _oscal_token(raw: str) -> str:
     """Coerce an arbitrary id into an OSCAL NCName-style token.
 
     OSCAL ``control-id`` / ``statement-id`` must start with a letter or
-    underscore and contain no whitespace. SCF codes ("IAC-06") already
+    underscore and contain no whitespace. SCF codes ("IAC-37") already
     qualify; raw control UUIDs may start with a digit. We lowercase,
     replace any disallowed run with a hyphen, and prefix ``ctrl-`` when
     the result would not start with a letter/underscore — so the mapping
@@ -142,6 +142,22 @@ def _oscal_token(raw: str) -> str:
     cleaned = "".join(ch if (ch.isalnum() or ch in "-_.") else "-" for ch in raw.lower())
     if not cleaned or not (cleaned[0].isalpha() or cleaned[0] == "_"):
         cleaned = f"ctrl-{cleaned}"
+    return cleaned
+
+
+def _requirement_token(framework: str, code: str) -> str:
+    """Namespace a framework requirement code as an OSCAL control-id token.
+
+    The spec's ``iso27001-2022:A.8.25`` can't be used as written: an OSCAL
+    token admits no colon. The namespace and code are joined with ``_``
+    instead (``iso27001-2022_A.8.25``). Case is kept, since requirement codes
+    are case-significant identifiers, and any other character outside the
+    token alphabet becomes ``-``.
+    """
+    raw = f"{framework}_{code}"
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_.") else "-" for ch in raw)
+    if not (cleaned[0].isalpha() or cleaned[0] == "_"):
+        cleaned = f"fw-{cleaned}"
     return cleaned
 
 
@@ -262,11 +278,14 @@ def serialize_ssp(pb_input) -> bytes:
             props.append(_prop("scf-id", ci.scf_id))
         if ci.evaluated_at:
             props.append(_prop("evaluated-at", ci.evaluated_at))
+        if ci.demo:
+            # #2043: the in-place demo seed added this control; never real.
+            props.append(_prop("demo-seed", "true"))
         for pid in ci.linked_policy_ids:
             props.append(_prop("linked-policy-id", pid))
         # OSCAL control-id and statement-id are NCName-style tokens: they
         # must start with a letter/underscore and contain no spaces. SCF
-        # codes (e.g. "IAC-06") satisfy this; raw control UUIDs may start
+        # codes (e.g. "IAC-37") satisfy this; raw control UUIDs may start
         # with a digit, so we always prefix with "ctrl-" to guarantee a
         # valid token.
         control_token = _oscal_token(ci.scf_id or ci.control_id)
@@ -349,6 +368,29 @@ def serialize_ssp(pb_input) -> bytes:
                     _prop("claim-id", vai.claim_id),
                 ],
                 statements=[statement],
+            )
+        )
+
+    # #1792: requirements excluded in the framework-scope revision active at
+    # the freeze (the Statement of Applicability). One implemented-requirement
+    # each, with the OSCAL core `implementation-status: not-applicable` prop and
+    # the operator's justification as remarks. These are scope decisions, not
+    # control implementations, so they carry no evaluation-result and never
+    # merge into a per-control entry.
+    for er in getattr(pb_input, "excluded_requirements", None) or []:
+        props = [
+            Property(name="implementation-status", value="not-applicable"),
+            _prop("framework", er.framework),
+            _prop("requirement-code", er.requirement_code),
+        ]
+        if er.framework_scope_id:
+            props.append(_prop("framework-scope-id", er.framework_scope_id))
+        implemented.append(
+            ImplementedRequirement(
+                uuid=str(uuid.uuid4()),
+                control_id=_requirement_token(er.framework, er.requirement_code),
+                props=props,
+                remarks=er.justification,
             )
         )
 
@@ -544,8 +586,14 @@ def _population_props(populations):
         # Slice 494 (AC-1): the DRAWN sample evidence ids, one prop per id in
         # shuffle order. The ordinal-suffixed name preserves the deterministic
         # auditor's-sample order (AC-9) so an importer can re-key the draw.
+        demo_ids = set(pop.demo_evidence_ids)
         for ordinal, ev_id in enumerate(pop.sampled_evidence_ids):
             props.append(_prop(f"population-{pop.population_id}-sampled-{ordinal}", ev_id))
+            # #2043: the in-place demo seed added this record; never real.
+            if ev_id in demo_ids:
+                props.append(
+                    _prop(f"population-{pop.population_id}-sampled-{ordinal}-demo-seed", "true")
+                )
     return props or None
 
 

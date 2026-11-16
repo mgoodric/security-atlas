@@ -24,7 +24,22 @@ import {
   EVIDENCE_FRESHNESS_METRIC_ID,
   freshnessPctFromReport,
 } from "@/lib/api/freshness-consistency";
-import { fetchObservations, fetchTarget, type Metric } from "@/lib/api/metrics";
+import {
+  fetchObservations,
+  fetchTarget,
+  measuredObservations,
+  noDataReason,
+  type Metric,
+  type MetricTarget,
+} from "@/lib/api/metrics";
+
+import {
+  type DeltaTone,
+  deltaAriaLabel,
+  deltaArrow,
+  deltaTone,
+  deltaToneClass,
+} from "@/lib/charts/delta-tone";
 
 import { formatValue, parseValue } from "./format";
 import { Sparkline } from "./sparkline";
@@ -86,8 +101,30 @@ export function BoardMetricCard({
     liveFreshnessPct !== null ? liveFreshnessPct / 100 : null;
   const latest: Latest =
     isFreshnessKPI && liveFreshnessFraction !== null
-      ? { raw: String(liveFreshnessFraction), value: liveFreshnessFraction }
+      ? {
+          raw: String(liveFreshnessFraction),
+          value: liveFreshnessFraction,
+          noDataReason: null,
+        }
       : latestObservation(obsQuery.data?.observations);
+
+  // #2064: an observation computed with no inputs carries the empty
+  // marker. Its number is a placeholder (the critical-findings SLA used
+  // to emit 1.0 = "100%"), so the card shows "No data" and the reason,
+  // with no percentage and a neutral badge.
+  const emptyReason = latest ? latest.noDataReason : null;
+
+  // #2095: the 90-day change, coloured by whether it moves toward the
+  // target (never by its sign alone, and neutral with no target).
+  const trend =
+    emptyReason || latest?.value === undefined
+      ? null
+      : trendSince(
+          latest.value,
+          measuredObservations(obsQuery.data?.observations ?? []),
+          metric.unit,
+          target,
+        );
 
   // The freshness KPI's value-loading and has-value signals follow the
   // live freshness query; every other metric follows the observations
@@ -128,28 +165,59 @@ export function BoardMetricCard({
                 className="text-2xl font-semibold tracking-tight"
                 data-testid={`board-metric-${metric.id}-value`}
               >
-                {formatValue(latest?.value, metric.unit)}
+                {emptyReason
+                  ? "No data"
+                  : formatValue(latest?.value, metric.unit)}
               </span>
+              {emptyReason ? (
+                <span
+                  className="text-xs text-muted-foreground"
+                  data-testid={`board-metric-${metric.id}-no-data-reason`}
+                >
+                  {emptyReason}
+                </span>
+              ) : null}
               {target && target.target_value ? (
                 <span className="text-xs text-muted-foreground">
                   target{" "}
                   {formatValue(parseValue(target.target_value), metric.unit)}
                 </span>
               ) : (
-                <span className="text-xs text-muted-foreground">
-                  no target set
-                </span>
+                <Link
+                  href={`/dashboards/metrics/${encodeURIComponent(
+                    metric.id,
+                  )}#metric-detail-target`}
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  data-testid={`board-metric-${metric.id}-no-target`}
+                >
+                  No target set
+                </Link>
               )}
+              {trend ? (
+                <span
+                  className={`text-xs ${deltaToneClass(trend.tone)}`}
+                  data-testid={`board-metric-${metric.id}-delta`}
+                  data-tone={trend.tone}
+                  aria-label={`90-day change ${deltaAriaLabel(
+                    trend.tone,
+                    trend.label,
+                  )}`}
+                >
+                  {deltaArrow(trend.delta)} {trend.label} over 90 days
+                </span>
+              ) : null}
             </div>
             <Sparkline
-              observations={obsQuery.data?.observations ?? []}
+              observations={measuredObservations(
+                obsQuery.data?.observations ?? [],
+              )}
               testid={`board-metric-${metric.id}-sparkline`}
             />
           </div>
         )}
         <div className="flex items-center justify-between">
           <ThresholdBadge
-            value={latest?.raw}
+            value={emptyReason ? undefined : latest?.raw}
             target={target}
             testid={`board-metric-${metric.id}-badge`}
           />
@@ -177,12 +245,48 @@ export function BoardMetricCard({
   );
 }
 
-type Latest = { raw: string; value: number | undefined } | undefined;
+type Latest =
+  | { raw: string; value: number | undefined; noDataReason: string | null }
+  | undefined;
 
-function latestObservation(observations?: { numeric_value: string }[]): Latest {
+function latestObservation(
+  observations?: {
+    numeric_value: string;
+    dimensions: Record<string, unknown>;
+  }[],
+): Latest {
   if (!observations || observations.length === 0) return undefined;
   // Upstream sort is `ORDER BY observed_at DESC` per the slice-076
   // ListMetricObservations query; the first row is the newest.
   const raw = observations[0].numeric_value;
-  return { raw, value: parseValue(raw) };
+  return {
+    raw,
+    value: parseValue(raw),
+    noDataReason: noDataReason(observations[0]),
+  };
+}
+
+// trendSince is the change from the oldest measured observation in the
+// window to the current value, toned against the target. Percent values
+// stored as fractions (0-1) are reported in percentage points.
+function trendSince(
+  value: number,
+  observations: { numeric_value: string }[],
+  unit: string,
+  target: MetricTarget | null,
+): { delta: number; label: string; tone: DeltaTone } | null {
+  // Upstream order is newest first; the last row is the oldest.
+  const oldest = parseValue(
+    observations[observations.length - 1]?.numeric_value,
+  );
+  if (observations.length < 2 || oldest === undefined) return null;
+  const delta = value - oldest;
+  const isPercent = unit === "percent" || unit === "ratio";
+  const fraction = isPercent && Math.abs(value) <= 1 && Math.abs(oldest) <= 1;
+  const shown = fraction ? delta * 100 : delta;
+  const sign = shown > 0 ? "+" : "";
+  const label = isPercent
+    ? `${sign}${shown.toFixed(1)} pts`
+    : `${sign}${formatValue(shown, unit)}`;
+  return { delta, label, tone: deltaTone(value, delta, target) };
 }

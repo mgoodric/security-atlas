@@ -9,7 +9,8 @@
 //     tenant; null fields render as a truncated user_id)
 //   - granted_at + granted_via (the slice-198 'bootstrap_first_install'
 //     value or the slice-142 'manual_grant' value)
-//   - per-row Demote button → opens a confirmation dialog
+//   - per-row actions menu → Demote opens a confirmation dialog;
+//     withheld, with the reason, from the last super admin (#2090)
 //
 // LOAD-BEARING UX: the demote dialog includes a prominent warning that
 // the operation is irreversible without DB access. Mirrors the slice-
@@ -54,7 +55,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { RowActions } from "@/components/ui/row-actions";
+import { lastSuperAdminReason } from "@/components/admin/last-holder";
 import type { SuperAdminRow } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
 
@@ -161,18 +165,20 @@ export default function SuperAdminsPage() {
   // error; the dialog has no input to point aria-describedby at, so
   // the id exists for the live-region linkage only.
   const grantErrorId = grantError ? "grant-super-admin-error" : undefined;
+  const demoteReason = lastSuperAdminReason(data ?? []);
 
   return (
-    <div className="space-y-6" data-testid="super-admins-page">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Super admins</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Super admins"
+      data-testid="super-admins-page"
+      subtitle={
+        <>
           Platform-global identities authorized to create tenants, rename
           tenants, and grant or demote other super admins. Super admin is NOT a
           per-tenant role; it does not confer tenant-write authority on its own.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <Alert>
         <AlertTitle>Last super admin safeguard</AlertTitle>
         <AlertDescription>
@@ -309,17 +315,25 @@ export default function SuperAdminsPage() {
                       {formatGrantedAt(s.granted_at)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid={`demote-button-${s.user_id}`}
-                        onClick={() => {
-                          setDemoteError(null);
-                          setDemoteTarget(s);
-                        }}
-                      >
-                        Demote
-                      </Button>
+                      {/* #2090: Demote opens the confirm dialog below.
+                          It is withheld, with the reason, from the last
+                          super admin; the backend's 409 still stands. */}
+                      <RowActions
+                        label={`Actions for ${formatUserID(s)}`}
+                        data-testid={`super-admin-actions-${s.user_id}`}
+                        items={[
+                          {
+                            id: "demote",
+                            label: "Demote",
+                            disabledReason: demoteReason,
+                            onSelect: () => {
+                              setDemoteError(null);
+                              setDemoteTarget(s);
+                            },
+                            "data-testid": `demote-button-${s.user_id}`,
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -393,6 +407,6 @@ export default function SuperAdminsPage() {
           </DialogContent>
         </DialogPortal>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

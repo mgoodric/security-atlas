@@ -54,7 +54,8 @@ func bundledSOC2(t *testing.T) *soc2import.Crosswalk {
 }
 
 // #1730: a workbook import for a slug a bundled crosswalk covers takes that
-// crosswalk's titles and bodies. A point of focus takes its parent's title.
+// crosswalk's titles and bodies. A point of focus is rolled up into its
+// parent (#1731), so it needs no title of its own.
 func TestLoadSCFWorkbook_TitlesFromBundledYAML(t *testing.T) {
 	t.Parallel()
 	xlsx := writeSingleColumnWorkbook(t, [][2]string{
@@ -73,9 +74,8 @@ func TestLoadSCFWorkbook_TitlesFromBundledYAML(t *testing.T) {
 	if got.Title != want.Title || got.Body != want.Body {
 		t.Fatalf("CC6.1 = %q / %q; want bundled %q / %q", got.Title, got.Body, want.Title, want.Body)
 	}
-	pof := requirementByCode(t, cw, "CC6.1-POF1")
-	if pof.Title != want.Title || pof.Body != "" {
-		t.Fatalf("CC6.1-POF1 = %q / %q; want parent title %q and no body", pof.Title, pof.Body, want.Title)
+	if len(cw.Requirements) != 2 || len(got.PointsOfFocus) != 1 || got.PointsOfFocus[0].Code != "CC6.1-POF1" {
+		t.Fatalf("requirements = %+v; want CC6.1 (carrying CC6.1-POF1) and CC6.2", cw.Requirements)
 	}
 	if n := soc2import.CodeOnlyTitleCount(cw); n != 0 {
 		t.Fatalf("CodeOnlyTitleCount = %d; want 0", n)
@@ -154,7 +154,8 @@ func TestLoadSCFWorkbook_CodeOnlyTitlesGate(t *testing.T) {
 	}
 }
 
-// #1730: a point of focus whose parent no source covers is code-only too.
+// #1730 + #1731: a point of focus rolls up into a parent created for it; a
+// parent no source covers is code-only too.
 func TestLoadSCFWorkbook_PointOfFocusWithoutParentTitleIsCodeOnly(t *testing.T) {
 	t.Parallel()
 	xlsx := writeSingleColumnWorkbook(t, [][2]string{
@@ -162,8 +163,8 @@ func TestLoadSCFWorkbook_PointOfFocusWithoutParentTitleIsCodeOnly(t *testing.T) 
 	})
 	_, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{FrameworkSlug: "no-bundled-framework", FrameworkColumns: []string{testColumn}, FrameworkVersion: "1"})
 	var codeOnly *soc2import.CodeOnlyTitlesError
-	if !errors.As(err, &codeOnly) || len(codeOnly.Codes) != 1 || codeOnly.Codes[0] != "EX-1-POF1" {
-		t.Fatalf("err = %v; want CodeOnlyTitlesError for EX-1-POF1", err)
+	if !errors.As(err, &codeOnly) || len(codeOnly.Codes) != 1 || codeOnly.Codes[0] != "EX-1" {
+		t.Fatalf("err = %v; want CodeOnlyTitlesError for the created parent EX-1", err)
 	}
 }
 

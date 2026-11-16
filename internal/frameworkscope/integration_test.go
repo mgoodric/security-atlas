@@ -109,7 +109,7 @@ func seedScopeAndControl(t *testing.T, admin *pgxpool.Pool, app *pgxpool.Pool, t
 		// for pre-existing rows. version defaults to 1.
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+			VALUES ($1, $2, 'IAC-37', 'MFA', 'IAC', 'automated', $3, $4)
 		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {
@@ -167,7 +167,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 	}
 
 	// AC-6: draft -> review.
-	reviewed, err := store.Submit(ctx, created.ID, "key_test")
+	reviewed, err := store.Submit(ctx, created.ID, "key_test", "key_test")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -259,7 +259,7 @@ func mustActivate(t *testing.T, ctx context.Context, store *frameworkscope.Store
 	if err != nil {
 		t.Fatalf("Create %s: %v", name, err)
 	}
-	if _, err := store.Submit(ctx, d.ID, "key_test"); err != nil {
+	if _, err := store.Submit(ctx, d.ID, "key_test", "key_test"); err != nil {
 		t.Fatalf("Submit %s: %v", name, err)
 	}
 	if _, err := store.Approve(ctx, frameworkscope.ApproveRequest{ID: d.ID, ApproverUserID: uuid.NewString()}); err != nil {
@@ -290,7 +290,7 @@ func TestPredicateEditBouncesApproved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := store.Submit(ctx, d.ID, "key_test"); err != nil {
+	if _, err := store.Submit(ctx, d.ID, "key_test", "key_test"); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	approverID := uuid.NewString()
@@ -443,7 +443,11 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, str
 	srv.AttachDB(app)
 	// Slice 197: JWT bearers via slice 190 path.
 	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
-	approver := srv.IssueTestJWT(t, testjwt.ApproverFor(uuid.MustParse(tenant)))
+	// #2101: only a person approves, so the approver carries the production
+	// "user:<uuid>" subject; the viewer that submits is someone else.
+	approverClaims := testjwt.ApproverFor(uuid.MustParse(tenant))
+	approverClaims.Subject = "user:" + uuid.NewString()
+	approver := srv.IssueTestJWT(t, approverClaims)
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests nil; AttachDB ineffective")

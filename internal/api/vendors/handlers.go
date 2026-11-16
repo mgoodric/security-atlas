@@ -55,16 +55,20 @@ func NewWithClock(store *vendor.Store, now func() time.Time) *Handler {
 // ----- wire types -----
 
 type vendorWire struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Domain         *string   `json:"domain,omitempty"`
-	Criticality    string    `json:"criticality"`
-	ContractStart  *string   `json:"contract_start,omitempty"`
-	ContractEnd    *string   `json:"contract_end,omitempty"`
-	DPASigned      bool      `json:"dpa_signed"`
-	DPASignedAt    *string   `json:"dpa_signed_at,omitempty"`
-	ReviewCadence  string    `json:"review_cadence"`
-	LastReviewDate *string   `json:"last_review_date,omitempty"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Domain         *string `json:"domain,omitempty"`
+	Criticality    string  `json:"criticality"`
+	ContractStart  *string `json:"contract_start,omitempty"`
+	ContractEnd    *string `json:"contract_end,omitempty"`
+	DPASigned      bool    `json:"dpa_signed"`
+	DPASignedAt    *string `json:"dpa_signed_at,omitempty"`
+	ReviewCadence  string  `json:"review_cadence"`
+	LastReviewDate *string `json:"last_review_date,omitempty"`
+	// FirstReviewDue is set only while the vendor has never been reviewed:
+	// its creation date (UTC) plus the tenant's initial-review window
+	// (#2061). Overdue is false until that day has passed.
+	FirstReviewDue *string   `json:"first_review_due,omitempty"`
 	Overdue        bool      `json:"overdue"`
 	OwnerUser      string    `json:"owner_user"`
 	LinkedSOWURI   *string   `json:"linked_sow_uri,omitempty"`
@@ -209,7 +213,7 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 			}
 			f.Cutoff = t
 		} else {
-			f.Cutoff = h.now()
+			f.Cutoff = h.now().UTC()
 		}
 	}
 	rows, err := h.store.List(ctx, f)
@@ -251,6 +255,24 @@ func (h *Handler) SpendRollup(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rollup": out})
+}
+
+// GetInitialReviewWindow handles GET /v1/vendors/initial-review-window
+// (#2201): the organisation's vendor initial-review window in days, so the
+// Settings page can show the current value. Set via
+// PATCH /v1/tenants/{id} vendor_initial_review_days.
+func (h *Handler) GetInitialReviewWindow(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	days, err := h.store.InitialReviewDays(ctx)
+	if err != nil {
+		h.writeStoreErr(w, r, "read vendor initial review window", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor_initial_review_days": days})
 }
 
 // GetVendor handles GET /v1/vendors/{id}.
@@ -403,7 +425,7 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 		}
 		crit = &v
 	}
-	asOf := h.now()
+	asOf := h.now().UTC()
 	if v := strings.TrimSpace(r.URL.Query().Get("as_of")); v != "" {
 		t, err := time.Parse("2006-01-02", v)
 		if err != nil {
@@ -539,12 +561,13 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 		ScopeCellIDs:  cellIDs,
 		CreatedAt:     v.CreatedAt,
 		UpdatedAt:     v.UpdatedAt,
-		Overdue:       v.IsOverdueAsOf(h.now()),
+		Overdue:       v.IsOverdueAsOf(h.now().UTC()),
 	}
 	w.ContractStart = dateString(v.ContractStart)
 	w.ContractEnd = dateString(v.ContractEnd)
 	w.DPASignedAt = dateString(v.DPASignedAt)
 	w.LastReviewDate = dateString(v.LastReviewDate)
+	w.FirstReviewDue = dateString(v.FirstReviewDue)
 	w.RenewalDate = dateString(v.RenewalDate)
 	if v.ToolCategory != nil {
 		s := string(*v.ToolCategory)

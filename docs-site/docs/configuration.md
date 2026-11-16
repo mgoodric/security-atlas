@@ -76,6 +76,10 @@ a deployment vulnerability, not a convenience.
       deployment is behind TLS, so session cookies carry the `Secure`
       flag. A `Secure` cookie over plain HTTP is silently dropped by
       browsers; the default `false` is for local HTTP only.
+      With it `true`, the OIDC login flow cookies also take the
+      `__Host-` prefix (Path `/`, no Domain), so a sibling subdomain
+      cannot plant them; with it `false` they keep their bare names,
+      which is the plain-HTTP dev fallback and not for production.
     - **`TRUSTED_PROXY_CIDRS`** — comma-separated CIDR allowlist of the
       reverse-proxy address(es) atlas sits behind. The server walks
       `X-Forwarded-For` **right-to-left**, accepting a hop only while the
@@ -85,20 +89,40 @@ a deployment vulnerability, not a convenience.
       is not behind one of these proxies **cannot** spoof its source IP by
       forging the header. **SECURITY:** list only your own proxy
       addresses; `0.0.0.0/0` trusts every connection and reopens the
-      spoofing vector.
+      spoofing vector. The compose bundle defaults it to `WEB_BFF_IP/32`
+      (`10.125.0.2/32`), the web container's fixed address, so web's vetted
+      client IP is honoured (#2040); keep that entry if you override it.
+      Name proxies narrowly: a range such as `10.0.0.0/8` also covers
+      compose network gateways, which host-published connections can
+      arrive from.
+    - **`WEB_TRUSTED_PROXY_CIDRS`** — the same kind of allowlist, read by
+      the web container for the proxies in front of **web**. Before any
+      request or WebSocket upgrade reaches the app, web replaces
+      `X-Forwarded-For` with the one client IP it resolves from its own
+      connection and these hops, so a browser-forged header never reaches
+      atlas, whether through the login BFF or the `/v1` rewrites
+      (upgrades included). Unset means browsers connect to web
+      directly. A malformed value stops web at boot. Never `0.0.0.0/0`.
     - **`TRUST_FORWARDED_HEADERS`** — **deprecated** boolean predecessor
       of `TRUSTED_PROXY_CIDRS`. When set to `1` (and `TRUSTED_PROXY_CIDRS`
       is unset) it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`)
-      for back-compat and the server logs a deprecation warning at boot.
-      `X-Forwarded-For` is a plain request header any client can set, so
-      trusting any proxy without a header-scrubbing reverse proxy in front
-      is a **client-IP spoofing vector**. **Off by default** (shipped
-      commented out). Prefer `TRUSTED_PROXY_CIDRS`.
+      for back-compat and the server logs a warning at every boot.
+      With every address trusted, the walk never reaches an untrusted
+      hop and returns the **left-most** `X-Forwarded-For` entry, which
+      is whatever the client wrote unless your proxy **replaces** the
+      header rather than appending to it. Any client can then choose
+      the IP recorded on its session and the key of every per-IP rate
+      limit (login, OAuth client authentication, demo seed), and so
+      sidestep those limits. **Off by default** (shipped commented
+      out). Set `TRUSTED_PROXY_CIDRS` to your proxy's address instead
+      and remove this.
     - **`ATLAS_ENABLE_DEMO_SEED`** — when set to exactly `true`, exposes
       the admin demo-seed surface (`POST /v1/admin/demo/{seed,teardown}`
-      and the `/admin/demo` page). Teardown **drops a whole tenant and
-      every row anchored to it**. **Off by default** (shipped commented
-      out). Do not enable it on a deployment holding real program data.
+      and the `/admin/demo` page). Teardown **deletes demo data**: the
+      rows a seed added to your organisation, or a whole separate demo
+      tenant and every row anchored to it. **Off by default** (shipped
+      commented out). Do not enable it on a deployment holding real
+      program data.
 <!-- prettier-ignore-end -->
 
 ## Required
@@ -140,11 +164,16 @@ JetStream is the durable event substrate. Their host ports are in the
 
 ## Cookies and security
 
-| Variable                  | Default         | Required? | Scope  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------- | --------------- | --------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ATLAS_SECURE_COOKIES`    | `false`         | no        | server | Marks session cookies `Secure`. Set to `true` once the deployment is behind TLS. A `Secure` cookie over plain HTTP is silently dropped — the `false` default is for local HTTP only. See the [security-critical](#security-critical-variables) note.                                                                                                                                                                                                                                                                                                                                                                                         |
-| `TRUSTED_PROXY_CIDRS`     | _(unset → off)_ | no        | server | Comma-separated CIDR allowlist of the reverse proxy/proxies atlas sits behind (slice 466). The server walks `X-Forwarded-For` **right-to-left**, accepting a hop only while the connecting peer is inside one of these CIDRs, and stops at the first untrusted hop (the real client) — so a client not behind a listed proxy cannot spoof its source IP. Shipped commented out; **off by default** (no proxy trusted → direct TCP peer `r.RemoteAddr`, byte-identical to unset). **Security:** list only your own proxy addresses — `0.0.0.0/0` reopens the spoofing vector. See the [security-critical](#security-critical-variables) note. |
-| `TRUST_FORWARDED_HEADERS` | _(unset → off)_ | no        | server | **Deprecated** boolean predecessor of `TRUSTED_PROXY_CIDRS` (slice 465 → 466). When set to `1` and `TRUSTED_PROXY_CIDRS` is unset, it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`) for back-compat and the server logs a deprecation warning at boot; `TRUSTED_PROXY_CIDRS` takes precedence when both are set. Shipped commented out; **off by default**. Trusting any proxy without a header-scrubbing reverse proxy in front is a client-IP spoofing vector — prefer `TRUSTED_PROXY_CIDRS`. See the [security-critical](#security-critical-variables) note.                                                                    |
+| Variable                  | Default                                     | Required? | Scope  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_SECURE_COOKIES`    | `false`                                     | no        | server | Marks session cookies `Secure`. Set to `true` once the deployment is behind TLS. A `Secure` cookie over plain HTTP is silently dropped — the `false` default is for local HTTP only. See the [security-critical](#security-critical-variables) note.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `ATLAS_OIDC_STATE_KEY`    | _(derived from `BEARER_HASH_KEY`)_          | no        | server | Key for the HMAC that signs the OIDC login `state` and binds it to the flow's tenant, IdP and nonce (#2177). Must be ≥ 32 bytes and the same on every replica. Unset, a key is derived from `BEARER_HASH_KEY`, so rotating that also restarts in-flight OIDC logins. A set but short value stops the server at boot. Secret — `openssl rand -hex 32`.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `TRUSTED_PROXY_CIDRS`     | `10.125.0.2/32` in compose; unset elsewhere | no        | server | Comma-separated CIDR allowlist of the reverse proxy/proxies atlas sits behind (slice 466). The server walks `X-Forwarded-For` **right-to-left**, accepting a hop only while the connecting peer is inside one of these CIDRs, and stops at the first untrusted hop (the real client) — so a client not behind a listed proxy cannot spoof its source IP. Shipped commented out. The compose bundle defaults it to the web container's fixed `bffnet` address so the login BFF's forwarded client IP is honoured (#2040); keep that entry if you override it. Unset elsewhere: no proxy trusted, direct TCP peer `r.RemoteAddr`. **Security:** list only your own proxy addresses — `0.0.0.0/0` reopens the spoofing vector. See the [security-critical](#security-critical-variables) note. |
+| `WEB_TRUSTED_PROXY_CIDRS` | _(unset → off)_                             | no        | web    | Comma-separated CIDR allowlist of the reverse proxies in front of the **web** container (#2040). Web walks its own connection plus the inbound `X-Forwarded-For` right-to-left through these and replaces the header with the resolved client IP on every request and WebSocket upgrade before the app runs, so atlas (login BFF, `/v1` rewrites and upgrades alike) never sees a browser-forged value. Unset: browsers connect to web directly and the socket peer is the client. Malformed: web exits at boot. **Security:** never `0.0.0.0/0`.                                                                                                                                                                                                                                           |
+| `ATLAS_BFF_SUBNET`        | `10.125.0.0/29`                             | no        | server | Subnet of the private web ↔ atlas compose network `bffnet` (#2040). Change it, `WEB_BFF_IP` and `ATLAS_BFF_IP` together, and only if the default collides with a network on the host (`docker compose up` then fails with a pool-overlap error).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `WEB_BFF_IP`              | `10.125.0.2`                                | no        | web    | The web container's fixed address on `bffnet`. atlas's default `TRUSTED_PROXY_CIDRS` is this address `/32`. Must be inside `ATLAS_BFF_SUBNET` and not its first address.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `ATLAS_BFF_IP`            | `10.125.0.3`                                | no        | server | atlas's fixed address on `bffnet`, pinned so atlas, which starts first, cannot take `WEB_BFF_IP`. Must be inside `ATLAS_BFF_SUBNET`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `TRUST_FORWARDED_HEADERS` | _(unset → off)_                             | no        | server | **Deprecated** boolean predecessor of `TRUSTED_PROXY_CIDRS` (slice 465 → 466). When set to `1` and `TRUSTED_PROXY_CIDRS` is unset, it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`) for back-compat and the server logs a warning at every boot; `TRUSTED_PROXY_CIDRS` takes precedence when both are set. Shipped commented out; **off by default**. Trusting every address makes the server take the left-most `X-Forwarded-For` entry, which the client wrote unless the proxy replaces the header, so any client chooses its own session IP and per-IP rate-limit key. Set `TRUSTED_PROXY_CIDRS` instead. See the [security-critical](#security-critical-variables) note.                                                                                                     |
 
 ## Observability
 
@@ -168,9 +197,10 @@ none of its own.
 
 ## Web
 
-| Variable                   | Default   | Required? | Scope | Description                                                                                                                                                                                                                                                                                                              |
-| -------------------------- | --------- | --------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NEXT_PUBLIC_API_BASE_URL` | _(empty)_ | no        | web   | The API base URL the **browser** uses to reach the atlas HTTP API. Leave empty when a reverse proxy fronts both `web` and `atlas` under one hostname (the browser uses same-origin relative URLs). Set an absolute URL only when the browser must reach atlas at a different origin (e.g. dev: `http://localhost:8080`). |
+| Variable                     | Default         | Required? | Scope | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------- | --------------- | --------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_API_BASE_URL`   | _(empty)_       | no        | web   | The API base URL the **browser** uses to reach the atlas HTTP API. Leave empty when a reverse proxy fronts both `web` and `atlas` under one hostname (the browser uses same-origin relative URLs). Set an absolute URL only when the browser must reach atlas at a different origin (e.g. dev: `http://localhost:8080`).                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ATLAS_WEB_DEV_TOKEN_SIGNIN` | _(unset → off)_ | no        | web   | Offers the "Developer sign-in" card on `/login`, where a bearer token (from `atlas-cli credentials issue`) is pasted in place of an email and password. **Off by default.** With it off, the card is offered only while the install is in first-install state (no one has signed in yet, or after `atlas-cli credentials issue --reset-bootstrap`), so the bootstrap token and the recovery key can still be used; see [First-time login](troubleshooting/first-login.md). The web server enforces this on every token sign-in, not only by hiding the card, and refuses token sign-in when it cannot read the install state. Only the exact lowercase string `true` opts in. Restart the `web` service after changing it. |
 
 ## Email / SMTP notification channel
 
@@ -256,18 +286,38 @@ logged.
 
 ## Demo seed
 
-Populates one dedicated demo tenant with a realistic dataset (~50
-controls, 20 risks, 200 evidence records, 3 audit periods, plus policies,
-vendors, and board packs) for screenshots, recorded walkthroughs, or
-handing an auditor a populated instance to explore. The same variable
-gates both the `/admin/demo` page and the `atlas-cli demo` commands.
+Populates a realistic dataset (~50 controls, 20 risks, 200 evidence
+records, 3 audit periods, plus policies, vendors, and board packs) for
+screenshots, recorded walkthroughs, or handing an auditor a populated
+instance to explore. The same variable gates both the `/admin/demo` page
+and the `atlas-cli demo` commands.
+
+Where the data goes follows the install's tenant count, and seeding never
+turns an install multi-tenant on its own:
+
+- **Single-tenant install, fresh:** `atlas-cli demo seed` loads into your
+  organisation while it holds no organisation data beyond the stock
+  bootstrap seed: no evidence, no risks, no tenant-private framework
+  versions, and no controls or policies other than the stock ones. Each
+  added row is recorded, and `atlas-cli demo teardown` removes exactly those
+  rows and nothing else.
+- **Single-tenant install holding real data:** refused. Demo and real data
+  are never mixed. Use a separate install, or opt in to multi-tenant.
+- **Separate demo tenant** (`--tenant-slug`): needs
+  `ATLAS_ALLOW_MULTI_TENANT=true` once any tenant exists, which makes the
+  install multi-tenant. Teardown deletes that tenant; beyond that there is
+  no supported path back to one tenant (tenants are not merged).
+
+The full rules and refusal messages are in
+[demo seed](https://github.com/mgoodric/security-atlas/blob/main/docs/getting-started/demo-seed.md).
 
 <!-- prettier-ignore-start -->
-!!! danger "Demo teardown drops a whole tenant — leave this off in production"
+!!! danger "Demo teardown deletes data — leave this off in production"
 
     `ATLAS_ENABLE_DEMO_SEED=true` exposes `POST /v1/admin/demo/seed` and
-    `POST /v1/admin/demo/teardown`. Teardown deletes the demo tenant and
-    every row anchored to it. When enabled, the surface stays admin-role
+    `POST /v1/admin/demo/teardown`. Teardown deletes demo data: the rows a
+    seed recorded in your organisation, or a whole demo tenant and every
+    row anchored to it. When enabled, the surface stays admin-role
     gated (OPA `admin.rego`), rate-limited to one seed/teardown per client
     IP per 60 seconds, and writes an audit row **before** the seeder runs —
     but none of that substitutes for leaving it off on a deployment holding
@@ -301,13 +351,31 @@ firewall or reverse proxy rather than binding them to `0.0.0.0`.
 
 ## Tenancy and bootstrap
 
-| Variable                         | Default                                     | Required? | Scope     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------------------- | ------------------------------------------- | --------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ATLAS_BOOTSTRAP_TENANT`         | `00000000-0000-4000-8000-000000000001`      | no        | bootstrap | UUID of the default tenant the bootstrap container seeds. The solo operator is a single-tenant deployment of the multi-tenant system. Leave the default unless migrating data.                                                                                                                                                                                                                                                                                                                |
-| `ATLAS_ALLOW_MULTI_TENANT`       | _(unset → off)_                             | no        | server    | Multi-tenant opt-in ([ADR 0023](https://github.com/mgoodric/security-atlas/blob/main/docs/adr/0023-single-tenant-experience-by-default.md)). Unset, a super-admin cannot create a second tenant (`POST /v1/admin/tenants` returns `403`). Only the exact lowercase string `true` opts in. It gates creation only: an install that already holds several tenants serves normally without it. One-way: there is no path back to a single tenant. Restart the `atlas` service after changing it. |
-| `SCF_CATALOG`                    | `/repo/migrations/fixtures/scf-sample.json` | no        | bootstrap | In-container path of the SCF catalog JSON the bootstrap imports. Shipped commented; the default is the bundled sample. Point it at a full SCF release converted to the importer's JSON shape — see `docs/SELF_HOSTING.md` "Bring your own SCF release".                                                                                                                                                                                                                                       |
-| `CONTROLS_DIR`                   | `/repo/controls/soc2`                       | no        | bootstrap | In-container directory of control bundles (one `control.yaml` per subdirectory) the bootstrap uploads. Shipped commented; the default is the 50 stock SOC 2 controls. Point it at an empty or non-existent directory to seed none.                                                                                                                                                                                                                                                            |
-| `ATLAS_OAUTH_TOKEN_RATE_PER_MIN` | `600`                                       | no        | server    | OAuth token-endpoint rate limit, per `client_id`, per minute (slice 187). Raised above the 60/min library default so the bootstrap container's idempotent control-bundle re-runs (up to ~100 token acquisitions/min) do not exhaust the budget. The envelope is per-`client_id`; other clients are unaffected. Tune to taste.                                                                                                                                                                 |
+| Variable                                  | Default                                     | Required? | Scope     | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------- | ------------------------------------------- | --------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_BOOTSTRAP_TENANT`                  | `00000000-0000-4000-8000-000000000001`      | no        | bootstrap | UUID of the default tenant the bootstrap container seeds. The solo operator is a single-tenant deployment of the multi-tenant system. Leave the default unless migrating data.                                                                                                                                                                                                                                                                                                                |
+| `ATLAS_ALLOW_MULTI_TENANT`                | _(unset → off)_                             | no        | server    | Multi-tenant opt-in ([ADR 0023](https://github.com/mgoodric/security-atlas/blob/main/docs/adr/0023-single-tenant-experience-by-default.md)). Unset, a super-admin cannot create a second tenant (`POST /v1/admin/tenants` returns `403`). Only the exact lowercase string `true` opts in. It gates creation only: an install that already holds several tenants serves normally without it. One-way: there is no path back to a single tenant. Restart the `atlas` service after changing it. |
+| `SCF_CATALOG`                             | `/repo/migrations/fixtures/scf-sample.json` | no        | bootstrap | In-container path of the SCF catalog JSON the bootstrap imports. Shipped commented; the default is the bundled sample. Point it at a full SCF release converted to the importer's JSON shape — see `docs/SELF_HOSTING.md` "Bring your own SCF release".                                                                                                                                                                                                                                       |
+| `CONTROLS_DIR`                            | `/repo/controls/soc2`                       | no        | bootstrap | In-container directory of control bundles (one `control.yaml` per subdirectory) the bootstrap uploads. Shipped commented; the default is the 50 stock SOC 2 controls. Point it at an empty or non-existent directory to seed none.                                                                                                                                                                                                                                                            |
+| `ATLAS_OAUTH_TOKEN_RATE_PER_MIN`          | `600`                                       | no        | server    | OAuth token-endpoint rate limit, per `client_id`, per minute (slice 187). Raised above the 60/min library default so the bootstrap container's idempotent control-bundle re-runs (up to ~100 token acquisitions/min) do not exhaust the budget. The envelope is per-`client_id`; other clients are unaffected. Tune to taste.                                                                                                                                                                 |
+| `ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN`    | `60`                                        | no        | server    | Rate limit, per `client_id`, per minute, on client authentication at `/oauth/introspect` and `/oauth/revoke` (#2041). Counted before the secret lookup, so an unknown `client_id` is throttled the same as a registered one. Over the limit the endpoint answers 429 with `Retry-After`. Each endpoint keeps its own buckets.                                                                                                                                                                 |
+| `ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN` | `120`                                       | no        | server    | Rate limit, per caller IP, per minute, on the same two endpoints (#2041). The IP is resolved through `TRUSTED_PROXY_CIDRS`, never a raw `X-Forwarded-For`. Self-revocation with a bearer token presents no `client_id` and is not counted.                                                                                                                                                                                                                                                    |
+
+### Rate limits are per replica
+
+Every rate limit above, and the fixed local-login throttle (60 attempts
+per client IP, then 60/min; 10 per account, then 5/min), is kept in
+memory by each atlas process. Nothing is shared between replicas. Behind
+a load balancer with N atlas replicas (an HA compose setup, or a Helm
+`replicaCount` above 1), a client spread across them gets up to N times
+each configured limit. Divide the `*_RATE_PER_MIN` values by your replica
+count if you need the stated limit cluster-wide. The login throttle's
+limits are not configurable.
+
+Per-IP limits key IPv4 clients on the full address and IPv6 clients on
+their `/64` prefix, since one IPv6 customer allocation holds far more
+addresses than any limiter could track. An IPv4-mapped IPv6 address
+(`::ffff:198.51.100.7`) counts as its IPv4 address.
 
 ## Related references
 

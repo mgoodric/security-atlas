@@ -38,7 +38,7 @@ func TestListControls_HappyPath(t *testing.T) {
 		if r.URL.Path != "/v1/controls" {
 			t.Errorf("path = %q, want /v1/controls", r.URL.Path)
 		}
-		_, _ = fmt.Fprint(w, `{"controls":[{"id":"00000000-0000-0000-0000-000000000001","title":"T","control_family":"IAC","scf_id":"IAC-06","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`)
+		_, _ = fmt.Fprint(w, `{"controls":[{"id":"00000000-0000-0000-0000-000000000001","title":"T","control_family":"IAC","scf_id":"IAC-37","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`)
 	})
 	defer srv.Close()
 
@@ -136,7 +136,7 @@ func TestGetControl_UUIDPath(t *testing.T) {
 		if r.URL.Path != "/v1/controls" {
 			t.Errorf("path = %q, want /v1/controls", r.URL.Path)
 		}
-		_, _ = fmt.Fprintf(w, `{"controls":[{"id":%q,"title":"T","control_family":"IAC","scf_id":"IAC-06","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`, wantID)
+		_, _ = fmt.Fprintf(w, `{"controls":[{"id":%q,"title":"T","control_family":"IAC","scf_id":"IAC-37","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`, wantID)
 	})
 	defer srv.Close()
 
@@ -158,12 +158,12 @@ func TestGetControl_ShortCodePath(t *testing.T) {
 		if !strings.HasPrefix(r.URL.Path, "/v1/anchors/") {
 			t.Errorf("path = %q, want /v1/anchors/ prefix", r.URL.Path)
 		}
-		_, _ = fmt.Fprint(w, `{"anchor":{"id":"a-uuid","short_code":"IAC-06","title":"T","family":"IAC"}}`)
+		_, _ = fmt.Fprint(w, `{"anchor":{"id":"a-uuid","short_code":"IAC-37","title":"T","family":"IAC"}}`)
 	})
 	defer srv.Close()
 
 	tool := tools.NewGetControl(client)
-	out, err := tool.Handle(context.Background(), json.RawMessage(`{"anchor_id":"IAC-06"}`))
+	out, err := tool.Handle(context.Background(), json.RawMessage(`{"anchor_id":"IAC-37"}`))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -190,6 +190,84 @@ func TestListRisks_ForwardsStatusFilter(t *testing.T) {
 	_, err := tool.Handle(context.Background(), json.RawMessage(`{"status":"accept"}`))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
+	}
+}
+
+// #2217: list_risks leaves roll-ups to the platform default and forwards
+// include_rollups only when asked; an included roll-up keeps its child_count.
+func TestListRisks_ForwardsIncludeRollUps(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		args, want string
+	}{
+		{`{}`, ""},
+		{`{"include_rollups":false}`, ""},
+		{`{"include_rollups":true}`, "true"},
+	} {
+		client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("include_rollups"); got != tc.want {
+				t.Errorf("include_rollups = %q, want %q", got, tc.want)
+			}
+			_, _ = fmt.Fprint(w, `{"risks":[{"id":"r1","title":"Parent","child_count":2}],"count":1}`)
+		})
+		got, err := tools.NewListRisks(client).Handle(context.Background(), json.RawMessage(tc.args))
+		srv.Close()
+		if err != nil {
+			t.Fatalf("Handle(%s): %v", tc.args, err)
+		}
+		b, _ := json.Marshal(got)
+		if !strings.Contains(string(b), `"child_count":2`) {
+			t.Errorf("Handle(%s) dropped child_count: %s", tc.args, b)
+		}
+	}
+}
+
+// #1815: list_risk_categories reads GET /v1/risks/categories and forwards
+// include_archived only when asked.
+func TestListRiskCategories_ForwardsIncludeArchived(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		args, want string
+	}{
+		{`{}`, ""},
+		{`{"include_archived":true}`, "true"},
+	} {
+		client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/risks/categories" {
+				t.Errorf("path = %q, want /v1/risks/categories", r.URL.Path)
+			}
+			if got := r.URL.Query().Get("include_archived"); got != tc.want {
+				t.Errorf("include_archived = %q, want %q", got, tc.want)
+			}
+			_, _ = fmt.Fprint(w, `{"categories":[{"id":"c1","slug":"operational","name":"Operational","is_default":true,"risk_count":3}],"count":1}`)
+		})
+		got, err := tools.NewListRiskCategories(client).Handle(context.Background(), json.RawMessage(tc.args))
+		srv.Close()
+		if err != nil {
+			t.Fatalf("Handle(%s): %v", tc.args, err)
+		}
+		raw, _ := json.Marshal(got)
+		if !strings.Contains(string(raw), `"slug":"operational"`) || !strings.Contains(string(raw), `"count":1`) {
+			t.Errorf("Handle(%s) = %s, want the operational category", tc.args, raw)
+		}
+	}
+}
+
+// #1815: the schemas suggest no category the platform would refuse; the
+// old example values "technical" and "legal" were never valid.
+func TestRiskToolSchemas_NoInvalidCategoryExamples(t *testing.T) {
+	t.Parallel()
+
+	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
+	for _, tool := range tools.AllWithWrites(client) {
+		def := tool.Definition()
+		for _, bad := range []string{"technical", "legal"} {
+			if strings.Contains(string(def.InputSchema), bad) || strings.Contains(def.Description, bad) {
+				t.Errorf("%s schema mentions invalid category example %q", def.Name, bad)
+			}
+		}
 	}
 }
 
@@ -331,26 +409,26 @@ func TestAll_WiresReadTools(t *testing.T) {
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.All(client)
-	if len(all) != 11 {
-		t.Fatalf("All() = %d tools, want 11 read tools (slice 172 P0-A10 + widened surface)", len(all))
+	if len(all) != 12 {
+		t.Fatalf("All() = %d tools, want 12 read tools (slice 172 P0-A10 + widened surface + #1815)", len(all))
 	}
-	// Read tools are the first eleven entries of CanonicalToolOrder.
-	for i, want := range mcp.CanonicalToolOrder[:11] {
+	// Read tools are the first twelve entries of CanonicalToolOrder.
+	for i, want := range mcp.CanonicalToolOrder[:12] {
 		if got := all[i].Definition().Name; got != want {
 			t.Errorf("all[%d] = %q, want %q (CanonicalToolOrder)", i, got, want)
 		}
 	}
 }
 
-// TestAllWithWrites_WiresAllTools — the full surface is 18 tools
-// (11 reads + 7 writes). Order is fixed by mcp.CanonicalToolOrder.
+// TestAllWithWrites_WiresAllTools — the full surface is 19 tools
+// (12 reads + 7 writes). Order is fixed by mcp.CanonicalToolOrder.
 func TestAllWithWrites_WiresAllTools(t *testing.T) {
 	t.Parallel()
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.AllWithWrites(client)
-	if len(all) != 18 {
-		t.Fatalf("AllWithWrites() = %d tools, want 18 (11 reads + 7 writes)", len(all))
+	if len(all) != 19 {
+		t.Fatalf("AllWithWrites() = %d tools, want 19 (12 reads + 7 writes)", len(all))
 	}
 	for i, want := range mcp.CanonicalToolOrder {
 		if got := all[i].Definition().Name; got != want {

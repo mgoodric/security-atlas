@@ -14,16 +14,58 @@ binaries — build the target explicitly, or use `go run ./cmd/atlas-cli`.
 
 Every subcommand that talks to a running platform accepts these:
 
-| Flag         | Env var                   | Notes                                     |
-| ------------ | ------------------------- | ----------------------------------------- |
-| `--endpoint` | `SECURITY_ATLAS_ENDPOINT` | **gRPC** endpoint, e.g. `localhost:50051` |
-| `--token`    | `SECURITY_ATLAS_TOKEN`    | Bearer token                              |
-| `--insecure` | —                         | Disable TLS. Loopback endpoints only.     |
+| Flag                    | Env var                   | Notes                                                      |
+| ----------------------- | ------------------------- | ---------------------------------------------------------- |
+| `--endpoint`            | `SECURITY_ATLAS_ENDPOINT` | **gRPC** endpoint, e.g. `localhost:50051`                  |
+| `--token`               | `SECURITY_ATLAS_TOKEN`    | Bearer token                                               |
+| `--insecure`            | —                         | Disable TLS. Loopback endpoints only.                      |
+| `--allow-insecure-http` | —                         | Let REST commands use plain `http://` to any host. Unsafe. |
+
+`--insecure` is refused unless the endpoint's host is `localhost`, an address
+in `127.0.0.0/8` (including `::ffff:127.0.0.1`), or `::1`. The host is parsed,
+not prefix-matched, so `localhost.example.com` is refused too. The check is
+literal and never consults DNS: a name that resolves to loopback, such as
+`127.0.0.1.nip.io`, is refused, and so is the fully qualified `localhost.`.
+Every connector applies the same rule to its own `--insecure`, on the
+registry dial as well as the push path.
+
+### Plain `http://` for REST commands
+
+The REST commands (`controls upload`, `controls import` and its subcommands
+including `export`, `features`, `taxonomy`, `mappings`, `credentials
+reset-bootstrap`, `policy import`, `login`, and the OAuth token request behind
+`controls upload --client-id`) refuse to send to an `http://` URL whose host
+is not loopback, by the same rule as `--insecure`. The refusal happens before
+anything is sent, so the bearer, the client secret or the device-flow token
+never crosses the wire in the clear. It applies to every redirect hop as
+well, so an `https://` endpoint that redirects to a non-loopback `http://`
+URL is refused at the redirect.
+
+`https://` is unaffected, and so is `http://localhost:8080` for local
+development. To send to a non-loopback `http://` URL anyway, for example
+inside a private network you trust, pass `--allow-insecure-http`; the CLI
+prints a warning on stderr every time it is set.
 
 Commands that write directly to Postgres (`catalog`, `policy seed-stock`,
 `demo`, `evidence verify`) take a `--dsn` / `--database-url` instead and read
 `DATABASE_URL` or `DATABASE_URL_APP` from the environment. The import
 commands need the `atlas_migrate` role; the read/verify paths use `atlas_app`.
+
+## Tenant flags
+
+On a single-tenant install (the default) no command needs a tenant ID. The
+tenant flags (`--tenant` on `credentials`, `evidence verify` and the `oauth`
+client commands; `--tenant-id` on `policy seed-stock` and `oscal-export`) are
+optional there:
+
+- Commands that call the API default to the tenant of the `--token`
+  credential.
+- Commands that connect straight to Postgres use the install's only tenant
+  and print its name on stderr.
+
+On a multi-tenant install, leaving the flag off is an error that lists every
+tenant's ID, slug and name, so you never act on the wrong one by accident.
+See [Tenant membership](tenant-membership.md) for opting in to multi-tenant.
 
 ## Command tree
 
@@ -76,14 +118,26 @@ security-atlas-cli evidence push \
 
 `--scope` is the scope predicate as JSON. `--payload` takes a JSON literal or
 `@path/to/file.json`. `--result` is one of `pass | fail | na | inconclusive`.
+`--control` takes the control's UUID or its bundle ID; a bundle ID links the
+record to the tenant's active version of that bundle. Any other value is kept
+as a free-form reference and does not link to a control.
+The receipt's `linkedControlId` is the UUID of the control the record linked
+to, and is absent when it linked to none. When `--control` is not a UUID and
+the record did not link, the CLI also prints a warning on stderr, which is
+usually a mistyped bundle ID. A bundle ID cannot be UUID-shaped: the push
+reads a UUID as a control ID, so `controls upload` rejects such a bundle.
 Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `service_account`), `--session-id`, `--payload-uri`.
+
+The gRPC endpoint accepts API keys only, not a UI session token; issue one
+with `credentials issue`. [Push a first manual attestation](first-manual-attestation.md)
+walks the whole path.
 
 `evidence verify` re-hashes the ledger and reports mismatches:
 
 ```sh
-security-atlas-cli evidence verify --tenant <tenant uuid>   # RLS-scoped, as atlas_app
-security-atlas-cli evidence verify --all-tenants            # super-admin walk
+security-atlas-cli evidence verify                 # RLS-scoped, as atlas_app
+security-atlas-cli evidence verify --all-tenants   # super-admin walk
 ```
 
 Add `--page-size` to tune the keyset page size (default 1000).
@@ -91,15 +145,21 @@ Add `--page-size` to tune the keyset page size (default 1000).
 ## credentials
 
 ```sh
-security-atlas-cli credentials issue --tenant <tenant id> \
-  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 30d
-security-atlas-cli credentials list   --tenant <tenant id>
+security-atlas-cli credentials issue \
+  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 720h
+security-atlas-cli credentials list
 security-atlas-cli credentials rotate --id <credential id>
 security-atlas-cli credentials revoke --id <credential id>
 ```
 
 The bearer is printed exactly once, at issue time. `--kinds` empty means all
-evidence kinds; `--ttl 0` (the default) means no expiry.
+evidence kinds; `--ttl` takes a Go duration (`24h`, `90m`) or whole days
+(`30d`), and `--ttl 0` (the default) means no expiry. So does any zero
+duration, such as `0d` or `0h`.
+
+These commands need an admin `--token`, and they act only in that
+credential's tenant: a `--tenant` naming another tenant is refused, and
+`rotate` or `revoke` of another tenant's key reports it as unknown.
 
 `credentials issue --reset-bootstrap --force` is the first-login recovery
 path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way.
@@ -116,6 +176,18 @@ security-atlas-cli catalog import-crosswalk data/crosswalks/soc2-tsc-2017.yaml
 
 `just import-scf <path>` and `just import-soc2 <path>` wrap these.
 
+The JSON catalog's shape is documented in
+[`docs/SELF_HOSTING.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/SELF_HOSTING.md),
+with `internal/api/scfimport/catalog.go` as the contract. Each control may
+carry an optional `legacy_scf_id`, its code in the previous SCF release;
+the anchor API returns it as `legacy_scf_id`.
+
+After importing a new release, `import-scf` re-binds controls that are
+still on the previous release's anchors. A control moves only when the new
+anchor has the same code and the same title. Every other control is printed
+as `control needs re-anchoring`, with a note saying where its concept went
+(see the [upgrade guide](upgrade.md#4-verify-the-upgrade)).
+
 `import-scf` also reads SCF's published Excel workbook directly, with no
 conversion step. Download it from the
 [SCF website](https://securecontrolsframework.com/) or the
@@ -131,7 +203,7 @@ It reads the `SCF <release>` sheet (`SCF #`, `SCF Control`, and the
 `import-crosswalk` reads from that workbook. The release version comes from the
 sheet name (`2026.3`); `--release-version` overrides it. The workbook carries
 no release date; pass `--release-date YYYY-MM-DD` to record one. Family is the `SCF #`
-prefix (`IAC` for `IAC-06`), as in the JSON catalog.
+prefix (`IAC` for `IAC-37`), as in the JSON catalog.
 
 To import a full OSCAL catalog (NIST 800-53 and friends), use the separate
 `atlas-oscal import-catalog` binary — see
@@ -162,6 +234,33 @@ These talk to the platform over HTTP, not gRPC — set `--http-endpoint` or
 `ATLAS_HTTP_ENDPOINT` (default `http://localhost:8080`). `--reason` is
 recorded in the feature-flag audit log.
 
+## oauth
+
+`oauth issue-client` and `oauth bind-client` connect straight to Postgres
+through `DATABASE_URL`. Leave out `--tenant` and they read every tenant, so
+use the BYPASSRLS `atlas_migrate` connection.
+
+```sh
+security-atlas-cli oauth issue-client ci-pipeline          # bound to your organisation
+security-atlas-cli oauth issue-client cli-public --unbound # public device-flow client
+security-atlas-cli oauth bind-client <client_id>           # bind an existing client
+```
+
+An OAuth `client_credentials` client is **bound to a tenant**: its tokens act
+in that tenant and its writes land there. `issue-client` binds the new client
+to the install's only tenant unless you pass `--tenant`. A token from an
+unbound client can still read, but every write is refused with
+`403 tenant_unbound`, which names `bind-client` as the fix. Use `--unbound`
+only for a public client used by the device-code or authorization-code flow,
+where the token carries the signed-in user's tenant.
+
+Upgrading binds every existing unbound client on a single-tenant install. On
+a multi-tenant install nothing is bound for you; bind each client with
+`security-atlas-cli oauth bind-client <client_id> --tenant <tenant id>`. A
+client already bound to another tenant is refused: issue a new one. See
+[Migrating from API keys to OAuth](migration/oauth.md) for auditing public clients after
+the upgrade.
+
 ## keys
 
 JWT signing-key lifecycle against the keystore directory (`--keystore`, env
@@ -189,7 +288,6 @@ period that has not been frozen and needs the `oscal-bridge` sidecar:
 
 ```sh
 security-atlas-cli oscal-export \
-  --tenant-id <tenant uuid> \
   --period-id <frozen period uuid> \
   --out ./oscal-bundle/ \
   --bridge-addr 127.0.0.1:50070
@@ -205,9 +303,17 @@ nothing else, enables it. Teardown is destructive; see
 [Configuration reference](configuration.md).
 
 ```sh
-security-atlas-cli demo seed --tenant-slug demo-acme --scale 1.0
+security-atlas-cli demo seed                 # your organisation, single-tenant install
+security-atlas-cli demo teardown             # removes exactly what that seed added
+security-atlas-cli demo seed --tenant-slug demo-acme --scale 1.0   # separate tenant
 security-atlas-cli demo teardown --tenant-slug demo-acme
 ```
+
+Without `--tenant-slug`, `seed` loads into the install's only tenant, and only
+while it holds nothing beyond the stock bootstrap seed; otherwise it refuses.
+With `--tenant-slug` it creates a separate demo tenant, which needs
+`ATLAS_ALLOW_MULTI_TENANT=true` when a tenant already exists. See
+`docs/getting-started/demo-seed.md`.
 
 `--scale` accepts 0.1 to 5.0. Both read the BYPASSRLS DSN from
 `--database-url` / `DATABASE_URL`; `seed` also uses `--app-database-url` /

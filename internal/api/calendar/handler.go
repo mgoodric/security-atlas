@@ -33,6 +33,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -53,11 +54,13 @@ const (
 	truncateThreshold = 500
 
 	// validEventTypes is the AC-1 closed set. Filters outside this set
-	// are rejected with 400. Slice 675 added `vendor` so the calendar
-	// agenda sources the same event types as the dashboard "Upcoming"
-	// widget (audit-period boundaries, vendor reviews, policy reviews,
-	// exceptions) plus the calendar-only periodic control reviews.
-	validEventTypes = "audit,exception,policy,vendor,control"
+	// are rejected with 400. Slice 675 added `vendor`; #2130 added
+	// `risk` (risk reviews), `action_plan` (action-plan due dates) and
+	// `policy_ack` (policy acknowledgement expiries), making the calendar
+	// the one list of what is due. #2215 added `offboarding` (open
+	// offboarding checklists), which the query already emitted but the
+	// filter could not name.
+	validEventTypes = "audit,exception,policy,vendor,control,risk,action_plan,policy_ack,offboarding"
 
 	// calendarScopeKind is the api_keys AllowedKinds entry used to
 	// scope a credential to "may only fetch the ICS feed." See decision
@@ -78,6 +81,7 @@ const (
 type Handler struct {
 	store  *Store
 	creds  *credstore.Store
+	engine *authz.Engine
 	nowFn  func() time.Time
 	urlGen func(token string) string
 }
@@ -100,6 +104,15 @@ func New(store *Store, creds *credstore.Store) *Handler {
 // computations deterministic.
 func (h *Handler) WithNow(fn func() time.Time) *Handler {
 	h.nowFn = fn
+	return h
+}
+
+// WithAuthz wires the OPA engine that narrows the gated event types
+// (gatedEventTypes) to the ones the caller may read (#2130). With no
+// engine (unit-test servers) the JSON list returns every type, as the
+// search handler does; the ICS feed leaves the gated types out either way.
+func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
+	h.engine = engine
 	return h
 }
 
@@ -177,10 +190,14 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
-	if err != nil {
-		httperr.WriteInternal(w, r, "calendar", err)
-		return
+	typeFilter, anyLeft := h.readableTypes(r, typeFilter)
+	var rows []dbx.ListCalendarEventsRow
+	if anyLeft {
+		rows, err = h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
+		if err != nil {
+			httperr.WriteInternal(w, r, "calendar", err)
+			return
+		}
 	}
 
 	truncated := len(rows) > truncateThreshold
@@ -302,10 +319,16 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
-	if err != nil {
-		httperr.WriteInternal(w, r, "calendar", err)
-		return
+	// #2130: an ICS token names no user, so there is no caller to ask OPA
+	// about; the gated types are left out of every feed (fail closed).
+	typeFilter, anyLeft := withoutTypes(typeFilter, gatedEventTypes)
+	var rows []dbx.ListCalendarEventsRow
+	if anyLeft {
+		rows, err = h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
+		if err != nil {
+			httperr.WriteInternal(w, r, "calendar", err)
+			return
+		}
 	}
 	if len(rows) > truncateThreshold {
 		rows = rows[:truncateThreshold]
@@ -398,11 +421,15 @@ func normalizeTypeFilter(raw string) (string, error) {
 	}
 	parts := strings.Split(raw, ",")
 	allowed := map[string]struct{}{
-		"audit":     {},
-		"exception": {},
-		"policy":    {},
-		"vendor":    {},
-		"control":   {},
+		"audit":       {},
+		"exception":   {},
+		"policy":      {},
+		"vendor":      {},
+		"control":     {},
+		"risk":        {},
+		"action_plan": {},
+		"policy_ack":  {},
+		"offboarding": {},
 	}
 	kept := make([]string, 0, len(parts))
 	seen := map[string]struct{}{}
@@ -421,6 +448,79 @@ func normalizeTypeFilter(raw string) (string, error) {
 		kept = append(kept, p)
 	}
 	return strings.Join(kept, ","), nil
+}
+
+// gatedEventTypes maps each calendar event type that needs more than
+// calendar access to the OPA resource type whose read it needs (#2130).
+// Roles admitted to `calendar` (auditor, control_owner, viewer) are not
+// all admitted to risks or action plans, so those events are shown only
+// to a caller who could read the records themselves, as /v1/search does
+// per type. Offboarding events (#2215) carry the departing person's work
+// email, so they need a personnel-security read, which only the GRC
+// engineer and admin hold.
+//
+// Vendor and exception events (#2232) name a vendor or the control an
+// exception waives, so they need a vendors or exceptions read: the auditor
+// reads exceptions but not vendors, and the control owner reads neither.
+// The ICS feed drops every gated type, these two included, because its
+// token names no user to ask OPA about.
+var gatedEventTypes = map[string]string{
+	"risk":        "risks",
+	"action_plan": "action-plans",
+	"offboarding": "personnel-security",
+	"vendor":      "vendors",
+	"exception":   "exceptions",
+}
+
+// readableTypes narrows a normalized type filter to the types the caller
+// may read; see ReadableTypes.
+func (h *Handler) readableTypes(r *http.Request, typeFilter string) (string, bool) {
+	return ReadableTypes(r, h.engine, typeFilter)
+}
+
+// ReadableTypes narrows a normalized type filter to the event types the
+// caller of r may read. Gated types (gatedEventTypes) the caller's OPA
+// decision denies are dropped. It returns the filter to query with and
+// whether any type is left; an empty filter means every type, so a
+// narrowed one is spelled out. With no engine every type stays (unit-test
+// servers). The dashboard export's upcoming panel calls it too (#2234),
+// so the export and the calendar show a caller the same events.
+func ReadableTypes(r *http.Request, engine *authz.Engine, typeFilter string) (string, bool) {
+	if engine == nil {
+		return typeFilter, true
+	}
+	denied := map[string]string{}
+	for eventType, resource := range gatedEventTypes {
+		in := authz.BuildInput(r, nil)
+		in.Resource.Type = resource
+		in.Resource.ID = ""
+		in.Action = "read"
+		d, err := engine.Decide(r.Context(), in)
+		if err != nil || !d.Allow {
+			denied[eventType] = resource
+		}
+	}
+	return withoutTypes(typeFilter, denied)
+}
+
+// withoutTypes removes drop's keys from a normalized type filter ("" is
+// every type). It returns the remaining filter and whether any type is
+// left.
+func withoutTypes(typeFilter string, drop map[string]string) (string, bool) {
+	if len(drop) == 0 {
+		return typeFilter, true
+	}
+	src := typeFilter
+	if src == "" {
+		src = validEventTypes
+	}
+	kept := make([]string, 0, 8)
+	for _, t := range strings.Split(src, ",") {
+		if _, gone := drop[t]; !gone {
+			kept = append(kept, t)
+		}
+	}
+	return strings.Join(kept, ","), len(kept) > 0
 }
 
 // rowToWire maps a sqlc-generated row into the AC-2 wire shape.

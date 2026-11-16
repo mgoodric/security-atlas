@@ -14,6 +14,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { Markdown } from "@/components/markdown";
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,14 +47,22 @@ export default function PersonnelChecklistDetailPage() {
   const now = useMemo(() => new Date(), []);
 
   if (detailQ.isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return (
+      <PageShell title="Personnel checklist" width="reading">
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </PageShell>
+    );
   }
   if (detailQ.isError) {
     return (
-      <Alert variant="destructive" data-testid="personnel-detail-error">
-        <AlertTitle>Could not load checklist</AlertTitle>
-        <AlertDescription>{(detailQ.error as Error).message}</AlertDescription>
-      </Alert>
+      <PageShell title="Personnel checklist" width="reading">
+        <Alert variant="destructive" data-testid="personnel-detail-error">
+          <AlertTitle>Could not load checklist</AlertTitle>
+          <AlertDescription>
+            {(detailQ.error as Error).message}
+          </AlertDescription>
+        </Alert>
+      </PageShell>
     );
   }
 
@@ -62,41 +72,45 @@ export default function PersonnelChecklistDetailPage() {
   );
 
   return (
-    <div className="space-y-6 max-w-3xl" data-testid="personnel-detail">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            data-testid="personnel-detail-person"
+    <PageShell
+      title={
+        <span data-testid="personnel-detail-person">
+          {checklist.person_display_name || checklist.person_external_id}
+        </span>
+      }
+      subtitle={
+        <div className="flex items-center gap-2">
+          <span
+            className="text-sm text-foreground"
+            data-testid="personnel-detail-kind"
           >
-            {checklist.person_display_name || checklist.person_external_id}
-          </h1>
-          <div className="mt-1 flex items-center gap-2">
-            <span className="text-sm" data-testid="personnel-detail-kind">
-              {kindLabel(checklist.kind)}
-            </span>
-            <span
-              className={
-                "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-                statusBadgeClass(checklist, now)
-              }
-              data-testid="personnel-detail-status"
-            >
-              {statusBadgeLabel(checklist, now)}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              Due {dateLabel(checklist.due_at)}
-            </span>
-          </div>
+            {kindLabel(checklist.kind)}
+          </span>
+          <span
+            className={
+              "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
+              statusBadgeClass(checklist, now)
+            }
+            data-testid="personnel-detail-status"
+          >
+            {statusBadgeLabel(checklist, now)}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            Due {dateLabel(checklist.due_at)}
+          </span>
         </div>
+      }
+      actions={
         <Link
           href="/personnel-security"
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
           Back to list
         </Link>
-      </div>
-
+      }
+      width="reading"
+      data-testid="personnel-detail"
+    >
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Person ID" value={checklist.person_external_id} mono />
         <Field
@@ -132,7 +146,7 @@ export default function PersonnelChecklistDetailPage() {
           </ul>
         )}
       </section>
-    </div>
+    </PageShell>
   );
 }
 
@@ -215,7 +229,7 @@ function ItemRow({
             </p>
           ) : null}
           {item.notes ? (
-            <p data-testid="personnel-item-notes">{item.notes}</p>
+            <Markdown source={item.notes} data-testid="personnel-item-notes" />
           ) : null}
         </div>
       ) : null}

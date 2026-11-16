@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 // BundleSchemaVersion is the only accepted manifest schema version in slice
@@ -39,11 +41,23 @@ type Manifest struct {
 	Title               string `yaml:"title"                  json:"title"`
 	Description         string `yaml:"description,omitempty"  json:"description,omitempty"`
 	SCFAnchorID         string `yaml:"scf_anchor_id"          json:"scf_anchor_id"`
-	ControlFamily       string `yaml:"control_family,omitempty" json:"control_family,omitempty"`
-	ImplementationType  string `yaml:"implementation_type"    json:"implementation_type"`
-	OwnerRole           string `yaml:"owner_role,omitempty"   json:"owner_role,omitempty"`
-	LifecycleState      string `yaml:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
-	FreshnessClass      string `yaml:"freshness_class,omitempty" json:"freshness_class,omitempty"`
+	// SCFRelease names the SCF release SCFAnchorID is a code in, e.g.
+	// "2025.2" (#1770). The SCF reuses codes between releases, so upload
+	// binds the anchor within this release. Optional for now: without it
+	// the code binds in the current release and the upload returns a
+	// deprecation warning.
+	SCFRelease string `yaml:"scf_release,omitempty" json:"scf_release,omitempty"`
+	// AnchorFit states how well SCFAnchorID fits the control's intent:
+	// exact (the default when omitted), partial, or none (issue #1736).
+	// A non-exact fit needs AnchorFitNote; `none` also allows an empty
+	// SCFAnchorID, for a control with no SCF equivalent at all.
+	AnchorFit          string `yaml:"anchor_fit,omitempty"      json:"anchor_fit,omitempty"`
+	AnchorFitNote      string `yaml:"anchor_fit_note,omitempty" json:"anchor_fit_note,omitempty"`
+	ControlFamily      string `yaml:"control_family,omitempty" json:"control_family,omitempty"`
+	ImplementationType string `yaml:"implementation_type"    json:"implementation_type"`
+	OwnerRole          string `yaml:"owner_role,omitempty"   json:"owner_role,omitempty"`
+	LifecycleState     string `yaml:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
+	FreshnessClass     string `yaml:"freshness_class,omitempty" json:"freshness_class,omitempty"`
 
 	// ApplicabilityExpr is a JSON-AST scope predicate (slice 017 shape). The
 	// parser decodes the YAML mapping into a generic interface and re-marshals
@@ -102,6 +116,19 @@ var allowedImplementationTypes = map[string]struct{}{
 	"semi_automated":  {},
 	"manual_attested": {},
 	"manual_periodic": {},
+}
+
+// Anchor-fit values (issue #1736). AnchorFitExact is the default.
+const (
+	AnchorFitExact   = "exact"
+	AnchorFitPartial = "partial"
+	AnchorFitNone    = "none"
+)
+
+var allowedAnchorFits = map[string]struct{}{
+	AnchorFitExact:   {},
+	AnchorFitPartial: {},
+	AnchorFitNone:    {},
 }
 
 var allowedLifecycleStates = map[string]struct{}{
@@ -164,6 +191,14 @@ func (m *Manifest) ValidateStructural() error {
 	if !bundleIDPattern.MatchString(m.BundleID) {
 		return fmt.Errorf("control bundle: bundle_id %q must match pattern %s", m.BundleID, bundleIDPattern.String())
 	}
+	// #2165: evidence push resolves --control as a control UUID first and
+	// only then as a bundle ID, so a bundle_id uuid.Parse accepts (e.g.
+	// "deadbeef-0000-4000-8000-000000000000" or its 32-hex form) could
+	// never be linked to by bundle ID. Refuse it here rather than let the
+	// evidence land unlinked.
+	if _, err := uuid.Parse(m.BundleID); err == nil {
+		return fmt.Errorf("control bundle: bundle_id %q is UUID-shaped; evidence push reads a UUID as a control id, so this bundle could never be referenced by bundle_id: choose a non-UUID bundle_id", m.BundleID)
+	}
 
 	if m.Title == "" {
 		return fmt.Errorf("control bundle: title is required")
@@ -172,10 +207,21 @@ func (m *Manifest) ValidateStructural() error {
 		return fmt.Errorf("control bundle: title exceeds 200 characters")
 	}
 
+	if m.AnchorFit != "" {
+		if _, ok := allowedAnchorFits[m.AnchorFit]; !ok {
+			return fmt.Errorf("control bundle: anchor_fit %q is not one of exact|partial|none", m.AnchorFit)
+		}
+	}
+	if m.AnchorFitOrDefault() != AnchorFitExact && strings.TrimSpace(m.AnchorFitNote) == "" {
+		return fmt.Errorf("control bundle: anchor_fit_note is required when anchor_fit is %q (say why the SCF anchor does not fully fit)", m.AnchorFit)
+	}
+
 	// AC-4: missing required metadata (scf_anchor_id is the canonical
-	// example) must reject with an error pointing at the field.
-	if m.SCFAnchorID == "" {
-		return fmt.Errorf("control bundle: scf_anchor_id is required (canvas invariant 7: every control must be anchored)")
+	// example) must reject with an error pointing at the field. The one
+	// exception is anchor_fit: none, ADR 0013's honest "unmapped": no SCF
+	// control fits, so the control may stand unanchored.
+	if m.SCFAnchorID == "" && m.AnchorFit != AnchorFitNone {
+		return fmt.Errorf("control bundle: scf_anchor_id is required (canvas invariant 7: every control must be anchored; if no SCF control fits, set anchor_fit: none with an anchor_fit_note)")
 	}
 
 	if m.ImplementationType == "" {
@@ -275,6 +321,25 @@ func (m *Manifest) LifecycleStateOrDefault() string {
 		return "draft"
 	}
 	return m.LifecycleState
+}
+
+// AnchorFitOrDefault returns the manifest's anchor_fit, or "exact" when
+// unset, so a bundle that omits it is stored as an exact fit.
+func (m *Manifest) AnchorFitOrDefault() string {
+	if m.AnchorFit == "" {
+		return AnchorFitExact
+	}
+	return m.AnchorFit
+}
+
+// AnchorFitNotePtr returns the trimmed note for the nullable DB column,
+// or nil when there is none.
+func (m *Manifest) AnchorFitNotePtr() *string {
+	n := strings.TrimSpace(m.AnchorFitNote)
+	if n == "" {
+		return nil
+	}
+	return &n
 }
 
 // ApplicabilityExprJSON marshals m.ApplicabilityExpr to compact JSON bytes

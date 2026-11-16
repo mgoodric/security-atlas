@@ -51,6 +51,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 
@@ -64,6 +65,8 @@ import {
   type EffectiveScopeResponse,
 } from "@/lib/api/control-detail";
 import { type EvidenceListResponse } from "@/lib/api/evidence";
+import { enumLabel } from "@/lib/labels/enum-labels";
+import { frameworkLabel } from "@/lib/labels/framework-label";
 
 import { formatResidualScore } from "@/app/(authed)/risks/filters";
 
@@ -99,6 +102,7 @@ export function EvidenceStreamBody({
             kind={rec.evidence_kind}
             source={rec.source}
             result={rec.result}
+            demo={rec.demo === true}
           />
         ))}
         {evidenceQ.data.next_cursor ? (
@@ -154,7 +158,7 @@ export function EffectiveScopeRows({
           (r) => r.framework_version_id === fvId,
         );
         const label = reqForFv
-          ? `${reqForFv.framework_name} ${reqForFv.framework_version}`
+          ? frameworkLabel(reqForFv.framework_name, reqForFv.framework_version)
           : fvId;
         return (
           <div key={fvId} data-testid="effective-scope-row">
@@ -219,8 +223,8 @@ export function PoliciesBody({
                 {p.version}
               </div>
             </div>
-            <Badge variant="secondary" className="capitalize">
-              {p.status}
+            <Badge variant="secondary">
+              {enumLabel("PolicyStatus", p.status)}
             </Badge>
           </li>
         ))}
@@ -337,12 +341,15 @@ export function EvidenceStreamRow({
   kind,
   source,
   result,
+  demo = false,
 }: {
   evidenceID: string;
   observedAt: string;
   kind: string | null;
   source: Record<string, unknown> | null;
   result: "pass" | "fail" | "na" | "inconclusive";
+  /** #2043 — the in-place demo seed added this record. */
+  demo?: boolean;
 }) {
   const dotClass =
     result === "pass"
@@ -356,9 +363,11 @@ export function EvidenceStreamRow({
       : result === "fail"
         ? "text-rose-600"
         : "text-muted-foreground";
+  // #2137 — the row opens the evidence detail page.
   return (
-    <div
-      className="grid grid-cols-12 items-center gap-3 py-2.5"
+    <Link
+      href={`/evidence/${encodeURIComponent(evidenceID)}`}
+      className="grid grid-cols-12 items-center gap-3 py-2.5 hover:bg-muted/50"
       data-testid="evidence-stream-row"
     >
       <div className="col-span-1">
@@ -370,6 +379,7 @@ export function EvidenceStreamRow({
       <div className="col-span-6 min-w-0">
         <div className="truncate text-sm text-foreground">
           {kind ?? evidenceID}
+          {demo ? <DemoBadge testId="evidence-stream-row-demo" /> : null}
         </div>
         <div className="truncate font-mono text-[11px] text-muted-foreground">
           {formatEvidenceSource(source)}
@@ -378,7 +388,7 @@ export function EvidenceStreamRow({
       <div className={`col-span-2 text-right font-mono text-xs ${resultClass}`}>
         {result}
       </div>
-    </div>
+    </Link>
   );
 }
 

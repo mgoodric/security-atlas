@@ -413,7 +413,7 @@ func controlsHistoryToRowIter(rows []controlHistoryExportRow) iter.Seq[[]string]
 				r.Title,
 				r.ControlFamily,
 				r.SCFID,
-				r.SCFAnchorID.String(),
+				anchorIDCell(r.SCFAnchorID),
 				r.ImplementationType,
 				r.OwnerRole,
 				r.LifecycleState,

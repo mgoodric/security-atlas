@@ -15,11 +15,18 @@ const countActiveControls = `-- name: CountActiveControls :one
 SELECT count(*)::bigint AS total
 FROM controls
 WHERE tenant_id = $1 AND superseded_by IS NULL
+  AND ($2::text IS NULL OR anchor_fit = $2::text)
 `
 
+type CountActiveControlsParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	AnchorFit *string     `json:"anchor_fit"`
+}
+
 // Issue #1741 — total for the paged ListActiveControlsWithState read.
-func (q *Queries) CountActiveControls(ctx context.Context, tenantID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveControls, tenantID)
+// The optional anchor_fit filter matches the list's (issue #1736).
+func (q *Queries) CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveControls, arg.TenantID, arg.AnchorFit)
 	var total int64
 	err := row.Scan(&total)
 	return total, err
@@ -112,7 +119,7 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        evidence_queries, manual_evidence_schema, linked_policy_ids,
        freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
        bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at,
-       external_refs
+       external_refs, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND id = $2
 `
@@ -148,6 +155,8 @@ type GetControlByIDRow struct {
 	CreatedAt            pgtype.Timestamptz        `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz        `json:"updated_at"`
 	ExternalRefs         []byte                    `json:"external_refs"`
+	AnchorFit            string                    `json:"anchor_fit"`
+	AnchorFitNote        *string                   `json:"anchor_fit_note"`
 }
 
 func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error) {
@@ -179,6 +188,8 @@ func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExternalRefs,
+		&i.AnchorFit,
+		&i.AnchorFitNote,
 	)
 	return i, err
 }
@@ -218,16 +229,18 @@ INSERT INTO controls (
     implementation_type, owner_role, lifecycle_state, applicability_expr,
     evidence_queries, manual_evidence_schema, linked_policy_ids,
     freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-    bundle_uploaded_at, bundle_uploaded_by, external_refs
+    bundle_uploaded_at, bundle_uploaded_by, external_refs,
+    anchor_fit, anchor_fit_note
 ) VALUES (
     $1, $2, $3, $4, NULL,
     $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    now(), $20, $21
+    now(), $20, $21,
+    $22, $23
 )
-RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by, external_refs
+RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by, external_refs, anchor_fit, anchor_fit_note
 `
 
 type InsertControlVersionParams struct {
@@ -252,10 +265,14 @@ type InsertControlVersionParams struct {
 	BundleManifestHash   string                    `json:"bundle_manifest_hash"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 	ExternalRefs         []byte                    `json:"external_refs"`
+	AnchorFit            string                    `json:"anchor_fit"`
+	AnchorFitNote        *string                   `json:"anchor_fit_note"`
 }
 
 // Insert a new control row (initial upload or supersession). Caller is
 // responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
+// anchor_fit / anchor_fit_note are issue #1736; the caller passes the
+// manifest's value with 'exact' filled in for an omitted one.
 func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error) {
 	row := q.db.QueryRow(ctx, insertControlVersion,
 		arg.ID,
@@ -279,6 +296,8 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		arg.BundleManifestHash,
 		arg.BundleUploadedBy,
 		arg.ExternalRefs,
+		arg.AnchorFit,
+		arg.AnchorFitNote,
 	)
 	var i Control
 	err := row.Scan(
@@ -307,8 +326,102 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		&i.BundleUploadedAt,
 		&i.BundleUploadedBy,
 		&i.ExternalRefs,
+		&i.AnchorFit,
+		&i.AnchorFitNote,
 	)
 	return i, err
+}
+
+const insertSCFRemapProposal = `-- name: InsertSCFRemapProposal :execrows
+INSERT INTO scf_remap_proposals (
+    tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
+    legacy_release, target_framework_version_id, target_release, class,
+    status, successor_scf_ids, target_anchor_id, source
+) VALUES (
+    $1, $2, $3,
+    $4, $5,
+    $6, $7,
+    $8, $9, $10,
+    $11::text[], $12,
+    $13
+)
+ON CONFLICT (control_id, target_framework_version_id) DO UPDATE
+    SET status = 'rebound',
+        target_anchor_id = EXCLUDED.target_anchor_id,
+        source = EXCLUDED.source
+    WHERE scf_remap_proposals.status = 'open' AND EXCLUDED.status = 'rebound'
+`
+
+type InsertSCFRemapProposalParams struct {
+	TenantID                 pgtype.UUID `json:"tenant_id"`
+	ControlID                pgtype.UUID `json:"control_id"`
+	BundleID                 string      `json:"bundle_id"`
+	LegacyAnchorID           pgtype.UUID `json:"legacy_anchor_id"`
+	LegacyScfID              string      `json:"legacy_scf_id"`
+	LegacyRelease            string      `json:"legacy_release"`
+	TargetFrameworkVersionID pgtype.UUID `json:"target_framework_version_id"`
+	TargetRelease            string      `json:"target_release"`
+	Class                    string      `json:"class"`
+	Status                   string      `json:"status"`
+	SuccessorScfIds          []string    `json:"successor_scf_ids"`
+	TargetAnchorID           pgtype.UUID `json:"target_anchor_id"`
+	Source                   string      `json:"source"`
+}
+
+// Issue #1775: queue one remap proposal for a control on a legacy SCF
+// anchor. Written by the migrate role during `catalog import-scf` (source
+// 'boot') and by the app role when an upload re-binds or flags a control in
+// place (source 'upload', #2236). A re-run leaves the existing proposal
+// alone, except that an open proposal whose control this run re-bound
+// becomes rebound, taking the run's target anchor and source (#2321: a stock
+// control flagged before the title-only rule moves on the re-run).
+// target_anchor_id is the anchor a 'rebound' control moved to, NULL for an
+// 'open' one.
+func (q *Queries) InsertSCFRemapProposal(ctx context.Context, arg InsertSCFRemapProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertSCFRemapProposal,
+		arg.TenantID,
+		arg.ControlID,
+		arg.BundleID,
+		arg.LegacyAnchorID,
+		arg.LegacyScfID,
+		arg.LegacyRelease,
+		arg.TargetFrameworkVersionID,
+		arg.TargetRelease,
+		arg.Class,
+		arg.Status,
+		arg.SuccessorScfIds,
+		arg.TargetAnchorID,
+		arg.Source,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const isApprovedRemapRevision = `-- name: IsApprovedRemapRevision :one
+SELECT EXISTS (
+    SELECT 1 FROM scf_remap_decisions
+    WHERE tenant_id = $1
+      AND new_control_id = $2
+      AND decision = 'approved'
+) AS approved
+`
+
+type IsApprovedRemapRevisionParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ControlID pgtype.UUID `json:"control_id"`
+}
+
+// Issue #1776: whether a control row is the revision a person's approved SCF
+// remap decision created. The upload path keeps such a revision when the
+// boot seed re-uploads the stock manifest it replaced, so a reviewed
+// re-anchor is never undone silently.
+func (q *Queries) IsApprovedRemapRevision(ctx context.Context, arg IsApprovedRemapRevisionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isApprovedRemapRevision, arg.TenantID, arg.ControlID)
+	var approved bool
+	err := row.Scan(&approved)
+	return approved, err
 }
 
 const listActiveControls = `-- name: ListActiveControls :many
@@ -379,7 +492,7 @@ const listActiveControlsForExport = `-- name: ListActiveControlsForExport :many
 SELECT id, bundle_id, version, scf_id, scf_anchor_id, title,
        control_family, implementation_type, owner_role, lifecycle_state,
        applicability_expr, freshness_class, bundle_manifest_hash,
-       created_at, updated_at
+       created_at, updated_at, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND superseded_by IS NULL
 ORDER BY bundle_id ASC, version DESC
@@ -407,6 +520,8 @@ type ListActiveControlsForExportRow struct {
 	BundleManifestHash string                    `json:"bundle_manifest_hash"`
 	CreatedAt          pgtype.Timestamptz        `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz        `json:"updated_at"`
+	AnchorFit          string                    `json:"anchor_fit"`
+	AnchorFitNote      *string                   `json:"anchor_fit_note"`
 }
 
 // Slice 137 — controls UCF graph data-export projection.
@@ -459,6 +574,8 @@ func (q *Queries) ListActiveControlsForExport(ctx context.Context, arg ListActiv
 			&i.BundleManifestHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AnchorFit,
+			&i.AnchorFitNote,
 		); err != nil {
 			return nil, err
 		}
@@ -715,14 +832,18 @@ worst_per_control AS (
     SELECT
         le.control_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
@@ -741,7 +862,7 @@ worst_per_control AS (
         MAX(le.last_observed_at) AS last_observed_at,
         MAX(le.evaluated_at)     AS evaluated_at
     FROM latest_eval le
-    WHERE ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
+    WHERE ($5::uuid IS NULL OR le.scope_cell_id = $5::uuid)
     GROUP BY le.control_id
 ),
 anchor_frameworks AS (
@@ -760,7 +881,7 @@ anchor_frameworks AS (
 )
 SELECT
     c.id, c.bundle_id, c.scf_id, c.scf_anchor_id, c.title, c.control_family,
-    c.lifecycle_state,
+    c.lifecycle_state, c.anchor_fit, c.anchor_fit_note,
     wpc.result                        AS state_result,
     wpc.freshness_status              AS state_freshness_status,
     wpc.last_observed_at::timestamptz AS state_last_observed_at,
@@ -770,12 +891,14 @@ FROM controls c
 LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
 LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
 WHERE c.tenant_id = $1 AND c.superseded_by IS NULL
+  AND ($2::text IS NULL OR c.anchor_fit = $2::text)
 ORDER BY c.scf_id NULLS LAST, c.bundle_id
-LIMIT $3 OFFSET $2
+LIMIT $4 OFFSET $3
 `
 
 type ListActiveControlsWithStateParams struct {
 	TenantID    pgtype.UUID `json:"tenant_id"`
+	AnchorFit   *string     `json:"anchor_fit"`
 	RowOffset   int32       `json:"row_offset"`
 	RowLimit    int32       `json:"row_limit"`
 	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
@@ -789,6 +912,8 @@ type ListActiveControlsWithStateRow struct {
 	Title                string                `json:"title"`
 	ControlFamily        string                `json:"control_family"`
 	LifecycleState       ControlLifecycleState `json:"lifecycle_state"`
+	AnchorFit            string                `json:"anchor_fit"`
+	AnchorFitNote        *string               `json:"anchor_fit_note"`
 	StateResult          *EvidenceResult       `json:"state_result"`
 	StateFreshnessStatus *string               `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz    `json:"state_last_observed_at"`
@@ -819,6 +944,7 @@ type ListActiveControlsWithStateRow struct {
 func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiveControlsWithStateParams) ([]ListActiveControlsWithStateRow, error) {
 	rows, err := q.db.Query(ctx, listActiveControlsWithState,
 		arg.TenantID,
+		arg.AnchorFit,
 		arg.RowOffset,
 		arg.RowLimit,
 		arg.ScopeCellID,
@@ -838,6 +964,8 @@ func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiv
 			&i.Title,
 			&i.ControlFamily,
 			&i.LifecycleState,
+			&i.AnchorFit,
+			&i.AnchorFitNote,
 			&i.StateResult,
 			&i.StateFreshnessStatus,
 			&i.StateLastObservedAt,
@@ -1036,6 +1164,191 @@ func (q *Queries) ListControlsHistoryForExport(ctx context.Context, arg ListCont
 	return items, nil
 }
 
+const listControlsOnLegacySCFAnchors = `-- name: ListControlsOnLegacySCFAnchors :many
+SELECT
+    c.id                  AS control_id,
+    c.tenant_id,
+    c.bundle_id,
+    c.title               AS control_title,
+    -- The stored control.yaml: a bundle that declares scf_release (#1770)
+    -- is pinned to that release and is never re-bound.
+    c.bundle_manifest_yaml,
+    la.id                 AS legacy_anchor_id,
+    la.scf_id             AS legacy_scf_id,
+    la.title              AS legacy_anchor_title,
+    lfv.version           AS legacy_release,
+    cfv.version           AS current_release,
+    ca.id                 AS current_anchor_id,
+    ca.title              AS current_anchor_title,
+    -- '' when SCF lists no current anchor with this legacy code.
+    COALESCE((SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id,
+    -- #1775 remap queue: the current release's id, the legacy ID of the
+    -- current anchor with this code ('' when it lists none, or the code is
+    -- gone), every current anchor that SCF lists the legacy code as the
+    -- legacy ID of (codes and titles in the same order), and whether the
+    -- current release carries any legacy IDs at all.
+    cfv.id                AS current_framework_version_id,
+    COALESCE(ca.legacy_scf_id, '')::text AS current_anchor_legacy_scf_id,
+    ARRAY(SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_scf_ids,
+    ARRAY(SELECT s.title FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_titles,
+    EXISTS (SELECT 1 FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id
+        AND COALESCE(btrim(s.legacy_scf_id), '') <> '') AS current_release_has_legacy_ids
+FROM controls c
+JOIN scf_anchors la            ON la.id = c.scf_anchor_id
+JOIN framework_versions lfv    ON lfv.id = la.framework_version_id
+JOIN frameworks f              ON f.id = lfv.framework_id AND f.slug = 'scf' AND f.tenant_id IS NULL
+JOIN framework_versions cfv    ON cfv.framework_id = f.id AND cfv.status = 'current'
+LEFT JOIN scf_anchors ca       ON ca.framework_version_id = cfv.id AND ca.scf_id = la.scf_id
+WHERE c.superseded_by IS NULL
+  AND lfv.id <> cfv.id
+  AND ($1::uuid IS NULL OR c.tenant_id = $1::uuid)
+ORDER BY c.tenant_id, c.bundle_id, c.id
+`
+
+type ListControlsOnLegacySCFAnchorsRow struct {
+	ControlID                  pgtype.UUID `json:"control_id"`
+	TenantID                   pgtype.UUID `json:"tenant_id"`
+	BundleID                   string      `json:"bundle_id"`
+	ControlTitle               string      `json:"control_title"`
+	BundleManifestYaml         string      `json:"bundle_manifest_yaml"`
+	LegacyAnchorID             pgtype.UUID `json:"legacy_anchor_id"`
+	LegacyScfID                string      `json:"legacy_scf_id"`
+	LegacyAnchorTitle          string      `json:"legacy_anchor_title"`
+	LegacyRelease              string      `json:"legacy_release"`
+	CurrentRelease             string      `json:"current_release"`
+	CurrentAnchorID            pgtype.UUID `json:"current_anchor_id"`
+	CurrentAnchorTitle         *string     `json:"current_anchor_title"`
+	SuccessorScfID             string      `json:"successor_scf_id"`
+	CurrentFrameworkVersionID  pgtype.UUID `json:"current_framework_version_id"`
+	CurrentAnchorLegacyScfID   string      `json:"current_anchor_legacy_scf_id"`
+	LegacySuccessorScfIds      []string    `json:"legacy_successor_scf_ids"`
+	LegacySuccessorTitles      []string    `json:"legacy_successor_titles"`
+	CurrentReleaseHasLegacyIds bool        `json:"current_release_has_legacy_ids"`
+}
+
+// Issue #1971 (D3): active controls still bound to an anchor of an SCF
+// release that is no longer current. Coverage joins controls to crosswalk
+// edges by anchor row, so these controls earn no framework credit until they
+// move. For each one: the legacy anchor; the current release's anchor with
+// the same code, if any (current_anchor_id is NULL when the code is gone);
+// and the current anchor that SCF lists the legacy code as the legacy ID of
+// (#1769), if any. The upgrade re-binds a control only when the current
+// anchor has the same code AND the same title; every other row is reported
+// as needing re-anchoring. tenant_id NULL lists every tenant (the migrate
+// role, at upgrade); a tenant id lists that tenant's controls.
+func (q *Queries) ListControlsOnLegacySCFAnchors(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsOnLegacySCFAnchorsRow, error) {
+	rows, err := q.db.Query(ctx, listControlsOnLegacySCFAnchors, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListControlsOnLegacySCFAnchorsRow
+	for rows.Next() {
+		var i ListControlsOnLegacySCFAnchorsRow
+		if err := rows.Scan(
+			&i.ControlID,
+			&i.TenantID,
+			&i.BundleID,
+			&i.ControlTitle,
+			&i.BundleManifestYaml,
+			&i.LegacyAnchorID,
+			&i.LegacyScfID,
+			&i.LegacyAnchorTitle,
+			&i.LegacyRelease,
+			&i.CurrentRelease,
+			&i.CurrentAnchorID,
+			&i.CurrentAnchorTitle,
+			&i.SuccessorScfID,
+			&i.CurrentFrameworkVersionID,
+			&i.CurrentAnchorLegacyScfID,
+			&i.LegacySuccessorScfIds,
+			&i.LegacySuccessorTitles,
+			&i.CurrentReleaseHasLegacyIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSCFRemapProposals = `-- name: ListSCFRemapProposals :many
+SELECT p.id, p.control_id, p.bundle_id, c.title AS control_title,
+       p.legacy_scf_id, p.legacy_release, p.target_release, p.class,
+       p.status, p.successor_scf_ids, p.created_at
+FROM scf_remap_proposals p
+JOIN controls c ON c.id = p.control_id
+WHERE p.tenant_id = $1
+  AND ($2::text IS NULL OR p.class = $2::text)
+  AND ($3::text IS NULL OR p.status = $3::text)
+ORDER BY p.created_at DESC, p.bundle_id, p.id
+`
+
+type ListSCFRemapProposalsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Class    *string     `json:"class"`
+	Status   *string     `json:"status"`
+}
+
+type ListSCFRemapProposalsRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	ControlID       pgtype.UUID        `json:"control_id"`
+	BundleID        string             `json:"bundle_id"`
+	ControlTitle    string             `json:"control_title"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	TargetRelease   string             `json:"target_release"`
+	Class           string             `json:"class"`
+	Status          string             `json:"status"`
+	SuccessorScfIds []string           `json:"successor_scf_ids"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+// Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
+// proposals, newest target release first, optionally filtered by class and
+// status. RLS (tenant_read) and the explicit tenant id both bind the read.
+func (q *Queries) ListSCFRemapProposals(ctx context.Context, arg ListSCFRemapProposalsParams) ([]ListSCFRemapProposalsRow, error) {
+	rows, err := q.db.Query(ctx, listSCFRemapProposals, arg.TenantID, arg.Class, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSCFRemapProposalsRow
+	for rows.Next() {
+		var i ListSCFRemapProposalsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ControlID,
+			&i.BundleID,
+			&i.ControlTitle,
+			&i.LegacyScfID,
+			&i.LegacyRelease,
+			&i.TargetRelease,
+			&i.Class,
+			&i.Status,
+			&i.SuccessorScfIds,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockActiveControlByBundleID = `-- name: LockActiveControlByBundleID :one
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, description, control_family, implementation_type,
@@ -1136,6 +1449,41 @@ func (q *Queries) MarkControlSuperseded(ctx context.Context, arg MarkControlSupe
 	return err
 }
 
+const rebindControlAnchorInPlace = `-- name: RebindControlAnchorInPlace :execrows
+UPDATE controls
+SET scf_anchor_id = $3,
+    scf_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL
+`
+
+type RebindControlAnchorInPlaceParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+	ScfAnchorID pgtype.UUID `json:"scf_anchor_id"`
+	ScfID       *string     `json:"scf_id"`
+}
+
+// Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
+// whose code now resolves to a different anchor row because a new SCF
+// release was imported (#1768 mints new anchor rows per release), moves the
+// active row to the current release's anchor in place. The manifest itself
+// is unchanged, so superseding would orphan owners, evidence and links for
+// nothing; coverage joins controls to edges by anchor row, so leaving the
+// control on the legacy row would drop it out of coverage.
+func (q *Queries) RebindControlAnchorInPlace(ctx context.Context, arg RebindControlAnchorInPlaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rebindControlAnchorInPlace,
+		arg.TenantID,
+		arg.ID,
+		arg.ScfAnchorID,
+		arg.ScfID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateControlMetadataInPlace = `-- name: UpdateControlMetadataInPlace :execrows
 UPDATE controls
 SET description = $3,
@@ -1144,6 +1492,7 @@ SET description = $3,
     bundle_manifest_hash = $6,
     bundle_uploaded_at = now(),
     bundle_uploaded_by = $7,
+    anchor_fit_note = $8,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL
 `
@@ -1156,10 +1505,12 @@ type UpdateControlMetadataInPlaceParams struct {
 	BundleManifestYaml string      `json:"bundle_manifest_yaml"`
 	BundleManifestHash string      `json:"bundle_manifest_hash"`
 	BundleUploadedBy   *string     `json:"bundle_uploaded_by"`
+	AnchorFitNote      *string     `json:"anchor_fit_note"`
 }
 
-// Issues #1908, #1958: a re-upload whose manifest differs from the active
-// row's only in `description` and/or `external_refs` updates that row in
+// Issues #1908, #1958, #2023: a re-upload whose manifest differs from the
+// active row's only in `description`, `external_refs` and/or
+// `anchor_fit_note` updates that row in
 // place instead of versioning, so every control-keyed row (owners,
 // evidence, exceptions, links) stays attached. The hash moves with the
 // YAML so a repeat upload is a no-op.
@@ -1172,6 +1523,7 @@ func (q *Queries) UpdateControlMetadataInPlace(ctx context.Context, arg UpdateCo
 		arg.BundleManifestYaml,
 		arg.BundleManifestHash,
 		arg.BundleUploadedBy,
+		arg.AnchorFitNote,
 	)
 	if err != nil {
 		return 0, err

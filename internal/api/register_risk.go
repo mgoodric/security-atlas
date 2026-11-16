@@ -44,6 +44,21 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// alongside /v1/risks/heatmap, before the generic /v1/risks/{id}, so
 	// chi's declaration-order match keeps it ahead of the UUID-id route.
 	root.Get("/v1/risks/theme-heatmap", risksH.ThemeHeatmap)
+	// #1809: the tenant's own risk categories (read-only expand step of
+	// #1745). Literal-segment route declared before the generic
+	// /v1/risks/{id}.
+	root.Get("/v1/risks/categories", risksH.ListCategories)
+	// #1810: category management. Literal segments, so chi matches them
+	// ahead of the generic /v1/risks/{id} routes.
+	root.Post("/v1/risks/categories", risksH.CreateCategory)
+	root.Patch("/v1/risks/categories/{ref}", risksH.RenameCategory)
+	root.Delete("/v1/risks/categories/{ref}", risksH.DeleteCategory)
+	root.Post("/v1/risks/categories/{ref}/archive", risksH.ArchiveCategory)
+	root.Post("/v1/risks/categories/{ref}/unarchive", risksH.UnarchiveCategory)
+	root.Post("/v1/risks/categories/{ref}/set-default", risksH.SetDefaultCategory)
+	// #2059: the organisation risk review cadence. Literal-segment route
+	// declared before the generic /v1/risks/{id}.
+	root.Get("/v1/risks/review-cadence", risksH.GetReviewCadence)
 	// Slice 136: risk register data export (CSV / JSON / XLSX). Reuses
 	// the slice 135 data-export library + slice 145 concurrency cap.
 	// Literal-segment route declared before the generic /v1/risks/{id}
@@ -65,6 +80,9 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	root.Post("/v1/risks/{id}/children", risksH.LinkChildren)
 	root.Delete("/v1/risks/{id}/children/{child_id}", risksH.UnlinkChild)
 	root.Get("/v1/risks/{id}/parents", risksH.ListParents)
+	// #2104: the risk's change history. Literal-suffix route declared
+	// before the generic /v1/risks/{id}.
+	root.Get("/v1/risks/{id}/audit-log", risksH.ListAuditLog)
 	// Slice 384: read-only "Linked Action Plans" section on /risks/{id}
 	// (AC-25). Literal-suffix route declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps it ahead.
@@ -95,6 +113,10 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// Slice 053: theme catalog + per-risk theme tagging.
 	themesH := themesapi.New(risksStore)
 	root.Get("/v1/themes", themesH.ListVisible)
+	// #1811: organisation theme management (admin / grc_engineer).
+	root.Post("/v1/themes", risksH.CreateTheme)
+	root.Patch("/v1/themes/{ref}", risksH.RenameTheme)
+	root.Delete("/v1/themes/{ref}", risksH.DeleteTheme)
 	root.Post("/v1/risks/{id}/themes", themesH.AssignThemes)
 	root.Delete("/v1/risks/{id}/themes/{theme}", themesH.RemoveTheme)
 	// Slice 054: declarative aggregation rules engine. Routes appended per

@@ -292,7 +292,7 @@ func TestDemoSCFAnchors_Invariants(t *testing.T) {
 		if a.SCFID == "" || a.Family == "" || a.Title == "" {
 			t.Errorf("demoSCFAnchors[%d] has an empty field: %+v", i, a)
 		}
-		// SCF codes are FAM-NN (e.g. IAC-06): a 3-letter family, a hyphen,
+		// SCF codes are FAM-NN (e.g. IAC-37): a 3-letter family, a hyphen,
 		// then digits. We assert the hyphen + a digit tail rather than a full
 		// regex to stay dependency-free.
 		dash := strings.IndexByte(a.SCFID, '-')

@@ -660,7 +660,7 @@ func TestBuildAuditEventRecord_OptionalRepo(t *testing.T) {
 		CreatedAt:      time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
 		// Repo intentionally empty (org-level event)
 	}
-	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-01")
+	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("buildAuditEventRecord: %v", err)
 	}
@@ -690,7 +690,7 @@ func TestBuildAuditEventRecord_WithRepo(t *testing.T) {
 		DeliveryID:     "test-delivery-2",
 		CreatedAt:      time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
 	}
-	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-01")
+	rec, err := buildAuditEventRecord(r, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("buildAuditEventRecord: %v", err)
 	}

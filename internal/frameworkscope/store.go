@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -30,7 +31,30 @@ var (
 	// partial unique index (another row is already activated for the
 	// same (tenant, framework_version)). HTTP 409.
 	ErrAnotherActivated = errors.New("frameworkscope: another scope is already activated for this framework version")
+	// ErrPredicateFrozen is returned when the predicate of an activated or
+	// superseded revision is edited. Create a new revision from it instead
+	// (CreateRequest.FromScopeID). HTTP 409.
+	ErrPredicateFrozen = errors.New("frameworkscope: the predicate of an activated or superseded scope is frozen; create a new revision from it")
+	// ErrRevisionVersionMismatch is returned when a new revision names a
+	// framework version other than its source revision's. HTTP 400.
+	ErrRevisionVersionMismatch = errors.New("frameworkscope: a new revision must be on its source revision's framework version")
+	// ErrSelfApproval is returned when the approver submitted the scope
+	// for review and the organisation does not allow self-approval
+	// (#2101). HTTP 403.
+	ErrSelfApproval = errors.New("frameworkscope: the submitter cannot approve their own scope; a second approver must approve it")
+	// ErrApproverNotPerson is returned when the approving credential
+	// belongs to no user. Only people approve (#2101). HTTP 403.
+	ErrApproverNotPerson = errors.New("frameworkscope: only a person can approve a scope; approve with your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
+	// ErrSubmitterUnknown is returned when the scope was submitted under a
+	// session id rather than a person, so no approver can be shown to
+	// differ from the submitter. Re-submitting records the person. HTTP 409.
+	ErrSubmitterUnknown = errors.New("frameworkscope: this scope was submitted before submitters were recorded by person, so a second approver cannot be verified; it must be re-submitted before it can be approved")
 )
+
+// constraintPredicateFrozen is the constraint name the
+// framework_scopes_predicate_frozen trigger raises for a predicate edit on
+// an activated or superseded revision.
+const constraintPredicateFrozen = "framework_scopes_predicate_frozen"
 
 // State constants mirror the CHECK enum on framework_scopes.state.
 const (
@@ -60,11 +84,17 @@ type FrameworkScope struct {
 	PredicateHashAtApproval  *string
 	ApprovalEvidenceFileURL  *string
 	ApprovalEvidenceFileHash *string
-	EffectiveFrom            *time.Time
-	SupersededBy             *uuid.UUID
-	SupersededAt             *time.Time
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	// SubmittedBy is who submitted the scope for review: a users(id) uuid,
+	// or a credential id for a machine (#2101).
+	SubmittedBy *string
+	// SelfApproved marks a scope its submitter approved under the
+	// organisation's Allow self-approval setting (#2101).
+	SelfApproved  bool
+	EffectiveFrom *time.Time
+	SupersededBy  *uuid.UUID
+	SupersededAt  *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // Store wraps the sqlc-generated Queries with the tenancy plumbing required
@@ -88,20 +118,54 @@ type CreateRequest struct {
 	Predicate          []byte // raw JSON from the caller
 	// Actor is the calling credential id, recorded on the workflow log.
 	Actor string
+	// FromScopeID, when set, makes the new draft a revision of that scope
+	// (#1965): activated and superseded revisions are immutable, so this is
+	// how their predicate or decisions change. The new draft is on the
+	// source's framework version (FrameworkVersionID may be zero; a
+	// different one is ErrRevisionVersionMismatch), takes the source's name
+	// and predicate when Name or Predicate is empty, and copies every
+	// decision recorded on the source. Each copied decision is logged as
+	// applicability.carry_over naming the source revision.
+	FromScopeID uuid.UUID
 }
 
 // Create inserts a new framework_scope row in `draft` state. AC-5.
 func (s *Store) Create(ctx context.Context, req CreateRequest) (FrameworkScope, error) {
-	canon, hash, err := Canonicalize(req.Predicate)
-	if err != nil {
-		return FrameworkScope{}, err
-	}
-	if err := Validate(canon); err != nil {
-		return FrameworkScope{}, err
-	}
-
 	var out FrameworkScope
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var source *dbx.FrameworkScope
+		if req.FromScopeID != uuid.Nil {
+			src, gerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(req.FromScopeID),
+			})
+			if gerr != nil {
+				if errors.Is(gerr, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				return fmt.Errorf("get source framework_scope: %w", gerr)
+			}
+			srcVersion := uuid.UUID(src.FrameworkVersionID.Bytes)
+			if req.FrameworkVersionID != uuid.Nil && req.FrameworkVersionID != srcVersion {
+				return ErrRevisionVersionMismatch
+			}
+			req.FrameworkVersionID = srcVersion
+			if req.Name == "" {
+				req.Name = src.Name
+			}
+			if len(req.Predicate) == 0 {
+				req.Predicate = src.Predicate
+			}
+			source = &src
+		}
+
+		canon, hash, err := Canonicalize(req.Predicate)
+		if err != nil {
+			return err
+		}
+		if err := Validate(canon); err != nil {
+			return err
+		}
 		row, err := q.CreateFrameworkScope(ctx, dbx.CreateFrameworkScopeParams{
 			ID:                 pgUUID(uuid.New()),
 			TenantID:           pgUUID(tenantID),
@@ -116,10 +180,48 @@ func (s *Store) Create(ctx context.Context, req CreateRequest) (FrameworkScope, 
 		if err := logChange(ctx, q, ActionCreate, req.Actor, nil, row); err != nil {
 			return err
 		}
+		if source != nil {
+			if row, err = copyDecisions(ctx, q, tenantID, *source, row, req.Actor); err != nil {
+				return err
+			}
+		}
 		out = rowToScope(row)
 		return nil
 	})
 	return out, err
+}
+
+// copyDecisions copies every decision recorded on source into the new draft
+// revision target, and returns target as it stands after the writes.
+func copyDecisions(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, source, target dbx.FrameworkScope, actor string) (dbx.FrameworkScope, error) {
+	src := rowToScope(source)
+	app, err := listApplicability(ctx, q, tenantID, src.FrameworkVersionID, &src)
+	if err != nil {
+		return target, err
+	}
+	var items []DecisionInput
+	for _, r := range app.Requirements {
+		if r.Decision == nil {
+			continue
+		}
+		items = append(items, DecisionInput{
+			RequirementID:     r.RequirementID,
+			Decision:          r.Decision.Decision,
+			Justification:     r.Decision.Justification,
+			ImplementationRef: r.Decision.ImplementationRef,
+			carriedFrom: &carrySource{
+				FrameworkVersionID:     src.FrameworkVersionID,
+				FrameworkScopeID:       src.ID,
+				FrameworkScopeState:    src.State,
+				FrameworkRequirementID: r.RequirementID,
+			},
+		})
+	}
+	if len(items) == 0 {
+		return target, nil
+	}
+	_, last, err := writeDecisions(ctx, q, tenantID, target, items, actor)
+	return last, err
 }
 
 // UpdatePredicate edits the predicate. The DB-level BEFORE UPDATE trigger
@@ -146,6 +248,9 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 			}
 			return fmt.Errorf("get framework_scope: %w", gerr)
 		}
+		if before.State == StateActivated || before.State == StateSuperseded {
+			return ErrPredicateFrozen
+		}
 		row, uerr := q.UpdateFrameworkScopePredicate(ctx, dbx.UpdateFrameworkScopePredicateParams{
 			TenantID:      pgUUID(tenantID),
 			ID:            pgUUID(id),
@@ -153,6 +258,12 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 			PredicateHash: hash,
 		})
 		if uerr != nil {
+			// The trigger re-checks the state on the locked row, so an
+			// activation that committed after the read above lands here.
+			var pgErr *pgconn.PgError
+			if errors.As(uerr, &pgErr) && pgErr.ConstraintName == constraintPredicateFrozen {
+				return ErrPredicateFrozen
+			}
 			return fmt.Errorf("update predicate: %w", uerr)
 		}
 		if lerr := logChange(ctx, q, ActionPredicateUpdate, actor, &before, row); lerr != nil {
@@ -172,12 +283,17 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 	return scope, invalidated, err
 }
 
-// Submit transitions draft -> review. AC-6.
-func (s *Store) Submit(ctx context.Context, id uuid.UUID, actor string) (FrameworkScope, error) {
+// Submit transitions draft -> review. AC-6. actor is the calling
+// credential id, recorded on the workflow log; submitter is the person
+// behind it (a users(id) uuid), or the principal for a machine, which
+// approval compares against (#2101). It also re-submits a review row whose
+// submitter is unrecorded or a session id, which approval refuses.
+func (s *Store) Submit(ctx context.Context, id uuid.UUID, actor, submitter string) (FrameworkScope, error) {
 	return s.guardedTransition(ctx, id, ActionSubmit, actor, func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error) {
 		return q.SubmitFrameworkScope(ctx, dbx.SubmitFrameworkScopeParams{
-			TenantID: pgUUID(tenantID),
-			ID:       pgUUID(id),
+			TenantID:    pgUUID(tenantID),
+			ID:          pgUUID(id),
+			SubmittedBy: &submitter,
 		})
 	})
 }
@@ -186,9 +302,13 @@ func (s *Store) Submit(ctx context.Context, id uuid.UUID, actor string) (Framewo
 // are optional (ADR-0001: in-app attestation is primary, file upload is
 // optional). When empty, the columns stay NULL.
 type ApproveRequest struct {
-	ID             uuid.UUID
-	ApproverUserID string // free-form id from the calling credential
-	// Actor is the calling credential id, recorded on the workflow log.
+	ID uuid.UUID
+	// ApproverUserID is the person approving: the users(id) uuid behind
+	// the calling credential (credstore.CallerUserID), empty when the
+	// credential belongs to no user. Only people approve (#2101).
+	ApproverUserID string
+	// Actor is the calling credential id, recorded on the workflow log and
+	// compared against submitters recorded by credential id.
 	Actor            string
 	EvidenceFileURL  string
 	EvidenceFileHash string
@@ -197,12 +317,29 @@ type ApproveRequest struct {
 // Approve transitions review -> approved. Records approver + approved_at +
 // predicate_hash_at_approval and optionally the evidence-file URL+hash. AC-7.
 //
-// ApproverUserID is the caller's free-form credential id ("key_…"). When it
-// happens to parse as a UUID the column is populated; otherwise it stays
-// NULL and the audit-log + credential id (set elsewhere) carries the
-// attribution. Slice 034 will graduate this to real user UUIDs.
+// The shared approval rule (internal/approval, #2101) runs in the same
+// transaction: only a person approves, and never the submitter unless the
+// organisation allows self-approval, in which case the row is flagged
+// self_approved and the workflow log's after-image carries the flag.
 func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope, error) {
 	return s.guardedTransition(ctx, req.ID, ActionApprove, req.Actor, func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error) {
+		current, err := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(req.ID),
+		})
+		if err != nil {
+			return dbx.FrameworkScope{}, err
+		}
+		var self bool
+		if current.State == StateReview {
+			allowSelf, aerr := approval.AllowSelf(ctx, q, tenantID)
+			if aerr != nil {
+				return dbx.FrameworkScope{}, aerr
+			}
+			if self, err = checkApprover(current, req, allowSelf); err != nil {
+				return dbx.FrameworkScope{}, err
+			}
+		}
 		var url, hash *string
 		if req.EvidenceFileURL != "" {
 			u := req.EvidenceFileURL
@@ -222,8 +359,34 @@ func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope
 			ApproverUserID:           approverPG,
 			ApprovalEvidenceFileUrl:  url,
 			ApprovalEvidenceFileHash: hash,
+			SelfApproved:             self,
 		})
 	})
+}
+
+// checkApprover applies the shared approval rule to a scope and maps its
+// errors onto this package's. A machine credential never approves,
+// whatever the setting.
+func checkApprover(row dbx.FrameworkScope, req ApproveRequest, allowSelf bool) (selfApproved bool, err error) {
+	if req.ApproverUserID == "" {
+		return false, ErrApproverNotPerson
+	}
+	// A scope in review with no recorded submitter (submitted before #2101
+	// and not backfilled) names nobody to compare against, so, unlike a
+	// policy, it must be re-submitted first.
+	if row.SubmittedBy == nil || *row.SubmittedBy == "" {
+		return false, ErrSubmitterUnknown
+	}
+	self, err := approval.Check(*row.SubmittedBy, approval.Approver{UserID: req.ApproverUserID, CredentialID: req.Actor}, allowSelf)
+	switch {
+	case errors.Is(err, approval.ErrNotPerson):
+		return false, ErrApproverNotPerson
+	case errors.Is(err, approval.ErrRequesterUnknown):
+		return false, ErrSubmitterUnknown
+	case errors.Is(err, approval.ErrSelfApproval):
+		return false, ErrSelfApproval
+	}
+	return self, err
 }
 
 // Activate transitions approved -> activated AND atomically supersedes the
@@ -524,6 +687,8 @@ func snapshot(r dbx.FrameworkScope) ([]byte, error) {
 		"predicate_hash_at_approval":  sc.PredicateHashAtApproval,
 		"approval_evidence_file_url":  sc.ApprovalEvidenceFileURL,
 		"approval_evidence_file_hash": sc.ApprovalEvidenceFileHash,
+		"submitted_by":                sc.SubmittedBy,
+		"self_approved":               sc.SelfApproved,
 		"effective_from":              sc.EffectiveFrom,
 		"superseded_by":               sc.SupersededBy,
 		"superseded_at":               sc.SupersededAt,
@@ -563,6 +728,8 @@ func rowToScope(r dbx.FrameworkScope) FrameworkScope {
 	out.PredicateHashAtApproval = r.PredicateHashAtApproval
 	out.ApprovalEvidenceFileURL = r.ApprovalEvidenceFileUrl
 	out.ApprovalEvidenceFileHash = r.ApprovalEvidenceFileHash
+	out.SubmittedBy = r.SubmittedBy
+	out.SelfApproved = r.SelfApproved
 	if r.EffectiveFrom.Valid {
 		t := r.EffectiveFrom.Time
 		out.EffectiveFrom = &t

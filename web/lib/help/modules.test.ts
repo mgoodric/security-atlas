@@ -1,0 +1,174 @@
+// #2143 — module help: front-matter parsing, route mapping, and the build
+// checks over the real help files in web/help/modules/.
+
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { findDevNote } from "../../eslint-rules/no-dev-notes-in-ui.mjs";
+import {
+  HELP_MODULES,
+  HELP_SOURCES,
+  helpDocsHref,
+  helpModuleForPath,
+  parseHelpModule,
+  type HelpModule,
+} from "./modules";
+import { getTerm } from "./terms";
+
+const WEB_ROOT = resolve(__dirname, "../..");
+const HELP_DIR = join(WEB_ROOT, "help", "modules");
+const DIAGRAM_DIR = join(WEB_ROOT, "public", "help", "diagrams");
+
+const FULL = `---
+id: widgets
+title: Widgets
+routes: [/widgets, "/widgets/archive"]
+terms: [anchor]
+diagrams:
+  - src: widget-states.svg
+    alt: Widgets move from draft to live
+  - src: other.svg
+    alt: 'Second diagram'
+---
+
+Body **text**.
+`;
+
+describe("parseHelpModule", () => {
+  it("reads every front-matter field and the body", () => {
+    expect(parseHelpModule(FULL)).toEqual({
+      id: "widgets",
+      title: "Widgets",
+      routes: ["/widgets", "/widgets/archive"],
+      terms: ["anchor"],
+      diagrams: [
+        { src: "widget-states.svg", alt: "Widgets move from draft to live" },
+        { src: "other.svg", alt: "Second diagram" },
+      ],
+      body: "Body **text**.",
+    });
+  });
+
+  it("reads a flow list Prettier wrapped onto the next line", () => {
+    const m = parseHelpModule(
+      "---\nid: a\ntitle: A\nterms:\n  [anchor, crosswalk]\n---\nx",
+    );
+    expect(m.terms).toEqual(["anchor", "crosswalk"]);
+  });
+
+  it("defaults the optional lists to empty", () => {
+    const m = parseHelpModule("---\nid: a\ntitle: A\ndiagrams: []\n---\nx");
+    expect(m.routes).toEqual([]);
+    expect(m.terms).toEqual([]);
+    expect(m.diagrams).toEqual([]);
+  });
+
+  it.each([
+    ["no opening fence", "id: a\n---\n"],
+    ["no closing fence", "---\nid: a\ntitle: A\n"],
+    ["a missing title", "---\nid: a\n---\n"],
+    ["an unknown key", "---\nid: a\ntitle: A\nowner: me\n---\n"],
+    ["a repeated key", "---\nid: a\nid: b\ntitle: A\n---\n"],
+    ["a scalar where a list goes", "---\nid: a\ntitle: A\nroutes: /a\n---\n"],
+    [
+      "a diagram without alt text",
+      "---\nid: a\ntitle: A\ndiagrams:\n  - src: a.svg\n---\n",
+    ],
+    [
+      "a diagram path that leaves the diagrams directory",
+      "---\nid: a\ntitle: A\ndiagrams:\n  - src: ../x.svg\n    alt: X\n---\n",
+    ],
+    [
+      "a diagram that is not an svg or png",
+      "---\nid: a\ntitle: A\ndiagrams:\n  - src: x.html\n    alt: X\n---\n",
+    ],
+    ["a flow-list diagram", "---\nid: a\ntitle: A\ndiagrams: [a.svg]\n---\n"],
+    ["a line it cannot read", "---\nid: a\ntitle: A\n  stray\n---\n"],
+  ])("rejects %s", (_name, source) => {
+    expect(() => parseHelpModule(source)).toThrow();
+  });
+});
+
+describe("helpModuleForPath", () => {
+  const mods: HelpModule[] = [
+    parseHelpModule("---\nid: a\ntitle: A\nroutes: [/things]\n---\n"),
+    parseHelpModule("---\nid: b\ntitle: B\nroutes: [/things/special]\n---\n"),
+  ];
+
+  it("matches the route and pages below it", () => {
+    expect(helpModuleForPath("/things", mods)?.id).toBe("a");
+    expect(helpModuleForPath("/things/123", mods)?.id).toBe("a");
+  });
+
+  it("prefers the longest matching route", () => {
+    expect(helpModuleForPath("/things/special", mods)?.id).toBe("b");
+    expect(helpModuleForPath("/things/special/1", mods)?.id).toBe("b");
+  });
+
+  it("does not match a route that only shares a prefix", () => {
+    expect(helpModuleForPath("/thingsmith", mods)).toBeUndefined();
+  });
+
+  it("returns nothing for a page no module covers", () => {
+    expect(helpModuleForPath("/elsewhere", mods)).toBeUndefined();
+  });
+});
+
+describe("the real help files", () => {
+  const files = readdirSync(HELP_DIR).filter((f) => f.endsWith(".md"));
+
+  it("registers every file in web/help/modules", () => {
+    expect(Object.keys(HELP_SOURCES).sort()).toEqual(files.sort());
+  });
+
+  it("names each module after its file", () => {
+    for (const file of files) {
+      const mod = parseHelpModule(readFileSync(join(HELP_DIR, file), "utf8"));
+      expect(`${mod.id}.md`).toBe(file);
+    }
+  });
+
+  it("references only terms that exist in terms.json", () => {
+    const unknown = HELP_MODULES.flatMap((m) =>
+      m.terms.filter((t) => !getTerm(t)).map((t) => `${m.id}: ${t}`),
+    );
+    expect(unknown).toEqual([]);
+  });
+
+  it("claims each route at most once", () => {
+    const routes = HELP_MODULES.flatMap((m) => m.routes);
+    expect(routes.length).toBe(new Set(routes).size);
+    for (const r of routes) expect(r).toMatch(/^\/[a-z0-9/-]*$/);
+  });
+
+  it("points every diagram at a file in public/help/diagrams", () => {
+    const missing = HELP_MODULES.flatMap((m) =>
+      m.diagrams
+        .filter((d) => !existsSync(join(DIAGRAM_DIR, d.src)))
+        .map((d) => `${m.id}: ${d.src}`),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("uses only absolute links, which the Markdown renderer keeps", () => {
+    for (const m of HELP_MODULES) {
+      const links = [...m.body.matchAll(/\]\(([^)\s]+)/g)].map((x) => x[1]);
+      for (const href of links) expect(href).toMatch(/^https:\/\//);
+    }
+  });
+
+  it("carries no developer notes", () => {
+    for (const m of HELP_MODULES) {
+      expect(findDevNote(`${m.title}\n${m.body}`)).toBeNull();
+    }
+  });
+
+  it("covers Controls, and leaves an unmapped page without help", () => {
+    expect(helpModuleForPath("/controls")?.id).toBe("controls");
+    expect(helpModuleForPath("/risks")).toBeUndefined();
+    expect(helpDocsHref("controls")).toBe(
+      "https://mgoodric.github.io/security-atlas/help/controls/",
+    );
+  });
+});

@@ -51,6 +51,7 @@ type ExportTestingEdgeRow struct {
 	Strength                  float64
 	SourceAttribution         string
 	Rationale                 string
+	MappingTier               string
 }
 
 // ExportTestingWriteCSV invokes the slice 174 CSV writer against the

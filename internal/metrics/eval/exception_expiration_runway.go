@@ -12,6 +12,9 @@ import (
 // "Auto-renewal forbidden" means every one of these is a forced human
 // re-decision — a stacked runway predicts the next quarter's
 // compliance-pause workload.
+//
+// No empty marker (#2064): this is a count, and zero exceptions expiring
+// in the window is a measured answer, not an absent one.
 type exceptionExpirationRunwayEvaluator struct{ pool *pgxpool.Pool }
 
 func (e *exceptionExpirationRunwayEvaluator) Name() string {

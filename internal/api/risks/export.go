@@ -6,7 +6,10 @@
 // audit-log reference impl (`internal/api/adminauditlog/export.go`),
 // adapted to the risk register shape:
 //
-//   - Source query is `risk.Store.List(ctx, ListFilter{})` (RLS-scoped).
+//   - Source query is `dbx.ListRisks` read directly under the tenant GUC
+//     (RLS-scoped), not `risk.Store.List`, so roll-ups stay in: the
+//     export is the full register, with `parent_risk_ids` naming each
+//     row's parents (#2060 D4).
 //   - No from/to window filter — the risk register is a small, live
 //     state; the row cap (50K) is the load-bearing DoS mitigation.
 //     Audit-period freezing is not relevant to the v1 export (risks
@@ -116,10 +119,13 @@ type exportSource interface {
 // re-export every field the riskWire shape carries — the canonical
 // column set in `riskExportHeader` is the single source of truth.
 type riskRow struct {
-	ID            uuid.UUID
-	Title         string
-	Description   string
+	ID          uuid.UUID
+	Title       string
+	Description string
+	// Category is the slug and CategoryName the display name of the
+	// tenant's category the risk references (#1814).
 	Category      string
+	CategoryName  string
 	Methodology   string
 	InherentScore []byte
 	Treatment     string
@@ -408,6 +414,9 @@ func riskExportHeader() []string {
 		// #1748: the parent risks this one rolls up to, semicolon-separated;
 		// empty when it has none. Appended for the same reason.
 		"parent_risk_ids",
+		// #1814: the organisation's name for the category whose slug is in
+		// `category`. Appended for the same reason.
+		"category_name",
 	}
 }
 
@@ -471,6 +480,7 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 				r.UpdatedAt.UTC().Format(time.RFC3339),
 				r.AcceptanceStatus,
 				strings.Join(parents, ";"),
+				r.CategoryName,
 			}
 			if !yield(row) {
 				return
@@ -523,6 +533,14 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 	if err != nil {
 		return nil, false, fmt.Errorf("list risks: %w", err)
 	}
+	cats, err := q.ListRiskCategories(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
+	if err != nil {
+		return nil, false, fmt.Errorf("list risk categories: %w", err)
+	}
+	categoryOf := make(map[uuid.UUID]dbx.OrgRiskCategory, len(cats))
+	for _, c := range cats {
+		categoryOf[uuid.UUID(c.ID.Bytes)] = c
+	}
 	links, err := q.ListRiskAggregationLinksForTenant(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
 	if err != nil {
 		return nil, false, fmt.Errorf("list risk parent links: %w", err)
@@ -562,6 +580,9 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 			Themes:         append([]string(nil), r.Themes...),
 			Severity:       severityOf(r.InherentScore),
 			ParentIDs:      parentsOf[uuid.UUID(r.ID.Bytes)],
+		}
+		if c, ok := categoryOf[uuid.UUID(r.CategoryID.Bytes)]; ok {
+			out[i].Category, out[i].CategoryName = c.Slug, c.Name
 		}
 		if r.AcceptanceStatus != nil {
 			out[i].AcceptanceStatus = string(*r.AcceptanceStatus)

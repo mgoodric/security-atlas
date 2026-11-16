@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -12,7 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/yaml.v3"
 
+	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -20,6 +25,25 @@ import (
 // resolve to a row in the scf_anchors catalog. The HTTP layer maps this to
 // 404 (canvas invariant 7 — no anchor, no control).
 var ErrSCFAnchorUnknown = errors.New("control bundle: scf_anchor_id does not resolve to a known SCF anchor")
+
+// ErrSCFReleaseUnknown is returned when the bundle declares an scf_release
+// that is not loaded (#1770). Distinct from ErrSCFCodeNotInRelease so an
+// author can tell a mistyped release from a code the release lacks.
+var ErrSCFReleaseUnknown = scfrelease.ErrUnknownRelease
+
+// ErrSCFCodeNotInRelease is returned when the bundle's declared scf_release
+// is loaded but has no anchor for its scf_anchor_id (#1770).
+var ErrSCFCodeNotInRelease = scfrelease.ErrCodeNotInRelease
+
+// SCFReleaseDeprecationWarning is returned on an upload whose control.yaml
+// has no scf_release (#1770). The bundle binds as before, to the current
+// SCF release; the field becomes required in a later release.
+const SCFReleaseDeprecationWarning = "control.yaml has no scf_release, so scf_anchor_id was bound in the current SCF release; declare scf_release, which will become required"
+
+// KeptReviewedAnchorWarning is returned on an upload of a stock manifest
+// that was not applied because a person re-anchored the control through an
+// approved SCF remap proposal (#1776).
+const KeptReviewedAnchorWarning = "kept the reviewed SCF re-anchor of this stock control: a person approved its remap, so the shipped manifest was not applied; update the bundle to change the anchor"
 
 // ErrControlChangedConcurrently is returned when the active version a
 // description-only upload was about to update in place was superseded by a
@@ -46,6 +70,145 @@ type UploadResult struct {
 	// place rather than superseded (issue #1908). ControlID and Version
 	// are the existing row's; SupersededID is zero.
 	UpdatedInPlace bool
+	// AnchorRebound is true when the manifest's SCF code now resolves to a
+	// different anchor row (a newer SCF release was imported, #1768) with
+	// the same title, and the active row was moved to it in place rather
+	// than superseded (#1971).
+	AnchorRebound bool
+	// NeedsReanchoring is true when the manifest's SCF code now resolves to
+	// a newer release's row whose title differs: the code changed meaning,
+	// so the control was left on its legacy anchor (#1971 D3). It earns no
+	// framework credit until it is re-anchored.
+	NeedsReanchoring bool
+	// KeptReviewedAnchor is true when the upload was the shipped stock
+	// manifest of a control whose active revision is a person's approved SCF
+	// re-anchor (#1776): nothing changed, and Warnings says why.
+	KeptReviewedAnchor bool
+	// AnchorID is the SCF anchor the bundle's scf_anchor_id resolved to;
+	// zero for an unanchored (anchor_fit: none) control.
+	AnchorID uuid.UUID
+	// SCFRelease is the SCF release label scf_anchor_id was resolved in
+	// (#1770); empty for an unanchored control.
+	SCFRelease string
+	// Warnings are non-fatal notes for the uploader, such as
+	// SCFReleaseDeprecationWarning.
+	Warnings []string
+}
+
+// rebindOutcome is what rebindAnchor did with an unchanged manifest whose
+// SCF code now resolves to a different anchor row.
+type rebindOutcome int
+
+const (
+	rebindNone          rebindOutcome = iota // already on the resolved anchor
+	rebindMoved                              // moved to the new row: same code, same title
+	rebindNeedsReanchor                      // left in place: the code's meaning changed
+)
+
+// rebindAnchor handles an unchanged manifest (byte-identical, or differing
+// only in in-place metadata) whose SCF code now resolves to a different
+// anchor row than the active row's: a new SCF release minted a new row for
+// the code (#1768). Matt's call (#1971 D3): move the control only when the
+// new row has the same code AND the same title as the old one, i.e. the
+// meaning did not change. Otherwise the control stays where it is and is
+// reported as needing re-anchoring, never silently re-pointed.
+//
+// anchorID is what bindSCFAnchor resolved the manifest to. A bundle pinned
+// to one release is never re-bound: one that declares scf_release (#1770),
+// and one whose scf_anchor_id is an anchor UUID, which scfrelease.Resolve
+// binds to that exact row in whichever release holds it. Moving either is
+// the silent re-point #1770 and D3 forbid, and for a UUID ref would flip
+// the control between releases on every boot and re-upload. An unanchored
+// control (anchor_fit: none) has nothing to re-bind. As a backstop, the
+// control only ever moves to a row in the current SCF release.
+func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID, pinnedRelease, anchorRef string) (rebindOutcome, error) {
+	if pinnedRelease != "" || anchorID == uuid.Nil {
+		return rebindNone, nil
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(anchorRef)); err == nil {
+		return rebindNone, nil
+	}
+	if !prior.ScfAnchorID.Valid || uuid.UUID(prior.ScfAnchorID.Bytes) == anchorID {
+		return rebindNone, nil
+	}
+	oldRow, err := lookupAnchorRow(ctx, q, uuid.UUID(prior.ScfAnchorID.Bytes))
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read bound anchor: %w", err)
+	}
+	newRow, err := lookupAnchorRow(ctx, q, anchorID)
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read resolved anchor: %w", err)
+	}
+	release, err := q.GetFrameworkVersionByID(ctx, newRow.FrameworkVersionID)
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read resolved anchor's release: %w", err)
+	}
+	if release.Status != dbx.FrameworkVersionStatusCurrent {
+		return rebindNone, nil
+	}
+	// #2236: record the move or the flag in this transaction, read before
+	// the move, while the control is still on its legacy anchor.
+	legacy, found, err := legacyAnchorRow(ctx, q, tenantID, prior.ID)
+	if err != nil {
+		return rebindNone, err
+	}
+	record := func(status string) error {
+		if !found {
+			// Not expected: the bound anchor is outside the current
+			// release. The re-bind itself is still right, so the upload
+			// goes ahead without its record rather than failing.
+			slog.WarnContext(ctx, "control: scf re-bind not recorded; control not on a legacy anchor",
+				"control_id", uuid.UUID(prior.ID.Bytes).String(), "status", status)
+			return nil
+		}
+		_, err := scfimport.RecordRemapProposal(ctx, q, legacy, status, scfimport.SourceUpload)
+		return err
+	}
+	if oldRow.ScfID != newRow.ScfID || oldRow.Title != newRow.Title {
+		if err := record(scfimport.ProposalOpen); err != nil {
+			return rebindNone, err
+		}
+		return rebindNeedsReanchor, nil
+	}
+	n, err := q.RebindControlAnchorInPlace(ctx, dbx.RebindControlAnchorInPlaceParams{
+		TenantID:    pgUUID(tenantID),
+		ID:          prior.ID,
+		ScfAnchorID: pgUUID(anchorID),
+		ScfID:       &newRow.ScfID,
+	})
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: %w", err)
+	}
+	if n != 1 {
+		return rebindNone, ErrControlChangedConcurrently
+	}
+	if err := record(scfimport.ProposalRebound); err != nil {
+		return rebindNone, err
+	}
+	return rebindMoved, nil
+}
+
+// legacyAnchorRow reads the control's row of ListControlsOnLegacySCFAnchors:
+// its legacy anchor and where SCF says the anchor's concept went, which the
+// re-bind record (#2236) carries. rebindAnchor calls it only for a control
+// whose anchor is not in the current release, so found should be true.
+func legacyAnchorRow(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, controlID pgtype.UUID) (row dbx.ListControlsOnLegacySCFAnchorsRow, found bool, err error) {
+	rows, err := q.ListControlsOnLegacySCFAnchors(ctx, pgUUID(tenantID))
+	if err != nil {
+		return dbx.ListControlsOnLegacySCFAnchorsRow{}, false, fmt.Errorf("rebind control anchor: list controls on legacy anchors: %w", err)
+	}
+	for _, r := range rows {
+		if r.ControlID == controlID {
+			return r, true, nil
+		}
+	}
+	return dbx.ListControlsOnLegacySCFAnchorsRow{}, false, nil
+}
+
+// apply records a rebind outcome on the upload result.
+func (o rebindOutcome) apply(r *UploadResult) {
+	r.AnchorRebound = o == rebindMoved
+	r.NeedsReanchoring = o == rebindNeedsReanchor
 }
 
 // Store persists parsed bundles to the controls table under RLS.
@@ -77,16 +240,112 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 	if b == nil {
 		return UploadResult{}, errors.New("control bundle: nil bundle")
 	}
-
 	var result UploadResult
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		result, err = upload(ctx, q, tenantID, b, uploadedBy)
+		return err
+	})
+	return result, err
+}
+
+// UploadTx is Upload inside the caller's transaction, so a caller can commit
+// the control together with its own writes (the control import's approval
+// and audit row, #1782). tx must already carry the caller's tenant
+// (tenancy.ApplyTenant), and ctx names the same tenant. UploadTx neither
+// commits nor rolls back.
+func UploadTx(ctx context.Context, tx pgx.Tx, b *Bundle, uploadedBy string) (UploadResult, error) {
+	if b == nil {
+		return UploadResult{}, errors.New("control bundle: nil bundle")
+	}
+	tenantStr, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	tenantID, err := uuid.Parse(tenantStr)
+	if err != nil {
+		return UploadResult{}, fmt.Errorf("control: parse tenant id: %w", err)
+	}
+	return upload(ctx, dbx.New(tx), tenantID, b, uploadedBy)
+}
+
+// keepReviewedAnchor guards the boot seed (#1776). Bootstrap re-uploads
+// every stock manifest under controls/soc2/ on each boot. When a person
+// approved an SCF remap of that stock control, its active revision is the
+// approved re-anchor, and superseding it with the shipped manifest would
+// silently undo the decision every boot, or fail outright when the shipped
+// code is gone from the current release (a split or withdrawn anchor). The
+// upload is kept as a no-op with a warning instead. It runs before the
+// manifest's anchor is resolved for that reason. ok is false for every other
+// upload, which proceeds as before.
+func keepReviewedAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle) (UploadResult, bool, error) {
+	if !scfimport.IsStockManifest(b.Manifest.BundleID, string(b.ManifestYAMLRaw)) {
+		return UploadResult{}, false, nil
+	}
+	prior, err := q.LockActiveControlByBundleID(ctx, dbx.LockActiveControlByBundleIDParams{
+		TenantID: pgUUID(tenantID),
+		BundleID: b.Manifest.BundleID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UploadResult{}, false, nil
+	}
+	if err != nil {
+		return UploadResult{}, false, fmt.Errorf("lookup prior version: %w", err)
+	}
+	if prior.BundleManifestHash == b.ManifestHashHex {
+		return UploadResult{}, false, nil
+	}
+	approved, err := q.IsApprovedRemapRevision(ctx, dbx.IsApprovedRemapRevisionParams{
+		TenantID:  pgUUID(tenantID),
+		ControlID: prior.ID,
+	})
+	if err != nil {
+		return UploadResult{}, false, fmt.Errorf("check approved SCF remap: %w", err)
+	}
+	if !approved {
+		return UploadResult{}, false, nil
+	}
+	return UploadResult{
+		ControlID:          uuid.UUID(prior.ID.Bytes),
+		BundleID:           b.Manifest.BundleID,
+		Version:            prior.Version,
+		KeptReviewedAnchor: true,
+		AnchorID:           uuid.UUID(prior.ScfAnchorID.Bytes),
+		Warnings:           []string{KeptReviewedAnchorWarning},
+	}, true, nil
+}
+
+// upload is the body of Upload and UploadTx.
+func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, uploadedBy string) (UploadResult, error) {
+	if kept, ok, err := keepReviewedAnchor(ctx, q, tenantID, b); err != nil || ok {
+		return kept, err
+	}
+	var result UploadResult
+	err := func() error {
 		// 1. Resolve scf_anchor_id. Accept either a uuid (FK target) or a
-		//    human-readable SCF code (e.g. "IAC-06") that resolves via the
+		//    human-readable SCF code (e.g. "IAC-37") that resolves via the
 		//    slice-006 importer. Both shapes are common: hand-written
 		//    bundles use the code, machine-generated bundles use the uuid.
-		anchorID, err := resolveSCFAnchor(ctx, q, b.Manifest.SCFAnchorID)
-		if err != nil {
-			return err
+		//
+		//    An empty scf_anchor_id passed ValidateStructural only with
+		//    anchor_fit: none (issue #1736): the control stands unanchored
+		//    and anchorID stays uuid.Nil (stored as NULL).
+		//
+		//    #1770: a declared scf_release binds the code within that
+		//    release. Without one the code binds in the current release,
+		//    as before, and the upload carries a deprecation warning.
+		var anchorID uuid.UUID
+		if b.Manifest.SCFAnchorID != "" {
+			anchor, rel, err := bindSCFAnchor(ctx, q, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
+			if err != nil {
+				return err
+			}
+			anchorID = uuid.UUID(anchor.ID.Bytes)
+			result.AnchorID = anchorID
+			result.SCFRelease = rel.Version
+		}
+		if b.Manifest.SCFRelease == "" {
+			result.Warnings = append(result.Warnings, SCFReleaseDeprecationWarning)
 		}
 
 		// 2. Marshal JSONB fields.
@@ -145,6 +404,11 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//     v2, v3, ... on every boot — the slice-065 idempotency
 		//     assertion (AC-7) exists precisely to catch that.
 		if !isNew && prior.BundleManifestHash == b.ManifestHashHex {
+			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
+			if err != nil {
+				return err
+			}
+			outcome.apply(&result)
 			result.ControlID = uuid.UUID(prior.ID.Bytes)
 			result.BundleID = b.Manifest.BundleID
 			result.Version = prior.Version
@@ -159,9 +423,10 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		}
 
 		// 3b. A manifest that differs from the active version's ONLY in
-		//     `description` (prose edit, reflow, whitespace) and/or
-		//     `external_refs` (backfilling or correcting trace ids)
-		//     updates the active row in place. Superseding would mint a
+		//     `description` (prose edit, reflow, whitespace),
+		//     `external_refs` (backfilling or correcting trace ids) and/or
+		//     `anchor_fit_note` (rewording why the fit is what it is,
+		//     issue #2023) updates the active row in place. Superseding would mint a
 		//     new control id and orphan everything keyed on the old one:
 		//     owners, evidence, evaluations, exceptions, risk and other
 		//     links (issues #1908, #1958). Any other difference still
@@ -194,6 +459,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 					BundleManifestYaml: string(b.ManifestYAMLRaw),
 					BundleManifestHash: b.ManifestHashHex,
 					BundleUploadedBy:   uploader,
+					AnchorFitNote:      b.Manifest.AnchorFitNotePtr(),
 				})
 				if err != nil {
 					return fmt.Errorf("update control metadata in place: %w", err)
@@ -201,6 +467,11 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 				if n != 1 {
 					return ErrControlChangedConcurrently
 				}
+				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
+				if err != nil {
+					return err
+				}
+				outcome.apply(&result)
 				result.ControlID = uuid.UUID(prior.ID.Bytes)
 				result.BundleID = b.Manifest.BundleID
 				result.Version = prior.Version
@@ -216,14 +487,19 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 			nextVersion = prior.Version + 1
 		}
 
+		anchored := anchorID != uuid.Nil
 		scfCode := b.Manifest.SCFAnchorID
-		if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
-			scfCode = anchorRow.ScfID
+		if anchored {
+			if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
+				scfCode = anchorRow.ScfID
+			}
 		}
 
 		family := b.Manifest.ControlFamily
 		if family == "" {
-			if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
+			if !anchored {
+				family = "UNKNOWN"
+			} else if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
 				family = anchorRow.Family
 			} else {
 				family = "UNKNOWN"
@@ -271,14 +547,21 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		// 6. Insert the new active row (superseded_by NULL). After step 5
 		//    the predecessor is no longer NULL, so the partial unique index
 		//    has room for exactly this row.
-		scfPtr := &scfCode
+		var scfPtr *string
+		var anchorPG pgtype.UUID // invalid (NULL) for an unanchored control
+		if anchored {
+			scfPtr = &scfCode
+			anchorPG = pgUUID(anchorID)
+		}
 		row, err := q.InsertControlVersion(ctx, dbx.InsertControlVersionParams{
 			ID:                   pgUUID(newID),
 			TenantID:             pgUUID(tenantID),
 			BundleID:             b.Manifest.BundleID,
 			Version:              nextVersion,
 			ScfID:                scfPtr,
-			ScfAnchorID:          pgUUID(anchorID),
+			ScfAnchorID:          anchorPG,
+			AnchorFit:            b.Manifest.AnchorFitOrDefault(),
+			AnchorFitNote:        b.Manifest.AnchorFitNotePtr(),
 			Title:                b.Manifest.Title,
 			Description:          b.Manifest.Description,
 			ControlFamily:        family,
@@ -304,7 +587,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		result.Version = nextVersion
 		result.IsNewBundle = isNew
 		return nil
-	})
+	}()
 
 	return result, err
 }
@@ -360,7 +643,14 @@ func (s *Store) List(ctx context.Context) ([]ActiveControl, error) {
 // each with its own worst-state-wins evaluation rollup and its anchor's
 // framework slugs, plus the unpaged total (issue #1741). A valid
 // scopeCell narrows the rollup to that cell; the zero value is no filter.
-func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
+//
+// A non-empty anchorFit narrows both the page and the total to controls
+// with that fit (issue #1736).
+func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID, anchorFit string) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
+	var fit *string
+	if anchorFit != "" {
+		fit = &anchorFit
+	}
 	var (
 		rows  []dbx.ListActiveControlsWithStateRow
 		total int64
@@ -372,11 +662,15 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 			RowLimit:    limit,
 			RowOffset:   offset,
 			ScopeCellID: scopeCell,
+			AnchorFit:   fit,
 		})
 		if err != nil {
 			return fmt.Errorf("list active controls with state: %w", err)
 		}
-		total, err = q.CountActiveControls(ctx, pgUUID(tenantID))
+		total, err = q.CountActiveControls(ctx, dbx.CountActiveControlsParams{
+			TenantID:  pgUUID(tenantID),
+			AnchorFit: fit,
+		})
 		if err != nil {
 			return fmt.Errorf("count active controls: %w", err)
 		}
@@ -388,38 +682,63 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 	return rows, total, nil
 }
 
+// ListOnLegacySCFAnchors returns the active tenant's active controls still
+// bound to an anchor of an SCF release that is no longer current (#2176).
+// The query is filtered by the explicit tenant id as well as by RLS. The
+// caller applies the #1971 D3 rule (scfimport.Classify) to decide which
+// rows need a person.
+func (s *Store) ListOnLegacySCFAnchors(ctx context.Context) ([]dbx.ListControlsOnLegacySCFAnchorsRow, error) {
+	var rows []dbx.ListControlsOnLegacySCFAnchorsRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		rows, err = q.ListControlsOnLegacySCFAnchors(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("list controls on legacy scf anchors: %w", err)
+		}
+		return nil
+	})
+	return rows, err
+}
+
 // resolveSCFAnchor accepts either a uuid string or an SCF code (e.g.,
-// "IAC-06") and returns the anchor's uuid. Unknown values fail with
-// ErrSCFAnchorUnknown.
+// "IAC-37") resolved in the current SCF release, and returns the anchor's
+// uuid. Unknown values fail with ErrSCFAnchorUnknown.
 func resolveSCFAnchor(ctx context.Context, q *dbx.Queries, ref string) (uuid.UUID, error) {
-	if ref == "" {
-		return uuid.Nil, ErrSCFAnchorUnknown
-	}
-	// First, try as a uuid.
-	if u, err := uuid.Parse(ref); err == nil {
-		row, err := q.GetSCFAnchorByID(ctx, pgUUID(u))
-		if err == nil {
-			return uuid.UUID(row.ID.Bytes), nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return uuid.Nil, fmt.Errorf("get scf anchor by id: %w", err)
-		}
-	}
-	// Fall back: SCF code lookup.
-	row, err := q.GetSCFAnchorBySCFID(ctx, ref)
+	row, _, err := bindSCFAnchor(ctx, q, "", ref)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return uuid.Nil, ErrSCFAnchorUnknown
-		}
-		return uuid.Nil, fmt.Errorf("get scf anchor by code: %w", err)
+		return uuid.Nil, err
 	}
 	return uuid.UUID(row.ID.Bytes), nil
 }
 
+// bindSCFAnchor resolves a bundle's scf_anchor_id in its declared
+// scf_release (#1770). With a release named, the two scfrelease errors
+// (ErrSCFReleaseUnknown, ErrSCFCodeNotInRelease) pass through wrapped, so
+// the caller can tell them apart. With none, any miss is
+// ErrSCFAnchorUnknown, the pre-#1770 error.
+func bindSCFAnchor(ctx context.Context, q scfrelease.Querier, release, ref string) (dbx.ScfAnchor, scfrelease.Release, error) {
+	if ref == "" {
+		return dbx.ScfAnchor{}, scfrelease.Release{}, ErrSCFAnchorUnknown
+	}
+	row, rel, err := scfrelease.Resolve(ctx, q, release, ref)
+	switch {
+	case err == nil:
+		return row, rel, nil
+	case release == "" && (errors.Is(err, scfrelease.ErrCodeNotInRelease) || errors.Is(err, scfrelease.ErrNoCurrentRelease)):
+		return dbx.ScfAnchor{}, scfrelease.Release{}, ErrSCFAnchorUnknown
+	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrCodeNotInRelease):
+		return dbx.ScfAnchor{}, scfrelease.Release{}, fmt.Errorf("control bundle: %w", err)
+	default:
+		return dbx.ScfAnchor{}, scfrelease.Release{}, err
+	}
+}
+
 // inPlaceManifestKeys are the top-level control.yaml keys an upload may
-// change without versioning the control: prose (issue #1908) and the
-// trace to outside identifiers (issue #1958). Neither feeds evaluation.
-var inPlaceManifestKeys = []string{"description", "external_refs"}
+// change without versioning the control: prose (issue #1908), the trace
+// to outside identifiers (issue #1958) and the anchor-fit note (issue
+// #2023). None feeds evaluation. `anchor_fit` itself is not here: a fit
+// change alters what the SCF mapping means, so it supersedes.
+var inPlaceManifestKeys = []string{"description", "external_refs", "anchor_fit_note"}
 
 // manifestsEqualIgnoringMetadata reports whether two control.yaml
 // documents are equal once the inPlaceManifestKeys are removed from each.
@@ -445,6 +764,18 @@ func manifestsEqualIgnoringMetadata(priorYAML, nextYAML []byte) (bool, error) {
 // path can hydrate family/code from the same source of truth.
 func lookupAnchorRow(ctx context.Context, q *dbx.Queries, id uuid.UUID) (dbx.ScfAnchor, error) {
 	return q.GetSCFAnchorByID(ctx, pgUUID(id))
+}
+
+// DemoControls returns which of ids the in-place demo seed added (#2043), so
+// read surfaces and exports can mark them "demo".
+func (s *Store) DemoControls(ctx context.Context, ids []uuid.UUID) (demoprov.Set, error) {
+	var set demoprov.Set
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ uuid.UUID) error {
+		var err error
+		set, err = demoprov.Lookup(ctx, q, demoprov.TableControls, ids)
+		return err
+	})
+	return set, err
 }
 
 // inTx mirrors scope.Store.inTx. Opens a transaction, applies the tenant
@@ -558,4 +889,24 @@ func coerceStringSlice(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// ListRemapProposals returns the active tenant's SCF remap proposals
+// (#1775), optionally filtered by class and status (nil = any). The query
+// is filtered by the explicit tenant id as well as by RLS.
+func (s *Store) ListRemapProposals(ctx context.Context, class, status *string) ([]dbx.ListSCFRemapProposalsRow, error) {
+	var rows []dbx.ListSCFRemapProposalsRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		rows, err = q.ListSCFRemapProposals(ctx, dbx.ListSCFRemapProposalsParams{
+			TenantID: pgUUID(tenantID),
+			Class:    class,
+			Status:   status,
+		})
+		if err != nil {
+			return fmt.Errorf("list scf remap proposals: %w", err)
+		}
+		return nil
+	})
+	return rows, err
 }

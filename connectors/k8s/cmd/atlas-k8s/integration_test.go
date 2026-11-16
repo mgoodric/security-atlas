@@ -116,7 +116,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rbac.Pull: %v", err)
 	}
-	rbacRec, err := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-21")
+	rbacRec, err := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildRBACRecord: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workload.Inspect: %v", err)
 	}
-	wlRec, err := buildWorkloadRecord(workloads[0], "cluster-1", "prod", "scf:CFG-02")
+	wlRec, err := buildWorkloadRecord(workloads[0], "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildWorkloadRecord: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if prodAdm == nil || prodAdm.Result != pss.ResultPass || !prodAdm.Configured {
 		t.Fatalf("prod namespace should PASS with enforce=restricted; got %+v", prodAdm)
 	}
-	pssRec, err := buildPSSRecord(*prodAdm, "cluster-1", "prod", "scf:CFG-02")
+	pssRec, err := buildPSSRecord(*prodAdm, "cluster-1", "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildPSSRecord: %v", err)
 	}
@@ -293,8 +293,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 			RunAsNonRoot: true, ReadOnlyRootFilesystem: true, ContainerCount: 1},
 	}}
 	wls, _ := workload.Inspect(context.Background(), wlAPI, fixed)
-	r1, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-02")
-	r2, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-02")
+	r1, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-04")
+	r2, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-04")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -320,13 +320,13 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 			Rules:    []rbac.Rule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}},
 	}}
 	bindings, _ := rbac.Pull(context.Background(), rbacAPI, fixed)
-	rbacRec, _ := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-21")
+	rbacRec, _ := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-10")
 
 	wlAPI := &fakeWorkloadForIntegration{workloads: []workload.RawWorkload{
 		{Kind: workload.KindDeployment, Name: "api", Namespace: "prod", RunAsNonRoot: true, ReadOnlyRootFilesystem: true, ContainerCount: 1},
 	}}
 	wls, _ := workload.Inspect(context.Background(), wlAPI, fixed)
-	wlRec, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-02")
+	wlRec, _ := buildWorkloadRecord(wls[0], "cluster-1", "prod", "scf:CFG-04")
 
 	// NetworkPolicy coverage: the faked policy embeds a podSelector label + an
 	// ingress peer that must NOT escape into the record.
@@ -345,7 +345,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 		{Name: "prod", EnforceLevel: pss.LevelRestricted, EnforceVersion: "v1.29", AuditLevel: pss.LevelBaseline},
 	}}
 	adms, _ := pss.Assess(context.Background(), pssAPI, fixed)
-	pssRec, _ := buildPSSRecord(adms[0], "cluster-1", "prod", "scf:CFG-02")
+	pssRec, _ := buildPSSRecord(adms[0], "cluster-1", "prod", "scf:CFG-04")
 
 	// Allow-list of permitted top-level payload keys per kind. Any key NOT in
 	// the allow-list is a leak and fails the test (config / authz metadata only).

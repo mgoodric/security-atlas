@@ -85,7 +85,7 @@ describe("buildUnifiedQuery", () => {
 });
 
 describe("AUDIT_LOG_KINDS", () => {
-  test("enumerates exactly the ten canonical kinds (matches platform unifiedlog.Kind)", () => {
+  test("enumerates exactly the thirteen canonical kinds (matches platform unifiedlog.Kind)", () => {
     expect(AUDIT_LOG_KINDS).toEqual([
       "decision",
       "evidence",
@@ -97,6 +97,9 @@ describe("AUDIT_LOG_KINDS", () => {
       "me",
       "walkthrough",
       "framework_scope",
+      "taxonomy",
+      "mapping_overlay",
+      "control_import",
     ]);
   });
 });

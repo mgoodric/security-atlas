@@ -44,7 +44,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -67,7 +66,8 @@ const (
 // controlFilterKeys is the slice-224 controls-filter allow-list. A persisted
 // view's filter payload is narrowed to EXACTLY these keys (threat-model T).
 // MUST stay in sync with web/app/(authed)/controls/filters.ts ControlFilters.
-var controlFilterKeys = []string{"framework", "family", "result", "freshness", "scope"}
+// anchor_fit is issue #1736.
+var controlFilterKeys = []string{"framework", "family", "result", "freshness", "scope", "anchor_fit"}
 
 // SavedViewsHandler binds the saved-views routes. pool may be nil in
 // unit-only servers (the route gates return 503).
@@ -264,8 +264,8 @@ func (h *SavedViewsHandler) identity(w http.ResponseWriter, r *http.Request) (cr
 		writeSavedViewError(w, http.StatusInternalServerError, "tenant context: invalid tenant id")
 		return cred, uuid.Nil, uuid.Nil, false
 	}
-	userUUID, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		writeSavedViewError(w, http.StatusForbidden, "saved views require a user credential")
 		return cred, uuid.Nil, uuid.Nil, false
 	}

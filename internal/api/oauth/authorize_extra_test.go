@@ -35,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // stubSessions / stubUsers satisfy the AuthorizeEndpoint constructor's
@@ -54,9 +55,18 @@ func (stubUsers) ResolveForOAuth(context.Context, uuid.UUID, uuid.UUID) (oauth.U
 	return oauth.UserIdentity{}, nil
 }
 
-// newAuthorizeUnitServer wires an AuthorizeEndpoint with nil-pool code
-// + client stores and stub session/user resolvers. The
-// parameter-validation gates run before any of these are touched.
+// stubClients answers every client_id with one unbound client, or with
+// bound's binding when set (#1968).
+type stubClients struct{ bound *uuid.UUID }
+
+func (s stubClients) Lookup(_ context.Context, clientID string) (*oauthclient.Client, error) {
+	return &oauthclient.Client{ClientID: clientID, TenantID: s.bound}, nil
+}
+
+// newAuthorizeUnitServer wires an AuthorizeEndpoint with a nil-pool code
+// store, a stub client lookup and stub session/user resolvers. The
+// parameter-validation and tenant gates run before the code store is
+// touched.
 func newAuthorizeUnitServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return newAuthorizeUnitServerWith(t, nil)
@@ -65,6 +75,13 @@ func newAuthorizeUnitServer(t *testing.T) *httptest.Server {
 // newAuthorizeUnitServerWith is newAuthorizeUnitServer with an
 // ImplicitTenant resolver wired (#1761).
 func newAuthorizeUnitServerWith(t *testing.T, implicit func(context.Context) (uuid.UUID, error)) *httptest.Server {
+	t.Helper()
+	return newAuthorizeUnitServerClients(t, implicit, stubClients{})
+}
+
+// newAuthorizeUnitServerClients is newAuthorizeUnitServerWith over a given
+// client lookup.
+func newAuthorizeUnitServerClients(t *testing.T, implicit func(context.Context) (uuid.UUID, error), clients oauth.ClientLookup) *httptest.Server {
 	t.Helper()
 	h, signer := newHandler(t)
 	// A token endpoint must be wired for the authorize route to leave
@@ -76,7 +93,7 @@ func newAuthorizeUnitServerWith(t *testing.T, implicit func(context.Context) (uu
 	h.AttachTokenEndpoint(tokenEP)
 	authEP := oauth.NewAuthorizeEndpoint(oauth.AuthorizeEndpointConfig{
 		Codes:          oauthcode.New(nil),
-		Clients:        oauthclient.New(nil),
+		Clients:        clients,
 		Sessions:       stubSessions{},
 		Users:          stubUsers{},
 		Issuer:         testIssuer,
@@ -202,9 +219,11 @@ func TestAuthorize_NoTenantID_NoImplicitTenant(t *testing.T) {
 	t.Parallel()
 	leaked := uuid.New()
 	cases := map[string]func(context.Context) (uuid.UUID, error){
-		"ambiguous":   func(context.Context) (uuid.UUID, error) { return uuid.Nil, errors.New("several tenants") },
+		"ambiguous": func(context.Context) (uuid.UUID, error) {
+			return uuid.Nil, &tenancy.AmbiguousTenantError{Tenants: []tenancy.TenantRef{{ID: leaked}, {ID: uuid.New()}}}
+		},
+		"no-tenants":  func(context.Context) (uuid.UUID, error) { return uuid.Nil, tenancy.ErrNoTenants },
 		"all-zeros":   func(context.Context) (uuid.UUID, error) { return uuid.Nil, nil },
-		"error-w-id":  func(context.Context) (uuid.UUID, error) { return leaked, errors.New("lookup failed") },
 		"no-resolver": nil,
 	}
 	for name, implicit := range cases {
@@ -225,6 +244,75 @@ func TestAuthorize_NoTenantID_NoImplicitTenant(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAuthorize_ImplicitTenantLookupErrorIs500 covers #1968: a resolver
+// failure that is not "no tenant implied" is a 500, not a 400 telling the
+// caller to name a tenant, and the body names no tenant.
+func TestAuthorize_ImplicitTenantLookupErrorIs500(t *testing.T) {
+	t.Parallel()
+	leaked := uuid.New()
+	srv := newAuthorizeUnitServerWith(t, func(context.Context) (uuid.UUID, error) {
+		return leaked, errors.New("connection refused")
+	})
+	q := validAuthorizeParams()
+	q.Del("tenant_id")
+	resp, body := getAuthorize(t, srv.URL, q)
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s; want 500", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "server_error") {
+		t.Errorf("body = %q, want server_error", body)
+	}
+	if strings.Contains(string(body), leaked.String()) || strings.Contains(string(body), "connection refused") {
+		t.Errorf("body discloses the resolver error: %s", body)
+	}
+}
+
+// TestAuthorize_BoundClientRefusesOtherTenant covers #1968: a client bound
+// to one tenant cannot authorize in another, whatever tenant_id says.
+func TestAuthorize_BoundClientRefusesOtherTenant(t *testing.T) {
+	t.Parallel()
+	bound := uuid.New()
+	srv := newAuthorizeUnitServerClients(t, nil, stubClients{bound: &bound})
+	q := validAuthorizeParams()
+	q.Set("tenant_id", uuid.NewString())
+	resp, body := getAuthorize(t, srv.URL, q)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s; want 400", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "tenant_id does not match the client's tenant") {
+		t.Errorf("body = %q, want the binding refusal", body)
+	}
+	if strings.Contains(string(body), bound.String()) {
+		t.Errorf("body discloses the bound tenant: %s", body)
+	}
+}
+
+// TestAuthorize_UnknownClientRefused covers #1968: a client the lookup
+// does not know (unregistered or disabled) gets the unregistered
+// redirect_uri answer, before any tenant is resolved.
+func TestAuthorize_UnknownClientRefused(t *testing.T) {
+	t.Parallel()
+	srv := newAuthorizeUnitServerClients(t, func(context.Context) (uuid.UUID, error) {
+		t.Error("implicit tenant resolved for an unknown client")
+		return uuid.Nil, nil
+	}, unknownClients{})
+	q := validAuthorizeParams()
+	q.Del("tenant_id")
+	resp, body := getAuthorize(t, srv.URL, q)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s; want 400", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "redirect_uri is not registered for this client") {
+		t.Errorf("body = %q, want the unregistered-client answer", body)
+	}
+}
+
+type unknownClients struct{}
+
+func (unknownClients) Lookup(context.Context, string) (*oauthclient.Client, error) {
+	return nil, oauthclient.ErrUnknownClient
 }
 
 // Note on the PKCE-method default (slice-189 D3 / P0-189-1): when

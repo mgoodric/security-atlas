@@ -39,6 +39,7 @@ const FRESH_VIEW_FILTERS = {
   result: "fail",
   freshness: "stale",
   scope: ALL,
+  anchor_fit: ALL,
 };
 
 describe("sanitizeFilters", () => {
@@ -49,6 +50,7 @@ describe("sanitizeFilters", () => {
       result: "pass",
       freshness: "fresh",
       scope: "cell-1",
+      anchor_fit: "none",
       // Injection attempt — an arbitrary key that must NOT survive.
       malicious: "DROP TABLE controls",
       __proto__: { polluted: true },
@@ -59,6 +61,7 @@ describe("sanitizeFilters", () => {
       result: "pass",
       freshness: "fresh",
       scope: "cell-1",
+      anchor_fit: "none",
     });
     expect((out as Record<string, unknown>).malicious).toBeUndefined();
   });

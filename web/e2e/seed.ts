@@ -52,6 +52,9 @@ export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
 // Slice 201: the global-setup module also uses this UUID as the JWT
 // `sub` claim so the synthesized credential's UserID matches.
 export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
+// #2142 — seeded by fixtures/e2e/theme.sql. The stored theme is per user,
+// so the theme spec signs in as this user rather than the shared demo one.
+export const THEME_USER_ID = "44444444-4444-4444-4444-444444442142";
 
 // The fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
@@ -102,7 +105,30 @@ export type FixtureName =
   | "controls-top-bar"
   | "controls-list"
   | "global-search"
-  | "tenant-switch";
+  | "tenant-switch"
+  // #1794 — synthetic ISO/IEC 27001 version + crosswalk + three
+  // evaluated controls for the SoA tab (framework-scope-soa.spec.ts).
+  // Deletes the version's scope revisions so each run starts clean.
+  | "framework-scope-soa"
+  // #1795 — synthetic framework version with four requirements for the
+  // review-screen applicability diff (framework-scope-diff.spec.ts).
+  // Deletes the version's scope revisions so each run starts clean.
+  | "framework-scope-diff"
+  // #2089 — one manual_attested control so attest.spec.ts can load the
+  // real attest form (the base control is automated).
+  | "attest"
+  // #2081 — a dedicated tenant with `board.reporting` + `vendor.claims`
+  // on, for the sidebar's flag-on case (sidebar-nav.spec.ts).
+  | "sidebar-nav"
+  // #2137 — one manual attestation for evidence-detail.spec.ts.
+  | "evidence-detail"
+  // #2142 — a user of settings-theme.spec.ts's own, its stored theme
+  // reset to never-chosen on each run.
+  | "theme"
+  // #1800 — a requirement with a catalog edge and a demo-tenant overlay
+  // edge, a control behind the overlay, and a second tenant
+  // (org-mapping.spec.ts).
+  | "org-mapping";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

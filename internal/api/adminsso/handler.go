@@ -119,14 +119,17 @@ func (h *Handler) WithPreflightOptions(opts PreflightOptions) *Handler {
 // GetResponse is the JSON body of GET /v1/admin/sso.
 // client_secret is intentionally omitted.
 type GetResponse struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	IssuerURL           string    `json:"issuer_url"`
-	ClientID            string    `json:"client_id"`
-	RedirectURL         string    `json:"redirect_url"`
-	AllowedEmailDomains []string  `json:"allowed_email_domains"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	IssuerURL           string   `json:"issuer_url"`
+	ClientID            string   `json:"client_id"`
+	RedirectURL         string   `json:"redirect_url"`
+	AllowedEmailDomains []string `json:"allowed_email_domains"`
+	// TrustUnverifiedEmailForLink lets a sign-in whose ID token omits
+	// email_verified link to a SCIM-provisioned user by email (#1944 D3).
+	TrustUnverifiedEmailForLink bool      `json:"trust_unverified_email_for_link"`
+	CreatedAt                   time.Time `json:"created_at"`
+	UpdatedAt                   time.Time `json:"updated_at"`
 }
 
 // PatchRequest is the JSON body of PATCH /v1/admin/sso. client_secret is
@@ -137,6 +140,9 @@ type PatchRequest struct {
 	ClientSecret        string   `json:"client_secret,omitempty"`
 	RedirectURL         string   `json:"redirect_url"`
 	AllowedEmailDomains []string `json:"allowed_email_domains"`
+	// TrustUnverifiedEmailForLink: like every field here, an omitted value
+	// is written as its zero value, false, which is the strict default.
+	TrustUnverifiedEmailForLink bool `json:"trust_unverified_email_for_link"`
 }
 
 // PreflightRequest is the JSON body of POST /v1/admin/sso/preflight.
@@ -194,6 +200,8 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		AllowedEmailDomains: row.AllowedEmailDomains,
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
+
+		TrustUnverifiedEmailForLink: row.TrustUnverifiedEmailForLink,
 	}
 	httpresp.WriteJSON(w, http.StatusOK, resp)
 }
@@ -277,6 +285,8 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 			ClientSecretEnc:     secretBytes,
 			RedirectUrl:         req.RedirectURL,
 			AllowedEmailDomains: domains,
+
+			TrustUnverifiedEmailForLink: req.TrustUnverifiedEmailForLink,
 		})
 		row = got
 		return qErr
@@ -295,6 +305,8 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		AllowedEmailDomains: row.AllowedEmailDomains,
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
+
+		TrustUnverifiedEmailForLink: row.TrustUnverifiedEmailForLink,
 	}
 	httpresp.WriteJSON(w, http.StatusOK, resp)
 }

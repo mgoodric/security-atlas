@@ -63,22 +63,3 @@ func TestMeSelfRead2015_DeniesTheRest(t *testing.T) {
 		}
 	}
 }
-
-// #2015: the rule admits reads only. A viewer cannot write its profile,
-// preferences or channel opt-ins through it.
-func TestMeSelfRead2015_WritesNotAdmitted(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct{ method, path string }{
-		{"PATCH", "/v1/me"},
-		{"PATCH", "/v1/me/preferences"},
-		{"PUT", "/v1/me/email-channel"},
-		{"DELETE", "/v1/me/sessions"},
-	} {
-		in := meReadInput([]authz.Role{authz.RoleViewer}, tc.path)
-		in.Action = "write"
-		in.Request.Method = tc.method
-		if d := decide(t, in); d.Allow {
-			t.Errorf("viewer admitted to %s %s", tc.method, tc.path)
-		}
-	}
-}

@@ -148,6 +148,13 @@ type controlWithStateWire struct {
 	SCFAnchorID *string           `json:"scf_anchor_id"`
 	State       *controlStateWire `json:"state"`
 	Frameworks  []string          `json:"frameworks"`
+	// AnchorFit is exact|partial|none; AnchorFitNote explains a non-exact
+	// fit and is null for an exact one (issue #1736).
+	AnchorFit     string  `json:"anchor_fit"`
+	AnchorFitNote *string `json:"anchor_fit_note"`
+	// Demo is true when the in-place demo seed added this control to the
+	// organisation (#2043), so the page can badge it. Omitted otherwise.
+	Demo bool `json:"demo,omitempty"`
 }
 
 type listWithStateResp struct {
@@ -167,8 +174,22 @@ func (h *ListHandler) listWithState(w http.ResponseWriter, r *http.Request) {
 		}
 		scopeCell = pgtype.UUID{Bytes: id, Valid: true}
 	}
+	anchorFit := r.URL.Query().Get("anchor_fit")
+	if !validAnchorFitFilter(anchorFit) {
+		httpresp.WriteError(w, http.StatusBadRequest, "anchor_fit must be one of exact|partial|none")
+		return
+	}
 
-	rows, total, err := h.store.ListWithState(r.Context(), limit, offset, scopeCell)
+	rows, total, err := h.store.ListWithState(r.Context(), limit, offset, scopeCell, anchorFit)
+	if err != nil {
+		httperr.WriteInternal(w, r, "list controls with state", err)
+		return
+	}
+	ids := make([]uuid.UUID, len(rows))
+	for i, row := range rows {
+		ids[i] = uuid.UUID(row.ID.Bytes)
+	}
+	demo, err := h.store.DemoControls(r.Context(), ids)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list controls with state", err)
 		return
@@ -176,6 +197,7 @@ func (h *ListHandler) listWithState(w http.ResponseWriter, r *http.Request) {
 	out := make([]controlWithStateWire, len(rows))
 	for i, row := range rows {
 		out[i] = controlWithStateWireFrom(row)
+		out[i].Demo = demo.Has(ids[i])
 	}
 	httpresp.WriteJSON(w, http.StatusOK, listWithStateResp{Controls: out, Count: len(out), Total: total})
 }
@@ -194,7 +216,9 @@ func controlWithStateWireFrom(row dbx.ListActiveControlsWithStateRow) controlWit
 			LifecycleState: string(row.LifecycleState),
 			BundleID:       row.BundleID,
 		},
-		Frameworks: []string{},
+		Frameworks:    []string{},
+		AnchorFit:     row.AnchorFit,
+		AnchorFitNote: row.AnchorFitNote,
 	}
 	if row.ScfAnchorID.Valid {
 		id := uuid.UUID(row.ScfAnchorID.Bytes).String()
@@ -218,6 +242,16 @@ func controlWithStateWireFrom(row dbx.ListActiveControlsWithStateRow) controlWit
 		out.State = cell
 	}
 	return out
+}
+
+// validAnchorFitFilter reports whether `?anchor_fit=` is absent (no
+// filter) or one of the three fit values.
+func validAnchorFitFilter(v string) bool {
+	switch v {
+	case "", control.AnchorFitExact, control.AnchorFitPartial, control.AnchorFitNone:
+		return true
+	}
+	return false
 }
 
 // includesState reports whether `?include=` names `state`; it accepts the
