@@ -344,10 +344,11 @@ func New(cfg Config) *Server {
 		),
 	)
 	evidencev1.RegisterEvidenceIngestServiceServer(grpcServer, evidence.New(cfg.IngestService, reg, idem))
-	adminv1.RegisterAdminCredentialsServiceServer(grpcServer, admin.New(cred))
+	adminSvc := admin.New(cred)
+	adminv1.RegisterAdminCredentialsServiceServer(grpcServer, adminSvc)
 	connectorsv1.RegisterConnectorRegistryServiceServer(grpcServer, connectors.New(connReg))
 
-	return &Server{
+	srv := &Server{
 		GRPC:              grpcServer,
 		credStore:         cred,
 		registry:          reg,
@@ -359,6 +360,11 @@ func New(cfg Config) *Server {
 		evidencePublisher: cfg.EvidencePublisher,
 		versionFieldsFn:   cfg.VersionFieldsFn,
 	}
+	// #2121: the ResetBootstrap RPC runs the reset-bootstrap endpoint's
+	// code; it reads platformResetter and bootstrapTokenPath at call time,
+	// so the Attach calls cmd/atlas makes after New still take effect.
+	adminSvc.SetBootstrapResetter(grpcBootstrapResetter{s: srv})
+	return srv
 }
 
 // AttachEvidencePublisher wires the slice-015 substrate after Server

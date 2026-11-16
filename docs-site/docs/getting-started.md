@@ -91,10 +91,7 @@ docker compose -f deploy/docker/docker-compose.yml logs --no-log-prefix atlas-bo
 
 Open <http://localhost:3000> and sign in with `ATLAS_DEFAULT_USER_EMAIL`
 and `ATLAS_DEFAULT_USER_PASSWORD` from your `.env`. If the first sign-in
-fails, see [First-time login](troubleshooting/first-login.md). Its
-`credentials issue --reset-bootstrap` recovery currently answers 401
-([#2121](https://github.com/mgoodric/security-atlas/issues/2121)); the
-page's other recovery steps still apply.
+fails, see [First-time login](troubleshooting/first-login.md).
 
 Three kinds of credential reach the platform, and each later step needs
 a particular one:
