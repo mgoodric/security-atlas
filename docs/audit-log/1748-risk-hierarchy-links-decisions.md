@@ -128,3 +128,69 @@ The column is appended after `acceptance_status` so existing column positions
 hold (the #1746 precedent), semicolon-separated, empty when there are none. It
 is filled from one tenant-wide query over `risk_aggregations`, not a query per
 row.
+
+## Follow-ups from the #1991 delta review (#2004)
+
+- **`detection_tier_actual`: `manual_review`.** The delta review of #1991
+  found the deadlock window below by reading the lock order. No test or
+  production failure surfaced it.
+- **`detection_tier_target`: `integration`.** A test that holds the hierarchy
+  lock and checks which paths wait on it pins the order. Added in
+  `internal/risk/aggrule/hierarchy_lock_order_integration_test.go`.
+
+### D11: a deadlock on a link or a risk delete is retried, three attempts
+
+D9 holds only when a risk write takes the hierarchy lock before its row
+lock. The `BeforeRiskWrite` hook (`LockOnRiskWrite`) takes it only when an
+active rule matches the write's themes. Two cases leave a write taking it
+later, inside `Evaluate`, after `DELETE` holds the row:
+
+1. A rule for one of the themes is activated between `LockRules` and
+   `Evaluate`.
+2. `checkRuleLocks` lets the write through on its last attempt after the
+   themes changed again, so the evaluated themes are not the locked ones.
+
+A concurrent link then holds the hierarchy lock and waits on the row (the
+composite FK takes `FOR KEY SHARE`), while the write holds the row and waits
+on the hierarchy lock. Postgres aborts one side with 40P01.
+
+`risk.Store.LinkChildren` and `risk.Store.Delete` now run through
+`retryOnDeadlock` (`internal/risk/deadlock.go`). It re-runs the whole
+transaction up to three attempts in all when the error is 40P01, and stops
+early on any other error or a done context. Each attempt opens and commits
+its own transaction, and every write of both paths is inside it: the link
+rows, the delete, and the rule re-evaluation the after-hook runs. An aborted
+attempt leaves nothing behind, so the retry never repeats a side effect. The
+winner holds its locks by the time the loser retries, so the retry waits
+behind it rather than deadlocking again. We chose a retry over a 409 because
+the conflict is an artefact of lock timing, not of the caller's request, and
+the caller cannot do anything with a 409 except send the request again.
+
+Not covered: the `link_child_risks` MCP applier runs `LinkChildrenTx` inside
+the write-proposal store's confirm transaction, which this package does not
+own. A deadlock there rolls back the confirm and leaves the proposal pending,
+so the operator confirms again. Unlinking takes no hierarchy lock (D9) and
+cannot join the cycle.
+
+Every path that takes `risk_hierarchy:<tenant>`, and when:
+
+| Path                                                                                      | Takes it                                                                     |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `risk.LinkChildrenTx` (`POST /v1/risks/{id}/children`, `link_child_risks` applier)        | always, before reading the parent                                            |
+| `aggrule.Engine.LockRules` (the `LockOnRiskWrite` hook on every risk write)               | only when an active rule targets one of the themes, before any meta-risk key |
+| `aggrule.Engine.Evaluate` (the `EvaluateOnRiskWrite` hook, evaluate-now, rule activation) | only when a rule is selected, before any meta-risk key                       |
+
+`TestHierarchyLock_PathsTakeItFirstAndOnlyWhenARuleMatches_2004` covers each
+row: with the lock held, a matching path waits and holds no advisory lock
+while it waits (so no meta-risk key was taken first), and a path with no
+matching rule finishes without waiting. Moving `lockHierarchy` after the key
+loop in `LockRules` fails it ("holds 1 advisory locks while waiting on the
+hierarchy lock, want 0").
+
+### D12: the link cap counts distinct children only
+
+The handler used to refuse more than `MaxChildrenPerLink` ids before
+removing duplicates, while `LinkChildrenTx` counts after. A request of 101
+copies of one id was a 400 from the API and fine through the MCP applier.
+The handler's check is gone. `LinkChildrenTx` is the single cap, and its
+`ErrTooManyChildren` already renders as a 400 through `writeLinkError`.

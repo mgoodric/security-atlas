@@ -452,3 +452,23 @@ func TestChildren_TooManyChildrenIs400(t *testing.T) {
 		t.Fatalf("status %d, want 400: %v", resp.StatusCode, body)
 	}
 }
+
+// The cap counts distinct children, as LinkChildrenTx does (#2004): a
+// request over the cap only because it repeats an id is not refused for
+// size.
+func TestChildren_RepeatedIDsCountOnceTowardCap(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshChildrenTenant(t, admin)
+	env := testServer(t, app, tenant)
+	org := seedLeveledRisk(t, admin, tenant, "org", "org risk", 3, 3)
+	team := seedLeveledRisk(t, admin, tenant, "team", "team risk", 2, 2)
+
+	ids := make([]uuid.UUID, risk.MaxChildrenPerLink+1)
+	for i := range ids {
+		ids[i] = team
+	}
+	if resp, body := linkChildren(t, env, org, ids...); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", resp.StatusCode, body)
+	}
+}
