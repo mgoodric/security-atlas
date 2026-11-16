@@ -80,6 +80,26 @@ func ValidateTreatment(in TreatmentInput) error {
 	return nil
 }
 
+// ValidateCreateAcceptance enforces what a create may say about an
+// acceptance (#2371). A risk is accepted only through propose then approve,
+// where the approval rule (internal/approval) checks who signs off. So a
+// create may propose an acceptance but never approve one, and may not name
+// an accepter or an acceptance expiry: both are recorded by the approval.
+// Every create path calls it: POST /v1/risks (Store.Create) and the MCP
+// create_risk applier.
+func ValidateCreateAcceptance(status dbx.RiskAcceptanceStatus, accepter string, acceptedUntilPresent bool) error {
+	if status == dbx.RiskAcceptanceStatusApproved {
+		return wrapTreatment("a risk cannot be created with an approved acceptance; create it with acceptance_status=proposed, then approve the acceptance")
+	}
+	if accepter != "" {
+		return wrapTreatment("accepter cannot be set at create; it is recorded when the acceptance is approved")
+	}
+	if acceptedUntilPresent {
+		return wrapTreatment("accepted_until cannot be set at create; it is recorded when the acceptance is approved")
+	}
+	return nil
+}
+
 func wrapTreatment(msg string) error {
 	return &treatmentErr{msg: msg}
 }

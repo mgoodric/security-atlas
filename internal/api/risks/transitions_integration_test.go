@@ -285,6 +285,76 @@ func TestTransition_ProposerApprovalRefusedUnlessSelfApprovalOn(t *testing.T) {
 	}
 }
 
+// TestTransition_CreateRecordsProposer (#2371): a create may not approve an
+// acceptance; one created proposed records its creator as the proposer, so
+// the creator cannot approve it and a second person can.
+func TestTransition_CreateRecordsProposer(t *testing.T) {
+	env := newTransitionEnv(t)
+	create := func(status string) (int, map[string]any) {
+		return env.do(t, http.MethodPost, "/v1/risks", env.ownerJWT, map[string]any{
+			"title":             "accepted at create",
+			"category":          "operational",
+			"inherent_score":    map[string]int{"likelihood": 3, "impact": 4},
+			"treatment":         "accept",
+			"acceptance_status": status,
+		})
+	}
+	if code, body := create("approved"); code != http.StatusBadRequest {
+		t.Fatalf("create approved: status %d, want 400: %v", code, body)
+	}
+	code, body := create("proposed")
+	if code != http.StatusCreated {
+		t.Fatalf("create proposed: status %d: %v", code, body)
+	}
+	id := riskField(t, body, "id").(string)
+	if acc, _ := riskField(t, body, "acceptance").(map[string]any); acc["proposed_by"] != env.owner.String() {
+		t.Fatalf("proposed_by after create = %v; want the creator %s", acc, env.owner)
+	}
+
+	until := map[string]any{"accepted_until": future(60)}
+	env.step(t, id, "acceptance/approve", env.ownerJWT, until, http.StatusForbidden)
+	body = env.step(t, id, "acceptance/approve", env.apprJWT, until, http.StatusOK)
+	if riskField(t, body, "acceptance_status") != "approved" || riskField(t, body, "accepter") != env.approver.String() {
+		t.Fatalf("after second-person approval: %v", body["risk"])
+	}
+}
+
+// TestTransition_UnknownProposerRefused (#2371): an acceptance with no
+// proposer a person can be compared with (none recorded, as on rows
+// proposed before #2105, or a pre-#1807 session id) cannot be approved by
+// anyone, its creator included: 409, nothing written. Rejecting it and
+// proposing again records a proposer and approval works.
+func TestTransition_UnknownProposerRefused(t *testing.T) {
+	for name, proposer := range map[string]string{
+		"empty":   "",
+		"session": "jwt:" + uuid.NewString(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newTransitionEnv(t)
+			id := env.newRisk(t)
+			env.step(t, id, "acceptance/propose", env.ownerJWT, proposal(), http.StatusOK)
+			if _, err := env.admin.Exec(context.Background(),
+				`UPDATE risks SET acceptance_proposed_by = $2 WHERE id = $1`, id, proposer); err != nil {
+				t.Fatalf("clear proposer: %v", err)
+			}
+			setAllowSelfApproval(t, env, true)
+
+			until := map[string]any{"accepted_until": future(60)}
+			for _, bearer := range []string{env.ownerJWT, env.apprJWT} {
+				env.step(t, id, "acceptance/approve", bearer, until, http.StatusConflict)
+			}
+			_, got := env.do(t, http.MethodGet, "/v1/risks/"+id, env.ownerJWT, nil)
+			if riskField(t, got, "acceptance_status") != "proposed" {
+				t.Fatalf("refused approval changed the risk: %v", got["risk"])
+			}
+
+			env.step(t, id, "acceptance/reject", env.apprJWT, map[string]any{}, http.StatusOK)
+			env.step(t, id, "acceptance/propose", env.ownerJWT, proposal(), http.StatusOK)
+			env.step(t, id, "acceptance/approve", env.apprJWT, until, http.StatusOK)
+		})
+	}
+}
+
 // TestTransition_MachineCredentialRefused: an API key bound to no person
 // never approves, with or without self-approval.
 func TestTransition_MachineCredentialRefused(t *testing.T) {
