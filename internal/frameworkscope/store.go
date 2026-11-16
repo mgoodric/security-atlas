@@ -336,7 +336,7 @@ func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope
 			if aerr != nil {
 				return dbx.FrameworkScope{}, aerr
 			}
-			if self, err = checkApprover(current, req, allowSelf); err != nil {
+			if self, err = CheckApprover(current, req, allowSelf); err != nil {
 				return dbx.FrameworkScope{}, err
 			}
 		}
@@ -364,10 +364,11 @@ func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope
 	})
 }
 
-// checkApprover applies the shared approval rule to a scope and maps its
+// CheckApprover applies the shared approval rule to a scope and maps its
 // errors onto this package's. A machine credential never approves,
-// whatever the setting.
-func checkApprover(row dbx.FrameworkScope, req ApproveRequest, allowSelf bool) (selfApproved bool, err error) {
+// whatever the setting. GET /v1/approvals (#2119) calls it per row, so it
+// lists exactly what Approve accepts.
+func CheckApprover(row dbx.FrameworkScope, req ApproveRequest, allowSelf bool) (selfApproved bool, err error) {
 	if req.ApproverUserID == "" {
 		return false, ErrApproverNotPerson
 	}

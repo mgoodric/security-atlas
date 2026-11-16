@@ -281,7 +281,7 @@ func ApproveAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 	if err != nil {
 		return Risk{}, err
 	}
-	self, err := checkAcceptanceApprover(current.Acceptance.ProposedBy, in.Approver, allowSelf)
+	self, err := CheckAcceptanceApprover(current.Acceptance.ProposedBy, in.Approver, allowSelf)
 	if err != nil {
 		return Risk{}, err
 	}
@@ -302,11 +302,13 @@ func ApproveAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 	return writeTreatment(ctx, q, tenantID, next, in.Approver.UserID, ActionAcceptanceApproved, before, after)
 }
 
-// checkAcceptanceApprover applies the shared approval rule to an
+// CheckAcceptanceApprover applies the shared approval rule to an
 // acceptance and maps its errors onto this package's. An acceptance with
 // no comparable proposer is refused rather than admitted: approval.Check
-// would let anyone approve it, its creator included (#2371).
-func checkAcceptanceApprover(proposer string, a approval.Approver, allowSelf bool) (selfApproved bool, err error) {
+// would let anyone approve it, its creator included (#2371). GET
+// /v1/approvals (#2119) calls it per row, so it lists exactly what
+// ApproveAcceptanceTx accepts.
+func CheckAcceptanceApprover(proposer string, a approval.Approver, allowSelf bool) (selfApproved bool, err error) {
 	if a.UserID == "" {
 		return false, ErrAcceptanceApproverNotPerson
 	}

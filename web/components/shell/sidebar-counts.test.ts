@@ -25,6 +25,7 @@ import { describe, expect, test } from "vitest";
 import type { Risk } from "@/lib/api/risks";
 
 import {
+  approvalsBadgeLabel,
   countHighSeverityRisks,
   highSeverityBadgeLabel,
   HIGH_SEVERITY_BADGE_MARKER,
@@ -122,5 +123,13 @@ describe("highSeverityBadgeLabel", () => {
     // numeral (which would read as part of the count).
     expect(HIGH_SEVERITY_BADGE_MARKER.length).toBeGreaterThan(0);
     expect(HIGH_SEVERITY_BADGE_MARKER).not.toMatch(/[0-9]/);
+  });
+});
+
+// #2119 — the Approvals badge says what the number counts.
+describe("approvalsBadgeLabel", () => {
+  test("names the count as waiting for the caller", () => {
+    expect(approvalsBadgeLabel(1)).toBe("1 waiting for your approval");
+    expect(approvalsBadgeLabel(4)).toBe("4 waiting for your approval");
   });
 });

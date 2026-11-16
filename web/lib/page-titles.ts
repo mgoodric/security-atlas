@@ -16,6 +16,7 @@
 
 export const PAGE_TITLES = {
   "/dashboard": "Dashboard",
+  "/approvals": "Approvals",
   "/calendar": "Calendar",
   "/dashboards/metrics": "Metrics",
   "/activity": "Activity",

@@ -196,6 +196,7 @@
     "internal/api/adminusers": 61,
     "internal/api/adminvendors": 75,
     "internal/api/aggregationrules": 59,
+    "internal/api/approvals": 42,
     "internal/api/authzmw": 69,
     "internal/api/board": 64,
     "internal/api/calendar": 79,

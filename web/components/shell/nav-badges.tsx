@@ -5,12 +5,15 @@
 // returns are client components either way.
 
 import {
+  ApprovalsCountBadge,
   ControlsCountBadge,
   RisksCountBadge,
 } from "@/components/shell/sidebar-counts";
 
 export function badgeForHref(href: string) {
   switch (href) {
+    case "/approvals":
+      return <ApprovalsCountBadge />;
     case "/controls":
       return <ControlsCountBadge />;
     case "/risks":

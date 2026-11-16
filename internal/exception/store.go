@@ -324,11 +324,13 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver approval.App
 	})
 }
 
-// checkApprover applies the shared approval rule to an exception and maps
+// CheckApprover applies the shared approval rule to an exception and maps
 // its errors onto this package's. A machine credential never approves,
 // whatever the setting. A requester recorded as a session id before #2101
 // is compared against the approving credential, as it always was.
-func checkApprover(requester string, a approval.Approver, allowSelf bool) (selfApproved bool, err error) {
+// GET /v1/approvals (#2119) calls it per row, so it lists exactly what
+// Approve accepts.
+func CheckApprover(requester string, a approval.Approver, allowSelf bool) (selfApproved bool, err error) {
 	if strings.HasPrefix(requester, legacySessionRequesterPrefix) {
 		if requester == a.CredentialID {
 			return false, ErrSegregationOfDuties
@@ -616,7 +618,7 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 					return aErr
 				}
 				var cErr error
-				if self, cErr = checkApprover(before.RequestedBy, *p.approver, allowSelf); cErr != nil {
+				if self, cErr = CheckApprover(before.RequestedBy, *p.approver, allowSelf); cErr != nil {
 					return cErr
 				}
 			}

@@ -577,9 +577,9 @@ func TestCheckApprover(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			row := dbx.Policy{SubmittedBy: tc.submittedBy}
-			self, got := checkApprover(row, tc.approver, tc.allowSelf)
+			self, got := CheckApprover(row, tc.approver, tc.allowSelf)
 			if !errors.Is(got, tc.want) {
-				t.Fatalf("checkApprover = %v, want %v", got, tc.want)
+				t.Fatalf("CheckApprover = %v, want %v", got, tc.want)
 			}
 			if self != tc.wantSelf {
 				t.Fatalf("selfApproved = %v, want %v", self, tc.wantSelf)
