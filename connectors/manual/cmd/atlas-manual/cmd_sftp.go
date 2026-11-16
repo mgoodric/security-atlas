@@ -73,7 +73,7 @@ func newSFTPCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.pathGlob, "path", "", "SFTP file path glob (e.g. /inbox/*.pdf) [required]")
 	cmd.Flags().StringVar(&f.keyFile, "key-file", "", "path to SSH private key file [required]")
 	cmd.Flags().StringVar(&f.knownHosts, "known-hosts", "", "path to known_hosts file [required]")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-04", "control id to attach to each record")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:GOV-05", "control id to attach to each record")
 	cmd.Flags().StringArrayVar(&f.scope, "scope", nil, "scope tag in key=value form (repeatable, at least one required)")
 	cmd.Flags().DurationVar(&f.dialTimeout, "dial-timeout", 15*time.Second, "SFTP dial timeout")
 	return cmd

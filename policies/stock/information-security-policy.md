@@ -5,8 +5,8 @@ owner_role: tenant_admin
 approver_role: security_lead
 scf_release: "2026.3"
 linked_control_ids:
-  - GOV-01
-  - GOV-04
+  - GOV-02
+  - GOV-05
   - RSK-01
 acknowledgment_required_roles:
   - employee

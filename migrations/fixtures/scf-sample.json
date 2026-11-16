@@ -202,59 +202,53 @@
     },
 
     {
-      "scf_id": "GOV-01",
-      "family": "GOV",
-      "title": "Information Security Governance",
-      "description": "Mechanisms exist to facilitate the implementation of cybersecurity governance."
-    },
-    {
       "scf_id": "GOV-02",
       "family": "GOV",
-      "title": "Publishing Security Documentation",
-      "description": "Mechanisms exist to publish security policies, standards, and procedures and make them available to the personnel responsible for implementing them."
-    },
-    {
-      "scf_id": "GOV-03",
-      "family": "GOV",
-      "title": "Periodic Review & Update of Security Documentation",
-      "description": "Mechanisms exist to review security policies, standards, and procedures at planned intervals and update them in response to environmental or operational change."
+      "title": "Security, Compliance & Resilience Program (SCRP)",
+      "description": "Mechanisms exist to facilitate the implementation of cybersecurity governance."
     },
     {
       "scf_id": "GOV-04",
       "family": "GOV",
-      "title": "Information Security Roles & Responsibilities",
+      "title": "Publishing Security, Compliance & Resilience Documentation",
+      "description": "Mechanisms exist to publish security policies, standards, and procedures and make them available to the personnel responsible for implementing them."
+    },
+    {
+      "scf_id": "GOV-04.1",
+      "family": "GOV",
+      "title": "Periodic Review & Update of Security, Compliance & Resilience Program",
+      "description": "Mechanisms exist to review security policies, standards, and procedures at planned intervals and update them in response to environmental or operational change."
+    },
+    {
+      "scf_id": "GOV-05",
+      "family": "GOV",
+      "title": "Assigned Security, Compliance & Resilience Responsibilities",
       "description": "Mechanisms exist to define security roles and responsibilities."
     },
 
     {
-      "scf_id": "HRS-01",
+      "scf_id": "HRS-02",
       "family": "HRS",
-      "title": "Human Resources Security",
+      "title": "Human Resources Security Management",
       "description": "Mechanisms exist to address human resources security."
     },
     {
-      "scf_id": "HRS-04",
+      "scf_id": "HRS-06.1",
       "family": "HRS",
-      "title": "Security Awareness Training",
-      "description": "Mechanisms exist to provide security awareness training."
+      "title": "Rules of Behavior",
+      "description": "Mechanisms exist to define acceptable and unacceptable rules of behavior for the use of technologies, including the manner of performance and the physical surroundings in which they are used."
     },
     {
-      "scf_id": "HRS-07",
+      "scf_id": "HRS-10",
       "family": "HRS",
       "title": "Personnel Sanctions",
       "description": "Mechanisms exist to apply a formal sanctions process to personnel who fail to comply with established security policies, standards, and procedures."
     },
     {
-      "scf_id": "HRS-09",
-      "family": "HRS",
-      "title": "Personnel Termination Process",
-      "description": "Mechanisms exist to govern personnel termination."
-    },
-    {
       "scf_id": "HRS-12",
       "family": "HRS",
-      "title": "Rules of Behavior (Acceptable Use)",
-      "description": "Mechanisms exist to define acceptable and unacceptable rules of behavior for the use of technologies, including the manner of performance and the physical surroundings in which they are used."
+      "title": "Personnel Termination",
+      "description": "Mechanisms exist to govern personnel termination."
     },
 
     {
@@ -376,6 +370,13 @@
       "family": "RSK",
       "title": "Business Impact Analysis (BIA)",
       "description": "Mechanisms exist to conduct a Business Impact Analysis to determine the relative criticality of applications, data, and business processes and the impact of their loss or unavailability."
+    },
+
+    {
+      "scf_id": "SAT-04",
+      "family": "SAT",
+      "title": "Security, Compliance & Resilience Awareness Training",
+      "description": "Mechanisms exist to provide security awareness training."
     },
 
     {

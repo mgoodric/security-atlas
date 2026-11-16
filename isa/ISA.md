@@ -184,7 +184,7 @@ automatable by wanting it to.
   - **What a duplicate is.** One control copied per framework onto the same
     SCF anchor, which is what C1 and ADR-0013 forbid. Distinct controls of one
     framework that share an anchor are not duplicates. The five SOC 2
-    controls on GOV-01 (`soc2_cc1_1_code_of_conduct`,
+    controls on GOV-02 (`soc2_cc1_1_code_of_conduct`,
     `soc2_cc1_2_board_oversight`, `soc2_cc2_1_information_quality`,
     `soc2_cc5_3_policies_procedures`, `soc2_pi1_1_processing_objectives`) are
     five controls. The falsifier's phrase "overlapping framework
@@ -198,8 +198,8 @@ automatable by wanting it to.
     `controls/<framework>/` directories.
   - **How the probe proves itself.** `isa/probes/no-duplicate-controls.sh`
     scans two fixtures on every run before the real catalog
-    (`isa/probes/testdata/no-duplicate-controls/`). `holds/` is the GOV-01
-    shape and must pass. `false/` adds an `iso27001` copy on GOV-01 and must
+    (`isa/probes/testdata/no-duplicate-controls/`). `holds/` is the GOV-02
+    shape and must pass. `false/` adds an `iso27001` copy on GOV-02 and must
     fail. If either answers wrong, the probe exits 3 rather than vouch for
     the catalog.
   - **What it cannot see.** A bundle a tenant uploads carries no framework,
@@ -280,7 +280,7 @@ place of the database check it described before.
 
 - ISC-2 holds on `main` today: the shipped catalog has one framework
   directory, `controls/soc2/`. The probe's self-test fixtures show it failing
-  on a cross-framework copy and passing on the GOV-01 shape. Ticking the
+  on a cross-framework copy and passing on the GOV-02 shape. Ticking the
   claim is left to review.
 - ISC-3 is false on `main` (#1699): the evaluation engine's as-of read
   (`ListEvidenceForControlAsOf`) bounds `observed_at` but never
