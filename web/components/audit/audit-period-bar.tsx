@@ -6,12 +6,8 @@
 // looking at is bounded to evidence with `observed_at <= frozen_at`.
 
 import { Badge } from "@/components/ui/badge";
+import { Timestamp } from "@/components/ui/timestamp";
 import type { AuditPeriod } from "@/lib/api/audit";
-
-function fmtDate(iso: string): string {
-  // period_start / period_end arrive as YYYY-MM-DD from slice 025.
-  return iso;
-}
 
 export function AuditPeriodBar({ period }: { period: AuditPeriod }) {
   const frozen = Boolean(period.frozen_at);
@@ -35,11 +31,13 @@ export function AuditPeriodBar({ period }: { period: AuditPeriod }) {
         )}
       </div>
       <span className="text-xs text-muted-foreground tabular-nums">
-        {fmtDate(period.period_start)} — {fmtDate(period.period_end)}
+        <Timestamp value={period.period_start} style="date" /> —{" "}
+        <Timestamp value={period.period_end} style="date" />
       </span>
       {frozen && period.frozen_at ? (
         <span className="text-xs text-muted-foreground">
-          evidence horizon: {period.frozen_at}
+          evidence horizon:{" "}
+          <Timestamp value={period.frozen_at} style="datetime" />
         </span>
       ) : (
         <span className="text-xs text-muted-foreground">

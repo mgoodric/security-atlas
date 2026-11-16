@@ -68,6 +68,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   fetchPoliciesList,
   type PoliciesListResponse,
@@ -198,13 +199,6 @@ function statusPillClass(status: string): string {
     default:
       return "bg-muted text-muted-foreground";
   }
-}
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  // Take YYYY-MM-DD prefix only (matches mockup mono-spaced "2026-01-15"
-  // shape). Avoids any locale drift from new Date().toLocaleDateString.
-  return iso.slice(0, 10);
 }
 
 function PoliciesPageInner() {
@@ -445,9 +439,11 @@ function PoliciesPageInner() {
       header: "Published",
       cell: (row) =>
         row.published_at ? (
-          <span className="font-mono text-xs text-muted-foreground">
-            {formatDate(row.published_at)}
-          </span>
+          <Timestamp
+            value={row.published_at}
+            style="date"
+            className="text-xs text-muted-foreground"
+          />
         ) : (
           <span className="text-xs text-muted-foreground italic">—</span>
         ),
@@ -474,12 +470,12 @@ function PoliciesPageInner() {
         const marker = reviewMarker(row.review_status);
         return (
           <span className="inline-flex items-center gap-2">
-            <span
-              className="font-mono text-xs text-muted-foreground"
-              data-testid="policies-row-next-review"
-            >
-              {formatDate(row.next_review_at)}
-            </span>
+            <Timestamp
+              value={row.next_review_at}
+              style="date"
+              className="text-xs text-muted-foreground"
+              testId="policies-row-next-review"
+            />
             {marker ? (
               <span
                 data-testid="policies-row-review-marker"
@@ -542,9 +538,10 @@ function PoliciesPageInner() {
       header: "Updated",
       align: "right",
       cell: (row) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {formatDate(row.updated_at)}
-        </span>
+        <Timestamp
+          value={row.updated_at}
+          className="text-xs text-muted-foreground"
+        />
       ),
     },
   ];
