@@ -317,7 +317,8 @@ func TestReconcile_TriggerRefusesUnverifyOutsideTheFunction(t *testing.T) {
 		})
 		// atlas_service_account holds no grant on action_plans, so it is
 		// refused before the trigger runs; either refusal holds the line.
-		if !isPgCode(err, "23514") && !(role != "" && isPgCode(err, "42501")) {
+		refused := isPgCode(err, "23514") || (role != "" && isPgCode(err, "42501"))
+		if !refused {
 			t.Errorf("role %q: verified -> completed with the marker set: %v, want check_violation", role, err)
 		}
 		err = env.appTx(t, role, func(ctx context.Context, tx pgx.Tx) error {
