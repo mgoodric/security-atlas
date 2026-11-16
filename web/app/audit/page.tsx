@@ -62,8 +62,8 @@ function NoPeriodState() {
           <AlertTitle>No audit period assigned</AlertTitle>
           <AlertDescription>
             Your account is signed in but is not assigned to any audit period.
-            The audit workspace opens once a GRC engineer grants you an auditor
-            assignment for a period. Until then there is nothing to test here.
+            The audit workspace opens once an admin assigns you to a period, on
+            that period&apos;s page. Until then there is nothing to test here.
           </AlertDescription>
         </Alert>
       </PageShell>

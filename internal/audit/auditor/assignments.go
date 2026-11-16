@@ -74,12 +74,13 @@ func (s *Store) Assign(ctx context.Context, userID string, periodID uuid.UUID, g
 		return fmt.Errorf("auditor: user_id must be non-empty")
 	}
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		return q.AssignAuditor(ctx, dbx.AssignAuditorParams{
+		_, err := q.AssignAuditor(ctx, dbx.AssignAuditorParams{
 			TenantID:      pgUUID(tenantID),
 			UserID:        userID,
 			AuditPeriodID: pgUUID(periodID),
 			GrantedBy:     grantedBy,
 		})
+		return err
 	})
 }
 

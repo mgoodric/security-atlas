@@ -9,6 +9,7 @@ import (
 	oscalexportapi "github.com/mgoodric/security-atlas/internal/api/oscalexport"
 	walkthroughsapi "github.com/mgoodric/security-atlas/internal/api/walkthroughs"
 	"github.com/mgoodric/security-atlas/internal/audit"
+	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/evidencesummary"
@@ -45,6 +46,13 @@ func (s *Server) registerAudit(root *chi.Mux) {
 	root.Post("/v1/audit-periods/{id}/freeze", periodsH.Freeze)
 	root.Get("/v1/audit-periods/{id}/control-state", periodsH.ControlState)
 	root.Post("/v1/audit-periods/{id}/populations/{popID}", periodsH.AttachPopulation)
+	// #2118: an admin assigns and removes a period's auditors over the
+	// slice-025 auditor_assignments store; each change is logged in the
+	// same transaction.
+	periodAuditorsH := auditperiodsapi.NewAuditors(auditor.NewStore(s.dbPool))
+	root.Get("/v1/audit-periods/{id}/auditors", periodAuditorsH.List)
+	root.Post("/v1/audit-periods/{id}/auditors", periodAuditorsH.Assign)
+	root.Delete("/v1/audit-periods/{id}/auditors/{userID}", periodAuditorsH.Remove)
 	// Slice 749: period-scoped AI evidence-summary — the audit-workspace sibling
 	// of slice 502's live /v1/controls/{id}/evidence-summary. For one control
 	// WITHIN one FROZEN audit period it returns the DETERMINISTIC bounded
