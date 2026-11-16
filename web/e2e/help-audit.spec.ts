@@ -71,7 +71,8 @@ const ROUTES = [
     route: "/oscal/component-definitions",
     id: "vendor-claims",
     title: "Vendor claims",
-    body: "Each of those statements is a vendor claim",
+    // One source line: the renderer joins a paragraph's lines with <br/>.
+    body: "statements is a vendor claim",
     term: "vendor-claim",
   },
 ] as const;
