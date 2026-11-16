@@ -148,6 +148,8 @@ sql:
       - "migrations/sql/20261214000000_framework_posture_targets.sql"
       # #2026: framework_requirements.points_of_focus must be a JSON array.
       - "migrations/sql/20261215000000_framework_requirement_points_of_focus_array.sql"
+      # #2446: policy draft editors, and edit / body-hash audit rows.
+      - "migrations/sql/20261222000000_policy_draft_editors.sql"
     queries: "internal/db/queries"
     gen:
       go:

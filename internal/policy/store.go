@@ -35,6 +35,8 @@ package policy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -87,6 +89,13 @@ var (
 	// submitted the policy for review (#1807, segregation of duties) and
 	// the organisation does not allow self-approval (#2101). HTTP 403.
 	ErrSelfApproval = errors.New("policy: the submitter cannot approve their own policy; a second approver must approve it")
+	// ErrEditorApproval is returned when the approver created or edited
+	// the draft and the organisation does not allow self-approval (#2446).
+	// Writing the text counts as authoring it, whoever submitted it.
+	ErrEditorApproval = errors.New("policy: an author of this draft cannot approve it; a person who neither wrote nor edited it must approve it")
+	// ErrUnknownLinkedControl is returned when linked_control_ids names a
+	// control that does not exist in the tenant (#2446).
+	ErrUnknownLinkedControl = errors.New("policy: linked_control_ids names a control that does not exist in this tenant")
 	// ErrApproverNotPerson is returned when the approving credential
 	// belongs to no user: an unbound API key, an OAuth client or the
 	// bootstrap admin. Only people approve policies (#1807). HTTP 403.
@@ -211,6 +220,9 @@ type CreateInput struct {
 	AcknowledgmentRequiredRoles []string
 	SourceAttribution           string
 	CreatedBy                   string
+	// Editor is the creator's principal (credstore.PrincipalOf), the
+	// first entry of the draft's editor set (#2446). Empty records none.
+	Editor string
 	// PredecessorID, when set, makes this draft the next version of a
 	// published policy. The predecessor must be published and must not
 	// already have a successor.
@@ -234,8 +246,15 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Policy, error) {
 	if ackRoles == nil {
 		ackRoles = []string{}
 	}
+	editors := []string{}
+	if in.Editor != "" {
+		editors = append(editors, in.Editor)
+	}
 	var out Policy
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		if err := checkLinkedControls(ctx, q, tenantID, links); err != nil {
+			return err
+		}
 		predecessor := pgtype.UUID{} // NULL — a first version has no predecessor
 		if in.PredecessorID != nil {
 			if err := checkPredecessor(ctx, q, tenantID, *in.PredecessorID); err != nil {
@@ -257,6 +276,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Policy, error) {
 			AcknowledgmentRequiredRoles: ackRoles,
 			SourceAttribution:           source,
 			CreatedBy:                   in.CreatedBy,
+			DraftEditors:                editors,
 		})
 		if err != nil {
 			return mapCreateError(err)
@@ -265,6 +285,37 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Policy, error) {
 		return nil
 	})
 	return out, err
+}
+
+// checkLinkedControls verifies that every id in ids is a control in the
+// tenant (#2446), so a policy cannot satisfy the orphan-publish rule with a
+// made-up or another tenant's id. Duplicates count once.
+func checkLinkedControls(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	distinct := make(map[uuid.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		distinct[id] = struct{}{}
+	}
+	n, err := q.CountTenantControls(ctx, dbx.CountTenantControlsParams{
+		TenantID: pgUUID(tenantID),
+		Ids:      uuidsToPg(ids),
+	})
+	if err != nil {
+		return fmt.Errorf("check linked controls: %w", err)
+	}
+	if n != int64(len(distinct)) {
+		return ErrUnknownLinkedControl
+	}
+	return nil
+}
+
+// bodySHA256 is the hex sha256 of a policy body, recorded in
+// policy_audit_log in place of the body itself (#2446).
+func bodySHA256(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
 }
 
 // checkPredecessor verifies that pred is a published policy in the tenant.
@@ -381,12 +432,32 @@ func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string)
 			if prior.Status == StateUnderReview {
 				action = auditActionResubmitted
 			}
-			if err := insertTransitionAudit(ctx, q, tenantID, row, action, actor, prior.Status); err != nil {
+			if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+				TenantID:      pgUUID(tenantID),
+				PolicyID:      row.ID,
+				Action:        action,
+				Actor:         actor,
+				PolicyTitle:   &row.Title,
+				PolicyVersion: &row.Version,
+				PreviousState: &prior.Status,
+				NewState:      &row.Status,
+				BodySha256:    stringPtr(bodySHA256(row.BodyMd)),
+				Editors:       editorsOrEmpty(row.DraftEditors),
+			}); err != nil {
 				return dbx.Policy{}, fmt.Errorf("submit: audit log: %w", err)
 			}
 			return row, nil
 		},
 	})
+}
+
+// editorsOrEmpty returns the editor set as a non-nil slice, so a submit
+// row with no recorded editor carries '{}' rather than NULL.
+func editorsOrEmpty(e []string) []string {
+	if e == nil {
+		return []string{}
+	}
+	return e
 }
 
 // insertTransitionAudit appends the policy_audit_log row for a status
@@ -481,7 +552,30 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 // caught; any other approver is refused with ErrSubmitterUnknown, because
 // the key's owner could be approving through a JWT or another key (#2200).
 // The policy is re-submitted to record the person.
+//
+// Every principal in the draft's editor set (its creator and everyone who
+// edited it, #2446) is an author too: an editor approving is refused with
+// ErrEditorApproval unless the organisation allows self-approval, and is
+// then self-approved, whoever submitted the policy.
 func checkApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
+	self, err := checkSubmitter(p, a, allowSelf)
+	if err != nil {
+		return false, err
+	}
+	for _, editor := range p.DraftEditors {
+		if editor == "" || (editor != a.UserID && editor != a.CredentialID) {
+			continue
+		}
+		if !allowSelf {
+			return false, ErrEditorApproval
+		}
+		self = true
+	}
+	return self, nil
+}
+
+// checkSubmitter is the submitter half of checkApprover.
+func checkSubmitter(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
 	submitter := ""
 	if p.SubmittedBy != nil {
 		submitter = *p.SubmittedBy
@@ -743,14 +837,27 @@ type UpdateDraftInput struct {
 	ApproverRole                string
 	LinkedControlIDs            []uuid.UUID
 	AcknowledgmentRequiredRoles []string
+	// Editor is the editing caller's principal (credstore.PrincipalOf).
+	// Required: it is recorded in the editor set and the audit log.
+	Editor string
 }
+
+// auditActionDraftEdited is the policy_audit_log action written for each
+// draft edit (#2446).
+const auditActionDraftEdited = "draft_edited"
 
 // UpdateDraft rewrites a draft's editable fields in place. ErrNotFound when
 // the id does not resolve; ErrWrongState once the policy has left draft, so
-// a published policy changes only through a new version.
+// a published policy changes only through a new version. The editor joins
+// the draft's editor set, which the approval rule treats as authors, and
+// a draft_edited policy_audit_log row naming them and the body's sha256 is
+// appended in the same transaction (#2446).
 func (s *Store) UpdateDraft(ctx context.Context, id uuid.UUID, in UpdateDraftInput) (Policy, error) {
 	if err := validateUpdateDraft(in); err != nil {
 		return Policy{}, err
+	}
+	if in.Editor == "" {
+		return Policy{}, ErrCreatedByRequired
 	}
 	links := in.LinkedControlIDs
 	if links == nil {
@@ -764,7 +871,10 @@ func (s *Store) UpdateDraft(ctx context.Context, id uuid.UUID, in UpdateDraftInp
 		expectedPrior: StateDraft,
 		newState:      StateDraft,
 		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Policy, error) {
-			return q.UpdateDraftPolicy(ctx, dbx.UpdateDraftPolicyParams{
+			if err := checkLinkedControls(ctx, q, tenantID, links); err != nil {
+				return dbx.Policy{}, err
+			}
+			row, err := q.UpdateDraftPolicy(ctx, dbx.UpdateDraftPolicyParams{
 				TenantID:                    pgUUID(tenantID),
 				ID:                          pgUUID(id),
 				Title:                       in.Title,
@@ -773,7 +883,23 @@ func (s *Store) UpdateDraft(ctx context.Context, id uuid.UUID, in UpdateDraftInp
 				ApproverRole:                in.ApproverRole,
 				LinkedControlIds:            uuidsToPg(links),
 				AcknowledgmentRequiredRoles: ackRoles,
+				Editor:                      in.Editor,
 			})
+			if err != nil {
+				return row, err
+			}
+			if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+				TenantID:      pgUUID(tenantID),
+				PolicyID:      row.ID,
+				Action:        auditActionDraftEdited,
+				Actor:         in.Editor,
+				PolicyTitle:   &row.Title,
+				PolicyVersion: &row.Version,
+				BodySha256:    stringPtr(bodySHA256(row.BodyMd)),
+			}); err != nil {
+				return dbx.Policy{}, fmt.Errorf("update draft: audit log: %w", err)
+			}
+			return row, nil
 		},
 	})
 }

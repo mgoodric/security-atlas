@@ -192,8 +192,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodePolicyBody(w, r, &req) {
 		return
 	}
 	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
@@ -224,6 +223,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		AcknowledgmentRequiredRoles: ackRoles,
 		SourceAttribution:           req.SourceAttribution,
 		CreatedBy:                   cred.ID,
+		Editor:                      actorOf(cred),
 		PredecessorID:               predecessor,
 	})
 	if err != nil {
@@ -741,11 +741,13 @@ type updateDraftReq struct {
 }
 
 // UpdateDraft handles PATCH /v1/policies/{id} (#2116). It edits a policy
-// only while it is a draft, with the same role as create and discard: any
-// credential in the tenant. A policy that has left draft answers 409; a
-// published policy changes through a new version (predecessor_id).
+// only while it is a draft, under the same `write` on `policies` as create
+// and discard, which OPA grants to admin and grc_engineer. A policy that
+// has left draft answers 409; a published policy changes through a new
+// version (predecessor_id). The caller is recorded as an editor of the
+// draft, and the approval rule counts every editor as an author (#2446).
 func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
-	ctx, _, ok := h.tenantCredContext(r)
+	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
@@ -756,8 +758,7 @@ func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateDraftReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+	if !decodePolicyBody(w, r, &req) {
 		return
 	}
 	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
@@ -772,13 +773,17 @@ func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
 		ApproverRole:                req.ApproverRole,
 		LinkedControlIDs:            linkedIDs,
 		AcknowledgmentRequiredRoles: req.AcknowledgmentRequiredRoles,
+		Editor:                      actorOf(cred),
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, policy.ErrUnknownLinkedControl):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		case errors.Is(err, policy.ErrTitleRequired),
 			errors.Is(err, policy.ErrBodyRequired),
 			errors.Is(err, policy.ErrOwnerRoleRequired),
-			errors.Is(err, policy.ErrApproverRoleRequired):
+			errors.Is(err, policy.ErrApproverRoleRequired),
+			errors.Is(err, policy.ErrCreatedByRequired):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, policy.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
@@ -856,12 +861,36 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 		errors.Is(err, policy.ErrPredecessorNotFound),
 		errors.Is(err, policy.ErrInvalidSourceAttribution):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, policy.ErrUnknownLinkedControl):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, policy.ErrPredecessorNotPublished),
 		errors.Is(err, policy.ErrPredecessorTaken):
 		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	default:
 		httperr.WriteInternal(w, r, "create policy", err)
 	}
+}
+
+// maxPolicyBodyBytes caps a policy create or draft-edit request body
+// (#2446). body_md is the bulk of it; 1 MiB is far above any real policy
+// document and keeps one request from holding unbounded memory.
+const maxPolicyBodyBytes = 1 << 20
+
+// decodePolicyBody decodes a create or draft-edit request into dst under
+// maxPolicyBodyBytes. It writes 413 for an oversized body and 400 for any
+// other decode failure, and reports whether the caller should continue.
+func decodePolicyBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxPolicyBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, "request body exceeds 1 MiB")
+			return false
+		}
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return false
+	}
+	return true
 }
 
 // actorOf names the person behind a credential: the bare users(id) uuid,
@@ -881,6 +910,7 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrSelfApproval),
+		errors.Is(err, policy.ErrEditorApproval),
 		errors.Is(err, policy.ErrApproverNotPerson):
 		httpresp.WriteError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, policy.ErrSubmitterUnknown):
