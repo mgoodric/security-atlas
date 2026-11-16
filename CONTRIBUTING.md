@@ -121,6 +121,26 @@ Scope is optional but recommended (`feat(evidence):`, `fix(ucf):`, `docs(canvas)
 
 Dependabot opens PRs every Monday with the `deps:` prefix (`deps(deps):`, `deps(deps-dev):`, `deps(actions):`, etc.) across all ecosystems (Go modules, npm, pip, Docker, GitHub Actions). Release-please surfaces them under the **Dependencies** section in `CHANGELOG.md`. Patch and minor bumps are reviewed individually; majors are investigated for breaking-change exposure before merge.
 
+### Changelog fragments
+
+Do not edit the top of `CHANGELOG.md`. A PR with a user-visible change adds
+one file, `changelog.d/<pr-or-issue>.<type>.md` (for example
+`changelog.d/2357.changed.md`), holding one Markdown bullet. `<type>` is one
+of `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`,
+`performance`, `documentation` or `quality`. Each PR touches only its own
+file, so parallel PRs no longer conflict on the changelog (#2357).
+
+The `changelog-fragment` CI check fails a PR that changes code and adds no
+fragment. A PR with nothing user-visible (tests, CI, refactors) takes the
+`no-changelog` label; re-run the failed job after adding it. Docs-only,
+Dependabot and release-please PRs are exempt without a label.
+
+`bash scripts/changelog.sh render` previews the assembled sections. At
+release time, on the release-please PR branch, `bash scripts/changelog.sh
+assemble <version>` writes the fragments under that release's heading and
+deletes them; commit the result to the release PR. Details:
+[`changelog.d/README.md`](changelog.d/README.md).
+
 ### Phantom dependencies
 
 `scripts/audit-deps.sh` classifies every direct dependency across the four manifests (`web/package.json`, `go.mod`, `oscal-bridge/pyproject.toml`, `docs-site/requirements.txt`) as USED, USED-VIA-CONFIG, USED-VIA-SCRIPT, or PHANTOM. The CI workflow re-runs the audit on every PR that touches one of those manifests and posts a comment listing any PHANTOM candidates — informational only, never blocks the merge (slice 120). If a PR you authored draws a phantom-dependency comment, drop the unused dep in the same PR (or document in the PR description why the comment is a false positive — known KEEP cases like Next.js's runtime peer `react-dom` are recorded in [`docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md`](./docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md)). The script is also runnable locally (`bash scripts/audit-deps.sh` from the repo root) — output is TSV, scoped runs via `--ecosystem <npm|go|pip-bridge|pip-docs>`.
