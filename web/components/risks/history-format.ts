@@ -23,6 +23,16 @@ const FIELD_LABELS: Record<string, string> = {
   category: "Category",
   level: "Level",
   org_unit_id: "Org unit",
+  // #2105: treatment and acceptance transitions.
+  treatment: "Treatment",
+  acceptance_status: "Acceptance",
+  justification: "Justification",
+  proposed_by: "Proposed by",
+  proposed_until: "Proposed expiry",
+  accepted_until: "Accepted until",
+  accepter: "Approved by",
+  self_approved: "Self-approved",
+  reason: "Reason",
 };
 
 // Keys an entry carries that are not a change a reader needs to see.
@@ -36,6 +46,16 @@ export function historyActionLabel(action: string): string {
       return "Category changed";
     case "placement_changed":
       return "Moved";
+    case "treatment_changed":
+      return "Treatment changed";
+    case "acceptance_proposed":
+      return "Acceptance proposed";
+    case "acceptance_approved":
+      return "Acceptance approved";
+    case "acceptance_rejected":
+      return "Acceptance rejected";
+    case "acceptance_revoked":
+      return "Acceptance revoked";
     default:
       return action;
   }
@@ -54,6 +74,14 @@ export function formatHistoryValue(field: string, v: unknown): string {
   if (field === "level" && typeof v === "string") {
     return enumLabel("RiskLevel", v);
   }
+  if (field === "treatment" && typeof v === "string") {
+    return enumLabel("RiskTreatment", v);
+  }
+  if (field === "acceptance_status" && typeof v === "string") {
+    return enumLabel("RiskAcceptanceStatus", v);
+  }
+  // Only a self-approval is worth a line; false reads as no change.
+  if (field === "self_approved") return v === true ? "yes" : "none";
   if (typeof v === "string") return v;
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;

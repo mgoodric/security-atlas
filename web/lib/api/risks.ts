@@ -50,6 +50,19 @@ export type Risk = {
   // #2060: how many child risks roll up into this one. GET /v1/risks sets
   // it on a roll-up, which the list only returns with include_rollups=true.
   child_count?: number;
+  // #2105: the proposed or approved acceptance's record; present when
+  // treatment is accept. The approved expiry and approver are
+  // accepted_until and accepter above.
+  acceptance?: RiskAcceptance;
+};
+
+export type RiskAcceptance = {
+  justification: string;
+  proposed_until?: string;
+  proposed_by?: string;
+  proposed_at?: string;
+  approved_at?: string;
+  self_approved: boolean;
 };
 
 export type RiskLevel = "team" | "org" | "company";
@@ -375,7 +388,16 @@ export type RiskPatchInput = {
 export type RiskAuditEntry = {
   id: string;
   actor: string;
-  action: "fields_changed" | "category_changed" | "placement_changed" | string;
+  action:
+    | "fields_changed"
+    | "category_changed"
+    | "placement_changed"
+    | "treatment_changed"
+    | "acceptance_proposed"
+    | "acceptance_approved"
+    | "acceptance_rejected"
+    | "acceptance_revoked"
+    | string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
   created_at: string;
@@ -393,6 +415,46 @@ export async function updateRisk(
 ): Promise<Risk> {
   const decoded = (await hierarchyRequest<{ risk: Risk }>(
     `/api/risks/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  )) as { risk: Risk };
+  return decoded.risk;
+}
+
+// ----- #2105: treatment and acceptance transitions -----
+//
+// Treatment and acceptance change only through these, each its own
+// platform route under /v1/risks/{id}; the BFF forwards them unchanged.
+// The platform owns every refusal: 400 for input, 403 for the approver
+// role or the approval rule, 409 for a transition the state forbids.
+
+export type RiskTransition =
+  | "treatment"
+  | "acceptance/propose"
+  | "acceptance/approve"
+  | "acceptance/reject"
+  | "acceptance/revoke";
+
+export type RiskTransitionBody = {
+  treatment?: string;
+  instrument_reference?: string;
+  justification?: string;
+  proposed_until?: string;
+  accepted_until?: string;
+  reason?: string;
+};
+
+/** Run one treatment or acceptance transition through the BFF. */
+export async function transitionRisk(
+  id: string,
+  transition: RiskTransition,
+  body: RiskTransitionBody,
+): Promise<Risk> {
+  const decoded = (await hierarchyRequest<{ risk: Risk }>(
+    `/api/risks/${encodeURIComponent(id)}/${transition}`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

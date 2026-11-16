@@ -163,6 +163,9 @@ type riskWire struct {
 	// ChildCount is how many child risks roll up into this one (#2060).
 	// Set on GET /v1/risks; omitted for a risk that is not a roll-up.
 	ChildCount int `json:"child_count,omitempty"`
+	// Acceptance is the proposed or approved acceptance's record (#2105):
+	// present when treatment=accept, omitted otherwise.
+	Acceptance *acceptanceWire `json:"acceptance,omitempty"`
 }
 
 // CreateRisk handles POST /v1/risks (AC-1..AC-5).
@@ -746,6 +749,9 @@ func riskWireFrom(r risk.Risk) riskWire {
 	w.Themes = append([]string{}, r.Themes...) // never null on the wire
 	w.Severity = severityOf(r.InherentScore)
 	w.ChildCount = r.ChildCount
+	if r.Treatment == dbx.RiskTreatmentAccept {
+		w.Acceptance = acceptanceWireFrom(r.Acceptance)
+	}
 	return w
 }
 

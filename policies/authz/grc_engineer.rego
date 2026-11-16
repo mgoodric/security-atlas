@@ -98,3 +98,13 @@ allow if {
     input.action == "revoke"
     input.resource.type == "exceptions"
 }
+
+# #2105: grc_engineer revokes an approved risk acceptance (PATCH
+# /v1/risks/{id}/acceptance/revoke), as it approves one. Bound to risks
+# like the exceptions admit above; the handler still requires the approver
+# flag.
+allow if {
+    has_role("grc_engineer")
+    input.action == "revoke"
+    input.resource.type == "risks"
+}
