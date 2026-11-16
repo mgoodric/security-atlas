@@ -4,8 +4,11 @@
 --    The free-text columns they replace (risks.treatment_owner,
 --    vendors.owner_user) are kept, not dropped: while owner_user_id is NULL
 --    their text is the display-only "Owner (unlinked)". The API and edit
---    paths validate an owner as an active user in the record's own tenant;
---    the FK only proves the user exists.
+--    paths validate an owner as an active user in the record's own tenant.
+--    The FK is composite, (tenant_id, owner_user_id) -> users (tenant_id,
+--    id), as in 20260802000000_change_management.sql, so the database
+--    itself refuses another tenant's user. Deleting a user sets only
+--    owner_user_id to NULL (a PG15+ column-list SET NULL), never tenant_id.
 --
 -- 2. Existing free text is matched to a user of the record's own tenant by
 --    exact name or email, case-insensitive, ignoring surrounding spaces.
@@ -26,12 +29,19 @@
 --    (20261120000000_llm_settings_audit.sql): every existing value is kept
 --    and the new one is appended.
 --
--- Reversible via 20261218000000_risk_vendor_owner_users.down.sql.
+-- Reversible via 20261221000000_risk_vendor_owner_users.down.sql.
 
-ALTER TABLE risks
-    ADD COLUMN IF NOT EXISTS owner_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL;
-ALTER TABLE vendors
-    ADD COLUMN IF NOT EXISTS owner_user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE risks ADD COLUMN IF NOT EXISTS owner_user_id UUID NULL;
+ALTER TABLE risks DROP CONSTRAINT IF EXISTS risks_owner_user_fk;
+ALTER TABLE risks ADD CONSTRAINT risks_owner_user_fk
+    FOREIGN KEY (tenant_id, owner_user_id) REFERENCES users (tenant_id, id)
+    ON DELETE SET NULL (owner_user_id);
+
+ALTER TABLE vendors ADD COLUMN IF NOT EXISTS owner_user_id UUID NULL;
+ALTER TABLE vendors DROP CONSTRAINT IF EXISTS vendors_owner_user_fk;
+ALTER TABLE vendors ADD CONSTRAINT vendors_owner_user_fk
+    FOREIGN KEY (tenant_id, owner_user_id) REFERENCES users (tenant_id, id)
+    ON DELETE SET NULL (owner_user_id);
 
 CREATE INDEX IF NOT EXISTS risks_owner_user ON risks (tenant_id, owner_user_id)
     WHERE owner_user_id IS NOT NULL;

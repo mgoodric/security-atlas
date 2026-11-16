@@ -1,6 +1,6 @@
 //go:build integration
 
-// #2129 — 20261218000000_risk_vendor_owner_users.sql links free-text risk and
+// #2129 — 20261221000000_risk_vendor_owner_users.sql links free-text risk and
 // vendor owners to users. Asserts against a live Postgres:
 //
 //  1. Text equal to one active user's name or email, ignoring case and
@@ -31,8 +31,8 @@ import (
 
 const (
 	ownerUsersPrior = "../../migrations/sql/20261120000000_llm_settings_audit.sql"
-	ownerUsersUp    = "../../migrations/sql/20261218000000_risk_vendor_owner_users.sql"
-	ownerUsersDown  = "../../migrations/sql/20261218000000_risk_vendor_owner_users.down.sql"
+	ownerUsersUp    = "../../migrations/sql/20261221000000_risk_vendor_owner_users.sql"
+	ownerUsersDown  = "../../migrations/sql/20261221000000_risk_vendor_owner_users.down.sql"
 )
 
 type ownerCase struct {
@@ -164,14 +164,52 @@ func TestRiskVendorOwnerUsersMigration_LinksUnambiguousOwnersAndLosesNothing(t *
 		check("vendor", `SELECT owner_user_id::text, owner_user FROM vendors WHERE id = $1`, vendorIDs[c.name], c)
 	}
 
+	// The composite FK refuses another tenant's user, and deleting a user
+	// nulls only owner_user_id (savepoints, rolled back).
+	fk, err := tx.Begin(ctx)
+	if err != nil {
+		t.Fatalf("savepoint: %v", err)
+	}
+	var bea string
+	if err := fk.QueryRow(ctx, `SELECT id::text FROM users WHERE tenant_id = $1`, tenantB).Scan(&bea); err != nil {
+		t.Fatalf("read tenant B user: %v", err)
+	}
+	for _, table := range []string{"risks", "vendors"} {
+		id := riskIDs["unknown text"]
+		if table == "vendors" {
+			id = vendorIDs["unknown text"]
+		}
+		inner, err := fk.Begin(ctx)
+		if err != nil {
+			t.Fatalf("savepoint: %v", err)
+		}
+		if _, err := inner.Exec(ctx, `UPDATE `+table+` SET owner_user_id = $1 WHERE id = $2`, bea, id); err == nil {
+			t.Errorf("%s: another tenant's user was accepted as owner", table)
+		}
+		_ = inner.Rollback(ctx)
+	}
+	if _, err := fk.Exec(ctx, `DELETE FROM users WHERE id = $1`, users["alice"]); err != nil {
+		t.Fatalf("delete owner user: %v", err)
+	}
+	var owner *string
+	var tenantOf string
+	if err := fk.QueryRow(ctx, `SELECT owner_user_id::text, tenant_id::text FROM risks WHERE id = $1`,
+		riskIDs["exact name"]).Scan(&owner, &tenantOf); err != nil {
+		t.Fatalf("read risk after user delete: %v", err)
+	}
+	if owner != nil || tenantOf != tenantA {
+		t.Errorf("after deleting the owner: owner %v, tenant %s; want NULL owner, tenant kept", owner, tenantOf)
+	}
+	_ = fk.Rollback(ctx)
+
 	// The CHECK takes the new action and keeps every earlier one.
 	for _, a := range append(meAuditActions(t, ownerUsersPrior), "vendor_owner_update") {
 		if !insertsAction(ctx, t, tx, a) {
-			t.Errorf("me_audit_log refuses action %q after 20261218000000", a)
+			t.Errorf("me_audit_log refuses action %q after 20261221000000", a)
 		}
 	}
 	if got, want := len(meAuditActions(t, ownerUsersUp)), len(meAuditActions(t, ownerUsersPrior))+1; got != want {
-		t.Errorf("20261218000000 lists %d actions, want %d", got, want)
+		t.Errorf("20261221000000 lists %d actions, want %d", got, want)
 	}
 
 	// The down migration refuses while a vendor_owner_update row exists.

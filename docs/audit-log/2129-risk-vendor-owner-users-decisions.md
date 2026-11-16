@@ -79,6 +79,24 @@ an edit of another field on a migrated risk is not blocked. The risk page
 shows the unlinked text with a "Pick the user" control that saves the
 owner at once.
 
+## D6: a composite FK, SET NULL on the owner column only
+
+`owner_user_id` references `users (tenant_id, id)` through
+`(tenant_id, owner_user_id)`, the composite target
+`20260802000000_change_management.sql` and
+`20261213000000_onboarding_hint_dismissals.sql` already use. The database
+then refuses an owner from another tenant even if the API check were
+skipped (invariant #6 at the schema, not only in the handler).
+
+On delete it is `SET NULL (owner_user_id)`, the column-list form Postgres
+15 added (the platform targets 16+). A plain `SET NULL` would null
+`tenant_id` too and fail its NOT NULL. Considered `RESTRICT`, which
+change management uses: users are disabled, not deleted, so either is
+rare. SET NULL was chosen because a user deleted outright (a test or a
+SCIM purge) should leave the record unowned, an ownership gap the
+dashboard reports, rather than block the delete on every risk and vendor
+they owned. The owner's id stays in the audit rows.
+
 ## Follow-ups not done here
 
 - The MCP `create_risk` and treatment proposal still take a free-text
