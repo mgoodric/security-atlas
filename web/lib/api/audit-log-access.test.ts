@@ -1,10 +1,8 @@
-// Slice 130 — unit coverage for the slice-125 layout's route-guard predicate.
-//
-// `canReachAuditLog` is exported as pure logic so the gate can be exercised
-// without a fetch round-trip. The layout itself is a server component;
-// vitest doesn't model server-component rendering, so we cover the predicate
-// directly. The fetch + redirect surface is covered by the Playwright e2e
-// spec (web/e2e/audit-log.spec.ts AC-8b + AC-8e).
+// Slice 130 — unit coverage for the audit-log access predicate. It was the
+// /audit-log layout's route guard; since #2093 it decides whether the
+// Activity page shows the export bar (the export endpoint is narrower than
+// the activity endpoint). The page wiring is covered by
+// web/e2e/activity.spec.ts.
 //
 // Matrix (P0-A3 fail-closed posture is the load-bearing case — assert it
 // twice, once for "no roles field" and once for "roles is not an array"):
@@ -25,7 +23,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { canReachAuditLog } from "./layout";
+import { canReachAuditLog } from "./audit-log-access";
 
 describe("canReachAuditLog", () => {
   test("admit: is_admin true overrides roles entirely", () => {

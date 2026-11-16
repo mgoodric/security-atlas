@@ -1,42 +1,43 @@
 "use client";
 
-// Slice 270 — /activity client island.
+// Slice 270 — /activity client island. Since #2093 this is the one
+// audit-log page; the slice-125 /audit-log island it duplicated is gone.
 //
-// AC-1 through AC-4 + AC-9. URL-driven filter state + TanStack
-// `useInfiniteQuery` over the BFF + IntersectionObserver-driven infinite
-// scroll capped at 10 auto-loaded pages, after which a manual "Load
-// more" button takes over (mirrors slice 125 audit-log page DoS posture
-// via the shared 1000-row backend cap).
+// URL-driven filter state + TanStack `useInfiniteQuery` over the BFF +
+// IntersectionObserver-driven infinite scroll capped at 10 auto-loaded
+// pages, after which a manual "Load more" button takes over (the shared
+// 1000-row backend cap, slice 125 DoS posture).
 //
 // Filters live in the URL (`?from=...&to=...&actor=...&kind=foo,bar`)
-// so back/forward buttons and shared links restore the same view.
+// so back/forward buttons and shared links restore the same view; a
+// link saved from the old /audit-log page carries the same keys and
+// lands here through its redirect.
 //
-// Slice 270 D3: this island is a near-duplicate of slice 125's
-// `AuditLogPageClient` (`web/app/audit-log/page-client.tsx`). The
-// differences are:
+// Two views of the same rows (#2093), chosen by `?view=`:
 //
-//   - BFF URL is `/api/activity` instead of `/api/audit-log/unified`.
-//   - `router.replace` target is `/activity` instead of `/audit-log`.
-//   - The actor filter accepts the literal `me` sentinel (slice 270
-//     D5) which the BFF resolves server-side to the caller's user_id.
-//     The input box shows `me` with a friendlier `(your activity)`
-//     label so the operator does not see a UUID they did not type.
-//   - No export bar — slice 270 does not ship export (out of scope).
+//   - sentences (default): "<Person> approved exception …", grouped by
+//     day, relative time, payload behind an expander. The sentence comes
+//     from `lib/activity-sentences.ts` and uses only the row envelope.
+//   - ledger (`?view=ledger`): the raw table — kind, target, IDs.
 //
-// A follow-on slice can extract a shared `<UnifiedAuditTable>`
-// component consumed by both pages; for slice 270 the duplication is
-// intentional and bounded. When either page changes, the maintainer
-// MUST update both — surface drift is a real risk and the duplicated
-// shell carries this header as the gate.
+// `payload_json` is null on a row whose source the caller cannot read
+// (#2379). The expander then says the details are not available; it
+// never fetches them from anywhere else.
+//
+// Export (CSV / JSON / XLSX) goes through `/api/audit-log/export`, which
+// admits fewer roles than `/v1/activity/unified`; the server shell
+// passes `canExport` so the bar shows only to callers it admits.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import Link from "next/link";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Person } from "@/components/ui/person";
 import { Timestamp } from "@/components/ui/timestamp";
 import {
   Table,
@@ -47,6 +48,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { describeEvent, groupByDay } from "@/lib/activity-sentences";
 import {
   ACTIVITY_KINDS,
   ACTOR_ME_SENTINEL,
@@ -58,6 +60,11 @@ import {
   fetchActivity,
   renderActorLabel,
 } from "@/lib/api/activity";
+import {
+  AUDIT_LOG_EXPORT_FORMATS,
+  type AuditLogExportFormat,
+  buildAuditLogExportURL,
+} from "@/lib/api/audit-log";
 
 // AUTO_LOAD_PAGE_LIMIT — after this many auto-loaded pages, switch to
 // a manual "Load more" button so the operator must explicitly opt
@@ -95,6 +102,8 @@ function rangeIsValid(from: string, to: string): boolean {
   return days <= MAX_WINDOW_DAYS;
 }
 
+type View = "sentences" | "ledger";
+
 type Filters = {
   from: string;
   to: string;
@@ -107,9 +116,10 @@ type Filters = {
   // links restore the same view. This is a view filter only; the
   // underlying audit ledger is unchanged.
   includeReads: boolean;
+  view: View;
 };
 
-export function ActivityPageClient() {
+export function ActivityPageClient({ canExport }: { canExport: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -120,6 +130,9 @@ export function ActivityPageClient() {
 
   const queryEnabled = rangeIsValid(filters.from, filters.to);
 
+  // The view is not part of the query: switching it re-renders the
+  // rows already loaded.
+  const { view, ...queryFilters } = filters;
   const query = useInfiniteQuery<
     ActivityListResponse,
     ActivityFetchError,
@@ -127,7 +140,7 @@ export function ActivityPageClient() {
     readonly unknown[],
     string | undefined
   >({
-    queryKey: ["activity", filters],
+    queryKey: ["activity", queryFilters],
     enabled: queryEnabled,
     initialPageParam: undefined,
     queryFn: async ({ pageParam }) => {
@@ -179,6 +192,7 @@ export function ActivityPageClient() {
       if (next.actor) params.set("actor", next.actor);
       if (next.kinds.length > 0) params.set("kind", next.kinds.join(","));
       if (next.includeReads) params.set("include_reads", "true");
+      if (next.view === "ledger") params.set("view", "ledger");
       router.replace(`/activity?${params.toString()}`);
     },
     [router],
@@ -210,6 +224,9 @@ export function ActivityPageClient() {
   const clearActor = () => {
     replaceWith({ ...filters, actor: "" });
   };
+  const setView = (v: View) => {
+    replaceWith({ ...filters, view: v });
+  };
 
   const error = query.error;
 
@@ -225,6 +242,13 @@ export function ActivityPageClient() {
         onIncludeReadsToggle={toggleIncludeReads}
         windowValid={queryEnabled}
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ViewToggle view={view} onChange={setView} />
+        {canExport ? (
+          <ExportBar filters={filters} disabled={!queryEnabled} />
+        ) : null}
+      </div>
 
       {!queryEnabled ? (
         <div
@@ -245,7 +269,11 @@ export function ActivityPageClient() {
         </div>
       ) : null}
 
-      <RowsTable rows={rows} loading={query.isLoading} />
+      {view === "ledger" ? (
+        <LedgerTable rows={rows} loading={query.isLoading} />
+      ) : (
+        <SentenceList rows={rows} loading={query.isLoading} />
+      )}
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span data-testid="activity-row-count">
@@ -281,6 +309,8 @@ function parseFilters(searchParams: URLSearchParams): Filters {
   // Slice 669: read-telemetry is excluded by default; only the explicit
   // `include_reads=true` opts back into the full ledger.
   const includeReads = searchParams.get("include_reads") === "true";
+  const view: View =
+    searchParams.get("view") === "ledger" ? "ledger" : "sentences";
 
   const from =
     fromRaw && Number.isFinite(Date.parse(fromRaw)) ? fromRaw : defaultFrom();
@@ -295,7 +325,7 @@ function parseFilters(searchParams: URLSearchParams): Filters {
         )
     : [];
 
-  return { from, to, actor, kinds, includeReads };
+  return { from, to, actor, kinds, includeReads, view };
 }
 
 type FilterBarProps = {
@@ -501,14 +531,120 @@ function ActorFilterInput({
   );
 }
 
-function RowsTable({
-  rows,
-  loading,
+// ----- view toggle ---------------------------------------------------
+
+function ViewToggle({
+  view,
+  onChange,
 }: {
-  rows: ActivityEntry[];
-  loading: boolean;
+  view: View;
+  onChange: (v: View) => void;
 }) {
-  if (loading && rows.length === 0) {
+  const option = (v: View, label: string) => (
+    <button
+      type="button"
+      data-testid={`activity-view-${v}`}
+      aria-pressed={view === v}
+      onClick={() => onChange(v)}
+      className={
+        "rounded-full border px-3 py-1 text-xs transition-colors " +
+        (view === v
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-input bg-background hover:bg-muted")
+      }
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div
+      role="group"
+      aria-label="View"
+      data-testid="activity-view-toggle"
+      className="flex items-center gap-2"
+    >
+      {option("sentences", "Events")}
+      {option("ledger", "Raw ledger")}
+    </div>
+  );
+}
+
+// ----- export --------------------------------------------------------
+//
+// Slice 135: CSV / JSON / XLSX of the current filter set. Each format
+// is an <a download> at the BFF export URL; the filename is
+// server-authored. The export endpoint returns every row in the window
+// (it takes no include_reads filter), as it did on /audit-log.
+
+const EXPORT_FORMAT_LABELS: Record<AuditLogExportFormat, string> = {
+  csv: "CSV",
+  json: "JSON",
+  xlsx: "XLSX",
+};
+
+function ExportBar({
+  filters,
+  disabled,
+}: {
+  filters: Filters;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      data-testid="activity-export-bar"
+      className="flex flex-wrap items-center gap-2"
+    >
+      <span className="text-xs font-medium text-muted-foreground">
+        Export current filter:
+      </span>
+      {AUDIT_LOG_EXPORT_FORMATS.map((format) => {
+        if (disabled) {
+          return (
+            <Button
+              key={format}
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled
+              data-testid={`activity-export-${format}`}
+            >
+              {EXPORT_FORMAT_LABELS[format]}
+            </Button>
+          );
+        }
+        const href = buildAuditLogExportURL(format, {
+          from: filters.from,
+          to: filters.to,
+          actor: filters.actor,
+          kinds: filters.kinds,
+        });
+        return (
+          <a
+            key={format}
+            href={href}
+            download
+            rel="noopener"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+            data-testid={`activity-export-${format}`}
+          >
+            {EXPORT_FORMAT_LABELS[format]}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+// ----- shared row states ----------------------------------------------
+
+function EmptyOrLoading({
+  loading,
+  empty,
+}: {
+  loading: boolean;
+  empty: boolean;
+}) {
+  if (loading && empty) {
     return (
       <div
         data-testid="activity-loading"
@@ -518,15 +654,188 @@ function RowsTable({
       </div>
     );
   }
-  if (rows.length === 0) {
+  return (
+    <div
+      data-testid="activity-empty"
+      className="rounded-md border bg-card p-6 text-center text-sm text-muted-foreground"
+    >
+      No activity entries match these filters.
+    </div>
+  );
+}
+
+function rowKey(row: ActivityEntry): string {
+  return `${row.kind}-${row.row_id}`;
+}
+
+// PayloadView renders the row's payload, or says it is not available
+// when the backend withheld it (#2379: null for a source the caller
+// cannot read).
+function PayloadView({ row, id }: { row: ActivityEntry; id: string }) {
+  if (row.payload_json === null || row.payload_json === undefined) {
     return (
-      <div
-        data-testid="activity-empty"
-        className="rounded-md border bg-card p-6 text-center text-sm text-muted-foreground"
+      <p
+        id={id}
+        data-testid="activity-payload-unavailable"
+        className="text-xs text-muted-foreground"
       >
-        No activity entries match these filters.
-      </div>
+        Details not available.
+      </p>
     );
+  }
+  return (
+    <pre
+      id={id}
+      tabIndex={0}
+      aria-label="Event payload"
+      className="max-h-80 overflow-auto rounded bg-foreground/5 p-3 text-xs"
+    >
+      {safeStringify(row.payload_json)}
+    </pre>
+  );
+}
+
+function ExpandToggle({
+  open,
+  controls,
+  onToggle,
+}: {
+  open: boolean;
+  controls: string;
+  onToggle: () => void;
+}) {
+  // A real button: aria-expanded is not allowed on a bare span (axe
+  // aria-allowed-attr). A ledger row click toggles too, so the button
+  // stops its own click from toggling twice.
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      data-testid="activity-row-toggle"
+      aria-expanded={open}
+      aria-controls={open ? controls : undefined}
+      aria-label={open ? "Collapse details" : "Expand details"}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+    >
+      {open ? "▾" : "▸"}
+    </Button>
+  );
+}
+
+// ----- sentences -----------------------------------------------------
+
+function SentenceList({
+  rows,
+  loading,
+}: {
+  rows: ActivityEntry[];
+  loading: boolean;
+}) {
+  if (rows.length === 0) {
+    return <EmptyOrLoading loading={loading} empty />;
+  }
+  const groups = groupByDay(rows);
+  return (
+    <div data-testid="activity-sentences" className="space-y-4">
+      {groups.map((g) => (
+        <section
+          key={g.key}
+          data-testid="activity-day"
+          aria-labelledby={`activity-day-${g.key}`}
+          className="rounded-xl border bg-card"
+        >
+          <h2
+            id={`activity-day-${g.key}`}
+            data-testid="activity-day-heading"
+            className="border-b px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground"
+          >
+            {g.label}
+          </h2>
+          <ul className="divide-y">
+            {g.rows.map((row) => (
+              <SentenceRow key={rowKey(row)} row={row} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function SentenceRow({ row }: { row: ActivityEntry }) {
+  const [open, setOpen] = useState(false);
+  const s = describeEvent(row);
+  const payloadId = `activity-payload-${rowKey(row)}`;
+  return (
+    <li data-testid="activity-row" data-kind={row.kind} className="px-4 py-2">
+      <div className="flex items-start gap-2">
+        <ExpandToggle
+          open={open}
+          controls={payloadId}
+          onToggle={() => setOpen((v) => !v)}
+        />
+        <p data-testid="activity-sentence" className="flex-1 text-sm">
+          <Person id={row.actor_id} className="font-medium" /> {s.phrase}
+          {s.noun ? ` ${s.noun}` : ""}
+          {s.targetId ? (
+            <>
+              {" "}
+              {s.href ? (
+                <Link
+                  href={s.href}
+                  className="font-mono text-xs underline underline-offset-2"
+                  data-testid="activity-sentence-target"
+                >
+                  {shortId(s.targetId)}
+                </Link>
+              ) : (
+                <span
+                  className="font-mono text-xs"
+                  title={s.targetId}
+                  data-testid="activity-sentence-target"
+                >
+                  {shortId(s.targetId)}
+                </span>
+              )}
+            </>
+          ) : null}
+          {s.suffix ? ` ${s.suffix}` : ""}
+        </p>
+        <Timestamp
+          value={row.occurred_at}
+          className="shrink-0 text-xs text-muted-foreground"
+        />
+      </div>
+      {open ? (
+        <div data-testid="activity-row-payload" className="mt-2 pl-8">
+          <PayloadView row={row} id={payloadId} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+// shortId keeps a UUID-length id readable in a sentence; the full id is
+// in the raw ledger and the tooltip.
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+// ----- raw ledger ----------------------------------------------------
+
+function LedgerTable({
+  rows,
+  loading,
+}: {
+  rows: ActivityEntry[];
+  loading: boolean;
+}) {
+  if (rows.length === 0) {
+    return <EmptyOrLoading loading={loading} empty />;
   }
   return (
     <div
@@ -536,7 +845,9 @@ function RowsTable({
       <Table>
         <TableHeader>
           <TableRow className="bg-muted/50 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <TableHead className="w-8" />
+            <TableHead className="w-8">
+              <span className="sr-only">Details</span>
+            </TableHead>
             <TableHead>Occurred</TableHead>
             <TableHead>Actor</TableHead>
             <TableHead>Kind</TableHead>
@@ -547,7 +858,7 @@ function RowsTable({
         </TableHeader>
         <TableBody>
           {rows.map((row) => (
-            <Row key={`${row.kind}-${row.row_id}`} row={row} />
+            <LedgerRow key={rowKey(row)} row={row} />
           ))}
         </TableBody>
       </Table>
@@ -555,33 +866,22 @@ function RowsTable({
   );
 }
 
-function Row({ row }: { row: ActivityEntry }) {
+function LedgerRow({ row }: { row: ActivityEntry }) {
   const [open, setOpen] = useState(false);
+  const payloadId = `activity-ledger-payload-${rowKey(row)}`;
   return (
     <>
       <TableRow
-        data-testid="activity-row"
+        data-testid="activity-ledger-row"
         className="cursor-pointer hover:bg-muted/40"
         onClick={() => setOpen((v) => !v)}
       >
         <TableCell className="w-8 text-center text-muted-foreground">
-          {/* A real button: aria-expanded is not allowed on a bare span
-              (axe aria-allowed-attr). The row click still toggles too, so
-              the button stops its own click from toggling twice. */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            data-testid="activity-row-toggle"
-            aria-expanded={open}
-            aria-label={open ? "Collapse payload" : "Expand payload"}
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen((v) => !v);
-            }}
-          >
-            {open ? "▾" : "▸"}
-          </Button>
+          <ExpandToggle
+            open={open}
+            controls={payloadId}
+            onToggle={() => setOpen((v) => !v)}
+          />
         </TableCell>
         <TableCell>
           <Timestamp value={row.occurred_at} />
@@ -620,9 +920,7 @@ function Row({ row }: { row: ActivityEntry }) {
         <TableRow data-testid="activity-row-payload">
           <TableCell />
           <TableCell colSpan={6}>
-            <pre className="max-h-80 overflow-auto rounded bg-foreground/5 p-3 text-xs">
-              {safeStringify(row.payload_json)}
-            </pre>
+            <PayloadView row={row} id={payloadId} />
           </TableCell>
         </TableRow>
       ) : null}

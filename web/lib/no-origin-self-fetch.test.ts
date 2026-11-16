@@ -100,7 +100,7 @@ describe("OE-549: no server-side self-fetch via the request Host header", () => 
     expect(files.length).toBeGreaterThan(200);
     const rel = files.map((f) => relative(WEB_ROOT, f));
     expect(rel).toContain(join("app", "admin", "layout.tsx"));
-    expect(rel).toContain(join("app", "audit-log", "layout.tsx"));
+    expect(rel).toContain(join("app", "(authed)", "activity", "page.tsx"));
     expect(rel).toContain(join("components", "shell", "sidebar.tsx"));
     expect(rel).toContain(join("components", "shell", "user-avatar.tsx"));
     expect(rel).toContain(join("lib", "feature-nav.server.ts"));
