@@ -182,6 +182,16 @@ describe("owningModuleName (#2172)", () => {
     expect(owningModuleName(modules, "/vendors/v1")).toBe("Third-party risk");
     expect(owningModuleName(modules, "/controls")).toBeUndefined();
   });
+
+  test("a module without features, and unknown modules", () => {
+    expect(
+      owningModuleName(
+        [board("on"), questionnaires("no_access")],
+        "/questionnaires/q1",
+      ),
+    ).toBe("questionnaires");
+    expect(owningModuleName(null, "/questionnaires")).toBeUndefined();
+  });
 });
 
 describe("module features (#2171)", () => {

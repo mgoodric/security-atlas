@@ -152,13 +152,9 @@ export function owningModuleName(
   href: string,
 ): string | undefined {
   const owner = moduleForPage(modules, href);
-  if (owner === undefined) {
-    return undefined;
-  }
-  for (const m of modules ?? []) {
-    if (m === owner || (m.features ?? []).includes(owner)) {
-      return m.name;
-    }
-  }
-  return owner.name;
+  // The owner is one of `modules` or a feature inside one, so a page some
+  // module owns always finds its module here.
+  return (modules ?? []).find(
+    (m) => m === owner || (m.features ?? []).some((f) => f === owner),
+  )?.name;
 }
