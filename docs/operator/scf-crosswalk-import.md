@@ -264,9 +264,9 @@ these sources that has its code:
 
    ```yaml
    requirements:
-     - code: "4.1"
-       title: "Context of the organization"
-       body: "Determine the internal and external issues relevant to the ISMS."
+     - code: "EX-1"
+       title: "Example requirement title"
+       body: "A one-line description in your own words."
    ```
 
 2. **The bundled crosswalk for the same framework slug.** `data/crosswalks/*.yaml`
@@ -275,6 +275,8 @@ these sources that has its code:
    body are used whatever its version. The match is on the slug the import
    writes, so pass `--framework-slug soc2` to get the bundled SOC 2 titles
    rather than the slug derived from the workbook's Focal Documents row.
+   Because these files ship inside the binary, they never carry verbatim
+   standard text; `data/crosswalks/README.md` has the authoring rules.
 3. **The code itself**, but only with `--allow-code-titles`.
 
 A SOC 2 point of focus (`CC1.1-POF3`) takes its parent criterion's title and
@@ -307,12 +309,17 @@ stage. A later import into the same slug and version therefore:
   incoming file differs;
 - still adds new requirements and new edges, and updates edges as described
   under [Provenance Precedence](#provenance-precedence);
-- prints one line per requirement whose incoming title or body differed, and
-  does not fail for that reason:
+- prints a warning to stderr for each requirement whose incoming title or
+  body differed, and by default does not fail for that reason:
 
   ```text
-  requirement kept CC6.1: incoming title or body differs, but framework version 2017 is frozen; ship a new version to change it
+  warning: requirement kept CC6.1: incoming title or body differs, but framework version 2017 is frozen; ship a new version to change it
   ```
+
+  The stdout summary counts them as `differed=<n>`. Pass `--strict` to make
+  the command exit non-zero when `differed` is above zero, so a scripted
+  import notices. The import has still committed; `--strict` changes only the
+  exit status.
 
 To change a requirement's text, import it as a new version
 (`--framework-version`).

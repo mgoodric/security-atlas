@@ -4,6 +4,10 @@
 // workbook-derived requirements from the bundled file for the same framework
 // slug (#1730). Importing a bundled crosswalk itself still reads the file by
 // path: atlas-cli catalog import-crosswalk data/crosswalks/<file>.yaml.
+//
+// Because every release ships these files, the licensing posture in each
+// file's header covers the binary too: no verbatim standard text goes in a
+// crosswalk. See README.md in this directory (#2008).
 package crosswalks
 
 import (
