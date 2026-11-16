@@ -165,6 +165,7 @@ export function MonthGridView({ events, anchor, onPrev, onNext }: Props) {
                 </span>
                 {overdueDot && (
                   <span
+                    role="img"
                     aria-label="overdue"
                     className="inline-block h-2 w-2 rounded-full bg-red-500"
                   />

@@ -142,6 +142,7 @@ GET /v1/mapping-overlays
 GET /v1/mapping-overlays/audited-under
 GET /v1/mapping-overlays/audited-under/export
 GET /v1/mapping-overlays/export
+GET /v1/mapping-overlays/remap-proposals
 GET /v1/mcp/write-proposals
 GET /v1/mcp/write-proposals/{id}
 GET /v1/me
@@ -167,6 +168,7 @@ GET /v1/org_units/{id}
 GET /v1/oscal/component-definitions
 GET /v1/oscal/component-definitions/{id}
 GET /v1/oscal/imported-profiles/{id}/provenance
+GET /v1/people
 GET /v1/personnel-security/checklists
 GET /v1/personnel-security/checklists/{id}
 GET /v1/policies
@@ -328,6 +330,9 @@ POST /v1/incidents/{id}/close
 POST /v1/install/mark-first-signin
 POST /v1/mapping-overlays
 POST /v1/mapping-overlays/import
+POST /v1/mapping-overlays/remap-proposals/{id}/approve
+POST /v1/mapping-overlays/remap-proposals/{id}/keep-legacy
+POST /v1/mapping-overlays/remap-proposals/{id}/reject
 POST /v1/mapping-overlays/{id}/retire
 POST /v1/mcp/write-proposals
 POST /v1/mcp/write-proposals/{id}/confirm

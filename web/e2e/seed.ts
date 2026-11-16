@@ -134,7 +134,10 @@ export type FixtureName =
   | "period-auditors"
   // #2381 — a viewer user with a viewer user_roles row in each of
   // feature-flag-gating.spec.ts's two tenants.
-  | "feature-flag-gating";
+  | "feature-flag-gating"
+  // #2085: a named user who owns an action plan, created an audit
+  // period and completed a personnel item, for person-names.spec.ts.
+  | "person-names";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

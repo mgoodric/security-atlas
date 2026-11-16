@@ -10,7 +10,8 @@ package scfimport
 // open, and only a super-admin decides it (internal/crosswalkremap).
 //
 // Tenant overlay edges (fw_to_scf_overlay_edges, #1735) are tenant-scoped
-// and are not queued here; #2360 adds them as a tenant-scoped queue.
+// and are not queued here; QueueOverlayRemapProposals (#1804) queues them
+// in a tenant-scoped table.
 
 import (
 	"context"

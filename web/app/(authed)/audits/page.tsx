@@ -99,6 +99,7 @@ import {
   statusTallyLabel,
 } from "./format";
 import { pageTitle } from "@/lib/page-titles";
+import { Person } from "@/components/ui/person";
 
 const FILTER_KEYS: (keyof AuditFilters)[] = ["framework", "status", "year"];
 
@@ -409,12 +410,11 @@ function AuditsPageInner() {
       header: "Created by",
       align: "right",
       cell: (p) => (
-        <span
+        <Person
+          id={p.created_by}
           className="text-xs text-muted-foreground"
-          data-testid="audits-row-created-by"
-        >
-          {p.created_by}
-        </span>
+          testId="audits-row-created-by"
+        />
       ),
     },
   ];

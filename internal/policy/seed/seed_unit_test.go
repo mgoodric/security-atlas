@@ -80,7 +80,7 @@ func TestLoadFromFS_MalformedYAMLFrontmatter(t *testing.T) {
 // `---\r\n` branch in parseStockPolicy. Windows-authored content lands
 // with CRLF line endings; the loader must accept that shape.
 func TestLoadFromFS_CRLFDelimiterAccepted(t *testing.T) {
-	crlf := "---\r\ntitle: E\r\nversion: 1.0.0\r\nowner_role: tenant_admin\r\napprover_role: security_lead\r\nlinked_control_ids:\r\n  - GOV-01\r\n  - GOV-04\r\n  - RSK-01\r\nacknowledgment_required_roles:\r\n  - employee\r\nsource_attribution: community_draft\r\n---\r\n\r\n# E\r\n\r\nBody.\r\n"
+	crlf := "---\r\ntitle: E\r\nversion: 1.0.0\r\nowner_role: tenant_admin\r\napprover_role: security_lead\r\nlinked_control_ids:\r\n  - GOV-02\r\n  - GOV-05\r\n  - RSK-01\r\nacknowledgment_required_roles:\r\n  - employee\r\nsource_attribution: community_draft\r\n---\r\n\r\n# E\r\n\r\nBody.\r\n"
 	files := map[string]string{
 		"stock/a.md": validStockPolicy("A"),
 		"stock/b.md": validStockPolicy("B"),
@@ -189,8 +189,8 @@ version: 1.0.0
 owner_role: tenant_admin
 approver_role: security_lead
 linked_control_ids:
-  - GOV-01
-  - GOV-04
+  - GOV-02
+  - GOV-05
   - RSK-01
 acknowledgment_required_roles:
   - employee

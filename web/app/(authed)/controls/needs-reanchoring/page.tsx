@@ -40,6 +40,14 @@ export default function NeedsReanchoringPage() {
       title="Controls needing re-anchoring"
       subtitle="Controls still on an anchor from an earlier SCF release. Re-upload each bundle on a current-release anchor; the note says where its anchor's concept went."
       data-testid="needs-reanchoring-page"
+      actions={
+        <Link
+          href="/controls/remap"
+          className="text-sm underline underline-offset-3"
+        >
+          Review remap proposals
+        </Link>
+      }
     >
       {q.isLoading ? (
         <Skeleton className="h-40 w-full" />

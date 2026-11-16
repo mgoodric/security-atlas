@@ -22,6 +22,7 @@ import (
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
@@ -114,6 +115,12 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// web app's sidebar and FeatureGate read it in place of a gating map
 	// of their own. It replaces slice 660's GET /v1/features/enabled.
 	root.Get("/v1/me/modules", featuresH.Modules)
+	// #2085: the caller's tenant's users and API keys, reduced to id,
+	// display name, status and key owner, so pages show a person in place
+	// of an ID. Every signed-in role reads it (defaults.rego). App pool
+	// under the caller's RLS tenant, never authPool: a super-admin sees
+	// only the tenant it is signed in to.
+	root.Get("/v1/people", people.New(s.dbPool).List)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each

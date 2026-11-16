@@ -95,6 +95,21 @@ allow if {
     count(input.user.roles) > 0
 }
 
+# #2085 — GET /v1/people, the tenant's users and API keys as names.
+#
+# Every signed-in role reads it so pages show a person in place of an ID.
+# The handler returns id, display name, status and key owner only (no
+# email, token or last4) and reads under the caller's RLS tenant, so a
+# super-admin sees only the tenant it is signed in to. Exact path: any
+# sub-path stays denied. Default-deny still applies to a roleless
+# credential.
+allow if {
+    is_read
+    input.resource.type == "people"
+    input.request.path == "/v1/people"
+    count(input.user.roles) > 0
+}
+
 me_self_read_paths := {
     "/v1/me",
     "/v1/me/tenancy",
