@@ -37,6 +37,7 @@ import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
 import { Vendor, VendorReview } from "@/lib/api/vendors";
@@ -139,7 +140,12 @@ export default function VendorDetailPage({
   }
 
   const vendor = data;
-  const mailto = ownerMailto(vendor.owner_user);
+  // #2129: the owner is a user; free text no user matched is shown as
+  // "unlinked" (as a mailto when it is an email address).
+  const unlinkedOwner = vendor.owner_user_id
+    ? ""
+    : (vendor.owner_unlinked ?? vendor.owner_user).trim();
+  const mailto = ownerMailto(unlinkedOwner);
 
   return (
     // #2102: the shared detail-page header. Record review is the vendor's
@@ -196,17 +202,28 @@ export default function VendorDetailPage({
         <CardContent>
           <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
             <Field label="Owner" testid="vendor-detail-owner">
-              {mailto ? (
+              {vendor.owner_user_id ? (
+                <Person id={vendor.owner_user_id} />
+              ) : mailto ? (
                 <a
                   href={mailto}
                   className="text-primary hover:underline"
                   data-testid="vendor-detail-owner-mailto"
                 >
-                  {vendor.owner_user.trim()}
+                  {unlinkedOwner}
                 </a>
               ) : (
-                <span>{vendor.owner_user.trim() || "unassigned"}</span>
+                <span>{unlinkedOwner || "unassigned"}</span>
               )}
+              {unlinkedOwner ? (
+                <span
+                  className="ml-2 text-xs italic text-muted-foreground"
+                  title="No user matched this owner. Edit the vendor to pick one."
+                  data-testid="vendor-detail-owner-unlinked"
+                >
+                  (unlinked)
+                </span>
+              ) : null}
             </Field>
             <Field label="Criticality" testid="vendor-detail-criticality">
               <span className="capitalize">{vendor.criticality}</span>

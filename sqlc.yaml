@@ -150,6 +150,8 @@ sql:
       - "migrations/sql/20261215000000_framework_requirement_points_of_focus_array.sql"
       # #2446: policy draft editors, and edit / body-hash audit rows.
       - "migrations/sql/20261222000000_policy_draft_editors.sql"
+      # #2129: risk and vendor owners are users (owner_user_id).
+      - "migrations/sql/20261226000000_risk_vendor_owner_users.sql"
     queries: "internal/db/queries"
     gen:
       go:

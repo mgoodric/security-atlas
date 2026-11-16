@@ -48,8 +48,12 @@ func (s *Store) Create(ctx context.Context, in CreateVendorInput) (Vendor, error
 	if in.Status == "" {
 		in.Status = StatusActive
 	}
+	normalizeOwner(&in)
 	var out Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		if err := checkOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
+			return err
+		}
 		window, err := initialReviewDays(ctx, q, tenantID)
 		if err != nil {
 			return err
@@ -79,6 +83,7 @@ func (s *Store) Create(ctx context.Context, in CreateVendorInput) (Vendor, error
 			CostOwner:        strings.TrimSpace(in.CostOwner),
 			CommercialStatus: dbx.VendorCommercialStatus(in.Status),
 			BillingCadence:   pgBillingCadence(in.BillingCadence),
+			OwnerUserID:      pgUUIDPtr(in.OwnerUserID),
 		})
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -86,6 +91,11 @@ func (s *Store) Create(ctx context.Context, in CreateVendorInput) (Vendor, error
 				return ErrDuplicateDomain
 			}
 			return fmt.Errorf("create vendor: %w", err)
+		}
+		if err := auditOwnerChange(ctx, q, tenantID, in.Actor,
+			ownerStateOf(vendorID, nil, ""),
+			ownerStateOf(vendorID, in.OwnerUserID, in.OwnerUser)); err != nil {
+			return err
 		}
 		if err := bindScopeCells(ctx, q, tenantID, vendorID, in.ScopeCellIDs); err != nil {
 			return err
@@ -111,8 +121,25 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 	if in.Status == "" {
 		in.Status = StatusActive
 	}
+	normalizeOwner(&in)
 	var out Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		current, err := q.GetVendor(ctx, dbx.GetVendorParams{TenantID: pgUUID(tenantID), ID: pgUUID(id)})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrVendorNotFound
+			}
+			return fmt.Errorf("get vendor: %w", err)
+		}
+		before := ownerStateOf(id, uuidPtr(current.OwnerUserID), current.OwnerUser)
+		after := ownerStateOf(id, in.OwnerUserID, in.OwnerUser)
+		// Only a newly named owner is checked, so an edit of another field
+		// is not refused because the owner was disabled since.
+		if !before.equal(after) {
+			if err := checkOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
+				return err
+			}
+		}
 		window, err := initialReviewDays(ctx, q, tenantID)
 		if err != nil {
 			return err
@@ -141,6 +168,7 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 			CostOwner:        strings.TrimSpace(in.CostOwner),
 			CommercialStatus: dbx.VendorCommercialStatus(in.Status),
 			BillingCadence:   pgBillingCadence(in.BillingCadence),
+			OwnerUserID:      pgUUIDPtr(in.OwnerUserID),
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -151,6 +179,9 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 				return ErrDuplicateDomain
 			}
 			return fmt.Errorf("update vendor: %w", err)
+		}
+		if err := auditOwnerChange(ctx, q, tenantID, in.Actor, before, after); err != nil {
+			return err
 		}
 		// Re-bind scope cells: clear then add. Same tx so failure rolls
 		// back the partial state.
@@ -409,6 +440,7 @@ func hydrate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, r dbx.Vend
 		ReviewCadence:  ReviewCadence(r.ReviewCadence),
 		LastReviewDate: fromPgDate(r.LastReviewDate),
 		OwnerUser:      r.OwnerUser,
+		OwnerUserID:    uuidPtr(r.OwnerUserID),
 		LinkedSOWURI:   r.LinkedSowUri,
 		Notes:          r.Notes,
 		AnnualCost:     r.AnnualCost,

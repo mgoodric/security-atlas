@@ -186,7 +186,11 @@ type Vendor struct {
 	DPASignedAt    *time.Time
 	ReviewCadence  ReviewCadence
 	LastReviewDate *time.Time
-	OwnerUser      string
+	// OwnerUser is the free-text owner; while OwnerUserID is nil, non-empty
+	// text is the "Owner (unlinked)" (#2129).
+	OwnerUser string
+	// OwnerUserID is the owner, a user of the vendor's tenant (#2129).
+	OwnerUserID    *uuid.UUID
 	LinkedSOWURI   *string
 	Notes          string
 	AnnualCost     *float64
@@ -268,6 +272,9 @@ type CreateVendorInput struct {
 	ReviewCadence  ReviewCadence
 	LastReviewDate *time.Time
 	OwnerUser      string
+	// OwnerUserID is the owner, an active user of the tenant (#2129). When
+	// set, OwnerUser is not stored.
+	OwnerUserID    *uuid.UUID
 	LinkedSOWURI   *string
 	Notes          string
 	AnnualCost     *float64
@@ -280,6 +287,9 @@ type CreateVendorInput struct {
 	Status         CommercialStatus
 	BillingCadence *BillingCadence
 	ScopeCellIDs   []uuid.UUID
+	// Actor names the caller on the owner audit row (#2129); uuid.Nil for
+	// a caller that is not a user.
+	Actor uuid.UUID
 }
 
 // UpdateVendorInput mirrors CreateVendorInput. UPDATE in slice 024 is a

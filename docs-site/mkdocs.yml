@@ -122,6 +122,11 @@ nav:
       - Tenants: help/admin-tenants.md
       - Super admins: help/admin-super-admins.md
       - Demo data: help/admin-demo.md
+      - Audit periods: help/audits.md
+      - Framework scopes: help/framework-scopes.md
+      - Board packs: help/board-packs.md
+      - CSF assessment: help/csf.md
+      - Vendor claims: help/vendor-claims.md
   - Audit logs: audit-logs.md
   - Operations:
       - Backup and restore: backup-restore.md

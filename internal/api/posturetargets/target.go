@@ -12,7 +12,7 @@
 //
 // Every signed-in role may read a target. Only admin and grc_engineer may
 // set one: OPA admits the write on the framework-scopes resource to those
-// two roles, and the handler checks it again (hasTargetAdmin), as the
+// two roles, and the handler checks it again (authz.IsTenantApprover), as the
 // risk-taxonomy writes do. There is no "GRC lead" role; the ticket's GRC
 // lead is grc_engineer.
 //

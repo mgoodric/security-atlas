@@ -18,6 +18,7 @@ import Link from "next/link";
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import { treatmentBadge } from "@/components/dashboard/treatment-badge";
 import { Badge } from "@/components/ui/badge";
+import { Person } from "@/components/ui/person";
 import type { DashboardRisk } from "@/lib/api/dashboard";
 import { enumLabel } from "@/lib/labels/enum-labels";
 
@@ -76,7 +77,13 @@ export function TopRisksPanel({
                   </Badge>
                 </div>
                 <div className="col-span-3 truncate text-xs text-muted-foreground">
-                  {risk.treatment_owner || "unassigned"}
+                  {risk.owner_user_id ? (
+                    <Person id={risk.owner_user_id} />
+                  ) : risk.owner_unlinked ? (
+                    `${risk.owner_unlinked} (unlinked)`
+                  ) : (
+                    "unassigned"
+                  )}
                 </div>
               </li>
             );

@@ -10,9 +10,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
-	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -23,26 +23,6 @@ type Handler struct {
 
 // New constructs a Handler.
 func New(store *Store) *Handler { return &Handler{store: store} }
-
-// hasTargetAdmin reports whether cred may set a posture target: admin or
-// grc_engineer. It reads the credential as the risk-taxonomy guard does:
-// the platform-admin and approver flags (a browser session's super-admin
-// sets both), then the tenant role list a JWT carries in OwnerRoles.
-// IsApprover alone is kept on purpose: for a bearer credential
-// authz.derivedRolesFor reads it as grc_engineer, so OPA admits that
-// credential's PUT, and refusing it here would make the two layers
-// disagree.
-func hasTargetAdmin(c credstore.Credential) bool {
-	if c.IsAdmin || c.IsApprover {
-		return true
-	}
-	for _, role := range c.OwnerRoles {
-		if role == "admin" || role == "grc_engineer" {
-			return true
-		}
-	}
-	return false
-}
 
 // Get handles GET /v1/framework-scopes/posture-targets/{framework_version_id}.
 // 404 when no target is set.
@@ -68,7 +48,7 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cred, _ := authctx.CredentialFromContext(r.Context())
-	if !hasTargetAdmin(cred) {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required to set a posture target")
 		return
 	}
