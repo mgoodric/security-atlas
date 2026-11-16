@@ -378,7 +378,7 @@ func TestBuildStorageRecord_Shape(t *testing.T) {
 		MinimumTLSVersion: "TLS1_2", AllowBlobPublicAccess: false,
 		Result: storage.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildStorageRecord(c, "prod", "scf:CRY-04")
+	rec, err := buildStorageRecord(c, "prod", "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildStorageRecord: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestBuildStorageRecord_OmitsEmptyOptionals(t *testing.T) {
 		EncryptionEnabled: true, HTTPSTrafficOnly: true,
 		Result: storage.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildStorageRecord(c, "prod", "scf:CRY-04")
+	rec, _ := buildStorageRecord(c, "prod", "scf:CRY-07")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location", "encryption_key_source", "minimum_tls_version"} {
 		if _, ok := pl[k]; ok {

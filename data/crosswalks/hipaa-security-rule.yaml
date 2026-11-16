@@ -564,10 +564,10 @@ mappings:
     strength: 0.85
     rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Automatic Logoff (electronic procedures that terminate an electronic session after a predetermined time of inactivity) IS session termination; IAC-01, the domain policy head, badly over-covered it. CFG-04.5 Session Termination is the direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 10."
   - requirement_code: "164.312(a)(2)(iv)"
-    scf_anchor: "CRY-04"
+    scf_anchor: "CRY-07"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Encryption and Decryption of ePHI at rest maps directly to SCF Encryption At Rest."
+    rationale: "Encryption and Decryption of ePHI at rest maps directly to SCF Encrypting Data At Rest."
   - requirement_code: "164.312(b)"
     scf_anchor: "MON-04"
     relationship_type: "equal"
@@ -579,10 +579,10 @@ mappings:
     strength: 0.8
     rationale: "Slice 567 re-point (was DCH-01 @ 0.65; the palette-bound row slice 481 D7 flagged and slice 516 D5 held). Integrity (protect ePHI from improper alteration or destruction) is a data-integrity control, not a classification-and-handling one; DCH-01 was the covering anchor only because no integrity anchor existed. DCH-05 Data Integrity is the policy-level integrity anchor; 164.312(c)(2) carries the cryptographic mechanism that implements it. Lift 0.65 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 11."
   - requirement_code: "164.312(c)(2)"
-    scf_anchor: "CRY-11"
+    scf_anchor: "CRY-14"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Slice 567 re-point (was DCH-01 @ 0.60). Mechanism to Authenticate ePHI (electronic mechanisms to corroborate that ePHI has not been altered or destroyed in an unauthorized manner) is the cryptographic verification mechanism — hashing, digital signatures — that implements 164.312(c)(1)'s integrity obligation. CRY-11 Cryptographic Integrity Verification keeps the mechanism distinct from the policy-level DCH-05 anchor rather than collapsing both onto one row. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 12."
+    rationale: "Slice 567 re-point (was DCH-01 @ 0.60). Mechanism to Authenticate ePHI (electronic mechanisms to corroborate that ePHI has not been altered or destroyed in an unauthorized manner) is the cryptographic verification mechanism — hashing, digital signatures — that implements 164.312(c)(1)'s integrity obligation. CRY-14 Cryptographic Hash keeps the mechanism distinct from the policy-level DCH-05 anchor rather than collapsing both onto one row. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 12."
   - requirement_code: "164.312(d)"
     scf_anchor: "IAC-01"
     relationship_type: "subset_of"
@@ -594,15 +594,15 @@ mappings:
     strength: 0.7
     rationale: "Transmission Security (guard against unauthorized access to ePHI in transit) overlaps SCF Boundary Protection; the cryptographic facet sits in 164.312(e)(2)(ii) (MEDIUM)."
   - requirement_code: "164.312(e)(2)(i)"
-    scf_anchor: "CRY-12"
+    scf_anchor: "CRY-06"
     relationship_type: "subset_of"
     strength: 0.85
-    rationale: "Slice 567 re-point (was NET-04 @ 0.60). Integrity Controls (Transmission) requires that transmitted ePHI is not improperly modified without detection — modification DETECTION in transit, not perimeter enforcement. Boundary protection answered a different question. CRY-12 Transmission Integrity is the on-point anchor. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 13."
+    rationale: "Slice 567 re-point (was NET-04 @ 0.60). Integrity Controls (Transmission) requires that transmitted ePHI is not improperly modified without detection — modification DETECTION in transit, not perimeter enforcement. Boundary protection answered a different question. CRY-06 Integrity of Data In Transit is the on-point anchor. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 13."
   - requirement_code: "164.312(e)(2)(ii)"
-    scf_anchor: "CRY-08"
+    scf_anchor: "CRY-05"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Encryption (Transmission) maps directly to SCF Encryption In Transit."
+    rationale: "Encryption (Transmission) maps directly to SCF Encrypting Data In Transit."
 
   # ===== ORGANIZATIONAL REQUIREMENTS (§164.314) → SCF =====
   # New in slice 516. All resolve to the Third-Party Management family (TPM-*) —

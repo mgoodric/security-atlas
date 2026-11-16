@@ -121,7 +121,7 @@ func DefaultSeed() []KindVersion {
 		// traffic contents; read-only (never mutates a network resource).
 		{Kind: "azure.nsg_rules.v1", Version: "1.0.0"},
 		// Slice 521: Azure connector Key-Vault access-policy / RBAC posture
-		// (secrets-management / least-privilege controls: SCF IAC-10 / CRY-09).
+		// (secrets-management / least-privilege controls: SCF IAC-10 / CRY-10).
 		// ARM Reader only — management-plane CONFIGURATION + access-policy /
 		// role-assignment METADATA only, NEVER a secret/key/certificate VALUE
 		// (the connector never touches the Key-Vault data plane and is never
@@ -164,9 +164,9 @@ func DefaultSeed() []KindVersion {
 		// a Secret VALUE (.data / .stringData, raw or base64). The collector
 		// struct physically cannot hold a value; a reflection guard + a
 		// fixture-with-real-data drop test fail the build if one is added.
-		// Anchors CRY-01 (cryptographic controls) + CRY-09 (key management); the
+		// Anchors CRY-02 (cryptographic controls) + CRY-10 (key management); the
 		// spec's candidate IAC-22 is absent from the bundled SCF catalog, so
-		// CRY-09 — the closest real anchor for secret-material lifecycle — is used
+		// CRY-10 — the closest real anchor for secret-material lifecycle — is used
 		// (decisions-log D2).
 		{Kind: "k8s.secret_inventory.v1", Version: "1.0.0"},
 		// Slice 652: Kubernetes connector admission-webhook + policy-engine evidence
@@ -330,7 +330,7 @@ func DefaultSeed() []KindVersion {
 		//     privileged-access anchor — is the primary (decisions-log D3).
 		//   - storage_bucket_config: bucket hardening evidence (encryption,
 		//     public-access prevention, uniform access, versioning, retention).
-		//     Anchors CRY-04 (Encryption At Rest) + NET-04 (Boundary Protection
+		//     Anchors CRY-07 (Encrypting Data At Rest) + NET-04 (Boundary Protection
 		//     — the public-access dimension); the SAME pair the analogous
 		//     azure.storage_account_config.v1 kind uses.
 		{Kind: "gcp.iam_policy_binding.v1", Version: "1.0.0"},

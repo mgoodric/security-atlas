@@ -729,17 +729,17 @@ mappings:
     strength: 0.8
     rationale: "Role-based training for specialized/privileged roles is a subset of SCF Security Awareness Training."
   - requirement_code: "PR.DS-01"
-    scf_anchor: "CRY-04"
+    scf_anchor: "CRY-07"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Protecting data-at-rest is covered by SCF Encryption At Rest (CSF outcome is broader than encryption alone)."
+    rationale: "Protecting data-at-rest is covered by SCF Encrypting Data At Rest (CSF outcome is broader than encryption alone)."
   - requirement_code: "PR.DS-02"
-    scf_anchor: "CRY-08"
+    scf_anchor: "CRY-05"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Protecting data-in-transit is covered by SCF Encryption In Transit (CSF outcome is broader than encryption alone)."
+    rationale: "Protecting data-in-transit is covered by SCF Encrypting Data In Transit (CSF outcome is broader than encryption alone)."
   - requirement_code: "PR.DS-10"
-    scf_anchor: "CRY-01"
+    scf_anchor: "CRY-02"
     relationship_type: "intersects_with"
     strength: 0.55
     rationale: "Protecting data-in-use overlaps SCF Use of Cryptographic Controls (the broadest crypto-protection anchor); confidential-compute/data-in-use specificity is absent from the sample fixture (LOW)."
