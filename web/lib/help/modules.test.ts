@@ -188,6 +188,31 @@ describe("the real help files", () => {
     expect(helpModuleForPath(route)?.id).toBe(id);
   });
 
+  // #2152 — every Audit page resolves to its own module.
+  it.each([
+    ["/audits", "audits"],
+    ["/audits/new", "audits"],
+    ["/audits/abc", "audits"],
+    ["/framework-scopes", "framework-scopes"],
+    ["/framework-scopes/new", "framework-scopes"],
+    ["/board-packs", "board-packs"],
+    ["/board-packs/abc", "board-packs"],
+    ["/csf/abc", "csf"],
+    ["/oscal/component-definitions", "vendor-claims"],
+    ["/oscal/component-definitions/abc", "vendor-claims"],
+  ])("covers %s with the %s help", (route, id) => {
+    expect(helpModuleForPath(route)?.id).toBe(id);
+  });
+
+  // #2152 — the audit-period and framework-scope lifecycles are embedded.
+  it.each([
+    ["audits", "audit_period"],
+    ["framework-scopes", "framework_scope"],
+  ])("embeds the %s lifecycle diagram", (id, lifecycle) => {
+    const mod = HELP_MODULES.find((m) => m.id === id);
+    expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual([lifecycle]);
+  });
+
   // #2145 — a module's hint dismissal is refused unless its id is in
   // userprefs.HintModules and the migration's CHECK, so the three lists
   // move together.

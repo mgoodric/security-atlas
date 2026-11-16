@@ -100,6 +100,15 @@ import {
 } from "./format";
 import { pageTitle } from "@/lib/page-titles";
 import { Person } from "@/components/ui/person";
+import { Term } from "@/components/help/term";
+
+// #2152: the subtitle names the module's key terms.
+const SUBTITLE = (
+  <>
+    <Term id="audit-period">Period</Term>-level index — open a period for the
+    per-control walk-through of its <Term id="sample">samples</Term>
+  </>
+);
 
 const FILTER_KEYS: (keyof AuditFilters)[] = ["framework", "status", "year"];
 
@@ -471,7 +480,7 @@ function AuditsPageInner() {
     return (
       <ListPage
         title={pageTitle("/audits")}
-        subtitle="Period-level index — open a period for the per-control walk-through"
+        subtitle={SUBTITLE}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -488,7 +497,7 @@ function AuditsPageInner() {
     return (
       <ListPage
         title={pageTitle("/audits")}
-        subtitle="Period-level index — open a period for the per-control walk-through"
+        subtitle={SUBTITLE}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="audits-load-error">
@@ -566,7 +575,7 @@ function AuditsPageInner() {
     <ListPage
       title={pageTitle("/audits")}
       titleAdornment={titleAdornment}
-      subtitle="Period-level index — open a period for the per-control walk-through"
+      subtitle={SUBTITLE}
       actions={actions}
       filterRow={
         <FilterPills
