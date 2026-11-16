@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -331,7 +332,58 @@ type UpdateInput struct {
 // Update applies the non-nil fields and writes an audit row. A status change
 // writes a `status_changed` row; a non-status edit writes `updated`. An
 // illegal transition returns ErrIllegalTransition (422) before any write.
+//
+// Update never moves a plan to verified: an approver verifies a plan with
+// no linked controls through Verify (#2108), and the platform verifies the
+// rest from their controls' evaluations (#2109).
 func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (ActionPlan, error) {
+	if in.Status != nil && *in.Status == StatusVerified {
+		return ActionPlan{}, ErrVerifyThroughVerify
+	}
+	return s.update(ctx, id, in, nil)
+}
+
+// Verify moves a completed plan with no linked controls to verified (#2108).
+// approver is the person verifying, and the role check is the caller's.
+// The plan's owner never verifies it, whatever the organisation's
+// self-approval setting: the rule is approval.Check with self-approval off.
+// A plan with linked controls is refused with ErrVerifyHasControls; its
+// controls' evaluations verify it. The status change writes one
+// status_changed audit row, in the same transaction, actor the approver.
+func (s *Store) Verify(ctx context.Context, id uuid.UUID, approver approval.Approver) (ActionPlan, error) {
+	actor, err := uuid.Parse(approver.UserID)
+	if err != nil {
+		return ActionPlan{}, ErrVerifierNotPerson
+	}
+	status := StatusVerified
+	in := UpdateInput{Status: &status, Actor: actor}
+	return s.update(ctx, id, in, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, cur ActionPlan) error {
+		if cur.Status != StatusCompleted {
+			return ErrIllegalTransition
+		}
+		n, err := q.CountActionPlanControls(ctx, dbx.CountActionPlanControlsParams{
+			TenantID:     pgUUID(tenantID),
+			ActionPlanID: pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("count linked controls (verify): %w", err)
+		}
+		if n > 0 {
+			return ErrVerifyHasControls
+		}
+		if _, err := approval.Check(cur.OwnerID.String(), approver, false); err != nil {
+			if errors.Is(err, approval.ErrNotPerson) {
+				return ErrVerifierNotPerson
+			}
+			return ErrOwnerCannotVerify
+		}
+		return nil
+	})
+}
+
+// update applies in, after guard (when set) accepts the current row inside
+// the same transaction.
+func (s *Store) update(ctx context.Context, id uuid.UUID, in UpdateInput, guard func(context.Context, *dbx.Queries, uuid.UUID, ActionPlan) error) (ActionPlan, error) {
 	if in.Title != nil {
 		if err := ValidateTitle(*in.Title); err != nil {
 			return ActionPlan{}, err
@@ -367,6 +419,11 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (Actio
 			return fmt.Errorf("get action plan (update): %w", err)
 		}
 		cur := planFromRow(before)
+		if guard != nil {
+			if err := guard(ctx, q, tenantID, cur); err != nil {
+				return err
+			}
+		}
 
 		next := cur
 		statusChanged := false

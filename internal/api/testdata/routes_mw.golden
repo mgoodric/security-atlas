@@ -264,6 +264,7 @@ POST /scim/v2/Users 10
 POST /v1/action-plans 9
 POST /v1/action-plans/{id}/controls/{control_id} 9
 POST /v1/action-plans/{id}/risks/{risk_id} 9
+POST /v1/action-plans/{id}/verify 9
 POST /v1/admin/authz-bundle/reload 9
 POST /v1/admin/credentials 9
 POST /v1/admin/credentials/{id}/revoke 9
