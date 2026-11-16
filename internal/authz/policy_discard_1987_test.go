@@ -29,6 +29,12 @@ func TestPolicyDiscard1987_SameAdmitSetAsCreate(t *testing.T) {
 	}
 	create := build(http.MethodPost, "/v1/policies")
 	discard := build(http.MethodDelete, "/v1/policies/6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c1987")
+	// #2116: PATCH /v1/policies/{id} edits a draft with the same role.
+	edit := build(http.MethodPatch, "/v1/policies/6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c1987")
+	if edit.Action != create.Action || edit.Resource.Type != create.Resource.Type {
+		t.Fatalf("edit derives %s on %s; create derives %s on %s",
+			edit.Action, edit.Resource.Type, create.Action, create.Resource.Type)
+	}
 	if discard.Action != create.Action || discard.Resource.Type != create.Resource.Type {
 		t.Fatalf("discard derives %s on %s; create derives %s on %s",
 			discard.Action, discard.Resource.Type, create.Action, create.Resource.Type)
@@ -49,7 +55,7 @@ func TestPolicyDiscard1987_SameAdmitSetAsCreate(t *testing.T) {
 		{"viewer", []authz.Role{authz.RoleViewer}, false},
 		{"no_role", []authz.Role{}, false},
 	} {
-		for name, in := range map[string]authz.Input{"create": create, "discard": discard} {
+		for name, in := range map[string]authz.Input{"create": create, "discard": discard, "edit": edit} {
 			in.User.Roles = c.roles
 			d, err := e.Decide(context.Background(), in)
 			if err != nil {

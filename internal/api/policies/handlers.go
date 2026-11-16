@@ -729,6 +729,69 @@ func (h *Handler) DiscardDraft(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// updateDraftReq is the PATCH /v1/policies/{id} body: every editable field,
+// replaced whole. version and predecessor_id are fixed at create.
+type updateDraftReq struct {
+	Title                       string   `json:"title"`
+	BodyMd                      string   `json:"body_md"`
+	OwnerRole                   string   `json:"owner_role"`
+	ApproverRole                string   `json:"approver_role"`
+	LinkedControlIDs            []string `json:"linked_control_ids"`
+	AcknowledgmentRequiredRoles []string `json:"acknowledgment_required_roles"`
+}
+
+// UpdateDraft handles PATCH /v1/policies/{id} (#2116). It edits a policy
+// only while it is a draft, with the same role as create and discard: any
+// credential in the tenant. A policy that has left draft answers 409; a
+// published policy changes through a new version (predecessor_id).
+func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
+	ctx, _, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req updateDraftReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids contains invalid UUID: "+err.Error())
+		return
+	}
+	updated, err := h.store.UpdateDraft(ctx, id, policy.UpdateDraftInput{
+		Title:                       req.Title,
+		BodyMd:                      req.BodyMd,
+		OwnerRole:                   req.OwnerRole,
+		ApproverRole:                req.ApproverRole,
+		LinkedControlIDs:            linkedIDs,
+		AcknowledgmentRequiredRoles: req.AcknowledgmentRequiredRoles,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, policy.ErrTitleRequired),
+			errors.Is(err, policy.ErrBodyRequired),
+			errors.Is(err, policy.ErrOwnerRoleRequired),
+			errors.Is(err, policy.ErrApproverRoleRequired):
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrWrongState):
+			httpresp.WriteError(w, http.StatusConflict, "only a draft policy can be edited; create a new version of a published policy")
+		default:
+			httperr.WriteInternal(w, r, "update policy draft", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
+}
+
 // PDF handles GET /v1/policies/{id}/pdf (AC-5). Returns
 // application/pdf. The render path is real (not a stub); the integration
 // test asserts the leading `%PDF-` magic bytes.

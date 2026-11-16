@@ -733,6 +733,66 @@ func (s *Store) DiscardDraft(ctx context.Context, id uuid.UUID, actor string) (P
 	return out, err
 }
 
+// UpdateDraftInput is the API shape for PATCH /v1/policies/{id} (#2116):
+// the fields a draft's author may change before submitting it. The
+// version, predecessor and source attribution are fixed at create.
+type UpdateDraftInput struct {
+	Title                       string
+	BodyMd                      string
+	OwnerRole                   string
+	ApproverRole                string
+	LinkedControlIDs            []uuid.UUID
+	AcknowledgmentRequiredRoles []string
+}
+
+// UpdateDraft rewrites a draft's editable fields in place. ErrNotFound when
+// the id does not resolve; ErrWrongState once the policy has left draft, so
+// a published policy changes only through a new version.
+func (s *Store) UpdateDraft(ctx context.Context, id uuid.UUID, in UpdateDraftInput) (Policy, error) {
+	if err := validateUpdateDraft(in); err != nil {
+		return Policy{}, err
+	}
+	links := in.LinkedControlIDs
+	if links == nil {
+		links = []uuid.UUID{}
+	}
+	ackRoles := in.AcknowledgmentRequiredRoles
+	if ackRoles == nil {
+		ackRoles = []string{}
+	}
+	return s.transition(ctx, id, transitionParams{
+		expectedPrior: StateDraft,
+		newState:      StateDraft,
+		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Policy, error) {
+			return q.UpdateDraftPolicy(ctx, dbx.UpdateDraftPolicyParams{
+				TenantID:                    pgUUID(tenantID),
+				ID:                          pgUUID(id),
+				Title:                       in.Title,
+				BodyMd:                      in.BodyMd,
+				OwnerRole:                   in.OwnerRole,
+				ApproverRole:                in.ApproverRole,
+				LinkedControlIds:            uuidsToPg(links),
+				AcknowledgmentRequiredRoles: ackRoles,
+			})
+		},
+	})
+}
+
+// validateUpdateDraft holds an edit to the same required fields as create.
+func validateUpdateDraft(in UpdateDraftInput) error {
+	switch {
+	case in.Title == "":
+		return ErrTitleRequired
+	case in.BodyMd == "":
+		return ErrBodyRequired
+	case in.OwnerRole == "":
+		return ErrOwnerRoleRequired
+	case in.ApproverRole == "":
+		return ErrApproverRoleRequired
+	}
+	return nil
+}
+
 // VersionChain returns the version history for a policy id, oldest first.
 func (s *Store) VersionChain(ctx context.Context, id uuid.UUID) ([]Policy, error) {
 	var out []Policy

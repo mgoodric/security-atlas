@@ -105,36 +105,5 @@ export const POLICIES_ACK_REPORT_FUTURE_TESTID = "policies-ack-report-future";
 export const POLICIES_ACK_REPORT_FUTURE_REASON =
   "The in-app acknowledgment report is not available yet — until then, per-policy ack rates surface in the Acknowledgment column on this page.";
 
-/**
- * Test-id token surfaced on the `<span>` that replaces the
- * formerly-disabled "New policy" button.
- *
- * Pinned by `header-cta-future.test.ts` (AC-4 of slice 241).
- */
-export const POLICIES_NEW_POLICY_FUTURE_TESTID = "policies-new-policy-future";
-
-/**
- * The disclosure copy rendered as the visible text AND as `title`
- * + `aria-label` on the `<span>` that replaces the formerly-
- * disabled "New policy" button. Single source of truth — the
- * page imports it directly.
- *
- * Copy discipline mirrors slice 242 D2 / D3 for cross-slice
- * coherence — both surfaces (this header CTA and the empty-state
- * disclosure) point the operator at the same `POST /v1/policies`
- * platform API endpoint as the next concrete action. When the
- * in-app `/policies/new` form ships, both disclosures retire
- * together.
- *
- * Copy discipline:
- *   * Future-tense framing — "ships with a future slice".
- *   * Names the capability ("policy-create form") rather than a
- *     specific tracking issue number.
- *   * Names the operator's next concrete action — asking an
- *     administrator, who can add policies (#2082: no API paths in UI copy).
- *   * Sentence-shaped (capitalized, ends with a period).
- *   * The substring "policy-create form" is load-bearing — AC-4's
- *     Playwright spec asserts on it.
- */
-export const POLICIES_NEW_POLICY_FUTURE_REASON =
-  "The in-app policy-create form is not available yet. An administrator can add policies for you in the meantime.";
+// The "New policy" disclosure retired with #2116: `/policies/new` exists,
+// so the header links to it.
