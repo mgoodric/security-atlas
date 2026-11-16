@@ -180,6 +180,9 @@ export const KIND_TEMPLATES: Record<AuditLogKind, Template | typeof GENERIC> = {
   mapping_overlay: lifecycle("mapping overlay edge"),
   control_import: lifecycle("imported control row"),
   risk: (row) => sentence(row, RISK_PHRASES[row.action] ?? "changed", "risk"),
+  // #2136: the one action is `set`; the target is the framework version.
+  posture_target: (row) =>
+    sentence(row, "set the posture target for", "framework version"),
 };
 
 function isKnownKind(kind: string): kind is AuditLogKind {
