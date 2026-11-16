@@ -139,8 +139,8 @@ describe("GET /api/search", () => {
             {
               id: "00000000-0000-0000-0000-0000000000a1",
               type: "anchors",
-              title: "CRY-04 — Encryption At Rest",
-              snippet: "CRY-04 — Encryption At Rest",
+              title: "CRY-07 — Encryption At Rest",
+              snippet: "CRY-07 — Encryption At Rest",
               relevance_score: 1.0,
             },
           ],
@@ -152,7 +152,7 @@ describe("GET /api/search", () => {
     });
 
     const req = makeReq(
-      "http://localhost:3000/api/search?q=CRY-04&types=anchors&limit=10",
+      "http://localhost:3000/api/search?q=CRY-07&types=anchors&limit=10",
     ) as unknown as Parameters<typeof GET>[0];
     const res = await GET(req);
     expect(res.status).toBe(200);
@@ -276,7 +276,7 @@ describe("GET /api/search — 398a contract (slice 398b)", () => {
               id: "00000000-0000-0000-0000-0000000000e1",
               type: "evidence",
               title: "kms.key_rotation",
-              snippet: "kms.key_rotation — CRY-04",
+              snippet: "kms.key_rotation — CRY-07",
               relevance_score: 0.75,
             },
             {

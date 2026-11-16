@@ -258,7 +258,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if len(inventory) != 1 || inventory[0].AgeDays != 30 {
 		t.Fatalf("secret inventory wrong: %+v", inventory)
 	}
-	secRec, err := buildSecretMetaRecord(inventory[0], "cluster-1", "prod", "scf:CRY-01")
+	secRec, err := buildSecretMetaRecord(inventory[0], "cluster-1", "prod", "scf:CRY-02")
 	if err != nil {
 		t.Fatalf("buildSecretMetaRecord: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 			CreatedAt: time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC), KeyNames: []string{"tls.crt", "tls.key", "token"}},
 	}}
 	inv, _ := secretmeta.Collect(context.Background(), secAPI, fixed)
-	secRec, _ := buildSecretMetaRecord(inv[0], "cluster-1", "prod", "scf:CRY-01")
+	secRec, _ := buildSecretMetaRecord(inv[0], "cluster-1", "prod", "scf:CRY-02")
 	secretAllowed := map[string]bool{
 		"namespace": true, "secret_name": true, "secret_type": true,
 		"age_days": true, "key_count": true, "created_at": true, "key_names": true,

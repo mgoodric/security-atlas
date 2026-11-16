@@ -182,6 +182,48 @@
       "from": "CLD-09",
       "to": "TPM-10",
       "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-01",
+      "to": "CRY-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-04",
+      "to": "CRY-07",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-08",
+      "to": "CRY-05",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-09",
+      "to": "CRY-10",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-11",
+      "to": "CRY-14",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CRY-12",
+      "to": "CRY-06",
+      "basis": "concept"
     }
   ]
 }

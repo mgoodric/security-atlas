@@ -4,7 +4,7 @@
   "x-evidence-kind": "gcp.storage_bucket_config.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["CRY-04", "NET-04"],
+  "x-default-scf-anchors": ["CRY-07", "NET-04"],
   "title": "GCP Cloud Storage bucket configuration",
   "description": "Per-bucket hardening posture captured read-only from the Cloud Storage JSON API buckets.list (roles/storage.bucketViewer, projection=noAcl): encryption (default CMEK key), public-access-prevention, uniform bucket-level access, object versioning, and retention-policy duration. Bucket CONFIGURATION only — never the contents of any stored object, never an ACL entry, never a signed-URL secret. The connector never touches the object data plane.",
   "type": "object",

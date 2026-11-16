@@ -103,7 +103,7 @@ func okFlags() runFlags {
 		roleARN:     "arn:aws:iam::111122223333:role/test",
 		region:      "us-east-1",
 		environment: "test",
-		controlID:   "scf:CRY-04",
+		controlID:   "scf:CRY-07",
 	}
 }
 
@@ -313,15 +313,15 @@ func TestBuildRecord_StablePayloadShape(t *testing.T) {
 		Reason:           "",
 	}
 	identity := awsauth.Identity{AccountID: "111122223333", Environment: "prod", Source: "flag"}
-	rec, err := buildRecord(state, identity, "scf:CRY-04")
+	rec, err := buildRecord(state, identity, "scf:CRY-07")
 	if err != nil {
 		t.Fatalf("buildRecord: %v", err)
 	}
 	if rec.EvidenceKind != SupportedKind {
 		t.Errorf("EvidenceKind = %q; want %q", rec.EvidenceKind, SupportedKind)
 	}
-	if rec.ControlId != "scf:CRY-04" {
-		t.Errorf("ControlId = %q; want scf:CRY-04", rec.ControlId)
+	if rec.ControlId != "scf:CRY-07" {
+		t.Errorf("ControlId = %q; want scf:CRY-07", rec.ControlId)
 	}
 	if rec.IdempotencyKey == "" {
 		t.Error("IdempotencyKey empty")
