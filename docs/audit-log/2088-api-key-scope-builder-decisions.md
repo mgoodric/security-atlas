@@ -48,6 +48,12 @@ schema. The dispatcher agreed.
 The picker's Everything is `{"op":"true"}`. The form sends `{}` instead,
 the column default and the value it always sent. #2435 defines `{}` as
 unrestricted. Both spellings already load as Everything in the picker.
+The picker's read-only view still prints `{"op":"true"}` for Everything.
+That's the same meaning, so the shared picker is left alone.
+
+The raw JSON toggle is disabled while "Choose by dimension" has no value
+picked. Opening that unfinished choice as JSON would show Everything and
+silently widen the key.
 
 ## D5 — Raw JSON stays open on a predicate the builder can't show
 

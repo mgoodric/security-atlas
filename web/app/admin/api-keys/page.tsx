@@ -33,13 +33,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ScopePicker } from "@/components/scope/scope-picker";
 import { EVERYTHING } from "@/components/scope/scope-picker-model";
-import {
-  advancedText,
-  parseAdvanced,
-} from "@/app/(authed)/framework-scopes/wizard";
+import { advancedText } from "@/app/(authed)/framework-scopes/wizard";
 import { fetchEvidenceKinds } from "@/lib/api/evidence-kinds";
 import {
   kindOptions,
+  parseRaw,
   predicateBody,
   rawToPicker,
   toggleKind,
@@ -395,24 +393,20 @@ function IssueForm({
   // Under raw JSON the predicate is the editor's text as written, so a
   // predicate the builder cannot show can still be issued. Text that is
   // not a JSON object blocks submit, as does an unfinished picker choice.
-  const rawParsed = raw
-    ? rawText.trim() === ""
-      ? ({ ok: true, predicate: EVERYTHING } as const)
-      : parseAdvanced(rawText)
-    : null;
-  const current: unknown = rawParsed
-    ? rawParsed.ok
-      ? rawParsed.predicate
+  const rawParse = raw ? parseRaw(rawText) : null;
+  const predicateToSend: unknown = rawParse
+    ? rawParse.ok
+      ? rawParse.predicate
       : null
     : predicate;
 
   function submit() {
-    if (current === null) {
-      if (rawParsed && !rawParsed.ok) setRawError(rawParsed.error);
+    if (predicateToSend === null) {
+      if (rawParse && !rawParse.ok) setRawError(rawParse.error);
       return;
     }
     onSubmit({
-      scope_predicate: predicateBody(current),
+      scope_predicate: predicateBody(predicateToSend),
       allowed_kinds: allowedKinds,
       ttl_seconds: ttlDays * 86400,
       is_admin: isAdmin,
@@ -441,6 +435,9 @@ function IssueForm({
               size="sm"
               variant="outline"
               aria-pressed={raw}
+              // An unfinished picker choice has no JSON to open; opening
+              // it as Everything would silently widen the key.
+              disabled={!raw && predicate === null}
               onClick={raw ? closeRaw : openRaw}
               data-testid="issue-scope-raw-toggle"
             >
@@ -511,7 +508,7 @@ function IssueForm({
           onClick={submit}
           // An unfinished picker choice says so under the picker; under raw
           // JSON a click shows why the text cannot be sent.
-          disabled={submitting || (!raw && current === null)}
+          disabled={submitting || (!raw && predicateToSend === null)}
           data-testid="issue-credential-submit"
         >
           {submitting ? "Issuing…" : "Issue credential"}
@@ -559,7 +556,7 @@ function KindsPicker({
   function addExtra() {
     const k = extra.trim();
     if (k === "") return;
-    if (!value.includes(k)) onChange(toggleKind(value, k, [...options, k]));
+    if (!value.includes(k)) onChange([...value, k]);
     setExtra("");
   }
 

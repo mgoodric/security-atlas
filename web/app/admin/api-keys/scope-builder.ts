@@ -10,7 +10,10 @@
 // Pure, so it is covered in the node vitest tier; `page.tsx` renders it.
 
 import { parseAdvanced } from "@/app/(authed)/framework-scopes/wizard";
-import { fromPredicate } from "@/components/scope/scope-picker-model";
+import {
+  EVERYTHING,
+  fromPredicate,
+} from "@/components/scope/scope-picker-model";
 
 /**
  * The scope_predicate string to send. Everything goes as `{}`, the
@@ -29,14 +32,23 @@ type RawRefused = { ok: false; error: string };
 export type RawToPicker = RawOk | RawRefused;
 
 /**
+ * Parses the raw JSON editor's text as written: blank is Everything, and
+ * anything else must be a JSON object. Used to issue from raw JSON, so a
+ * predicate the builder cannot show still goes through.
+ */
+export function parseRaw(text: string): RawToPicker {
+  if (text.trim() === "") return { ok: true, predicate: EVERYTHING };
+  return parseAdvanced(text);
+}
+
+/**
  * Parses the raw JSON editor's text for a switch back to the builder.
  * Blank text is Everything. A predicate the builder cannot show (any-of,
  * negation, a custom dimension, …) is refused with the reason, and the
  * editor stays open: the key can still be issued with it as written.
  */
 export function rawToPicker(text: string): RawToPicker {
-  if (text.trim() === "") return { ok: true, predicate: { op: "true" } };
-  const parsed = parseAdvanced(text);
+  const parsed = parseRaw(text);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const loaded = fromPredicate(parsed.predicate);
   if (loaded.kind === "advanced") {
