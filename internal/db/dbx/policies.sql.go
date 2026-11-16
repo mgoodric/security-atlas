@@ -1099,6 +1099,83 @@ func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePol
 	return i, err
 }
 
+const updateDraftPolicy = `-- name: UpdateDraftPolicy :one
+UPDATE policies
+SET title = $1,
+    body_md = $2,
+    owner_role = $3,
+    approver_role = $4,
+    linked_control_ids = $5,
+    acknowledgment_required_roles = $6,
+    updated_at = now()
+WHERE tenant_id = $7
+  AND id = $8
+  AND status = 'draft'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved
+`
+
+type UpdateDraftPolicyParams struct {
+	Title                       string        `json:"title"`
+	BodyMd                      string        `json:"body_md"`
+	OwnerRole                   string        `json:"owner_role"`
+	ApproverRole                string        `json:"approver_role"`
+	LinkedControlIds            []pgtype.UUID `json:"linked_control_ids"`
+	AcknowledgmentRequiredRoles []string      `json:"acknowledgment_required_roles"`
+	TenantID                    pgtype.UUID   `json:"tenant_id"`
+	ID                          pgtype.UUID   `json:"id"`
+}
+
+// #2116 — edit a draft in place. Only a row still in 'draft' matches, so a
+// submitted, approved, published or superseded policy is never rewritten
+// here: a published policy changes through a new version (predecessor_id).
+// version, predecessor_id and source_attribution are not editable.
+func (q *Queries) UpdateDraftPolicy(ctx context.Context, arg UpdateDraftPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, updateDraftPolicy,
+		arg.Title,
+		arg.BodyMd,
+		arg.OwnerRole,
+		arg.ApproverRole,
+		arg.LinkedControlIds,
+		arg.AcknowledgmentRequiredRoles,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+	)
+	return i, err
+}
+
 const updatePolicyNextReviewAt = `-- name: UpdatePolicyNextReviewAt :one
 UPDATE policies
 SET next_review_at = $1,

@@ -16,26 +16,48 @@
 // the only tenant context (cookie session -> upstream RLS, invariant
 // #6); the page never passes a tenant_id.
 //
-// Read-only (slice 672 anti-criteria): NO submit / approve / publish /
-// edit affordances. The PDF link (`/v1/policies/{id}/pdf`) is the one
-// outbound action — a same-origin link the reverse proxy routes to the
-// platform's chromedp renderer (D5 in the decisions log).
+// #2116 renders the page through the shared DetailHeader (parent #2071).
+// Its actions follow the workflow: a draft has Edit, Submit for review
+// and Discard (overflow, confirmed inline); a policy under review has
+// Approve; an approved one has Publish (its own form, for the effective
+// and review dates); a published one has Create new version, which opens
+// the create form as the draft's predecessor. One-click transitions
+// confirm inline, then toast. The platform enforces every rule: the
+// approval rule (the submitter cannot approve unless the organisation
+// allows self-approval, and then it is flagged), the draft-only edit and
+// discard, and the publish block on a policy with no linked control.
+// The PDF link (`/v1/policies/{id}/pdf`) is a same-origin link the
+// reverse proxy routes to the platform's chromedp renderer.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { use, useEffect } from "react";
+import { use, useEffect, useState } from "react";
 
+import { DetailHeader } from "@/components/detail/detail-header";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Timestamp } from "@/components/ui/timestamp";
+import { useToast } from "@/components/ui/toast";
 import { APIError } from "@/lib/api/base";
-import { fetchPolicyDetail } from "@/lib/api/policies";
+import {
+  discardPolicyDraft,
+  fetchPolicyDetail,
+  transitionPolicy,
+} from "@/lib/api/policies";
 import { Markdown } from "@/components/markdown";
+
+import {
+  isDraft,
+  needsControlsWarning,
+  NO_CONTROLS_WARNING,
+  primaryAction,
+} from "../lifecycle";
 
 function statusPillVariant(
   status: string,
@@ -70,6 +92,42 @@ export default function PolicyDetailPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [confirming, setConfirming] = useState<"submit" | "approve" | null>(
+    null,
+  );
+
+  const transition = useMutation({
+    mutationFn: (t: "submit" | "approve") => transitionPolicy(id, t),
+    onSuccess: async (_p, t) => {
+      setConfirming(null);
+      await qc.invalidateQueries({ queryKey: ["policy", id] });
+      void qc.invalidateQueries({ queryKey: ["policies"] });
+      toast(t === "submit" ? "Policy submitted for review" : "Policy approved");
+    },
+    onError: (err, t) => {
+      setConfirming(null);
+      toast(
+        `Could not ${t === "submit" ? "submit" : "approve"} policy: ${
+          (err as Error).message
+        }`,
+      );
+    },
+  });
+  const discard = useMutation({
+    mutationFn: () => discardPolicyDraft(id),
+    onSuccess: async () => {
+      // The cached detail is left alone: refetching it now would 404 into
+      // notFound() before the list loads.
+      await qc.invalidateQueries({ queryKey: ["policies"] });
+      toast("Draft discarded");
+      router.push("/policies");
+    },
+    onError: (err) => {
+      toast(`Could not discard draft: ${(err as Error).message}`);
+    },
+  });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["policy", id],
@@ -127,18 +185,64 @@ export default function PolicyDetailPage({
 
   const { policy, ack_rate } = data;
   const sourceHref = safeHttpUrl(policy.source_url);
+  const primary = primaryAction(policy);
+  const draft = isDraft(policy);
+  const busy = confirming !== null || transition.isPending || discard.isPending;
+  const base = `/policies/${encodeURIComponent(id)}`;
 
   return (
-    <PageShell
-      title={<span data-testid="policy-detail-title">{policy.title}</span>}
-      titleAdornment={
+    <DetailHeader
+      data-testid="policy-detail"
+      titleTestId="policy-detail-title"
+      back={<BackLink />}
+      title={policy.title}
+      edit={
+        draft
+          ? { href: `${base}/edit`, "data-testid": "policy-detail-edit" }
+          : undefined
+      }
+      primaryAction={
+        primary
+          ? {
+              label: primary.label,
+              ...("href" in primary
+                ? { href: primary.href }
+                : {
+                    onClick: () =>
+                      setConfirming(primary.kind as "submit" | "approve"),
+                  }),
+              disabled: busy,
+              "data-testid": `policy-action-${primary.kind}`,
+            }
+          : undefined
+      }
+      overflow={
+        draft
+          ? [
+              {
+                id: "discard",
+                label: "Discard draft",
+                destructive: true,
+                confirmPrompt:
+                  "Discard this draft? It is deleted; the discard is kept in the policy audit log.",
+                confirmLabel: "Discard",
+                disabledReason: busy
+                  ? "Finish the open confirmation first."
+                  : undefined,
+                onSelect: () => discard.mutate(),
+                "data-testid": "policy-action-discard",
+              },
+            ]
+          : []
+      }
+      status={
         <div className="flex flex-wrap items-center gap-2">
           <Badge
             variant={statusPillVariant(policy.status)}
             data-testid="policy-detail-status"
             className="capitalize"
           >
-            {policy.status}
+            {policy.status.replace("_", " ")}
           </Badge>
           <span
             className="font-mono text-xs text-muted-foreground"
@@ -247,9 +351,60 @@ export default function PolicyDetailPage({
           ) : null}
         </div>
       }
-      actions={<BackLink />}
-      data-testid="policy-detail"
     >
+      {confirming ? (
+        <ConfirmInline
+          prompt={
+            confirming === "submit"
+              ? "Submit this draft for review? It can no longer be edited; an approver approves it next."
+              : "Approve this policy? It can then be published."
+          }
+          confirmLabel={confirming === "submit" ? "Submit" : "Approve"}
+          busy={transition.isPending}
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => transition.mutate(confirming)}
+          data-testid="policy-action-confirm"
+        />
+      ) : null}
+
+      {needsControlsWarning(policy) ? (
+        <Alert data-testid="policy-detail-no-controls-warning">
+          <AlertTitle>No linked controls</AlertTitle>
+          <AlertDescription>{NO_CONTROLS_WARNING}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {policy.predecessor_id ? (
+        <p className="text-sm text-muted-foreground">
+          Revises{" "}
+          <Link
+            href={`/policies/${encodeURIComponent(policy.predecessor_id)}`}
+            className="text-primary hover:underline"
+            data-testid="policy-detail-predecessor"
+          >
+            the previous version
+          </Link>
+          .
+        </p>
+      ) : null}
+
+      <p className="text-sm" data-testid="policy-detail-linked-controls">
+        <span className="text-muted-foreground">Linked controls </span>
+        {policy.linked_control_ids.length === 0
+          ? "none"
+          : policy.linked_control_ids.map((cid, i) => (
+              <span key={cid}>
+                {i > 0 ? ", " : ""}
+                <Link
+                  href={`/controls/${encodeURIComponent(cid)}`}
+                  className="font-mono text-xs text-primary hover:underline"
+                >
+                  {cid}
+                </Link>
+              </span>
+            ))}
+      </p>
+
       {/* ============ ACK RATE (published only) ============ */}
       {ack_rate ? (
         <Card size="sm" data-testid="policy-detail-ack-rate">
@@ -304,7 +459,7 @@ export default function PolicyDetailPage({
           Download as PDF →
         </Link>
       </div>
-    </PageShell>
+    </DetailHeader>
   );
 }
 
