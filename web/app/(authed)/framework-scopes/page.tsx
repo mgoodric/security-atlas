@@ -93,7 +93,7 @@ export default function FrameworkScopesIndexPage() {
                         href={`/framework-scopes/${encodeURIComponent(
                           f.latest_version_id,
                         )}`}
-                        aria-label={`Open the ${f.name} scope`}
+                        aria-label={`Open scope: ${f.name}`}
                         className="underline underline-offset-2"
                       >
                         Open scope

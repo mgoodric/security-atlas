@@ -65,6 +65,34 @@ npm run test:e2e
 #  or headed:    npx playwright test --headed
 ```
 
+### The route sweep and its axe gate
+
+`route-sweep.spec.ts` visits every authenticated route (discovered from
+`web/app`, not listed by hand) at 1316px and 1200px. Besides the title,
+overflow and focus-ring checks, it **fails a route on any serious or
+critical axe violation** (#2097). The gate is `axe-gate.ts`;
+`axe-gate.spec.ts` proves it rejects a deliberately broken inline page
+and passes a clean one.
+
+```sh
+cd web
+# With the platform up and auth env set as in steps 2-3 above:
+npx playwright test e2e/route-sweep.spec.ts
+#  one route:      npx playwright test e2e/route-sweep.spec.ts -g '/calendar'
+#  the gate alone: npx playwright test e2e/axe-gate.spec.ts
+#                  (inline HTML, no seed data; the default config's
+#                  global setup still expects the platform up)
+```
+
+A failing route names each rule, its impact, the offending selectors and
+axe's fix summary in the assertion message. Every route also writes
+`web/axe-report/<route>.json` (pass or fail); CI uploads that directory
+as the `route-sweep-axe-report` artifact, so a CI failure can be read
+without a local bring-up. Fix the violation in the component or token
+that owns it. A per-route or per-rule exception needs a comment giving
+the reason and a follow-up issue link at the point of use; there are
+none today.
+
 ## Seed-harness contract for spec authors
 
 A spec's preconditions (the test user, tenant rows, seeded controls/evidence/policies it asserts against) MUST be establishable by the docker-compose bring-up the CI job uses. Concretely:
