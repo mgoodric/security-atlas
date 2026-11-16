@@ -47,12 +47,16 @@ VALUES (
     '00000000-0000-0000-0000-00000000d3a0',
     'Person names e2e period (2085)',
     '11111111-1111-1111-1111-111111110002',
-    '2026-10-01',
-    '2026-12-31',
+    -- In the past, so it never becomes the in-progress period the shared
+    -- top-bar pill shows (risks-top-bar.spec.ts pins that pill).
+    '2025-07-01',
+    '2025-09-30',
     'open',
     'user:44444444-4444-4444-4444-444444442085'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+    SET period_start = EXCLUDED.period_start,
+        period_end   = EXCLUDED.period_end;
 
 INSERT INTO personnel_security_checklists (
     id, tenant_id, workflow_kind, source, person_external_id,
