@@ -283,11 +283,8 @@ func TestModuleAccess_RLSAndAuditLog(t *testing.T) {
 		t.Fatalf("other tenant: audit rows = %d; want 0 (RLS)", n)
 	}
 
-	// The other tenant's admin cannot read or set this member's access.
+	// The other tenant's admin cannot set this member's access.
 	path := "/v1/admin/users/" + user.String() + "/module-access"
-	if got := b.do(t, http.MethodGet, path, b.admin, nil); got.status != http.StatusNotFound {
-		t.Fatalf("other tenant GET: status %d; want 404", got.status)
-	}
 	if got := b.do(t, http.MethodPut, path, b.admin, map[string]any{"modules": []string{}}); got.status != http.StatusNotFound {
 		t.Fatalf("other tenant PUT: status %d; want 404", got.status)
 	}

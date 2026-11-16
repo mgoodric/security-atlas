@@ -22,36 +22,25 @@ import (
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
-// SetModuleAccess wires a member's module access (#2172): the two
-// /v1/admin/users/{id}/module-access routes, and module_access on the
-// list and get responses. Returns the handler so it composes with New(...).
+// SetModuleAccess wires a member's module access (#2172):
+// PUT /v1/admin/users/{id}/module-access, and module_access on the list
+// and get responses. Returns the handler so it composes with New(...).
+//
+// There is no GET of its own: the value is read from the user rows. OPA
+// admits grc_engineer on admin reads, and a tenant-admin-only read would
+// disagree with it (the #2447 gate-site guard).
 func (h *Handler) SetModuleAccess(s *moduleaccess.Store) *Handler {
 	h.access = s
 	return h
 }
 
-// ModuleAccessResponse is the GET / PUT /v1/admin/users/{id}/module-access
+// ModuleAccessResponse is the PUT /v1/admin/users/{id}/module-access
 // shape. Modules is null for "all" (a wildcard that includes modules
 // switched on later), else the optional-module keys the member may work
 // in, in registry order.
 type ModuleAccessResponse struct {
 	UserID  string   `json:"user_id"`
 	Modules []string `json:"modules"`
-}
-
-// GetModuleAccess handles GET /v1/admin/users/{id}/module-access. Tenant
-// admin only; the member must belong to the caller's tenant (404).
-func (h *Handler) GetModuleAccess(w http.ResponseWriter, r *http.Request) {
-	tenantID, target, ok := h.moduleAccessTarget(w, r)
-	if !ok {
-		return
-	}
-	modules, err := h.access.Get(r.Context(), tenantID, target.String())
-	if err != nil {
-		httperr.WriteInternal(w, r, "get module access", err)
-		return
-	}
-	httpresp.WriteJSON(w, http.StatusOK, ModuleAccessResponse{UserID: target.String(), Modules: modules})
 }
 
 // PutModuleAccess handles PUT /v1/admin/users/{id}/module-access with the

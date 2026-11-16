@@ -65,8 +65,10 @@ var gateSites2447 = func() map[string]gateSite2447 {
 	const preRoute = "tenant-admin gate that predates #2428 and is not in routes2428"
 	return map[string]gateSite2447{
 		"actionplans/handlers.go Handler.VerifyActionPlan": site(adm, r2447(post, "/v1/action-plans/"+id+"/verify")),
-		"auditperiods/auditors.go AuditorsHandler.admit":   notRoute(adm, preRoute+" (period auditors, #2118)"),
-		"auditperiods/handlers.go canReadControlState":     site(apr, r2447(get, "/v1/audit-periods/"+id+"/control-state")),
+		"adminusers/moduleaccess.go Handler.moduleAccessTarget": site(adm,
+			r2447(put, "/v1/admin/users/"+id+"/module-access")),
+		"auditperiods/auditors.go AuditorsHandler.admit": notRoute(adm, preRoute+" (period auditors, #2118)"),
+		"auditperiods/handlers.go canReadControlState":   site(apr, r2447(get, "/v1/audit-periods/"+id+"/control-state")),
 		"auditperiods/handlers.go canWrite": site(adm,
 			r2447(post, "/v1/audit-periods"),
 			r2447(post, "/v1/audit-periods/"+id+"/freeze"),

@@ -62,7 +62,6 @@ GET /v1/admin/super-admins 10
 GET /v1/admin/tenants 10
 GET /v1/admin/users 10
 GET /v1/admin/users/{id} 10
-GET /v1/admin/users/{id}/module-access 10
 GET /v1/admin/vendors/export 10
 GET /v1/aggregation-rules 10
 GET /v1/aggregation-rules/{id} 10

@@ -77,7 +77,6 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/admin/tenants", Tag: "admin-tenants", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/tenants"},
 	{Method: "GET", Path: "/v1/admin/users", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/users"},
 	{Method: "GET", Path: "/v1/admin/users/{id}", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/users/{id}"},
-	{Method: "GET", Path: "/v1/admin/users/{id}/module-access", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/users/{id}/module-access — a member's module access, null for all modules (#2172)"},
 	{Method: "GET", Path: "/v1/admin/vendors/export", Tag: "admin-vendors", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/vendors/export"},
 	{Method: "GET", Path: "/v1/aggregation-rules", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/aggregation-rules"},
 	{Method: "GET", Path: "/v1/aggregation-rules/{id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/aggregation-rules/{id}"},

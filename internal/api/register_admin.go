@@ -149,9 +149,9 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Get("/v1/admin/users", usersH.ListDispatch)
 	root.Get("/v1/admin/users/{id}", usersH.Get)
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
-	// #2172: a member's module access, read and set next to their roles.
-	// Tenant admin only; every change writes an access audit-log row.
-	root.Get("/v1/admin/users/{id}/module-access", usersH.GetModuleAccess)
+	// #2172: set a member's module access, next to their roles. Tenant
+	// admin only; every change writes an access audit-log row. It is read
+	// from module_access on the /v1/admin/users rows.
 	root.Put("/v1/admin/users/{id}/module-access", usersH.PutModuleAccess)
 	root.Post("/v1/admin/users/assign", usersH.Assign)
 	root.Post("/v1/admin/users/revoke", usersH.Revoke)

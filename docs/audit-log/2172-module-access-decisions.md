@@ -72,8 +72,12 @@ allowed and ignored while they hold admin (D3).
 
 ### D5 — the admin API
 
-`GET`/`PUT /v1/admin/users/{id}/module-access`, gated on
-`authz.IsTenantAdmin` (the live tenant admin role, #2428). The target must
+`PUT /v1/admin/users/{id}/module-access`, gated on `authz.IsTenantAdmin`
+(the live tenant admin role, #2428) and registered in the #2447 gate-site
+and #2428 route tables. There is no `GET` of its own: OPA admits
+grc_engineer on `admin` reads, so a tenant-admin-only read would disagree
+with OPA, which the #2447 guard forbids; the value is read from
+`module_access` on the user rows instead. The target must
 be a `users` row in the caller's tenant (tenant predicate + RLS); another
 tenant's member, or no user, is `404`. The body field `modules` is
 required (`null` for all), so a typo cannot silently grant everything; a
