@@ -4,16 +4,16 @@
 -- DB-side CHECK constraints (slice 019) are defense-in-depth, not the
 -- primary validation path.
 INSERT INTO risks (
-    id, tenant_id, title, description, category, methodology,
+    id, tenant_id, title, description, category_id, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
-    acceptance_status, level, org_unit_id, category_id
+    acceptance_status, level, org_unit_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15, $16, $17, $18
+    $15, $16, $17
 )
 RETURNING *;
 
@@ -45,21 +45,21 @@ ORDER BY created_at DESC, id ASC;
 -- name: UpdateRisk :one
 -- Full-update path (PATCH handler reads existing, mutates fields, writes).
 -- updated_at is set explicitly so the schema's per-row default doesn't
--- silently keep stale values.
+-- silently keep stale values. The category moves only through
+-- UpdateRiskCategory, which the caller audit-logs (#1812).
 UPDATE risks
 SET title = $3,
     description = $4,
-    category = $5,
-    methodology = $6,
-    inherent_score = $7,
-    treatment = $8,
-    treatment_owner = $9,
-    residual_score = $10,
-    review_due_at = $11,
-    accepted_until = $12,
-    accepter = $13,
-    instrument_reference = $14,
-    acceptance_status = $15,
+    methodology = $5,
+    inherent_score = $6,
+    treatment = $7,
+    treatment_owner = $8,
+    residual_score = $9,
+    review_due_at = $10,
+    accepted_until = $11,
+    accepter = $12,
+    instrument_reference = $13,
+    acceptance_status = $14,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
@@ -191,7 +191,7 @@ ORDER BY id ASC;
 -- severity, severity_function, child_count, and aggregation_key live inside
 -- the `inherent_score` JSONB.
 INSERT INTO risks (
-    id, tenant_id, title, description, category, methodology,
+    id, tenant_id, title, description, category_id, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     accepter, instrument_reference, level, org_unit_id, themes
 )
@@ -237,13 +237,11 @@ WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 
 -- name: UpdateRiskCategory :one
--- #1812: move a risk onto another of the tenant's categories. Dual-writes
--- the reference and the matching risk_category enum value until #1745's
--- contract step drops the enum. The caller holds the row via LockRiskByID
--- and has resolved the category as assignable.
+-- #1812: move a risk onto another of the tenant's categories. The caller
+-- holds the row via LockRiskByID and has resolved the category as
+-- assignable.
 UPDATE risks
 SET category_id = sqlc.arg(category_id),
-    category = sqlc.arg(category),
     updated_at = now()
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
 RETURNING *;

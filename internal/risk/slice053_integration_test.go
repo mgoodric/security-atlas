@@ -105,11 +105,11 @@ func seedAggregableRisk(t *testing.T, admin *pgxpool.Pool, tenant string, title 
 	scoreB, _ := json.Marshal(score)
 	_, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, methodology, inherent_score,
+			id, tenant_id, title, category_id, methodology, inherent_score,
 			treatment, treatment_owner, residual_score, accepter,
 			instrument_reference, level, themes
 		) VALUES (
-			$1, $2, $3, 'confidentiality', 'nist_800_30', $4,
+			$1, $2, $3, risk_category_id($2, 'confidentiality'), 'nist_800_30', $4,
 			'avoid', '', '{}', '', '', 'team', $5
 		)`, id, tenant, title, scoreB, themes)
 	if err != nil {
@@ -609,11 +609,11 @@ func TestAggregate_MixedMethodology_Rejected(t *testing.T) {
 	r2 := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
-			id, tenant_id, title, category, methodology, inherent_score,
+			id, tenant_id, title, category_id, methodology, inherent_score,
 			treatment, treatment_owner, residual_score, accepter,
 			instrument_reference, level, themes
 		) VALUES (
-			$1, $2, 'fair risk', 'confidentiality', 'fair',
+			$1, $2, 'fair risk', risk_category_id($2, 'confidentiality'), 'fair',
 			'{"lef":1.5,"lm":50000}'::jsonb,
 			'avoid', '', '{}', '', '', 'team', '{}'::text[]
 		)`, r2, tenant); err != nil {

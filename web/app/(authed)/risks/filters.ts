@@ -99,7 +99,8 @@ export function isDefault(filters: RiskFilters): boolean {
  * treatment_owner, so the filter normalizes both shapes.
  *
  * Slice 244 — three new branches:
- *   - category: exact match against the wire enum (`risk_category`).
+ *   - category: exact match against the category slug on the wire
+ *     (an organisation category, #1745; the risk_category enum is retired).
  *   - methodology: exact match against the wire enum
  *     (`risk_methodology`).
  *   - org_unit: exact match against the row's `org_unit_id` (UUID).

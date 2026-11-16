@@ -1,12 +1,13 @@
 //go:build integration
 
-// #1809 — organisation-owned risk categories, expand step of #1745.
-// Exercises the HTTP surface against a real Postgres:
+// #1809 — organisation-owned risk categories (#1745). Exercises the HTTP
+// surface against a real Postgres:
 //
 //   - GET /v1/risks/categories gives a new tenant its seven categories, the
-//     old enum values as slugs, `operational` the only default;
-//   - POST /v1/risks accepts the category by slug and by id, and the
-//     risk's reference and enum agree;
+//     retired enum's values as slugs, `operational` the only default;
+//   - POST /v1/risks accepts the category by slug and by id, so a client
+//     sending an old enum value still works (#1819), and the risk
+//     references its own tenant's category;
 //   - an unknown category is a 400 naming the valid slugs;
 //   - tenant B cannot see tenant A's categories.
 
@@ -59,17 +60,17 @@ func listCategories(t *testing.T, env testEnv) map[string]map[string]any {
 	return out
 }
 
-// storedCategory reads a risk's enum value and the slug and tenant of the
-// category it references, straight from the table.
-func storedCategory(t *testing.T, admin *pgxpool.Pool, riskID string) (enum, slug, categoryTenant, riskTenant string) {
+// storedCategory reads the slug and tenant of the category a risk
+// references, and the risk's tenant, straight from the table.
+func storedCategory(t *testing.T, admin *pgxpool.Pool, riskID string) (slug, categoryTenant, riskTenant string) {
 	t.Helper()
 	if err := admin.QueryRow(context.Background(), `
-		SELECT r.category::text, c.slug, c.tenant_id::text, r.tenant_id::text
+		SELECT c.slug, c.tenant_id::text, r.tenant_id::text
 		FROM risks r JOIN org_risk_categories c ON c.id = r.category_id
-		WHERE r.id = $1`, riskID).Scan(&enum, &slug, &categoryTenant, &riskTenant); err != nil {
+		WHERE r.id = $1`, riskID).Scan(&slug, &categoryTenant, &riskTenant); err != nil {
 		t.Fatalf("read stored category: %v", err)
 	}
-	return enum, slug, categoryTenant, riskTenant
+	return slug, categoryTenant, riskTenant
 }
 
 func TestRiskCategories_NewTenantHasSevenSeededCategories(t *testing.T) {
@@ -128,14 +129,52 @@ func TestRiskCategories_CreateRiskBySlugAndByID(t *testing.T) {
 			t.Errorf("create with category %q: response category = %v, want privacy", ref, got)
 		}
 		riskID := body["risk"].(map[string]any)["id"].(string)
-		enum, slug, catTenant, riskTenant := storedCategory(t, admin, riskID)
-		if enum != "privacy" || slug != "privacy" {
-			t.Errorf("create with category %q: stored enum=%s reference slug=%s, want both privacy", ref, enum, slug)
+		slug, catTenant, riskTenant := storedCategory(t, admin, riskID)
+		if slug != "privacy" {
+			t.Errorf("create with category %q: stored reference slug=%s, want privacy", ref, slug)
 		}
 		if catTenant != riskTenant || riskTenant != tenant {
 			t.Errorf("create with category %q: category tenant %s, risk tenant %s, want both %s",
 				ref, catTenant, riskTenant, tenant)
 		}
+	}
+}
+
+// #1819: with the risk_category enum dropped, a client that still sends the
+// old enum values works unchanged: every one creates a risk in the seeded
+// category of that slug, and a PATCH moves a risk by old value too.
+func TestRiskCategories_OldEnumValuesStillWork(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshCategoryTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	var lastID string
+	for _, old := range seededCategorySlugs {
+		resp, body := post(t, env, "/v1/risks", map[string]any{
+			"title":          "old value " + old,
+			"category":       old,
+			"inherent_score": map[string]int{"likelihood": 2, "impact": 3},
+		}, env.bearer)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create with old value %q: status %d, want 201 (%v)", old, resp.StatusCode, body)
+		}
+		created := body["risk"].(map[string]any)
+		if created["category"] != old {
+			t.Errorf("create with old value %q: response category = %v", old, created["category"])
+		}
+		lastID = created["id"].(string)
+		if slug, _, _ := storedCategory(t, admin, lastID); slug != old {
+			t.Errorf("create with old value %q: stored reference slug = %s", old, slug)
+		}
+	}
+
+	resp, body := patch(t, env, "/v1/risks/"+lastID, `{"category": "financial"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch with old value financial: status %d, want 200 (%v)", resp.StatusCode, body)
+	}
+	if slug, _, _ := storedCategory(t, admin, lastID); slug != "financial" {
+		t.Errorf("patch with old value financial: stored reference slug = %s", slug)
 	}
 }
 

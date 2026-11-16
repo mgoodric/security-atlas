@@ -8,7 +8,8 @@
 //     category is active; with every child's category archived it takes
 //     the tenant's default, and after set-default new meta-risks follow;
 //   - each tenant's rules use that tenant's default;
-//   - set-default refuses a custom category until the contract step.
+//   - since the contract step (#1819) a custom category can be the
+//     default, and meta-risks fall back to it.
 
 package risks_test
 
@@ -53,19 +54,16 @@ func evaluateAll(t *testing.T, env taxEnv) {
 	}
 }
 
-// metaRiskCategory reads the category of the meta-risk ruleID produced:
-// the enum and the slug its reference points at, which must agree.
+// metaRiskCategory reads the slug of the category the meta-risk ruleID
+// produced references.
 func metaRiskCategory(t *testing.T, admin *pgxpool.Pool, tenant, ruleID string) string {
 	t.Helper()
-	var enum, slug string
+	var slug string
 	if err := admin.QueryRow(context.Background(), `
-		SELECT r.category::text, c.slug
+		SELECT c.slug
 		FROM risks r JOIN org_risk_categories c ON c.tenant_id = r.tenant_id AND c.id = r.category_id
-		WHERE r.tenant_id = $1 AND r.inherent_score->>'rule_id' = $2`, tenant, ruleID).Scan(&enum, &slug); err != nil {
+		WHERE r.tenant_id = $1 AND r.inherent_score->>'rule_id' = $2`, tenant, ruleID).Scan(&slug); err != nil {
 		t.Fatalf("read meta-risk of %s: %v", ruleID, err)
-	}
-	if enum != slug {
-		t.Fatalf("meta-risk of %s: enum %q, reference slug %q", ruleID, enum, slug)
 	}
 	return slug
 }
@@ -148,7 +146,7 @@ func TestMetaRiskCategory_EachTenantUsesItsOwnDefault(t *testing.T) {
 	}
 }
 
-func TestMetaRiskCategory_SetDefaultRefusesCustomCategory(t *testing.T) {
+func TestMetaRiskCategory_CustomCategoryCanBeTheDefault(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	env := taxServer(t, dbtest.NewAppPool(t), taxFixture(t, admin))
 
@@ -156,12 +154,20 @@ func TestMetaRiskCategory_SetDefaultRefusesCustomCategory(t *testing.T) {
 		map[string]any{"slug": "cloud-security", "name": "Cloud Security"}); status != http.StatusCreated {
 		t.Fatalf("add: status %d (%v)", status, body)
 	}
-	if status, body := taxCall(t, env, http.MethodPost, "/v1/risks/categories/cloud-security/set-default", env.admin, nil); status != http.StatusBadRequest {
-		t.Fatalf("set-default custom: status %d (%v), want 400", status, body)
-	}
+	setDefault(t, env, "cloud-security")
 	cats := taxList(t, env, "")
-	if cats["operational"]["is_default"] != true || cats["cloud-security"]["is_default"] != false {
-		t.Fatalf("default after refused set-default: operational=%v cloud-security=%v",
+	if cats["operational"]["is_default"] != false || cats["cloud-security"]["is_default"] != true {
+		t.Fatalf("default after set-default custom: operational=%v cloud-security=%v",
 			cats["operational"]["is_default"], cats["cloud-security"]["is_default"])
+	}
+
+	// A meta-risk whose children's category is archived takes it.
+	rule := metaRule(t, admin, env.tenant, "meta-custom")
+	taxSeedRisk(t, admin, env.tenant, "privacy", []string{"meta-custom"})
+	taxSeedRisk(t, admin, env.tenant, "privacy", []string{"meta-custom"})
+	archive(t, env, "privacy")
+	evaluateAll(t, env)
+	if got := metaRiskCategory(t, admin, env.tenant, rule); got != "cloud-security" {
+		t.Fatalf("meta-risk over archived children: category %q, want the custom default cloud-security", got)
 	}
 }

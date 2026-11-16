@@ -28,12 +28,12 @@ SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0';
 -- A risk with treatment=mitigate (linked to the seeded control)
 -- ============================================================
 -- The risk carries its category reference, looked up by slug in this
--- tenant's own categories (#1816); the enum is dual-written until the
--- contract step drops it. seed_risk_categories is idempotent.
+-- tenant's own categories (#1816); the risk_category enum is gone (#1819).
+-- seed_risk_categories is idempotent.
 SELECT seed_risk_categories('00000000-0000-0000-0000-00000000d3a0');
 
 INSERT INTO risks (
-    id, tenant_id, title, description, category, category_id, treatment,
+    id, tenant_id, title, description, category_id, treatment,
     treatment_owner, inherent_score, residual_score
 )
 VALUES (
@@ -41,7 +41,6 @@ VALUES (
     '00000000-0000-0000-0000-00000000d3a0',
     'Unencrypted production data at rest',
     'Risk that production S3 buckets in customer-data accounts ship without server-side encryption.',
-    'confidentiality',
     (SELECT id FROM org_risk_categories
      WHERE tenant_id = '00000000-0000-0000-0000-00000000d3a0' AND slug = 'confidentiality'),
     'mitigate',

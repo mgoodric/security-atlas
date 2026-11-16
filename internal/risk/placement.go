@@ -140,13 +140,10 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 		// then the risk row, as AssignThemes and Delete take their
 		// vocabulary and rule locks. Category admin locks only category
 		// rows, so no path takes these in the reverse order.
-		var (
-			category     Category
-			categoryEnum dbx.RiskCategory
-		)
+		var category Category
 		if in.CategoryRef != "" {
 			var err error
-			category, categoryEnum, err = ResolveCategoryTx(ctx, q, tenantID, in.CategoryRef)
+			category, err = ResolveCategoryTx(ctx, q, tenantID, in.CategoryRef)
 			if err != nil {
 				return err
 			}
@@ -240,7 +237,6 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 				TenantID:   pgUUID(tenantID),
 				ID:         pgUUID(riskID),
 				CategoryID: pgUUID(category.ID),
-				Category:   categoryEnum,
 			})
 			if err != nil {
 				return fmt.Errorf("update risk category: %w", err)

@@ -76,7 +76,7 @@ func TestCreate_DefaultsMethodologyToNist80030(t *testing.T) {
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Unauthorized PHI access",
-		Category:      dbx.RiskCategoryConfidentiality,
+		CategoryRef:   "confidentiality",
 		Methodology:   "", // omitted on purpose
 		InherentScore: []byte(`{"likelihood":3,"impact":4}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -100,7 +100,7 @@ func TestCreate_RejectsInvalidNistScore(t *testing.T) {
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Bad score",
-		Category:      dbx.RiskCategoryIntegrity,
+		CategoryRef:   "integrity",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":9,"impact":2}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -119,7 +119,7 @@ func TestCreate_RejectsFairMissingLM(t *testing.T) {
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "FAIR-style risk",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.0}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -138,7 +138,7 @@ func TestCreate_FairPersistsCanonicalDollarExposure(t *testing.T) {
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:         "FAIR-style risk",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"loss_event_frequency":2,"loss_magnitude":50000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -171,7 +171,7 @@ func TestCreate_FairAcceptsLegacyAliasesAndNormalizes(t *testing.T) {
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:         "FAIR aliases",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.5,"lm":40000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -210,7 +210,7 @@ func TestCreate_MitigateRequiresLinkedControl(t *testing.T) {
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Needs mitigation",
-		Category:      dbx.RiskCategoryOperational,
+		CategoryRef:   "operational",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":4,"impact":3}`),
 		Treatment:     dbx.RiskTreatmentMitigate,
@@ -230,7 +230,7 @@ func TestCreate_MitigateWithLinkedControlSucceeds(t *testing.T) {
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:            "Mitigated",
-		Category:         dbx.RiskCategoryOperational,
+		CategoryRef:      "operational",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentMitigate,
@@ -264,7 +264,7 @@ func TestCreate_AcceptRequiresBothFields(t *testing.T) {
 	// Missing accepted_until.
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:            "Accepted",
-		Category:         dbx.RiskCategoryRegulatory,
+		CategoryRef:      "regulatory",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		InherentScore:    []byte(`{"likelihood":1,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
@@ -279,7 +279,7 @@ func TestCreate_AcceptRequiresBothFields(t *testing.T) {
 	until := time.Now().AddDate(0, 6, 0)
 	_, err = store.Create(ctx, risk.CreateInput{
 		Title:            "Accepted",
-		Category:         dbx.RiskCategoryRegulatory,
+		CategoryRef:      "regulatory",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		InherentScore:    []byte(`{"likelihood":1,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
@@ -293,7 +293,7 @@ func TestCreate_AcceptRequiresBothFields(t *testing.T) {
 	// Both fields present succeeds.
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:            "Accepted",
-		Category:         dbx.RiskCategoryRegulatory,
+		CategoryRef:      "regulatory",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		InherentScore:    []byte(`{"likelihood":1,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
@@ -320,7 +320,7 @@ func TestCreate_OmittedTreatmentStoresUntreated(t *testing.T) {
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Intake risk",
-		Category:      dbx.RiskCategoryOperational,
+		CategoryRef:   "operational",
 		InherentScore: []byte(`{"likelihood":2,"impact":2}`),
 	})
 	if err != nil {
@@ -343,7 +343,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:            "Pending acceptance",
-		Category:         dbx.RiskCategoryOperational,
+		CategoryRef:      "operational",
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
@@ -362,7 +362,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 	// Approved without accepter / expiry: the domain layer rejects it.
 	_, err = store.Create(ctx, risk.CreateInput{
 		Title:            "Approved, unsigned",
-		Category:         dbx.RiskCategoryOperational,
+		CategoryRef:      "operational",
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusApproved,
@@ -400,8 +400,8 @@ func TestDB_AcceptanceChecks(t *testing.T) {
 			st = status
 		}
 		_, err = tx.Exec(ctx, `
-			INSERT INTO risks (id, tenant_id, title, category, treatment, acceptance_status)
-			VALUES ($1, $2, 'db check', 'operational', $3::risk_treatment, $4::risk_acceptance_status)
+			INSERT INTO risks (id, tenant_id, title, category_id, treatment, acceptance_status)
+			VALUES ($1, $2, 'db check', risk_category_id($2, 'operational'), $3::risk_treatment, $4::risk_acceptance_status)
 		`, uuid.New(), tenant, treatment, st)
 		return err
 	}
@@ -439,7 +439,7 @@ func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Insured",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":3,"impact":3}`),
 		Treatment:     dbx.RiskTreatmentTransfer,
@@ -450,7 +450,7 @@ func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:               "Insured",
-		Category:            dbx.RiskCategoryFinancial,
+		CategoryRef:         "financial",
 		Methodology:         dbx.RiskMethodologyNist80030,
 		InherentScore:       []byte(`{"likelihood":3,"impact":3}`),
 		Treatment:           dbx.RiskTreatmentTransfer,
@@ -476,7 +476,7 @@ func TestList_Filters(t *testing.T) {
 	until := time.Now().AddDate(0, 6, 0)
 	// One nist_800_30 + accept
 	if _, err := store.Create(ctx, risk.CreateInput{
-		Title: "A", Category: dbx.RiskCategoryPrivacy,
+		Title: "A", CategoryRef: "privacy",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
 		Treatment:        dbx.RiskTreatmentAccept,
@@ -487,7 +487,7 @@ func TestList_Filters(t *testing.T) {
 	}
 	// One fair + avoid
 	if _, err := store.Create(ctx, risk.CreateInput{
-		Title: "B", Category: dbx.RiskCategoryFinancial,
+		Title: "B", CategoryRef: "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.0,"lm":50000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -496,7 +496,7 @@ func TestList_Filters(t *testing.T) {
 	}
 	// One qualitative_5x5 + avoid
 	if _, err := store.Create(ctx, risk.CreateInput{
-		Title: "C", Category: dbx.RiskCategoryAvailability,
+		Title: "C", CategoryRef: "availability",
 		Methodology:   dbx.RiskMethodologyQualitative5x5,
 		InherentScore: []byte(`{"likelihood":5,"impact":5}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -542,7 +542,7 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if _, err := store.Create(ctx, risk.CreateInput{
 			Title:         "n",
-			Category:      dbx.RiskCategoryConfidentiality,
+			CategoryRef:   "confidentiality",
 			Methodology:   dbx.RiskMethodologyNist80030,
 			InherentScore: []byte(`{"likelihood":3,"impact":4}`),
 			Treatment:     dbx.RiskTreatmentAvoid,
@@ -553,7 +553,7 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	// One qualitative_5x5 in bucket (5,5).
 	if _, err := store.Create(ctx, risk.CreateInput{
 		Title:         "q",
-		Category:      dbx.RiskCategoryAvailability,
+		CategoryRef:   "availability",
 		Methodology:   dbx.RiskMethodologyQualitative5x5,
 		InherentScore: []byte(`{"likelihood":5,"impact":5}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -563,7 +563,7 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	// One FAIR — must NOT appear in heatmap.
 	if _, err := store.Create(ctx, risk.CreateInput{
 		Title:         "f",
-		Category:      dbx.RiskCategoryFinancial,
+		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.0,"lm":50000}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
@@ -605,7 +605,7 @@ func TestCrossTenant_RisksAreIsolated(t *testing.T) {
 
 	created, err := store.Create(ctxA, risk.CreateInput{
 		Title:         "A's risk",
-		Category:      dbx.RiskCategoryRegulatory,
+		CategoryRef:   "regulatory",
 		Methodology:   dbx.RiskMethodologyNist80030,
 		InherentScore: []byte(`{"likelihood":1,"impact":1}`),
 		Treatment:     dbx.RiskTreatmentAvoid,
