@@ -150,7 +150,9 @@ export type FixtureName =
   | "posture-targets"
   // #2115 — a framework version with no scope (reset each run) and an
   // admin approver user, for framework-scope-wizard.spec.ts.
-  | "framework-scope-wizard";
+  | "framework-scope-wizard"
+  // #2116 — an admin approver user, for policy-lifecycle.spec.ts.
+  | "policy-lifecycle";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

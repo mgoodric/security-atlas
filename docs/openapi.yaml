@@ -5095,6 +5095,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+    patch:
+      summary: PATCH /v1/policies/{id} — edit a draft policy; a policy that has left draft answers 409 (#2116)
+      tags: [policies]
+      operationId: patch-v1-policies-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/acknowledge:
     post:
       summary: POST /v1/policies/{id}/acknowledge

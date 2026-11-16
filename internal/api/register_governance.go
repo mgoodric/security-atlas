@@ -104,6 +104,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	root.Get("/v1/policies/{id}/pdf", policiesH.PDF)
 	root.Get("/v1/policies/{id}", policiesH.GetPolicy)
 	root.Delete("/v1/policies/{id}", policiesH.DiscardDraft)
+	root.Patch("/v1/policies/{id}", policiesH.UpdateDraft)
 	// Slice 023: policy acknowledgment workflow. Three routes appended
 	// per the parallel-batch convention (chi rejects two Mounts at "/").
 	// The literal-segment route /v1/policies/{id}/acknowledgment-rate is
