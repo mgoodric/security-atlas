@@ -108,13 +108,12 @@ func TestDecide2381_RoleMatrixPerPrincipalKind(t *testing.T) {
 		ro := r == authz.RoleViewer || r == authz.RoleAuditor
 		granted := seedUser("active", r)
 		revoked := seedUser("active", "")
-		bound := seedUser("active", r)
 		jti := uuid.NewString()
+		// API keys moved to their own matrix when #2402 narrowed them:
+		// apikey_readonly_roles_2402_integration_test.go.
 		principals = append(principals,
 			principal{"JWT " + string(r) + ", granted", credstore.Credential{ID: "jwt:" + jti, TenantID: tenant, UserID: "user:" + granted.String(), OwnerRoles: []string{string(r)}}, ro},
 			principal{"JWT " + string(r) + ", grant revoked", credstore.Credential{ID: "jwt:r" + jti, TenantID: tenant, UserID: "user:" + revoked.String(), OwnerRoles: []string{string(r)}}, ro},
-			principal{"bound key " + string(r), credstore.Credential{ID: "key_b2381_" + string(r), TenantID: tenant, UserID: bound.String(), OwnerRoles: []string{string(r)}}, false},
-			principal{"unbound key " + string(r), credstore.Credential{ID: "key_u2381_" + string(r), TenantID: tenant, UserID: "key_u2381_" + string(r), OwnerRoles: []string{string(r)}}, false},
 		)
 	}
 	both := seedUser("active", authz.RoleAuditor)
