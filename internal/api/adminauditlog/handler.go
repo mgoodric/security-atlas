@@ -53,6 +53,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/authz"
+
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
@@ -76,11 +78,21 @@ const (
 type Handler struct {
 	pool    *pgxpool.Pool
 	limiter *export.Limiter
+	// engine decides which unified-log payloads a caller may see
+	// (#2375, payloadgate.go). Nil hides every payload from a
+	// non-admin caller.
+	engine *authz.Engine
 }
 
 // New constructs a Handler.
 func New(pool *pgxpool.Pool) *Handler {
 	return &Handler{pool: pool}
+}
+
+// WithAuthz sets the OPA engine the unified-log payload gate decides with.
+func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
+	h.engine = engine
+	return h
 }
 
 // --- response shapes ---
