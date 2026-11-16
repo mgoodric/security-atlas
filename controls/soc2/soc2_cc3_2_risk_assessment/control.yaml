@@ -8,7 +8,7 @@ description: |
   default), date, participants, and a count of risks identified by
   severity tier. The evidence is the PDF or signed report.
 
-scf_anchor_id: RSK-04
+scf_anchor_id: RSK-13
 control_family: RSK
 implementation_type: manual_periodic
 owner_role: ciso

@@ -7,7 +7,7 @@ scf_release: "2026.3"
 linked_control_ids:
   - GOV-02
   - GOV-05
-  - RSK-01
+  - RSK-02
 acknowledgment_required_roles:
   - employee
   - contractor

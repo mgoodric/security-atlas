@@ -24,14 +24,14 @@ func sampleFiring() firing.Firing {
 
 func TestBuild_PopulatesRecord(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleFiring(), "scf:IRO-09", "connector:datadog:firing@dev", "datadog", "prod")
+	rec, err := Build(sampleFiring(), "scf:IRO-16", "connector:datadog:firing@dev", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	if rec.EvidenceKind != "monitoring.alert_firing.v1" || rec.SchemaVersion != "1.0.0" {
 		t.Errorf("kind/version wrong: %q %q", rec.EvidenceKind, rec.SchemaVersion)
 	}
-	if rec.ControlId != "scf:IRO-09" {
+	if rec.ControlId != "scf:IRO-16" {
 		t.Errorf("control = %q", rec.ControlId)
 	}
 	if rec.SourceAttribution.ActorId != "connector:datadog:firing@dev" {
@@ -61,7 +61,7 @@ func TestBuild_PopulatesRecord(t *testing.T) {
 func TestBuild_IdempotencyKeyMatchesSharedDeriver(t *testing.T) {
 	t.Parallel()
 	f := sampleFiring()
-	rec, err := Build(f, "scf:IRO-09", "a", "datadog", "prod")
+	rec, err := Build(f, "scf:IRO-16", "a", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestBuild_OmitsAbsentResolvedAndTarget(t *testing.T) {
 	f := sampleFiring()
 	f.ResolvedAt = time.Time{} // still firing
 	f.Target = nil
-	rec, err := Build(f, "scf:IRO-09", "a", "datadog", "prod")
+	rec, err := Build(f, "scf:IRO-16", "a", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
