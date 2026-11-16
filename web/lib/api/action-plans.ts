@@ -206,3 +206,47 @@ export async function fetchActionPlansForControl(
     await fetch(`/api/controls/${encodeURIComponent(controlId)}/action-plans`),
   );
 }
+
+/**
+ * The fields the edit route sends (#2108), only the changed ones. A
+ * status is one transition; verified is not among them, because a plan
+ * is verified through `verifyActionPlan`. `due_date` is an RFC 3339
+ * timestamp; `clear_due_date` removes the date.
+ */
+export type UpdateActionPlanInput = {
+  title?: string;
+  description?: string;
+  owner_id?: string;
+  due_date?: string;
+  clear_due_date?: boolean;
+  status?: Exclude<ActionPlanStatus, "verified">;
+};
+
+/** PATCH an action plan: a record edit, or one status transition. */
+export async function updateActionPlan(
+  id: string,
+  body: UpdateActionPlanInput,
+): Promise<{ action_plan: ActionPlan }> {
+  return parse<{ action_plan: ActionPlan }>(
+    await fetch(`/api/action-plans/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+/**
+ * Verify a completed plan with no linked controls (#2108). The platform
+ * refuses the plan's owner, anyone without the approver role, and a plan
+ * with linked controls.
+ */
+export async function verifyActionPlan(
+  id: string,
+): Promise<{ action_plan: ActionPlan }> {
+  return parse<{ action_plan: ActionPlan }>(
+    await fetch(`/api/action-plans/${encodeURIComponent(id)}/verify`, {
+      method: "POST",
+    }),
+  );
+}

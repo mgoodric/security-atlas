@@ -162,10 +162,11 @@ SELECT EXISTS (
 );
 
 -- name: ActionPlanOwnerExistsInTenant :one
--- AC-10 tampering guard: owner_id must resolve to a user in the caller's
--- tenant. RLS hides cross-tenant users.
+-- AC-10 tampering guard: owner_id must resolve to an active user in the
+-- caller's tenant (#2108: a disabled user cannot be handed a plan). RLS
+-- hides cross-tenant users.
 SELECT EXISTS (
-    SELECT 1 FROM users WHERE tenant_id = $1 AND id = $2
+    SELECT 1 FROM users WHERE tenant_id = $1 AND id = $2 AND status = 'active'
 );
 
 -- ===== append-only audit log =====
