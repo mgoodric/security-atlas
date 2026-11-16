@@ -34,6 +34,7 @@ export const AUDIT_LOG_KINDS = [
   "mapping_overlay",
   "control_import",
   "risk",
+  "posture_target",
 ] as const;
 
 export type AuditLogKind = (typeof AUDIT_LOG_KINDS)[number];
