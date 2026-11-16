@@ -82,7 +82,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.slackToken, "slack-token", "", "Slack read-only OAuth token (env: SLACK_TOKEN)")
 	cmd.Flags().StringVar(&f.memberControlID, "member-control-id", "scf:IAC-01", "control id attached to each workspace-member record")
 	cmd.Flags().StringVar(&f.auditControlID, "audit-control-id", "scf:MON-02", "control id attached to each admin audit-log record")
-	cmd.Flags().StringVar(&f.retentionControlID, "retention-control-id", "scf:DCH-01", "control id attached to the retention-settings record")
+	cmd.Flags().StringVar(&f.retentionControlID, "retention-control-id", "scf:DCH-04", "control id attached to the retention-settings record")
 	return cmd
 }
 
