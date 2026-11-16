@@ -66,6 +66,11 @@ describe("describeEvent", () => {
     expect(describeEvent(row("risk", "placement_changed")).phrase).toBe(
       "moved",
     );
+    expect(describeEvent(row("risk", "acceptance_approved")).phrase).toBe(
+      "approved acceptance of",
+    );
+    expect(describeEvent(row("risk", "reopened")).phrase).toBe("reopened");
+    expect(describeEvent(row("risk", "something_new")).phrase).toBe("changed");
     expect(
       describeEvent(row("feature_flag", "feature_flag.disable")).phrase,
     ).toBe("disabled");

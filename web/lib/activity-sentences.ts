@@ -134,10 +134,20 @@ const ME_PHRASES: Record<string, string> = {
   "session.revoke": "revoked one of their sessions",
 };
 
+// risk_audit_log.action_type (CHECK in migrations/sql). An action added
+// there later reads "changed risk …" until it gets a phrase here.
 const RISK_PHRASES: Record<string, string> = {
   placement_changed: "moved",
   category_changed: "recategorized",
   fields_changed: "edited",
+  treatment_changed: "changed the treatment of",
+  acceptance_proposed: "proposed acceptance of",
+  acceptance_approved: "approved acceptance of",
+  acceptance_rejected: "rejected acceptance of",
+  acceptance_revoked: "revoked acceptance of",
+  closed: "closed",
+  reopened: "reopened",
+  deleted: "deleted",
 };
 
 const FLAG_PHRASES: Record<string, string> = {
