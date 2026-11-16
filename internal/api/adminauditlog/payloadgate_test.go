@@ -83,6 +83,7 @@ var kindSourcePath = map[unifiedlog.Kind]string{
 	unifiedlog.KindControlImport:   "/v1/controls",
 	unifiedlog.KindRisk:            "/v1/risks/00000000-0000-0000-0000-000000000001/audit-log",
 	unifiedlog.KindPostureTarget:   "/v1/framework-scopes/posture-targets/00000000-0000-0000-0000-000000000001",
+	unifiedlog.KindModuleAccess:    "/v1/admin/users/00000000-0000-0000-0000-000000000001/module-access",
 }
 
 type grcRoles struct{}

@@ -29,7 +29,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { fetchAdminMe, fetchEffectiveModules } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-import { resolveFeatureGate } from "@/lib/feature-nav";
+import { owningModuleName, resolveFeatureGate } from "@/lib/feature-nav";
 
 export async function FeatureGate({
   page,
@@ -51,6 +51,20 @@ export async function FeatureGate({
   const state = resolveFeatureGate(modules, page, me.is_admin);
   if (state === "on") {
     return children;
+  }
+
+  if (state === "no-access") {
+    // #2172: the module is on, but outside the caller's module access.
+    const name = owningModuleName(modules, page) ?? moduleName;
+    return (
+      <PageShell title={moduleName}>
+        <Card data-testid="feature-no-access-state">
+          <CardContent className="py-6 text-sm text-muted-foreground">
+            <p>You don&apos;t have access to {name}. Ask an administrator.</p>
+          </CardContent>
+        </Card>
+      </PageShell>
+    );
   }
 
   return (

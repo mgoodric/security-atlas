@@ -1381,6 +1381,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/users/{id}/module-access:
+    get:
+      summary: GET /v1/admin/users/{id}/module-access — a member's module access, null for all modules (#2172)
+      tags: [admin-users]
+      operationId: get-v1-admin-users-id-module-access
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/admin/users/{id}/module-access — set a member's module access and write an access audit-log row (#2172)
+      tags: [admin-users]
+      operationId: put-v1-admin-users-id-module-access
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/users/{id}/roles:
     patch:
       summary: PATCH /v1/admin/users/{id}/roles

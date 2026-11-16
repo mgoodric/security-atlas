@@ -148,6 +148,8 @@ sql:
       - "migrations/sql/20261214000000_framework_posture_targets.sql"
       # #2026: framework_requirements.points_of_focus must be a JSON array.
       - "migrations/sql/20261215000000_framework_requirement_points_of_focus_array.sql"
+      # #2172: module access for each member, and its audit log.
+      - "migrations/sql/20261225000000_member_module_access.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -30,6 +30,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkversion"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
@@ -42,7 +43,7 @@ import (
 // registered here is gated identically to how it was inline (slice 436
 // AC-6). Behavior is unchanged: routes, handlers, and declaration order are
 // preserved verbatim.
-func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Store) {
+func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Store, moduleAccessStore *moduleaccess.Store) {
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
@@ -107,13 +108,14 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// non-admin callers see 403 even without the slice-035 OPA
 	// middleware wired. Routes appended per the parallel-batch
 	// convention (chi rejects two Mounts at "/").
-	featuresH := featuresapi.New(featureFlagStore)
+	featuresH := featuresapi.New(featureFlagStore).WithModuleAccess(moduleAccessStore)
 	root.Get("/v1/admin/features", featuresH.List)
 	root.Patch("/v1/admin/features/{key}", featuresH.Patch)
 	// #2170: the caller's effective modules (featureflag.Modules), read
 	// by every signed-in role for its own tenant (RLS — invariant #6). The
 	// web app's sidebar and FeatureGate read it in place of a gating map
 	// of their own. It replaces slice 660's GET /v1/features/enabled.
+	// #2172: a module outside the caller's module access reads no_access.
 	root.Get("/v1/me/modules", featuresH.Modules)
 	// #2085: the caller's tenant's users and API keys, reduced to id,
 	// display name, status and key owner, so pages show a person in place
@@ -143,10 +145,14 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// ListDispatch routes super-admins to the cross-tenant view and
 	// everyone else to the slice-062 within-tenant List (P0-478-3: a
 	// tenant-admin's view is never widened).
-	usersH := adminusers.New(s.dbPool).SetAuthPool(s.authPool).SetCredentialRevoker(s.credStore)
+	usersH := adminusers.New(s.dbPool).SetAuthPool(s.authPool).SetCredentialRevoker(s.credStore).SetModuleAccess(moduleAccessStore)
 	root.Get("/v1/admin/users", usersH.ListDispatch)
 	root.Get("/v1/admin/users/{id}", usersH.Get)
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
+	// #2172: a member's module access, read and set next to their roles.
+	// Tenant admin only; every change writes an access audit-log row.
+	root.Get("/v1/admin/users/{id}/module-access", usersH.GetModuleAccess)
+	root.Put("/v1/admin/users/{id}/module-access", usersH.PutModuleAccess)
 	root.Post("/v1/admin/users/assign", usersH.Assign)
 	root.Post("/v1/admin/users/revoke", usersH.Revoke)
 

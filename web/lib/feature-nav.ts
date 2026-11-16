@@ -12,8 +12,13 @@
 
 import { APIError } from "@/lib/api/base";
 
-/** A module's state for the caller, as `GET /v1/me/modules` reports it. */
-export type ModuleState = "on" | "switched_off";
+/**
+ * A module's state for the caller, as `GET /v1/me/modules` reports it.
+ * `no_access` (#2172): switched on, but outside the caller's module
+ * access. Switched off wins: a module off for the tenant reads
+ * `switched_off` for everyone.
+ */
+export type ModuleState = "on" | "switched_off" | "no_access";
 
 /**
  * A feature inside an optional module (#2171). Its `state` is already
@@ -110,10 +115,11 @@ export function isFeatureDisabledError(err: unknown): boolean {
 }
 
 // FeatureGateState is what a gated route renders: the module itself, or
-// one of two calm off states. Only an admin (`is_admin`, the super-admin
+// one of three calm states. Only an admin (`is_admin`, the super-admin
 // bit) is told where to switch the module on; everyone else is told to
-// ask one, and never sees the Admin link.
-export type FeatureGateState = "on" | "off-admin" | "off-member";
+// ask one, and never sees the Admin link. `no-access` (#2172) is a module
+// that is on but outside the caller's module access.
+export type FeatureGateState = "on" | "off-admin" | "off-member" | "no-access";
 
 /**
  * resolveFeatureGate decides a gated page's render from the caller's
@@ -125,8 +131,34 @@ export function resolveFeatureGate(
   page: string,
   isAdmin: boolean,
 ): FeatureGateState {
-  if (moduleForPage(modules, page)?.state === "on") {
+  const state = moduleForPage(modules, page)?.state;
+  if (state === "on") {
     return "on";
   }
+  if (state === "no_access") {
+    return "no-access";
+  }
   return isAdmin ? "off-admin" : "off-member";
+}
+
+/**
+ * owningModuleName returns the display name of the optional module that
+ * owns `href` (the module, never a feature inside it), so the no-access
+ * message names the module the caller lacks: "You don't have access to
+ * Third-party risk" on the vendor claims page.
+ */
+export function owningModuleName(
+  modules: EffectiveModules,
+  href: string,
+): string | undefined {
+  const owner = moduleForPage(modules, href);
+  if (owner === undefined) {
+    return undefined;
+  }
+  for (const m of modules ?? []) {
+    if (m === owner || (m.features ?? []).includes(owner)) {
+      return m.name;
+    }
+  }
+  return owner.name;
 }
