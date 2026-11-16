@@ -112,13 +112,20 @@ scope cell": allowed on the old bundle, denied now).
 `web/e2e/audit-workspace.spec.ts` was slice 042's contract, every step
 commented out against seed data that never existed (an assignment to an
 email address, which no principal carries). It now runs the #2157 workflow
-against the real platform: admin assigns via the period page (#2118), the
+against the real platform: an admin assigns over the #2118 routes, the
 auditor lands on the period in `/audit`, reads the population and in-scope
 evidence, draws a sample, is refused the unselected cell, the unassigned
 period and the tenant-wide list, and loses them all after removal. Slice
 042's other placeholder ACs (walkthrough recorder, comment threads, tab
-persistence) were never assertions and are not carried over. The fixture
-keeps slice 082's frozen period because `route-sweep.spec.ts` opens it.
+persistence) were never assertions and are not carried over.
+
+The fixture seeds a tenant of its own (`...2157`). The first cut used the
+demo tenant, and its two extra controls broke `controls-list.spec.ts`
+(select-all counted 7 rows against the 5 it had counted). In its own
+tenant the spec cannot use the demo admin's period page, so the admin
+assigns and removes through the same routes directly. The picker UI stays
+covered by `period-auditors.spec.ts`. The fixture keeps slice 082's frozen
+demo-tenant period, because `route-sweep.spec.ts` opens it.
 
 ## Found while building, not fixed here
 

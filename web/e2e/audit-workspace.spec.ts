@@ -1,20 +1,24 @@
 // #2157 — Playwright for an assigned auditor's workflow.
 //
 // Against the real platform, no route mocks. An admin assigns the auditor
-// to a period from the period's page (#2118). Signed in, the auditor finds
-// the period in the audit workspace, then works it through the platform
-// API: reads the period's population, draws a sample from it, and reads
-// the evidence the population contains. The authz middleware decides each
-// call from the audit period the route belongs to (the #2157 resource-attrs
-// hydrator), so everything outside the assignment is refused: a cell the
-// population does not select, the unassigned period's population and
-// evidence, and a tenant-wide evidence list. The admin then removes the
-// auditor, and the same reads are refused.
+// to a period over POST /v1/audit-periods/{id}/auditors (#2118). Signed in,
+// the auditor finds the period in the audit workspace, then works it
+// through the platform API: reads the period's population, draws a sample
+// from it, and reads the evidence the population contains. The authz
+// middleware decides each call from the audit period the route belongs to
+// (the #2157 resource-attrs hydrator), so everything outside the
+// assignment is refused: a cell the population does not select, the
+// unassigned period's population and evidence, and a tenant-wide evidence
+// list. The admin then removes the auditor, and the same reads are
+// refused.
 //
-// The fixture (fixtures/e2e/audit-workspace.sql) seeds two periods, their
-// attached populations, two scope cells and the evidence, plus an auditor
-// user of this spec's own, and drops the user's assignments, so each run
-// starts unassigned.
+// The fixture (fixtures/e2e/audit-workspace.sql) seeds all of it in a
+// tenant of this spec's own, so no other spec's rows change: two periods,
+// their attached populations, two scope cells, the evidence, an admin and
+// an auditor. It drops the auditor's assignments, so each run starts
+// unassigned. The admin page's assignment picker is covered by
+// period-auditors.spec.ts in the demo tenant; here the admin uses the same
+// routes directly.
 //
 // This replaces slice 042's spec, whose assertions were all commented-out
 // pseudo-steps against seed data that never existed.
@@ -25,13 +29,13 @@ import type { Browser, Page } from "@playwright/test";
 
 import { ATLAS_JWT_COOKIE } from "../lib/auth";
 import { expect, test } from "./fixtures";
-import { DEMO_TENANT_ID, seedFromFixture } from "./seed";
+import { seedFromFixture } from "./seed";
 
+const TENANT_ID = "00000000-0000-0000-0000-000000002157";
 const PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb2157";
 const PERIOD_NAME = "Audit workspace e2e (2157)";
 const AUDITOR_ID = "44444444-4444-4444-4444-444444442157";
-const AUDITOR_LABEL =
-  "Audit Workspace E2E (audit-workspace-e2e@example.invalid)";
+const ADMIN_ID = "44444444-4444-4444-4444-444444442158";
 
 const POPULATION = "77777777-7777-7777-7777-77777777a157";
 const UNASSIGNED_POPULATION = "77777777-7777-7777-7777-77777777b157";
@@ -43,15 +47,17 @@ function atlasBaseURL(): string {
   return process.env.ATLAS_HTTP_URL ?? "http://localhost:8080";
 }
 
-async function mintAuditorJWT(): Promise<string> {
+// A JWT for a "user:<uuid>" subject in this spec's tenant, the shape a
+// /login, PKCE or device-grant session carries.
+async function mintJWT(userID: string, role: string): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      tenant_id: DEMO_TENANT_ID,
-      user_id: `user:${AUDITOR_ID}`,
-      roles: ["auditor"],
+      tenant_id: TENANT_ID,
+      user_id: `user:${userID}`,
+      roles: [role],
       super_admin: false,
     }),
   });
@@ -88,8 +94,8 @@ async function auditorPage(
   return context.newPage();
 }
 
-// One platform call as the auditor; returns the status and parsed body.
-async function asAuditor(
+// One platform call; returns the status and parsed body.
+async function call(
   bearer: string,
   method: string,
   path: string,
@@ -126,35 +132,32 @@ const READS: Array<[string, number]> = [
 test.describe.configure({ mode: "serial" });
 
 let auditorBearer = "";
+let adminBearer = "";
 
 test.beforeAll(async () => {
   seedFromFixture("audit-workspace");
-  auditorBearer = await mintAuditorJWT();
+  auditorBearer = await mintJWT(AUDITOR_ID, "auditor");
+  adminBearer = await mintJWT(ADMIN_ID, "admin");
 });
 
 test("an assigned auditor works the period's population and evidence, and nothing else", async ({
-  authedPage,
   browser,
   baseURL,
 }) => {
   // Unassigned, every period-scoped read is refused.
   for (const [path] of READS) {
-    const { status } = await asAuditor(auditorBearer, "GET", path);
+    const { status } = await call(auditorBearer, "GET", path);
     expect(status, `unassigned GET ${path}`).toBe(403);
   }
 
-  // The admin assigns the auditor from the period's page.
-  await authedPage.goto(`/audits/${PERIOD_ID}`);
-  const card = authedPage.getByTestId("audit-period-auditors");
-  await expect(card).toBeVisible();
-  await card
-    .getByLabel("Assign an auditor")
-    .selectOption({ label: AUDITOR_LABEL });
-  await card.getByTestId("audit-period-auditor-assign").click();
-  const row = card.locator(
-    `[data-testid="audit-period-auditor"][data-user-id="${AUDITOR_ID}"]`,
+  // The admin assigns the auditor to the period.
+  const assigned = await call(
+    adminBearer,
+    "POST",
+    `/v1/audit-periods/${PERIOD_ID}/auditors`,
+    { user_id: AUDITOR_ID },
   );
-  await expect(row).toContainText("Audit Workspace E2E");
+  expect(assigned.status, "admin assigns the auditor").toBeLessThan(300);
 
   // Signed in, the auditor's workspace opens on the period.
   const auditor = await auditorPage(browser, baseURL, auditorBearer);
@@ -166,13 +169,13 @@ test("an assigned auditor works the period's population and evidence, and nothin
 
   // The period's reads, and only those.
   for (const [path, want] of READS) {
-    const { status } = await asAuditor(auditorBearer, "GET", path);
+    const { status } = await call(auditorBearer, "GET", path);
     expect(status, `assigned GET ${path}`).toBe(want);
   }
 
   // A sample drawn from the period's population holds only the in-scope
   // record; the unassigned period's population cannot be drawn from.
-  const drawn = await asAuditor(auditorBearer, "POST", "/v1/samples", {
+  const drawn = await call(auditorBearer, "POST", "/v1/samples", {
     population_id: POPULATION,
     n: 1,
     seed: "e2e-2157",
@@ -183,13 +186,9 @@ test("an assigned auditor works the period's population and evidence, and nothin
     evidence_record_ids: string[];
   };
   expect(sample.evidence_record_ids).toEqual([EVIDENCE_IN_SCOPE]);
-  const read = await asAuditor(
-    auditorBearer,
-    "GET",
-    `/v1/samples/${sample.id}`,
-  );
+  const read = await call(auditorBearer, "GET", `/v1/samples/${sample.id}`);
   expect(read.status, "read own sample").toBe(200);
-  const refused = await asAuditor(auditorBearer, "POST", "/v1/samples", {
+  const refused = await call(auditorBearer, "POST", "/v1/samples", {
     population_id: UNASSIGNED_POPULATION,
     n: 1,
     seed: "e2e-2157",
@@ -197,14 +196,18 @@ test("an assigned auditor works the period's population and evidence, and nothin
   expect(refused.status, "draw in the unassigned period").toBe(403);
 
   // Removed, the auditor loses the period's reads on the next request.
-  await row.getByTestId("audit-period-auditor-remove").click();
-  await expect(row).toHaveCount(0);
+  const removed = await call(
+    adminBearer,
+    "DELETE",
+    `/v1/audit-periods/${PERIOD_ID}/auditors/${AUDITOR_ID}`,
+  );
+  expect(removed.status, "admin removes the auditor").toBeLessThan(300);
   for (const path of [
     `/v1/populations/${POPULATION}`,
     `/v1/evidence/${EVIDENCE_IN_SCOPE}`,
     `/v1/samples/${sample.id}`,
   ]) {
-    const { status } = await asAuditor(auditorBearer, "GET", path);
+    const { status } = await call(auditorBearer, "GET", path);
     expect(status, `removed GET ${path}`).toBe(403);
   }
 });
