@@ -164,26 +164,35 @@ func (p poolControlReader) ControlByID(ctx context.Context, tenantID string, id 
 // idempotency key (#2509). poolControlReader implements it; the contract
 // test's stub reader does not need to.
 type idempotencyReader interface {
-	ObservedAtByIdempotencyKey(ctx context.Context, tenantID, idemKey string) (time.Time, bool, error)
+	AttestationByIdempotencyKey(ctx context.Context, tenantID string, controlID uuid.UUID, idemKey string) (priorAttestation, bool, error)
 }
 
-// ObservedAtByIdempotencyKey returns the observed_at of the tenant's record
-// under idemKey, inside a tenant-GUC read tx. found is false when there is
-// none.
-func (p poolControlReader) ObservedAtByIdempotencyKey(ctx context.Context, tenantID, idemKey string) (time.Time, bool, error) {
+// priorAttestation is the record already under an idempotency key.
+// superseded reports that the control has a later attestation than it,
+// under the engine's latest-attestation order (#2520).
+type priorAttestation struct {
+	observedAt time.Time
+	superseded bool
+}
+
+// AttestationByIdempotencyKey returns the tenant's record under idemKey,
+// and whether a later attestation for controlID exists, inside one
+// tenant-GUC read tx. found is false when there is none.
+func (p poolControlReader) AttestationByIdempotencyKey(ctx context.Context, tenantID string, controlID uuid.UUID, idemKey string) (priorAttestation, bool, error) {
 	tenantUUID, err := uuid.Parse(tenantID)
 	if err != nil {
-		return time.Time{}, false, fmt.Errorf("parse tenant: %w", err)
+		return priorAttestation{}, false, fmt.Errorf("parse tenant: %w", err)
 	}
 	var (
-		out   time.Time
+		out   priorAttestation
 		found bool
 	)
 	err = pgx.BeginTxFunc(ctx, p.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		if terr := tenancy.ApplyTenant(ctx, tx); terr != nil {
 			return terr
 		}
-		rec, gerr := dbx.New(tx).GetEvidenceRecordByIdempotency(ctx, dbx.GetEvidenceRecordByIdempotencyParams{
+		q := dbx.New(tx)
+		rec, gerr := q.GetEvidenceRecordByIdempotency(ctx, dbx.GetEvidenceRecordByIdempotencyParams{
 			TenantID:       pgtype.UUID{Bytes: tenantUUID, Valid: true},
 			IdempotencyKey: &idemKey,
 		})
@@ -193,7 +202,31 @@ func (p poolControlReader) ObservedAtByIdempotencyKey(ctx context.Context, tenan
 		if gerr != nil {
 			return gerr
 		}
-		out, found = rec.ObservedAt.Time.UTC(), true
+		// ingested_at is NOT NULL DEFAULT now() on evidence_records, so a
+		// ledger row always carries it; the engine's zero fallback in
+		// attestedAt is for fixtures only (#2520).
+		if !rec.IngestedAt.Valid {
+			return errors.New("evidence record has no ingested_at")
+		}
+		observed, ingested := rec.ObservedAt.Time.UTC(), rec.IngestedAt.Time.UTC()
+		attested := observed
+		if ingested.Before(observed) {
+			attested = ingested
+		}
+		newer, eerr := q.ExistsAttestationAfter(ctx, dbx.ExistsAttestationAfterParams{
+			TenantID:     pgtype.UUID{Bytes: tenantUUID, Valid: true},
+			ControlID:    pgtype.UUID{Bytes: controlID, Valid: true},
+			ControlRef:   controlID.String(),
+			EvidenceKind: AttestationKind,
+			ID:           rec.ID,
+			AttestedAt:   pgtype.Timestamptz{Time: attested, Valid: true},
+			IngestedAt:   pgtype.Timestamptz{Time: ingested, Valid: true},
+			IDText:       uuid.UUID(rec.ID.Bytes).String(),
+		})
+		if eerr != nil {
+			return eerr
+		}
+		out, found = priorAttestation{observedAt: observed, superseded: newer}, true
 		return nil
 	})
 	return out, found, err
@@ -528,22 +561,20 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	// the request falls in. A retry of the same body inside the window gets
 	// the same key and deduplicates; the same text attested again later
 	// gets a new key and is recorded. A caller may send its own key.
-	idemKey := req.IdempotencyKey
-	if idemKey == "" {
-		idemKey = deriveIdempotencyKey(cred.UserID, id.String(), body, now.Truncate(attestRetryWindow))
+	idemKey, prior, found, kerr := h.resolveIdempotencyKey(ctx, cred.TenantID, cred.UserID, id, body, req.IdempotencyKey, now)
+	if errors.Is(kerr, errAttestKeyChainExhausted) {
+		writeAttestError(w, http.StatusConflict, kerr.Error())
+		return
+	}
+	if kerr != nil {
+		writeAttestError(w, http.StatusInternalServerError, "idempotency lookup: "+kerr.Error())
+		return
 	}
 	// The server stamps observed_at when the body has none, so a retry
 	// would carry a new time and hash differently. Reuse the first
 	// request's observed_at so the retry deduplicates instead of 409ing.
-	if req.ObservedAt == "" {
-		prior, found, lerr := h.priorObservedAt(ctx, cred.TenantID, idemKey)
-		if lerr != nil {
-			writeAttestError(w, http.StatusInternalServerError, "idempotency lookup: "+lerr.Error())
-			return
-		}
-		if found {
-			observed = prior
-		}
+	if req.ObservedAt == "" && found {
+		observed = prior
 	}
 
 	// Build the manual.attestation.v1 payload. actor_type=human and
@@ -712,15 +743,61 @@ func deriveIdempotencyKey(userID, controlID string, body []byte, window time.Tim
 	return "attest-" + hex.EncodeToString(h.Sum(nil))[:32]
 }
 
-// priorObservedAt returns the observed_at of the attestation already
-// recorded under idemKey, if any. Without a reader that can look it up
-// (unit tests) it reports none, and a retry falls back to ingest's 409.
-func (h *AttestHandler) priorObservedAt(ctx context.Context, tenantID, idemKey string) (time.Time, bool, error) {
-	lr, ok := h.reader.(idempotencyReader)
-	if !ok {
-		return time.Time{}, false, nil
+// attestMaxKeyGenerations bounds how far one server-derived key steps
+// inside a retry window (#2520). Each step needs a newer attestation
+// between two identical bodies, so no person submitting by hand reaches it.
+const attestMaxKeyGenerations = 32
+
+// errAttestKeyChainExhausted is a keyless caller repeating one body past
+// attestMaxKeyGenerations in a window. The caller can reach it, so it is a
+// 409 telling them to send their own key, not a 500.
+var errAttestKeyChainExhausted = fmt.Errorf("the same attestation was repeated more than %d times in one %s window without an idempotency_key; send an idempotency_key with each attestation", attestMaxKeyGenerations, attestRetryWindow)
+
+// resolveIdempotencyKey picks the key the attestation is recorded under,
+// and returns the observed_at of the record already under it, if any.
+//
+// A client-supplied key is used as-is and dedupes strictly. A
+// server-derived key dedupes a retry, but not a repeat that a later
+// attestation has overtaken (#2520): keyless fail, pass, fail inside one
+// window would otherwise map the second fail onto the first, skip
+// evaluation and leave the control passing. While the record under the
+// key is superseded, the key steps to its next generation (key.1, key.2,
+// ...); the first generation with no record, or whose record is still the
+// latest, is used. A retry of a stepped request walks the same chain and
+// stops on the same generation, so it still dedupes.
+//
+// Without a reader that can look keys up (unit tests) it reports no prior
+// record, and a retry falls back to ingest's 409.
+func (h *AttestHandler) resolveIdempotencyKey(ctx context.Context, tenantID, userID string, controlID uuid.UUID, body []byte, clientKey string, now time.Time) (string, time.Time, bool, error) {
+	lr, canLookup := h.reader.(idempotencyReader)
+	if clientKey != "" {
+		if !canLookup {
+			return clientKey, time.Time{}, false, nil
+		}
+		prior, found, err := lr.AttestationByIdempotencyKey(ctx, tenantID, controlID, clientKey)
+		return clientKey, prior.observedAt, found, err
 	}
-	return lr.ObservedAtByIdempotencyKey(ctx, tenantID, idemKey)
+	base := deriveIdempotencyKey(userID, controlID.String(), body, now.Truncate(attestRetryWindow))
+	if !canLookup {
+		return base, time.Time{}, false, nil
+	}
+	for gen := 0; gen < attestMaxKeyGenerations; gen++ {
+		key := base
+		if gen > 0 {
+			key = base + "." + strconv.Itoa(gen)
+		}
+		prior, found, err := lr.AttestationByIdempotencyKey(ctx, tenantID, controlID, key)
+		if err != nil {
+			return "", time.Time{}, false, err
+		}
+		if !found {
+			return key, time.Time{}, false, nil
+		}
+		if !prior.superseded {
+			return key, prior.observedAt, true, nil
+		}
+	}
+	return "", time.Time{}, false, errAttestKeyChainExhausted
 }
 
 func ingestErrorToStatus(err error) int {

@@ -325,7 +325,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/board/narrative/generate", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board/narrative/generate"},
 	{Method: "POST", Path: "/v1/board/narrative/generate-all", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board/narrative/generate-all — draft the full multi-section narrative"},
 	{Method: "POST", Path: "/v1/calendar/subscription", Tag: "calendar", Tier: "bearer", Internal: false, Summary: "POST /v1/calendar/subscription"},
-	{Method: "POST", Path: "/v1/controls/{id}/attestations", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/{id}/attestations"},
+	{Method: "POST", Path: "/v1/controls/{id}/attestations", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/{id}/attestations — record a manual attestation and evaluate the control; API callers should send their own idempotency_key per attestation, since without one the server derives a key that dedupes identical bodies within a 5-minute window (#2520)"},
 	{Method: "POST", Path: "/v1/controls/checklist:generate", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/checklist:generate"},
 	{Method: "POST", Path: "/v1/controls/checklist/sections/{id}:approve", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/checklist/sections/{id}:approve"},
 	{Method: "POST", Path: "/v1/controls/imports", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/imports — upload a CSV/XLSX control sheet as a staged import batch (#1779)"},

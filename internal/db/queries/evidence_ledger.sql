@@ -158,3 +158,28 @@ WHERE tenant_id = $1
   AND record_id = $3
 ORDER BY received_at DESC
 LIMIT 1;
+
+-- name: ExistsAttestationAfter :one
+-- #2520: is there an attestation for the control later than the given one,
+-- under the evaluation engine's latest-attestation order (internal/eval
+-- latestAttestationWins): min(observed_at, ingested_at), then ingested_at,
+-- then id compared bytewise? The attest handler asks this on a dedupe hit
+-- for a server-derived key, so a repeat of an older attestation is recorded
+-- when a newer one would otherwise stand. Control resolution mirrors
+-- ListEvidenceForControlAsOf.
+SELECT EXISTS (
+    SELECT 1
+    FROM evidence_records
+    WHERE tenant_id = sqlc.arg(tenant_id)
+      AND (control_id = sqlc.arg(control_id) OR control_ref = sqlc.arg(control_ref)::text)
+      AND evidence_kind = sqlc.arg(evidence_kind)::text
+      AND id <> sqlc.arg(id)
+      AND (
+        LEAST(observed_at, ingested_at) > sqlc.arg(attested_at)::timestamptz
+        OR (LEAST(observed_at, ingested_at) = sqlc.arg(attested_at)::timestamptz
+            AND ingested_at > sqlc.arg(ingested_at)::timestamptz)
+        OR (LEAST(observed_at, ingested_at) = sqlc.arg(attested_at)::timestamptz
+            AND ingested_at = sqlc.arg(ingested_at)::timestamptz
+            AND id::text COLLATE "C" > sqlc.arg(id_text)::text)
+      )
+) AS newer;
