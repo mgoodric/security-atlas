@@ -9,9 +9,11 @@
 //
 // ?module=<key> (#2174) leaves out the users who cannot work in that
 // optional module: an assignee picker on a record offers no one an admin
-// has narrowed out of it. The filter runs here, on the server, from each
-// person's stored module access and live roles
-// (moduleaccess.Views.MembersWithout).
+// has narrowed out of it, nor anyone with no live role (#2501). The
+// filter runs here, on the server, from each person's stored module
+// access, live roles and super-admin grant
+// (moduleaccess.Views.MembersWithout). Only a caller who can work in that
+// module may ask; anyone else gets 403.
 //
 // It returns no email address, token, prefix or last4: a user's
 // display_name falls back to the email's local-part here, on the server.
@@ -152,7 +154,23 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if module != "" {
+		// Only a caller who can work in the module may ask who else can
+		// (#2501): anyone else would learn who was narrowed out of it.
 		// A failed access read fails closed: 500, never everyone.
+		viewer, err := h.views.For(r)
+		if err != nil {
+			httperr.WriteInternal(w, r, "people module access", err)
+			return
+		}
+		sees, err := viewer.SeesModule(module)
+		if err != nil {
+			httperr.WriteInternal(w, r, "people module access", err)
+			return
+		}
+		if !sees {
+			httpresp.WriteError(w, http.StatusForbidden, "module: not available to you")
+			return
+		}
 		excluded, err := h.views.MembersWithout(r.Context(), tenantID, module)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list people with module access", err)
