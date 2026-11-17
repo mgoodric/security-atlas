@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
@@ -407,8 +408,8 @@ func TestChildren_LinkWaitsForHierarchyLock(t *testing.T) {
 		t.Fatalf("begin holder: %v", err)
 	}
 	defer func() { _ = holder.Rollback(ctx) }()
-	if _, err := holder.Exec(ctx,
-		`SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || $1::uuid::text, 0))`, tenant); err != nil {
+	// The same key LockRiskHierarchy takes: hashtext of the canonical uuid text.
+	if err := advisorylock.LockText(ctx, holder, advisorylock.RiskHierarchy, uuid.MustParse(tenant).String()); err != nil {
 		t.Fatalf("take hierarchy lock: %v", err)
 	}
 

@@ -132,25 +132,27 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		return []Role{RoleAdmin}
 	case cred.IsApprover:
 		return []Role{RoleGRCEngineer}
-	case jwtSession(cred) && readOnlyRoleClaim(cred.OwnerRoles):
-		// #2381: jwtmw copies the JWT's role claim into OwnerRoles, so a
-		// viewer or auditor session used to derive control_owner below and
-		// could write evidence, artifacts and walkthroughs. Such a session
-		// derives nothing from the credential: its roles come only from
-		// the live user_roles rows the resolver merges in Decide. Not the
-		// claim itself, which outlives a revoke until the token expires.
+	case jwtSession(cred) && !machineJWT(cred):
+		// #2496: a user's session derives nothing from its role claim,
+		// whatever the claim says. jwtmw copies the claim into OwnerRoles,
+		// and the claim outlives a revoke until the token expires. A viewer
+		// or auditor claim used to derive control_owner (#2381), an empty
+		// one grc_engineer (#2401: every login path mints a session for a
+		// user with no role rather than refusing), and an admin or
+		// grc_engineer claim control_owner (#2496). The session's roles are
+		// the live user_roles rows the resolver merges in Decide before OPA
+		// evaluates, and nothing else. IsAdmin and IsApprover above are the
+		// super-admin bit, which jwtmw takes from the re-checked
+		// atlas:super_admin claim, not a tenant role.
+		//
+		// This is an allow-list: only a client_credentials machine token
+		// reaches the cases below, because it names no user and has no
+		// user_roles to fall back on. Every other subject shape, known or
+		// not, derives nothing.
 		return nil
-	case jwtSession(cred) && len(cred.OwnerRoles) == 0 && !machineJWT(cred):
-		// #2401: a user's session carries an empty claim when the user has
-		// no user_roles row in the current tenant (never granted, last role
-		// revoked, or a member of another tenant only), and every login
-		// path mints one rather than refusing. The default below handed
-		// that session grc_engineer, so revoking a user's only role lasted
-		// until their next login. Such a session derives nothing; its roles
-		// are the live user_roles rows alone. This is an allow-list: only a
-		// client_credentials machine token keeps the default, because it
-		// names no user and its claim is always empty. Every other subject
-		// shape, known or not, derives nothing.
+	case jwtSession(cred) && readOnlyRoleClaim(cred.OwnerRoles):
+		// #2381: a machine token whose claim names only viewer and/or
+		// auditor must not derive control_owner below.
 		return nil
 	case apiKey(cred) && readOnlyRoleClaim(cred.OwnerRoles):
 		// #2402: an API key whose owner_roles names only viewer and/or

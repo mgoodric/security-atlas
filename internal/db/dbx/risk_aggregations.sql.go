@@ -327,7 +327,7 @@ func (q *Queries) ListRiskParentLinks(ctx context.Context, arg ListRiskParentLin
 }
 
 const lockRiskHierarchy = `-- name: LockRiskHierarchy :exec
-SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || $1::uuid::text, 0))
+SELECT pg_advisory_xact_lock(6, hashtext($1::uuid::text))
 `
 
 // #1748: serialize every write that can add a hierarchy link in one tenant
@@ -336,7 +336,7 @@ SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || $1::uuid::tex
 // check on a snapshot that lacks the other. Transaction-scoped and
 // re-entrant within a session. Callers take it before any meta-risk key
 // lock (LockAggregationKey) so the two locks are always acquired in the
-// same order.
+// same order. Namespace 6 is advisorylock.RiskHierarchy (#2273).
 func (q *Queries) LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, lockRiskHierarchy, tenantID)
 	return err

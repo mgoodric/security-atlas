@@ -329,6 +329,15 @@ RETURNING *;
 --   treatment, methodology, level, theme, org_unit_id: exact match.
 --   category_ids      any of these organisation categories (#1745); the
 --                     store resolves slugs to ids first.
+--   severity_min, severity_max  the assessed severity in that inclusive
+--                     range (#2490), FAIR left out. The value is
+--                     risk.AssessedSeverity's, the wire `severity`: the
+--                     inherent score's `severity`, else likelihood x
+--                     impact, each truncated to a whole number, and 0 when
+--                     the score is not an object or any of the three keys
+--                     is not a number (Go's json.Unmarshal into *float64
+--                     fails on the whole object then). The store sets the
+--                     bounds from risk.SeverityBandRange.
 --   owner_user_id     that person's risks (#2129); unowned keeps the risks
 --                     with no owner user.
 --   due_from, due_before  review_due_at in [due_from, due_before). The
@@ -378,6 +387,21 @@ LEFT JOIN LATERAL (
            END AS residual,
            lower(COALESCE(NULLIF(ou.display_name, ''), NULLIF(ou.email, ''), NULLIF(btrim(r.treatment_owner), ''))) AS owner_name
 ) k ON true
+LEFT JOIN LATERAL (
+    SELECT CASE
+               WHEN jsonb_typeof(r.inherent_score) <> 'object'
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'severity'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'likelihood'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'impact'), 'null') NOT IN ('number', 'null')
+                   THEN 0
+               WHEN jsonb_typeof(r.inherent_score -> 'severity') = 'number'
+                   THEN trunc((r.inherent_score ->> 'severity')::numeric)
+               WHEN jsonb_typeof(r.inherent_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.inherent_score -> 'impact') = 'number'
+                   THEN trunc((r.inherent_score ->> 'likelihood')::numeric) * trunc((r.inherent_score ->> 'impact')::numeric)
+               ELSE 0
+           END AS assessed
+) sev ON true
 WHERE r.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg('status')::text IS NULL OR r.status::text = sqlc.narg('status')::text)
   AND (sqlc.arg(include_rollups)::bool OR kids.child_count = 0)
@@ -391,6 +415,8 @@ WHERE r.tenant_id = sqlc.arg(tenant_id)
   AND (NOT sqlc.arg(unowned)::bool OR r.owner_user_id IS NULL)
   AND (sqlc.narg('due_from')::timestamptz IS NULL OR r.review_due_at >= sqlc.narg('due_from')::timestamptz)
   AND (sqlc.narg('due_before')::timestamptz IS NULL OR r.review_due_at < sqlc.narg('due_before')::timestamptz)
+  AND (sqlc.narg('severity_min')::int IS NULL OR (r.methodology <> 'fair' AND sev.assessed >= sqlc.narg('severity_min')::int))
+  AND (sqlc.narg('severity_max')::int IS NULL OR sev.assessed <= sqlc.narg('severity_max')::int)
 ORDER BY
     -- residual (the default, descending): 5x5 above FAIR in both directions.
     CASE WHEN sqlc.arg(sort_key)::text IN ('residual', 'residual_age') THEN k.fair_group END ASC,
@@ -437,6 +463,22 @@ LEFT JOIN LATERAL (
       AND ra.parent_risk_id = r.id
       AND c.status = 'open'
 ) kids ON true
+LEFT JOIN LATERAL (
+    -- The same expression as ListRisksPage's sev lateral; keep them equal.
+    SELECT CASE
+               WHEN jsonb_typeof(r.inherent_score) <> 'object'
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'severity'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'likelihood'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'impact'), 'null') NOT IN ('number', 'null')
+                   THEN 0
+               WHEN jsonb_typeof(r.inherent_score -> 'severity') = 'number'
+                   THEN trunc((r.inherent_score ->> 'severity')::numeric)
+               WHEN jsonb_typeof(r.inherent_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.inherent_score -> 'impact') = 'number'
+                   THEN trunc((r.inherent_score ->> 'likelihood')::numeric) * trunc((r.inherent_score ->> 'impact')::numeric)
+               ELSE 0
+           END AS assessed
+) sev ON true
 WHERE r.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg('status')::text IS NULL OR r.status::text = sqlc.narg('status')::text)
   AND (sqlc.arg(include_rollups)::bool OR kids.child_count = 0)
@@ -449,4 +491,6 @@ WHERE r.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg('owner_user_id')::uuid IS NULL OR r.owner_user_id = sqlc.narg('owner_user_id')::uuid)
   AND (NOT sqlc.arg(unowned)::bool OR r.owner_user_id IS NULL)
   AND (sqlc.narg('due_from')::timestamptz IS NULL OR r.review_due_at >= sqlc.narg('due_from')::timestamptz)
-  AND (sqlc.narg('due_before')::timestamptz IS NULL OR r.review_due_at < sqlc.narg('due_before')::timestamptz);
+  AND (sqlc.narg('due_before')::timestamptz IS NULL OR r.review_due_at < sqlc.narg('due_before')::timestamptz)
+  AND (sqlc.narg('severity_min')::int IS NULL OR (r.methodology <> 'fair' AND sev.assessed >= sqlc.narg('severity_min')::int))
+  AND (sqlc.narg('severity_max')::int IS NULL OR sev.assessed <= sqlc.narg('severity_max')::int);

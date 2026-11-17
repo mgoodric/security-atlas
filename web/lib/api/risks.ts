@@ -214,6 +214,9 @@ export type RisksListResponse = {
   total?: number;
   limit?: number;
   offset?: number;
+  // #2490: set by fetchAllRisks when it stopped at its page cap before
+  // holding `total` rows; `risks` is then the first pages only.
+  partial?: boolean;
 };
 
 // #2132: the GET /v1/risks parameters the BFF passes through. The
@@ -229,6 +232,7 @@ export const RISK_LIST_PARAMS = [
   "level",
   "org_unit",
   "theme",
+  "severity_band",
   "review_due",
   "review_due_from",
   "review_due_to",
@@ -270,39 +274,65 @@ export async function listRisks(
   };
 }
 
-// Browser-side fetcher used by the sidebar count. Hits the BFF at
-// `/api/risks` which forwards the bearer cookie to upstream. It reads every
-// page (#2482): GET /v1/risks returns at most 500 rows a call (#2132), and
-// the badge and pickers need the whole register.
-export async function fetchRisksList(): Promise<RisksListResponse> {
-  return fetchAllRisks({});
+// #2490: the register's size for its "N of M" label: the platform's
+// filtered `total` for the default register (open, roll-ups left out), read
+// off a one-row page. A response without `total` (an older platform, or a
+// hand-rolled fixture) falls back to the rows it returned.
+export async function fetchRiskRegisterTotal(): Promise<number> {
+  const page = await fetchRisks("/api/risks?limit=1");
+  return page.total ?? (page.risks ?? []).length;
 }
 
-// fetchRisksListWithRollUps is fetchRisksList with roll-up parents kept
-// (#2060): the pickers where a roll-up is a valid choice.
+// #2490: the sidebar badge's count: open, non-roll-up risks in the High
+// severity band, counted by the platform (?severity_band=high, the bands of
+// risk.SeverityBand) off a one-row page. A response without `total` is an
+// error, so the badge renders nothing rather than a count of one page.
+export async function fetchHighSeverityRiskTotal(): Promise<number> {
+  const page = await fetchRisks("/api/risks?severity_band=high&limit=1");
+  if (page.total === undefined) {
+    throw new APIError(502, "risk list response has no total");
+  }
+  return page.total;
+}
+
+// fetchRisksListWithRollUps reads the whole register with roll-up parents
+// kept (#2060): the pickers where a roll-up is a valid choice. It reads
+// every page (#2482): GET /v1/risks returns at most 500 rows a call
+// (#2132).
 export async function fetchRisksListWithRollUps(): Promise<RisksListResponse> {
   return fetchAllRisks({ include_rollups: "true" });
 }
 
+// FETCH_ALL_RISKS_MAX_PAGES caps fetchAllRisks (#2490): 50 pages of 500 is
+// 25,000 risks, far past a v1 register. It is insurance against an upstream
+// whose `total` never stops growing or whose pages never fill.
+export const FETCH_ALL_RISKS_MAX_PAGES = 50;
+
 // fetchAllRisks walks the register a page at a time until it holds
 // `total` rows. A page that comes back empty ends the walk, so a register
-// that shrinks mid-walk cannot loop.
+// that shrinks mid-walk cannot loop. At FETCH_ALL_RISKS_MAX_PAGES it stops
+// and returns what it holds with `partial: true` rather than throwing, so a
+// picker still offers the risks it read.
 async function fetchAllRisks(
   query: Record<string, string>,
 ): Promise<RisksListResponse> {
   const risks: Risk[] = [];
   let total: number | undefined;
-  for (;;) {
+  for (let pages = 0; ; ) {
     const qs = new URLSearchParams(query);
     if (risks.length > 0) qs.set("offset", String(risks.length));
     const page = await fetchRisks(
       qs.size ? `/api/risks?${qs.toString()}` : "/api/risks",
     );
+    pages++;
     const rows = page.risks ?? [];
     risks.push(...rows);
     total = page.total;
     if (rows.length === 0 || total === undefined || risks.length >= total) {
       break;
+    }
+    if (pages >= FETCH_ALL_RISKS_MAX_PAGES) {
+      return { risks, count: risks.length, total, partial: true };
     }
   }
   return { risks, count: risks.length, total: total ?? risks.length };

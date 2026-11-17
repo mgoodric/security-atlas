@@ -8,7 +8,6 @@
 //   - actorTenantFromContext         : valid + bad + missing branches
 //   - mustMarshal                    : happy path; panic branch is documented
 //   - stringPtr                      : pointer round-trip
-//   - actorAdvisoryKey               : determinism + slice-143 prefix + slice-142 non-collision
 //   - writeError / writeJSON         : Content-Type + status + body shape
 //
 // Per the slice 290 unit/integration split rule: integration tests cover
@@ -198,41 +197,6 @@ func TestStringPtr(t *testing.T) {
 	// Empty string still allocates a pointer (not nil).
 	if stringPtr("") == nil {
 		t.Fatalf("empty string should produce a non-nil pointer")
-	}
-}
-
-// ===== actorAdvisoryKey =====
-
-func TestActorAdvisoryKey_Deterministic(t *testing.T) {
-	actor := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-	a1 := actorAdvisoryKey(actor)
-	a2 := actorAdvisoryKey(actor)
-	if a1 != a2 {
-		t.Fatalf("not deterministic: %x vs %x", a1, a2)
-	}
-}
-
-func TestActorAdvisoryKey_Slice143Prefix(t *testing.T) {
-	actor := uuid.New()
-	key := actorAdvisoryKey(actor)
-	const slice143Prefix int64 = 0x0143000000000000
-	if (key & 0x7fff000000000000) != (slice143Prefix & 0x7fff000000000000) {
-		// Confirm the slice-143 prefix is in the high bits (the load-bearing
-		// guarantee that slice-142 keys cannot collide).
-		t.Fatalf("expected slice-143 prefix in high bits, got %x", key)
-	}
-	// Must not collide with slice-142's fixed-value advisory key.
-	const slice142Key int64 = 0x0142142142142142
-	if key == slice142Key {
-		t.Fatalf("collision with slice-142 key: %x", key)
-	}
-}
-
-func TestActorAdvisoryKey_DistinctActorsDistinctKeys(t *testing.T) {
-	a := uuid.MustParse("11111111-2222-3333-4444-555555555555")
-	b := uuid.MustParse("66666666-7777-8888-9999-aaaaaaaaaaaa")
-	if actorAdvisoryKey(a) == actorAdvisoryKey(b) {
-		t.Fatalf("distinct actors should produce distinct keys")
 	}
 }
 

@@ -27,10 +27,11 @@ func TestBuildInput2381_DerivedRoles(t *testing.T) {
 		{"JWT viewer", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"viewer"}}, nil},
 		{"JWT auditor", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"auditor"}}, nil},
 		{"JWT viewer+auditor", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"auditor", "viewer"}}, nil},
-		{"JWT control_owner", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"control_owner"}}, []authz.Role{authz.RoleControlOwner}},
-		{"JWT grc_engineer", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"grc_engineer"}}, []authz.Role{authz.RoleControlOwner}},
-		{"JWT admin", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"admin"}}, []authz.Role{authz.RoleControlOwner}},
-		{"JWT auditor+control_owner", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"auditor", "control_owner"}}, []authz.Role{authz.RoleControlOwner}},
+		// #2496: no user claim derives anything; live user_roles alone count.
+		{"JWT control_owner", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"control_owner"}}, nil},
+		{"JWT grc_engineer", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"grc_engineer"}}, nil},
+		{"JWT admin", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"admin"}}, nil},
+		{"JWT auditor+control_owner", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"auditor", "control_owner"}}, nil},
 		// An empty claim derives nothing for a user (#2401); every principal
 		// kind is in jwt_empty_claim_2401_test.go.
 		{"JWT empty claim", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:6f1c2a9e-1d2b-4c3d-8e4f-5a6b7c8d9e0f"}, nil},

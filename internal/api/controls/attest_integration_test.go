@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
@@ -120,9 +121,9 @@ func bootRegistry(t *testing.T, admin *pgxpool.Pool) *schemaregistry.Service {
 	// Best-effort advisory lock; we don't strictly need to block
 	// parallel test packages because the registry seed is idempotent
 	// (ON CONFLICT DO NOTHING). The lock keeps log output clean.
-	_, _ = conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781140)")
+	_ = advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyControlAttest)
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781140)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyControlAttest)
 	}()
 
 	platform, err := schemaregistry.LoadPlatformSchemas(schemaregistry.PlatformSchemasFS())

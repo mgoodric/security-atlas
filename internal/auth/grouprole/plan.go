@@ -122,6 +122,17 @@ func planReconcile(st reconcileState) reconcilePlan {
 	return p
 }
 
+// revokesAdmin reports whether reconciling target against current would
+// revoke the user's group-derived admin role, before the last-admin guard
+// decides whether to suppress it. Only then does the plan read the tenant's
+// admin count, so only then does Derive take the admin-roster lock (#2273):
+// grants and non-admin revokes cannot remove an admin.
+func revokesAdmin(target, current map[string]struct{}) bool {
+	_, held := current[roleAdmin]
+	_, kept := target[roleAdmin]
+	return held && !kept
+}
+
 // wouldStrandLastAdmin reports whether revoking THIS user's group-derived admin
 // role would remove the tenant's final admin (AC-5 / P0-509-3). It returns true
 // only when the user does not also hold admin manually (a manual admin grant
