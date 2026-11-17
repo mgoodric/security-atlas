@@ -31,6 +31,18 @@ const DefaultExpiryInterval = 24 * time.Hour
 type Expirer struct {
 	pool   *pgxpool.Pool
 	logger *slog.Logger
+	// reevaluate, when set, re-evaluates each expired exception's control
+	// after the tenant's sweep commits (#2269).
+	reevaluate Reevaluator
+}
+
+// WithReevaluate makes the sweep re-evaluate the control of every exception
+// it expires, once the tenant's transaction has committed (#2269). The
+// sweep is already a background loop, so the calls run in it, one per
+// distinct control.
+func (e *Expirer) WithReevaluate(r Reevaluator) *Expirer {
+	e.reevaluate = r
+	return e
 }
 
 // NewExpirer constructs an Expirer. The pool MUST be connected as the
@@ -171,6 +183,20 @@ func (e *Expirer) sweepTenant(ctx context.Context, tenantID uuid.UUID, now time.
 	}
 	if err := tx.Commit(tenantCtx); err != nil {
 		return 0, fmt.Errorf("commit: %w", err)
+	}
+	// #2269: the expired exceptions no longer waive their controls.
+	// The engine already stops honouring an exception at expires_at (#2112
+	// D4); this run records it without waiting for the next scheduled one.
+	if e.reevaluate != nil {
+		seen := map[uuid.UUID]bool{}
+		for _, row := range expired {
+			controlID := uuid.UUID(row.ControlID.Bytes)
+			if seen[controlID] {
+				continue
+			}
+			seen[controlID] = true
+			e.reevaluate(ctx, tenantID, controlID)
+		}
 	}
 	return len(expired), nil
 }

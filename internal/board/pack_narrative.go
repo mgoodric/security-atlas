@@ -96,11 +96,14 @@ var sectionSources = map[string]string{
 		`Activate a framework scope to populate this section.` +
 		`{{ else if .Data.ScopeCountUnknown }}Control coverage stands at {{ pct .Data.CoveragePct }}% at quarter end, ` +
 		`against a baseline of {{ pct .Data.BaselineCoveragePct }}% — a {{ pts .Data.CoverageDelta }} point change.` +
-		`{{ else }}Control coverage averages {{ pct .Data.CoveragePct }}% across ` +
+		`{{ else }}Control coverage averages {{ pct .Data.CoveragePct }}%` +
+		`{{ if .Data.ShowsExceptionShare }} ({{ pct .Data.CoveredByExceptionPct }}% of requirements covered only by exception){{ end }} across ` +
 		`the {{ .Data.ScopedFrameworks }} {{ pluralize .Data.ScopedFrameworks "framework" "frameworks" }} with an activated scope` +
 		`{{ if .Data.NoBaseline }}, with {{ noBaseline }}, so no change is reported. ` +
 		`Set baseline_coverage_pct to compare against a prior-quarter figure.` +
-		`{{ else }}, against a baseline of {{ pct .Data.BaselineCoveragePct }}% — a {{ pts .Data.CoverageDelta }} point change. ` +
+		`{{ else }}, against a baseline of {{ pct .Data.BaselineCoveragePct }}%` +
+		`{{ if and .Data.ShowsExceptionShare .Data.BaselineExceptionKnown }} ({{ pct .Data.BaselineCoveredByExceptionPct }}% by exception){{ end }}` +
+		` — a {{ pts .Data.CoverageDelta }} point change. ` +
 		`The baseline is the same frameworks' coverage at the start of the 90-day posture trend, unless the operator has set baseline_coverage_pct.{{ end }}` +
 		`{{ end }}`,
 
