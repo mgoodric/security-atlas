@@ -16,18 +16,32 @@ import (
 // #2174: who can work in a module, asked about a person who is not the
 // caller: the owner of a record (for the "owner can't access this module"
 // flag) and the members an assignee picker lists. Both read the person's
-// live user_roles and stored module access at the time of the read, so a
-// narrowing or a role change shows up without touching the record.
+// live user_roles, super-admin grant and stored module access at the
+// time of the read, so a narrowing or a role change shows up without
+// touching the record.
 //
-// A person lacks a module only when an admin narrowed their module access
-// to leave it out and their live user_roles hold neither admin nor
-// auditor (both exempt, as in Gate). A person with no stored narrowing
-// has "all". Roles held only in a credential (a test token, an IdP claim)
-// cannot be read for someone who is not the caller, so the absence of a
-// user_roles row is not taken as lost access: the flag and the picker are
-// advisory, and Gate still refuses the person on their own requests.
+// A person can work in an optional module when they are a super-admin
+// (exempt, as in ForCaller), their live user_roles hold admin or auditor
+// (exempt, as in Gate), or they hold some other live role and an admin
+// has not narrowed their module access to leave it out (no stored
+// narrowing is "all"). A person with no live role lacks every optional
+// module (#2501): user sessions decide on live roles only (#2496), so
+// such a person cannot use the module on their own requests either.
 // Whether the module is switched on is not asked: a switched-off module's
 // records are not shown to anyone.
+
+// memberLacks is the rule above for one person: super is their
+// super-admin grant, roles their live user_roles, modules their stored
+// access (nil is "all").
+func memberLacks(super bool, roles []authz.Role, modules []string, key string) bool {
+	if super || exemptRole(roles) {
+		return false
+	}
+	if len(roles) == 0 {
+		return true
+	}
+	return !(Access{Modules: modules}).Has(key)
+}
 
 // UserHas reports whether userID (a users.id or user_roles key) can work
 // in the optional module key. A core module, or a key the registry does
@@ -37,18 +51,27 @@ func (v *Views) UserHas(ctx context.Context, tenantID uuid.UUID, userID, key str
 	if v == nil || v.access == nil || !optional(key) || userID == "" {
 		return true, nil
 	}
-	modules, err := v.access.Get(ctx, tenantID, identity.RolesKey(userID))
-	if err != nil {
-		return false, err
-	}
-	if (Access{Modules: modules}).Has(key) {
-		return true, nil
-	}
 	roles, err := v.access.roles.RolesFor(ctx, tenantID.String(), userID)
 	if err != nil {
 		return false, fmt.Errorf("moduleaccess: owner roles: %w", err)
 	}
-	return exemptRole(roles), nil
+	if exemptRole(roles) {
+		return true, nil
+	}
+	var modules []string
+	if len(roles) > 0 {
+		if modules, err = v.access.Get(ctx, tenantID, identity.RolesKey(userID)); err != nil {
+			return false, err
+		}
+		if (Access{Modules: modules}).Has(key) {
+			return true, nil
+		}
+	}
+	super, err := v.access.superAdmin(ctx, tenantID, userID)
+	if err != nil {
+		return false, err
+	}
+	return !memberLacks(super, roles, modules, key), nil
 }
 
 // exemptRole reports whether roles hold admin or auditor, whom module
@@ -103,39 +126,95 @@ func (o *OwnerCheck) Lacks(owner string) (bool, error) {
 	return !has, nil
 }
 
-// MembersWithout returns the user_roles keys of the tenant's members who
-// cannot work in the optional module key: narrowed to leave it out, and
-// holding neither admin nor auditor live. A core module, an unlisted key,
-// or a nil Views returns none.
+// MembersWithout returns the users.id of the tenant's users who cannot
+// work in the optional module key, by memberLacks: a user with no live
+// role (none granted, or deactivated) is among them unless a super-admin.
+// A core module, an unlisted key, or a nil Views returns none.
 func (v *Views) MembersWithout(ctx context.Context, tenantID uuid.UUID, key string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if v == nil || v.access == nil || !optional(key) {
 		return out, nil
 	}
-	stored, err := v.access.List(ctx, tenantID)
+	users, err := v.access.tenantUsers(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	narrowedOut := false
-	for user, modules := range stored {
-		if !(Access{Modules: modules}).Has(key) {
-			out[user] = true
-			narrowedOut = true
-		}
-	}
-	if !narrowedOut {
-		return out, nil
+	stored, err := v.access.List(ctx, tenantID)
+	if err != nil {
+		return nil, err
 	}
 	roles, err := v.access.liveRoles(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	for user := range out {
-		if exemptRole(roles[user]) {
-			delete(out, user)
+	for user, super := range users {
+		if memberLacks(super, roles[user], stored[user], key) {
+			out[user] = true
 		}
 	}
 	return out, nil
+}
+
+// superAdmin reports whether userID names an active user of the tenant
+// holding the platform super-admin grant. A key that names no user (an
+// API key) is not one.
+func (s *Store) superAdmin(ctx context.Context, tenantID uuid.UUID, userID string) (bool, error) {
+	id, ok := identity.UserID(identity.RolesKey(userID))
+	if !ok {
+		return false, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("moduleaccess: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return false, err
+	}
+	var super bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM super_admins s
+		      JOIN users u ON u.id = s.user_id
+		     WHERE s.user_id = $1 AND u.tenant_id = $2 AND u.status = 'active')`,
+		id, tenantID).Scan(&super); err != nil {
+		return false, fmt.Errorf("moduleaccess: query super_admins: %w", err)
+	}
+	return super, nil
+}
+
+// tenantUsers returns every user of the tenant by users.id, each with
+// whether they are an active super-admin.
+func (s *Store) tenantUsers(ctx context.Context, tenantID uuid.UUID) (map[string]bool, error) {
+	out := map[string]bool{}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("moduleaccess: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT u.id::text,
+		       u.status = 'active' AND EXISTS (SELECT 1 FROM super_admins s WHERE s.user_id = u.id)
+		  FROM users u
+		 WHERE u.tenant_id = $1`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("moduleaccess: query users: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			user  string
+			super bool
+		)
+		if err := rows.Scan(&user, &super); err != nil {
+			return nil, fmt.Errorf("moduleaccess: scan users: %w", err)
+		}
+		out[user] = super
+	}
+	return out, rows.Err()
 }
 
 // liveRoles returns every live role in the tenant keyed by user_roles key,

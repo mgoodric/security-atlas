@@ -23,6 +23,17 @@ machine requester). Only policies have the #1807 history, so only
 it, whoever the key now names. Any other approver gets
 `ErrSubmitterUnknown` (409), which asks for a re-submit.
 
+The prefix check also catches a policy submitted today by an unbound
+key. Its principal (`credstore.PrincipalOf`) is its own `key_...` id,
+so that is what `submitted_by` records. Every person who approves it gets 409
+`ErrSubmitterUnknown`, whatever the self-approval setting, and the key
+itself gets 403 `ErrApproverNotPerson`. The submitter check runs before
+the editor check, so the 409 comes first even when the key also wrote
+the draft. The policy stays unapprovable until a person re-submits it
+(D2). After that, a key that created or edited the draft is still an
+unknown author, so approval needs Allow self-approval and is flagged
+`self_approved` (#2459). Both rules fail closed.
+
 **D2: Re-submit accepts `key_%` rows.** `SubmitPolicyForReview`'s legacy
 predicate is `submitted_by LIKE 'jwt:%' OR submitted_by LIKE 'key\_%'`.
 The underscore is escaped, because `_` is a single-character wildcard in
