@@ -491,6 +491,22 @@ func TestWriteTransitionErr_ApplierRefusals(t *testing.T) {
 
 // ----- writeTransitionErr: every documented branch -----
 
+// #2175: a proposal into a switched-off module answers 409 with a stable
+// code; the proposal stays pending.
+func TestWriteTransitionErr_ModuleOff(t *testing.T) {
+	t.Parallel()
+	h := New(nil)
+	w := httptest.NewRecorder()
+	h.writeTransitionErr(w, httptest.NewRequest(http.MethodPost, "/", nil),
+		fmt.Errorf("%w: risk", writeproposals.ErrModuleOff))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code":"module_switched_off"`) {
+		t.Fatalf("body = %s; want code module_switched_off", w.Body.String())
+	}
+}
+
 func TestWriteTransitionErr_NotFound(t *testing.T) {
 	t.Parallel()
 	h := New(nil)

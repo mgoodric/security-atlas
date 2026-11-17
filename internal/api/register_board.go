@@ -65,7 +65,7 @@ func (s *Server) registerBoard(root *chi.Mux, freshnessStore *freshness.Store, d
 	boardPackGen := board.NewPackGenerator(
 		boardPackStore,
 		vendorBurndownAdapter{store: vendorStore},
-	)
+	).WithSwitches(s.moduleViews)
 	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
 	boardPackH.RegisterRoutes(root)
 	// Slice 440: board-narrative AI v0 (cited, numeric-verified,
