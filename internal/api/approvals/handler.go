@@ -27,6 +27,7 @@ package approvals
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -146,42 +147,52 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
-	out := emptyResponse()
-	approver := approval.Approver{UserID: credstore.MinterUserID(cred), CredentialID: cred.ID}
-	// Gates 2 and "only people approve": nothing to read.
-	if !authz.IsTenantApprover(cred) || approver.UserID == "" {
-		httpresp.WriteJSON(w, http.StatusOK, out)
-		return
-	}
-	if h.pool == nil {
+	items, err := h.Pending(r, cred, tenantID)
+	if errors.Is(err, ErrNoDatabase) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "approvals unavailable: no database")
 		return
 	}
-	viewer, err := h.views.For(r)
-	if err != nil {
-		httperr.WriteInternal(w, r, "approvals module access", err)
-		return
-	}
-	on := map[string]bool{}
-	for _, t := range Types {
-		if on[t], err = featureflag.RouteOn(r, h.flags, approveRoutes[t]); err != nil {
-			httperr.WriteInternal(w, r, "approvals module check", err)
-			return
-		}
-		if !on[t] {
-			continue
-		}
-		if on[t], err = viewer.Sees(approveRoutes[t]); err != nil {
-			httperr.WriteInternal(w, r, "approvals module access", err)
-			return
-		}
-	}
-	items, err := h.pending(r.Context(), tenantID, approver, on)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list approvals", err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, Build(items))
+}
+
+// ErrNoDatabase is Pending's answer to an approver on a server with no
+// database.
+var ErrNoDatabase = errors.New("approvals: no database")
+
+// Pending returns every record waiting for cred's approval, unordered and
+// uncapped, under the gates the package comment lists. A caller who is not
+// an approver, or has no person behind it, gets none. GET
+// /v1/needs-attention (#2134) lists the same rows as its approvals band.
+func (h *Handler) Pending(r *http.Request, cred credstore.Credential, tenantID uuid.UUID) ([]Item, error) {
+	approver := approval.Approver{UserID: credstore.MinterUserID(cred), CredentialID: cred.ID}
+	// Gates 2 and "only people approve": nothing to read.
+	if !authz.IsTenantApprover(cred) || approver.UserID == "" {
+		return nil, nil
+	}
+	if h.pool == nil {
+		return nil, ErrNoDatabase
+	}
+	viewer, err := h.views.For(r)
+	if err != nil {
+		return nil, fmt.Errorf("approvals module access: %w", err)
+	}
+	on := map[string]bool{}
+	for _, t := range Types {
+		if on[t], err = featureflag.RouteOn(r, h.flags, approveRoutes[t]); err != nil {
+			return nil, fmt.Errorf("approvals module check: %w", err)
+		}
+		if !on[t] {
+			continue
+		}
+		if on[t], err = viewer.Sees(approveRoutes[t]); err != nil {
+			return nil, fmt.Errorf("approvals module access: %w", err)
+		}
+	}
+	return h.pending(r.Context(), tenantID, approver, on)
 }
 
 // Build turns the full pending list into the response: counts per type
