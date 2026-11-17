@@ -16,13 +16,13 @@ package board
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // freshnessLister is the narrow view of *freshness.Store the Generator needs.
@@ -244,15 +244,17 @@ func stateFromCoverage(coveragePct int) string {
 //
 // "Age" is the age-since-treatment proxy: now - updated_at (decisions log
 // D4 — the risks table has no treatment-applied timestamp). Residual
-// severity is extracted from the residual_score JSONB, falling back to
-// inherent_score when residual has not been derived yet (a risk with no
-// linked controls — slice 020 AC-7 — has residual == inherent anyway).
+// severity is read from the residual_score JSONB by risk.ScoreValue, falling
+// back to inherent_score when residual has not been derived yet (a risk with
+// no linked controls — slice 020 AC-7 — has residual == inherent anyway).
+// FAIR risks carry a dollar residual, so risk.RanksAbove ranks them after
+// every 5x5 risk rather than comparing dollars with severities (#2185).
 func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 	aging := make([]RiskAging, 0, len(rows))
 	for _, r := range rows {
-		severity := extractSeverity(r.ResidualScore)
+		severity, _ := risk.ScoreValue(r.ResidualScore)
 		if severity == 0 {
-			severity = extractSeverity(r.InherentScore)
+			severity, _ = risk.ScoreValue(r.InherentScore)
 		}
 		ageDays := 0
 		if !r.UpdatedAt.IsZero() {
@@ -267,13 +269,18 @@ func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 			Category:         r.Category,
 			CategoryName:     r.CategoryName,
 			Treatment:        r.Treatment,
+			Methodology:      string(r.Methodology),
 			ResidualSeverity: severity,
 			AgeDays:          ageDays,
 		})
 	}
 	sort.SliceStable(aging, func(i, j int) bool {
-		if aging[i].ResidualSeverity != aging[j].ResidualSeverity {
-			return aging[i].ResidualSeverity > aging[j].ResidualSeverity
+		a, b := aging[i], aging[j]
+		if risk.RanksAbove(a.Monetary(), a.ResidualSeverity, b.Monetary(), b.ResidualSeverity) {
+			return true
+		}
+		if risk.RanksAbove(b.Monetary(), b.ResidualSeverity, a.Monetary(), a.ResidualSeverity) {
+			return false
 		}
 		if aging[i].AgeDays != aging[j].AgeDays {
 			return aging[i].AgeDays > aging[j].AgeDays
@@ -284,52 +291,4 @@ func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 		aging = aging[:n]
 	}
 	return aging
-}
-
-// extractSeverity pulls a ranking-comparable severity scalar out of a
-// score JSONB blob. The JSONB shape is methodology-dependent (slice 019 /
-// 020 / 053):
-//
-//   - slice 020 residual_score: { "score": <float>, ... }
-//   - slice 053 aggregated parents: { "severity": <float>, ... }
-//   - slice 019 nist_800_30 / qualitative_5x5 inherent_score:
-//     { "likelihood": L, "impact": I } -> severity := L * I
-//
-// The extraction tries each in turn and returns 0 when none resolves (the
-// caller then falls back to the other blob, and ultimately to 0 — a risk
-// with no derivable severity ranks last, which is the honest behavior).
-func extractSeverity(blob []byte) float64 {
-	if len(blob) == 0 {
-		return 0
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(blob, &m); err != nil {
-		return 0
-	}
-	if v, ok := numField(m, "score"); ok {
-		return v
-	}
-	if v, ok := numField(m, "severity"); ok {
-		return v
-	}
-	l, lok := numField(m, "likelihood")
-	i, iok := numField(m, "impact")
-	if lok && iok {
-		return l * i
-	}
-	return 0
-}
-
-// numField extracts a numeric value from a raw JSON object field. Returns
-// (0, false) when the field is absent or not a number.
-func numField(m map[string]json.RawMessage, key string) (float64, bool) {
-	raw, ok := m[key]
-	if !ok {
-		return 0, false
-	}
-	var f float64
-	if err := json.Unmarshal(raw, &f); err != nil {
-		return 0, false
-	}
-	return f, true
 }

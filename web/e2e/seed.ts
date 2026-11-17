@@ -152,7 +152,10 @@ export type FixtureName =
   // admin approver user, for framework-scope-wizard.spec.ts.
   | "framework-scope-wizard"
   // #2116 — an admin approver user, for policy-lifecycle.spec.ts.
-  | "policy-lifecycle";
+  | "policy-lifecycle"
+  // #2172 — a tenant with one grc_engineer member whose module access
+  // is reset to "all" each run, for module-access.spec.ts.
+  | "module-access";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

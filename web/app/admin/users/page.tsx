@@ -76,13 +76,16 @@ import {
 } from "@/components/admin/roles";
 import { lastAdminReason } from "@/components/admin/last-holder";
 import { MintedKeysWarning } from "@/components/admin/minted-keys-warning";
+import { ModuleAccessControl } from "@/components/admin/module-access-control";
 import { RowActions } from "@/components/ui/row-actions";
 import type {
   AdminUserRow,
   AdminUserListResult,
   AssignUserResponse,
+  FeatureFlag,
   TenantRow,
 } from "@/lib/api/admin";
+import { accessSummary, optionalModules } from "@/lib/admin/module-access";
 import {
   userOptions,
   tenantOptions,
@@ -126,6 +129,20 @@ export default function UsersPage() {
       return body;
     },
   });
+
+  // #2172: the optional modules a member's access can grant, from the
+  // server's registry via Admin › Features. Best-effort: on failure the
+  // dialog lists none and "All modules" still saves.
+  const { data: flags } = useQuery({
+    queryKey: ["admin", "features"],
+    queryFn: async (): Promise<FeatureFlag[]> => {
+      const res = await fetch("/api/admin/features", { cache: "no-store" });
+      if (!res.ok) return [];
+      const body = (await res.json()) as { items?: FeatureFlag[] };
+      return body.items ?? [];
+    },
+  });
+  const modules = optionalModules(flags ?? []);
 
   // The session tenant — used as the revoke tenant_id fallback for the
   // within-tenant (tenant-admin) list shape, whose rows carry no
@@ -382,6 +399,7 @@ export default function UsersPage() {
                   ) : null}
                   <TableHead>Status</TableHead>
                   <TableHead>Roles</TableHead>
+                  <TableHead>Module access</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -436,6 +454,27 @@ export default function UsersPage() {
                           )
                         )}
                       </div>
+                    </TableCell>
+                    {/* #2172: module access, next to the role. It is set
+                        from inside the member's tenant, so a super-admin's
+                        cross-tenant rows in another tenant show it only. */}
+                    <TableCell>
+                      {u.tenant_id && u.tenant_id !== me?.tenant_id ? (
+                        <span
+                          className="text-xs text-muted-foreground"
+                          data-testid={`module-access-${u.id}`}
+                        >
+                          {accessSummary(u.module_access, modules)}
+                        </span>
+                      ) : (
+                        <ModuleAccessControl
+                          userID={u.id}
+                          userLabel={u.display_name || u.email}
+                          roles={u.roles}
+                          access={u.module_access}
+                          modules={modules}
+                        />
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       {/* #2090: Revoke roles opens the confirm dialog
