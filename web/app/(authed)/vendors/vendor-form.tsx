@@ -182,6 +182,7 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
           <Field label="Owner">
             <EntityPicker
               kinds={["user"]}
+              module="third_party_risk"
               id="vendor-owner"
               value={body.owner_user_id ?? ""}
               onChange={(id) => update("owner_user_id", id)}

@@ -273,6 +273,12 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 	case errors.Is(err, writeproposals.ErrPendingCapExceeded):
 		httpresp.WriteError(w, http.StatusTooManyRequests, "pending proposal cap exceeded; approve or reject existing proposals before filing more")
 	default:
+		// A create_risk score refusal (#2502) takes the status and code
+		// it takes on confirm, which are POST /v1/risks' statuses.
+		if status, code, ok := scoreErrStatus(err); ok {
+			httpresp.WriteJSON(w, status, transitionErrBody{Error: err.Error(), Code: code})
+			return
+		}
 		httperr.WriteInternal(w, r, "create proposal", err)
 	}
 }
@@ -317,6 +323,9 @@ type transitionErrBody struct {
 // POST /v1/risks/{id}/children returns (#1748). The treatment applier's
 // transition refusals take the statuses the #2105 transition routes return.
 func applyErrStatus(err error) (int, string, bool) {
+	if status, code, ok := scoreErrStatus(err); ok {
+		return status, code, true
+	}
 	switch {
 	case risk.IsTreatmentValidation(err):
 		return http.StatusBadRequest, "treatment_validation_failed", true
@@ -352,6 +361,21 @@ func applyErrStatus(err error) (int, string, bool) {
 		return http.StatusBadRequest, "invalid_input", true
 	case errors.Is(err, writeproposals.ErrIngestUnavailable):
 		return http.StatusServiceUnavailable, "ingest_unavailable", true
+	}
+	return 0, "", false
+}
+
+// scoreErrStatus maps a create_risk score refusal to the status
+// POST /v1/risks returns for it (internal/api/risks/handlers.go): 422 for a
+// score field that is not a number in range, 400 for an unknown
+// methodology or a score that fails its methodology's schema (#2502).
+func scoreErrStatus(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, risk.ErrScoreNotNumeric):
+		return http.StatusUnprocessableEntity, "score_validation_failed", true
+	case errors.Is(err, risk.ErrInvalidMethodology),
+		errors.Is(err, risk.ErrInherentScoreInvalid):
+		return http.StatusBadRequest, "score_validation_failed", true
 	}
 	return 0, "", false
 }

@@ -93,7 +93,7 @@ async function mock(page: Page, store: Store, viewer: string) {
       }),
     ),
   );
-  await page.route("**/api/people", (route: Route) =>
+  await page.route(/\/api\/people(\?.*)?$/, (route: Route) =>
     route.fulfill(
       json({
         users: [

@@ -48,7 +48,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 
 	// OE-631: incident register backend. Minimal writer/reader routes for
 	// log, list, detail, lifecycle transition, and post-mortem closure.
-	incidentsH := incidentsapi.New(incident.NewStore(s.dbPool).WithIngest(s.ingestService))
+	incidentsH := incidentsapi.New(incident.NewStore(s.dbPool).WithIngest(s.ingestService)).WithModules(s.moduleViews)
 	root.Post("/v1/incidents", incidentsH.Create)
 	root.Get("/v1/incidents", incidentsH.List)
 	root.Get("/v1/incidents/{id}", incidentsH.Get)
@@ -78,7 +78,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	// route ahead of the generic UUID-id route. The link sub-resource
 	// routes are declared after the bare /{id} routes but use distinct path
 	// shapes (/{id}/links/{kind}[/{targetID}]) so there is no shadowing.
-	decisionsH := decisionsapi.New(decision.NewStore(s.dbPool))
+	decisionsH := decisionsapi.New(decision.NewStore(s.dbPool)).WithModules(s.moduleViews)
 	root.Post("/v1/decisions", decisionsH.CreateDecision)
 	root.Get("/v1/decisions", decisionsH.ListDecisions)
 	root.Get("/v1/decisions/overdue", decisionsH.Overdue)

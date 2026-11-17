@@ -118,6 +118,7 @@ export function ActionPlanForm({ onSubmit, initialRiskIds = [] }: Props) {
         </label>
         <EntityPicker
           kinds={OWNER_KINDS}
+          module="risk"
           id="ap-owner"
           value={ownerId}
           onChange={setOwnerId}
