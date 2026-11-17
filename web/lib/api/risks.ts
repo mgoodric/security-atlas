@@ -550,18 +550,39 @@ export type RiskAuditEntry = {
 export type RiskAuditLogResponse = {
   entries: RiskAuditEntry[];
   count: number;
+  // #2311: the platform returns at most `limit` rows, newest first;
+  // `truncated` is true when older changes exist past them.
+  limit?: number;
+  truncated?: boolean;
 };
 
-/** PATCH a risk's record fields through the BFF. */
+/**
+ * The If-Match value for a risk as it was read (#2311): its updated_at,
+ * quoted. The platform refuses (412) a PATCH carrying it once the risk has
+ * changed since.
+ */
+export function riskIfMatch(risk: Pick<Risk, "updated_at">): string {
+  return `"${risk.updated_at}"`;
+}
+
+/**
+ * PATCH a risk's record fields through the BFF. With `ifMatch` (see
+ * riskIfMatch) the edit applies only to the version it was made from.
+ */
 export async function updateRisk(
   id: string,
   body: RiskPatchInput,
+  opts?: { ifMatch?: string },
 ): Promise<Risk> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (opts?.ifMatch) headers["If-Match"] = opts.ifMatch;
   const decoded = (await hierarchyRequest<{ risk: Risk }>(
     `/api/risks/${encodeURIComponent(id)}`,
     {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     },
   )) as { risk: Risk };
