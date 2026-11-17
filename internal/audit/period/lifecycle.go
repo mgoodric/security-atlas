@@ -7,11 +7,12 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 // and lifecycle_integration_test.go proves the two agree. No trigger
 // guards audit_periods.status.
 var Lifecycle = lifecycle.Table{
-	Name:   "audit_period",
-	Title:  "Audit period",
-	Entity: "audit_periods",
-	Column: "status",
-	States: []string{string(StatusOpen), string(StatusFrozen)},
+	Name:        "audit_period",
+	Title:       "Audit period",
+	Entity:      "audit_periods",
+	Column:      "status",
+	Enforcement: lifecycle.EnforcedByStore,
+	States:      []string{string(StatusOpen), string(StatusFrozen)},
 	Initial: []lifecycle.Entry{{
 		State:  string(StatusOpen),
 		Action: "create",
