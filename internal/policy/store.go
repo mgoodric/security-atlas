@@ -93,9 +93,16 @@ var (
 	// the draft and the organisation does not allow self-approval (#2446).
 	// Writing the text counts as authoring it, whoever submitted it.
 	ErrEditorApproval = errors.New("policy: an author of this draft cannot approve it; a person who neither wrote nor edited it must approve it")
+	// ErrEditorNotPerson is returned when the draft was created or edited
+	// through a credential that names no person (an unbound API key, an
+	// OAuth client or the bootstrap admin) and the organisation does not
+	// allow self-approval (#2459). Whoever holds that credential is an
+	// unknown author, so no approver can be shown not to be them. HTTP 403.
+	ErrEditorNotPerson = errors.New("policy: this draft was written or edited through an unbound API key, OAuth client or bootstrap credential, so its author is unknown and no approver can be shown to differ from them; it can be approved only with Allow self-approval on")
 	// ErrUnknownLinkedControl is returned when linked_control_ids names a
-	// control that does not exist in the tenant (#2446).
-	ErrUnknownLinkedControl = errors.New("policy: linked_control_ids names a control that does not exist in this tenant")
+	// control that does not exist in the tenant (#2446) or is retired
+	// (#2459).
+	ErrUnknownLinkedControl = errors.New("policy: linked_control_ids names a control that does not exist in this tenant or is retired")
 	// ErrApproverNotPerson is returned when the approving credential
 	// belongs to no user: an unbound API key, an OAuth client or the
 	// bootstrap admin. Only people approve policies (#1807). HTTP 403.
@@ -252,9 +259,6 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Policy, error) {
 	}
 	var out Policy
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		if err := checkLinkedControls(ctx, q, tenantID, links); err != nil {
-			return err
-		}
 		predecessor := pgtype.UUID{} // NULL — a first version has no predecessor
 		if in.PredecessorID != nil {
 			if err := checkPredecessor(ctx, q, tenantID, *in.PredecessorID); err != nil {
@@ -280,6 +284,12 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Policy, error) {
 		})
 		if err != nil {
 			return mapCreateError(err)
+		}
+		// Linked controls are checked after the insert, so a bad or taken
+		// predecessor (400/409) is reported before a bad link (422,
+		// #2459); a failure here rolls the insert back.
+		if err := checkLinkedControls(ctx, q, tenantID, links); err != nil {
+			return err
 		}
 		out = policyFromRow(row)
 		return nil
@@ -558,6 +568,13 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 // ErrEditorApproval unless the organisation allows self-approval, and is
 // then self-approved, whoever submitted the policy.
 //
+// An editor that names no person (an unbound key's "key_..." id,
+// "oauth_client:<id>", "bootstrap-admin": anything but a users(id) uuid)
+// is an unknown author (#2459). Anyone holding that credential could be
+// the approver, so every approver is refused with ErrEditorNotPerson
+// unless the organisation allows self-approval, and the approval is then
+// flagged self-approved.
+//
 // GET /v1/approvals (#2119) calls it per row, so it lists exactly what
 // Approve accepts.
 func CheckApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
@@ -566,7 +583,17 @@ func CheckApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool,
 		return false, err
 	}
 	for _, editor := range p.DraftEditors {
-		if editor == "" || (editor != a.UserID && editor != a.CredentialID) {
+		if editor == "" {
+			continue
+		}
+		if !isPersonPrincipal(editor) {
+			if !allowSelf {
+				return false, ErrEditorNotPerson
+			}
+			self = true
+			continue
+		}
+		if editor != a.UserID && editor != a.CredentialID {
 			continue
 		}
 		if !allowSelf {
@@ -575,6 +602,13 @@ func CheckApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool,
 		self = true
 	}
 	return self, nil
+}
+
+// isPersonPrincipal reports whether principal (credstore.PrincipalOf) names
+// a person: a bare users(id) uuid. Every other shape names a credential.
+func isPersonPrincipal(principal string) bool {
+	_, err := uuid.Parse(principal)
+	return err == nil
 }
 
 // checkSubmitter is the submitter half of CheckApprover.
@@ -874,6 +908,18 @@ func (s *Store) UpdateDraft(ctx context.Context, id uuid.UUID, in UpdateDraftInp
 		expectedPrior: StateDraft,
 		newState:      StateDraft,
 		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Policy, error) {
+			// Existence and state first, so a missing (404) or non-draft
+			// (409) policy is reported before a bad link (422, #2459).
+			current, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(id),
+			})
+			if err != nil {
+				return dbx.Policy{}, err
+			}
+			if current.Status != StateDraft {
+				return dbx.Policy{}, ErrWrongState
+			}
 			if err := checkLinkedControls(ctx, q, tenantID, links); err != nil {
 				return dbx.Policy{}, err
 			}

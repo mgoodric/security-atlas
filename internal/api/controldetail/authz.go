@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 // hasControlRead reports whether the credential carries an explicit
@@ -61,4 +62,15 @@ func requireControlRead(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// readsUnscopedEvidence reports whether cred reads a control's evidence
+// without a period bound: a tenant admin, a grc_engineer or approver, or a
+// control_owner, the roles whose rego rules admit the per-control list
+// outright. Anyone else (an auditor admitted through a period) reads it only
+// as far as the auditor hydrator's lookup reached, which resolves the
+// control by control_id alone (#2470). It fails closed: an unknown or
+// absent role is treated as scoped, which can only narrow the rows.
+func readsUnscopedEvidence(c credstore.Credential) bool {
+	return authz.IsTenantApprover(c) || authz.IsTenantControlOwner(c)
 }
