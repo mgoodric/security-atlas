@@ -56,6 +56,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -79,6 +80,9 @@ type Handler struct {
 	pool     *pgxpool.Pool
 	authPool *pgxpool.Pool
 	creds    CredentialRevoker
+	// access is the member module access store (#2172). Nil leaves the
+	// module-access routes answering 503 and module_access null.
+	access *moduleaccess.Store
 
 	// beforeRevokeCommit, when set, runs in Revoke after the last-admin
 	// check passes and before the transaction commits. Nil in production;
@@ -119,6 +123,10 @@ type UserResponse struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	// ModuleAccess is the member's module access (#2172): null for all
+	// modules, else the optional-module keys they may work in. It does not
+	// apply to admins or auditors.
+	ModuleAccess []string `json:"module_access"`
 }
 
 // ListResponse is the GET /v1/admin/users shape.
@@ -198,6 +206,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, userResponseFromListRow(row))
 	}
+	if err := h.withModuleAccess(r.Context(), tenantID, items); err != nil {
+		httperr.WriteInternal(w, r, "list module access", err)
+		return
+	}
 
 	httpresp.WriteJSON(w, http.StatusOK, ListResponse{Items: items, NextCursor: nextCursor})
 }
@@ -237,7 +249,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpresp.WriteJSON(w, http.StatusOK, userResponseFromGetRow(row))
+	out := []UserResponse{userResponseFromGetRow(row)}
+	if err := h.withModuleAccess(r.Context(), tenantID, out); err != nil {
+		httperr.WriteInternal(w, r, "get module access", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out[0])
 }
 
 // PatchRoles handles PATCH /v1/admin/users/{id}/roles.

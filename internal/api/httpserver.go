@@ -35,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/vendor"
@@ -199,6 +200,12 @@ func (s *Server) buildRouter() *chi.Mux {
 	// routes and switched-on modules fall through to it. It replaces the
 	// per-route featureflag.Gate groups board and OSCAL vendor claims used.
 	root.Use(featureflag.ModuleGate(featureFlagStore))
+	// #2172: the module access step. A switched-on optional module outside
+	// the caller's module access answers 403 naming the module, before the
+	// OPA role decision; admins, auditors and members with "all" fall
+	// through. After the module gate, so switched off (404) wins.
+	moduleAccessStore := moduleaccess.NewStore(s.dbPool)
+	root.Use(moduleaccess.Gate(moduleAccessStore))
 	// Slice 035: RBAC + ABAC via embedded OPA. Every non-exempt
 	// request reaches authz.Decide; every decision (allow or deny)
 	// writes one row to decision_audit_log. Attaches AFTER tenancymw
@@ -264,7 +271,7 @@ func (s *Server) buildRouter() *chi.Mux {
 	s.registerBoard(root, freshnessStore, driftStore, vendorStore)
 	s.registerQuestionnaire(root)
 	s.registerLLMRouting(root)
-	s.registerAdmin(root, featureFlagStore)
+	s.registerAdmin(root, featureFlagStore, moduleAccessStore)
 	s.registerMetrics(root)
 	s.registerPersonnelSecurity(root)
 	return root

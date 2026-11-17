@@ -984,6 +984,13 @@ type Querier interface {
 	// refresh to decide whether today already has a snapshot, and by tests.
 	GetLatestDriftSnapshotForDay(ctx context.Context, arg GetLatestDriftSnapshotForDayParams) (ControlDriftSnapshot, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
+	// #2172: module access for each member. Every query runs under
+	// tenancy.ApplyTenant as atlas_app; the explicit tenant_id predicate is the
+	// primary guarantee and RLS the second leg.
+	GetMemberModuleAccess(ctx context.Context, arg GetMemberModuleAccessParams) (MemberModuleAccess, error)
+	// The current row, locked, so the audit row's before is the value the
+	// upsert replaces.
+	GetMemberModuleAccessForUpdate(ctx context.Context, arg GetMemberModuleAccessForUpdateParams) (MemberModuleAccess, error)
 	// Recursive walk starting at every catalog metric with the supplied
 	// level, descending through parent → child edges up to depth_limit
 	// levels. Returns one row per (descendant, parent, depth). The API
@@ -1410,6 +1417,7 @@ type Querier interface {
 	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 	// the DB layer; explicit-is-clearer per AC-5).
 	InsertMeAuditLog(ctx context.Context, arg InsertMeAuditLogParams) error
+	InsertMemberModuleAccessAudit(ctx context.Context, arg InsertMemberModuleAccessAuditParams) error
 	// Append one manual entry. The fn_metric_inputs_replicate trigger fires
 	// AFTER INSERT and writes a matching metric_observations row so the
 	// read API serves both shapes from one series. Idempotency boundary is
@@ -2534,6 +2542,7 @@ type Querier interface {
 	// signed delta and the flipped-to-fail control set. `since_date` is computed
 	// in Go (today - N days) and passed explicitly.
 	ListLatestDriftSnapshotsSince(ctx context.Context, arg ListLatestDriftSnapshotsSinceParams) ([]ControlDriftSnapshot, error)
+	ListMemberModuleAccess(ctx context.Context, tenantID pgtype.UUID) ([]MemberModuleAccess, error)
 	// Children of a single metric (one level). Used by GET /v1/metrics/{id}.
 	ListMetricCatalogChildren(ctx context.Context, parentID string) ([]MetricsCatalog, error)
 	// Parents of a single metric (one level). Used by GET /v1/metrics/{id}
@@ -3868,6 +3877,7 @@ type Querier interface {
 	// Set or overwrite the argon2id hash for a user. Idempotent so password-change
 	// and initial-provisioning go through the same path.
 	UpsertLocalCredential(ctx context.Context, arg UpsertLocalCredentialParams) error
+	UpsertMemberModuleAccess(ctx context.Context, arg UpsertMemberModuleAccessParams) error
 	// Platform-seeded cascade-edge upsert. Runs as atlas_migrate (BYPASSRLS).
 	UpsertMetricCascadeEdge(ctx context.Context, arg UpsertMetricCascadeEdgeParams) error
 	// Platform-seeded global catalog upsert. The seeder runs as atlas_migrate

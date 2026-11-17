@@ -355,6 +355,10 @@ export type AdminUserRow = {
   display_name: string;
   status: string;
   roles: string[];
+  // #2172: the member's module access, within-tenant list only: null for
+  // all modules, else the optional-module keys. Ignored for admins and
+  // auditors.
+  module_access?: string[] | null;
   // Cross-tenant (super_admin) only:
   tenant_id?: string;
   idp_issuer?: string;
