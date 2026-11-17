@@ -119,6 +119,15 @@ func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, cont
 		if r.ObservedAt.Valid {
 			rec.observedAt = r.ObservedAt.Time
 		}
+		if r.EvidenceKind != nil {
+			rec.kind = *r.EvidenceKind
+		}
+		if r.IngestedAt.Valid {
+			rec.ingestedAt = r.IngestedAt.Time
+		}
+		if r.ID.Valid {
+			rec.id = uuid.UUID(r.ID.Bytes).String()
+		}
 		out = append(out, rec)
 	}
 	return out, nil
