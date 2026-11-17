@@ -219,6 +219,11 @@ type Querier interface {
 	// DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
 	// start of the next day (exclusive).
 	CountDecisionsByDecidedDate(ctx context.Context, arg CountDecisionsByDecidedDateParams) (int64, error)
+	// #2470: the `total` of GET /v1/evidence?control_id=. Counts the rows
+	// ListEvidenceForControlPaged pages through, before the cursor: the same
+	// control resolution (id_only included) and [since, until] window. The
+	// per-control list ignores scope_cell_id, so the count does too.
+	CountEvidenceForControlWindow(ctx context.Context, arg CountEvidenceForControlWindowParams) (int64, error)
 	// Slice 502: total CURRENT LIVE evidence count for one control, used by the
 	// evidence-summary surface to render a "showing N of M" bound (the summary is
 	// over the bounded top-N, never the full history — P0-502-8). Resolution
@@ -2259,6 +2264,11 @@ type Querier interface {
 	// Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
 	// can surface it (the column has always been on evidence_records; the slice
 	// 064 wire shape simply omitted it).
+	//
+	// #2470: id_only drops the control_ref leg, so the rows are exactly the
+	// control_id = $2 set the auditor hydrator (audit.Store.ControlPeriods) and
+	// the population draw resolve. The handler sets it for a period-scoped
+	// caller; every other caller keeps the slice-012 OR resolution.
 	ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error)
 	// AC-3: control-state read for a period. Returns evidence records for one
 	// control bounded by the period's frozen_at horizon (or live when the

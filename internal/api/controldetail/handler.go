@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -46,7 +47,9 @@ type controlDetailReader interface {
 //     (GET /v1/evidence with no control_id, the slice-106 + slice-234
 //     filter-matrix branch), keyset-paginated over the six optional filters.
 //   - CountEvidenceForTenant — the slice-236 tenant-wide ledger total the
-//     wire envelope's `total` carries on both branches.
+//     tenant-wide branch's `total` carries.
+//   - CountEvidenceForControl — the per-control branch's `total`: the rows
+//     matching that request's control and window (#2470).
 //
 // The contract recorders (evidence_contract_test.go) inject a fixed-row stub
 // satisfying this seam so both evidence wire shapes record on the plain
@@ -64,6 +67,7 @@ type evidenceWindowReader interface {
 	EvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error)
 	EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.ListEvidencePagedRow, error)
 	CountEvidenceForTenant(ctx context.Context) (int64, error)
+	CountEvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) (int64, error)
 	// DemoEvidence returns which of ids the in-place demo seed added
 	// (#2043), so each row can carry the demo badge.
 	DemoEvidence(ctx context.Context, ids []uuid.UUID) (demoprov.Set, error)
@@ -308,22 +312,29 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Per-control path (slice 064 behavior, preserved verbatim). Slice 692
-	// routes BOTH reads through the per-control evidenceWindowReader seam so
-	// the wire shape records with no Postgres pool. The tenant-wide ledger
-	// total (slice 236) the envelope's `total` carries is read via the same
-	// seam (CountEvidenceForTenant); production *Store satisfies it verbatim.
-	total, err := h.evidence.CountEvidenceForTenant(ctx)
-	if err != nil {
-		httperr.WriteInternal(w, r, "controldetail", err)
-		return
-	}
-	rows, err := h.evidence.EvidenceForControl(ctx, controlID, evidencePage{
+	// Per-control path (slice 064). Slice 692 routes both reads through the
+	// evidenceWindowReader seam so the wire shape records with no Postgres
+	// pool.
+	//
+	// #2470: `total` counts the rows this request's control and window
+	// match, not the tenant ledger, so an auditor admitted for one control
+	// in one period learns nothing about the rest. A period-scoped caller
+	// also resolves the control by control_id alone, the lookup its authz
+	// decision covered (audit.Store.ControlPeriods).
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	p := evidencePage{
 		since:    since,
 		until:    until,
 		cursor:   cursor,
 		pageRows: pageRows,
-	})
+		idOnly:   !readsUnscopedEvidence(cred),
+	}
+	total, err := h.evidence.CountEvidenceForControl(ctx, controlID, p)
+	if err != nil {
+		httperr.WriteInternal(w, r, "controldetail", err)
+		return
+	}
+	rows, err := h.evidence.EvidenceForControl(ctx, controlID, p)
 	if err != nil {
 		httperr.WriteInternal(w, r, "controldetail", err)
 		return
