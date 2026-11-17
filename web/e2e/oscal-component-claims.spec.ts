@@ -337,8 +337,63 @@ test.describe("OSCAL vendor-claims view", () => {
     );
     await page.goto(`/oscal/component-definitions/${DEF_ID}`);
     await page.getByTestId("claim-reject").first().click();
+    await page.getByTestId("claim-reject-confirm-ok").click();
     await expect(page.getByTestId("disposition-error")).toContainText(
       "approver",
     );
+  });
+
+  test("#2280: Reject asks first; Cancel posts nothing, Confirm posts the reject", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/oscal/component-definitions/${DEF_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(detailBody),
+      }),
+    );
+    const posted: { disposition?: string }[] = [];
+    await page.route(
+      `**/api/oscal/component-claims/${CLAIM_MAPPED}/disposition`,
+      async (route) => {
+        posted.push(
+          JSON.parse(route.request().postData() ?? "{}") as {
+            disposition?: string;
+          },
+        );
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: CLAIM_MAPPED,
+            control_id: "ac-2",
+            is_vendor_claim: true,
+            claim_status: "rejected",
+            dispositioned_by: "grc-1",
+            dispositioned_at: "2026-06-08T12:05:00Z",
+            disposition_note: "",
+          }),
+        });
+      },
+    );
+
+    await page.goto(`/oscal/component-definitions/${DEF_ID}`);
+    await page.getByTestId("claim-reject").first().click();
+    const confirm = page.getByTestId("claim-reject-confirm");
+    await expect(confirm).toContainText("Reject the vendor claim for ac-2?");
+    await expect(page.getByTestId("claim-reject-confirm-cancel")).toBeFocused();
+
+    await page.getByTestId("claim-reject-confirm-cancel").click();
+    await expect(confirm).toHaveCount(0);
+    await expect(page.getByTestId("claim-status-badge").first()).toHaveText(
+      "Asserted",
+    );
+    expect(posted).toEqual([]);
+
+    await page.getByTestId("claim-reject").first().click();
+    await page.getByTestId("claim-reject-confirm-ok").click();
+    await expect.poll(() => posted).toEqual([{ disposition: "reject" }]);
+    await expect(confirm).toHaveCount(0);
   });
 });

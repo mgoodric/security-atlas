@@ -30,6 +30,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CloudRoutingBanner } from "@/components/llm/cloud-routing-banner";
 import type { Question } from "@/components/questionnaire/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ConfirmInline } from "@/components/ui/row-actions";
 import {
   type AnswerRunDetail,
   type OutcomeFilter,
@@ -66,6 +67,9 @@ export function ReviewQueue({
   const [editDraft, setEditDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // #2280: Reject fires at once, so it asks first. Holds the answer id, so
+  // stepping to another draft never carries an open confirm with it.
+  const [confirmingReject, setConfirmingReject] = useState<string | null>(null);
 
   const drafts = useMemo(() => pendingDrafts(questions), [questions]);
   const clamped = drafts.length === 0 ? 0 : Math.min(index, drafts.length - 1);
@@ -143,6 +147,7 @@ export function ReviewQueue({
         setError(msg);
         return;
       }
+      setConfirmingReject(null);
       onChanged();
     } finally {
       setBusy(false);
@@ -347,21 +352,33 @@ export function ReviewQueue({
               >
                 Approve answer
               </button>
-              <button
-                type="button"
-                data-testid="review-reject"
-                disabled={busy}
-                onClick={() => {
-                  void submitOne(
-                    "reject",
-                    current.answerId,
-                    current.questionId,
-                  );
-                }}
-                className="text-xs px-3 py-1 rounded-md border border-border bg-background font-medium hover:bg-muted disabled:opacity-50"
-              >
-                Reject draft
-              </button>
+              {confirmingReject === current.answerId ? (
+                <ConfirmInline
+                  prompt={`Reject the draft answer for ${current.questionCode}? It leaves the review queue.`}
+                  confirmLabel="Reject draft"
+                  ariaLabel={`Confirm: reject draft for ${current.questionCode}`}
+                  busy={busy}
+                  onCancel={() => setConfirmingReject(null)}
+                  onConfirm={() => {
+                    void submitOne(
+                      "reject",
+                      current.answerId,
+                      current.questionId,
+                    );
+                  }}
+                  data-testid="review-reject-confirm"
+                />
+              ) : (
+                <button
+                  type="button"
+                  data-testid="review-reject"
+                  disabled={busy}
+                  onClick={() => setConfirmingReject(current.answerId)}
+                  className="text-xs px-3 py-1 rounded-md border border-border bg-background font-medium hover:bg-muted disabled:opacity-50"
+                >
+                  Reject draft
+                </button>
+              )}
               <span className="text-xs text-muted-foreground">
                 Review before approving — approval is per answer.
               </span>
