@@ -48,15 +48,14 @@ test.describe("topbar header chrome (slice 213)", () => {
     await page.goto("/audits");
     const pill = page.getByTestId("in-progress-audit-pill");
     await expect(pill).toBeVisible();
-    // The pill's visible copy is the period name + " in progress".
     // The fixture seeds 'SOC 2 Type II · Q2 2026' as the in_progress
     // period name (audits-header.sql).
-    await expect(pill).toContainText("SOC 2 Type II · Q2 2026 in progress");
-    // The amber dot is an aria-hidden visual cue; the pill itself
-    // carries the aria-label for screen readers.
+    // #2135: the pill is the audit banner, counting down to the
+    // period's end; the period name stays in its accessible label.
+    await expect(pill).toContainText(/Audit (ends|ended)/);
     await expect(pill).toHaveAttribute(
       "aria-label",
-      "SOC 2 Type II · Q2 2026 in progress",
+      /^SOC 2 Type II · Q2 2026: audit (ends|ended)/,
     );
   });
 
