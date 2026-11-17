@@ -393,7 +393,9 @@ test.describe("OSCAL vendor-claims view", () => {
 
     await page.getByTestId("claim-reject").first().click();
     await page.getByTestId("claim-reject-confirm-ok").click();
-    await expect.poll(() => posted).toEqual([{ disposition: "reject" }]);
+    await expect
+      .poll(() => posted)
+      .toEqual([{ disposition: "reject", note: "" }]);
     await expect(confirm).toHaveCount(0);
   });
 });
