@@ -39,14 +39,6 @@ func ownerCred(roles ...string) credstore.Credential {
 	}
 }
 
-func plainCred() credstore.Credential {
-	return credstore.Credential{
-		ID:       "key_plain",
-		TenantID: "00000000-0000-0000-0000-000000000001",
-		UserID:   "key_plain",
-	}
-}
-
 func TestAttestForm_RequiresAuth(t *testing.T) {
 	t.Parallel()
 	h := NewAttestHandler(nil, nil, nil)
