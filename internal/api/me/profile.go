@@ -88,6 +88,10 @@ type profileWire struct {
 	// bit that gates /admin (#2216 D2).
 	IsTenantAdmin bool `json:"is_tenant_admin"`
 	IsApprover    bool `json:"is_approver"`
+	// HasTenantRole is authz.HasTenantRole over the live roles in Roles
+	// (#2494): false for a signed-in user with no role in this tenant who
+	// is not a super-admin. The web shell shows a "no role" page on false.
+	HasTenantRole bool `json:"has_tenant_role"`
 }
 
 // patchProfileRequest is the wire shape of PATCH /v1/me. Pointer fields encode the
@@ -134,6 +138,7 @@ func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wire.Roles = roles
+	wire.HasTenantRole = authz.HasTenantRole(cred, roles)
 	httpresp.WriteJSON(w, http.StatusOK, wire)
 }
 
@@ -211,6 +216,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		wire.Roles = roles
+		wire.HasTenantRole = authz.HasTenantRole(cred, roles)
 		httpresp.WriteJSON(w, http.StatusOK, wire)
 		return
 	}
@@ -240,6 +246,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wire.Roles = roles
+	wire.HasTenantRole = authz.HasTenantRole(cred, roles)
 	httpresp.WriteJSON(w, http.StatusOK, wire)
 }
 

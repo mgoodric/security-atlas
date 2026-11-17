@@ -717,3 +717,46 @@ func TestListSessions_AugmentedFieldsOnWire(t *testing.T) {
 		}
 	}
 }
+
+// #2494: has_tenant_role is false for a signed-in user with no user_roles
+// row in the tenant, and turns true on the next request once a role is
+// granted, on the same token (live roles, #2442).
+func TestGetMe_HasTenantRoleFollowsLiveGrant(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantID, userID := seedTenantAndUser(t, admin, "no-role2494@example.com", "No Role 2494")
+	env := testServerForUser(t, app, tenantID, userID, false)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if v, ok := body["has_tenant_role"].(bool); !ok || v {
+		t.Fatalf("has_tenant_role = %v (%T); want false for a user with no role", body["has_tenant_role"], body["has_tenant_role"])
+	}
+
+	seedUserRoles(t, admin, tenantID, userID, "viewer")
+	resp, body = do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me after grant: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if v, ok := body["has_tenant_role"].(bool); !ok || !v {
+		t.Errorf("has_tenant_role = %v after a viewer grant; want true without re-login", body["has_tenant_role"])
+	}
+}
+
+// #2494: a super-admin with no role row in the tenant still has a role.
+func TestGetMe_HasTenantRoleForSuperAdmin(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantID, userID := seedTenantAndUser(t, admin, "super2494@example.com", "Super 2494")
+	env := testServerForUser(t, app, tenantID, userID, true)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/me: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	if v, ok := body["has_tenant_role"].(bool); !ok || !v {
+		t.Errorf("has_tenant_role = %v for a super-admin; want true", body["has_tenant_role"])
+	}
+}

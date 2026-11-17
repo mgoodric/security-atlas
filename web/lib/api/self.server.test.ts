@@ -31,11 +31,15 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   emptyAdminMe,
   fetchAdminMe,
+  fetchTenantsSummary,
   fetchDemoSeedEnabled,
   fetchEffectiveModules,
   fetchSelfProfile,
   normalizeAdminMe,
   normalizeEffectiveModules,
+  tenantRoleStateFrom,
+  tenantsSummaryFrom,
+  fetchTenantRoleState,
 } from "./self.server";
 
 // The internal service address the compose sets. Stable regardless of the
@@ -381,5 +385,76 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
     // Invariant #6: the answer is bearer-dependent, so it must never
     // enter the Next.js data cache.
     expect(seen[0].cache).toBe("no-store");
+  });
+});
+
+describe("#2494: has_tenant_role and the current tenant name", () => {
+  beforeEach(() => {
+    process.env.ATLAS_HTTP_URL = ATLAS_BASE;
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("tenantRoleStateFrom reads only a literal boolean", () => {
+    expect(tenantRoleStateFrom({ has_tenant_role: true })).toBe("has_role");
+    expect(tenantRoleStateFrom({ has_tenant_role: false })).toBe("no_role");
+    // A body without the field, or a malformed one, is neither.
+    expect(tenantRoleStateFrom({})).toBe("unknown");
+    expect(tenantRoleStateFrom({ has_tenant_role: "false" })).toBe("unknown");
+    expect(tenantRoleStateFrom(null)).toBe("unknown");
+    expect(tenantRoleStateFrom("x")).toBe("unknown");
+  });
+
+  test("a failed /v1/me read is unknown, never role-less", async () => {
+    containerNetwork({ "/v1/me": { status: 500, body: { error: "boom" } } });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("unknown");
+
+    vi.restoreAllMocks();
+    containerNetwork({
+      "/v1/me": { status: 403, body: { error: "forbidden" } },
+    });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("unknown");
+
+    vi.restoreAllMocks();
+    containerNetwork({ "/v1/me": { text: "<html>" } });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("unknown");
+  });
+
+  test("a role-less caller reads as no_role through the internal base", async () => {
+    const { urls } = containerNetwork({
+      "/v1/me": { body: { has_tenant_role: false, roles: [] } },
+    });
+    await expect(fetchTenantRoleState("b")).resolves.toBe("no_role");
+    expectNoSelfFetch(urls);
+  });
+
+  test("tenantsSummaryFrom names the current tenant and counts them all", () => {
+    expect(
+      tenantsSummaryFrom({
+        tenants: [
+          { id: "a", name: "Acme", current: false },
+          { id: "b", name: "Beta", current: true },
+        ],
+      }),
+    ).toEqual({ currentName: "Beta", count: 2 });
+    expect(
+      tenantsSummaryFrom({ tenants: [{ id: "a", name: "", current: true }] }),
+    ).toEqual({ currentName: null, count: 1 });
+    expect(tenantsSummaryFrom({ tenants: "x" })).toEqual({
+      currentName: null,
+      count: 0,
+    });
+    expect(tenantsSummaryFrom(null)).toEqual({ currentName: null, count: 0 });
+  });
+
+  test("fetchTenantsSummary is empty on failure", async () => {
+    containerNetwork({ "/v1/me/tenants": { status: 500, body: {} } });
+    await expect(fetchTenantsSummary("b")).resolves.toEqual({
+      currentName: null,
+      count: 0,
+    });
   });
 });
