@@ -45,8 +45,15 @@ its own id, a third key.
 The chain is bounded at 32 generations per window. Each step needs a newer
 attestation between two identical bodies from one user in five minutes; a
 person filling the form never reaches it (the form sends its own key
-anyway). Past the bound the handler answers 500 with "send an
-idempotency_key" rather than loop.
+anyway). An API client can reach it, though, so past the bound the handler
+answers **409 Conflict** (`errAttestKeyChainExhausted`) telling the caller
+to send an `idempotency_key`, rather than loop. A failed lookup is still a 500. Tested by `TestAttestSubmit_KeyChainExhausted_Conflict` (stub reader).
+
+A consequence to know: a genuine network retry of an older keyless
+attestation that arrives after a newer one is now recorded, and as the
+latest attestation it wins. Without a key the server cannot tell that retry
+from a deliberate repeat; a caller that needs the difference sends its own
+`idempotency_key`.
 
 ## D2 — client-supplied keys keep strict dedupe
 

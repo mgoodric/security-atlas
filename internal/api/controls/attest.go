@@ -562,6 +562,10 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	// the same key and deduplicates; the same text attested again later
 	// gets a new key and is recorded. A caller may send its own key.
 	idemKey, prior, found, kerr := h.resolveIdempotencyKey(ctx, cred.TenantID, cred.UserID, id, body, req.IdempotencyKey, now)
+	if errors.Is(kerr, errAttestKeyChainExhausted) {
+		writeAttestError(w, http.StatusConflict, kerr.Error())
+		return
+	}
 	if kerr != nil {
 		writeAttestError(w, http.StatusInternalServerError, "idempotency lookup: "+kerr.Error())
 		return
@@ -744,6 +748,11 @@ func deriveIdempotencyKey(userID, controlID string, body []byte, window time.Tim
 // between two identical bodies, so no person submitting by hand reaches it.
 const attestMaxKeyGenerations = 32
 
+// errAttestKeyChainExhausted is a keyless caller repeating one body past
+// attestMaxKeyGenerations in a window. The caller can reach it, so it is a
+// 409 telling them to send their own key, not a 500.
+var errAttestKeyChainExhausted = fmt.Errorf("the same attestation was repeated more than %d times in one %s window without an idempotency_key; send an idempotency_key with each attestation", attestMaxKeyGenerations, attestRetryWindow)
+
 // resolveIdempotencyKey picks the key the attestation is recorded under,
 // and returns the observed_at of the record already under it, if any.
 //
@@ -788,7 +797,7 @@ func (h *AttestHandler) resolveIdempotencyKey(ctx context.Context, tenantID, use
 			return key, prior.observedAt, true, nil
 		}
 	}
-	return "", time.Time{}, false, fmt.Errorf("one attestation repeated more than %d times in one window; send an idempotency_key", attestMaxKeyGenerations)
+	return "", time.Time{}, false, errAttestKeyChainExhausted
 }
 
 func ingestErrorToStatus(err error) int {
