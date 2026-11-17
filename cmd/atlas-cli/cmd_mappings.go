@@ -43,8 +43,155 @@ func newMappingsOverlayCmd() *cobra.Command {
 			"tenant only. Adding, retiring and importing need an admin or grc_engineer token and are audit-logged.",
 	}
 	cmd.AddCommand(newMappingsOverlayAddCmd(), newMappingsOverlayListCmd(), newMappingsOverlayRetireCmd(),
-		newMappingsOverlayImportCmd(), newMappingsOverlayExportCmd())
+		newMappingsOverlayImportCmd(), newMappingsOverlayExportCmd(), newMappingsOverlayAuditedUnderCmd())
 	return cmd
+}
+
+// auditedUnderReport is GET /v1/mapping-overlays/audited-under's body, the
+// fields the table prints (#2324).
+type auditedUnderReport struct {
+	Rows []struct {
+		ControlBundleID  string `json:"control_bundle_id"`
+		AnchorCode       string `json:"anchor_code"`
+		AnchorSCFRelease string `json:"anchor_scf_release"`
+		AnchorFit        string `json:"anchor_fit"`
+		Framework        string `json:"framework"`
+		FrameworkVersion string `json:"framework_version"`
+		RequirementCode  string `json:"requirement_code"`
+		TestedUnderNote  string `json:"tested_under_note"`
+		CandidateAnchors []struct {
+			AnchorCode string `json:"anchor_code"`
+		} `json:"candidate_anchors"`
+	} `json:"rows"`
+	Count                int  `json:"count"`
+	Total                int  `json:"total"`
+	Truncated            bool `json:"truncated"`
+	UnresolvedReferences []struct {
+		ControlBundleID string `json:"control_bundle_id"`
+		System          string `json:"system"`
+		Code            string `json:"code"`
+		TestedUnderNote string `json:"tested_under_note"`
+	} `json:"unresolved_references"`
+	UnresolvedCount int `json:"unresolved_count"`
+}
+
+func newMappingsOverlayAuditedUnderCmd() *cobra.Command {
+	var framework, outPath string
+	var limit int
+	var jsonOutput, csvOutput bool
+	cmd := &cobra.Command{
+		Use:   "audited-under",
+		Short: "list criteria your controls were tested under that their SCF anchor does not reach",
+		Long: "The audited-under report: each row is a control and a criterion it was tested under " +
+			"(its tested_under reference) that its SCF anchor does not reach through catalog and overlay " +
+			"edges. Add an overlay edge to close a row. References that name no requirement in the " +
+			"framework's current version are listed after the table.",
+		Example: "  atlas-cli mappings overlay audited-under --framework soc2\n" +
+			"  atlas-cli mappings overlay audited-under --csv -o audited-under.csv",
+		Args:    cobra.NoArgs,
+		PreRunE: func(_ *cobra.Command, _ []string) error { return resolveCommon() },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			q := url.Values{}
+			if framework != "" {
+				q.Set("framework", framework)
+			}
+			if limit != 0 {
+				q.Set("limit", strconv.Itoa(limit))
+			}
+			path := "/v1/mapping-overlays/audited-under"
+			if csvOutput {
+				path += "/export"
+			}
+			if len(q) > 0 {
+				path += "?" + q.Encode()
+			}
+			out := cmd.OutOrStdout()
+			if csvOutput {
+				code, hdr, raw, err := overlayRawRequestWithHeaders(http.MethodGet, path, nil)
+				if err != nil {
+					return err
+				}
+				if code != http.StatusOK {
+					return apiError(code, raw)
+				}
+				// The CSV has no room to say it was cut, so say it on stderr.
+				if hdr.Get("X-Atlas-Truncated") == "true" {
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
+						"warning: the report was truncated at its row cap; narrow it with --framework")
+				}
+				if n := hdr.Get("X-Atlas-Unresolved-References"); n != "" && n != "0" {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"warning: %s tested-under reference(s) do not resolve; run without --csv to list them\n", printable(n))
+				}
+				if outPath == "" {
+					_, err = out.Write(raw)
+					return err
+				}
+				if err := os.WriteFile(outPath, raw, 0o600); err != nil {
+					return fmt.Errorf("write %s: %w", outPath, err)
+				}
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s\n", outPath)
+				return nil
+			}
+			raw, err := taxonomyRequest(http.MethodGet, path, nil)
+			if err != nil {
+				return err
+			}
+			if jsonOutput {
+				return printIndented(out, raw)
+			}
+			var rep auditedUnderReport
+			if err := json.Unmarshal(raw, &rep); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+			return printAuditedUnder(out, rep)
+		},
+	}
+	cmd.Flags().StringVar(&framework, "framework", "", "only this framework slug")
+	cmd.Flags().IntVar(&limit, "limit", 0, "at most this many rows, 1 to 5000 (default: the platform's cap, 5000)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print the API response as JSON")
+	cmd.Flags().BoolVar(&csvOutput, "csv", false, "print the report as CSV (the export endpoint)")
+	cmd.Flags().StringVarP(&outPath, "out", "o", "", "with --csv, write the CSV to this file (default: stdout)")
+	cmd.MarkFlagsMutuallyExclusive("json", "csv")
+	return cmd
+}
+
+// printAuditedUnder prints the report's rows, then any unresolved
+// references, then a line when the report was cut at its cap.
+func printAuditedUnder(out io.Writer, rep auditedUnderReport) error {
+	tw := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "CRITERION\tCONTROL\tANCHOR\tFIT\tCANDIDATES\tTESTED UNDER")
+	for _, r := range rep.Rows {
+		anchor := "-"
+		if r.AnchorCode != "" {
+			anchor = "SCF " + r.AnchorSCFRelease + ":" + r.AnchorCode
+		}
+		cands := make([]string, len(r.CandidateAnchors))
+		for i, c := range r.CandidateAnchors {
+			cands[i] = c.AnchorCode
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			printable(r.Framework+":"+r.FrameworkVersion+":"+r.RequirementCode), printable(r.ControlBundleID),
+			printable(anchor), printable(r.AnchorFit), printable(strings.Join(cands, ", ")), printable(r.TestedUnderNote))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if rep.UnresolvedCount > 0 {
+		_, _ = fmt.Fprintf(out, "\n%d tested-under reference(s) name no requirement in the framework's current version:\n", rep.UnresolvedCount)
+		for _, u := range rep.UnresolvedReferences {
+			line := "  " + printable(u.System+" "+u.Code) + " on " + printable(u.ControlBundleID)
+			if u.TestedUnderNote != "" {
+				line += " (" + printable(u.TestedUnderNote) + ")"
+			}
+			_, _ = fmt.Fprintln(out, line)
+		}
+	}
+	if rep.Truncated {
+		_, _ = fmt.Fprintf(out, "\ntruncated: showing %d of %d row(s) and %d of %d unresolved reference(s)\n",
+			rep.Count, rep.Total, len(rep.UnresolvedReferences), rep.UnresolvedCount)
+	}
+	return nil
 }
 
 // overlayEdge is an overlay edge as the API returns it.
@@ -326,25 +473,32 @@ func readOverlayFile(path string) ([]byte, error) {
 // sends body as-is and hands back the status, so the caller can read a
 // 422's row report.
 func overlayRawRequest(method, path string, body []byte) (int, []byte, error) {
+	code, _, raw, err := overlayRawRequestWithHeaders(method, path, body)
+	return code, raw, err
+}
+
+// overlayRawRequestWithHeaders is overlayRawRequest that also hands back
+// the response headers, for a caller that reads a signal from them.
+func overlayRawRequestWithHeaders(method, path string, body []byte) (int, http.Header, []byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequest(method, strings.TrimRight(common.endpoint, "/")+path, reader)
 	if err != nil {
-		return 0, nil, fmt.Errorf("new request: %w", err)
+		return 0, nil, nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set(sdk.MetadataAuthorization, sdk.BearerPrefix+common.token)
 	resp, err := cmdhttp.Client(60 * time.Second).Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("request: %w", err)
+		return 0, nil, nil, fmt.Errorf("request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024*1024))
 	if err != nil {
-		return 0, nil, fmt.Errorf("read response: %w", err)
+		return 0, nil, nil, fmt.Errorf("read response: %w", err)
 	}
-	return resp.StatusCode, raw, nil
+	return resp.StatusCode, resp.Header, raw, nil
 }
 
 // apiError is the error taxonomyRequest returns for a 4xx/5xx.
