@@ -53,6 +53,7 @@ import {
   type TaxonomyTheme,
 } from "@/lib/api/taxonomy";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 const CATEGORIES_KEY = ["taxonomy-categories"];
 const THEMES_KEY = ["taxonomy-themes"];
@@ -71,9 +72,13 @@ export default function RiskTaxonomyPage() {
       width="reading"
       data-testid="taxonomy-page"
       subtitle={
-        canEdit
-          ? "Your organisation's risk categories and themes. Slugs never change, so integrations keep working after a rename."
-          : "Your organisation's risk categories and themes. Changing them needs the admin or GRC engineer role."
+        <>
+          Your organisation&apos;s risk categories and{" "}
+          <Term id="theme">themes</Term>.{" "}
+          {canEdit
+            ? "Slugs never change, so integrations keep working after a rename."
+            : "Changing them needs the admin or GRC engineer role."}
+        </>
       }
     >
       <CategoriesSection canEdit={canEdit} />

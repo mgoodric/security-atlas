@@ -799,7 +799,10 @@ function RisksPageInner() {
 
   const subtitle = (
     <>
-      Flat list of all risks · for the org-tree view see{" "}
+      Flat list of all risks, scored by{" "}
+      <Term id="inherent-severity">inherent severity</Term> or{" "}
+      <Term id="fair">FAIR</Term>, each with its{" "}
+      <Term id="treatment">treatment</Term> · for the org-tree view see{" "}
       <Link href="/risks/hierarchy" className="text-primary hover:underline">
         Risk hierarchy
       </Link>
