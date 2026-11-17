@@ -107,12 +107,21 @@ func newMappingsOverlayAuditedUnderCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if csvOutput {
-				code, raw, err := overlayRawRequest(http.MethodGet, path, nil)
+				code, hdr, raw, err := overlayRawRequestWithHeaders(http.MethodGet, path, nil)
 				if err != nil {
 					return err
 				}
 				if code != http.StatusOK {
 					return apiError(code, raw)
+				}
+				// The CSV has no room to say it was cut, so say it on stderr.
+				if hdr.Get("X-Atlas-Truncated") == "true" {
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
+						"warning: the report was truncated at its row cap; narrow it with --framework")
+				}
+				if n := hdr.Get("X-Atlas-Unresolved-References"); n != "" && n != "0" {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+						"warning: %s tested-under reference(s) do not resolve; run without --csv to list them\n", printable(n))
 				}
 				if outPath == "" {
 					_, err = out.Write(raw)
@@ -464,25 +473,32 @@ func readOverlayFile(path string) ([]byte, error) {
 // sends body as-is and hands back the status, so the caller can read a
 // 422's row report.
 func overlayRawRequest(method, path string, body []byte) (int, []byte, error) {
+	code, _, raw, err := overlayRawRequestWithHeaders(method, path, body)
+	return code, raw, err
+}
+
+// overlayRawRequestWithHeaders is overlayRawRequest that also hands back
+// the response headers, for a caller that reads a signal from them.
+func overlayRawRequestWithHeaders(method, path string, body []byte) (int, http.Header, []byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequest(method, strings.TrimRight(common.endpoint, "/")+path, reader)
 	if err != nil {
-		return 0, nil, fmt.Errorf("new request: %w", err)
+		return 0, nil, nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set(sdk.MetadataAuthorization, sdk.BearerPrefix+common.token)
 	resp, err := cmdhttp.Client(60 * time.Second).Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("request: %w", err)
+		return 0, nil, nil, fmt.Errorf("request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024*1024))
 	if err != nil {
-		return 0, nil, fmt.Errorf("read response: %w", err)
+		return 0, nil, nil, fmt.Errorf("read response: %w", err)
 	}
-	return resp.StatusCode, raw, nil
+	return resp.StatusCode, resp.Header, raw, nil
 }
 
 // apiError is the error taxonomyRequest returns for a 4xx/5xx.

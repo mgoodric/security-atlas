@@ -164,7 +164,9 @@ export default function AuditedUnderPage() {
             </span>
           </div>
 
-          {q.data.truncated ? (
+          {/* Keyed on the rows, not `truncated`: a cut unresolved list
+              alone is said in its own note. */}
+          {q.data.count < q.data.total ? (
             <Alert data-testid="audited-under-truncated">
               <AlertTitle>Report truncated</AlertTitle>
               <AlertDescription>

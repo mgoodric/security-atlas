@@ -194,4 +194,33 @@ func TestMappingsOverlayAuditedUnder_CSVReadsTheExport(t *testing.T) {
 	if _, err := runOverlay(t, srv, "audited-under", "--csv", "--json"); err == nil {
 		t.Error("--csv with --json: want an error")
 	}
+	if strings.Contains(out, "warning:") {
+		t.Errorf("no truncation headers, but a warning:\n%s", out)
+	}
+}
+
+// A cut or partly unresolved export says so on stderr, since the CSV
+// itself cannot (#2324).
+func TestMappingsOverlayAuditedUnder_CSVWarnsWhenTruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("X-Atlas-Truncated", "true")
+		w.Header().Set("X-Atlas-Unresolved-References", "2")
+		_, _ = w.Write([]byte("framework,requirement_code\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	out, err := runOverlay(t, srv, "audited-under", "--csv")
+	if err != nil {
+		t.Fatalf("audited-under --csv: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"framework,requirement_code",
+		"warning: the report was truncated at its row cap",
+		"warning: 2 tested-under reference(s) do not resolve",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
 }

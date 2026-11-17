@@ -292,6 +292,38 @@ test.describe("Audited under report", () => {
     await expect(page.getByTestId("audited-under-truncated")).toHaveCount(0);
   });
 
+  test("a cut unresolved list alone shows no gap truncation banner", async ({
+    authedPage: page,
+  }) => {
+    await page.route(REPORT, async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          report([GAP, OTHER], {
+            truncated: true,
+            unresolved_count: 9,
+            unresolved_references: [
+              {
+                control_id: GAP.control_id,
+                control_bundle_id: GAP.control_bundle_id,
+                control_title: GAP.control_title,
+                system: "soc2",
+                code: "CC9.9",
+              },
+            ],
+          }),
+        ),
+      });
+    });
+    await page.goto("/catalog/audited-under");
+    await expect(page.getByTestId("audited-under-row")).toHaveCount(2);
+    await expect(page.getByTestId("audited-under-unresolved")).toContainText(
+      "9 tested-under references do not resolve",
+    );
+    await expect(page.getByTestId("audited-under-truncated")).toHaveCount(0);
+  });
+
   test("filters by framework, and the CSV export downloads", async ({
     authedPage: page,
   }) => {
