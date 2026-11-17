@@ -92,13 +92,15 @@ export type ControlStateResponse = {
 
 async function throwAPIError(res: Response): Promise<never> {
   let msg = `${res.status} ${res.statusText}`;
+  let code: string | undefined;
   try {
-    const j = (await res.json()) as { error?: string };
+    const j = (await res.json()) as { error?: string; code?: string };
     if (j.error) msg = j.error;
+    code = j.code;
   } catch {
     /* body not JSON — keep the status line */
   }
-  throw new APIError(res.status, msg);
+  throw new APIError(res.status, msg, code);
 }
 
 function periodPath(id: string): string {
