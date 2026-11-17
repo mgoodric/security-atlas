@@ -194,6 +194,10 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	}
 	postures := packPostures(postureRows)
 	coveragePct, baselinePct, scopedCount, hasBaseline := coverageTrend(postures)
+	exceptionNow, exceptionThen := exceptionTrend(postures)
+	if !hasBaseline {
+		exceptionThen = 0
+	}
 
 	// --- risks: top-N aging, ranked by residual severity then age ---
 	riskRows, err := g.store.ListRisksAsOf(ctx, generatedAt)
@@ -247,6 +251,10 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 		BaselineCoveragePct:  baselinePct,
 		ScopedFrameworkCount: &scopedCount,
 		NoBaseline:           !hasBaseline,
+		// #2269: how much of each end rests on exceptions.
+		CoveredByExceptionPct:         exceptionNow,
+		BaselineCoveredByExceptionPct: exceptionThen,
+		BaselineExceptionKnown:        hasBaseline,
 	})
 	pack.Sections[SectionOpenFindings] = newSection(SectionOpenFindings, SectionData{
 		Findings:      findings,

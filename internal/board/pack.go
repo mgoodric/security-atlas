@@ -246,6 +246,16 @@ type SectionData struct {
 	// the cost per coverage point are not reported. An operator-entered
 	// baseline clears it on coverage_trend.
 	NoBaseline bool `json:"no_baseline,omitempty"`
+	// CoveredByExceptionPct and BaselineCoveredByExceptionPct (#2269) are
+	// the parts of CoveragePct and BaselineCoveragePct that rest only on
+	// exceptions, as means over the same scoped frameworks. The sentence
+	// discloses them so a reader can tell demonstrated coverage from waived
+	// coverage at both ends of the trend. BaselineExceptionKnown is false
+	// when there is no generated baseline, including once an operator
+	// overwrites the baseline: their figure carries no exception share.
+	CoveredByExceptionPct         float64 `json:"covered_by_exception_pct,omitempty"`
+	BaselineCoveredByExceptionPct float64 `json:"baseline_covered_by_exception_pct,omitempty"`
+	BaselineExceptionKnown        bool    `json:"baseline_exception_known,omitempty"`
 
 	// open_findings: failing control evaluations as of period_end
 	// (decision D4 — a failing evaluation IS a finding for v1).
@@ -348,4 +358,12 @@ func (d SectionData) ScopedFrameworks() int {
 		return 0
 	}
 	return *d.ScopedFrameworkCount
+}
+
+// ShowsExceptionShare reports whether the coverage_trend sentence discloses
+// the covered-by-exception share (#2269): when any part of the quarter-end
+// figure, or of a generated baseline, rests on exceptions. When it does,
+// both ends are stated, a zero included, so the reader can compare them.
+func (d SectionData) ShowsExceptionShare() bool {
+	return d.CoveredByExceptionPct > 0 || (d.BaselineExceptionKnown && d.BaselineCoveredByExceptionPct > 0)
 }

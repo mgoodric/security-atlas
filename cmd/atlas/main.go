@@ -1020,6 +1020,11 @@ func main() {
 				}
 			}
 			expirer := exception.NewExpirer(expiryPool, logger)
+			// #2269: re-evaluate each expired exception's control through
+			// the app-role pool, so RLS binds the evaluation's writes.
+			if pool != nil {
+				expirer.WithReevaluate(eval.ExceptionChangeReevaluator(eval.NewEngineFactory(pool), logger))
+			}
 			wg.Add(1)
 			go func() {
 				defer wg.Done()

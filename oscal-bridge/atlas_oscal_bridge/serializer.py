@@ -32,12 +32,15 @@ from trestle.oscal.assessment_plan import AssessmentPlan
 from trestle.oscal.assessment_results import AssessmentResults, ImportAp, Result
 from trestle.oscal.catalog import Catalog
 from trestle.oscal.common import (
+    BackMatter,
     ControlSelection,
     ImportSsp,
+    Link,
     Metadata,
     Observation,
     Property,
     RelevantEvidence,
+    Resource,
     ReviewedControls,
     SystemComponent,
     SystemId,
@@ -497,6 +500,8 @@ def serialize_assessment(pb_input):
                 ],
             )
         )
+    excepted_obs, exception_resources = _excepted_observations(pb_input.excepted_cells)
+    observations.extend(excepted_obs)
 
     result = Result(
         uuid=str(uuid.uuid4()),
@@ -514,11 +519,93 @@ def serialize_assessment(pb_input):
         metadata=ar_meta,
         import_ap=ImportAp(href="#security-atlas-assessment-plan"),
         results=[result],
+        back_matter=BackMatter(resources=exception_resources) if exception_resources else None,
     )
 
     return (
         ap.oscal_serialize_json().encode("utf-8"),
         ar.oscal_serialize_json().encode("utf-8"),
+    )
+
+
+def _excepted_observations(cells):
+    """Map excepted cells to risk-accepted observations (#2269).
+
+    An excepted cell is a control waived by an approved exception in one
+    scope cell. It is never a finding: the observation is marked
+    ``risk-accepted`` and links to a back-matter resource per exception,
+    which carries the exception's id, expiry and approver. Each exception
+    appears once in back-matter however many cells it covers.
+
+    Returns ``(observations, resources)``.
+    """
+    observations = []
+    resources = {}
+    for cell in cells:
+        props = [
+            _prop("observation-source", "exception"),
+            _prop("risk-accepted", "true"),
+            _prop("control-id", cell.control_id),
+            _prop("evaluation-id", cell.evaluation_id),
+            _prop("evaluation-result", "excepted"),
+        ]
+        if cell.scope_cell_id:
+            props.append(_prop("scope-cell-id", cell.scope_cell_id))
+        links = []
+        expiries = []
+        for exc in cell.exceptions:
+            props.append(_prop("exception-id", exc.id))
+            links.append(Link(href=f"#{exc.id}", rel="related", text="Accepting exception"))
+            if exc.expires_at:
+                expiries.append(datetime.fromisoformat(exc.expires_at))
+            if exc.id not in resources:
+                resources[exc.id] = _exception_resource(exc)
+        where = f"scope cell {cell.scope_cell_id}" if cell.scope_cell_id else "the whole tenant"
+        if cell.exceptions:
+            description = (
+                f"Control {cell.control_id} is excepted in {where}: an approved "
+                "exception accepts the risk, so the control's own result is not "
+                "assessed here. Not a finding."
+            )
+        else:
+            description = (
+                f"Control {cell.control_id} is excepted in {where}, but the "
+                "accepting exception can no longer be resolved. Not a finding."
+            )
+        observations.append(
+            Observation(
+                uuid=str(uuid.uuid4()),
+                title="Risk accepted by exception",
+                description=description,
+                methods=["EXAMINE"],
+                collected=_note_collected(cell.evaluated_at),
+                # The observation holds until the earliest exception expires.
+                expires=min(expiries) if expiries else None,
+                props=props,
+                links=links or None,
+            )
+        )
+    return observations, list(resources.values())
+
+
+def _exception_resource(exc) -> Resource:
+    props = [
+        _prop("exception-id", exc.id),
+        _prop("risk-accepted", "true"),
+    ]
+    if exc.expires_at:
+        props.append(_prop("expires-at", exc.expires_at))
+    if exc.approved_by:
+        props.append(_prop("approved-by", exc.approved_by))
+    if exc.approved_at:
+        props.append(_prop("approved-at", exc.approved_at))
+    if exc.status:
+        props.append(_prop("exception-status", exc.status))
+    return Resource(
+        uuid=exc.id,
+        title=f"Exception {exc.id}",
+        description=exc.justification or "Approved exception.",
+        props=props,
     )
 
 

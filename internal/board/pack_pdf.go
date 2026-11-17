@@ -173,6 +173,16 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 				`<div class="muted">Coverage %s%% · baseline %s%% · delta %s pts</div>`,
 				formatPct(d.CoveragePct), formatPct(d.BaselineCoveragePct), signedPts(d.CoverageDelta))
 		}
+		// #2269: the share of each end that rests only on exceptions.
+		if d.ShowsExceptionShare() && !d.NoScopedFrameworks() {
+			if d.BaselineExceptionKnown && !d.NoBaseline {
+				fmt.Fprintf(w, `<div class="muted">Covered only by exception: %s%% · baseline %s%%</div>`,
+					formatPct(d.CoveredByExceptionPct), formatPct(d.BaselineCoveredByExceptionPct))
+			} else {
+				fmt.Fprintf(w, `<div class="muted">Covered only by exception: %s%%</div>`,
+					formatPct(d.CoveredByExceptionPct))
+			}
+		}
 
 	case SectionOpenFindings:
 		if len(d.Findings) == 0 {

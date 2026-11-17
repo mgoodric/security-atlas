@@ -239,6 +239,67 @@ func TestRenderSectionNarrative_CoverageTrendFromPosture(t *testing.T) {
 	}
 }
 
+// #2269: the coverage_trend sentence says how much of the quarter-end figure
+// and of the generated baseline rests on exceptions, and drops the baseline
+// share once an operator overwrites the baseline.
+func TestRenderSectionNarrative_CoverageTrendDisclosesExceptionShare(t *testing.T) {
+	t.Parallel()
+	postures := packPostures([]frameworkPostureRow{
+		{Name: "SOC 2", CoveragePct: 80, ExceptionPct: 20, ExceptionThenPct: 10, TrendDelta90d: 10, ScopeActivated: true, TrendHistory: true},
+		{Name: "ISO 27001", CoveragePct: 60, ExceptionPct: 0, ExceptionThenPct: 0, TrendDelta90d: 0, ScopeActivated: true, TrendHistory: true},
+		{Name: "PCI DSS", ExceptionPct: 99, ScopeActivated: false},
+	})
+	now, then := exceptionTrend(postures)
+	if now != 10 || then != 5 {
+		t.Fatalf("exceptionTrend = (%v, %v), want (10, 5): the mean over the scoped frameworks", now, then)
+	}
+
+	data := SectionData{
+		CoveragePct: 70, BaselineCoveragePct: 65, CoverageDelta: 5, ScopedFrameworkCount: intPtr(2),
+		CoveredByExceptionPct: now, BaselineCoveredByExceptionPct: then, BaselineExceptionKnown: true,
+	}
+	text, err := renderSectionNarrative(newSection(SectionCoverageTrend, data), "2026-09-30")
+	if err != nil {
+		t.Fatalf("renderSectionNarrative: %v", err)
+	}
+	want := "Control coverage averages 70% (10% of requirements covered only by exception) across the 2 frameworks with an activated scope, against a baseline of 65% (5% by exception) — a +5 point change."
+	if !strings.Contains(text, want) {
+		t.Errorf("coverage trend narrative = %q, want it to contain %q", text, want)
+	}
+
+	// A baseline that rested on exceptions is disclosed even when nothing
+	// does at quarter end.
+	data.CoveredByExceptionPct = 0
+	text, _ = renderSectionNarrative(newSection(SectionCoverageTrend, data), "2026-09-30")
+	if want := "averages 70% (0% of requirements covered only by exception)"; !strings.Contains(text, want) {
+		t.Errorf("coverage trend narrative = %q, want it to contain %q", text, want)
+	}
+	if want := "baseline of 65% (5% by exception)"; !strings.Contains(text, want) {
+		t.Errorf("coverage trend narrative = %q, want it to contain %q", text, want)
+	}
+
+	// An operator-entered baseline carries no exception share.
+	data.CoveredByExceptionPct = 10
+	sec := newSection(SectionCoverageTrend, data)
+	baseline := 50
+	applyInputs(&sec, &SectionInputs{BaselineCoveragePct: &baseline})
+	text, _ = renderSectionNarrative(sec, "2026-09-30")
+	if want := "against a baseline of 50% — a"; !strings.Contains(text, want) {
+		t.Errorf("operator baseline narrative = %q, want it to contain %q (no exception share)", text, want)
+	}
+	if want := "averages 70% (10% of requirements covered only by exception)"; !strings.Contains(text, want) {
+		t.Errorf("coverage trend narrative = %q, want it to contain %q", text, want)
+	}
+
+	// No exception anywhere: the sentence is unchanged.
+	plain, _ := renderSectionNarrative(newSection(SectionCoverageTrend, SectionData{
+		CoveragePct: 70, BaselineCoveragePct: 65, CoverageDelta: 5, ScopedFrameworkCount: intPtr(2), BaselineExceptionKnown: true,
+	}), "2026-09-30")
+	if strings.Contains(plain, "exception") {
+		t.Errorf("coverage trend narrative mentions exceptions with none: %q", plain)
+	}
+}
+
 // The posture card in the PDF shows "Scope not set" in place of a number.
 func TestBuildPackHTML_ScopeNotSetCard(t *testing.T) {
 	t.Parallel()
