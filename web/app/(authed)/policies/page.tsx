@@ -111,6 +111,15 @@ import {
   POLICIES_SCAFFOLD_FUTURE_TESTID,
 } from "./scaffold-future";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+
+// #2154: the subtitle names the module's key terms.
+const SUBTITLE = (
+  <>
+    Versioned policies · <Term id="policy-acknowledgment">acknowledgment</Term>{" "}
+    tracked against the current version
+  </>
+);
 
 const FILTER_KEYS: (keyof PolicyFilters)[] = [
   "status",
@@ -592,7 +601,7 @@ function PoliciesPageInner() {
     return (
       <ListPage
         title={pageTitle("/policies")}
-        subtitle="Versioned policies · acknowledgment tracked against the current version"
+        subtitle={SUBTITLE}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -607,7 +616,7 @@ function PoliciesPageInner() {
     return (
       <ListPage
         title={pageTitle("/policies")}
-        subtitle="Versioned policies · acknowledgment tracked against the current version"
+        subtitle={SUBTITLE}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="policies-load-error">
@@ -692,7 +701,7 @@ function PoliciesPageInner() {
     <ListPage
       title={pageTitle("/policies")}
       titleAdornment={titleAdornment}
-      subtitle="Versioned policies · acknowledgment tracked against the current version"
+      subtitle={SUBTITLE}
       actions={actions}
       filterRow={
         <FilterPills
