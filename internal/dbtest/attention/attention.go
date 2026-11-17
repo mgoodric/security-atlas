@@ -195,15 +195,18 @@ func seedTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label string) 
 	at.AckDueSoon = ack(at.Owner, now.Add(-355*day))
 	at.AckOverdue = ack(at.Other, now.Add(-400*day))
 
+	// An owned risk names its owner as a user (#2129) as well as in the
+	// older free text; the unowned risk has neither.
 	risk := func(title, owner string, reviewDue time.Time) uuid.UUID {
 		id := uuid.New()
 		exec("risk "+title, `
 			INSERT INTO risks (
 				id, tenant_id, title, category_id, treatment, treatment_owner,
-				inherent_score, residual_score, review_due_at
+				inherent_score, residual_score, review_due_at, owner_user_id
 			)
 			VALUES ($1, $2, $3, risk_category_id($2, 'operational'), 'mitigate'::risk_treatment, $4,
-			        '{"likelihood": 3, "impact": 4}'::jsonb, '{"likelihood": 2, "impact": 3}'::jsonb, $5)
+			        '{"likelihood": 3, "impact": 4}'::jsonb, '{"likelihood": 2, "impact": 3}'::jsonb, $5,
+			        NULLIF($4, '')::uuid)
 		`, id, at.ID, at.RiskTitlePrefix+title, owner, reviewDue)
 		return id
 	}

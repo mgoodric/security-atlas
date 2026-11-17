@@ -60,8 +60,8 @@ const (
 // seam. It returns deterministic rows with no Postgres.
 type stubRiskLister struct{ rows []risk.Risk }
 
-func (s stubRiskLister) List(_ context.Context, _ risk.ListFilter) ([]risk.Risk, error) {
-	return s.rows, nil
+func (s stubRiskLister) ListPage(_ context.Context, _ risk.PageFilter) ([]risk.Risk, int64, error) {
+	return s.rows, int64(len(s.rows)), nil
 }
 
 // contractRequest builds a GET carrying both the gates ListRisks enforces: an
