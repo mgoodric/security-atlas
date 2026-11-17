@@ -88,6 +88,40 @@ func TestMonetaryOnlyFAIR(t *testing.T) {
 	}
 }
 
+// RanksAbove's tiers: scored 5x5, then scored FAIR, then unscored of any
+// methodology, whose value is ignored (#2185, #2516).
+func TestRanksAboveTiers(t *testing.T) {
+	t.Parallel()
+	sev := func(v float64) Rank { return Rank{Value: v} }
+	usd := func(v float64) Rank { return Rank{Monetary: true, Value: v} }
+	unscored := Rank{Unscored: true}
+	unscoredFAIR := Rank{Unscored: true, Monetary: true}
+	cases := []struct {
+		name string
+		a, b Rank
+		want bool
+	}{
+		{"higher severity first", sev(12), sev(4), true},
+		{"lower severity not above", sev(4), sev(12), false},
+		{"tie is false", sev(4), sev(4), false},
+		{"severity above dollars", sev(1), usd(250000), true},
+		{"dollars not above severity", usd(250000), sev(1), false},
+		{"more dollars first", usd(900), usd(100), true},
+		{"zero severity above unscored", sev(0), unscored, true},
+		{"FAIR above unscored 5x5", usd(1), unscored, true},
+		{"FAIR above unscored FAIR", usd(1), unscoredFAIR, true},
+		{"unscored not above FAIR", unscored, usd(1), false},
+		{"unscored FAIR not above 5x5", unscoredFAIR, sev(0), false},
+		{"unscored tie both ways", unscoredFAIR, unscored, false},
+		{"unscored value ignored", Rank{Unscored: true, Value: 9}, unscored, false},
+	}
+	for _, tc := range cases {
+		if got := RanksAbove(tc.a, tc.b); got != tc.want {
+			t.Errorf("%s: RanksAbove(%+v, %+v) = %v, want %v", tc.name, tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 // A FAIR risk's dollar residual never outranks a 5x5 severity by raw
 // number: $250,000 sits below a residual of 2.
 func TestSortByResidualThenAgeRanksFAIRSeparately(t *testing.T) {
@@ -108,9 +142,12 @@ func TestSortByResidualThenAgeRanksFAIRSeparately(t *testing.T) {
 		mk("fair-small", dbx.RiskMethodologyFair, `{"score":900}`, 1),
 		mk("5x5-high", dbx.RiskMethodologyQualitative5x5, `{"likelihood":4,"impact":5}`, 1),
 		mk("5x5-unscored", dbx.RiskMethodologyNist80030, `{}`, 5),
+		mk("fair-unscored", dbx.RiskMethodologyFair, ``, 9),
 	}
 	sortByResidualThenAge(risks)
-	want := []string{"5x5-high", "5x5-low", "5x5-unscored", "fair-big", "fair-small"}
+	// #2516: unscored risks of both methodologies rank after every scored
+	// FAIR risk, oldest first among themselves.
+	want := []string{"5x5-high", "5x5-low", "fair-big", "fair-small", "fair-unscored", "5x5-unscored"}
 	got := make([]string, len(risks))
 	for i, r := range risks {
 		got[i] = r.Title
