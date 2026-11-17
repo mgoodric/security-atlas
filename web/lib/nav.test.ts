@@ -65,7 +65,10 @@ describe("buildNav — groups", () => {
       facts({ me: ME.superAdmin, modules: ALL_ON, csfVersionId: CSF }),
     );
     expect(nav.map((g) => [g.label, g.items.map((i) => i.label)])).toEqual([
-      ["Program", ["Dashboard", "Calendar", "Metrics", "Activity"]],
+      [
+        "Program",
+        ["Dashboard", "Approvals", "Calendar", "Metrics", "Activity"],
+      ],
       [
         "Controls",
         ["Controls", "Evidence", "Exceptions", "Implementation checklist"],
@@ -171,6 +174,7 @@ describe("buildNav — gates", () => {
     test(`${role}: no Admin and no gated entry with flags off`, () => {
       expect(labels(facts({ me: ME[role], modules: DEFAULTS }))).toEqual([
         "Dashboard",
+        "Approvals",
         "Calendar",
         "Metrics",
         "Activity",
