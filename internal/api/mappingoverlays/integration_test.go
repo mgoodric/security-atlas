@@ -97,7 +97,13 @@ func newFixture(t *testing.T) fixture {
 
 	fwID, verID := uuid.New(), uuid.New()
 	t.Cleanup(func() {
-		// Requirements, catalog edges and overlay edges cascade from the version.
+		// An active overlay edge refuses its requirement's delete (#2240), so
+		// the overlay edges go first; requirements and catalog edges cascade
+		// from the version.
+		_, _ = admin.Exec(ctx, `DELETE FROM fw_to_scf_overlay_edges WHERE framework_requirement_id IN (
+			SELECT fr.id FROM framework_requirements fr
+			JOIN framework_versions fv ON fv.id = fr.framework_version_id
+			WHERE fv.framework_id = $1)`, fwID)
 		_, _ = admin.Exec(ctx, `DELETE FROM framework_versions WHERE framework_id = $1`, fwID)
 		_, _ = admin.Exec(ctx, `DELETE FROM frameworks WHERE id = $1`, fwID)
 	})

@@ -290,7 +290,8 @@ type anchorWire struct {
 	SourceAttribution string  `json:"source_attribution,omitempty"`
 	// MappingTier is the slice-483 trust tier (draft | under_review |
 	// verified | rejected) — additive, orthogonal to source_attribution. No
-	// reviewer identity on this catalog payload (P0-483-6).
+	// reviewer identity on this catalog payload (P0-483-6). Omitted on an
+	// overlay row (#2240).
 	MappingTier string `json:"mapping_tier,omitempty"`
 	// Origin is where the edge comes from: "catalog", or "overlay" for the
 	// caller tenant's own org mapping (#1798). Omitted on the bare anchor.
@@ -314,6 +315,17 @@ type overlayWire struct {
 // nil for a catalog row, and for an overlay row whose LEFT JOIN found
 // nothing (it cannot: the view's overlay arm reads the same table under
 // the same tenant setting).
+// tierFor is the mapping_tier a coverage row reports. ADR 0018's tiers do
+// not apply to an overlay edge (#1797), so an overlay row has none; the
+// view's 'verified' on the overlay arm (#1798 D3) only lets it pass the
+// rejected-tier filter and is not reported (#2240).
+func tierFor(origin, tier string) string {
+	if origin == "overlay" {
+		return ""
+	}
+	return tier
+}
+
 func overlayFrom(origin string, sourceRef, createdBy *string, createdAt pgtype.Timestamptz) *overlayWire {
 	if origin != "overlay" || sourceRef == nil {
 		return nil
@@ -403,8 +415,9 @@ type requirementForAnchorWire struct {
 	Coverage               *float64 `json:"coverage"`
 	SourceAttribution      string   `json:"source_attribution"`
 	// MappingTier is the slice-483 trust tier — additive, orthogonal to
-	// source_attribution; no reviewer identity (P0-483-6).
-	MappingTier string `json:"mapping_tier"`
+	// source_attribution; no reviewer identity (P0-483-6). Omitted on an
+	// overlay row (#2240).
+	MappingTier string `json:"mapping_tier,omitempty"`
 	// Origin is "catalog", or "overlay" when the path runs through the
 	// caller tenant's own org mapping (#1798).
 	Origin    string `json:"origin"`

@@ -41,6 +41,12 @@ func resetISO(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	for _, stmt := range []string{
+		// An active overlay edge refuses its requirement's delete (#2240).
+		`DELETE FROM fw_to_scf_overlay_edges WHERE framework_requirement_id IN (
+			SELECT fr.id FROM framework_requirements fr
+			JOIN framework_versions fv ON fv.id = fr.framework_version_id
+			JOIN frameworks f ON f.id = fv.framework_id
+			WHERE f.slug = 'iso27001')`,
 		`DELETE FROM fw_to_scf_edges WHERE framework_requirement_id IN (
 			SELECT fr.id FROM framework_requirements fr
 			JOIN framework_versions fv ON fv.id = fr.framework_version_id

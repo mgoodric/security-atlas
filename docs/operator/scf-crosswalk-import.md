@@ -246,6 +246,16 @@ proposals:
 
 A person must decide: a machine credential gets 403.
 
+### Deleting catalog rows that overlay edges use (#2240)
+
+The database refuses to delete an SCF anchor, a framework requirement, or a
+framework version holding requirements, while any tenant has an **active**
+overlay edge on it (SQLSTATE 23001, `active overlay edge(s) reference …`).
+Retire those overlay edges first. A retired overlay edge does not hold the
+row: the delete removes it and writes a `cascade_removed` row to that
+tenant's overlay audit trail, with the edge's codes and the catalog row it
+went with. `TRUNCATE` skips both checks; only test fixtures use it.
+
 All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
 reviewed or verified is a human governance step.

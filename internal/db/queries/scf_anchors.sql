@@ -156,10 +156,11 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 --      tenant-instantiated control that satisfies one anchor:
 --        result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
 --        freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
---   3. `anchor_frameworks` aggregates the global crosswalk: for each
---      anchor, the DISTINCT set of framework slugs reached via
---      fw_to_scf_edges → framework_requirements → framework_versions
---      → frameworks. Excludes the SCF spine itself (the column is
+--   3. `anchor_frameworks` aggregates the effective crosswalk (catalog
+--      edges plus the caller tenant's active overlay edges, #1798): for
+--      each anchor, the DISTINCT set of framework slugs reached via
+--      effective_fw_to_scf_edges → framework_requirements →
+--      framework_versions → frameworks. Excludes the SCF spine itself (the column is
 --      "what frameworks DOES this anchor satisfy?", not "is it an SCF
 --      anchor?" — the answer to that is always yes). Excludes
 --      `no_relationship` edges (those are explicit non-mappings, not
@@ -177,8 +178,9 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 --      filters those rows, and each `controls` read also carries an
 --      explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
 --      #1832, belt-and-suspenders as in ListActiveControlsWithState);
---      the global `scf_anchors` rows + the catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
---      visible to every tenant by design.
+--      the global `scf_anchors` rows + catalog `fw_to_scf_edges` are
+--      visible to every tenant by design; the overlay arm of
+--      effective_fw_to_scf_edges shows only the caller tenant's own.
 --   #2 Engine is sole writer of control_evaluations: this is a pure read
 --      over the engine's output table, never a parallel computation.
 --
@@ -246,7 +248,8 @@ worst_per_anchor AS (
 ),
 anchor_frameworks AS (
     -- Slice 226: per-anchor framework set. One GROUP BY over the
-    -- catalog-global crosswalk; no per-row fan-out.
+    -- effective crosswalk (catalog edges + this tenant's overlay edges,
+    -- #1798); no per-row fan-out.
     SELECT
         e.scf_anchor_id AS anchor_id,
         array_agg(DISTINCT af.slug) AS framework_slugs
