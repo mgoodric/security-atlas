@@ -303,7 +303,7 @@ func (q *Queries) LockTenantTheme(ctx context.Context, arg LockTenantThemeParams
 
 const lockThemeVocabulary = `-- name: LockThemeVocabulary :exec
 
-SELECT pg_advisory_xact_lock(hashtextextended('theme_vocabulary:' || $1::uuid::text, 0))
+SELECT pg_advisory_xact_lock(5, hashtext($1::uuid::text))
 `
 
 // ===== #1811: organisation theme management =====
@@ -311,14 +311,15 @@ SELECT pg_advisory_xact_lock(hashtextextended('theme_vocabulary:' || $1::uuid::t
 // one tenant. Rename and delete take it exclusively before anything else;
 // an assignment takes the shared form (LockThemeVocabularyShared) before it
 // validates, so it can never write a name a concurrent rename or delete has
-// just removed. Transaction-scoped.
+// just removed. Transaction-scoped. Namespace 5 is
+// advisorylock.ThemeVocabulary (#2273).
 func (q *Queries) LockThemeVocabulary(ctx context.Context, tenantID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, lockThemeVocabulary, tenantID)
 	return err
 }
 
 const lockThemeVocabularyShared = `-- name: LockThemeVocabularyShared :exec
-SELECT pg_advisory_xact_lock_shared(hashtextextended('theme_vocabulary:' || $1::uuid::text, 0))
+SELECT pg_advisory_xact_lock_shared(5, hashtext($1::uuid::text))
 `
 
 func (q *Queries) LockThemeVocabularyShared(ctx context.Context, tenantID pgtype.UUID) error {

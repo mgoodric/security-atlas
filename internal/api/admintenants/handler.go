@@ -85,6 +85,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -343,7 +344,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The multi-tenant gate (#1763) counts tenants inside the create
-	// transaction, under installTenantCreateLockKey (#2015, step 0b).
+	// transaction, under the advisorylock.TenantCreateInstall lock (#2015, step 0b).
 	allowMultiTenant := h.allowMultiTenant()
 
 	var req createRequest
@@ -452,18 +453,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	//    serialisation, N concurrent transactions all see count=K
 	//    and all proceed (the limit becomes K + N - 1 instead of K).
 	//
-	//    Lock key derivation: 0x143... prefix (slice-143-unique) +
-	//    the actor's UUID upper 64 bits. Distinct from slice 142's
-	//    0x142142142142 key (the slice-142 demote lock). Future
-	//    slices needing per-actor advisory locks must pick a distinct
-	//    high-bit prefix to avoid cross-feature blocking.
-	//
-	//    Lock is auto-released at transaction commit (xact_lock).
-	//    Mirrors the slice 142 D1 pattern.
-	actorLockKey := actorAdvisoryKey(actorID)
-	if _, err := tx.Exec(r.Context(),
-		`SELECT pg_advisory_xact_lock($1)`, actorLockKey,
-	); err != nil {
+	//    The lock is the advisorylock.TenantCreateActor namespace keyed
+	//    on the actor id (#2273). Auto-released at transaction commit
+	//    (xact_lock). Mirrors the slice 142 D1 pattern.
+	if err := advisorylock.LockText(r.Context(), tx, advisorylock.TenantCreateActor, actorID.String()); err != nil {
 		httperr.WriteInternal(w, r, "acquire actor lock", err)
 		return
 	}
@@ -477,9 +470,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	//     a previous holder committed. Taken after the actor lock, in
 	//     the same order on every path, so the two cannot deadlock.
 	if !allowMultiTenant {
-		if _, err := tx.Exec(r.Context(),
-			`SELECT pg_advisory_xact_lock($1)`, installTenantCreateLockKey,
-		); err != nil {
+		if err := advisorylock.Lock(r.Context(), tx, advisorylock.TenantCreateInstall, 0); err != nil {
 			httperr.WriteInternal(w, r, "acquire tenant-create lock", err)
 			return
 		}
@@ -758,13 +749,6 @@ func mustMarshal(v any) []byte {
 
 func stringPtr(s string) *string { return &s }
 
-// installTenantCreateLockKey is the pg_advisory_xact_lock(BIGINT) key that
-// serialises tenant creation while the multi-tenant opt-in is off (#2015).
-// One key for the whole install, distinct from the slice-142
-// (0x142142142142), slice-198 (0x198198198198) and per-actor slice-143
-// (0x0143...) keys.
-const installTenantCreateLockKey int64 = 0x201520152015
-
 // rowQuerier is the QueryRow method shared by *pgxpool.Pool and pgx.Tx.
 type rowQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -783,31 +767,4 @@ func countTenants(ctx context.Context, q rowQuerier) (int, error) {
 func writeMultiTenantDisabled(w http.ResponseWriter) {
 	httpresp.WriteError(w, http.StatusForbidden,
 		"multi-tenant is not enabled on this install: set "+AllowMultiTenantEnvVar+"=true to create another tenant")
-}
-
-// actorAdvisoryKey derives a per-actor BIGINT key for the slice-143
-// per-actor advisory lock. The high bit of the key is the slice-143-
-// stable prefix (0x143 << 48); the low bits are the upper 48 bits of
-// the actor's UUID. The result is deterministic per actor and won't
-// collide with the slice-142 advisory lock (0x142142142142) because
-// the high prefix differs.
-//
-// Why upper 48 bits and not lower: UUIDv4's most-uniform entropy lives
-// in the low 48 bits, but using the high 48 bits gives us a stable
-// mapping that doesn't depend on UUID version. For test fixtures
-// generated via uuid.New() (v4), both halves are equally uniform.
-//
-// Returns int64 because Postgres `pg_advisory_xact_lock(BIGINT)` is
-// signed; we mask away the sign bit so the result fits in int63.
-func actorAdvisoryKey(actorID uuid.UUID) int64 {
-	const slice143Prefix int64 = 0x0143000000000000
-	bytes := actorID
-	// Take the upper 6 bytes of the UUID for the actor component.
-	var actorComponent int64
-	for i := 0; i < 6; i++ {
-		actorComponent = (actorComponent << 8) | int64(bytes[i])
-	}
-	// Mask the actor component into the low 48 bits to leave the
-	// prefix intact.
-	return slice143Prefix | (actorComponent & 0x0000ffffffffffff)
 }

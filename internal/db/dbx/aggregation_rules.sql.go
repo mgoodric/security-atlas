@@ -626,7 +626,7 @@ func (q *Queries) ListCandidateRisksForRule(ctx context.Context, arg ListCandida
 }
 
 const lockAggregationKey = `-- name: LockAggregationKey :exec
-SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+SELECT pg_advisory_xact_lock(7, hashtext($1::text))
 `
 
 // #1861: serialize every evaluation of one rule's meta-risk key inside the
@@ -635,8 +635,9 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 // risk writes, or a risk write racing evaluate-now, can both miss the read
 // and both create. Transaction-scoped, so it releases on commit/rollback.
 // Under READ COMMITTED the reads issued after the lock see the winner's
-// committed meta-risk. hashtextextended maps the hex key to the BIGINT
-// lock space; a hash collision only over-serializes, never under-.
+// committed meta-risk. Namespace 7 is advisorylock.AggregationKey (#2273);
+// hashtext maps the hex key into it, and a hash collision only
+// over-serializes, never under-.
 func (q *Queries) LockAggregationKey(ctx context.Context, aggregationKey string) error {
 	_, err := q.db.Exec(ctx, lockAggregationKey, aggregationKey)
 	return err

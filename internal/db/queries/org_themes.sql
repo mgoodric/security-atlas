@@ -68,11 +68,12 @@ WHERE tenant_id = $1 AND id = $2;
 -- one tenant. Rename and delete take it exclusively before anything else;
 -- an assignment takes the shared form (LockThemeVocabularyShared) before it
 -- validates, so it can never write a name a concurrent rename or delete has
--- just removed. Transaction-scoped.
-SELECT pg_advisory_xact_lock(hashtextextended('theme_vocabulary:' || sqlc.arg(tenant_id)::uuid::text, 0));
+-- just removed. Transaction-scoped. Namespace 5 is
+-- advisorylock.ThemeVocabulary (#2273).
+SELECT pg_advisory_xact_lock(5, hashtext(sqlc.arg(tenant_id)::uuid::text));
 
 -- name: LockThemeVocabularyShared :exec
-SELECT pg_advisory_xact_lock_shared(hashtextextended('theme_vocabulary:' || sqlc.arg(tenant_id)::uuid::text, 0));
+SELECT pg_advisory_xact_lock_shared(5, hashtext(sqlc.arg(tenant_id)::uuid::text));
 
 -- name: GetVisibleThemeByRef :one
 -- A theme the caller can see (built-in or its own), named by name or id.

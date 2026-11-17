@@ -223,6 +223,29 @@ func (q *Queries) ListSCIMCredentialsByTenant(ctx context.Context, tenantID pgty
 	return items, nil
 }
 
+const notifySuperAdminsLastAdminDeprovisioned = `-- name: NotifySuperAdminsLastAdminDeprovisioned :one
+SELECT notify_super_admins_last_admin_deprovisioned(
+    $1::uuid,
+    $2::uuid
+)::int AS notified
+`
+
+type NotifySuperAdminsLastAdminDeprovisionedParams struct {
+	TenantID            pgtype.UUID `json:"tenant_id"`
+	DeprovisionedUserID pgtype.UUID `json:"deprovisioned_user_id"`
+}
+
+// #2273: notify every active super-admin that a SCIM deprovision left the
+// tenant with no active admin. The SECURITY DEFINER function refuses any
+// tenant but the caller's RLS tenant, does nothing while the tenant still has
+// an active admin, and returns how many notifications it wrote.
+func (q *Queries) NotifySuperAdminsLastAdminDeprovisioned(ctx context.Context, arg NotifySuperAdminsLastAdminDeprovisionedParams) (int32, error) {
+	row := q.db.QueryRow(ctx, notifySuperAdminsLastAdminDeprovisioned, arg.TenantID, arg.DeprovisionedUserID)
+	var notified int32
+	err := row.Scan(&notified)
+	return notified, err
+}
+
 const revokeSCIMCredential = `-- name: RevokeSCIMCredential :exec
 UPDATE scim_credentials
 SET revoked_at = now()

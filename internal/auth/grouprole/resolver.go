@@ -134,16 +134,34 @@ func (r *Resolver) Derive(ctx context.Context, in DeriveInput) (DeriveResult, er
 	//    taken under the tenant's admin-roster lock, the same lock the admin
 	//    API's revoke and role replacement take, so a reconcile and a revoke
 	//    cannot both remove one of the last two admins (#2261).
-	guard, err := users.LockAdmins(ctx, q, tenantID)
-	if err != nil {
-		return DeriveResult{}, fmt.Errorf("grouprole: %w", err)
-	}
-	adminCount := guard.Before()
-	userHoldsManualAdmin, err := q.HasManualRole(ctx, dbx.HasManualRoleParams{
-		TenantID: tID, UserID: in.UserID, Role: roleAdmin,
-	})
-	if err != nil {
-		return DeriveResult{}, fmt.Errorf("grouprole: check manual admin: %w", err)
+	//
+	//    The lock is taken only when the plan would revoke this user's
+	//    group-derived admin role (#2273). Otherwise the guard never reads
+	//    the count, and an ordinary login does not serialise with every
+	//    other login in the tenant. After the lock the user's derived roles
+	//    are re-read, so a concurrent reconcile of the same user that
+	//    committed while we waited is seen.
+	adminCount := 0
+	userHoldsManualAdmin := false
+	if revokesAdmin(target, current) {
+		guard, err := users.LockAdmins(ctx, q, tenantID)
+		if err != nil {
+			return DeriveResult{}, fmt.Errorf("grouprole: %w", err)
+		}
+		adminCount = guard.Before()
+		currentRoles, err = q.ListGroupDerivedRoles(ctx, dbx.ListGroupDerivedRolesParams{
+			TenantID: tID, UserID: in.UserID,
+		})
+		if err != nil {
+			return DeriveResult{}, fmt.Errorf("grouprole: list current derived: %w", err)
+		}
+		current = setOf(currentRoles)
+		userHoldsManualAdmin, err = q.HasManualRole(ctx, dbx.HasManualRoleParams{
+			TenantID: tID, UserID: in.UserID, Role: roleAdmin,
+		})
+		if err != nil {
+			return DeriveResult{}, fmt.Errorf("grouprole: check manual admin: %w", err)
+		}
 	}
 
 	// 4. Compute the pure plan.
