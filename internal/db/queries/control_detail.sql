@@ -159,7 +159,8 @@ ORDER BY l.created_at DESC, r.id ASC;
 -- pure SELECT over the append-only ledger — no evaluation is triggered
 -- (constitutional invariant #2).
 SELECT id, evaluated_at, scope_cell_id, result,
-       freshness_status, evidence_count_in_window
+       freshness_status, evidence_count_in_window,
+       trigger, triggered_by
 FROM control_evaluations
 WHERE tenant_id = $1
   AND control_id = $2

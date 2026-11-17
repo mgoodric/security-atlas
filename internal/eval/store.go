@@ -67,6 +67,7 @@ type evaluationRow struct {
 	lastObservedAt        *time.Time
 	freshnessClass        string
 	trigger               string
+	triggeredBy           string // "" = none; set only on a manual run (#2479)
 }
 
 // loadControl returns the control's evaluation-relevant metadata. Resolves
@@ -164,6 +165,11 @@ func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID u
 		fc := row.freshnessClass
 		freshnessClass = &fc
 	}
+	var triggeredBy *string
+	if row.triggeredBy != "" {
+		tb := row.triggeredBy
+		triggeredBy = &tb
+	}
 	_, err := q.InsertControlEvaluation(ctx, dbx.InsertControlEvaluationParams{
 		ID:                    pgUUID(uuid.New()),
 		TenantID:              pgUUID(tenantID),
@@ -177,6 +183,7 @@ func (s *Store) appendEvaluation(ctx context.Context, q *dbx.Queries, tenantID u
 		LastObservedAt:        lastObserved,
 		FreshnessClass:        freshnessClass,
 		Trigger:               row.trigger,
+		TriggeredBy:           triggeredBy,
 	})
 	if err != nil {
 		return fmt.Errorf("append control evaluation: %w", err)

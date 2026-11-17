@@ -49,7 +49,8 @@ func (q *Queries) CountEvidenceForControlWindow(ctx context.Context, arg CountEv
 
 const listControlEvaluationHistoryPaged = `-- name: ListControlEvaluationHistoryPaged :many
 SELECT id, evaluated_at, scope_cell_id, result,
-       freshness_status, evidence_count_in_window
+       freshness_status, evidence_count_in_window,
+       trigger, triggered_by
 FROM control_evaluations
 WHERE tenant_id = $1
   AND control_id = $2
@@ -76,6 +77,8 @@ type ListControlEvaluationHistoryPagedRow struct {
 	Result                EvidenceResult     `json:"result"`
 	FreshnessStatus       string             `json:"freshness_status"`
 	EvidenceCountInWindow int32              `json:"evidence_count_in_window"`
+	Trigger               string             `json:"trigger"`
+	TriggeredBy           *string            `json:"triggered_by"`
 }
 
 // AC-4: the control's evaluation history from slice 012's control_eval-
@@ -111,6 +114,8 @@ func (q *Queries) ListControlEvaluationHistoryPaged(ctx context.Context, arg Lis
 			&i.Result,
 			&i.FreshnessStatus,
 			&i.EvidenceCountInWindow,
+			&i.Trigger,
+			&i.TriggeredBy,
 		); err != nil {
 			return nil, err
 		}

@@ -2019,6 +2019,7 @@ type ControlEvaluation struct {
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	TriggeredBy           *string            `json:"triggered_by"`
 }
 
 type ControlImportAuditLog struct {

@@ -17,14 +17,18 @@
           "evaluated_at": "2026-05-12T09:30:00Z",
           "evidence_count": 3,
           "freshness_status": "fresh",
-          "scope_cell": "44444444-4444-4444-8444-444444444444"
+          "scope_cell": "44444444-4444-4444-8444-444444444444",
+          "trigger": "manual",
+          "triggered_by": "55555555-5555-4555-8555-555555555555"
         },
         {
           "computed_state": "fail",
           "evaluated_at": "2026-05-11T09:30:00Z",
           "evidence_count": 0,
           "freshness_status": "stale",
-          "scope_cell": null
+          "scope_cell": null,
+          "trigger": "scheduled",
+          "triggered_by": null
         }
       ],
       "next_cursor": ""

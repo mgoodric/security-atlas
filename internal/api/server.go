@@ -60,7 +60,10 @@ type Server struct {
 	dbPool            *pgxpool.Pool
 	ingestService     *ingest.Service
 	evidencePushRate  float64
-	artifactStore     *artifact.Store
+	// evaluateRatePerMin is the per-principal limit on POST
+	// /v1/controls/{id}/evaluate (#2479); 0 uses the controlstate default.
+	evaluateRatePerMin int
+	artifactStore      *artifact.Store
 	// evidencePublisher is the slice-015 substrate. When non-nil the
 	// push HTTP handler routes through JetStream; nil falls back to
 	// direct Service.Process.
@@ -300,6 +303,11 @@ type Config struct {
 	// for the slice-013 REST push endpoint. 0 disables rate limiting
 	// (used by tests). Production defaults: 100 records/second.
 	EvidencePushRate float64
+	// EvaluateRatePerMin is how many manual evaluations one principal may
+	// start per minute, per process (#2479). 0 uses
+	// controlstate.DefaultEvaluateRatePerMin. cmd/atlas reads it from
+	// ATLAS_EVALUATE_RATE_PER_MIN.
+	EvaluateRatePerMin int
 	// ArtifactStore, when non-nil, wires the slice-036 S3 artifact store
 	// into the HTTP server. Routes POST /v1/artifacts:upload and
 	// GET /v1/artifacts/{id} only mount when this is populated.
@@ -353,16 +361,17 @@ func New(cfg Config) *Server {
 	connectorsv1.RegisterConnectorRegistryServiceServer(grpcServer, connectors.New(connReg))
 
 	srv := &Server{
-		GRPC:              grpcServer,
-		credStore:         cred,
-		registry:          reg,
-		idemStore:         idem,
-		connectorRegistry: connReg,
-		ingestService:     cfg.IngestService,
-		evidencePushRate:  cfg.EvidencePushRate,
-		artifactStore:     cfg.ArtifactStore,
-		evidencePublisher: cfg.EvidencePublisher,
-		versionFieldsFn:   cfg.VersionFieldsFn,
+		GRPC:               grpcServer,
+		credStore:          cred,
+		registry:           reg,
+		idemStore:          idem,
+		connectorRegistry:  connReg,
+		ingestService:      cfg.IngestService,
+		evidencePushRate:   cfg.EvidencePushRate,
+		evaluateRatePerMin: cfg.EvaluateRatePerMin,
+		artifactStore:      cfg.ArtifactStore,
+		evidencePublisher:  cfg.EvidencePublisher,
+		versionFieldsFn:    cfg.VersionFieldsFn,
 	}
 	// #2121: the ResetBootstrap RPC runs the reset-bootstrap endpoint's
 	// code; it reads platformResetter and bootstrapTokenPath at call time,

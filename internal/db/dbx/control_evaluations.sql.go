@@ -16,13 +16,15 @@ const insertControlEvaluation = `-- name: InsertControlEvaluation :one
 INSERT INTO control_evaluations (
     id, tenant_id, control_id, scope_cell_id, eval_run_id,
     evaluated_at, result, freshness_status,
-    evidence_count_in_window, last_observed_at, freshness_class, trigger
+    evidence_count_in_window, last_observed_at, freshness_class, trigger,
+    triggered_by
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
-    $9, $10, $11, $12
+    $9, $10, $11, $12,
+    $13
 )
-RETURNING id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at
+RETURNING id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at, triggered_by
 `
 
 type InsertControlEvaluationParams struct {
@@ -38,6 +40,7 @@ type InsertControlEvaluationParams struct {
 	LastObservedAt        pgtype.Timestamptz `json:"last_observed_at"`
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
+	TriggeredBy           *string            `json:"triggered_by"`
 }
 
 // Slice 012 — control state evaluation engine queries.
@@ -71,6 +74,7 @@ func (q *Queries) InsertControlEvaluation(ctx context.Context, arg InsertControl
 		arg.LastObservedAt,
 		arg.FreshnessClass,
 		arg.Trigger,
+		arg.TriggeredBy,
 	)
 	var i ControlEvaluation
 	err := row.Scan(
@@ -87,6 +91,7 @@ func (q *Queries) InsertControlEvaluation(ctx context.Context, arg InsertControl
 		&i.FreshnessClass,
 		&i.Trigger,
 		&i.CreatedAt,
+		&i.TriggeredBy,
 	)
 	return i, err
 }
@@ -215,7 +220,7 @@ func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEviden
 }
 
 const listLatestControlEvaluations = `-- name: ListLatestControlEvaluations :many
-SELECT DISTINCT ON (scope_cell_id) id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at
+SELECT DISTINCT ON (scope_cell_id) id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at, triggered_by
 FROM control_evaluations
 WHERE tenant_id = $1
   AND control_id = $2
@@ -255,6 +260,7 @@ func (q *Queries) ListLatestControlEvaluations(ctx context.Context, arg ListLate
 			&i.FreshnessClass,
 			&i.Trigger,
 			&i.CreatedAt,
+			&i.TriggeredBy,
 		); err != nil {
 			return nil, err
 		}
