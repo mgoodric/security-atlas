@@ -92,8 +92,9 @@ func TestListRisks_SortResidualAge(t *testing.T) {
 	}
 }
 
-// (plus): ?sort= is additive — omitting it keeps the slice-019 default
-// order (created_at DESC). An unrecognized ?sort= is a 400.
+// (plus): with no ?sort= the register's default order applies: residual,
+// highest first (#2132; before it, created_at DESC). An unrecognized
+// ?sort= is a 400.
 
 func TestListRisks_SortIsAdditive(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
@@ -102,11 +103,12 @@ func TestListRisks_SortIsAdditive(t *testing.T) {
 	env := testServer(t, app, tenant)
 
 	now := time.Now().UTC()
-	// Default order is created_at DESC: newest first.
-	seedRiskWithResidual(t, admin, tenant, "older", 1, 1, now.Add(-30*24*time.Hour))
-	seedRiskWithResidual(t, admin, tenant, "newer", 5, 5, now.Add(-1*24*time.Hour))
+	// The higher residual is the OLDER risk, so created_at DESC would list
+	// it second.
+	seedRiskWithResidual(t, admin, tenant, "older", 5, 5, now.Add(-30*24*time.Hour))
+	seedRiskWithResidual(t, admin, tenant, "newer", 1, 1, now.Add(-1*24*time.Hour))
 
-	// No ?sort= -> default order, newest first (created_at DESC).
+	// No ?sort= -> default order, residual descending.
 	resp, body := get(t, env, "/v1/risks")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /v1/risks (no sort): status %d", resp.StatusCode)
@@ -115,8 +117,8 @@ func TestListRisks_SortIsAdditive(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 risks, got %d", len(rows))
 	}
-	if title := rows[0].(map[string]any)["title"].(string); title != "newer" {
-		t.Fatalf("default order: first risk = %q, want newer (created_at DESC)", title)
+	if title := rows[0].(map[string]any)["title"].(string); title != "older" {
+		t.Fatalf("default order: first risk = %q, want older (residual DESC)", title)
 	}
 
 	// Unrecognized ?sort= -> 400.

@@ -276,6 +276,9 @@ type Querier interface {
 	// mitigate rule (a linked control or a linked action plan).
 	CountRiskActionPlanLinks(ctx context.Context, arg CountRiskActionPlanLinksParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
+	// #2132: the total for ListRisksPage. It takes every filter the list does,
+	// so the total counts exactly the set the register pages over.
+	CountRisksPage(ctx context.Context, arg CountRisksPageParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	// Issue #1741: totals for the paged `/v1/anchors?include=state` read on
 	// the current SCF version: the whole catalog, and the anchors the
@@ -2870,6 +2873,34 @@ type Querier interface {
 	// so this endpoint is not paginated. Newest-link-first; risk id ASC
 	// tiebreaks.
 	ListRisksLinkedToControl(ctx context.Context, arg ListRisksLinkedToControlParams) ([]ListRisksLinkedToControlRow, error)
+	// #2132: the risk register, filtered, sorted and paged on the server.
+	//
+	// Filters (each optional; NULL / false leaves it off):
+	//   status            open | closed. NULL keeps both.
+	//   include_rollups   false leaves out a roll-up: a risk with at least one
+	//                     open child (#2060, the #2107 open-children rule).
+	//   treatment, methodology, level, theme, org_unit_id: exact match.
+	//   category_ids      any of these organisation categories (#1745); the
+	//                     store resolves slugs to ids first.
+	//   owner_user_id     that person's risks (#2129); unowned keeps the risks
+	//                     with no owner user.
+	//   due_from, due_before  review_due_at in [due_from, due_before). The
+	//                     store turns overdue, due-soon and a date range into
+	//                     these two UTC-day bounds (the duedate rule).
+	//
+	// sort_key is one of the fixed keys in the ORDER BY; the handler refuses
+	// any other value before it gets here. Residual follows #2185's
+	// risk.RanksAbove: every non-FAIR (5x5) risk ranks above every FAIR risk,
+	// in either direction, so a dollar figure never ranks against a 1..25
+	// score. The value is risk.ScoreValue's: score, then severity, then
+	// likelihood x impact. A risk with no residual value sorts after the
+	// scored ones of its group in both directions. Every order ends on r.id,
+	// so offset paging has no duplicates or gaps. Text keys sort lower-cased
+	// under COLLATE "C", so the order is the same on every deployment.
+	//
+	// RLS posture: the explicit tenant_id predicates sit alongside the
+	// GUC-driven RLS on every table read here.
+	ListRisksPage(ctx context.Context, arg ListRisksPageParams) ([]ListRisksPageRow, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
