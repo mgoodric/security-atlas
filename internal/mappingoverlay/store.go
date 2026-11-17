@@ -347,9 +347,12 @@ func resolveRequirement(ctx context.Context, q *dbx.Queries, framework, version,
 	return req, nil
 }
 
-// refuseCatalogDuplicate refuses a pair an active catalog edge already
-// joins. A catalog edge a reviewer rejected (ADR 0018) is not active, so an
-// organisation may still assert the pair itself.
+// refuseCatalogDuplicate refuses a pair a live catalog edge already joins.
+// "Live" is the coverage view's test (effective_fw_to_scf_edges, #1798 D4):
+// not retired, not rejected (ADR 0018), not no_relationship. A catalog edge
+// that asserts no relationship credits nothing, so the organisation may
+// assert the pair itself, and its overlay counts whether the catalog edge
+// was no_relationship before or after the overlay was created (#2240).
 func refuseCatalogDuplicate(ctx context.Context, q *dbx.Queries, reqID, anchorID pgtype.UUID) error {
 	edge, err := q.GetFwToScfEdge(ctx, dbx.GetFwToScfEdgeParams{
 		FrameworkRequirementID: reqID, ScfAnchorID: anchorID,
@@ -360,7 +363,8 @@ func refuseCatalogDuplicate(ctx context.Context, q *dbx.Queries, reqID, anchorID
 	if err != nil {
 		return fmt.Errorf("mapping overlay: read catalog edge: %w", err)
 	}
-	if edge.MappingTier == dbx.CrosswalkMappingTierRejected {
+	if edge.MappingTier == dbx.CrosswalkMappingTierRejected ||
+		edge.RelationshipType == dbx.StrmRelationshipTypeNoRelationship {
 		return nil
 	}
 	return &CatalogEdgeExistsError{

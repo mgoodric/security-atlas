@@ -2902,10 +2902,11 @@ type Querier interface {
 	//      tenant-instantiated control that satisfies one anchor:
 	//        result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
 	//        freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
-	//   3. `anchor_frameworks` aggregates the global crosswalk: for each
-	//      anchor, the DISTINCT set of framework slugs reached via
-	//      fw_to_scf_edges → framework_requirements → framework_versions
-	//      → frameworks. Excludes the SCF spine itself (the column is
+	//   3. `anchor_frameworks` aggregates the effective crosswalk (catalog
+	//      edges plus the caller tenant's active overlay edges, #1798): for
+	//      each anchor, the DISTINCT set of framework slugs reached via
+	//      effective_fw_to_scf_edges → framework_requirements →
+	//      framework_versions → frameworks. Excludes the SCF spine itself (the column is
 	//      "what frameworks DOES this anchor satisfy?", not "is it an SCF
 	//      anchor?" — the answer to that is always yes). Excludes
 	//      `no_relationship` edges (those are explicit non-mappings, not
@@ -2923,8 +2924,9 @@ type Querier interface {
 	//      filters those rows, and each `controls` read also carries an
 	//      explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
 	//      #1832, belt-and-suspenders as in ListActiveControlsWithState);
-	//      the global `scf_anchors` rows + the catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
-	//      visible to every tenant by design.
+	//      the global `scf_anchors` rows + catalog `fw_to_scf_edges` are
+	//      visible to every tenant by design; the overlay arm of
+	//      effective_fw_to_scf_edges shows only the caller tenant's own.
 	//   #2 Engine is sole writer of control_evaluations: this is a pure read
 	//      over the engine's output table, never a parallel computation.
 	//
