@@ -80,6 +80,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"checklist/handler.go Handler.LoadGeneration":                 notRoute(apr, "checklist read: an approver or any owner-role credential"),
 		"controlimports/settings.go requireTenantAdmin":               notRoute(adm, preRoute+" (control import LLM settings)"),
 		"controls/handlers.go Handler.UploadBundle":                   site(adm, r2447(post, "/v1/controls:upload-bundle")),
+		"controlstate/evaluate.go EvaluateHandler.Evaluate":           site(adm, r2447(post, "/v1/controls/"+id+"/evaluate")),
 		"dashboardexport/dashboardexport.go hasDashboardExportAccess": site(apr, r2447(get, "/v1/dashboard/export")),
 		"evidencesummary/periodhandler.go hasAuditWorkspaceRead": site(apr,
 			r2447(get, "/v1/audit-periods/"+id+"/controls/"+id+"/evidence-summary")),

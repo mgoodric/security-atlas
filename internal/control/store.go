@@ -913,3 +913,26 @@ func (s *Store) ListRemapProposals(ctx context.Context, class, status *string) (
 	})
 	return rows, err
 }
+
+// ErrControlNotFound is a control id with no row in the caller's tenant.
+var ErrControlNotFound = errors.New("control: not found")
+
+// BundleManifest returns a control's bundle_id and the control.yaml the
+// store holds for it, byte for byte (#2110 Download bundle). RLS confines
+// the read to the caller's tenant; an id in another tenant is
+// ErrControlNotFound.
+func (s *Store) BundleManifest(ctx context.Context, id uuid.UUID) (bundleID string, manifestYAML []byte, err error) {
+	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		row, qerr := q.GetControlByID(ctx, dbx.GetControlByIDParams{TenantID: pgUUID(tenantID), ID: pgUUID(id)})
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return ErrControlNotFound
+		}
+		if qerr != nil {
+			return fmt.Errorf("read control: %w", qerr)
+		}
+		bundleID = row.BundleID
+		manifestYAML = []byte(row.BundleManifestYaml)
+		return nil
+	})
+	return bundleID, manifestYAML, err
+}

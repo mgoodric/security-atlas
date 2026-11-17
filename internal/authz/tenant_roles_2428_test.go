@@ -116,6 +116,10 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/metrics/" + id2428 + "/inputs", tenantAdminGate},
 	{http.MethodPut, "/v1/metrics/" + id2428 + "/target", tenantAdminGate},
 	{http.MethodPost, "/v1/controls:upload-bundle", tenantAdminGate},
+	// #2110: Evaluate now. The role gate is tenant admin; the handler also
+	// admits the control's assigned owner (owner_user_id), whatever their
+	// role, which this role-only table cannot express.
+	{http.MethodPost, "/v1/controls/" + id2428 + "/evaluate", tenantAdminGate},
 	{http.MethodDelete, "/v1/risks/" + id2428, tenantAdminGate},
 }
 
@@ -180,6 +184,11 @@ var handlerNarrower2428 = map[string]bool{
 	"/v1/walkthroughs control_owner":                                                    true,
 	"/v1/walkthroughs/" + id2428 + "/attachments control_owner":                         true,
 	"/v1/walkthroughs/" + id2428 + ":finalize control_owner":                            true,
+	// #2110: OPA admits grc_engineer (controls write) and control_owner
+	// (the evaluate path rule); the handler admits neither by role, only
+	// the control's assigned owner (Matt's call: owner or admin).
+	"/v1/controls/" + id2428 + "/evaluate grc_engineer":  true,
+	"/v1/controls/" + id2428 + "/evaluate control_owner": true,
 }
 
 // TestTenantGates2428_HandlerAgreesWithOPA runs the real bundle for every

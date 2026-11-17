@@ -101,6 +101,7 @@ GET /v1/controls/remap-proposals 9
 GET /v1/controls/{id}/action-plans 9
 GET /v1/controls/{id}/applicability 9
 GET /v1/controls/{id}/attest-form 9
+GET /v1/controls/{id}/bundle 9
 GET /v1/controls/{id}/coverage 9
 GET /v1/controls/{id}/effective-scope 9
 GET /v1/controls/{id}/effectiveness 9
@@ -319,6 +320,7 @@ POST /v1/controls/remap-proposals/{id}/approve 9
 POST /v1/controls/remap-proposals/{id}/keep-legacy 9
 POST /v1/controls/remap-proposals/{id}/reject 9
 POST /v1/controls/{id}/attestations 9
+POST /v1/controls/{id}/evaluate 9
 POST /v1/controls/{id}/owner 9
 POST /v1/controls:bulk-assign-owner 9
 POST /v1/controls:upload-bundle 9

@@ -2709,6 +2709,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/bundle:
+    get:
+      summary: GET /v1/controls/{id}/bundle — the control's control.yaml as a gzip-tar bundle that POST /v1/controls:upload-bundle reads back (#2110)
+      tags: [controls]
+      operationId: get-v1-controls-id-bundle
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/coverage:
     get:
       summary: GET /v1/controls/{id}/coverage
@@ -2754,6 +2774,26 @@ paths:
       summary: GET /v1/controls/{id}/effectiveness
       tags: [controls]
       operationId: get-v1-controls-id-effectiveness
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/evaluate:
+    post:
+      summary: POST /v1/controls/{id}/evaluate — run evaluation for the control now and return its new state; the control's owner or an admin (#2110)
+      tags: [controls]
+      operationId: post-v1-controls-id-evaluate
       security:
         - bearer: []
       parameters:

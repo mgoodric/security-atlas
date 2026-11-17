@@ -5,9 +5,12 @@
 // Mockup parity target: `Plans/_archive/mockups/control.html` lines 92-102. The
 // top-right header well carries:
 //
-//   1. One action link: Request exception. Run query and Edit YAML
-//      were disabled placeholder buttons; #2082 removed them until the
-//      features ship, so the header shows only what the user can do.
+//   1. Actions (#2110): Evaluate now (POST /v1/controls/{id}/evaluate,
+//      "Evaluating…" while pending), Download bundle (the control's
+//      control.yaml as a tarball), Upload new version (a form over the
+//      existing bundle upload) and the Request exception link. Run query
+//      and Edit YAML were disabled placeholders; #2082 removed them and
+//      Evaluate now / the bundle pair are what replaced them.
 //   2. A sub-line: "last evaluated <relative-time>" with a status icon.
 //
 // JUDGMENT decisions (see docs/audit-log/255-header-actions-decisions.md):
@@ -35,27 +38,34 @@
 //
 // Anti-criteria honored:
 //   - P0-255-1/2: no Run query execution path and no YAML editor; no
-//     entry point is rendered for either (#2082).
+//     entry point is rendered for either (#2082). Evaluate now runs the
+//     platform's evaluation; the YAML is edited offline and uploaded.
 //   - P0-255-3: no `<a href="#">` anywhere. Request exception links to a
 //     real, existing route.
-//   - P0-255-4: no new API endpoint. The request form posts to the
-//     existing POST /v1/exceptions.
+//
+// Evaluate now writes the returned state into the ["control", id,
+// "state"] query and invalidates the control's other reads, so the
+// header sub-line, freshness clock and KPIs move together. Who may
+// evaluate (owner or admin) and upload (admin) is the platform's check;
+// a refusal shows inline rather than hiding the button.
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useId, useState } from "react";
 
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  bundleDownloadHref,
+  evaluateControl,
+  uploadControlBundle,
+} from "@/lib/api/control-actions";
 import type {
   ControlStateResponse,
   ControlStateEntry,
 } from "@/lib/api/control-detail";
 import { relativeTimeOrNever } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
-
-// Tooltip / aria-label copy for the two placeholder buttons. Both
-// inlined here as constants so the same string drives `title`,
-// `aria-label`, and the test assertion — the slice 183 / slice 184
-// pattern (visible copy + tooltip + aria-label all read the same line).
 
 // mostRecentObservedAt picks the freshest `last_observed_at` across all
 // scope-cell entries — the same reduce-to-newest rule the freshness
@@ -129,6 +139,36 @@ export function ControlHeaderActions({
   state,
 }: ControlHeaderActionsProps) {
   const now = useNow();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const fileInputID = useId();
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+
+  const evaluate = useMutation({
+    mutationFn: () => evaluateControl(controlID),
+    onSuccess: async (next) => {
+      queryClient.setQueryData(["control", controlID, "state"], next);
+      await queryClient.invalidateQueries({
+        queryKey: ["control", controlID],
+        predicate: (q) => q.queryKey[2] !== "state",
+      });
+    },
+  });
+
+  const upload = useMutation({
+    mutationFn: (f: File) => uploadControlBundle(f),
+    onSuccess: async (res) => {
+      setFile(null);
+      setUploadOpen(false);
+      if (res.control_id && res.control_id !== controlID) {
+        // The upload superseded this control: its new version has a new id.
+        router.push(`/controls/${encodeURIComponent(res.control_id)}`);
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ["control", controlID] });
+    },
+  });
 
   // Resolve the freshest `last_observed_at` across cells. Three branches:
   //   1. state is undefined        → undefined  → "—"
@@ -152,6 +192,35 @@ export function ControlHeaderActions({
         className="flex items-center gap-2"
         data-testid="control-header-action-buttons"
       >
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => evaluate.mutate()}
+          disabled={evaluate.isPending}
+          aria-busy={evaluate.isPending}
+          data-testid="control-action-evaluate"
+        >
+          {evaluate.isPending ? "Evaluating…" : "Evaluate now"}
+        </Button>
+        <a
+          href={bundleDownloadHref(controlID)}
+          download
+          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          data-testid="control-action-download-bundle"
+        >
+          Download bundle
+        </a>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setUploadOpen((o) => !o)}
+          aria-expanded={uploadOpen}
+          data-testid="control-action-upload-toggle"
+        >
+          Upload new version
+        </Button>
         <Link
           href={`/exceptions/new?control_id=${encodeURIComponent(controlID)}`}
           className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
@@ -160,6 +229,55 @@ export function ControlHeaderActions({
           Request exception
         </Link>
       </div>
+
+      {uploadOpen && (
+        <form
+          className="flex items-center gap-2 text-xs"
+          data-testid="control-upload-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (file) upload.mutate(file);
+          }}
+        >
+          <label htmlFor={fileInputID} className="text-muted-foreground">
+            Bundle (.tar.gz)
+          </label>
+          <input
+            id={fileInputID}
+            type="file"
+            accept=".tar.gz,.tgz,application/gzip"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            data-testid="control-upload-file"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!file || upload.isPending}
+            data-testid="control-upload-submit"
+          >
+            {upload.isPending ? "Uploading…" : "Upload"}
+          </Button>
+        </form>
+      )}
+
+      {evaluate.isError && (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="control-evaluate-error"
+        >
+          {evaluate.error.message}
+        </p>
+      )}
+      {upload.isError && (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="control-upload-error"
+        >
+          {upload.error.message}
+        </p>
+      )}
 
       <div
         className="flex items-center gap-1.5 text-xs text-muted-foreground"
