@@ -34,6 +34,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { Anchor } from "@/lib/api/anchors";
@@ -82,6 +83,8 @@ export default function ComponentDefinitionDetailPage({
   const qc = useQueryClient();
   const [note, setNote] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
+  // #2280: Reject fires at once, so it asks first. Holds the claim id.
+  const [confirmingReject, setConfirmingReject] = useState<string | null>(null);
   // Per-claim SCF-anchor picker search term (only used for unmapped claims).
   const [anchorQuery, setAnchorQuery] = useState<Record<string, string>>({});
 
@@ -134,6 +137,7 @@ export default function ComponentDefinitionDetailPage({
     },
     onSuccess: () => {
       setActionError(null);
+      setConfirmingReject(null);
       void qc.invalidateQueries({
         queryKey: ["oscal", "component-definition", id],
       });
@@ -312,20 +316,32 @@ export default function ComponentDefinitionDetailPage({
                 >
                   Accept
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  data-testid="claim-reject"
-                  disabled={dispositionM.isPending}
-                  onClick={() =>
-                    dispositionM.mutate({
-                      claimId: c.id,
-                      disposition: "reject",
-                    })
-                  }
-                >
-                  Reject
-                </Button>
+                {confirmingReject === c.id ? (
+                  <ConfirmInline
+                    prompt={`Reject the vendor claim for ${c.control_id}?`}
+                    confirmLabel="Reject claim"
+                    ariaLabel={`Confirm: reject claim ${c.control_id}`}
+                    busy={dispositionM.isPending}
+                    onCancel={() => setConfirmingReject(null)}
+                    onConfirm={() =>
+                      dispositionM.mutate({
+                        claimId: c.id,
+                        disposition: "reject",
+                      })
+                    }
+                    data-testid="claim-reject-confirm"
+                  />
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="claim-reject"
+                    disabled={dispositionM.isPending}
+                    onClick={() => setConfirmingReject(c.id)}
+                  >
+                    Reject
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"

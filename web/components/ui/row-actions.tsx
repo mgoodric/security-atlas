@@ -178,7 +178,9 @@ export type ConfirmInlineProps = {
 };
 
 /** The inline confirm step: a prompt with Cancel and a destructive
- *  confirm button. Esc cancels. Never a native confirm() or a modal. */
+ *  confirm button. Esc cancels. Never a native confirm() or a modal.
+ *  Focus lands on Cancel when it opens, so a second Enter can't fire the
+ *  action; a caller passing `cancelRef` manages that focus itself. */
 export function ConfirmInline({
   prompt,
   confirmLabel,
@@ -190,6 +192,10 @@ export function ConfirmInline({
   children,
   "data-testid": testId = "confirm-inline",
 }: ConfirmInlineProps) {
+  const ownCancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!cancelRef) ownCancelRef.current?.focus();
+  }, [cancelRef]);
   return (
     <div
       role="group"
@@ -207,7 +213,7 @@ export function ConfirmInline({
       {children}
       <div className="flex justify-end gap-2">
         <Button
-          ref={cancelRef}
+          ref={cancelRef ?? ownCancelRef}
           type="button"
           variant="outline"
           size="sm"

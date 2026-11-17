@@ -432,7 +432,7 @@ function BackLink() {
 function CriticalityBadge({ value }: { value: string }) {
   const variant =
     value === "high"
-      ? "destructive"
+      ? "critical"
       : value === "medium"
         ? "secondary"
         : "outline";

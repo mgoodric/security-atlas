@@ -198,8 +198,27 @@ test.describe("/risks/[id] parents and children (#1748)", () => {
       "Team A export gap (team)",
     ]);
 
-    // Detach: the child and the roll-up go.
-    await page.getByTestId(`risk-detail-child-detach-${TEAM_B_ID}`).click();
+    // #2280: Detach asks first; Cancel leaves the child attached.
+    const detachBtn = page.getByTestId(`risk-detail-child-detach-${TEAM_B_ID}`);
+    const detachConfirm = page.getByTestId(
+      `risk-detail-child-detach-${TEAM_B_ID}-confirm`,
+    );
+    await detachBtn.click();
+    await expect(detachConfirm).toContainText("stops rolling up");
+    await page
+      .getByTestId(`risk-detail-child-detach-${TEAM_B_ID}-confirm-cancel`)
+      .click();
+    await expect(detachConfirm).toHaveCount(0);
+    await expect(child).toHaveCount(1);
+    await expect(page.getByTestId("risk-detail-rollup-severity")).toHaveText(
+      "16",
+    );
+
+    // Detach confirmed: the child and the roll-up go.
+    await detachBtn.click();
+    await page
+      .getByTestId(`risk-detail-child-detach-${TEAM_B_ID}-confirm-ok`)
+      .click();
     await expect(page.getByTestId("risk-detail-children-empty")).toBeVisible();
     await expect(page.getByTestId("risk-detail-rollup")).toHaveCount(0);
   });
