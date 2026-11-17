@@ -41,9 +41,29 @@ export interface AuditedUnderRow {
   candidate_anchors: CandidateAnchor[];
 }
 
+/** A tested-under reference that names no requirement in its framework's
+ *  current version (#2324): a typo, a withdrawn code, or an unknown
+ *  framework. Mirrors `unresolvedWire`. */
+export interface UnresolvedReference {
+  control_id: string;
+  control_bundle_id: string;
+  control_title: string;
+  system: string;
+  code: string;
+  tested_under_note?: string;
+}
+
 export interface AuditedUnderReport {
   rows: AuditedUnderRow[];
   count: number;
+  /** Rows before the cap; more than `count` when `truncated`. */
+  total: number;
+  limit: number;
+  /** True when rows or unresolved_references were cut at `limit`. */
+  truncated: boolean;
+  unresolved_references: UnresolvedReference[];
+  /** Unresolved references before the cap. */
+  unresolved_count: number;
   candidate_scf_release: string | null;
 }
 

@@ -88,6 +88,21 @@ func TestAuditedUnder_RequiresTenant(t *testing.T) {
 	}
 }
 
+// ?limit= defaults to the cap and refuses anything outside 1..cap (#2324).
+func TestParseAuditedUnderLimit(t *testing.T) {
+	t.Parallel()
+	for v, want := range map[string]int{"": mappingoverlay.AuditedUnderRowCap, "1": 1, "5000": 5000} {
+		if got, msg := parseAuditedUnderLimit(v); got != want || msg != "" {
+			t.Errorf("limit=%q: got %d, %q; want %d", v, got, msg, want)
+		}
+	}
+	for _, v := range []string{"0", "-1", "5001", "abc", "1.5"} {
+		if _, msg := parseAuditedUnderLimit(v); msg == "" {
+			t.Errorf("limit=%q: want a 400 message", v)
+		}
+	}
+}
+
 // An unanchored control's row carries anchor_id null and no anchor code.
 func TestGapWireFrom_Unanchored(t *testing.T) {
 	t.Parallel()
