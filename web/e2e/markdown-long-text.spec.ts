@@ -7,6 +7,7 @@
 //   - A policy body with a table and a block quote renders a real table
 //     and blockquote (pipes and ">" were shown as text before).
 //   - Raw HTML and a javascript: link in the same text stay inert.
+//   - An evidence attestation statement renders the same way (#2316).
 //
 // Mocked per the `route.fulfill` convention (policy-detail,
 // risk-detail-hierarchy-links), so the assertions do not depend on seed
@@ -142,5 +143,62 @@ test.describe("long text renders as safe markdown (#2094)", () => {
     const quote = body.locator("blockquote");
     await expect(quote).toContainText("Review this table quarterly.");
     await expect(quote.locator("strong")).toHaveText("quarterly");
+  });
+});
+
+// #2316 — the evidence detail "Statement" renders through <Markdown> too.
+const EVIDENCE_ID = "00000000-0000-4000-8000-000000002316";
+
+const EVIDENCE = {
+  evidence_id: EVIDENCE_ID,
+  evidence_kind: "manual.attestation.v1",
+  schema_version: "v1",
+  observed_at: "2026-11-14T00:00:00Z",
+  ingested_at: "2026-11-14T00:00:00Z",
+  result: "pass",
+  payload: {
+    attestor: "reviewer@example.invalid",
+    statement:
+      "Quarterly review **completed**.\n\n- No exceptions\n- Two stale accounts removed\n\n<script>window.__md_xss = 1</script> [x](javascript:alert(1))",
+    supporting_uri: "https://example.invalid/reviews/q4",
+  },
+  payload_uri: null,
+  source: { source: "e2e-fixture" },
+  source_attribution: null,
+  credential_id: null,
+  ingestion_path: "manual",
+  control_id: null,
+  control_ref: "",
+  scope_cell: null,
+  content_hash: "sha256-markdown-statement-fixture",
+};
+
+test.describe("evidence statement renders as safe markdown (#2316)", () => {
+  test("bold and bullets render; raw HTML and javascript: stay inert", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/evidence/${EVIDENCE_ID}`, (route) =>
+      json(route, { evidence: EVIDENCE }),
+    );
+
+    await page.goto(`/evidence/${EVIDENCE_ID}`);
+    const statement = page.getByTestId("evidence-detail-statement");
+    await expect(statement).toBeVisible({ timeout: 30_000 });
+
+    await expect(statement.locator("strong")).toHaveText("completed");
+    await expect(statement.locator("ul > li")).toHaveText([
+      "No exceptions",
+      "Two stale accounts removed",
+    ]);
+    await expect(statement).not.toContainText("**");
+
+    await expect(statement).toContainText("<script>");
+    await expect(statement.locator("script")).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __md_xss?: number }).__md_xss,
+      ),
+    ).toBeUndefined();
+    await expect(statement.locator("a")).toHaveCount(0);
   });
 });

@@ -160,10 +160,14 @@ func TestPatchRisk_OversizedBodyIs413(t *testing.T) {
 }
 
 // TestPatchRisk_MalformedIfMatchIs400 covers #2311: an If-Match that is
-// not one quoted timestamp is refused before the store is reached.
+// not one quoted timestamp is refused before the store is reached. A weak
+// ETag is refused too (#2544): If-Match compares strongly.
 func TestPatchRisk_MalformedIfMatchIs400(t *testing.T) {
 	t.Parallel()
-	for _, h := range []string{`2026-11-17T00:00:00Z`, `"v3"`, `"a", "b"`, `"`} {
+	for _, h := range []string{
+		`2026-11-17T00:00:00Z`, `"v3"`, `"a", "b"`, `"`,
+		`W/"2026-11-17T00:00:00Z"`,
+	} {
 		w := patchBeforeStore(t, `{"title":"T"}`, h)
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "If-Match") {
 			t.Fatalf("If-Match %s: status %d: %s", h, w.Code, w.Body.String())
@@ -172,8 +176,8 @@ func TestPatchRisk_MalformedIfMatchIs400(t *testing.T) {
 }
 
 // TestParseIfMatch covers the accepted If-Match forms (#2311): absent and
-// "*" are unconditional; a quoted RFC 3339 time, strong or weak, in any
-// zone, round-trips riskETag.
+// "*" are unconditional; a quoted RFC 3339 time in any zone round-trips
+// riskETag. A weak tag is not accepted (#2544).
 func TestParseIfMatch(t *testing.T) {
 	t.Parallel()
 	for _, h := range []string{"", "*", " * "} {
@@ -184,7 +188,6 @@ func TestParseIfMatch(t *testing.T) {
 	at := time.Date(2026, 11, 17, 19, 11, 33, 123456000, time.UTC)
 	for _, h := range []string{
 		riskETag(at),
-		"W/" + riskETag(at),
 		`"2026-11-17T11:11:33.123456-08:00"`,
 	} {
 		got, msg := parseIfMatch(h)

@@ -518,8 +518,10 @@ function ControlsCard({ period }: { period: AuditPeriod }) {
   return (
     <Card data-testid="audit-period-controls">
       <CardHeader>
-        <CardTitle>Controls in this period</CardTitle>
+        <CardTitle>Controls</CardTitle>
         <p className="text-sm text-muted-foreground">
+          Every control in the tenant, not only those in this period&apos;s
+          framework.{" "}
           {isFrozen(period)
             ? "Evidence observed up to the freeze."
             : "Evidence observed so far; the horizon moves until the period is frozen."}{" "}
