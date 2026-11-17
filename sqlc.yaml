@@ -156,6 +156,8 @@ sql:
       - "migrations/sql/20261226000000_risk_vendor_owner_users.sql"
       # #2172: module access for each member, and its audit log.
       - "migrations/sql/20261230000000_member_module_access.sql"
+      # #2479: who triggered a manual evaluation.
+      - "migrations/sql/20261238000000_control_evaluation_triggered_by.sql"
     queries: "internal/db/queries"
     gen:
       go:

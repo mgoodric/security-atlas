@@ -214,6 +214,11 @@ export type ControlHistoryEntry = {
   computed_state: string;
   freshness_status: string;
   evidence_count: number;
+  // What started the run: ingest | scheduled | manual | replay.
+  trigger: string;
+  // Who started a manual run (#2479): a users(id), or a key or client id;
+  // null for every other trigger, and for manual runs with no caller.
+  triggered_by: string | null;
 };
 
 export type ControlHistoryResponse = {

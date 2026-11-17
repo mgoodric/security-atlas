@@ -40,7 +40,8 @@ func (s *Server) registerControlState(root *chi.Mux) {
 	// subscriber and scheduler run (trigger=manual) and returns the new
 	// state. A tenant admin or the control's assigned owner only; OPA
 	// admits control_owner at this one path (control_owner.rego).
-	evaluateH := controlstateapi.NewEvaluateHandler(controlStateEngine, s.dbPool)
+	// #2479: per-principal limit, and the caller recorded as triggered_by.
+	evaluateH := controlstateapi.NewEvaluateHandler(controlStateEngine, s.dbPool, s.evaluateRatePerMin)
 	root.Post("/v1/controls/{id}/evaluate", evaluateH.Evaluate)
 	// Slice 064: control-detail backend read endpoints. Four pure reads that
 	// fill the four binding placeholders slice 041's control-detail view

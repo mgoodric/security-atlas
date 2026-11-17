@@ -2826,7 +2826,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/evaluate:
     post:
-      summary: POST /v1/controls/{id}/evaluate — run evaluation for the control now and return its new state; the control's owner or an admin (#2110)
+      summary: POST /v1/controls/{id}/evaluate — run evaluation for the control now and return its new state; the control's owner or an admin (#2110); records the caller as triggered_by, and is 429 with Retry-After past a per-principal limit (#2479)
       tags: [controls]
       operationId: post-v1-controls-id-evaluate
       security:
