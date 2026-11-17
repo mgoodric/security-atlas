@@ -97,6 +97,9 @@ Commands:
                                   only tenant; required with several)
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared framework label (e.g. "NIST 800-53 rev5")
+                    --scf-release  SCF release the control ids belong to (or an
+                                   "scf-release" metadata prop); without either
+                                   they match in the current release, with a warning
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
@@ -122,6 +125,10 @@ Commands:
                                   only tenant; required with several)
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared baseline label (e.g. "FedRAMP Moderate")
+                    --scf-release  SCF release the resolved control ids belong to
+                                   (or an "scf-release" prop on the entry profile's
+                                   metadata); without either they match in the
+                                   current release, with a warning
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
@@ -197,6 +204,7 @@ func runImportCatalog(args []string) error {
 	tenantID := fs.String("tenant-id", "", tenantIDFlagHelp)
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
 	sourceLabel := fs.String("source-label", "", "declared framework label")
+	scfRelease := fs.String("scf-release", "", "SCF release the catalog's control ids belong to (or an \"scf-release\" prop on the catalog's metadata); without either they match in the current release, with a warning")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
 	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
 	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
@@ -257,6 +265,7 @@ func runImportCatalog(args []string) error {
 		SourceLabel: *sourceLabel,
 		ImportedBy:  *importedBy,
 		Role:        authz.Role(*roleStr),
+		SCFRelease:  *scfRelease,
 	})
 	if err != nil {
 		switch {
@@ -280,6 +289,8 @@ func runImportCatalog(args []string) error {
 			"source_label":  report.SourceLabel,
 			"control_count": report.ControlCount,
 			"mapped_count":  report.MappedCount,
+			"scf_release":   report.SCFRelease,
+			"warnings":      report.Warnings,
 		}, "", "  ")
 		fmt.Println(string(out))
 		return nil
@@ -293,6 +304,10 @@ func runImportCatalog(args []string) error {
 	fmt.Printf("  source sha256:  %s\n", report.SourceSha256)
 	fmt.Printf("  controls:       %d imported (%d mapped to SCF anchors, %d need operator mapping)\n",
 		report.ControlCount, report.MappedCount, report.ControlCount-report.MappedCount)
+	fmt.Printf("  SCF release:    %s\n", report.SCFRelease)
+	for _, w := range report.Warnings {
+		fmt.Printf("  warning: %s\n", w)
+	}
 	return nil
 }
 
@@ -321,6 +336,7 @@ func runImportProfile(args []string) error {
 	tenantID := fs.String("tenant-id", "", tenantIDFlagHelp)
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
 	sourceLabel := fs.String("source-label", "", "declared baseline label")
+	scfRelease := fs.String("scf-release", "", "SCF release the resolved control ids belong to (or an \"scf-release\" prop on the entry profile's metadata); without either they match in the current release, with a warning")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
 	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
 	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
@@ -403,6 +419,7 @@ func runImportProfile(args []string) error {
 		SourceLabel: *sourceLabel,
 		ImportedBy:  *importedBy,
 		Role:        authz.Role(*roleStr),
+		SCFRelease:  *scfRelease,
 	})
 	if err != nil {
 		switch {
@@ -428,6 +445,8 @@ func runImportProfile(args []string) error {
 			"source_label":  report.SourceLabel,
 			"control_count": report.ControlCount,
 			"mapped_count":  report.MappedCount,
+			"scf_release":   report.SCFRelease,
+			"warnings":      report.Warnings,
 		}, "", "  ")
 		fmt.Println(string(out))
 		return nil
@@ -441,6 +460,10 @@ func runImportProfile(args []string) error {
 	fmt.Printf("  source sha256:  %s\n", report.SourceSha256)
 	fmt.Printf("  controls:       %d resolved (%d mapped to SCF anchors, %d need operator mapping)\n",
 		report.ControlCount, report.MappedCount, report.ControlCount-report.MappedCount)
+	fmt.Printf("  SCF release:    %s\n", report.SCFRelease)
+	for _, w := range report.Warnings {
+		fmt.Printf("  warning: %s\n", w)
+	}
 	return nil
 }
 
