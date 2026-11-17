@@ -128,6 +128,9 @@ var routes2428 = []route2428{
 	// role, which this role-only table cannot express.
 	{http.MethodPost, "/v1/controls/" + id2428 + "/evaluate", tenantAdminGate},
 	{http.MethodDelete, "/v1/risks/" + id2428, tenantAdminGate},
+	// #2134: the Everyone view of the needs-attention list. for=me stays
+	// open to every role, so OPA admits the path for all of them.
+	{http.MethodGet, "/v1/needs-attention?for=all", tenantApproverGate},
 }
 
 // tenantRoles2428 are the tenant roles the matrices run, each alone.
@@ -196,6 +199,12 @@ var handlerNarrower2428 = map[string]bool{
 	// the control's assigned owner (Matt's call: owner or admin).
 	"/v1/controls/" + id2428 + "/evaluate grc_engineer":  true,
 	"/v1/controls/" + id2428 + "/evaluate control_owner": true,
+	// #2134: OPA admits every role to GET /v1/needs-attention, whose for=me
+	// view is anyone's; the view is a query parameter OPA does not see, so
+	// the handler alone refuses for=all to the roles below.
+	"/v1/needs-attention?for=all control_owner": true,
+	"/v1/needs-attention?for=all auditor":       true,
+	"/v1/needs-attention?for=all viewer":        true,
 }
 
 // TestTenantGates2428_HandlerAgreesWithOPA runs the real bundle for every
