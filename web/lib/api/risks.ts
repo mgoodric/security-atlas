@@ -242,15 +242,19 @@ export type RiskListParam = (typeof RISK_LIST_PARAMS)[number];
 // Server-side fetcher used by the slice-100 BFF route. Each parameter on
 // RISK_LIST_PARAMS is forwarded as given (#2132); with none the platform
 // returns its default page: open risks, roll-ups left out (#2060, #2107),
-// residual descending.
+// residual descending. A parameter given as a list is repeated
+// (?category=a&category=b, #2482); the platform decides which keys take
+// several values.
 export async function listRisks(
   bearer: string,
-  params: Partial<Record<RiskListParam, string>> = {},
+  params: Partial<Record<RiskListParam, string | string[]>> = {},
 ): Promise<RisksListResponse> {
   const qs = new URLSearchParams();
   for (const key of RISK_LIST_PARAMS) {
-    const v = params[key];
-    if (v) qs.set(key, v);
+    const raw = params[key];
+    for (const v of Array.isArray(raw) ? raw : [raw]) {
+      if (v) qs.append(key, v);
+    }
   }
   const res = await apiFetch(
     qs.size ? `/v1/risks?${qs.toString()}` : "/v1/risks",
@@ -267,15 +271,41 @@ export async function listRisks(
 }
 
 // Browser-side fetcher used by the sidebar count. Hits the BFF at
-// `/api/risks` which forwards the bearer cookie to upstream.
+// `/api/risks` which forwards the bearer cookie to upstream. It reads every
+// page (#2482): GET /v1/risks returns at most 500 rows a call (#2132), and
+// the badge and pickers need the whole register.
 export async function fetchRisksList(): Promise<RisksListResponse> {
-  return fetchRisks(`/api/risks`);
+  return fetchAllRisks({});
 }
 
 // fetchRisksListWithRollUps is fetchRisksList with roll-up parents kept
 // (#2060): the pickers where a roll-up is a valid choice.
 export async function fetchRisksListWithRollUps(): Promise<RisksListResponse> {
-  return fetchRisks(`/api/risks?include_rollups=true`);
+  return fetchAllRisks({ include_rollups: "true" });
+}
+
+// fetchAllRisks walks the register a page at a time until it holds
+// `total` rows. A page that comes back empty ends the walk, so a register
+// that shrinks mid-walk cannot loop.
+async function fetchAllRisks(
+  query: Record<string, string>,
+): Promise<RisksListResponse> {
+  const risks: Risk[] = [];
+  let total: number | undefined;
+  for (;;) {
+    const qs = new URLSearchParams(query);
+    if (risks.length > 0) qs.set("offset", String(risks.length));
+    const page = await fetchRisks(
+      qs.size ? `/api/risks?${qs.toString()}` : "/api/risks",
+    );
+    const rows = page.risks ?? [];
+    risks.push(...rows);
+    total = page.total;
+    if (rows.length === 0 || total === undefined || risks.length >= total) {
+      break;
+    }
+  }
+  return { risks, count: risks.length, total: total ?? risks.length };
 }
 
 // fetchRegisterPage is the register's read (#2132): one filtered, sorted
