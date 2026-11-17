@@ -5,6 +5,7 @@
 package board
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,51 @@ func TestRankTopRisks_FAIRNeverOutranks5x5(t *testing.T) {
 	}
 	if got := top[0].ResidualLabel(); got != "20.0 High" {
 		t.Errorf("5x5 ResidualLabel = %q, want \"20.0 High\"", got)
+	}
+}
+
+// #2511: a risk with no score at all ranks after every scored risk, FAIR
+// included, prints as Unscored rather than a severity of 0, and the brief
+// renders it.
+func TestRankTopRisks_UnscoredLast(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)
+	mk := func(title string, m dbx.RiskMethodology, inherent, residual string, age int) riskRow {
+		return riskRow{
+			ID: uuid.New(), Title: title, Methodology: m,
+			InherentScore: []byte(inherent), ResidualScore: []byte(residual),
+			UpdatedAt: now.AddDate(0, 0, -age),
+		}
+	}
+	rows := []riskRow{
+		mk("unscored old", dbx.RiskMethodologyNist80030, `{}`, `{}`, 90),
+		mk("fair small", dbx.RiskMethodologyFair, `{}`, `{"score": 900}`, 1),
+		mk("unscored nil", dbx.RiskMethodologyFair, ``, ``, 1),
+		mk("5x5 low", dbx.RiskMethodologyNist80030, `{"likelihood":1,"impact":1}`, `{}`, 1),
+	}
+	top := rankTopRisks(rows, now, 4)
+	want := []string{"5x5 low", "fair small", "unscored old", "unscored nil"}
+	for i, w := range want {
+		if top[i].Title != w {
+			t.Fatalf("top[%d] = %q, want %q (order %v)", i, top[i].Title, w, titles(top))
+		}
+	}
+	if top[0].Unscored || top[1].Unscored || !top[2].Unscored || !top[3].Unscored {
+		t.Fatalf("Unscored flags %v %v %v %v, want false false true true",
+			top[0].Unscored, top[1].Unscored, top[2].Unscored, top[3].Unscored)
+	}
+	if got := top[2].ResidualLabel(); got != "Unscored" {
+		t.Errorf("unscored ResidualLabel = %q, want Unscored", got)
+	}
+	if got := top[3].Band(); got != "" {
+		t.Errorf("unscored Band = %q, want empty", got)
+	}
+	md, err := RenderNarrative(Brief{TopRisks: top})
+	if err != nil {
+		t.Fatalf("RenderNarrative: %v", err)
+	}
+	if !strings.Contains(md, "**unscored old** (") || !strings.Contains(md, "— unscored, open 90 day(s)") {
+		t.Errorf("narrative does not print the unscored risk as unscored:\n%s", md)
 	}
 }
 
