@@ -36,6 +36,8 @@ import (
 	coreos "github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
+
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 const (
@@ -102,6 +104,19 @@ const (
 	// before re-running OIDC discovery. Slice 335's chaos design expected new
 	// logins to observe IdP outage/recovery within roughly this window.
 	ProviderCacheTTL = 30 * time.Second
+
+	// AllowPrivateIssuersEnv is the deployment-level opt-in (#2534) that
+	// lets a tenant's IdP issuer, its JWKS and its token endpoint resolve
+	// to loopback or a private network (RFC1918, ULA, CGNAT): a
+	// self-hosted Keycloak or Authentik on the LAN. Unset or "false" is
+	// the default and denies them. Only the operator sets it; there is no
+	// tenant-admin surface for it. Link-local, including the cloud
+	// metadata address, is denied either way.
+	AllowPrivateIssuersEnv = "ATLAS_OIDC_ALLOW_PRIVATE_ISSUERS"
+
+	// issuerClientTimeout is the whole-request backstop on the IdP client.
+	// Discovery carries its own shorter deadline.
+	issuerClientTimeout = 30 * time.Second
 )
 
 // IdpConfig is one OIDC IdP relationship — what we received at provisioning
@@ -168,6 +183,33 @@ type Authenticator struct {
 	cache            map[string]cachedProvider // keyed by issuer URL
 	providerCacheTTL time.Duration
 	now              func() time.Time
+	// issuerClient makes every request to the tenant's IdP: discovery,
+	// JWKS and token exchange. The issuer URL is chosen by a tenant admin,
+	// so the client is SSRF-hardened (#2534).
+	issuerClient *http.Client
+}
+
+// Option configures an Authenticator.
+type Option func(*Authenticator)
+
+// WithIssuerPolicy sets the SSRF policy applied to every request to the
+// tenant's IdP. The default is the strict zero netguard.Policy.
+func WithIssuerPolicy(p netguard.Policy) Option {
+	return func(a *Authenticator) { a.issuerClient = p.NewHTTPClient(issuerClientTimeout) }
+}
+
+// IssuerPolicyFromEnv returns the issuer SSRF policy the deployment asks
+// for through AllowPrivateIssuersEnv. Any value other than "", "true" or
+// "false" is an error and the strict policy, so a typo never widens it.
+func IssuerPolicyFromEnv() (netguard.Policy, error) {
+	switch v := os.Getenv(AllowPrivateIssuersEnv); v {
+	case "", "false":
+		return netguard.Policy{}, nil
+	case "true":
+		return netguard.Policy{AllowLoopback: true, AllowPrivate: true}, nil
+	default:
+		return netguard.Policy{}, fmt.Errorf("%s must be \"true\" or \"false\", got %q", AllowPrivateIssuersEnv, v)
+	}
 }
 
 type cachedProvider struct {
@@ -181,25 +223,30 @@ const defaultDiscoveryTimeout = 5 * time.Second
 // signs the flow state (#2177); it must be at least StateKeyMinBytes and the
 // same on every replica (see StateKeyFromEnv). The key is borrowed, not
 // copied.
-func New(resolver IdpResolver, stateKey []byte) *Authenticator {
-	return NewWithDiscoveryTimeout(resolver, stateKey, defaultDiscoveryTimeout)
+func New(resolver IdpResolver, stateKey []byte, opts ...Option) *Authenticator {
+	return NewWithDiscoveryTimeout(resolver, stateKey, defaultDiscoveryTimeout, opts...)
 }
 
 // NewWithDiscoveryTimeout constructs an Authenticator with an explicit OIDC
 // discovery timeout. Tests use this to prove the outage path is bounded without
 // waiting on the production timeout.
-func NewWithDiscoveryTimeout(resolver IdpResolver, stateKey []byte, discoveryTimeout time.Duration) *Authenticator {
+func NewWithDiscoveryTimeout(resolver IdpResolver, stateKey []byte, discoveryTimeout time.Duration, opts ...Option) *Authenticator {
 	if discoveryTimeout <= 0 {
 		discoveryTimeout = defaultDiscoveryTimeout
 	}
-	return &Authenticator{
+	a := &Authenticator{
 		resolver:         resolver,
 		stateKey:         stateKey,
 		discoveryTimeout: discoveryTimeout,
 		cache:            map[string]cachedProvider{},
 		providerCacheTTL: ProviderCacheTTL,
 		now:              time.Now,
+		issuerClient:     netguard.Policy{}.NewHTTPClient(issuerClientTimeout),
 	}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
 }
 
 // LoginInput captures the per-flow inputs at /auth/oidc/login.
@@ -378,7 +425,10 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		Endpoint:     provider.Endpoint(),
 		Scopes:       []string{coreos.ScopeOpenID, "email", "profile"},
 	}
-	tok, err := oa.Exchange(ctx, queryCode, oauth2.VerifierOption(verifierCookie.Value))
+	// The token endpoint comes from the discovery document, so it is not
+	// even the host the admin typed; it goes through the hardened client.
+	exchangeCtx := context.WithValue(ctx, oauth2.HTTPClient, a.issuerClient)
+	tok, err := oa.Exchange(exchangeCtx, queryCode, oauth2.VerifierOption(verifierCookie.Value))
 	if err != nil {
 		return CallbackResult{}, fmt.Errorf("oidc: code exchange: %w", err)
 	}
@@ -540,7 +590,9 @@ func (a *Authenticator) provider(ctx context.Context, issuer string) (*coreos.Pr
 	a.mu.Unlock()
 	discoveryCtx, cancel := context.WithTimeout(ctx, a.discoveryTimeout)
 	defer cancel()
-	p, err := coreos.NewProvider(discoveryCtx, issuer)
+	// The provider keeps this client for its JWKS fetches, whose URL also
+	// comes from the discovery document (#2534).
+	p, err := coreos.NewProvider(coreos.ClientContext(discoveryCtx, a.issuerClient), issuer)
 	if err != nil {
 		a.mu.Lock()
 		delete(a.cache, issuer)

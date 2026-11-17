@@ -39,7 +39,7 @@ func issuedFlow(t *testing.T, secure bool) (uuid.UUID, map[string]*http.Cookie) 
 	a := oidc.New(unitStubResolver{cfg: oidc.IdpConfig{
 		TenantID: tenantID, Name: "primary", IssuerURL: idp.URL,
 		ClientID: "test-client", RedirectURL: "http://localhost:9999/auth/oidc/callback",
-	}}, testStateKey)
+	}}, testStateKey, loopbackIdP)
 	res, err := a.BeginLogin(context.Background(), oidc.LoginInput{TenantID: tenantID, IdpName: "primary"}, secure)
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)
@@ -130,7 +130,7 @@ func TestHandleCallbackVerifiesSignedState(t *testing.T) {
 					key = tc.key
 				}
 				r := callbackRequest(cookies[oidc.StateCookie].Value, cookies, secure)
-				_, err := oidc.New(reachedIdpResolver{}, key).HandleCallback(context.Background(), r, tenant, secure)
+				_, err := oidc.New(reachedIdpResolver{}, key, loopbackIdP).HandleCallback(context.Background(), r, tenant, secure)
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("HandleCallback err = %v, want %v", err, tc.want)
 				}
@@ -152,7 +152,7 @@ func secureSuffix(secure bool) string {
 func TestHandleCallbackIgnoresUnprefixedCookiesWhenSecure(t *testing.T) {
 	tenant, cookies := issuedFlow(t, false)
 	r := callbackRequest(cookies[oidc.StateCookie].Value, cookies, false)
-	_, err := oidc.New(reachedIdpResolver{}, testStateKey).HandleCallback(context.Background(), r, tenant, true)
+	_, err := oidc.New(reachedIdpResolver{}, testStateKey, loopbackIdP).HandleCallback(context.Background(), r, tenant, true)
 	if !errors.Is(err, oidc.ErrStateMismatch) {
 		t.Fatalf("HandleCallback err = %v, want ErrStateMismatch", err)
 	}
