@@ -26,6 +26,7 @@ const testActor = "00000000-0000-0000-0000-000000000001"
 
 type auditRow struct {
 	userID, action string
+	principal      string
 	before, after  map[string]any
 	raw            string
 }
@@ -33,7 +34,7 @@ type auditRow struct {
 func routingAuditRows(t *testing.T, admin *pgxpool.Pool, tenant string) []auditRow {
 	t.Helper()
 	rows, err := admin.Query(context.Background(), `
-		SELECT user_id::text, action, before, after, before::text || after::text
+		SELECT user_id::text, action, coalesce(actor_principal, ''), before, after, before::text || after::text
 		  FROM me_audit_log
 		 WHERE tenant_id = $1 AND action IN ($2, $3)
 		 ORDER BY occurred_at`,
@@ -48,7 +49,7 @@ func routingAuditRows(t *testing.T, admin *pgxpool.Pool, tenant string) []auditR
 			r             auditRow
 			before, after []byte
 		)
-		if err := rows.Scan(&r.userID, &r.action, &before, &after, &r.raw); err != nil {
+		if err := rows.Scan(&r.userID, &r.action, &r.principal, &before, &after, &r.raw); err != nil {
 			t.Fatalf("scan audit row: %v", err)
 		}
 		if err := json.Unmarshal(before, &r.before); err != nil {
@@ -114,8 +115,8 @@ func TestHandler_EachChangeWritesOneAuditRow(t *testing.T) {
 		t.Fatalf("after PUT: %d audit rows, want 1", len(rows))
 	}
 	r := rows[0]
-	if r.action != cloud.AuditActionRoutingUpdate || r.userID != testActor {
-		t.Errorf("row = %s by %s, want %s by %s", r.action, r.userID, cloud.AuditActionRoutingUpdate, testActor)
+	if r.action != cloud.AuditActionRoutingUpdate || r.userID != testActor || r.principal != testActor {
+		t.Errorf("row = %s by %s (%q), want %s by %s", r.action, r.userID, r.principal, cloud.AuditActionRoutingUpdate, testActor)
 	}
 	if r.before["provider"] != "local-ollama" || r.before["has_api_key"] != false {
 		t.Errorf("before = %v, want the local-ollama default", r.before)
