@@ -1,0 +1,411 @@
+{
+  "name": "risk_treatment",
+  "title": "Risk treatment and acceptance",
+  "entity": "risks",
+  "column": "treatment, acceptance_status",
+  "enforcement": "store",
+  "states": [
+    "untreated",
+    "mitigate",
+    "transfer",
+    "avoid",
+    "accept_proposed",
+    "accept_approved"
+  ],
+  "initial": [
+    {
+      "state": "untreated",
+      "action": "create",
+      "routes": [
+        "POST /v1/risks"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    },
+    {
+      "state": "mitigate",
+      "action": "create",
+      "routes": [
+        "POST /v1/risks"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    },
+    {
+      "state": "transfer",
+      "action": "create",
+      "routes": [
+        "POST /v1/risks"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    },
+    {
+      "state": "avoid",
+      "action": "create",
+      "routes": [
+        "POST /v1/risks"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    },
+    {
+      "state": "accept_proposed",
+      "action": "create",
+      "routes": [
+        "POST /v1/risks"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    }
+  ],
+  "terminal": [],
+  "transitions": [
+    {
+      "from": "untreated",
+      "to": "mitigate",
+      "action": "mitigate",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a linked control or action plan."
+    },
+    {
+      "from": "untreated",
+      "to": "transfer",
+      "action": "transfer",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs an instrument reference (an insurance policy or contract)."
+    },
+    {
+      "from": "untreated",
+      "to": "avoid",
+      "action": "avoid",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "mitigate",
+      "to": "untreated",
+      "action": "clear_treatment",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "mitigate",
+      "to": "transfer",
+      "action": "transfer",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs an instrument reference (an insurance policy or contract)."
+    },
+    {
+      "from": "mitigate",
+      "to": "avoid",
+      "action": "avoid",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "transfer",
+      "to": "untreated",
+      "action": "clear_treatment",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "transfer",
+      "to": "mitigate",
+      "action": "mitigate",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a linked control or action plan."
+    },
+    {
+      "from": "transfer",
+      "to": "avoid",
+      "action": "avoid",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "avoid",
+      "to": "untreated",
+      "action": "clear_treatment",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "avoid",
+      "to": "mitigate",
+      "action": "mitigate",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a linked control or action plan."
+    },
+    {
+      "from": "avoid",
+      "to": "transfer",
+      "action": "transfer",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/treatment"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs an instrument reference (an insurance policy or contract)."
+    },
+    {
+      "from": "untreated",
+      "to": "accept_proposed",
+      "action": "propose_acceptance",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/acceptance/propose"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a justification and a proposed expiry after today."
+    },
+    {
+      "from": "mitigate",
+      "to": "accept_proposed",
+      "action": "propose_acceptance",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/acceptance/propose"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a justification and a proposed expiry after today."
+    },
+    {
+      "from": "transfer",
+      "to": "accept_proposed",
+      "action": "propose_acceptance",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/acceptance/propose"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a justification and a proposed expiry after today."
+    },
+    {
+      "from": "avoid",
+      "to": "accept_proposed",
+      "action": "propose_acceptance",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/acceptance/propose"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a justification and a proposed expiry after today."
+    },
+    {
+      "from": "accept_proposed",
+      "to": "accept_approved",
+      "action": "approve_acceptance",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/acceptance/approve"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": true,
+      "second_person": true,
+      "self_approval_opt_in": true,
+      "note": "The approver is recorded as the accepter, with the accepted-until date."
+    },
+    {
+      "from": "accept_proposed",
+      "to": "untreated",
+      "action": "reject_acceptance",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/acceptance/reject"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "A rejected acceptance leaves the risk untreated until its owner decides a treatment."
+    },
+    {
+      "from": "accept_approved",
+      "to": "untreated",
+      "action": "revoke_acceptance",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/acceptance/revoke"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a reason. A revoked acceptance leaves the risk untreated."
+    }
+  ]
+}

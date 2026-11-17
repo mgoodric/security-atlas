@@ -1,0 +1,63 @@
+{
+  "name": "risk_status",
+  "title": "Risk open and closed",
+  "entity": "risks",
+  "column": "status",
+  "enforcement": "store",
+  "states": [
+    "open",
+    "closed"
+  ],
+  "initial": [
+    {
+      "state": "open",
+      "action": "create",
+      "routes": [
+        "POST /v1/risks"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    }
+  ],
+  "terminal": [],
+  "transitions": [
+    {
+      "from": "open",
+      "to": "closed",
+      "action": "close",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/close"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Needs a reason: not applicable, merged, or realised and handled. A closed risk leaves the register, heatmaps, rollups and board pack, and keeps its history."
+    },
+    {
+      "from": "closed",
+      "to": "open",
+      "action": "reopen",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/risks/{id}/reopen"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "The closure is cleared."
+    }
+  ]
+}
