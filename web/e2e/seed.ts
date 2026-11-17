@@ -152,7 +152,10 @@ export type FixtureName =
   // admin approver user, for framework-scope-wizard.spec.ts.
   | "framework-scope-wizard"
   // #2116 — an admin approver user, for policy-lifecycle.spec.ts.
-  | "policy-lifecycle";
+  | "policy-lifecycle"
+  // #2110 — a tenant of its own, so control-actions-2110.spec.ts's
+  // uploads never change the demo tenant's controls.
+  | "control-actions";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

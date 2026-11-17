@@ -4,17 +4,62 @@
 // SETUP: the spec makes its own control by uploading a bundle through the
 // BFF (the same upload the page's form uses), with anchor_fit: none so it
 // needs no SCF catalog in the e2e database, and a per-run bundle_id so a
-// re-run never collides with an earlier one. Nothing seeded is mutated.
-// The signed-in e2e credential is a tenant admin, so it may evaluate and
-// upload; the Go tier covers who else may (owner) and who may not.
+// re-run never collides with an earlier one. It signs in to a tenant of
+// its own (fixtures/e2e/control-actions.sql): in the shared demo tenant a
+// new active control changes what specs running in parallel count. The
+// credential is a tenant admin, so it may evaluate and upload; the Go tier
+// covers who else may (owner) and who may not.
 //
 // Hard rule (P0-A9 / GitGuardian): every id and string is neutral.
 
 import { gunzipSync, gzipSync } from "node:zlib";
 
-import type { Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-import { expect, test } from "./fixtures";
+import { ATLAS_JWT_COOKIE } from "../lib/auth";
+import { seedFromFixture } from "./seed";
+
+const ACTIONS_TENANT = "00000000-0000-0000-0000-000000002110";
+
+// signInToActionsTenant mints an admin bearer for the spec's tenant
+// through the env-gated /v1/test/issue-jwt (slice 201) and sets it as the
+// session cookie, as sidebar-nav.spec.ts does for its tenant.
+async function signInToActionsTenant(page: Page): Promise<void> {
+  const url = `${
+    process.env.ATLAS_HTTP_URL ?? "http://localhost:8080"
+  }/v1/test/issue-jwt`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tenant_id: ACTIONS_TENANT,
+      roles: ["admin"],
+      super_admin: true,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `#2110: ${url} returned ${res.status}: ${await res.text()}`,
+    );
+  }
+  const { token } = (await res.json()) as { token?: string };
+  if (!token) throw new Error(`#2110: ${url} returned 200 but no token field`);
+  const base = new URL(
+    process.env.PLATFORM_BASE_URL ?? "http://localhost:3000",
+  );
+  await page.context().clearCookies();
+  await page.context().addCookies([
+    {
+      name: ATLAS_JWT_COOKIE,
+      value: token,
+      domain: base.hostname,
+      path: "/",
+      httpOnly: true,
+      secure: base.protocol === "https:",
+      sameSite: "Lax",
+    },
+  ]);
+}
 
 // tarGz builds a gzip-tar holding one regular file at the archive root:
 // the bundle shape POST /v1/controls:upload-bundle reads.
@@ -91,10 +136,15 @@ async function evaluationCount(page: Page): Promise<number> {
 }
 
 test.describe("control page actions (#2110)", () => {
+  test.beforeAll(() => {
+    seedFromFixture("control-actions");
+  });
+
   test("Evaluate now, Download bundle and Upload new version", async ({
-    authedPage: page,
+    page,
   }) => {
     test.setTimeout(120_000);
+    await signInToActionsTenant(page);
     const bundleID = `e2e_2110_${Date.now().toString(36)}`;
     const v1 = manifest(bundleID, "Control actions e2e v1");
     const created = await upload(page, tarGz("control.yaml", v1));
