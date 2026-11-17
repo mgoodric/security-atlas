@@ -207,53 +207,84 @@ export async function detachChildRisk(
 
 export type RisksListResponse = {
   risks: Risk[];
+  // #2132: the page's row count, the filtered total it pages over, and the
+  // page the platform applied. Optional because hand-rolled fixtures and
+  // the older callers predate them.
+  count?: number;
+  total?: number;
+  limit?: number;
+  offset?: number;
 };
 
-// Server-side fetcher used by the slice-100 BFF route. Mirrors the
-// slice-098 `listAnchors` shape: no query-string narrowing — the page
-// owns filter state client-side. The one exception is roll-ups (#2060):
-// upstream leaves them out unless asked, so a parent never counts beside
-// the children it summarises.
-//
-// #2107: closed risks are left out the same way unless includeClosed.
+// #2132: the GET /v1/risks parameters the BFF passes through. The
+// platform checks every value and refuses one it does not allow.
+export const RISK_LIST_PARAMS = [
+  "status",
+  "include_closed",
+  "include_rollups",
+  "owner",
+  "treatment",
+  "category",
+  "methodology",
+  "level",
+  "org_unit",
+  "theme",
+  "review_due",
+  "review_due_from",
+  "review_due_to",
+  "sort",
+  "limit",
+  "offset",
+] as const;
+
+export type RiskListParam = (typeof RISK_LIST_PARAMS)[number];
+
+// Server-side fetcher used by the slice-100 BFF route. Each parameter on
+// RISK_LIST_PARAMS is forwarded as given (#2132); with none the platform
+// returns its default page: open risks, roll-ups left out (#2060, #2107),
+// residual descending.
 export async function listRisks(
   bearer: string,
-  includeRollups = false,
-  includeClosed = false,
-): Promise<Risk[]> {
+  params: Partial<Record<RiskListParam, string>> = {},
+): Promise<RisksListResponse> {
   const qs = new URLSearchParams();
-  if (includeRollups) qs.set("include_rollups", "true");
-  if (includeClosed) qs.set("include_closed", "true");
+  for (const key of RISK_LIST_PARAMS) {
+    const v = params[key];
+    if (v) qs.set(key, v);
+  }
   const res = await apiFetch(
     qs.size ? `/v1/risks?${qs.toString()}` : "/v1/risks",
     bearer,
   );
-  const body = (await res.json()) as { risks: Risk[]; count: number };
-  return body.risks;
+  const body = (await res.json()) as RisksListResponse;
+  return {
+    risks: body.risks ?? [],
+    count: body.count,
+    total: body.total,
+    limit: body.limit,
+    offset: body.offset,
+  };
 }
 
-// Browser-side fetcher used by the slice-100 page. Hits the BFF at
+// Browser-side fetcher used by the sidebar count. Hits the BFF at
 // `/api/risks` which forwards the bearer cookie to upstream.
 export async function fetchRisksList(): Promise<RisksListResponse> {
   return fetchRisks(`/api/risks`);
 }
 
 // fetchRisksListWithRollUps is fetchRisksList with roll-up parents kept
-// (#2060): the register's "Show roll-ups" toggle, and the pickers where a
-// roll-up is a valid choice.
+// (#2060): the pickers where a roll-up is a valid choice.
 export async function fetchRisksListWithRollUps(): Promise<RisksListResponse> {
   return fetchRisks(`/api/risks?include_rollups=true`);
 }
 
-// fetchRegisterRisks is the register's read: roll-ups and closed risks
-// each kept only when its toggle is on (#2060, #2107).
-export async function fetchRegisterRisks(opts: {
-  rollups: boolean;
-  closed: boolean;
-}): Promise<RisksListResponse> {
-  const qs = new URLSearchParams();
-  if (opts.rollups) qs.set("include_rollups", "true");
-  if (opts.closed) qs.set("include_closed", "true");
+// fetchRegisterPage is the register's read (#2132): one filtered, sorted
+// page, with the filtered total. `query` is built by the page's
+// registerQuery.
+export async function fetchRegisterPage(
+  query: Record<string, string>,
+): Promise<RisksListResponse> {
+  const qs = new URLSearchParams(query);
   return fetchRisks(qs.size ? `/api/risks?${qs.toString()}` : "/api/risks");
 }
 

@@ -1,60 +1,33 @@
 "use client";
 
-// Slice 100 — /risks list view.
+// Slice 100 — /risks, the risk register.
 //
-// Today `/risks` 404'd in the sidebar (audit finding F-4 in
-// `Plans/canvas/13-ui-mockup-audit-2026-05-16.md`). This page ships the
-// missing flat list AND addresses audit F-3 by removing
-// `/risks/hierarchy` from the top-nav (the canonical default is the
-// flat list; the hierarchy stays reachable via the page-header
-// `Hierarchy view ->` link per design doc §5).
+// #2132: the register is filtered, sorted and paged on the server. The page
+// reads its filters, sort, page and columns from the URL, sends them to
+// `GET /v1/risks` through the BFF at /api/risks, and renders the one page
+// it gets back. No filtering or sorting happens in the browser.
 //
-// The page consumes the shared `web/components/list/*` shell from slice
-// 098 — the reusable primitives that the other list-view slices
-// (099/101/102) also consume.
-//
-// Data source resolution (slice 100):
-//   `GET /v1/risks` (slice 019 + slice 067 hierarchy/severity fields)
-//   is the row source. Per AC-3 the visible filter set narrows to
-//   three (treatment + severity + owner); the additional pills shown
-//   in the mockup (category/methodology/org_unit) stay deferrable.
+//   - Filters: status (open by default; closed and all on request), owner
+//     (a person or unowned), treatment, category, review due (overdue, due
+//     in 14 days, a date range), methodology and org unit. Each URL key is
+//     the platform parameter of the same name.
+//   - Sort: every column header; residual, highest first, by default. The
+//     URL `sort` is the platform's `sort`.
+//   - Columns: ID, Title, Category, Owner, Residual, Treatment, Review due
+//     and Status by default, sized to fit 1316px without sideways scroll.
+//     The column chooser adds methodology, level, org unit, themes and
+//     created (`?cols=`).
+//   - Rows open the risk.
 //
 // Constitutional invariants honored:
-//   - Invariant 6 (tenant isolation): the BFF at /api/risks forwards
-//     the bearer cookie to /v1/risks; the platform enforces tenant
-//     isolation via RLS. The UI does not pass tenant_id.
-//
-// Anti-criteria honored (P0):
-//   - P0-A1: ZERO content edits to /risks/hierarchy beyond the
-//     `List view ->` page-header link.
-//   - P0-A2: read-only list — Add first risk CTA links to the dedicated
-//     risk-create UI at `/risks/new` (slice 105). The placeholder
-//     `/admin` link from slice 100's original ship was lifted when
-//     slice 105 landed.
-//   - P0-A3: NO invented columns — every column derives from `riskWire`
-//     (id, title, category, treatment, treatment_owner, residual_score,
-//     severity, review_due_at).
-//   - P0-A4: neutral test-* tokens.
-//
-// Slice 185 amendment — UI honesty (F-178-5 closure):
-//   The row-click affordance was removed. Previously rows routed to
-//   `/risks/hierarchy?focus=<id>` as a "no 404" stand-in for a
-//   per-risk detail page, creating an honesty-gap (the row promised
-//   a detail destination it could not deliver). Replaced by:
-//     1. an explicit per-row "View in hierarchy" link in a new
-//        `actions` column (AC-2 — preserves the prior workflow);
-//     2. a banner above the table (AC-3 — "Per-risk detail page is
-//        a future slice");
-//     3. removal of `onRowClick` from the `<ListTable>` call site,
-//        which makes the `ListTable` primitive drop the
-//        `cursor-pointer` class automatically (AC-1).
-//   Option B (ship `/risks/[id]/page.tsx`) stays as a separate
-//   future slice per P0-185-1.
+//   - Invariant 6 (tenant isolation): the BFF forwards the bearer cookie;
+//     the platform enforces tenant isolation with RLS and an explicit
+//     tenant_id. The UI never passes a tenant.
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo, type MouseEvent } from "react";
 
 import {
   EmptyState,
@@ -63,7 +36,6 @@ import {
   ListPage,
   ListPagination,
   ListTable,
-  paginateRows,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
@@ -74,8 +46,9 @@ import { Person, usePeopleDirectory } from "@/components/ui/person";
 import { resolvePerson } from "@/lib/person";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
-  fetchRegisterRisks,
+  fetchRegisterPage,
   fetchRiskCategories,
+  fetchRisksList,
   treatmentLabel,
   type Risk,
   type RiskCategory,
@@ -86,291 +59,177 @@ import {
   RISK_EXPORT_FORMAT_LABELS,
   buildRiskExportURL,
 } from "@/lib/api/risks-export";
+import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
+import { pageTitle } from "@/lib/page-titles";
 
 import { risksCountLabel } from "./count-label";
 import {
-  ALL,
-  applyFilters,
   categoryDisplay,
   categoryOptions,
-  clearFilters,
-  DEFAULT_FILTERS,
   fairScore,
   formatDollars,
   formatResidualScore,
   patternNoLongerMet,
   residualClass,
+  residualSeverity,
   residualState,
   reviewDuePending,
   reviewOverdue,
-  setFilter,
-  residualSeverity,
   severityBand,
-  severityClasses,
-  uniqueOwners,
-  type RiskFilters,
+  severityBandLabel,
 } from "./filters";
 import {
-  DEFAULT_SORT,
+  ALL,
+  clampedPage,
+  COLUMNS_PARAM,
+  DEFAULT_FILTERS,
+  DEFAULT_STATUS,
+  filtersFromParams,
+  FILTER_KEYS,
+  isDefaultFilters,
+  OPTIONAL_COLUMN_LABELS,
+  OPTIONAL_COLUMNS,
+  parseColumns,
+  registerQuery,
+  shortRiskId,
+  toggleColumn,
+  type FilterKey,
+  type OptionalColumn,
+  type RegisterFilters,
+} from "./server-query";
+import { SeverityPill } from "./severity-pill";
+import {
+  ariaSort,
   nextSortState,
   parseSortState,
-  serializeSortState,
-  sortRisks,
+  sortParam,
   type SortKey,
-  type SortState,
 } from "./sort";
-import { SeverityPill } from "./severity-pill";
 import { SortableHeader } from "./sortable-header";
-import { pageTitle } from "@/lib/page-titles";
-import { enumOptions } from "@/lib/labels/enum-labels";
 
-// Slice 244 — six filter keys. Order mirrors the mockup
-// (Plans/_archive/mockups/risks.html lines 126-173) with one local deviation:
-// the slice-100 Severity pill is a net positive over the mockup and is
-// retained per anti-criterion P0-244-1. It sits between Org unit and
-// Owner so it neighbours the related risk-scoring controls without
-// disturbing the mockup-pill visual order.
-const FILTER_KEYS: (keyof RiskFilters)[] = [
-  "category",
-  "treatment",
-  "methodology",
-  "org_unit",
-  "severity",
-  "owner",
-];
-
-// Slice 246 — page-size default per AC-3.
-//
-// Per anti-criterion P0-246-4 this constant lives at module scope so it
-// is greppable; component code references `RISKS_PAGE_SIZE` rather than
-// inlining `50`. A future slice that promotes pagination to server-side
-// LIMIT/OFFSET will swap the constant for an API-derived value without
-// touching the JSX.
+// One page of the register. The platform caps a page at 500.
 const RISKS_PAGE_SIZE = 50;
 
-// Slice 246 — URL query-string key for the 1-indexed page index. The
-// `page` key is sibling to the filter keys above; the filter-change
-// handlers below explicitly DROP it on every filter mutation (AC-5 —
-// page index resets to 1 when a filter changes, preserving the user's
-// mental model).
+// URL keys beside the filters: the 1-indexed page, the sort, and the
+// roll-ups (#2060) and archived-categories (#1817) toggles.
 const PAGE_PARAM = "page";
-
-// Slice 681 / ATLAS-039 — URL query-string key for the active column
-// sort (shape `"<key>:<dir>"`, e.g. `severity:asc`). Sibling to the
-// filter keys + the `page` key. A filter or sort change resets the page
-// index to 1 (the user's mental model: re-ordering the set starts at the
-// top). The default sort (severity desc) is treated as "no param" so the
-// canonical register URL stays clean until a non-default sort is chosen.
 const SORT_PARAM = "sort";
-
-// #2060 — URL query-string key for the "Show roll-ups" toggle. A roll-up
-// is a parent risk with at least one child linked; it summarises risks
-// already in the register, so it is left out of the rows and the count
-// unless the toggle is on (`?rollups=1`).
 const ROLLUPS_PARAM = "rollups";
-
-// #1817 — URL query-string key for the "Show archived" toggle. The
-// Category pill lists the organisation's active categories; with the
-// toggle on (`?archived=1`) it lists archived ones too. It narrows only
-// the pill's options, so it composes with the roll-ups toggle.
 const ARCHIVED_PARAM = "archived";
 
-// #2107 — URL query-string key for the "Show closed" toggle. Closed risks
-// are left out of the rows and the count unless it is on (`?closed=1`).
-const CLOSED_PARAM = "closed";
-
-// Slice 680 / ATLAS-038 — column-header clarity copy.
-//
-// The "Severity" and "Residual" columns are INDEPENDENT axes, and the
-// audit flagged that they read as inconsistent (the same residual maps
-// to different severities across seeded risks). They are NOT a scoring
-// bug — per canvas §6.2 they measure different things:
-//
-//   - INHERENT SEVERITY = likelihood × impact on the 5×5 grid, BEFORE
-//     any control mitigation (the risk's raw exposure).
-//   - RESIDUAL = inherent × (1 − control_effectiveness) — the exposure
-//     AFTER the linked controls' measured effectiveness, on the same
-//     1..25 scale and bands as inherent (#2058; it was once divided by 25
-//     into 0..1, which sat beside a 1..25 inherent number).
-//
-// Two risks with the same inherent severity legitimately carry
-// different residuals (different controls); two risks with the same
-// residual legitimately carry different inherent severities. The
-// headers now name the axis explicitly and a native `title` tooltip
-// spells out the relationship so the columns no longer read as a
-// scoring inconsistency. Copy/label only — the scoring model is
-// unchanged (anti-criterion).
-const SEVERITY_HEADER_TOOLTIP =
-  "Inherent severity (1–25): likelihood × impact on the 5×5 grid, before any control mitigation. Low 1–7, Medium 8–14, High 15–25.";
 const RESIDUAL_HEADER_TOOLTIP =
-  "Residual (1–25): inherent severity reduced by the linked controls' measured effectiveness, on the same scale and bands as inherent. Two risks with the same inherent severity can have different residuals, and vice versa.";
+  "Residual: inherent severity reduced by the linked controls' measured effectiveness, banded like inherent (Low 1–7, Medium 8–14, High 15–25). FAIR risks are in dollars and sort after the 5×5 risks. Hover a value for the inherent severity.";
 
-// Slice 680 / ATLAS-029 — pending-evaluation affordance copy.
-//
-// A newly-created risk has no residual_score until the evaluator
-// backfills it. The old cell rendered a bare "—", which reads as
-// broken. We render an explicit "Pending evaluation" label (with a
-// tooltip) instead so the empty state reads as "awaiting the
-// evaluator", not "missing data". The review-due date is not part of
-// this: since #2059 it is set when the risk is created.
 const PENDING_EVAL_LABEL = "Pending evaluation";
 const PENDING_EVAL_TOOLTIP =
   "Awaiting the risk evaluator. Inherent severity computes immediately; the residual is backfilled once controls are evaluated.";
 
-const TREATMENT_OPTIONS: { value: string; label: string }[] = [
+const STATUS_OPTIONS = [
+  { value: "open", label: "Open" },
+  { value: "closed", label: "Closed" },
+  { value: ALL, label: "Open and closed" },
+];
+
+const TREATMENT_OPTIONS = [
   { value: ALL, label: "All treatments" },
   ...enumOptions("RiskTreatment"),
 ];
 
-const SEVERITY_OPTIONS: { value: string; label: string }[] = [
-  { value: ALL, label: "All severity" },
-  { value: "high", label: "high (>=15)" },
-  { value: "medium", label: "medium (8-14)" },
-  { value: "low", label: "low (1-7)" },
-  { value: "none", label: "none (0)" },
-];
-
-// Decision D2: the mockup shows `five_by_five` but the wire enum
-// `risk_methodology` carries `qualitative_5x5` for the same concept.
-// All five wire values are exposed, under their labels (#2083).
-const METHODOLOGY_OPTIONS: { value: string; label: string }[] = [
+const METHODOLOGY_OPTIONS = [
   { value: ALL, label: "All methodologies" },
   ...enumOptions("RiskMethodology"),
 ];
+
+const REVIEW_DUE_OPTIONS = [
+  { value: ALL, label: "Any date" },
+  { value: "overdue", label: "Overdue" },
+  { value: "due_soon", label: "Due in 14 days" },
+];
+
+const LEVEL_LABELS: Record<string, string> = {
+  team: "Team",
+  org: "Org",
+  company: "Company",
+};
+
+// A link inside a clickable row: let it navigate on its own, without the
+// row's click also pushing the risk.
+function stopRowClick(e: MouseEvent) {
+  e.stopPropagation();
+}
 
 function RisksPageInner() {
   const router = useRouter();
   const search = useSearchParams();
 
-  // URL-driven filter state — mirrors the slice 098 controls pattern so
-  // the filter set is shareable / bookmarkable. Default = ALL on every
-  // pill.
-  const filters: RiskFilters = useMemo(() => {
-    const out = { ...DEFAULT_FILTERS };
-    for (const k of FILTER_KEYS) {
-      const v = search.get(k);
-      if (v) out[k] = v;
-    }
-    return out;
-  }, [search]);
-
-  // Slice 246 — current page index. URL is the source of truth so the
-  // page is bookmarkable and survives refresh. Invalid / missing /
-  // negative values fall back to 1; the rendering math in
-  // `paginationBounds` further clamps an out-of-range page to the
-  // last available page so a stale bookmark survives a register that
-  // shrunk between visits.
-  const currentPage: number = useMemo(() => {
-    const raw = search.get(PAGE_PARAM);
-    if (!raw) return 1;
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed) || parsed < 1) return 1;
-    return parsed;
-  }, [search]);
-
-  // Slice 681 — active column sort, URL-driven so it is bookmarkable and
-  // survives refresh (same posture as the filter + page state). A
-  // missing / malformed param resolves to DEFAULT_SORT (severity desc).
-  const sortState: SortState = useMemo(
+  const filters: RegisterFilters = useMemo(
+    () => filtersFromParams(search),
+    [search],
+  );
+  const sortState = useMemo(
     () => parseSortState(search.get(SORT_PARAM)),
     [search],
   );
-
-  // Slice 681 — header-click handler. Toggles the clicked column's
-  // direction (or switches to it, descending-first) and writes the
-  // result to the URL. The default sort is dropped from the URL so the
-  // canonical register URL has no `sort` key; any other sort serialises
-  // to `?sort=<key>:<dir>`. Re-sorting resets the page index to 1.
-  const updateSort = (clicked: SortKey) => {
-    const next = nextSortState(sortState, clicked);
-    const sp = new URLSearchParams(search.toString());
-    if (next.key === DEFAULT_SORT.key && next.dir === DEFAULT_SORT.dir) {
-      sp.delete(SORT_PARAM);
-    } else {
-      sp.set(SORT_PARAM, serializeSortState(next));
-    }
-    sp.delete(PAGE_PARAM);
-    router.replace(`/risks?${sp.toString()}`);
-  };
-
-  const updateFilter = (key: keyof RiskFilters, value: string) => {
-    const next = setFilter(filters, key, value);
-    const sp = new URLSearchParams(search.toString());
-    if (next[key] === ALL) {
-      sp.delete(key);
-    } else {
-      sp.set(key, next[key]);
-    }
-    // AC-5: filter changes reset the page index to 1. The URL key is
-    // dropped (page=1 is the default and need not be serialised) so
-    // the URL stays clean when no pagination is in play.
-    sp.delete(PAGE_PARAM);
-    router.replace(`/risks?${sp.toString()}`);
-  };
-
-  const clearAll = () => {
-    const cleared = clearFilters();
-    const sp = new URLSearchParams(search.toString());
-    for (const k of FILTER_KEYS) {
-      if (cleared[k] === ALL) sp.delete(k);
-    }
-    // AC-2 / AC-5: clearing filters also resets pagination.
-    sp.delete(PAGE_PARAM);
-    router.replace(`/risks?${sp.toString()}`);
-  };
-
-  // Slice 246 — page-change handler. Writes the new 1-indexed page to
-  // the URL; page=1 is omitted so the canonical URL of the first page
-  // matches the no-pagination URL exactly.
-  const goToPage = (page: number) => {
-    const sp = new URLSearchParams(search.toString());
-    if (page <= 1) {
-      sp.delete(PAGE_PARAM);
-    } else {
-      sp.set(PAGE_PARAM, String(page));
-    }
-    router.replace(`/risks?${sp.toString()}`);
-  };
-
+  const columnsChosen = useMemo(
+    () => parseColumns(search.get(COLUMNS_PARAM)),
+    [search],
+  );
+  const currentPage: number = useMemo(() => {
+    const parsed = Number.parseInt(search.get(PAGE_PARAM) ?? "", 10);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+  }, [search]);
   const showRollUps = search.get(ROLLUPS_PARAM) === "1";
-  const toggleRollUps = () => {
-    const sp = new URLSearchParams(search.toString());
-    if (showRollUps) {
-      sp.delete(ROLLUPS_PARAM);
-    } else {
-      sp.set(ROLLUPS_PARAM, "1");
-    }
-    sp.delete(PAGE_PARAM);
-    router.replace(`/risks?${sp.toString()}`);
-  };
-
-  const showClosed = search.get(CLOSED_PARAM) === "1";
-  const toggleClosed = () => {
-    const sp = new URLSearchParams(search.toString());
-    if (showClosed) {
-      sp.delete(CLOSED_PARAM);
-    } else {
-      sp.set(CLOSED_PARAM, "1");
-    }
-    sp.delete(PAGE_PARAM);
-    router.replace(`/risks?${sp.toString()}`);
-  };
-
   const showArchived = search.get(ARCHIVED_PARAM) === "1";
-  const toggleArchived = () => {
+
+  // Every URL change goes through here. A change to what the list holds
+  // (a filter, the sort, a toggle) resets the page to 1.
+  const replace = (edit: (sp: URLSearchParams) => void, resetPage = true) => {
     const sp = new URLSearchParams(search.toString());
-    if (showArchived) {
-      sp.delete(ARCHIVED_PARAM);
-    } else {
-      sp.set(ARCHIVED_PARAM, "1");
-    }
-    sp.delete(PAGE_PARAM);
-    router.replace(`/risks?${sp.toString()}`);
+    edit(sp);
+    if (resetPage) sp.delete(PAGE_PARAM);
+    const qs = sp.toString();
+    router.replace(qs ? `/risks?${qs}` : "/risks");
   };
+
+  const updateFilter = (key: FilterKey, value: string) =>
+    replace((sp) => {
+      if (value === DEFAULT_FILTERS[key] || value === "") sp.delete(key);
+      else sp.set(key, value);
+    });
+
+  const clearAll = () =>
+    replace((sp) => {
+      for (const k of FILTER_KEYS) sp.delete(k);
+    });
+
+  const updateSort = (clicked: SortKey) =>
+    replace((sp) => {
+      const next = sortParam(nextSortState(sortState, clicked));
+      if (next) sp.set(SORT_PARAM, next);
+      else sp.delete(SORT_PARAM);
+    });
+
+  const toggleFlag = (param: string, on: boolean) =>
+    replace((sp) => {
+      if (on) sp.delete(param);
+      else sp.set(param, "1");
+    });
+
+  const toggleOptionalColumn = (col: OptionalColumn) =>
+    replace((sp) => {
+      const next = toggleColumn(columnsChosen, col);
+      if (next) sp.set(COLUMNS_PARAM, next);
+      else sp.delete(COLUMNS_PARAM);
+    }, false);
+
+  const goToPage = (page: number) =>
+    replace((sp) => {
+      if (page <= 1) sp.delete(PAGE_PARAM);
+      else sp.set(PAGE_PARAM, String(page));
+    }, false);
 
   // #1817 — the organisation's categories, archived included, so a risk
   // on an archived category still reads by name with its archived mark.
-  // The pill hides archived ones unless "Show archived" is on.
   const categoriesQ = useQuery<RiskCategory[]>({
     queryKey: ["risks", "categories", "with-archived"],
     queryFn: () => fetchRiskCategories(true),
@@ -378,98 +237,108 @@ function RisksPageInner() {
   });
   const categories = useMemo(() => categoriesQ.data ?? [], [categoriesQ.data]);
 
-  const risksQ = useQuery<RisksListResponse>({
-    queryKey: [
-      "risks",
-      "list",
-      ...(showRollUps ? ["with-rollups"] : []),
-      ...(showClosed ? ["with-closed"] : []),
-    ],
-    queryFn: () =>
-      fetchRegisterRisks({ rollups: showRollUps, closed: showClosed }),
-  });
-
-  // Slice 244 — Org unit pill options need org-unit *names*, not just
-  // the `org_unit_id` UUIDs the risk rows carry. Reuse the existing
-  // browser-side fetcher (`fetchHierarchyOrgUnits`) so we do NOT
-  // introduce a new BFF route (anti-criterion P0-244-3). Stale time of
-  // 5 minutes — org unit data rarely changes during a session and a
-  // refetch on every nav is wasteful.
   const orgUnitsQ = useQuery<OrgUnit[]>({
     queryKey: ["risks", "org-units"],
     queryFn: fetchHierarchyOrgUnits,
     staleTime: 5 * 60 * 1000,
   });
+  const orgUnitName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of orgUnitsQ.data ?? []) m.set(u.id, u.name);
+    return m;
+  }, [orgUnitsQ.data]);
+
+  const query = useMemo(
+    () =>
+      registerQuery({
+        filters,
+        sort: search.get(SORT_PARAM),
+        rollups: showRollUps,
+        page: currentPage,
+        pageSize: RISKS_PAGE_SIZE,
+      }),
+    [filters, search, showRollUps, currentPage],
+  );
+
+  const risksQ = useQuery<RisksListResponse>({
+    queryKey: ["risks", "list", query],
+    queryFn: () => fetchRegisterPage(query),
+    placeholderData: (prev) => prev,
+  });
+
+  // The register's unfiltered size, for "N of M": the sidebar badge's read
+  // (open risks, no roll-ups), shared under its query key.
+  const registerSizeQ = useQuery<RisksListResponse>({
+    queryKey: ["sidebar", "risks-count"],
+    queryFn: fetchRisksList,
+    staleTime: 60_000,
+    retry: false,
+  });
 
   const rows: Risk[] = useMemo(() => risksQ.data?.risks ?? [], [risksQ.data]);
+  const total = risksQ.data?.total ?? rows.length;
 
-  const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+  // A stale bookmark past the end of a shrunken set lands on the last
+  // page that has rows.
+  useEffect(() => {
+    if (!risksQ.data || risksQ.isPlaceholderData) return;
+    const clamp = clampedPage(currentPage, RISKS_PAGE_SIZE, total);
+    if (clamp !== null && clamp !== currentPage) goToPage(clamp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [risksQ.data, risksQ.isPlaceholderData, currentPage, total]);
 
-  // Slice 681 / ATLAS-039 — apply the active column sort AFTER filtering
-  // and BEFORE pagination, so the page slice the table renders is the
-  // correctly-ordered window. `sortRisks` is pure (returns a new array)
-  // so the memoized `filtered` array is never mutated.
-  const visible = useMemo(
-    () => sortRisks(filtered, sortState),
-    [filtered, sortState],
-  );
-
-  // Slice 246 — client-side page slice over the filtered set. Per
-  // P0-246-1 the v1 wire `GET /v1/risks` ships the full list; the
-  // table consumes the per-page slice rather than the full `visible`
-  // array. The pagination footer below the table emits page-change
-  // events through `goToPage` which round-trip through the URL.
-  const pagedRows = useMemo(
-    () => paginateRows(visible, currentPage, RISKS_PAGE_SIZE),
-    [visible, currentPage],
-  );
-
-  // #2129: an owner is a user id, shown by name; unlinked free text is
-  // listed as itself.
+  // #2129: an owner is a user, shown by name. The pill offers anyone,
+  // unowned and every person in the directory; an owner in the URL the
+  // directory does not know still shows.
   const people = usePeopleDirectory();
-  const ownerOptions: { value: string; label: string }[] = useMemo(() => {
-    const owners = uniqueOwners(rows);
-    const linked = new Set(
-      rows.map((r) => r.owner_user_id).filter((id): id is string => !!id),
-    );
-    return [
-      { value: ALL, label: "All owners" },
-      ...owners.map((o) => ({
-        value: o,
-        label: linked.has(o)
-          ? resolvePerson(o, people.data).text
-          : o === "unassigned"
-            ? "unassigned"
-            : `${o} (unlinked)`,
-      })),
+  const ownerOptions = useMemo(() => {
+    const users = Array.from(people.data?.users.keys() ?? [])
+      .map((id) => ({ value: id, label: resolvePerson(id, people.data).text }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const opts = [
+      { value: ALL, label: "Anyone" },
+      { value: "none", label: "Unowned" },
+      ...users,
     ];
-  }, [rows, people.data]);
+    if (filters.owner !== ALL && !opts.some((o) => o.value === filters.owner)) {
+      opts.push({ value: filters.owner, label: "A person" });
+    }
+    return opts;
+  }, [people.data, filters.owner]);
 
-  // Slice 244 — Org unit options derive from the unique `org_unit_id`
-  // set on the loaded rows (same pattern as `ownerOptions`), then join
-  // client-side to OrgUnit names so the pill displays "Platform"
-  // rather than a bare UUID. Rows with no `org_unit_id` are skipped —
-  // the spec does not call for an "unassigned" org-unit bucket, and
-  // the filter is by exact `org_unit_id` against the wire.
-  const orgUnitOptions: { value: string; label: string }[] = useMemo(() => {
-    const ids = new Set<string>();
-    for (const r of rows) {
-      if (r.org_unit_id) ids.add(r.org_unit_id);
+  const orgUnitOptions = useMemo(() => {
+    const units = (orgUnitsQ.data ?? [])
+      .map((u) => ({ value: u.id, label: u.name }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const opts = [{ value: ALL, label: "All units" }, ...units];
+    if (
+      filters.org_unit !== ALL &&
+      !opts.some((o) => o.value === filters.org_unit)
+    ) {
+      opts.push({ value: filters.org_unit, label: "A unit" });
     }
-    const nameById = new Map<string, string>();
-    for (const u of orgUnitsQ.data ?? []) {
-      nameById.set(u.id, u.name);
-    }
-    const sorted = Array.from(ids)
-      .map((id) => ({ id, name: nameById.get(id) ?? id }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    return [
-      { value: ALL, label: "All units" },
-      ...sorted.map(({ id, name }) => ({ value: id, label: name })),
-    ];
-  }, [rows, orgUnitsQ.data]);
+    return opts;
+  }, [orgUnitsQ.data, filters.org_unit]);
 
   const pills: FilterPill[] = [
+    {
+      id: "status",
+      label: "Status",
+      value: filters.status,
+      options: STATUS_OPTIONS,
+    },
+    {
+      id: "owner",
+      label: "Owner",
+      value: filters.owner,
+      options: ownerOptions,
+    },
+    {
+      id: "treatment",
+      label: "Treatment",
+      value: filters.treatment,
+      options: TREATMENT_OPTIONS,
+    },
     {
       id: "category",
       label: "Category",
@@ -477,10 +346,10 @@ function RisksPageInner() {
       options: categoryOptions(categories, showArchived, filters.category),
     },
     {
-      id: "treatment",
-      label: "Treatment",
-      value: filters.treatment,
-      options: TREATMENT_OPTIONS,
+      id: "review_due",
+      label: "Review due",
+      value: filters.review_due,
+      options: REVIEW_DUE_OPTIONS,
     },
     {
       id: "methodology",
@@ -494,60 +363,64 @@ function RisksPageInner() {
       value: filters.org_unit,
       options: orgUnitOptions,
     },
-    {
-      id: "severity",
-      label: "Severity",
-      value: filters.severity,
-      options: SEVERITY_OPTIONS,
-    },
-    {
-      id: "owner",
-      label: "Owner",
-      value: filters.owner,
-      options: ownerOptions,
-    },
   ];
 
-  // Slice 684 — header count semantics fix (mirrors slice 666 on
-  // /controls). Previously the header read "Showing {visible} of {rows}
-  // risks" while the shared `<ListPagination>` footer reads "Showing M–N
-  // of TOTAL" — both used the verb "Showing" but meant different things,
-  // so read together the header implied all rows were on screen while
-  // the footer paginated only the first page. The header now drops the
-  // verb and renders a plain COUNT of the filtered register; the footer
-  // keeps sole ownership of the page-range phrasing. The filtered count
-  // drives the header (AC-3) and is the same number the footer
-  // paginates over, so the two now read consistently. Copy/semantics
-  // only — page size + counts are unchanged (anti-criterion). See
-  // `docs/audit-log/684-risks-count-semantics-decisions.md`.
-  const countLabel = risksCountLabel(visible.length, rows.length);
-  const countMeta = (
-    <span data-testid="risks-count-label">
-      {countLabel.isFiltered ? (
-        <>
-          <span className="text-foreground font-medium">
-            {countLabel.filtered}
-          </span>{" "}
-          of <span className="font-mono">{countLabel.total}</span> risks
-        </>
-      ) : (
-        <>
-          <span className="text-foreground font-medium">
-            {countLabel.total}
-          </span>{" "}
-          risks
-        </>
-      )}
-    </span>
-  );
+  const filtered =
+    !isDefaultFilters(filters) ||
+    showRollUps ||
+    filters.status !== DEFAULT_STATUS;
+  const registerSize = registerSizeQ.data
+    ? registerSizeQ.data.total ?? registerSizeQ.data.risks.length
+    : null;
+  const countLabel =
+    filtered && registerSize !== null && total <= registerSize
+      ? risksCountLabel(total, registerSize)
+      : risksCountLabel(total, total);
+
   const meta = (
-    <span className="inline-flex items-center gap-3">
-      {countMeta}
+    <span className="inline-flex flex-wrap items-center gap-3">
+      <span data-testid="risks-count-label" title={countLabel.text}>
+        {countLabel.isFiltered ? (
+          <>
+            <span className="text-foreground font-medium">
+              {countLabel.filtered}
+            </span>{" "}
+            of <span className="font-mono">{countLabel.total}</span> risks
+          </>
+        ) : (
+          <>
+            <span className="text-foreground font-medium">
+              {countLabel.total}
+            </span>{" "}
+            risks
+          </>
+        )}
+      </span>
+      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        Due from
+        <input
+          type="date"
+          value={filters.review_due_from === ALL ? "" : filters.review_due_from}
+          onChange={(e) => updateFilter("review_due_from", e.target.value)}
+          className="rounded border bg-background px-1 py-0.5 text-xs"
+          data-testid="risks-review-due-from"
+        />
+      </label>
+      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        to
+        <input
+          type="date"
+          value={filters.review_due_to === ALL ? "" : filters.review_due_to}
+          onChange={(e) => updateFilter("review_due_to", e.target.value)}
+          className="rounded border bg-background px-1 py-0.5 text-xs"
+          data-testid="risks-review-due-to"
+        />
+      </label>
       <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
         <input
           type="checkbox"
           checked={showRollUps}
-          onChange={toggleRollUps}
+          onChange={() => toggleFlag(ROLLUPS_PARAM, showRollUps)}
           data-testid="risks-show-rollups"
         />
         Show roll-ups
@@ -555,67 +428,100 @@ function RisksPageInner() {
       <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
         <input
           type="checkbox"
-          checked={showClosed}
-          onChange={toggleClosed}
-          data-testid="risks-show-closed"
-        />
-        Show closed
-      </label>
-      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-        <input
-          type="checkbox"
           checked={showArchived}
-          onChange={toggleArchived}
+          onChange={() => toggleFlag(ARCHIVED_PARAM, showArchived)}
           data-testid="risks-show-archived"
         />
         Show archived categories
       </label>
+      <details className="relative" data-testid="risks-column-chooser">
+        <summary className="cursor-pointer select-none rounded border px-2 py-0.5 text-xs">
+          Columns
+        </summary>
+        <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border bg-popover p-2 shadow-md">
+          {OPTIONAL_COLUMNS.map((col) => (
+            <label
+              key={col}
+              className="flex items-center gap-2 py-0.5 text-xs text-foreground"
+            >
+              <input
+                type="checkbox"
+                checked={columnsChosen.includes(col)}
+                onChange={() => toggleOptionalColumn(col)}
+                data-testid={`risks-column-toggle-${col}`}
+              />
+              {OPTIONAL_COLUMN_LABELS[col]}
+            </label>
+          ))}
+        </div>
+      </details>
     </span>
   );
 
-  const columns: ListColumn<Risk>[] = [
+  const header = (key: SortKey, label: string, title?: string) => (
+    <SortableHeader
+      sortKey={key}
+      label={label}
+      title={title}
+      state={sortState}
+      onSort={updateSort}
+    />
+  );
+
+  // shadcn cells never wrap; the text columns must, or a long title or
+  // owner pushes the table past 1316px.
+  const nowrap = "whitespace-nowrap";
+  const wrap = "whitespace-normal break-words";
+
+  const defaultColumns: ListColumn<Risk>[] = [
+    {
+      id: "id",
+      header: header("id", "ID"),
+      ariaSort: ariaSort(sortState, "id"),
+      className: nowrap,
+      cell: (row) => (
+        <Link
+          href={`/risks/${encodeURIComponent(row.id)}`}
+          onClick={stopRowClick}
+          className="font-mono text-xs text-muted-foreground hover:underline"
+          title={row.id}
+          data-testid="risks-row-id"
+        >
+          {shortRiskId(row.id)}
+        </Link>
+      ),
+    },
     {
       id: "title",
-      header: "Title",
-      // Slice 681 / ATLAS-039 (AC-2): the title is now a link to the
-      // read-only per-risk detail at `/risks/{id}`. Slice 185 removed the
-      // old implicit row-click (it dishonestly routed to the hierarchy);
-      // this restores a drill-in that truthfully advertises its
-      // destination, now that the detail route exists (decisions log D2).
+      header: header("title", "Title"),
+      ariaSort: ariaSort(sortState, "title"),
+      className: `${wrap} min-w-[14rem]`,
       cell: (row) => (
-        <>
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <Link
             href={`/risks/${encodeURIComponent(row.id)}`}
+            onClick={stopRowClick}
             className="text-primary hover:underline"
             data-testid="risks-row-title"
           >
             {row.title}
-            {patternNoLongerMet(row.inherent_score) ? (
-              <span
-                className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                data-testid="risks-row-pattern-lapsed"
-                title="Rule-generated meta-risk with 0 child risks in the current window. The engine never closes it; review it."
-              >
-                Pattern no longer met
-              </span>
-            ) : null}
           </Link>
-          {/* #2107: a closed risk only shows with "Show closed" on. */}
-          {row.status === "closed" ? (
+          {patternNoLongerMet(row.inherent_score) ? (
             <span
-              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
-              data-testid="risks-row-closed"
-              title="Closed risk. It is left out of the register and its count unless closed risks are shown."
+              className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              data-testid="risks-row-pattern-lapsed"
+              title="Rule-generated meta-risk with 0 child risks in the current window. The engine never closes it; review it."
             >
-              Closed
+              Pattern no longer met
             </span>
           ) : null}
           {/* #2060: a roll-up only shows with the toggle on. The marker
-            links to the children it summarises on the detail page. */}
+              links to the children it summarises on the detail page. */}
           {row.child_count ? (
             <Link
               href={`/risks/${encodeURIComponent(row.id)}#children`}
-              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:underline"
+              onClick={stopRowClick}
+              className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:underline"
               data-testid="risks-row-rollup"
               title="Roll-up of other risks in the register. It is left out of the count unless roll-ups are shown."
             >
@@ -623,12 +529,14 @@ function RisksPageInner() {
               {row.child_count === 1 ? "child" : "children"}
             </Link>
           ) : null}
-        </>
+        </span>
       ),
     },
     {
       id: "category",
-      header: "Category",
+      header: header("category", "Category"),
+      ariaSort: ariaSort(sortState, "category"),
+      className: wrap,
       cell: (row) => {
         const cat = categoryDisplay(row, categories);
         return (
@@ -651,20 +559,10 @@ function RisksPageInner() {
       },
     },
     {
-      id: "treatment",
-      header: "Treatment",
-      cell: (row) => (
-        <span
-          className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-muted text-foreground"
-          data-testid="risks-row-treatment"
-        >
-          {treatmentLabel(row)}
-        </span>
-      ),
-    },
-    {
-      id: "treatment_owner",
-      header: "Owner",
+      id: "owner",
+      header: header("owner", "Owner"),
+      ariaSort: ariaSort(sortState, "owner"),
+      className: `${wrap} min-w-[7rem]`,
       cell: (row) => {
         if (row.owner_user_id) {
           return (
@@ -678,8 +576,11 @@ function RisksPageInner() {
         const unlinked = (row.owner_unlinked ?? "").trim();
         if (unlinked === "") {
           return (
-            <span className="text-xs italic text-muted-foreground">
-              unassigned
+            <span
+              className="text-xs italic text-muted-foreground"
+              data-testid="risks-row-owner-none"
+            >
+              Unowned
             </span>
           );
         }
@@ -695,13 +596,7 @@ function RisksPageInner() {
       },
     },
     {
-      id: "residual_score",
-      // Slice 680 / ATLAS-038: name the axis ("after controls") + tooltip
-      // so it doesn't read as inconsistent with the inherent-severity
-      // column. Independent axes (canvas §6.2).
-      // Slice 681 / ATLAS-039: the header is now a sortable button. The
-      // slice-680 axis-disambiguation tooltip moves to the button's
-      // native `title`; pending (un-scored) rows sort to the end.
+      id: "residual",
       header: (
         <SortableHeader
           sortKey="residual"
@@ -709,116 +604,38 @@ function RisksPageInner() {
             node: <Term id="residual-risk">Residual</Term>,
             text: "Residual",
           }}
-          label="(after controls)"
+          label=""
           title={RESIDUAL_HEADER_TOOLTIP}
           state={sortState}
           onSort={updateSort}
         />
       ),
-      cell: (row) => {
-        // Slice 680 / ATLAS-029: a brand-new risk has no residual yet —
-        // render an explicit "Pending evaluation" affordance rather than
-        // a bare "—" that reads as broken.
-        if (residualState(row.residual_score) === "pending") {
-          return (
-            <span
-              className="text-xs italic text-muted-foreground"
-              title={PENDING_EVAL_TOOLTIP}
-              data-testid="risks-row-residual-pending"
-            >
-              {PENDING_EVAL_LABEL}
-            </span>
-          );
-        }
-        const formatted = formatResidualScore(
-          row.residual_score,
-          row.methodology,
-        );
-        // #2058: a 5x5 residual shows on the inherent column's 1..25
-        // scale, as the same banded pill. A FAIR residual is dollars and
-        // carries no band.
-        const n = residualSeverity(row.residual_score);
-        if (row.methodology === "fair" || n == null) {
-          return (
-            <span
-              className="font-mono text-xs text-foreground"
-              data-testid="risks-row-residual"
-            >
-              {formatted}
-            </span>
-          );
-        }
-        return (
-          <SeverityPill
-            value={formatted}
-            band={severityBand(n)}
-            className={residualClass(formatted)}
-            testId="risks-row-residual"
-            title="Residual severity (1–25, after controls)"
-          />
-        );
-      },
+      ariaSort: ariaSort(sortState, "residual"),
+      className: nowrap,
+      cell: (row) => <ResidualCell row={row} />,
     },
     {
-      id: "severity",
-      // Slice 680 / ATLAS-038: "Inherent severity" names the axis (before
-      // controls) so it doesn't read as inconsistent with the residual
-      // (after controls) column. Independent axes (canvas §6.2).
-      // Slice 681 / ATLAS-039: sortable; this is the DEFAULT sort
-      // (descending — worst exposure first).
-      header: (
-        <SortableHeader
-          sortKey="severity"
-          label="Inherent severity"
-          title={SEVERITY_HEADER_TOOLTIP}
-          state={sortState}
-          onSort={updateSort}
-        />
+      id: "treatment",
+      header: header("treatment", "Treatment"),
+      ariaSort: ariaSort(sortState, "treatment"),
+      className: nowrap,
+      cell: (row) => (
+        <span
+          className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-muted text-foreground"
+          data-testid="risks-row-treatment"
+        >
+          {treatmentLabel(row)}
+        </span>
       ),
-      cell: (row) => {
-        const fair =
-          row.methodology === "fair" ? fairScore(row.inherent_score) : null;
-        if (fair) {
-          return (
-            <span
-              className="font-mono text-xs text-foreground"
-              data-testid="risks-row-fair-exposure"
-              title="FAIR annualized loss exposure"
-            >
-              {formatDollars(fair.annualized_loss_exposure)}
-            </span>
-          );
-        }
-        const band = severityBand(row.severity);
-        return (
-          <SeverityPill
-            value={String(row.severity)}
-            band={band}
-            className={severityClasses(band)}
-            testId="risks-row-severity"
-            title="Inherent severity (1–25, likelihood × impact, before controls)"
-          />
-        );
-      },
     },
     {
-      id: "review_due_at",
-      // Slice 681 / ATLAS-039: sortable by review-due date. Pending
-      // (un-dated, newly-created) rows sort to the end in both
-      // directions so "next review soonest" never surfaces an
-      // un-evaluated risk first.
-      header: (
-        <SortableHeader
-          sortKey="review_due"
-          label="Review due"
-          state={sortState}
-          onSort={updateSort}
-        />
-      ),
+      id: "review_due",
+      header: header("review_due", "Review due"),
+      ariaSort: ariaSort(sortState, "review_due"),
+      className: nowrap,
       cell: (row) => {
-        // #2059: every risk gets a review date at creation (created +
-        // the organisation cadence), so a missing one is a data gap and
-        // reads as "Not set". A past due day is marked Overdue.
+        // #2059: every risk gets a review date at creation, so a missing
+        // one is a data gap and reads as "Not set".
         if (reviewDuePending(row.review_due_at)) {
           return (
             <span
@@ -829,16 +646,15 @@ function RisksPageInner() {
             </span>
           );
         }
-        const overdue = reviewOverdue(row.review_due_at);
         return (
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5">
             <span
               className="font-mono text-xs text-muted-foreground"
               data-testid="risks-row-review-due"
             >
               {row.review_due_at!.slice(0, 10)}
             </span>
-            {overdue ? (
+            {reviewOverdue(row.review_due_at) ? (
               <span
                 className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-50 text-red-700"
                 data-testid="risks-row-review-overdue"
@@ -850,38 +666,105 @@ function RisksPageInner() {
         );
       },
     },
-    // Slice 185 (AC-2): explicit per-row "View in hierarchy" link
-    // replaces the implicit row-click affordance. The link preserves
-    // the existing `?focus=<id>` workflow (P0-185-2) so users who
-    // relied on the row-click reaching the hierarchy view still have
-    // a one-click path; the difference is that the affordance now
-    // truthfully advertises its destination instead of pretending to
-    // be a row-as-detail link.
     {
-      id: "actions",
-      header: "",
-      align: "right",
-      cell: (row) => (
-        <Link
-          href={`/risks/hierarchy?focus=${encodeURIComponent(row.id)}`}
-          data-testid="risks-row-hierarchy-link"
-          className="text-xs text-primary hover:underline"
-        >
-          View in hierarchy →
-        </Link>
-      ),
+      id: "status",
+      header: header("status", "Status"),
+      ariaSort: ariaSort(sortState, "status"),
+      className: nowrap,
+      cell: (row) =>
+        row.status === "closed" ? (
+          <span
+            className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+            data-testid="risks-row-closed"
+            title="Closed risk. It is left out of the register unless the Status filter shows closed risks."
+          >
+            Closed
+          </span>
+        ) : (
+          <span
+            className="text-xs text-foreground"
+            data-testid="risks-row-open"
+          >
+            Open
+          </span>
+        ),
     },
   ];
 
-  // AC-6: Page-header `Hierarchy view ->` link on /risks navigates to
-  // /risks/hierarchy. The reciprocal `List view ->` link on the
-  // hierarchy page is wired in a sibling edit.
-  //
-  // Slice 136: Export buttons (CSV / JSON / XLSX) wire to the BFF
-  // proxy at `/api/risks/export?format=...`, which forwards to the
-  // platform `GET /v1/risks/export` endpoint. Each link is an
-  // `<a download>` so the browser honours the backend's
-  // Content-Disposition filename; no client-side JS download flow.
+  const optionalColumns: Record<OptionalColumn, ListColumn<Risk>> = {
+    methodology: {
+      id: "methodology",
+      header: header("methodology", "Methodology"),
+      ariaSort: ariaSort(sortState, "methodology"),
+      cell: (row) => (
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="risks-row-methodology"
+        >
+          {enumLabel("RiskMethodology", row.methodology)}
+        </span>
+      ),
+    },
+    level: {
+      id: "level",
+      header: header("level", "Level"),
+      ariaSort: ariaSort(sortState, "level"),
+      cell: (row) => (
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="risks-row-level"
+        >
+          {row.level ? LEVEL_LABELS[row.level] ?? row.level : "—"}
+        </span>
+      ),
+    },
+    org_unit: {
+      id: "org_unit",
+      header: header("org_unit", "Org unit"),
+      ariaSort: ariaSort(sortState, "org_unit"),
+      cell: (row) => (
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="risks-row-org-unit"
+        >
+          {row.org_unit_id ? orgUnitName.get(row.org_unit_id) ?? "—" : "—"}
+        </span>
+      ),
+    },
+    themes: {
+      id: "themes",
+      header: header("themes", "Themes"),
+      ariaSort: ariaSort(sortState, "themes"),
+      cell: (row) => (
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="risks-row-themes"
+        >
+          {row.themes.length ? row.themes.join(", ") : "—"}
+        </span>
+      ),
+    },
+    created_at: {
+      id: "created_at",
+      header: header("created_at", "Created"),
+      ariaSort: ariaSort(sortState, "created_at"),
+      className: nowrap,
+      cell: (row) => (
+        <span
+          className="font-mono text-xs text-muted-foreground"
+          data-testid="risks-row-created"
+        >
+          {row.created_at.slice(0, 10)}
+        </span>
+      ),
+    },
+  };
+
+  const columns = [
+    ...defaultColumns,
+    ...columnsChosen.map((c) => optionalColumns[c]),
+  ];
+
   const actions = (
     <>
       <Link
@@ -903,12 +786,6 @@ function RisksPageInner() {
           Export {RISK_EXPORT_FORMAT_LABELS[format]}
         </a>
       ))}
-      {/* Slice 247 — honesty fix. Previously rendered as
-          `<Button size="sm" disabled>` with no tooltip / banner / route,
-          even though `/risks/new` exists (slice 105) and the empty-state
-          CTA already routes there. Same shadcn Button shape via
-          `buttonVariants({ size: "sm" })`, wrapped in a Next `<Link>` to
-          `/risks/new`. Matches the /vendors page header pattern. */}
       <Link
         href="/risks/new"
         data-testid="risks-new-link"
@@ -928,15 +805,21 @@ function RisksPageInner() {
     </>
   );
 
+  const filterRow = (
+    <FilterPills
+      pills={pills}
+      onChange={(id, v) => updateFilter(id as FilterKey, v)}
+      meta={meta}
+    />
+  );
+
   if (risksQ.isLoading) {
     return (
       <ListPage
         title={pageTitle("/risks")}
         subtitle={subtitle}
         actions={actions}
-        filterRow={
-          <FilterPills pills={pills} onChange={() => {}} meta={meta} />
-        }
+        filterRow={filterRow}
       >
         <ListLoadingSkeleton />
       </ListPage>
@@ -949,6 +832,7 @@ function RisksPageInner() {
         title={pageTitle("/risks")}
         subtitle={subtitle}
         actions={actions}
+        filterRow={filterRow}
       >
         <Alert variant="destructive" data-testid="risks-load-error">
           <AlertTitle>Could not load risks</AlertTitle>
@@ -958,12 +842,6 @@ function RisksPageInner() {
     );
   }
 
-  // AC-4: empty-state copy "No risks logged yet" with `Add first risk`
-  // primary CTA (per design doc §2 — true zero-state). Most installs
-  // start with zero risks; the CTA routes to the dedicated risk-create
-  // form at `/risks/new` (slice 105). When filters narrow to zero
-  // results on a populated tenant, the CTA changes to `Clear filters`.
-  const isFilterEmpty = rows.length > 0 && visible.length === 0;
   const emptyState = (
     <EmptyState
       icon={
@@ -982,20 +860,16 @@ function RisksPageInner() {
           />
         </svg>
       }
-      title={
-        isFilterEmpty ? "No risks match these filters" : "No risks logged yet"
-      }
+      title={filtered ? "No risks match these filters" : "No risks logged yet"}
       body={
-        isFilterEmpty
-          ? "Try widening the category, treatment, methodology, org unit, severity, or owner filters."
+        filtered
+          ? "Try widening the status, owner, treatment, category, review due, methodology or org unit filters."
           : "Start a register with one or two known operational risks — you can refine methodology later."
       }
       cta={
-        isFilterEmpty
+        filtered
           ? { label: "Clear filters", onClick: clearAll }
           : {
-              // True zero-state CTA — routes to the dedicated
-              // risk-create form added by slice 105.
               label: "Add first risk",
               onClick: () => router.push("/risks/new"),
             }
@@ -1003,66 +877,28 @@ function RisksPageInner() {
     />
   );
 
-  // Slice 185 (AC-1, AC-3): the row-click affordance is intentionally
-  // ABSENT. The previous implementation routed `onRowClick` to
-  // `/risks/hierarchy?focus=<id>` as a "no 404" stand-in for a
-  // per-risk detail page that does not yet exist. That created an
-  // honesty-gap: the row advertised "click to view risk detail" but
-  // delivered the hierarchy view. The fix is to remove the row-level
-  // affordance entirely; the explicit per-row "View in hierarchy"
-  // link (AC-2, see the `actions` column above) preserves the
-  // existing workflow. The future per-risk detail page is a separate
-  // slice (Option B in slice 185's spec); when it ships, this page
-  // gains a per-row link to `/risks/${id}` without re-introducing
-  // row-as-link semantics.
-
   return (
     <ListPage
       title={pageTitle("/risks")}
       subtitle={subtitle}
       actions={actions}
-      filterRow={
-        <FilterPills
-          pills={pills}
-          onChange={(id, v) => updateFilter(id as keyof RiskFilters, v)}
-          meta={meta}
-        />
-      }
+      filterRow={filterRow}
     >
-      {/* Slice 681 (AC-2): the slice-185 "Per-risk detail page is a
-          future slice" banner is REMOVED — the read-only detail route
-          now exists (`/risks/{id}`) and the title links to it. The
-          per-row "View in hierarchy" link is retained for the org-tree
-          scoping workflow (it sits alongside, not instead of, the
-          title drill-in). See decisions log D2. */}
       <ListTable<Risk>
         columns={columns}
-        rows={pagedRows}
+        rows={rows}
         rowKey={(row) => row.id}
+        onRowClick={(row) =>
+          router.push(`/risks/${encodeURIComponent(row.id)}`)
+        }
         emptyFallback={emptyState}
-        // Slice 281 — collapse to a card stack at `< md`. The risks
-        // table carries 9 columns (id / title / category / treatment
-        // / owner / residual / severity / review_due / actions); it
-        // horizontal-scrolls badly at 375px and the per-row "View in
-        // hierarchy" link (slice 185 AC-2) is unreachable without
-        // scrolling. The card variant surfaces every column inline as
-        // label/value pairs. Desktop UX is unchanged at `≥ md`
-        // (P0-281-1).
         mobileMode="cards"
       />
-      {/* Slice 246 — pagination footer. Rendered ONLY when there is at
-          least one row in the filtered set; an empty result delegates
-          to the `emptyFallback` above and a stand-alone pagination
-          chrome would be honesty-confusing (Previous / Next clicks
-          would no-op). On a single-page result the footer still
-          renders so the user gets the truth-telling "Showing N of N"
-          summary; both Previous and Next are disabled and clearly
-          read as such. */}
-      {visible.length > 0 ? (
+      {total > 0 ? (
         <ListPagination
           currentPage={currentPage}
           pageSize={RISKS_PAGE_SIZE}
-          totalCount={visible.length}
+          totalCount={total}
           onPageChange={goToPage}
           testIdPrefix="risks-pagination"
         />
@@ -1071,10 +907,56 @@ function RisksPageInner() {
   );
 }
 
+// The residual cell (#2132): the band, with the inherent severity on
+// hover. A 5x5 residual shows its 1..25 value and band; a FAIR residual is
+// dollars and carries no band; a risk not yet evaluated says so.
+function ResidualCell({ row }: { row: Risk }) {
+  const inherentFair =
+    row.methodology === "fair" ? fairScore(row.inherent_score) : null;
+  const inherentText = inherentFair
+    ? `Inherent: ${formatDollars(inherentFair.annualized_loss_exposure)} (FAIR)`
+    : `Inherent: ${row.severity} (${severityBandLabel(
+        severityBand(row.severity),
+      )})`;
+
+  if (residualState(row.residual_score) === "pending") {
+    return (
+      <span
+        className="text-xs italic text-muted-foreground"
+        title={`${PENDING_EVAL_TOOLTIP} ${inherentText}.`}
+        data-testid="risks-row-residual-pending"
+      >
+        {PENDING_EVAL_LABEL}
+      </span>
+    );
+  }
+  const formatted = formatResidualScore(row.residual_score, row.methodology);
+  const n = residualSeverity(row.residual_score);
+  if (row.methodology === "fair" || n == null) {
+    return (
+      <span
+        className="font-mono text-xs text-foreground"
+        title={inherentText}
+        data-testid="risks-row-residual"
+      >
+        {formatted}
+      </span>
+    );
+  }
+  return (
+    <SeverityPill
+      value={formatted}
+      band={severityBand(n)}
+      className={residualClass(formatted)}
+      testId="risks-row-residual"
+      title={inherentText}
+    />
+  );
+}
+
 export default function RisksListPage() {
   // useSearchParams must be wrapped in Suspense in App Router (Next 16
-  // strict-mode requirement). The fallback is the same skeleton the
-  // query-pending state shows, so the perceived layout is stable.
+  // strict-mode requirement).
   return (
     <Suspense fallback={<ListLoadingSkeleton />}>
       <RisksPageInner />

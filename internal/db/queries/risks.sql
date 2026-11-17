@@ -318,3 +318,135 @@ SET status = sqlc.arg(status),
     updated_at = now()
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
 RETURNING *;
+
+-- name: ListRisksPage :many
+-- #2132: the risk register, filtered, sorted and paged on the server.
+--
+-- Filters (each optional; NULL / false leaves it off):
+--   status            open | closed. NULL keeps both.
+--   include_rollups   false leaves out a roll-up: a risk with at least one
+--                     open child (#2060, the #2107 open-children rule).
+--   treatment, methodology, level, theme, org_unit_id: exact match.
+--   category_ids      any of these organisation categories (#1745); the
+--                     store resolves slugs to ids first.
+--   owner_user_id     that person's risks (#2129); unowned keeps the risks
+--                     with no owner user.
+--   due_from, due_before  review_due_at in [due_from, due_before). The
+--                     store turns overdue, due-soon and a date range into
+--                     these two UTC-day bounds (the duedate rule).
+--
+-- sort_key is one of the fixed keys in the ORDER BY; the handler refuses
+-- any other value before it gets here. Residual follows #2185's
+-- risk.RanksAbove: every non-FAIR (5x5) risk ranks above every FAIR risk,
+-- in either direction, so a dollar figure never ranks against a 1..25
+-- score. The value is risk.ScoreValue's: score, then severity, then
+-- likelihood x impact. A risk with no residual value sorts after the
+-- scored ones of its group in both directions. Every order ends on r.id,
+-- so offset paging has no duplicates or gaps. Text keys sort lower-cased
+-- under COLLATE "C", so the order is the same on every deployment.
+--
+-- RLS posture: the explicit tenant_id predicates sit alongside the
+-- GUC-driven RLS on every table read here.
+SELECT
+    sqlc.embed(r),
+    kids.child_count::int AS child_count
+FROM risks r
+LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS child_count
+    FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND c.status = 'open'
+) kids ON true
+LEFT JOIN org_risk_categories cat
+       ON cat.tenant_id = r.tenant_id AND cat.id = r.category_id
+LEFT JOIN users ou
+       ON ou.tenant_id = r.tenant_id AND ou.id = r.owner_user_id
+LEFT JOIN org_units unit
+       ON unit.tenant_id = r.tenant_id AND unit.id = r.org_unit_id
+LEFT JOIN LATERAL (
+    SELECT CASE WHEN r.methodology = 'fair' THEN 1 ELSE 0 END AS fair_group,
+           CASE
+               WHEN jsonb_typeof(r.residual_score -> 'score') = 'number'
+                   THEN (r.residual_score ->> 'score')::float8
+               WHEN jsonb_typeof(r.residual_score -> 'severity') = 'number'
+                   THEN (r.residual_score ->> 'severity')::float8
+               WHEN jsonb_typeof(r.residual_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.residual_score -> 'impact') = 'number'
+                   THEN (r.residual_score ->> 'likelihood')::float8 * (r.residual_score ->> 'impact')::float8
+           END AS residual,
+           lower(COALESCE(NULLIF(ou.display_name, ''), NULLIF(ou.email, ''), NULLIF(btrim(r.treatment_owner), ''))) AS owner_name
+) k ON true
+WHERE r.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.narg('status')::text IS NULL OR r.status::text = sqlc.narg('status')::text)
+  AND (sqlc.arg(include_rollups)::bool OR kids.child_count = 0)
+  AND (sqlc.narg('treatment')::text IS NULL OR r.treatment::text = sqlc.narg('treatment')::text)
+  AND (sqlc.narg('methodology')::text IS NULL OR r.methodology::text = sqlc.narg('methodology')::text)
+  AND (sqlc.narg('level')::text IS NULL OR r.level::text = sqlc.narg('level')::text)
+  AND (sqlc.narg('theme')::text IS NULL OR sqlc.narg('theme')::text = ANY(r.themes))
+  AND (sqlc.narg('org_unit_id')::uuid IS NULL OR r.org_unit_id = sqlc.narg('org_unit_id')::uuid)
+  AND (sqlc.narg('category_ids')::uuid[] IS NULL OR r.category_id = ANY(sqlc.narg('category_ids')::uuid[]))
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR r.owner_user_id = sqlc.narg('owner_user_id')::uuid)
+  AND (NOT sqlc.arg(unowned)::bool OR r.owner_user_id IS NULL)
+  AND (sqlc.narg('due_from')::timestamptz IS NULL OR r.review_due_at >= sqlc.narg('due_from')::timestamptz)
+  AND (sqlc.narg('due_before')::timestamptz IS NULL OR r.review_due_at < sqlc.narg('due_before')::timestamptz)
+ORDER BY
+    -- residual (the default, descending): 5x5 above FAIR in both directions.
+    CASE WHEN sqlc.arg(sort_key)::text IN ('residual', 'residual_age') THEN k.fair_group END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'residual' AND NOT sqlc.arg(sort_desc)::bool THEN k.residual END ASC NULLS LAST,
+    CASE WHEN (sqlc.arg(sort_key)::text = 'residual' AND sqlc.arg(sort_desc)::bool) OR sqlc.arg(sort_key)::text = 'residual_age' THEN k.residual END DESC NULLS LAST,
+    -- residual_age (the dashboard's residual,age): oldest first on a tie.
+    CASE WHEN sqlc.arg(sort_key)::text = 'residual_age' THEN r.created_at END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'title' AND NOT sqlc.arg(sort_desc)::bool THEN lower(r.title) COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'title' AND sqlc.arg(sort_desc)::bool THEN lower(r.title) COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'category' AND NOT sqlc.arg(sort_desc)::bool THEN lower(cat.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'category' AND sqlc.arg(sort_desc)::bool THEN lower(cat.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'owner' AND NOT sqlc.arg(sort_desc)::bool THEN k.owner_name COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'owner' AND sqlc.arg(sort_desc)::bool THEN k.owner_name COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'treatment' AND NOT sqlc.arg(sort_desc)::bool THEN r.treatment::text COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'treatment' AND sqlc.arg(sort_desc)::bool THEN r.treatment::text COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'review_due' AND NOT sqlc.arg(sort_desc)::bool THEN r.review_due_at END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'review_due' AND sqlc.arg(sort_desc)::bool THEN r.review_due_at END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'status' AND NOT sqlc.arg(sort_desc)::bool THEN r.status::text COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'status' AND sqlc.arg(sort_desc)::bool THEN r.status::text COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'methodology' AND NOT sqlc.arg(sort_desc)::bool THEN r.methodology::text COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'methodology' AND sqlc.arg(sort_desc)::bool THEN r.methodology::text COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'level' AND NOT sqlc.arg(sort_desc)::bool THEN r.level END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'level' AND sqlc.arg(sort_desc)::bool THEN r.level END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'org_unit' AND NOT sqlc.arg(sort_desc)::bool THEN lower(unit.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'org_unit' AND sqlc.arg(sort_desc)::bool THEN lower(unit.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'themes' AND NOT sqlc.arg(sort_desc)::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'themes' AND sqlc.arg(sort_desc)::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'created_at' AND NOT sqlc.arg(sort_desc)::bool THEN r.created_at END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'created_at' AND sqlc.arg(sort_desc)::bool THEN r.created_at END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'id' AND sqlc.arg(sort_desc)::bool THEN r.id END DESC,
+    r.id
+LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
+
+-- name: CountRisksPage :one
+-- #2132: the total for ListRisksPage. It takes every filter the list does,
+-- so the total counts exactly the set the register pages over.
+SELECT count(*)::bigint AS total
+FROM risks r
+LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS child_count
+    FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND c.status = 'open'
+) kids ON true
+WHERE r.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.narg('status')::text IS NULL OR r.status::text = sqlc.narg('status')::text)
+  AND (sqlc.arg(include_rollups)::bool OR kids.child_count = 0)
+  AND (sqlc.narg('treatment')::text IS NULL OR r.treatment::text = sqlc.narg('treatment')::text)
+  AND (sqlc.narg('methodology')::text IS NULL OR r.methodology::text = sqlc.narg('methodology')::text)
+  AND (sqlc.narg('level')::text IS NULL OR r.level::text = sqlc.narg('level')::text)
+  AND (sqlc.narg('theme')::text IS NULL OR sqlc.narg('theme')::text = ANY(r.themes))
+  AND (sqlc.narg('org_unit_id')::uuid IS NULL OR r.org_unit_id = sqlc.narg('org_unit_id')::uuid)
+  AND (sqlc.narg('category_ids')::uuid[] IS NULL OR r.category_id = ANY(sqlc.narg('category_ids')::uuid[]))
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR r.owner_user_id = sqlc.narg('owner_user_id')::uuid)
+  AND (NOT sqlc.arg(unowned)::bool OR r.owner_user_id IS NULL)
+  AND (sqlc.narg('due_from')::timestamptz IS NULL OR r.review_due_at >= sqlc.narg('due_from')::timestamptz)
+  AND (sqlc.narg('due_before')::timestamptz IS NULL OR r.review_due_at < sqlc.narg('due_before')::timestamptz);

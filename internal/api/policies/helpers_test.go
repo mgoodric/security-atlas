@@ -236,6 +236,7 @@ func TestWriteTransitionErr(t *testing.T) {
 		{fmt.Errorf("transition: %w", policy.ErrSelfApproval), http.StatusForbidden},
 		{fmt.Errorf("transition: %w", policy.ErrApproverNotPerson), http.StatusForbidden},
 		{fmt.Errorf("transition: %w", policy.ErrSubmitterUnknown), http.StatusConflict},
+		{fmt.Errorf("transition: %w", policy.ErrUnknownLinkedControl), http.StatusUnprocessableEntity},
 		{errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
@@ -284,6 +285,7 @@ func TestWritePublishErr(t *testing.T) {
 		want int
 	}{
 		{policy.ErrOrphanPublish, http.StatusConflict},
+		{policy.ErrNoLiveLinkedControl, http.StatusUnprocessableEntity},
 		{policy.ErrNotFound, http.StatusNotFound},
 		{policy.ErrWrongState, http.StatusConflict},
 		{policy.ErrInvalidVersion, http.StatusBadRequest},

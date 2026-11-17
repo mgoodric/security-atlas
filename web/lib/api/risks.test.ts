@@ -24,13 +24,27 @@ describe("risk list fetchers and roll-ups", () => {
   }
 
   test.each([
-    [false, "/v1/risks"],
-    [true, "/v1/risks?include_rollups=true"],
-  ])("listRisks(includeRollups=%s) asks upstream for %s", async (inc, path) => {
-    const spy = stubFetch({ risks: [{ id: "r1" }], count: 1 });
-    const risks = await listRisks("test-bearer-2060", inc);
-    expect(risks).toEqual([{ id: "r1" }]);
+    [{}, "/v1/risks"],
+    [{ include_rollups: "true" }, "/v1/risks?include_rollups=true"],
+    // #2132: filters, sort and page pass through in allow-list order.
+    [
+      { sort: "-title", owner: "none", status: "all", limit: "50" },
+      "/v1/risks?status=all&owner=none&sort=-title&limit=50",
+    ],
+  ])("listRisks(%o) asks upstream for %s", async (params, path) => {
+    const spy = stubFetch({ risks: [{ id: "r1" }], count: 1, total: 7 });
+    const page = await listRisks("test-bearer-2060", params);
+    expect(page.risks).toEqual([{ id: "r1" }]);
+    expect(page.total).toBe(7);
     expect(String(spy.mock.calls[0]?.[0]).endsWith(path)).toBe(true);
+  });
+
+  test("listRisks drops a parameter not on the allow-list", async () => {
+    const spy = stubFetch({ risks: [] });
+    await listRisks("test-bearer-2060", {
+      tenant_id: "x",
+    } as unknown as Record<string, string>);
+    expect(String(spy.mock.calls[0]?.[0]).endsWith("/v1/risks")).toBe(true);
   });
 
   test.each([
