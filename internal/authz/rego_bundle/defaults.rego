@@ -110,6 +110,22 @@ allow if {
     count(input.user.roles) > 0
 }
 
+# #2119 — GET /v1/approvals, what the caller can approve right now.
+#
+# Every signed-in role reads it so the sidebar can ask without knowing the
+# caller's roles first. The handler answers per caller: it lists only the
+# rows each type's approve handler would accept from this credential
+# (authz.IsTenantApprover, then that type's own approver check), so a
+# viewer, an auditor or a machine credential gets an empty list. Exact
+# path: any sub-path stays denied. Default-deny still applies to a
+# roleless credential.
+allow if {
+    is_read
+    input.resource.type == "approvals"
+    input.request.path == "/v1/approvals"
+    count(input.user.roles) > 0
+}
+
 me_self_read_paths := {
     "/v1/me",
     "/v1/me/tenancy",

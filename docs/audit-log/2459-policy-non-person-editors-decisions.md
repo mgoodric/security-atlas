@@ -75,7 +75,9 @@ publish, which this ticket doesn't ask for.
 
 ## `/v1/approvals` agreement
 
-#2453 (the Approvals list) is not on `main` at the time of writing. It
-calls the policy approval rule, so it gets this rule unchanged. Its
-agreement test belongs to that PR, or to a follow-up once both have
-landed.
+The Approvals list (#2453) calls `policy.CheckApprover` for each row, so
+it gets this rule with no change of its own.
+`TestApprovals2459_NonPersonEditorMatchesApproveGate` pins the agreement
+for each of the three kinds. With the setting off, an uninvolved approver
+neither sees the policy nor can approve it. With it on, they see it marked
+`self_approval`, and the approve route accepts it.

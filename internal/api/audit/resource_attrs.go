@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -27,7 +28,7 @@ type periodLookup interface {
 	PopulationPeriod(ctx context.Context, id uuid.UUID) (uuid.UUID, bool, error)
 	SamplePeriod(ctx context.Context, id uuid.UUID) (uuid.UUID, bool, error)
 	EvidencePeriods(ctx context.Context, id uuid.UUID) (audit.EvidenceScope, bool, error)
-	ControlPeriods(ctx context.Context, controlID uuid.UUID) ([]uuid.UUID, error)
+	ControlPeriods(ctx context.Context, controlID uuid.UUID, since, until time.Time) ([]uuid.UUID, error)
 }
 
 // ResourceAttrs returns the authz resource-attrs hydrator for the auditor's
@@ -43,9 +44,11 @@ type periodLookup interface {
 //	GET  /v1/evidence/{id}                  audit_period_ids the periods whose populations contain the record
 //	                                        scope_cell_id    the record's scope cell
 //	GET  /v1/evidence?control_id=           audit_period_ids the periods whose populations cover the whole control
+//	     &since=&until=                                      and whose window holds [since, until]
 //
 // It fails closed: a malformed id, an unknown or other-tenant row, a
-// population attached to no period, or a list without control_id leaves
+// population attached to no period, or a list without control_id or
+// without explicit since and until leaves
 // the period attribute unset, and the auditor rules deny. A lookup error is
 // returned, and the middleware answers 500. Every other request gets no
 // attributes.
@@ -129,12 +132,28 @@ func evidenceRecordAttrs(ctx context.Context, rawID string, store periodLookup) 
 // population covers every cell of it: the per-control list ignores
 // ?scope_cell_id=, so a cell-scoped population must not admit it. A list
 // without control_id gets no period, so no tenant-wide read.
+//
+// #2424: the list is bounded in time too. The caller passes explicit since
+// and until (RFC 3339, parsed as the handler parses them), and an admitting
+// population's window and freeze horizon must hold both. Without them the
+// handler defaults to the last 30 days, and a caller-chosen range could
+// reach years of the control's evidence, so a missing or malformed bound
+// gets no period.
 func evidenceListAttrs(r *http.Request, store periodLookup) (map[string]any, error) {
-	controlID, err := uuid.Parse(r.URL.Query().Get("control_id"))
+	q := r.URL.Query()
+	controlID, err := uuid.Parse(q.Get("control_id"))
 	if err != nil {
 		return nil, nil
 	}
-	periods, err := store.ControlPeriods(r.Context(), controlID)
+	since, err := time.Parse(time.RFC3339, q.Get("since"))
+	if err != nil {
+		return nil, nil
+	}
+	until, err := time.Parse(time.RFC3339, q.Get("until"))
+	if err != nil {
+		return nil, nil
+	}
+	periods, err := store.ControlPeriods(r.Context(), controlID, since.UTC(), until.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("audit resource attrs: %w", err)
 	}
