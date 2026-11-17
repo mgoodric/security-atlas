@@ -384,10 +384,10 @@ mappings:
     strength: 0.6
     rationale: "Security in project management overlaps with Secure Engineering Principles for project-phase security gates."
   - requirement_code: A.5.9
-    scf_anchor: AST-22
-    relationship_type: subset_of
-    strength: 0.7
-    rationale: "Inventory of assets is part of the SCF asset management family; AST-22 (Secure Disposal, Destruction or Re-Use of Equipment) carries this edge for the asset lifecycle."
+    scf_anchor: AST-04
+    relationship_type: intersects_with
+    strength: 0.8
+    rationale: "An asset inventory maps to SCF Asset Inventories (AST-04), the anchor SCF 2026.3 lists for ISO 27002:2022 5.9. Intersects rather than equal: the ownership half of the control sits in other SCF controls. Was AST-22 @ 0.70 subset_of until #2301."
   - requirement_code: A.5.10
     scf_anchor: DCH-04
     relationship_type: intersects_with
