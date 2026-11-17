@@ -162,15 +162,17 @@ func inWindowRecords(all []allRecord, class string, now time.Time) []inWindowRec
 //
 // "Latest" is decided by, in order:
 //
-//  1. observed_at, later wins;
-//  2. ingested_at, later wins, when observed_at is equal (two attestations
+//  1. min(observed_at, ingested_at), later wins;
+//  2. ingested_at, later wins, when that is equal (two attestations
 //     stamped the same moment, or a client clock that repeats);
 //  3. id, the greater string wins, when both are equal.
 //
 // The comparison is explicit, so the outcome does not depend on the order
-// the records arrive in. Clock skew between attesters is resolved by
-// observed_at as recorded: the attestation that claims the later moment
-// wins, and the ingest time only breaks a tie.
+// the records arrive in. A backdated attestation is ordered by the moment
+// it claims, so backdating can only make it lose. A future-dated one is
+// capped at the moment the platform received it (#2509): ingest accepts
+// observed_at up to MaxObservedAtSkew ahead, and without the cap a pusher
+// could date a pass a day ahead and outvote every honest later fail.
 func latestAttestationWins(records []inWindowRecord) []inWindowRecord {
 	latest := -1
 	for i, r := range records {
@@ -197,13 +199,23 @@ func latestAttestationWins(records []inWindowRecord) []inWindowRecord {
 // attestationAfter reports whether a is later than b under the
 // latestAttestationWins order.
 func attestationAfter(a, b inWindowRecord) bool {
-	if !a.observedAt.Equal(b.observedAt) {
-		return a.observedAt.After(b.observedAt)
+	if ae, be := attestedAt(a), attestedAt(b); !ae.Equal(be) {
+		return ae.After(be)
 	}
 	if !a.ingestedAt.Equal(b.ingestedAt) {
 		return a.ingestedAt.After(b.ingestedAt)
 	}
 	return a.id > b.id
+}
+
+// attestedAt is the moment an attestation counts from:
+// min(observed_at, ingested_at). A record with no ingested_at (a fixture
+// record) counts from observed_at.
+func attestedAt(r inWindowRecord) time.Time {
+	if !r.ingestedAt.IsZero() && r.ingestedAt.Before(r.observedAt) {
+		return r.ingestedAt
+	}
+	return r.observedAt
 }
 
 // computeResult rolls a set of in-window evidence results into a single

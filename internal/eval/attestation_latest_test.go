@@ -61,9 +61,26 @@ func TestLatestAttestationWins(t *testing.T) {
 			want: ResultPass,
 		},
 		{
-			name: "skewed clock: later observed_at wins even when ingested first",
-			recs: []inWindowRecord{att(ResultFail, t0.Add(time.Hour), t0, "a"), att(ResultPass, t0, t0.Add(2*time.Hour), "b")},
+			name: "backdated: the attestation claiming the later moment wins even when ingested first",
+			recs: []inWindowRecord{att(ResultFail, t0.Add(time.Hour), t0.Add(time.Hour), "a"), att(ResultPass, t0, t0.Add(2*time.Hour), "b")},
 			want: ResultFail,
+		},
+		{
+			// #2509: a pass dated 20h ahead does not beat a fail made an
+			// hour later; it counts from its ingest time.
+			name: "future-dated pass loses to a later real fail",
+			recs: []inWindowRecord{att(ResultPass, t0.Add(20*time.Hour), t0, "a"), att(ResultFail, t0.Add(time.Hour), t0.Add(time.Hour), "b")},
+			want: ResultFail,
+		},
+		{
+			name: "future-dated pass loses to a later real fail, reversed input",
+			recs: []inWindowRecord{att(ResultFail, t0.Add(time.Hour), t0.Add(time.Hour), "b"), att(ResultPass, t0.Add(20*time.Hour), t0, "a")},
+			want: ResultFail,
+		},
+		{
+			name: "future-dated pass still wins over an earlier real fail",
+			recs: []inWindowRecord{att(ResultFail, t0.Add(-time.Hour), t0.Add(-time.Hour), "a"), att(ResultPass, t0.Add(20*time.Hour), t0, "b")},
+			want: ResultPass,
 		},
 		{
 			name: "equal observed_at and ingested_at: greater id wins",

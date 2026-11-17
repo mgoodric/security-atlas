@@ -27,7 +27,7 @@ VALUES (
     'manual_attested',
     'security-engineering',
     'active',
-    'env == "prod"',
+    '{"op":"true"}',
     'demo-access-review-attest',
     'quarterly'
 )
