@@ -85,7 +85,9 @@ stateDiagram-v2
 Your open risks, filtered, sorted and paged by the server, so the counts
 cover the whole register. Filter by status, owner, treatment, category,
 review date, methodology or org unit. Roll-ups stay hidden until you
-turn on **Show roll-ups**, so nothing is counted twice. Export the list
+turn on **Show roll-ups**, so nothing is counted twice. Choose which
+columns to show, and save a set of filters, sort and columns as a view
+of your own to come back to. Export the list
 as CSV, JSON or a spreadsheet. **Risk taxonomy** holds your categories
 and themes.
 

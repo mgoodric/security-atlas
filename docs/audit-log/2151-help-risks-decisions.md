@@ -58,8 +58,9 @@ GLOSSARY.md's "Action plan: Completed and Verified".
 - Action plans: OPA admits only admin on `action-plans` writes; manual
   verify is `IsTenantAdmin`, never the owner, only plans with no linked
   controls (`VerifyActionPlan`).
-- Saved views (#2133) have not landed, so the help does not mention them.
-  The edit protections (#2311) landed while this was in CI: the register
+- Saved views (#2133) landed while this was in CI: the register help says
+  you can save filters, sort and columns as a view of your own (views are
+  per user, `saved_views.user_id`). The edit protections (#2311) landed while this was in CI: the register
   help now describes the "changed since you opened it" reload and the
   methodology-reset note, in the edit form's own words.
 
