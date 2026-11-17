@@ -1,4 +1,4 @@
--- Reverses 20261240000000_control_evaluation_exception_change_trigger.sql.
+-- Reverses 20261243000000_control_evaluation_exception_change_trigger.sql.
 --
 -- Fails while any exception_change row exists: the ledger is append-only,
 -- so those rows are not rewritten to make the narrower CHECK fit.

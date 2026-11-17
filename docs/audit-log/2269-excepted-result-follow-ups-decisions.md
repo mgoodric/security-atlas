@@ -80,7 +80,7 @@ synchronously after each tenant's commit, once per distinct control. A
 failure is logged, not returned: the state change has already committed and
 the scheduler re-evaluates the control within the hour.
 
-The runs record trigger `exception_change` (migration `20261240000000`
+The runs record trigger `exception_change` (migration `20261243000000`
 widens `control_evaluations_trigger_chk`) and no `triggered_by`, which #2479
 keeps to manual runs. Approval and denial do not re-evaluate: neither changes
 what the engine reads. An activation with a future `effective_from` records
