@@ -27,6 +27,12 @@ VALUES (
 ON CONFLICT (id) DO UPDATE
     SET status = 'active', display_name = 'Person Names E2E';
 
+-- #2501: a live role, so the plan's owner is not flagged as lacking Risk
+-- (a user with no live role lacks every optional module).
+INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
+VALUES ('00000000-0000-0000-0000-00000000d3a0', '44444444-4444-4444-4444-444444442085', 'grc_engineer', 'e2e:2501')
+ON CONFLICT DO NOTHING;
+
 INSERT INTO action_plans (id, tenant_id, title, owner_id, due_date, status)
 VALUES (
     'acacacac-acac-acac-acac-acacacac2085',

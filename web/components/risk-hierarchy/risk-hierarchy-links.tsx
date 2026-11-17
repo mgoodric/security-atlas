@@ -20,6 +20,7 @@ import { useId, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmInline } from "@/components/ui/row-actions";
 import { Select } from "@/components/ui/select";
 import {
   attachChildRisks,
@@ -41,6 +42,8 @@ export function RiskHierarchyLinks({ risk }: Props) {
   const pickerId = useId();
   const [selected, setSelected] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  // #2280: Detach fires at once, so it asks first. Holds the child id.
+  const [confirmingDetach, setConfirmingDetach] = useState<string | null>(null);
 
   const children = useQuery({
     queryKey: ["risk-children", risk.id],
@@ -80,6 +83,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
     mutationFn: (childID: string) => detachChildRisk(risk.id, childID),
     onSuccess: async () => {
       setActionError(null);
+      setConfirmingDetach(null);
       await refresh();
     },
     onError: (err: Error) => setActionError(err.message),
@@ -153,16 +157,28 @@ export function RiskHierarchyLinks({ risk }: Props) {
             <ul className="space-y-1.5" data-testid="risk-detail-children-list">
               {childRows.map((c) => (
                 <LinkedRiskRow key={c.id} link={c} testid="risk-detail-child">
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    disabled={detach.isPending}
-                    onClick={() => detach.mutate(c.id)}
-                    data-testid={`risk-detail-child-detach-${c.id}`}
-                    aria-label={`Detach ${c.title}`}
-                  >
-                    Detach
-                  </Button>
+                  {confirmingDetach === c.id ? (
+                    <ConfirmInline
+                      prompt={`Detach ${c.title}? It stops rolling up to this risk.`}
+                      confirmLabel="Detach"
+                      ariaLabel={`Confirm: detach ${c.title}`}
+                      busy={detach.isPending}
+                      onCancel={() => setConfirmingDetach(null)}
+                      onConfirm={() => detach.mutate(c.id)}
+                      data-testid={`risk-detail-child-detach-${c.id}-confirm`}
+                    />
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      disabled={detach.isPending}
+                      onClick={() => setConfirmingDetach(c.id)}
+                      data-testid={`risk-detail-child-detach-${c.id}`}
+                      aria-label={`Detach ${c.title}`}
+                    >
+                      Detach
+                    </Button>
+                  )}
                 </LinkedRiskRow>
               ))}
             </ul>
