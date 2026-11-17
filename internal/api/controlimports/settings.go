@@ -23,7 +23,7 @@ const maxSettingsBody = 4 * 1024
 // (controlimport.Store in production).
 type SettingsStore interface {
 	GetSettings(ctx context.Context) (controlimport.Settings, error)
-	SetSettings(ctx context.Context, in controlimport.Settings, updatedBy string, actor uuid.UUID) (controlimport.Settings, error)
+	SetSettings(ctx context.Context, in controlimport.Settings, updatedBy string, actor uuid.UUID, principal string) (controlimport.Settings, error)
 }
 
 // WithSettings serves GET and PUT /v1/controls/imports/settings (#2079).
@@ -65,9 +65,10 @@ func (h *Handler) PutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	// The audit row names the user; a caller that is not one (a bootstrap
-	// key) is recorded as uuid.Nil, with cred.ID still in updated_by.
+	// key) is recorded as uuid.Nil, with cred.ID still in updated_by. The
+	// row's actor_principal names the credential either way (#2329).
 	actor, _ := credstore.CallerUserID(cred)
-	s, err := h.settings.SetSettings(r.Context(), controlimport.Settings{LLMRerankLocal: *body.LLMRerankLocal}, cred.ID, actor)
+	s, err := h.settings.SetSettings(r.Context(), controlimport.Settings{LLMRerankLocal: *body.LLMRerankLocal}, cred.ID, actor, credstore.PrincipalOf(cred))
 	if err != nil {
 		httperr.WriteInternal(w, r, "controlimports", err)
 		return
