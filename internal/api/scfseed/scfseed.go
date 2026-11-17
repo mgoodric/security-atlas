@@ -177,6 +177,45 @@ func EnsureFullCatalog(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+// ReseedOverlayActor is the audit actor on the cascade_removed rows
+// fullReseedSCF writes for the overlay edges it wipes.
+const ReseedOverlayActor = "system:catalog_reseed"
+
+// reseedOverlayAuditSQL records every overlay edge fullReseedSCF is about to
+// delete, one cascade_removed row per edge under the edge's own tenant. The
+// before/after shape matches fw_to_scf_overlay_edges_guard_catalog_delete
+// (migration 20261234000000), with removed_with naming the reseed.
+const reseedOverlayAuditSQL = `INSERT INTO fw_to_scf_overlay_edge_audit_log (
+		tenant_id, overlay_edge_id, action, before, after, actor
+	)
+	SELECT e.tenant_id, e.id, 'cascade_removed',
+	       jsonb_build_object(
+	           'framework', f.slug,
+	           'framework_version', fv.version,
+	           'requirement_code', fr.code,
+	           'scf_release', av.version,
+	           'anchor_code', a.scf_id,
+	           'relationship_type', e.relationship_type,
+	           'strength', e.strength,
+	           'rationale', e.rationale,
+	           'source_ref', e.source_ref,
+	           'status', e.status,
+	           'retirement_reason', e.retirement_reason
+	       ),
+	       jsonb_build_object(
+	           'status', 'removed',
+	           'removed_with', 'catalog_reseed',
+	           'framework_requirement_id', e.framework_requirement_id,
+	           'scf_anchor_id', e.scf_anchor_id
+	       ),
+	       '` + ReseedOverlayActor + `'
+	FROM fw_to_scf_overlay_edges e
+	LEFT JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+	LEFT JOIN framework_versions fv ON fv.id = fr.framework_version_id
+	LEFT JOIN frameworks f ON f.id = fv.framework_id
+	LEFT JOIN scf_anchors a ON a.id = e.scf_anchor_id
+	LEFT JOIN framework_versions av ON av.id = a.framework_version_id`
+
 // fullReseedSCF wipes the SCF + SOC 2 platform-layer rows and reimports the
 // SCF sample. It only fires on the catalog-incomplete branch — i.e. when the
 // catalog is absent OR a prior package left it partial. In that case the
@@ -199,7 +238,11 @@ func fullReseedSCF(ctx context.Context, pool *pgxpool.Pool) error {
 		`TRUNCATE controls RESTART IDENTITY CASCADE`,
 		`DELETE FROM fw_to_scf_edges`,
 		// An active overlay edge refuses its requirement's or anchor's
-		// delete (#2240); a reseed wipes them with the catalog.
+		// delete (#2240); a reseed wipes them with the catalog. Each edge,
+		// active or retired, gets a cascade_removed audit row in its own
+		// tenant first (#2481), in the shape the catalog-delete trigger
+		// writes, so the wipe is on record like any other catalog removal.
+		reseedOverlayAuditSQL,
 		`DELETE FROM fw_to_scf_overlay_edges`,
 		`DELETE FROM framework_requirements`,
 		`DELETE FROM scf_anchors`,
@@ -208,10 +251,16 @@ func fullReseedSCF(ctx context.Context, pool *pgxpool.Pool) error {
 		)`,
 		`DELETE FROM frameworks WHERE slug IN ('scf', 'soc2') AND tenant_id IS NULL`,
 	}
-	for _, stmt := range stmts {
-		if _, err := pool.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("scfseed: reseed wipe %q: %w", stmt, err)
+	// One transaction, so the audit rows and the overlay wipe land together.
+	if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		for _, stmt := range stmts {
+			if _, err := tx.Exec(ctx, stmt); err != nil {
+				return fmt.Errorf("scfseed: reseed wipe %q: %w", stmt, err)
+			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	cat, err := scfimport.Load(scfSamplePath)
