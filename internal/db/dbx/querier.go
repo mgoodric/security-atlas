@@ -287,6 +287,9 @@ type Querier interface {
 	// (issue #1832) keeps with_control_total per tenant even where RLS is
 	// bypassed.
 	CountSCFAnchorsLatest(ctx context.Context, tenantID pgtype.UUID) (CountSCFAnchorsLatestRow, error)
+	// Issue #2325: the total ListSCFRemapProposals pages through, with the same
+	// filters and no cursor.
+	CountSCFRemapProposals(ctx context.Context, arg CountSCFRemapProposalsParams) (int64, error)
 	// Total group count in the tenant (List envelope totalResults).
 	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -3022,8 +3025,19 @@ type Querier interface {
 	// regen-on-rebase note in MEMORY.md). Keep the two in sync.
 	ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error)
 	// Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
-	// proposals, newest target release first, optionally filtered by class and
-	// status. RLS (tenant_read) and the explicit tenant id both bind the read.
+	// proposals, newest first, optionally filtered by class, by a class to
+	// leave out (class_not, #2325: rebound rows a person may still review) and
+	// by status. RLS (tenant_read) and the explicit tenant id both bind the read.
+	//
+	// #2325: a pending proposal (open or rejected) whose control has a newer
+	// version is stale, so it is left out; decide refuses it anyway
+	// (ErrRemapControlChanged). A decided one stays: an approved proposal's
+	// control is the version the approval superseded.
+	//
+	// Keyset paged: the order is (created_at DESC, bundle_id, id), and a page
+	// starts after the cursor row (after_created_at, after_bundle_id, after_id,
+	// all NULL for the first page). CountSCFRemapProposals takes the same
+	// filters.
 	ListSCFRemapProposals(ctx context.Context, arg ListSCFRemapProposalsParams) ([]ListSCFRemapProposalsRow, error)
 	// Read-only: SCIM audit rows for a tenant, newest first. Backs integration
 	// assertions (AC-5) and any future admin surface.

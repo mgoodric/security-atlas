@@ -2578,7 +2578,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/controls/remap-proposals:
     get:
-      summary: GET /v1/controls/remap-proposals — the tenant's SCF remap proposals, one per control left on an older SCF release's anchor, filterable by class and status (#1775)
+      summary: GET /v1/controls/remap-proposals — the tenant's SCF remap proposals, one per control left on an older SCF release's anchor, filterable by class, class_not and status, keyset paged by limit and cursor with a total; a pending proposal whose control has a newer version is left out (#1775, #2325)
       tags: [controls]
       operationId: get-v1-controls-remap-proposals
       security:
