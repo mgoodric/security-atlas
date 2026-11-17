@@ -349,6 +349,166 @@ describe("renderMarkdown — reference definitions inside code (#2094 review)", 
   });
 });
 
+describe("renderMarkdown — reference labels (#2316)", () => {
+  test.each([
+    ["an ampersand", "[Q&A][]\n\n[Q&A]: https://example.com/qa"],
+    ["a less-than sign", "[a<b][]\n\n[a<b]: https://example.com/lt"],
+    ["an apostrophe", "[Matt's][]\n\n[matt's]: https://example.com/ap"],
+    ["a double quote", '[x][say "hi"]\n\n[say "hi"]: https://example.com/q'],
+    ["mixed case", "[x][Docs]\n\n[DOCS]: https://example.com/case"],
+    [
+      "different inner whitespace",
+      "[x][Access   Review]\n\n[access review]: https://example.com/ws",
+    ],
+    [
+      "ß against SS (case fold)",
+      "[x][STRASSE]\n\n[straße]: https://example.com/ss",
+    ],
+  ])("a label with %s resolves", (_name, md) => {
+    const html = renderMarkdown(md);
+    expect(html.match(/<a /g) ?? []).toHaveLength(1);
+    expect(html).toContain('href="https://example.com/');
+  });
+
+  test("a label holding <script> resolves and injects nothing", () => {
+    const html = renderMarkdown(
+      "[<script>alert(1)</script>][]\n\n[<script>alert(1)</script>]: https://example.com/s",
+    );
+    expect(html).toBe(
+      '<p><a href="https://example.com/s" rel="noopener noreferrer" target="_blank">&lt;script&gt;alert(1)&lt;/script&gt;</a></p>',
+    );
+  });
+
+  test("an unsafe target behind an escaped label still does not link", () => {
+    const html = renderMarkdown("[a&b][]\n\n[a&b]: javascript:alert(1)");
+    expect(html).not.toMatch(/href=/i);
+  });
+});
+
+describe("renderMarkdown — definitions inside block quotes (#2316)", () => {
+  test("a definition in a quote resolves a link outside it", () => {
+    const html = renderMarkdown(
+      "[go][r]\n\n> Quoted text.\n> [r]: https://example.com/q",
+    );
+    expect(html).toContain('href="https://example.com/q"');
+    expect(html).not.toContain("[r]:");
+    expect(html).toContain("<blockquote><p>Quoted text.</p></blockquote>");
+  });
+
+  test("a definition in a nested quote resolves a link inside the quote", () => {
+    const html = renderMarkdown("> [go][r]\n>\n> > [r]: https://example.com/n");
+    expect(html).toContain('href="https://example.com/n"');
+    expect(html).not.toContain("[r]:");
+  });
+
+  test("a quote holding only a definition renders empty", () => {
+    expect(renderMarkdown("> [r]: https://example.com/e")).toBe(
+      "<blockquote></blockquote>",
+    );
+  });
+
+  test("a definition inside a quoted fence stays code", () => {
+    const html = renderMarkdown(
+      "[go][r]\n\n> ```\n> [r]: https://example.com/f\n> ```",
+    );
+    expect(html).not.toContain("<a ");
+    expect(html).toContain(
+      "<pre><code>[r]: https://example.com/f</code></pre>",
+    );
+  });
+
+  test("a quoted fence left open ends with the quote", () => {
+    const html = renderMarkdown(
+      "> ```\n> code\n\n[go][r]\n\n[r]: https://example.com/after",
+    );
+    expect(html).toContain('href="https://example.com/after"');
+  });
+
+  test("a quote-shaped line inside a top-level fence stays code", () => {
+    const html = renderMarkdown(
+      "[go][r]\n\n```\n> [r]: https://example.com/c\n```",
+    );
+    expect(html).not.toContain("<a ");
+    expect(html).toContain("&gt; [r]: https://example.com/c");
+  });
+
+  test("a javascript: definition in a quote does not link", () => {
+    const html = renderMarkdown("[x][r]\n\n> [r]: javascript:alert(1)");
+    expect(html).not.toMatch(/href=/i);
+  });
+});
+
+describe("renderMarkdown — random input emits only the safe grammar (#2316)", () => {
+  // A seeded generator over markdown- and HTML-significant fragments. In
+  // every output, each tag is one the renderer may emit and every href is
+  // one the allow-list accepts.
+  const FRAGMENTS = [
+    "[",
+    "]",
+    "(",
+    ")",
+    "<",
+    ">",
+    "&",
+    "'",
+    '"',
+    "`",
+    "*",
+    "_",
+    "!",
+    "|",
+    "\n",
+    "> ",
+    "- ",
+    "1. ",
+    "# ",
+    "```",
+    ":",
+    " ",
+    "x",
+    "&amp;",
+    "&lt;",
+    "[r]: ",
+    "javascript:",
+    "https://e.example/",
+    "mailto:a@e.example",
+    "<script>",
+    "onerror=",
+    "\x00",
+    "data:",
+    "//",
+    "\t",
+  ];
+  const TAG =
+    /^<\/?(p|br\/|strong|em|code|pre|ul|ol|li|h[1-6]|hr\/|blockquote|table|thead|tbody|tr|th|td|a)( href="[^"]*" rel="noopener noreferrer" target="_blank")?>$/;
+
+  let seed = 2316;
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+
+  test("2000 random documents", () => {
+    for (let n = 0; n < 2000; n++) {
+      let md = "";
+      const len = 1 + Math.floor(rand() * 40);
+      for (let k = 0; k < len; k++) {
+        md += FRAGMENTS[Math.floor(rand() * FRAGMENTS.length)];
+      }
+      const html = renderMarkdown(md);
+      for (const tag of html.match(/<[^>]*>/g) ?? []) {
+        expect(tag, md).toMatch(TAG);
+        const href = tag.match(/href="([^"]*)"/)?.[1];
+        if (href !== undefined) {
+          expect(href, md).toMatch(/^(https?:\/\/[^/]|mailto:[^/])/i);
+        }
+      }
+      // No `<` survives outside an emitted tag.
+      expect(html.replace(/<[^>]*>/g, ""), md).not.toContain("<");
+    }
+  });
+});
+
 describe("renderMarkdown — bounded work (#2094 review)", () => {
   // Each line is just under the size cap and shaped to make a naive
   // pattern rescan to the end of the line from every opener.
@@ -371,7 +531,9 @@ describe("renderMarkdown — bounded work (#2094 review)", () => {
     ["repeated [x]: in definitions", "[x]:".repeat(n)],
     // `\s` matches U+2028/U+2029 and `.` does not; a `\s+ … .*$` block
     // pattern backtracks on these unless the line split breaks on them.
-    ...["- ", "# ", "1. ", "[x]: a "].flatMap((prefix) =>
+    ["repeated > ", "> ".repeat(n * 2)],
+    ["repeated > [x]: in quoted definitions", "> [x]:".repeat(n * 0.6)],
+    ...["- ", "# ", "1. ", "[x]: a ", "> [x]: a "].flatMap((prefix) =>
       [" ", "\u2028", "\u2029"].map((sep): [string, string] => [
         `${JSON.stringify(prefix)} + spaces + x${JSON.stringify(sep)}x`,
         prefix + " ".repeat(99_000) + "x" + sep + "x",
