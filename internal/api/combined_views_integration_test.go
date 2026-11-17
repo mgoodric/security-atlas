@@ -339,6 +339,74 @@ func TestCombinedViews_NoPoliciesAccessHidesPolicyItems(t *testing.T) {
 	}
 }
 
+// activityDecisionIDs returns the target ids of the caller's Activity
+// decision rows.
+func (e *combinedViewsEnv) activityDecisionIDs(t *testing.T, bearer string) map[string]bool {
+	t.Helper()
+	got := e.do(t, http.MethodGet, "/v1/activity/unified?include_reads=true&from="+e.fx.Now.Add(-time.Hour).Format(time.RFC3339)+"&to="+time.Now().UTC().Add(time.Hour).Format(time.RFC3339), bearer, nil)
+	if got.status != http.StatusOK {
+		t.Fatalf("GET /v1/activity/unified: status %d body=%s", got.status, got.body)
+	}
+	var body struct {
+		Entries []struct {
+			Kind     string `json:"kind"`
+			TargetID string `json:"target_id"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &body); err != nil {
+		t.Fatalf("decode activity: %v body=%s", err, got.body)
+	}
+	out := map[string]bool{}
+	for _, en := range body.Entries {
+		if en.Kind == "decision" {
+			out[en.TargetID] = true
+		}
+	}
+	return out
+}
+
+// #2477: an authorization decision is placed by the request path it was
+// made on, not by its resource type (the first path segment), so a
+// decision on a nested or /v1/me route of a hidden module leaves Activity.
+// A legacy row with no recorded path still falls back to its type.
+func TestCombinedViews_ActivityDecisionsFollowRequestPath(t *testing.T) {
+	e := newCombinedViewsEnv(t)
+	member, engineer := e.member(t, "grc_engineer")
+	rows := []struct{ resourceType, path string }{
+		{"me", "/v1/me/acknowledgments"},
+		{"controls", "/v1/controls/" + uuid.NewString() + "/policies"},
+		{"policies", ""}, // legacy: no recorded path, placed by its type
+		// A recorded path wins over the type: a core route stays shown.
+		{"policies", "/v1/controls/" + uuid.NewString()},
+	}
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = uuid.NewString()
+		if _, err := e.migrate.Exec(context.Background(),
+			`INSERT INTO decision_audit_log
+			   (tenant_id, user_id, action, resource_type, resource_id, result, request_path, request_method)
+			 VALUES ($1, 'seed-2477', 'read', $2, $3, 'allow', $4, 'GET')`,
+			e.tenant, row.resourceType, ids[i], row.path); err != nil {
+			t.Fatalf("seed decision %d: %v", i, err)
+		}
+	}
+
+	before := e.activityDecisionIDs(t, engineer)
+	for i, id := range ids {
+		if !before[id] {
+			t.Fatalf("all modules: Activity is missing decision %d (%s %q)", i, rows[i].resourceType, rows[i].path)
+		}
+	}
+
+	e.setAccess(t, member, everyOptionalBut("policies"))
+	after := e.activityDecisionIDs(t, engineer)
+	for i, want := range []bool{false, false, false, true} {
+		if after[ids[i]] != want {
+			t.Errorf("no Policies access: decision on %s %q shown=%v; want %v", rows[i].resourceType, rows[i].path, after[ids[i]], want)
+		}
+	}
+}
+
 // An admin sees every switched-on module's items in each combined view,
 // whatever access is stored on their row.
 func TestCombinedViews_AdminSeesEverySwitchedOnModule(t *testing.T) {
