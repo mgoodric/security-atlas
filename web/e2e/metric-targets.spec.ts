@@ -168,7 +168,13 @@ test.describe("metric targets (#2341)", () => {
       const res = await route.fetch();
       const me = (await res.json()) as Record<string, unknown>;
       return route.fulfill(
-        json({ ...me, is_admin: false, owner_roles: ["viewer"] }),
+        json({
+          ...me,
+          is_admin: false,
+          is_tenant_admin: false,
+          is_approver: false,
+          owner_roles: ["viewer"],
+        }),
       );
     });
     await page.route("**/api/admin/me", (route) =>

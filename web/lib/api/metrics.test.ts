@@ -312,13 +312,17 @@ describe("noDataReason — the evaluators' empty marker (#2064)", () => {
 });
 
 // #2341 — the metric-target dialog's guard and client-side check.
+// The guard reads /v1/me's is_tenant_admin (authz.IsTenantAdmin over the
+// live roles), never the JWT's owner_roles claim, which goes stale after
+// a revoke.
 describe("canSetMetricTarget", () => {
   test.each([
-    [{ is_admin: true }, true],
-    [{ owner_roles: ["admin"] }, true],
-    [{ owner_roles: ["grc_engineer"] }, false],
-    [{ owner_roles: ["viewer"] }, false],
-    [{ owner_roles: ["auditor"] }, false],
+    [{ is_tenant_admin: true }, true],
+    [{ is_tenant_admin: false }, false],
+    // A stale claim still listing admin is not enough.
+    [{ is_tenant_admin: false, owner_roles: ["admin"] }, false],
+    // An approver (grc_engineer) is not a tenant admin.
+    [{ is_tenant_admin: false, is_approver: true }, false],
     [{}, false],
     [undefined, false],
   ])("%j -> %s", (me, want) => {

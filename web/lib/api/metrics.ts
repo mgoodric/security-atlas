@@ -456,16 +456,15 @@ export function thresholdBadgeColor(
 /**
  * canSetMetricTarget mirrors the platform's guard on
  * PUT /v1/metrics/{id}/target (`authz.IsTenantAdmin`): only an admin may
- * set a metric target. It reads what `/v1/me` echoes of the credential,
- * `is_admin` and the tenant role list in `owner_roles`, as
- * `canSetPostureTarget` does. Anything unknown is view-only.
+ * set a metric target. `/v1/me` reports exactly that check, over the
+ * live tenant roles, as `is_tenant_admin`. The JWT's `owner_roles` claim
+ * is not read: it goes stale after a role is revoked. Anything unknown is
+ * view-only.
  */
 export function canSetMetricTarget(
-  me: { is_admin?: boolean; owner_roles?: readonly string[] } | undefined,
+  me: { is_tenant_admin?: boolean } | undefined,
 ): boolean {
-  if (!me) return false;
-  if (me.is_admin === true) return true;
-  return (me.owner_roles ?? []).includes("admin");
+  return me?.is_tenant_admin === true;
 }
 
 // Rounds away float noise from the x100 / /100 conversion (0.7 * 100 is
