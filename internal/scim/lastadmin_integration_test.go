@@ -4,11 +4,15 @@ package scim_test
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
 
@@ -247,7 +251,7 @@ func TestNotifySuperAdmins_Guards_2273(t *testing.T) {
 	}
 	var n int
 	if err := tx.QueryRow(context.Background(),
-		`SELECT notify_super_admins_last_admin_deprovisioned($1, $2)`, tenant, uuid.New()).Scan(&n); err != nil {
+		`SELECT notify_super_admins_last_admin_deprovisioned($1, $2)`, tenant, seedInactiveUser(t, tenant)).Scan(&n); err != nil {
 		t.Fatalf("notify own tenant: %v", err)
 	}
 	if n != 0 {
@@ -260,5 +264,112 @@ func TestNotifySuperAdmins_Guards_2273(t *testing.T) {
 	_ = tx.Rollback(context.Background())
 	if got := alertsFor(t, home, sa, other); got != 0 {
 		t.Fatalf("alerts for the other tenant = %d, want 0", got)
+	}
+}
+
+// seedInactiveUser creates a deactivated user in tenant and returns its id.
+func seedInactiveUser(t *testing.T, tenant uuid.UUID) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := adminPool.Exec(context.Background(),
+		`INSERT INTO users (id, tenant_id, email, display_name, status, active)
+		 VALUES ($1, $2, $3, 'Departed 2504', 'active', false)`,
+		id, tenant, "gone-2504-"+id.String()[:8]+"@example.com"); err != nil {
+		t.Fatalf("seed inactive user: %v", err)
+	}
+	return id
+}
+
+// #2504: an error from the super-admin notifier rolls back only the notify
+// step. The deprovision commits, the user ends up inactive, and the
+// tenant_last_admin_deprovisioned audit row carries the error.
+func TestDeprovision_NotifyFailureStillCommits_2504(t *testing.T) {
+	requireAdminPool(t)
+	home, sa := seedSuperAdmin(t)
+	failing := func(ctx context.Context, db dbx.DBTX, _ dbx.NotifySuperAdminsLastAdminDeprovisionedParams) (int32, error) {
+		// A real SQL error, so the transaction is aborted back to the
+		// savepoint and only ROLLBACK TO SAVEPOINT makes it usable again.
+		var x int
+		if err := db.QueryRow(ctx, `SELECT 1 / 0`).Scan(&x); err != nil {
+			return 0, err
+		}
+		return 0, errors.New("SELECT 1/0 succeeded")
+	}
+	for name, deprovision := range deprovisioners {
+		t.Run(name, func(t *testing.T) {
+			tenant, admins := seedAdminTenant(t, 1)
+			store := newProvStore().WithNotifierForTest(failing)
+			if err := deprovision(tenantCtx(t, tenant), store, tenant, admins[0]); err != nil {
+				t.Fatalf("deprovision must commit despite the notify failure: %v", err)
+			}
+			var active bool
+			if err := adminPool.QueryRow(context.Background(),
+				`SELECT active FROM users WHERE id = $1`, admins[0]).Scan(&active); err != nil {
+				t.Fatalf("read user: %v", err)
+			}
+			if active {
+				t.Fatal("user is still active; the deprovision rolled back")
+			}
+			var notifyErr *string
+			if err := adminPool.QueryRow(context.Background(),
+				`SELECT detail->>'notify_error' FROM scim_audit_log
+				  WHERE tenant_id = $1 AND action = $2`,
+				tenant, scim.ActionLastAdminDeprovisioned).Scan(&notifyErr); err != nil {
+				t.Fatalf("read alert audit row: %v (actions %v)", err, auditActions(t, tenant))
+			}
+			if notifyErr == nil || !strings.Contains(*notifyErr, "division by zero") {
+				t.Fatalf("notify_error = %v, want the division-by-zero error", notifyErr)
+			}
+			if got := alertsFor(t, home, sa, tenant); got != 0 {
+				t.Fatalf("alerts = %d, want 0", got)
+			}
+		})
+	}
+}
+
+// #2504: the SECURITY DEFINER notifier accepts only an existing, inactive
+// user of the caller's tenant, and its search_path stays pinned.
+func TestNotifySuperAdmins_ValidatesUser_2504(t *testing.T) {
+	requireAdminPool(t)
+	tenant, admins := seedAdminTenant(t, 1)
+	other, _ := seedAdminTenant(t, 0)
+	inactive := seedInactiveUser(t, tenant)
+	foreign := seedInactiveUser(t, other)
+
+	call := func(user any) error {
+		ctx := context.Background()
+		tx, err := appPool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.current_tenant', $1, true)`, tenant.String()); err != nil {
+			t.Fatalf("set tenant: %v", err)
+		}
+		var n int
+		return tx.QueryRow(ctx,
+			`SELECT notify_super_admins_last_admin_deprovisioned($1, $2::uuid)`, tenant, user).Scan(&n)
+	}
+	if err := call(inactive); err != nil {
+		t.Fatalf("inactive user of the tenant refused: %v", err)
+	}
+	for name, user := range map[string]any{
+		"null":           nil,
+		"unknown":        uuid.New(),
+		"active":         admins[0],
+		"another tenant": foreign,
+	} {
+		if err := call(user); err == nil {
+			t.Errorf("%s user accepted; want a refusal", name)
+		}
+	}
+
+	var config []string
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT proconfig FROM pg_proc WHERE proname = 'notify_super_admins_last_admin_deprovisioned'`).Scan(&config); err != nil {
+		t.Fatalf("read proconfig: %v", err)
+	}
+	if !slices.Contains(config, "search_path=public, pg_temp") {
+		t.Fatalf("proconfig = %v, want search_path pinned to public, pg_temp", config)
 	}
 }

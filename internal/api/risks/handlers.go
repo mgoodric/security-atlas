@@ -36,6 +36,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -71,6 +72,32 @@ type Handler struct {
 	store   *risk.Store
 	deriver *risk.ResidualDeriver
 	lister  riskLister
+	views   *moduleaccess.Views
+}
+
+// WithModules wires the module views the owner_lacks_access flag reads
+// (#2174). Without them (a unit-test server) no owner is flagged.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// flagOwners sets owner_lacks_access on each risk from its owner's live
+// module access. An error fails the read rather than drop the flag.
+func (h *Handler) flagOwners(r *http.Request, out []riskWire) error {
+	check, err := h.views.Owners(r, "risk")
+	if err != nil {
+		return err
+	}
+	for i := range out {
+		if out[i].OwnerUserID == nil {
+			continue
+		}
+		if out[i].OwnerLacksAccess, err = check.Lacks(*out[i].OwnerUserID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // New constructs a Handler. The ResidualDeriver is attached separately via
@@ -140,9 +167,12 @@ type riskWire struct {
 	// OwnerUnlinked is the free-text owner no user matched, shown as
 	// "Owner (unlinked)"; it is empty whenever OwnerUserID is set.
 	// TreatmentOwner is the stored free text, kept for older clients.
-	OwnerUserID         *string         `json:"owner_user_id"`
-	OwnerUnlinked       string          `json:"owner_unlinked"`
-	TreatmentOwner      string          `json:"treatment_owner"`
+	OwnerUserID    *string `json:"owner_user_id"`
+	OwnerUnlinked  string  `json:"owner_unlinked"`
+	TreatmentOwner string  `json:"treatment_owner"`
+	// OwnerLacksAccess (#2174), computed at read time and present only
+	// when true: the owner can no longer work in Risk. The owner is kept.
+	OwnerLacksAccess    bool            `json:"owner_lacks_access,omitempty"`
 	ResidualScore       json.RawMessage `json:"residual_score"`
 	ReviewDueAt         *time.Time      `json:"review_due_at,omitempty"`
 	AcceptedUntil       *string         `json:"accepted_until,omitempty"`
@@ -331,6 +361,10 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	out := make([]riskWire, len(risks))
 	for i, rk := range risks {
 		out[i] = riskWireFrom(rk)
+	}
+	if err := h.flagOwners(r, out); err != nil {
+		httperr.WriteInternal(w, r, "risk owner access", err)
+		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"risks":  out,
@@ -584,7 +618,12 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 		ru := rollUpWireFrom(*rollUp)
 		wire.RollUp = &ru
 	}
-	body := map[string]any{"risk": wire}
+	flagged := []riskWire{wire}
+	if err := h.flagOwners(r, flagged); err != nil {
+		httperr.WriteInternal(w, r, "risk owner access", err)
+		return
+	}
+	body := map[string]any{"risk": flagged[0]}
 	// Slice 020 (AC-2): when the residual deriver is wired, return the
 	// live-derived residual + the per-linked-control effectiveness breakdown.
 	// Derive is the pure read path — recompute=false, so a GET never triggers

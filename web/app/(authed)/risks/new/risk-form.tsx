@@ -465,6 +465,7 @@ export function RiskForm(props: Props) {
           </label>
           <EntityPicker
             kinds={["user"]}
+            module="risk"
             id="risk-owner"
             value={state.owner_user_id}
             onChange={(id) => update("owner_user_id", id)}

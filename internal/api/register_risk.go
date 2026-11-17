@@ -35,7 +35,7 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 		risksStore,
 		eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool)),
 	)
-	risksH := risksapi.New(risksStore).WithDeriver(risksDeriver)
+	risksH := risksapi.New(risksStore).WithDeriver(risksDeriver).WithModules(s.moduleViews)
 	root.Post("/v1/risks", risksH.CreateRisk)
 	root.Get("/v1/risks", risksH.ListRisks)
 	root.Get("/v1/risks/heatmap", risksH.Heatmap)
@@ -100,7 +100,7 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// Slice 384: read-only "Linked Action Plans" section on /risks/{id}
 	// (AC-25). Literal-suffix route declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps it ahead.
-	actionPlansH := actionplansapi.New(actionplan.NewStore(s.dbPool))
+	actionPlansH := actionplansapi.New(actionplan.NewStore(s.dbPool)).WithModules(s.moduleViews)
 	root.Get("/v1/risks/{id}/action-plans", actionPlansH.PlansForRisk)
 	root.Get("/v1/risks/{id}", risksH.GetRisk)
 	// #1749: move a risk between hierarchy levels and org units.

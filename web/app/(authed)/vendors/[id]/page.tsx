@@ -37,6 +37,7 @@ import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { OwnerAccessFlag } from "@/components/ui/owner-access-flag";
 import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
@@ -203,7 +204,13 @@ export default function VendorDetailPage({
           <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
             <Field label="Owner" testid="vendor-detail-owner">
               {vendor.owner_user_id ? (
-                <Person id={vendor.owner_user_id} />
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  <Person id={vendor.owner_user_id} />
+                  <OwnerAccessFlag
+                    lacksAccess={vendor.owner_lacks_access}
+                    testId="vendor-detail-owner-no-access"
+                  />
+                </span>
               ) : mailto ? (
                 <a
                   href={mailto}

@@ -7,6 +7,12 @@
 // pool, so a super-admin sees only the tenant it is signed in to. The
 // admin-only /v1/admin/users and /v1/admin/credentials are unchanged.
 //
+// ?module=<key> (#2174) leaves out the users who cannot work in that
+// optional module: an assignee picker on a record offers no one an admin
+// has narrowed out of it. The filter runs here, on the server, from each
+// person's stored module access and live roles
+// (moduleaccess.Views.MembersWithout).
+//
 // It returns no email address, token, prefix or last4: a user's
 // display_name falls back to the email's local-part here, on the server.
 package people
@@ -26,6 +32,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -68,7 +76,37 @@ type Response struct {
 
 // Handler serves GET /v1/people.
 type Handler struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	views *moduleaccess.Views
+}
+
+// WithModules wires the module views ?module= filters by (#2174). Without
+// them (a unit-test server) the filter keeps everyone.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// knownModule reports whether key names a module in the registry.
+func knownModule(key string) bool {
+	for _, m := range featureflag.Modules {
+		if m.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// without drops the users excluded names (user_roles keys, which for a
+// user are its id).
+func without(users []User, excluded map[string]bool) []User {
+	out := make([]User, 0, len(users))
+	for _, u := range users {
+		if !excluded[u.ID] {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // New builds a Handler on the app pool.
@@ -99,6 +137,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusInternalServerError, "invalid tenant in credential")
 		return
 	}
+	module := r.URL.Query().Get("module")
+	if module != "" && !knownModule(module) {
+		httpresp.WriteError(w, http.StatusBadRequest, "module: not a module")
+		return
+	}
 	if h.pool == nil {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "people list unavailable: no database")
 		return
@@ -107,6 +150,15 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httperr.WriteInternal(w, r, "list people", err)
 		return
+	}
+	if module != "" {
+		// A failed access read fails closed: 500, never everyone.
+		excluded, err := h.views.MembersWithout(r.Context(), tenantID, module)
+		if err != nil {
+			httperr.WriteInternal(w, r, "list people with module access", err)
+			return
+		}
+		out.Users = without(out.Users, excluded)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
