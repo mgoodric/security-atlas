@@ -9,7 +9,9 @@
 // populations contain. Everything outside the assignment is refused: a
 // second, unassigned period's population, sample and evidence; evidence of
 // the assigned control in a scope cell the population does not select or
-// outside its window; a list without control_id. The matrix also pins
+// outside its window; a list without control_id, or whose since/until
+// (#2424) are missing or not inside an assigned population's window and
+// freeze horizon. The matrix also pins
 // that an admin keeps every read and a viewer gains none.
 //
 // Requires DATABASE_URL_APP (atlas_app, RLS) and DATABASE_URL (migrate role).
@@ -40,8 +42,9 @@ type seed2157 struct {
 	// the assigned period.
 	cellCtl uuid.UUID
 	// wholeCtl has a match-every-cell population in the assigned period;
-	// otherCtl one in the unassigned period.
-	wholeCtl, otherCtl uuid.UUID
+	// otherCtl one in the unassigned period. frozenCtl has one in the
+	// assigned period frozen at 2026-03-01, inside its window (#2424).
+	wholeCtl, otherCtl, frozenCtl uuid.UUID
 	// inScope is cellCtl evidence in the prod cell inside the window;
 	// outOfCell in the dev cell; outOfWindow in prod before the window;
 	// whole is wholeCtl's; other is otherCtl's.
@@ -124,6 +127,7 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 	s.cellCtl = seedControl2157(t, admin, tenant)
 	s.wholeCtl = seedControl2157(t, admin, tenant)
 	s.otherCtl = seedControl2157(t, admin, tenant)
+	s.frozenCtl = seedControl2157(t, admin, tenant)
 	prod := seedCell2157(t, admin, tenant, "prod")
 	dev := seedCell2157(t, admin, tenant, "dev")
 	inWindow := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
@@ -194,6 +198,14 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 	cellPop := population(s.cellCtl, `{"op":"eq","dim":"environment","value":"prod"}`, s.assigned)
 	population(s.wholeCtl, `{"op":"true"}`, s.assigned)
 	otherPop := population(s.otherCtl, `{"op":"true"}`, s.unassigned)
+	frozenPop := population(s.frozenCtl, `{"op":"true"}`, s.assigned)
+	// A period freeze stamps frozen_at with the time of the call, after the
+	// window ends. A freeze inside the window is stamped directly, so the
+	// matrix can ask for a list that runs past it.
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE populations SET frozen_at = '2026-03-01T00:00:00Z' WHERE id = $1`, frozenPop); err != nil {
+		t.Fatalf("freeze population: %v", err)
+	}
 	draw := func(c periodAuditorsCall, pop string) (int, string, map[string]any) {
 		st, out := c.do(http.MethodPost, "/v1/samples", map[string]any{"population_id": pop, "n": 1, "seed": "seed-2157"})
 		sample, _ := out["sample"].(map[string]any)
@@ -251,7 +263,18 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 
 	// The read matrix: route -> want status per role.
 	ev := func(id uuid.UUID) string { return "/v1/evidence/" + id.String() }
-	list := func(ctrl uuid.UUID) string { return "/v1/evidence?control_id=" + ctrl.String() }
+	listIn := func(ctrl uuid.UUID, since, until string) string {
+		out := "/v1/evidence?control_id=" + ctrl.String()
+		if since != "" {
+			out += "&since=" + since
+		}
+		if until != "" {
+			out += "&until=" + until
+		}
+		return out
+	}
+	const start, end = "2026-01-01T00:00:00Z", "2026-03-31T23:59:59Z"
+	list := func(ctrl uuid.UUID) string { return listIn(ctrl, start, end) }
 	reads := []struct {
 		name, path             string
 		auditor, admin, viewer int
@@ -269,11 +292,26 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 		{"evidence of the unassigned period", ev(s.other), 403, 200, 403},
 		{"unknown evidence", ev(uuid.New()), 403, 404, 403},
 		{"list of a whole-control population's control", list(s.wholeCtl), 200, 200, 403},
+		{"list inside the window", listIn(s.wholeCtl, "2026-02-01T00:00:00Z", "2026-02-28T00:00:00Z"), 200, 200, 403},
+		{"list without since or until", listIn(s.wholeCtl, "", ""), 403, 200, 403},
+		{"list without until", listIn(s.wholeCtl, start, ""), 403, 200, 403},
+		{"list without since", listIn(s.wholeCtl, "", end), 403, 200, 403},
+		{"list before the window", listIn(s.wholeCtl, "2025-01-01T00:00:00Z", "2025-06-30T00:00:00Z"), 403, 200, 403},
+		{"list starting before the window", listIn(s.wholeCtl, "2025-12-01T00:00:00Z", "2026-02-01T00:00:00Z"), 403, 200, 403},
+		{"list ending after the window", listIn(s.wholeCtl, "2026-02-01T00:00:00Z", "2026-06-30T00:00:00Z"), 403, 200, 403},
+		{"list of a frozen population, before the freeze", listIn(s.frozenCtl, start, "2026-03-01T00:00:00Z"), 200, 200, 403},
+		{"list of a frozen population, past the freeze", listIn(s.frozenCtl, start, end), 403, 200, 403},
 		{"list of a cell-scoped population's control", list(s.cellCtl), 403, 200, 403},
 		{"list of the unassigned period's control", list(s.otherCtl), 403, 200, 403},
 		{"tenant-wide list", "/v1/evidence", 403, 200, 403},
 		{"tenant-wide list by cell", "/v1/evidence?scope_cell_id=" + prod.String(), 403, 200, 403},
 		{"freshness panel", "/v1/evidence/freshness", 200, 200, 200},
+	}
+	// A grc_engineer's evidence lists are not bounded by any period.
+	for _, p := range []string{list(s.cellCtl), listIn(s.wholeCtl, "", ""), listIn(s.frozenCtl, start, end)} {
+		if st, out := asGRC.do(http.MethodGet, p, nil); st != http.StatusOK {
+			t.Errorf("grc_engineer GET %s: %d %v; want 200", p, st, out)
+		}
 	}
 	for _, rd := range reads {
 		for role, c := range map[string]struct {

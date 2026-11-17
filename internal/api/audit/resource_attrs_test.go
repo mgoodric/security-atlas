@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -23,7 +24,10 @@ type fakeLookup struct {
 	samples     map[uuid.UUID]uuid.UUID
 	evidence    map[uuid.UUID]audit.EvidenceScope
 	controls    map[uuid.UUID][]uuid.UUID
-	err         error
+	// window is the population window the controls' periods cover; a list
+	// asking outside it gets no period, as the store answers.
+	window [2]time.Time
+	err    error
 }
 
 func (f fakeLookup) PopulationPeriod(_ context.Context, id uuid.UUID) (uuid.UUID, bool, error) {
@@ -41,7 +45,10 @@ func (f fakeLookup) EvidencePeriods(_ context.Context, id uuid.UUID) (audit.Evid
 	return e, ok, f.err
 }
 
-func (f fakeLookup) ControlPeriods(_ context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+func (f fakeLookup) ControlPeriods(_ context.Context, id uuid.UUID, since, until time.Time) ([]uuid.UUID, error) {
+	if since.Before(f.window[0]) || until.After(f.window[1]) {
+		return nil, f.err
+	}
 	return f.controls[id], f.err
 }
 
@@ -70,7 +77,13 @@ func TestResourceAttrs2157_Routes(t *testing.T) {
 			orphanRec: {},
 		},
 		controls: map[uuid.UUID][]uuid.UUID{control: {period}},
+		window: [2]time.Time{
+			time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			time.Date(2026, 3, 31, 23, 59, 59, 0, time.UTC),
+		},
 	}
+	list := "/v1/evidence?control_id=" + control.String()
+	inWindow := "&since=2026-01-01T00:00:00Z&until=2026-03-31T23:59:59Z"
 	one := map[string]any{"audit_period_id": period.String()}
 	cases := []struct {
 		name, method, target, body string
@@ -95,8 +108,14 @@ func TestResourceAttrs2157_Routes(t *testing.T) {
 		{"unknown evidence record", "GET", "/v1/evidence/" + uuid.NewString(), "", nil},
 		{"freshness", "GET", "/v1/evidence/freshness", "", nil},
 		{"receipt", "GET", "/v1/evidence/receipts/" + rec.String(), "", nil},
-		{"evidence list for a control", "GET", "/v1/evidence?control_id=" + control.String(), "", map[string]any{"audit_period_ids": []any{period.String()}}},
-		{"evidence list, cell ignored", "GET", "/v1/evidence?control_id=" + control.String() + "&scope_cell_id=" + cell.String(), "", map[string]any{"audit_period_ids": []any{period.String()}}},
+		{"evidence list for a control", "GET", list + inWindow, "", map[string]any{"audit_period_ids": []any{period.String()}}},
+		{"evidence list, offset bounds", "GET", list + "&since=2026-01-01T02:00:00%2B02:00&until=2026-02-01T00:00:00Z", "", map[string]any{"audit_period_ids": []any{period.String()}}},
+		{"evidence list, cell ignored", "GET", list + inWindow + "&scope_cell_id=" + cell.String(), "", map[string]any{"audit_period_ids": []any{period.String()}}},
+		{"evidence list, outside the window", "GET", list + "&since=2025-01-01T00:00:00Z&until=2026-03-31T23:59:59Z", "", map[string]any{"audit_period_ids": []any{}}},
+		{"evidence list, no bounds", "GET", list, "", nil},
+		{"evidence list, no since", "GET", list + "&until=2026-03-31T23:59:59Z", "", nil},
+		{"evidence list, no until", "GET", list + "&since=2026-01-01T00:00:00Z", "", nil},
+		{"evidence list, malformed since", "GET", list + "&since=2026-01-01&until=2026-03-31T23:59:59Z", "", nil},
 		{"evidence list, no control", "GET", "/v1/evidence?scope_cell_id=" + cell.String(), "", nil},
 		{"evidence list, bad control", "GET", "/v1/evidence?control_id=nope", "", nil},
 		{"evidence push", "POST", "/v1/evidence:push", `{}`, nil},
@@ -138,7 +157,7 @@ func TestResourceAttrs2157_FailsClosed(t *testing.T) {
 			"/v1/populations/" + pop.String(),
 			"/v1/samples/" + pop.String(),
 			"/v1/evidence/" + pop.String(),
-			"/v1/evidence?control_id=" + pop.String(),
+			"/v1/evidence?control_id=" + pop.String() + "&since=2026-01-01T00:00:00Z&until=2026-01-02T00:00:00Z",
 		} {
 			_, err := ResourceAttrs(fakeLookup{err: outage})(attrsRequest(t, "GET", target, "", true))
 			if !errors.Is(err, outage) {

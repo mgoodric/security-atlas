@@ -44,6 +44,7 @@ import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Timestamp } from "@/components/ui/timestamp";
 import { useToast } from "@/components/ui/toast";
+import { invalidateApprovals } from "@/lib/api/approvals";
 import { APIError } from "@/lib/api/base";
 import {
   discardPolicyDraft,
@@ -104,6 +105,7 @@ export default function PolicyDetailPage({
       setConfirming(null);
       await qc.invalidateQueries({ queryKey: ["policy", id] });
       void qc.invalidateQueries({ queryKey: ["policies"] });
+      void invalidateApprovals(qc);
       toast(t === "submit" ? "Policy submitted for review" : "Policy approved");
     },
     onError: (err, t) => {
