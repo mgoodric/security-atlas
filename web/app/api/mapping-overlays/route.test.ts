@@ -97,6 +97,19 @@ describe("mapping overlay BFF routes", () => {
     );
   });
 
+  test("the export passes the truncation and unresolved-reference headers through (#2324)", async () => {
+    upstream(200, "control_id,framework\n", {
+      "Content-Type": "text/csv; charset=utf-8",
+      "X-Atlas-Truncated": "true",
+      "X-Atlas-Unresolved-References": "3",
+      "X-Not-Forwarded": "x",
+    });
+    const res = await exportReport(new Request("http://t/"));
+    expect(res.headers.get("x-atlas-truncated")).toBe("true");
+    expect(res.headers.get("x-atlas-unresolved-references")).toBe("3");
+    expect(res.headers.get("x-not-forwarded")).toBeNull();
+  });
+
   test("a framework that is not a slug is refused before calling upstream", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     for (const bad of ["a%26b", "..%2Fx", "soc2%3Fx%3D1", "a%20b"]) {

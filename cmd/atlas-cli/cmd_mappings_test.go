@@ -139,3 +139,88 @@ func TestMappingsOverlayRetire_PostsReason(t *testing.T) {
 		t.Error("a retire without a reason still called the API")
 	}
 }
+
+func TestMappingsOverlayAuditedUnder_PrintsRowsUnresolvedAndTruncation(t *testing.T) {
+	api := &taxonomyAPI{}
+	srv := api.server(t, http.StatusOK, map[string]any{
+		"rows": []map[string]any{{
+			"control_bundle_id": "ctrl-nda", "anchor_code": "IAC-06", "anchor_scf_release": "2025.2",
+			"anchor_fit": "partial", "framework": "soc2", "framework_version": "2017",
+			"requirement_code": "CC1.4", "tested_under_note": "FY25 report s4",
+			"candidate_anchors": []map[string]any{{"anchor_code": "HRS-06"}, {"anchor_code": "GOV-01"}},
+		}},
+		"count": 1, "total": 3, "truncated": true,
+		"unresolved_references": []map[string]any{{
+			"control_bundle_id": "ctrl-nda", "system": "soc2", "code": "CC9.9", "tested_under_note": "FY25 import",
+		}},
+		"unresolved_count": 1,
+	})
+
+	out, err := runOverlay(t, srv, "audited-under", "--framework", "soc2", "--limit", "1")
+	if err != nil {
+		t.Fatalf("audited-under: %v\n%s", err, out)
+	}
+	if api.method != http.MethodGet || api.path != "/v1/mapping-overlays/audited-under" ||
+		api.query != "framework=soc2&limit=1" || api.auth != "Bearer tok" {
+		t.Errorf("request %s %s?%s auth=%q", api.method, api.path, api.query, api.auth)
+	}
+	for _, want := range []string{
+		"CRITERION", "CANDIDATES",
+		"soc2:2017:CC1.4  ctrl-nda  SCF 2025.2:IAC-06  partial  HRS-06, GOV-01  FY25 report s4",
+		"1 tested-under reference(s) name no requirement",
+		"soc2 CC9.9 on ctrl-nda (FY25 import)",
+		"truncated: showing 1 of 3 row(s) and 1 of 1 unresolved reference(s)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestMappingsOverlayAuditedUnder_CSVReadsTheExport(t *testing.T) {
+	api := &taxonomyAPI{}
+	srv := api.server(t, http.StatusOK, "framework,requirement_code")
+
+	out, err := runOverlay(t, srv, "audited-under", "--csv")
+	if err != nil {
+		t.Fatalf("audited-under --csv: %v\n%s", err, out)
+	}
+	if api.path != "/v1/mapping-overlays/audited-under/export" || api.query != "" {
+		t.Errorf("request %s?%s; want the export", api.path, api.query)
+	}
+	if !strings.Contains(out, "framework,requirement_code") {
+		t.Errorf("output:\n%s", out)
+	}
+	if _, err := runOverlay(t, srv, "audited-under", "--csv", "--json"); err == nil {
+		t.Error("--csv with --json: want an error")
+	}
+	if strings.Contains(out, "warning:") {
+		t.Errorf("no truncation headers, but a warning:\n%s", out)
+	}
+}
+
+// A cut or partly unresolved export says so on stderr, since the CSV
+// itself cannot (#2324).
+func TestMappingsOverlayAuditedUnder_CSVWarnsWhenTruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("X-Atlas-Truncated", "true")
+		w.Header().Set("X-Atlas-Unresolved-References", "2")
+		_, _ = w.Write([]byte("framework,requirement_code\n"))
+	}))
+	t.Cleanup(srv.Close)
+
+	out, err := runOverlay(t, srv, "audited-under", "--csv")
+	if err != nil {
+		t.Fatalf("audited-under --csv: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"framework,requirement_code",
+		"warning: the report was truncated at its row cap",
+		"warning: 2 tested-under reference(s) do not resolve",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
