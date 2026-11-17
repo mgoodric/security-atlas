@@ -236,7 +236,9 @@ type setupResult struct {
 	adminBear string
 	ownerBear string
 	plainBear string
-	tenant    string
+	// viewerBear is a live viewer's session (#2523).
+	viewerBear string
+	tenant     string
 	// admin is the migrate pool; ownerUser is the user behind ownerBear,
 	// whose live user_roles a test may change mid-session (#2523).
 	admin     *pgxpool.Pool
@@ -249,10 +251,10 @@ type setupResult struct {
 const ownerRole = "control_owner"
 
 // setupHTTP builds an HTTP test server with auth, authz, ingest, registry,
-// optional artifact store. Three pre-issued credentials are returned:
-// admin, owner (a user session holding live control_owner and grc_engineer), and
-// plain (a user session holding live grc_engineer, which OPA lets write but
-// which is not the control's owner_role).
+// optional artifact store. Four pre-issued credentials are returned:
+// admin, owner (a user session holding live control_owner), plain (a user
+// session holding live grc_engineer, which OPA lets write but which is not
+// the control's owner_role) and viewer (live viewer, which OPA refuses).
 //
 // #2523: the attest gate counts a user session's live user_roles, which the
 // authz middleware resolves, so the server runs it with a DB roles resolver.
@@ -294,10 +296,9 @@ func setupHTTP(t *testing.T) setupResult {
 		return u, srv.IssueTestJWT(t, c)
 	}
 	adminBear := srv.IssueTestJWT(t, testjwt.AdminFor(tenantUUID))
-	// OPA admits a write to controls for grc_engineer and admin only, so the
-	// owner also holds grc_engineer to reach the handler's owner_role gate.
-	ownerUser, ownerBear := session(ownerRole, "grc_engineer")
+	ownerUser, ownerBear := session(ownerRole)
 	_, plainBear := session("grc_engineer")
+	_, viewerBear := session("viewer")
 
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -308,16 +309,17 @@ func setupHTTP(t *testing.T) setupResult {
 		ts.Close()
 	})
 	return setupResult{
-		server:    ts,
-		adminBear: adminBear,
-		ownerBear: ownerBear,
-		plainBear: plainBear,
-		tenant:    tenant,
-		admin:     admin,
-		ownerUser: ownerUser,
-		registry:  reg,
-		hasMinIO:  store != nil,
-		bucket:    bucket,
+		server:     ts,
+		adminBear:  adminBear,
+		ownerBear:  ownerBear,
+		plainBear:  plainBear,
+		viewerBear: viewerBear,
+		tenant:     tenant,
+		admin:      admin,
+		ownerUser:  ownerUser,
+		registry:   reg,
+		hasMinIO:   store != nil,
+		bucket:     bucket,
 	}
 }
 
@@ -359,16 +361,23 @@ func revokeRole(t *testing.T, admin *pgxpool.Pool, tenant string, user uuid.UUID
 	}
 }
 
-// uploadBundle posts a manual control bundle and returns the new
-// control id.
+// uploadBundle posts a manual control bundle owned by ownerRole and returns
+// the new control id.
 func uploadBundle(t *testing.T, s setupResult, bundleID string) string {
+	t.Helper()
+	return uploadBundleOwnedBy(t, s, bundleID, ownerRole)
+}
+
+// uploadBundleOwnedBy posts a manual control bundle whose owner_role is role
+// and returns the new control id.
+func uploadBundleOwnedBy(t *testing.T, s setupResult, bundleID, role string) string {
 	t.Helper()
 	yaml := `bundle_schema_version: "1"
 bundle_id: ` + bundleID + `
 title: "Manual review of access list"
 implementation_type: manual_attested
 scf_anchor_id: IAC-37
-owner_role: ` + ownerRole + `
+owner_role: ` + role + `
 freshness_class: quarterly
 manual_evidence_schema:
   type: object
@@ -1060,10 +1069,35 @@ func TestAttest_FutureObservedAt_Refused(t *testing.T) {
 // #2523: the attest gate reads the caller's live user_roles, not the role
 // claim in its session. One session, minted while the user held
 // control_owner, is held across a revoke and a re-grant; its claim says
-// control_owner throughout. With control_owner revoked (the user keeps
+// control_owner throughout. With control_owner revoked (the user also holds
 // grc_engineer, so the authz middleware lets the write through to the handler)
 // the owner_role gate refuses the attest with no re-login. Granted back, it
 // is allowed.
+// #2523: the attest route through the real authz middleware, per role. A
+// user whose only role is control_owner attests a control whose owner_role
+// is control_owner (OPA's narrow control_owner attestations rule). A viewer
+// is refused by OPA. A control_owner on a control owned by another role
+// passes OPA and is refused by the handler's owner_role gate.
+func TestAttest2523_RoleMatrix(t *testing.T) {
+	s := setupHTTP(t)
+	owned := uploadBundle(t, s, "attest_2523_matrix_owned")
+	other := uploadBundleOwnedBy(t, s, "attest_2523_matrix_other", "security-engineering")
+	post := func(controlID, bearer, stmt string) (int, []byte) {
+		return httpJSON(t, s, http.MethodPost, "/v1/controls/"+controlID+"/attestations", bearer, attestBody(stmt, nil))
+	}
+
+	if status, raw := post(owned, s.ownerBear, "2523 control_owner, owner_role matches."); status != http.StatusCreated {
+		t.Fatalf("control_owner on its control: %d body=%s; want 201", status, raw)
+	}
+	if status, raw := post(owned, s.viewerBear, "2523 viewer."); status != http.StatusForbidden || !strings.Contains(string(raw), `"forbidden"`) {
+		t.Fatalf("viewer: %d body=%s; want 403 forbidden from authz", status, raw)
+	}
+	status, raw := post(other, s.ownerBear, "2523 control_owner, owner_role differs.")
+	if status != http.StatusForbidden || !strings.Contains(string(raw), "security-engineering") {
+		t.Fatalf("control_owner on another role's control: %d body=%s; want 403 from the owner_role gate", status, raw)
+	}
+}
+
 func TestAttest2523_RevokedOwnerRole_RefusedWithoutRelogin(t *testing.T) {
 	s := setupHTTP(t)
 	controlID := uploadBundle(t, s, "attest_2523_revoke")
@@ -1072,6 +1106,9 @@ func TestAttest2523_RevokedOwnerRole_RefusedWithoutRelogin(t *testing.T) {
 		return httpJSON(t, s, http.MethodPost, path, s.ownerBear, attestBody(stmt, nil))
 	}
 
+	// A second live role, so OPA still admits the write after control_owner
+	// is revoked and the refusal is the handler's owner_role gate.
+	grantRole(t, s.admin, s.tenant, s.ownerUser, "grc_engineer")
 	if status, raw := attest("2523 live control_owner."); status != http.StatusCreated {
 		t.Fatalf("live control_owner: %d body=%s; want 201", status, raw)
 	}

@@ -56,6 +56,25 @@ a separate decision.
 now calls `authz.HasOwnerRole`, so a session with a stale `grc_engineer`
 claim is refused there too (`TestRoleCut_...` asserts the 403).
 
+### D5 — OPA admits control_owner at the attestations path, and nowhere else new
+
+Added to this ticket by the dispatcher (also #2150 D5). The attest route maps
+to `controls`/`write`, and `control_owner.rego` granted controls write only at
+`/evaluate` (#2110), so a user whose only role was `control_owner` was
+refused before the handler ran, although the handler, the GLOSSARY and the
+help say owners attest. A rule mirroring the #2110 one admits `control_owner`
+for `POST /v1/controls/{uuid}/attestations`, anchored on the uuid and the
+exact suffix, in `policies/authz/control_owner.rego` and its
+`internal/authz/rego_bundle` copy (#2410). `authz.HasOwnerRole` stays the real
+gate.
+
+`TestDecide2523_AttestRoleMatrix` and
+`TestDecide2523_ControlOwnerAttestRuleIsNarrow` pin the OPA layer.
+`TestAttest2523_RoleMatrix` runs it end to end: an owner on its own control
+gets 201, a viewer gets 403 from authz, and an owner on another role's control
+gets 403 from the handler. The attest harness's owner now holds
+`control_owner` alone.
+
 ## Findings (not fixed here)
 
 - **OPA refuses `/v1/csf/*` for every role but super-admin.** No rego rule
@@ -64,10 +83,3 @@ claim is refused there too (`TestRoleCut_...` asserts the 403).
   `default-deny: role [grc_engineer] cannot write csf`, and a viewer cannot
   read. The CSF integration suite runs without the middleware, so its
   engineer is now a client_credentials token, whose claim is its grant.
-- **OPA lets only grc_engineer and admin write `controls`.** A user holding
-  only `control_owner` is refused with
-  `default-deny: role [control_owner] cannot write controls` on the attest
-  route before the handler's owner_role gate runs.
-  `control_owner.rego` says owners submit attestations, but
-  `control_owner_writable_resources` has no `controls`. The attest harness
-  now runs the real middleware, so its owner also holds grc_engineer.
