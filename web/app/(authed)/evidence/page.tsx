@@ -98,6 +98,7 @@ import {
   PUSH_CTA_SUBTITLE_PREFIX,
 } from "./push-cta";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 import { Timestamp } from "@/components/ui/timestamp";
 
 // URL parameter names mirror the upstream + BFF FORWARD_PARAMS so the
@@ -655,8 +656,9 @@ function EvidencePageInner() {
     ledgerTotal === undefined ? "" : ledgerSubtitleSuffix(ledgerTotal);
   const subtitleNode = (
     <>
-      Append-only · ingestion separated from evaluation · point-in-time replay
-      always possible. {PUSH_CTA_SUBTITLE_PREFIX}
+      <Term id="evidence-ledger">Append-only</Term> · ingestion separated from{" "}
+      <Term id="evaluation">evaluation</Term> · point-in-time replay always
+      possible. {PUSH_CTA_SUBTITLE_PREFIX}
       <a
         href={PUSH_CTA_HREF}
         target="_blank"

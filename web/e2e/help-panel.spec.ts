@@ -82,10 +82,10 @@ test.describe("How this works panel (#2143)", () => {
     expect(results.violations).toEqual([]);
   });
 
-  // #2148 — the exception lifecycle diagram in the Controls help: the
-  // pre-rendered SVG for the current theme loads and shows, the other is
-  // hidden, and the image is described by the list of its states and
-  // transitions, which a screen reader reaches.
+  // #2148 — the exception lifecycle diagram, in the Exceptions help since
+  // #2150: the pre-rendered SVG for the current theme loads and shows, the
+  // other is hidden, and the image is described by the list of its states
+  // and transitions, which a screen reader reaches.
   for (const theme of ["light", "dark"] as const) {
     test(`the lifecycle diagram renders in ${theme} mode with its text alternative`, async ({
       authedPage: page,
@@ -95,7 +95,7 @@ test.describe("How this works panel (#2143)", () => {
         ([key, value]) => window.localStorage.setItem(key, value),
         ["security-atlas.settings.theme", theme] as const,
       );
-      await page.goto("/controls");
+      await page.goto("/exceptions");
       await expect
         .poll(() =>
           page.evaluate(() =>
@@ -116,7 +116,7 @@ test.describe("How this works panel (#2143)", () => {
       await expect(hidden).toBeHidden();
       await expect(shown).toHaveAttribute(
         "src",
-        `/help/diagrams/controls-exception-${theme}.svg`,
+        `/help/diagrams/exceptions-exception-${theme}.svg`,
       );
       // The SVG actually loaded and laid out, not a broken image.
       await expect

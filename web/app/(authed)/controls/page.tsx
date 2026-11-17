@@ -149,6 +149,7 @@ import {
 } from "./saved-views";
 import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 import { Timestamp } from "@/components/ui/timestamp";
 
 // #2131 — the filter keys (`FILTER_KEYS`, from ./filters) are the URL keys
@@ -1191,9 +1192,17 @@ function ControlsPageInner() {
   );
 
   const subtitle =
-    view === "mine"
-      ? "Your tenant's controls evaluated against live evidence"
-      : "The SCF anchor catalog, with the controls your tenant has on it";
+    view === "mine" ? (
+      <>
+        Your tenant&apos;s controls <Term id="evaluation">evaluated</Term>{" "}
+        against live evidence
+      </>
+    ) : (
+      <>
+        The SCF <Term id="anchor">anchor</Term> catalog, with the controls your
+        tenant has on it
+      </>
+    );
 
   if (listQ.isLoading) {
     return (
