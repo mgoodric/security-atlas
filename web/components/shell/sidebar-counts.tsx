@@ -46,6 +46,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+import {
+  APPROVALS_QUERY_KEY,
+  fetchApprovals,
+  type ApprovalsResponse,
+} from "@/lib/api/approvals";
 import { fetchMyControlsTotal } from "@/lib/api/controls-list";
 import {
   fetchRisksList,
@@ -197,6 +202,42 @@ export function RisksCountBadge() {
         {HIGH_SEVERITY_BADGE_MARKER}
       </span>
       {count}
+    </span>
+  );
+}
+
+/** #2119 — "N waiting for your approval", for aria-label and title. */
+export function approvalsBadgeLabel(count: number): string {
+  return `${count} waiting for your approval`;
+}
+
+// #2119 — the Approvals row's badge: how many records the caller can
+// approve now. It reads the platform's server-side `total` through the
+// same query as the /approvals page (APPROVALS_QUERY_KEY), so the badge
+// and the page cannot disagree, and every approval flow invalidates it.
+// Renders nothing on loading, error or zero, like the other badges.
+export function ApprovalsCountBadge() {
+  const q = useQuery<ApprovalsResponse>({
+    queryKey: APPROVALS_QUERY_KEY,
+    queryFn: fetchApprovals,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+
+  if (q.isLoading || q.isError || !q.data || q.data.total === 0) return null;
+
+  const label = approvalsBadgeLabel(q.data.total);
+  return (
+    <span
+      data-testid="sidebar-approvals-count"
+      className={`${BADGE_BASE} font-semibold text-foreground ${pulseClass(
+        q.isFetching,
+      )}`}
+      aria-label={label}
+      title={label}
+    >
+      {q.data.total}
     </span>
   );
 }

@@ -34,7 +34,7 @@ func TestCheckAcceptanceApprover(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			self, err := checkAcceptanceApprover(c.proposer, c.approver, c.allowSelf)
+			self, err := CheckAcceptanceApprover(c.proposer, c.approver, c.allowSelf)
 			if !errors.Is(err, c.wantErr) || (c.wantErr == nil && err != nil) {
 				t.Fatalf("err = %v, want %v", err, c.wantErr)
 			}
