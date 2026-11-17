@@ -19,7 +19,7 @@
 // newAttestHandlerWithReader. No Postgres, no pool. NewAttestHandler's
 // signature is unchanged (P0-409-2).
 //
-// caller_can_attest is the cred.HasOwnerRole(owner_role) branch — recorded
+// caller_can_attest is the authz.HasOwnerRole(cred, owner_role) branch — recorded
 // both true (credential holds the control's owner_role) and false (a
 // control-read credential that does NOT hold it). The non-manual 400 branch
 // is pinned by a sibling unit test (TestAttestForm_NonManual400) — it is an
@@ -129,7 +129,7 @@ func TestContract_AttestForm(t *testing.T) {
 	// owner — credential holds the control's owner_role: caller_can_attest
 	// is true. viewer — a control-read credential (IsApprover -> grc_engineer)
 	// that does NOT hold the owner_role: caller_can_attest is false. The two
-	// variants pin both branches of the cred.HasOwnerRole gate that drives
+	// variants pin both branches of the authz.HasOwnerRole gate that drives
 	// the attest button's enabled state in the frontend.
 	ownerCredential := credstore.Credential{
 		ID:         "key_contract_692",

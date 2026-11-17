@@ -12,6 +12,8 @@
 // GET reads the risk. #2104 adds PATCH: the Edit route saves the record
 // fields through it, forwarded to `PATCH /v1/risks/{id}` with the upstream
 // status and body passed through (a 400 refusal renders in the form).
+// #2311: an If-Match header is forwarded too, so the platform can refuse
+// (412) an edit made from a version someone else has since changed.
 //
 // Error mapping (slice 367 — never leak an internal error to the user):
 //   - missing bearer cookie       -> 401 { error: "unauthenticated" }
@@ -41,10 +43,12 @@ export async function PATCH(
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
+  const ifMatch = req.headers.get("If-Match");
   return noStore(
     await forwardJSON(`/v1/risks/${encodeURIComponent(id)}`, {
       method: "PATCH",
       jsonBody: body,
+      headers: ifMatch ? { "If-Match": ifMatch } : undefined,
     }),
   );
 }

@@ -96,11 +96,9 @@ type Credential struct {
 	// users) will replace this with a real user id from the IdP claims.
 	UserID string
 	// OwnerRoles is the list of control-owner roles this credential
-	// holds. Slice 011 introduces this as the gate for
-	// POST /v1/controls/{id}/attestations — the caller's OwnerRoles must
-	// include the control's `owner_role` (declared in the slice-009
-	// bundle manifest). IsAdmin acts as a wildcard: an admin holds every
-	// owner role implicitly. Slice 035 graduates this to OPA-driven RBAC.
+	// holds: an API key's admin-set label, or a JWT's role claim. Gates
+	// read it through authz (authz.HasOwnerRole for attestation, #2523),
+	// which drops a user session's claim: it outlives a revoke (#2381).
 	OwnerRoles []string
 	// TenantRoles is the caller's live user_roles for the current tenant,
 	// as authzmw resolved them for this request's decision (#2428). It is
@@ -133,26 +131,6 @@ type Credential struct {
 // /v1/admin/install/reset-bootstrap mints (#1892). RevokePurpose finds
 // these by the marker and id, never by bearer.
 const PurposeBootstrapRecovery = "bootstrap-recovery"
-
-// HasOwnerRole reports whether c can attest a control whose `owner_role`
-// equals role. Admin is a wildcard; otherwise c must list the role
-// verbatim in OwnerRoles. Empty role argument returns false so a control
-// bundle that forgot to declare an owner_role cannot be attested by
-// anyone but an admin.
-func (c Credential) HasOwnerRole(role string) bool {
-	if role == "" {
-		return c.IsAdmin
-	}
-	if c.IsAdmin {
-		return true
-	}
-	for _, r := range c.OwnerRoles {
-		if r == role {
-			return true
-		}
-	}
-	return false
-}
 
 // ExpiresAt is IssuedAt + TTL, or the zero time for a credential with no
 // TTL (it never expires).
