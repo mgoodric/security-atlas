@@ -41,6 +41,7 @@ import {
   showCloudBanner,
 } from "@/lib/checklist/checklist-view";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 async function postJSON(path: string): Promise<ChecklistResponse> {
   const res = await fetch(path, { method: "POST" });
@@ -105,8 +106,10 @@ export default function ChecklistPage() {
       title={pageTitle("/controls/checklist")}
       subtitle={
         <p className="max-w-2xl">
-          Generate a per-team to-do checklist from your in-scope controls. Each
-          control is assigned to a team deterministically from its owner role;
+          Generate a per-team{" "}
+          <Term id="implementation-checklist">to-do checklist</Term> from your
+          in-scope controls. Each control is assigned to a team
+          deterministically from its <Term id="owner-role">owner role</Term>;
           the AI drafts the concrete tasks and cites the source control for
           every one. Review and approve each team&apos;s section before
           exporting.

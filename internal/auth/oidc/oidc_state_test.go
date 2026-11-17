@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -56,6 +58,15 @@ func issuedFlow(t *testing.T, secure bool) (uuid.UUID, map[string]*http.Cookie) 
 	}
 	if got := u.Query().Get("state"); got != cookies[oidc.StateCookie].Value {
 		t.Fatalf("authorize URL state = %q, state cookie = %q", got, cookies[oidc.StateCookie].Value)
+	}
+	// #2298: state = rand "." iat "." mac, iat the issue time in unix seconds.
+	parts := strings.Split(cookies[oidc.StateCookie].Value, ".")
+	if len(parts) != 3 {
+		t.Fatalf("state %q is not rand.iat.mac", cookies[oidc.StateCookie].Value)
+	}
+	iat, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || time.Since(time.Unix(iat, 0)).Abs() > time.Minute {
+		t.Fatalf("state iat = %q, want the current unix time", parts[1])
 	}
 	return tenantID, cookies
 }
