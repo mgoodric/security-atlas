@@ -20,9 +20,11 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminvendors"
 	approvalsapi "github.com/mgoodric/security-atlas/internal/api/approvals"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
+	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
+	"github.com/mgoodric/security-atlas/internal/api/needsattention"
 	"github.com/mgoodric/security-atlas/internal/api/people"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
@@ -128,7 +130,15 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// risk acceptances, policies and framework scopes, under each type's
 	// own approve gate. Every signed-in role reads it (defaults.rego); a
 	// caller who cannot approve gets an empty list.
-	root.Get("/v1/approvals", approvalsapi.New(s.dbPool, featureFlagStore).WithModules(s.moduleViews).List)
+	approvalsH := approvalsapi.New(s.dbPool, featureFlagStore).WithModules(s.moduleViews)
+	root.Get("/v1/approvals", approvalsH.List)
+	// #2134: the dashboard's ranked needs-attention list. Every signed-in
+	// role reads it (defaults.rego); for=all is refused in the handler to
+	// anyone but admins and GRC leads (authz.IsTenantApprover). Its
+	// approvals band is approvalsH's list, its due-based bands the
+	// calendar's events, under the calendar's OPA and module filters.
+	root.Get("/v1/needs-attention", needsattention.New(s.dbPool, calendarapi.NewStore(s.dbPool), approvalsH).
+		WithAuthz(s.authzEngine).WithModules(s.moduleViews).List)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each

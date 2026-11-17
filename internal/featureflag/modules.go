@@ -235,6 +235,7 @@ var Modules = []Module{
 			"/v1/dashboard",
 			"/v1/activity",
 			"/v1/approvals",
+			"/v1/needs-attention",
 			"/v1/calendar",
 			"/v1/calendar.ics",
 			"/v1/search",
