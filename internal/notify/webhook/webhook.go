@@ -22,7 +22,8 @@
 //     user free-text, not notification-derived; AND it is validated by
 //     notify.SSRFPolicy at channel construction — an internal target
 //     (loopback / RFC1918 / 169.254.169.254 / ULA / CGNAT) is rejected
-//     before any send.
+//     before any send; the same deny list is re-applied to every dialled
+//     address (DNS rebinding), and redirects are never followed (#2304).
 //   - minimum disclosure (P0-543-1): payload carries counts + a deep-link
 //     only; no notification details/evidence/secrets.
 //   - injection (threat-model T): the payload is structured JSON built by
@@ -153,21 +154,25 @@ func NewHTTPTransport(cfg Config, policy notify.SSRFPolicy) (*HTTPTransport, err
 	if !cfg.Enabled() {
 		// Inert transport: Post returns ErrNotConfigured. We still return a
 		// non-nil transport so the channel can be wired uniformly.
-		return &HTTPTransport{cfg: cfg, client: newClient()}, nil
+		return &HTTPTransport{cfg: cfg, client: newClient(cfg, policy)}, nil
 	}
 	validated, err := policy.ValidateWebhookURL(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("webhook: target rejected: %w", err)
 	}
-	return &HTTPTransport{cfg: cfg, url: validated, client: newClient()}, nil
+	return &HTTPTransport{cfg: cfg, url: validated, client: newClient(cfg, policy)}, nil
 }
 
-// newClient returns a client with its own connection pool. A bare
-// &http.Client{} shares http.DefaultTransport, so any CloseIdleConnections
-// on it elsewhere in the process (httptest.Server.Close does this) can cut
-// a webhook POST in flight (#2202).
-func newClient() *http.Client {
-	return &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+// newClient returns the policy's hardened client (#2304): its own
+// connection pool (#2202), no environment proxy, the SSRF deny list
+// re-applied to every dialled address (DNS rebinding), redirects refused,
+// and a backstop timeout so a Config{Timeout: 0} cannot hang.
+func newClient(cfg Config, policy notify.SSRFPolicy) *http.Client {
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	return policy.NewHTTPClient(timeout)
 }
 
 // Post delivers the JSON body. Bearer + HMAC secret are revealed ONLY here
@@ -197,6 +202,11 @@ func (t *HTTPTransport) Post(ctx context.Context, body []byte) error {
 		return errors.New("webhook: post failed: " + t.scrub(err.Error()))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		// Redirects are never followed (#2304): the receiver must answer
+		// at the configured URL itself.
+		return fmt.Errorf("webhook: post status %d: redirect not followed; configure the final URL", resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return fmt.Errorf("webhook: post status %d: %s", resp.StatusCode, t.scrub(string(snippet)))

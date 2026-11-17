@@ -1362,7 +1362,7 @@ func main() {
 			// Slack channel (slice 543) — mounts only when a webhook URL is set.
 			slackCfg := notifyslack.ConfigFromEnv()
 			if slackCfg.Enabled() {
-				slackCh := notifyslack.NewChannel(pool, notifyslack.NewHTTPTransport(slackCfg), slackCfg.BaseURL).WithModules(bgModules)
+				slackCh := notifyslack.NewChannel(pool, notifyslack.NewHTTPTransport(slackCfg, notifyslack.SSRFPolicy()), slackCfg.BaseURL).WithModules(bgModules)
 				channels = append(channels, notifyscheduler.SlackChannel(slackCh))
 			}
 

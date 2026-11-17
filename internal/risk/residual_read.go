@@ -96,15 +96,44 @@ func SeverityBand(severity float64) string {
 	}
 }
 
-// RanksAbove orders two scored risks for a "top risks" list, highest first.
+// Rank is one risk's place in a "top risks" order: its residual value and
+// the tier the value is ranked in. Unscored means the risk has no readable
+// score; each caller decides which scores it reads (#2516).
+type Rank struct {
+	Unscored bool
+	Monetary bool
+	Value    float64
+}
+
+// Tier is the group a Rank is ordered in: 0 for a scored 5x5 severity, 1 for
+// a scored FAIR dollar amount, 2 for an unscored risk of any methodology.
+// Tiers never flip with the sort direction; only the value within a tier
+// does. The register's residual ORDER BY (ListRisksPage) mirrors it.
+func (r Rank) Tier() int {
+	switch {
+	case r.Unscored:
+		return 2
+	case r.Monetary:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// RanksAbove orders two risks for a "top risks" list, highest first.
 // 5x5 severities and FAIR dollar amounts are ranked separately, not on one
 // scale: every severity-scored risk ranks above every Monetary one, and
 // within each group the higher value ranks first. So a FAIR risk's dollar
-// figure never outranks a 1..25 severity by raw number. It returns false
-// when the two are tied, so callers apply their own tiebreak.
-func RanksAbove(aMonetary bool, a float64, bMonetary bool, b float64) bool {
-	if aMonetary != bMonetary {
-		return !aMonetary
+// figure never outranks a 1..25 severity by raw number (#2185). Unscored
+// risks rank after every scored one, FAIR included, and their Value is
+// ignored (#2516). It returns false when the two are tied, so callers apply
+// their own tiebreak.
+func RanksAbove(a, b Rank) bool {
+	if at, bt := a.Tier(), b.Tier(); at != bt {
+		return at < bt
 	}
-	return a > b
+	if a.Unscored {
+		return false
+	}
+	return a.Value > b.Value
 }

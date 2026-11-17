@@ -118,9 +118,20 @@ type HTTPTransport struct {
 	client *http.Client
 }
 
-// NewHTTPTransport constructs an HTTPTransport from config.
-func NewHTTPTransport(cfg Config) *HTTPTransport {
-	return &HTTPTransport{cfg: cfg, client: &http.Client{}}
+// SSRFPolicy returns the strict production SSRF policy for the Slack
+// transport (#2304), mirroring webhook.SSRFPolicy.
+func SSRFPolicy() notify.SSRFPolicy { return notify.SSRFPolicy{} }
+
+// NewHTTPTransport constructs an HTTPTransport from config. Its client is
+// the policy's SSRF-hardened one (#2304): the deny list is applied to every
+// dialled address, no environment proxy, redirects refused. Production
+// passes the strict zero-value policy; tests relax it to reach httptest.
+func NewHTTPTransport(cfg Config, policy notify.SSRFPolicy) *HTTPTransport {
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	return &HTTPTransport{cfg: cfg, client: policy.NewHTTPClient(timeout)}
 }
 
 // Post delivers the JSON body to the Slack incoming-webhook URL. The
@@ -146,6 +157,9 @@ func (t *HTTPTransport) Post(ctx context.Context, body []byte) error {
 		return errors.New("slack: post failed: " + notify.ScrubSecret(err.Error(), t.cfg.WebhookURL))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return fmt.Errorf("slack: post status %d: redirect not followed", resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return fmt.Errorf("slack: post status %d: %s", resp.StatusCode,

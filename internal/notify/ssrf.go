@@ -3,8 +3,11 @@ package notify
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // SSRF guard for the generic-webhook channel (slice 543 / threat-model S /
@@ -26,7 +29,10 @@ import (
 //     time — the resolved set must be entirely public).
 //
 // The guard runs at config-validation time (channel construction) so a bad
-// target fails fast and visibly, not silently at send time.
+// target fails fast and visibly, not silently at send time. A config-time
+// check alone is not enough: DNS can change between validation and the
+// dial. NewHTTPClient re-applies the same deny list to every dialled
+// address and refuses redirects (#2304).
 
 // SSRFPolicy parameterizes the guard. The zero value is the strict
 // production policy (https-only, deny all internal).
@@ -125,4 +131,67 @@ func (p SSRFPolicy) denyReason(ip net.IP) string {
 		return "cgnat"
 	}
 	return ""
+}
+
+// WithResolver returns a copy of the policy whose config-time check
+// resolves hosts with f instead of net.LookupIP. It is a test seam: it
+// changes ValidateWebhookURL only, never the dial-time check, which always
+// judges the address actually being connected to.
+func (p SSRFPolicy) WithResolver(f func(host string) ([]net.IP, error)) SSRFPolicy {
+	p.resolveHost = f
+	return p
+}
+
+// DialControl is a net.Dialer.Control hook that applies the policy to the
+// resolved address being dialled (#2304). ValidateWebhookURL checks the
+// host once, at config time; every later dial resolves the name again, so
+// a hostname whose DNS an attacker controls could rebind to an internal
+// address after validation. Control runs after resolution and before
+// connect, once per address tried (every Happy-Eyeballs attempt included),
+// so it sees exactly what is connected to. An address that does not parse
+// as ip:port is refused: fail closed.
+func (p SSRFPolicy) DialControl(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("ssrf guard: dial address %q unparseable: %w", address, err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("ssrf guard: dial address %q is not an IP", address)
+	}
+	if reason := p.denyReason(ip); reason != "" {
+		return fmt.Errorf("ssrf guard: dial to %s refused (%s); internal targets are denied", ip, reason)
+	}
+	return nil
+}
+
+// NewHTTPClient returns an *http.Client for an operator-configured
+// outbound target, hardened against SSRF (#2304):
+//
+//   - its own *http.Transport, not http.DefaultTransport (#2202);
+//   - Proxy nil: an environment proxy (HTTPS_PROXY) would make the client
+//     dial the proxy, and the proxy dial the target, past DialControl;
+//   - net.Dialer.Control = DialControl, so every dialled IP is re-checked
+//     (DNS rebinding);
+//   - redirects are never followed: CheckRedirect returns
+//     http.ErrUseLastResponse, so a 3xx comes back as the response and the
+//     body and its auth/signature headers go nowhere else;
+//   - timeout as a whole-request backstop for a caller that sets no
+//     deadline.
+func (p SSRFPolicy) NewHTTPClient(timeout time.Duration) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   p.DialControl,
+	}
+	tr.DialContext = dialer.DialContext
+	return &http.Client{
+		Transport: tr,
+		Timeout:   timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
