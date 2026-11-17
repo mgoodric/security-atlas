@@ -86,6 +86,16 @@ function emphasis(s: string): string {
 
 type RefMap = Map<string, string>;
 
+// CommonMark label matching: trim, collapse internal whitespace, and case
+// fold. It runs on UNESCAPED text on both sides — the definition map is
+// built from raw lines, the lookup from already-escaped inline text — so
+// a label holding `&`, `<` or `'` matches its definition (#2316). The
+// lower-then-upper pass folds the cases a single `toLowerCase` misses
+// (`ß` and `SS` both become `SS`).
+function normalizeLabel(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ").toLowerCase().toUpperCase();
+}
+
 // Inline transforms applied to an ALREADY-escaped string. Code spans and
 // finished anchors are swapped for NUL-delimited placeholders (NUL is
 // stripped from input by escapeHtml, so input cannot forge one) so later
@@ -121,7 +131,7 @@ function renderInline(escaped: string, refs: RefMap): string {
   out = out.replace(
     /\[([^[\]]+)\]\[([^[\]]*)\]/g,
     (m, text: string, label: string) => {
-      const target = refs.get((label || text).trim().toLowerCase());
+      const target = refs.get(normalizeLabel(unescapeHtml(label || text)));
       const href = target === undefined ? null : safeHref(target);
       return href ? hold(anchor(href, emphasis(text))) : m;
     },
@@ -175,9 +185,12 @@ function isTableStart(lines: string[], i: number): boolean {
 
 // Reference definitions `[label]: url "title"` are collected once over the
 // whole document, outside fenced code, and removed from the rendered
-// output. Inside a fence they are code and stay as written.
+// output. Inside a fence they are code and stay as written. A definition
+// inside a block quote (`> [r]: url`) counts too, as CommonMark has it
+// (#2316); its `>` markers stay so the quote keeps its shape.
 const REF_DEF = /^\s{0,3}\[([^[\]]+)\]:\s*<?([^\s>]+)>?(?:\s+.*)?$/;
 const FENCE = /^\s*```/;
+const QUOTE_MARKER = /^\s*>\s?/;
 
 // Longer input renders as escaped preformatted text with no markdown
 // transforms: a cap on the work any one stored field can cost a viewer.
@@ -187,6 +200,23 @@ export const MAX_MARKDOWN_CHARS = 100_000;
 // markers render as plain text, so a hostile `>>>>…` cannot blow the stack.
 const MAX_QUOTE_DEPTH = 8;
 
+// Strip up to `max` leading `>` markers the way renderBlocks does, one
+// level at a time. Returns how many came off and what is left.
+function stripQuotes(
+  line: string,
+  max: number,
+): { depth: number; rest: string } {
+  let depth = 0;
+  let rest = line;
+  while (depth < max) {
+    const m = rest.match(QUOTE_MARKER);
+    if (!m) break;
+    rest = rest.slice(m[0].length);
+    depth++;
+  }
+  return { depth, rest };
+}
+
 /**
  * Render a markdown string to a safe HTML string. The input is escaped
  * before any transform; the output is a fixed grammar of safe tags.
@@ -195,20 +225,41 @@ export function renderMarkdown(md: string): string {
   if (!md) return "";
   if (md.length > MAX_MARKDOWN_CHARS) return `<pre>${escapeHtml(md)}</pre>`;
   const refs: RefMap = new Map();
-  let inFence = false;
+  // Quote depth of the open fence, or null outside one. A fence opened
+  // inside a quote ends with the quote, as renderBlocks renders it.
+  let fenceDepth: number | null = null;
   // Split on every character `.` refuses to match (\n, \r, U+2028,
   // U+2029), so no line holds a character that `\s` matches but `.` does
   // not. Otherwise the `\s+ … .* … $` block patterns backtrack
   // quadratically on a line like "- " + spaces + "x\u2028x".
-  const lines = md.split(/\r\n?|[\n\u2028\u2029]/).filter((line) => {
-    if (FENCE.test(line)) inFence = !inFence;
-    if (inFence) return true;
-    const def = line.match(REF_DEF);
-    if (!def) return true;
-    const label = def[1].trim().toLowerCase();
+  const lines: string[] = [];
+  for (const line of md.split(/\r\n?|[\n\u2028\u2029]/)) {
+    if (fenceDepth !== null) {
+      const inner = stripQuotes(line, fenceDepth);
+      if (inner.depth === fenceDepth) {
+        if (FENCE.test(inner.rest)) fenceDepth = null;
+        lines.push(line);
+        continue;
+      }
+      fenceDepth = null; // the quote holding the fence ended
+    }
+    const { depth, rest } = stripQuotes(line, MAX_QUOTE_DEPTH);
+    if (FENCE.test(rest)) {
+      fenceDepth = depth;
+      lines.push(line);
+      continue;
+    }
+    const def = rest.match(REF_DEF);
+    if (!def) {
+      lines.push(line);
+      continue;
+    }
+    const label = normalizeLabel(def[1]);
     if (!refs.has(label)) refs.set(label, def[2]);
-    return false;
-  });
+    // Top level: drop the line. In a quote: keep the markers alone, so
+    // the quote still renders (as an empty one, if that was all of it).
+    if (depth > 0) lines.push(line.slice(0, line.length - rest.length));
+  }
   return renderBlocks(lines, refs, 0);
 }
 
