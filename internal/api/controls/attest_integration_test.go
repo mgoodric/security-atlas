@@ -894,3 +894,94 @@ func TestAttest_LatestAttestationDecidesControlState(t *testing.T) {
 		t.Fatalf("pass then fail: control result %q, want fail", got)
 	}
 }
+
+// #2509: a retry of the same body, with no idempotency_key and no
+// observed_at, returns the first receipt instead of a 409, and does not
+// evaluate the control again.
+func TestAttest_RetryWithoutKeyOrObservedAt_Dedupes(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_retry_dedupes")
+	body := attestBody("Quarterly review complete.", map[string]any{})
+	path := "/v1/controls/" + controlID + "/attestations"
+
+	status1, raw1 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, body)
+	if status1 != http.StatusCreated {
+		t.Fatalf("first: expected 201; got %d body=%s", status1, raw1)
+	}
+	status2, raw2 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, body)
+	if status2 != http.StatusOK {
+		t.Fatalf("retry: expected 200 (dedup); got %d body=%s", status2, raw2)
+	}
+	var r1, r2 struct {
+		RecordID     string `json:"record_id"`
+		Deduplicated bool   `json:"deduplicated"`
+		Evaluated    bool   `json:"evaluated"`
+	}
+	_ = json.Unmarshal(raw1, &r1)
+	_ = json.Unmarshal(raw2, &r2)
+	if !r2.Deduplicated || r2.RecordID != r1.RecordID {
+		t.Fatalf("retry must return the first receipt: first=%+v retry=%+v", r1, r2)
+	}
+	if r2.Evaluated {
+		t.Fatalf("a replay must not evaluate the control again: %s", raw2)
+	}
+}
+
+// #2509: attesting the same text again after a different attestation is a
+// new attestation (the web form sends a fresh key per submission), so a
+// pass, a fail and the same pass again leave the control passing.
+func TestAttest_SameTextAgain_IsRecorded(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_same_text_again")
+	path := "/v1/controls/" + controlID + "/attestations"
+	post := func(statement string, extra map[string]any) attestWire {
+		t.Helper()
+		extra["idempotency_key"] = "attest-web-" + uuid.NewString()
+		status, raw := httpJSON(t, s, http.MethodPost, path, s.ownerBear, attestBody(statement, extra))
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201; got %d body=%s", status, raw)
+		}
+		var resp attestWire
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("decode: %v body=%s", err, raw)
+		}
+		return resp
+	}
+
+	first := post("Review clean.", map[string]any{"result": "pass"})
+	post("Found a stale account.", map[string]any{"result": "fail", "fail_reason": "leaver still active"})
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("after fail: control result %q, want fail", got)
+	}
+	again := post("Review clean.", map[string]any{"result": "pass"})
+	if again.RecordID == first.RecordID {
+		t.Fatalf("the same text again must be a new record, got the first one back")
+	}
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("same pass again: control result %q, want pass", got)
+	}
+}
+
+// #2509: observed_at more than five minutes ahead of server time is refused
+// with 422 and nothing is written.
+func TestAttest_FutureObservedAt_Refused(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_future_refused")
+	status, raw := httpJSON(t, s, http.MethodPost,
+		"/v1/controls/"+controlID+"/attestations", s.ownerBear,
+		attestBody("Dated tomorrow.", map[string]any{
+			"observed_at": time.Now().UTC().Add(20 * time.Hour).Format(time.RFC3339Nano),
+		}))
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422; got %d body=%s", status, raw)
+	}
+	admin := dbtest.NewMigratePool(t)
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE control_id = $1`, controlID).Scan(&n); err != nil {
+		t.Fatalf("count records: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("a refused attestation must write nothing; got %d records", n)
+	}
+}
