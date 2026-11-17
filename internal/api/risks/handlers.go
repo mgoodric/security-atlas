@@ -297,6 +297,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 				"error": err.Error(),
 				"code":  "treatment_validation_failed",
 			})
+		case errors.Is(err, risk.ErrScoreNotNumeric):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		case errors.Is(err, risk.ErrInvalidMethodology),
 			errors.Is(err, risk.ErrInherentScoreInvalid),
 			risk.IsPlacementValidation(err),
@@ -440,6 +442,13 @@ func parsePageFilter(r *http.Request) (risk.PageFilter, string) {
 			return f, "level must be one of team|org|company"
 		}
 		f.Level = v
+	}
+	// #2490: ?severity_band=high|medium|low, the sidebar badge's count.
+	if v := q.Get("severity_band"); v != "" {
+		if _, _, ok := risk.SeverityBandRange(v); !ok {
+			return f, risk.ErrInvalidSeverityBand.Error()
+		}
+		f.SeverityBand = v
 	}
 	// Slice 067 (AC-4): ?org_unit= is an optional UUID. A present-but-
 	// malformed value is a 400 rather than a silently-ignored filter.
@@ -703,6 +712,8 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, risk.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
+		case errors.Is(err, risk.ErrScoreNotNumeric):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		case risk.IsPlacementValidation(err), risk.IsCategoryRefusal(err),
 			risk.IsRecordValidation(err):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
