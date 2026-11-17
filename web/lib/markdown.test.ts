@@ -496,15 +496,16 @@ describe("renderMarkdown — random input emits only the safe grammar (#2316)", 
         md += FRAGMENTS[Math.floor(rand() * FRAGMENTS.length)];
       }
       const html = renderMarkdown(md);
-      for (const tag of html.match(/<[^>]*>/g) ?? []) {
+      const tags = html.match(/<[^>]*>/g) ?? [];
+      // No `<` survives outside an emitted tag: every one starts a tag.
+      expect((html.match(/</g) ?? []).length, md).toBe(tags.length);
+      for (const tag of tags) {
         expect(tag, md).toMatch(TAG);
         const href = tag.match(/href="([^"]*)"/)?.[1];
         if (href !== undefined) {
           expect(href, md).toMatch(/^(https?:\/\/[^/]|mailto:[^/])/i);
         }
       }
-      // No `<` survives outside an emitted tag.
-      expect(html.replace(/<[^>]*>/g, ""), md).not.toContain("<");
     }
   });
 });
