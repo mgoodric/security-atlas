@@ -29,6 +29,9 @@ func TestDirectoryName(t *testing.T) {
 		{nameless, "Unknown"},
 		{"key_" + key, "API key …beef"},
 		{"system", "System"},
+		// A platform process, such as the SCF import's carry-forward (#2554).
+		{"system:scf-import", "System"},
+		{"systemd", "Unknown"},
 		// Another tenant's user or key is not in this directory.
 		{other, "Unknown"},
 		{"key_" + otherKey, "Unknown"},

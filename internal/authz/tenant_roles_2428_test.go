@@ -34,6 +34,7 @@ type gate2428 struct {
 var (
 	tenantAdminGate    = gate2428{"IsTenantAdmin", authz.IsTenantAdmin}
 	tenantApproverGate = gate2428{"IsTenantApprover", authz.IsTenantApprover}
+	riskReaderGate     = gate2428{"IsTenantRiskReader", authz.IsTenantRiskReader}
 )
 
 // route2428 is one switched route and the gate its handler calls.
@@ -131,6 +132,15 @@ var routes2428 = []route2428{
 	// #2134: the Everyone view of the needs-attention list. for=me stays
 	// open to every role, so OPA admits the path for all of them.
 	{http.MethodGet, "/v1/needs-attention?for=all", tenantApproverGate},
+
+	// #2556: the risk-module read gates, admin, grc_engineer and viewer.
+	// The other risk-module reads have no handler role gate; OPA alone
+	// decides them (risk_reads_2556_test.go).
+	{http.MethodGet, "/v1/risks", riskReaderGate},
+	{http.MethodGet, "/v1/risks/theme-heatmap", riskReaderGate},
+	{http.MethodGet, "/v1/risks/export", riskReaderGate},
+	{http.MethodGet, "/v1/decisions", riskReaderGate},
+	{http.MethodGet, "/v1/org_units", riskReaderGate},
 }
 
 // tenantRoles2428 are the tenant roles the matrices run, each alone.
@@ -145,6 +155,8 @@ func wantAdmit2428(g gate2428, role authz.Role) bool {
 	switch g.name {
 	case tenantAdminGate.name:
 		return role == authz.RoleAdmin
+	case riskReaderGate.name:
+		return role == authz.RoleAdmin || role == authz.RoleGRCEngineer || role == authz.RoleViewer
 	default:
 		return role == authz.RoleAdmin || role == authz.RoleGRCEngineer
 	}

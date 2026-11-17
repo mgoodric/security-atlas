@@ -114,7 +114,8 @@ func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "provider must be one of: local-ollama, anthropic, openai, bedrock")
 		return
 	}
-	mc, err := h.store.Set(r.Context(), provider, cloud.Secret(req.APIKey), actor(r))
+	user, principal := actor(r)
+	mc, err := h.store.Set(r.Context(), provider, cloud.Secret(req.APIKey), user, principal)
 	if err != nil {
 		writeSetError(w, err)
 		return
@@ -127,7 +128,8 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireTenantAdmin(w, r) {
 		return
 	}
-	if _, err := h.store.Clear(r.Context(), actor(r)); err != nil {
+	user, principal := actor(r)
+	if _, err := h.store.Clear(r.Context(), user, principal); err != nil {
 		httpresp.WriteError(w, http.StatusInternalServerError, "failed to clear routing config")
 		return
 	}
@@ -155,12 +157,16 @@ func writeSetError(w http.ResponseWriter, err error) {
 	}
 }
 
-// actor is the user the audit row names (#2224); a caller that is not a user
-// (a bootstrap key) is recorded as uuid.Nil.
-func actor(r *http.Request) uuid.UUID {
-	cred, _ := authctx.CredentialFromContext(r.Context())
+// actor is the user the audit row names (#2224), uuid.Nil for a caller that
+// is not a user (a bootstrap key), and the acting credential's principal
+// (#2329), which names that caller either way. Empty with no credential.
+func actor(r *http.Request) (uuid.UUID, string) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		return uuid.Nil, ""
+	}
 	u, _ := credstore.CallerUserID(cred)
-	return u
+	return u, credstore.PrincipalOf(cred)
 }
 
 // requireTenantAdmin enforces the tenant-admin gate (P0-499 threat-model S): a

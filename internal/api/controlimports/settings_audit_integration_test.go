@@ -63,13 +63,14 @@ func putSettings(t *testing.T, h http.Handler, body string) int {
 
 type settingsAuditRow struct {
 	userID        string
+	principal     string
 	before, after map[string]any
 }
 
 func settingsAuditRows(t *testing.T, admin *pgxpool.Pool, tenant string) []settingsAuditRow {
 	t.Helper()
 	rows, err := admin.Query(context.Background(), `
-		SELECT user_id::text, before, after FROM me_audit_log
+		SELECT user_id::text, coalesce(actor_principal, ''), before, after FROM me_audit_log
 		 WHERE tenant_id = $1 AND action = $2
 		 ORDER BY occurred_at`, tenant, controlimport.AuditActionSettingsUpdate)
 	if err != nil {
@@ -82,7 +83,7 @@ func settingsAuditRows(t *testing.T, admin *pgxpool.Pool, tenant string) []setti
 			r             settingsAuditRow
 			before, after []byte
 		)
-		if err := rows.Scan(&r.userID, &before, &after); err != nil {
+		if err := rows.Scan(&r.userID, &r.principal, &before, &after); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
 		if err := json.Unmarshal(before, &r.before); err != nil {
@@ -118,8 +119,8 @@ func TestPutSettings_EachChangeWritesOneAuditRow(t *testing.T) {
 			t.Fatalf("after PUT %d: %d audit rows, want %d", i+1, len(rows), i+1)
 		}
 		r := rows[i]
-		if r.userID != settingsActor {
-			t.Errorf("row %d actor = %s, want %s", i, r.userID, settingsActor)
+		if r.userID != settingsActor || r.principal != settingsActor {
+			t.Errorf("row %d actor = %s principal = %q, want %s for both", i, r.userID, r.principal, settingsActor)
 		}
 		if r.before["llm_rerank_local"] != want.before || r.after["llm_rerank_local"] != want.after {
 			t.Errorf("row %d before=%v after=%v, want %v -> %v", i, r.before, r.after, want.before, want.after)

@@ -245,59 +245,9 @@ func (s *Store) DecideRemap(ctx context.Context, in RemapDecideInput) (RemapDeci
 	}
 	var out RemapDecision
 	err = s.inRawTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
-		var p lockedRemap
-		err := tx.QueryRow(ctx, `
-			SELECT id, overlay_edge_id, legacy_anchor_id, target_framework_version_id,
-			       legacy_scf_id, legacy_release, target_release, class, status, successor_scf_ids
-			FROM scf_overlay_remap_proposals
-			WHERE tenant_id = $1 AND id = $2
-			FOR UPDATE`, tenantID, proposalID).Scan(
-			&p.id, &p.edgeID, &p.legacyAnchorID, &p.targetVersionID,
-			&p.legacySCFID, &p.legacyRelease, &p.targetRelease, &p.class, &p.status, &p.successors)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrRemapNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("mapping overlay: lock remap proposal: %w", err)
-		}
-		if err := checkDecidable(p.status, in.Decision); err != nil {
-			return err
-		}
-		out = RemapDecision{
-			ProposalID: p.id.String(), Decision: in.Decision, LegacyOverlayEdgeID: p.edgeID.String(),
-			LegacySCFID: p.legacySCFID, LegacyRelease: p.legacyRelease,
-			Reason: strings.TrimSpace(in.Reason), DecidedBy: strings.TrimSpace(in.DecidedBy),
-		}
-		var newEdge, newAnchor *uuid.UUID
-		if in.Decision == RemapApproved {
-			edge, anchor, code, err := approveRemap(ctx, tx, tenantID, p, in.SCFID, in.Actor)
-			if err != nil {
-				return err
-			}
-			newEdge, newAnchor = &edge, &anchor
-			out.NewOverlayEdgeID, out.NewAnchorID = edge.String(), anchor.String()
-			out.NewSCFID, out.NewRelease = code, p.targetRelease
-		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE scf_overlay_remap_proposals
-			SET status = $3, target_anchor_id = $4, new_overlay_edge_id = $5
-			WHERE tenant_id = $1 AND id = $2`, tenantID, p.id, in.Decision, newAnchor, newEdge); err != nil {
-			return fmt.Errorf("mapping overlay: update remap proposal: %w", err)
-		}
-		var decidedAt time.Time
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO scf_overlay_remap_decisions (
-			    tenant_id, proposal_id, decision, legacy_overlay_edge_id, legacy_anchor_id,
-			    legacy_scf_id, legacy_release, new_overlay_edge_id, new_anchor_id,
-			    new_scf_id, new_release, reason, decided_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), $13)
-			RETURNING decided_at`,
-			tenantID, p.id, in.Decision, p.edgeID, p.legacyAnchorID, p.legacySCFID, p.legacyRelease,
-			newEdge, newAnchor, out.NewSCFID, out.NewRelease, out.Reason, out.DecidedBy).Scan(&decidedAt); err != nil {
-			return fmt.Errorf("mapping overlay: record remap decision: %w", err)
-		}
-		out.DecidedAt = decidedAt.UTC().Format(time.RFC3339Nano)
-		return nil
+		var err error
+		out, err = decideRemapTx(ctx, tx, tenantID, proposalID, in, true)
+		return err
 	})
 	if err != nil {
 		return RemapDecision{}, err
@@ -305,10 +255,69 @@ func (s *Store) DecideRemap(ctx context.Context, in RemapDecideInput) (RemapDeci
 	return out, nil
 }
 
-// approveRemap creates the overlay edge on the chosen anchor and retires the
-// legacy one, both with their audit rows. It returns the new edge, the
-// anchor and its code.
-func approveRemap(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p lockedRemap, scfID, actor string) (uuid.UUID, uuid.UUID, string, error) {
+// decideRemapTx applies one decision inside tx, which is already bound to
+// tenantID. retireLegacy says whether an approval retires the legacy edge:
+// a writer's approval does, the import's carry-forward does not (#2554).
+func decideRemapTx(ctx context.Context, tx pgx.Tx, tenantID, proposalID uuid.UUID, in RemapDecideInput, retireLegacy bool) (RemapDecision, error) {
+	var p lockedRemap
+	err := tx.QueryRow(ctx, `
+		SELECT id, overlay_edge_id, legacy_anchor_id, target_framework_version_id,
+		       legacy_scf_id, legacy_release, target_release, class, status, successor_scf_ids
+		FROM scf_overlay_remap_proposals
+		WHERE tenant_id = $1 AND id = $2
+		FOR UPDATE`, tenantID, proposalID).Scan(
+		&p.id, &p.edgeID, &p.legacyAnchorID, &p.targetVersionID,
+		&p.legacySCFID, &p.legacyRelease, &p.targetRelease, &p.class, &p.status, &p.successors)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RemapDecision{}, ErrRemapNotFound
+	}
+	if err != nil {
+		return RemapDecision{}, fmt.Errorf("mapping overlay: lock remap proposal: %w", err)
+	}
+	if err := checkDecidable(p.status, in.Decision); err != nil {
+		return RemapDecision{}, err
+	}
+	out := RemapDecision{
+		ProposalID: p.id.String(), Decision: in.Decision, LegacyOverlayEdgeID: p.edgeID.String(),
+		LegacySCFID: p.legacySCFID, LegacyRelease: p.legacyRelease,
+		Reason: strings.TrimSpace(in.Reason), DecidedBy: strings.TrimSpace(in.DecidedBy),
+	}
+	var newEdge, newAnchor *uuid.UUID
+	if in.Decision == RemapApproved {
+		edge, anchor, code, err := approveRemap(ctx, tx, tenantID, p, in.SCFID, in.Actor, retireLegacy)
+		if err != nil {
+			return RemapDecision{}, err
+		}
+		newEdge, newAnchor = &edge, &anchor
+		out.NewOverlayEdgeID, out.NewAnchorID = edge.String(), anchor.String()
+		out.NewSCFID, out.NewRelease = code, p.targetRelease
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE scf_overlay_remap_proposals
+		SET status = $3, target_anchor_id = $4, new_overlay_edge_id = $5
+		WHERE tenant_id = $1 AND id = $2`, tenantID, p.id, in.Decision, newAnchor, newEdge); err != nil {
+		return RemapDecision{}, fmt.Errorf("mapping overlay: update remap proposal: %w", err)
+	}
+	var decidedAt time.Time
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO scf_overlay_remap_decisions (
+		    tenant_id, proposal_id, decision, legacy_overlay_edge_id, legacy_anchor_id,
+		    legacy_scf_id, legacy_release, new_overlay_edge_id, new_anchor_id,
+		    new_scf_id, new_release, reason, decided_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), $13)
+		RETURNING decided_at`,
+		tenantID, p.id, in.Decision, p.edgeID, p.legacyAnchorID, p.legacySCFID, p.legacyRelease,
+		newEdge, newAnchor, out.NewSCFID, out.NewRelease, out.Reason, out.DecidedBy).Scan(&decidedAt); err != nil {
+		return RemapDecision{}, fmt.Errorf("mapping overlay: record remap decision: %w", err)
+	}
+	out.DecidedAt = decidedAt.UTC().Format(time.RFC3339Nano)
+	return out, nil
+}
+
+// approveRemap creates the overlay edge on the chosen anchor and, when
+// retireLegacy is set, retires the legacy one, each with its audit row. It
+// returns the new edge, the anchor and its code.
+func approveRemap(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p lockedRemap, scfID, actor string, retireLegacy bool) (uuid.UUID, uuid.UUID, string, error) {
 	code, err := successorFor(p.class, p.successors, scfID)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, "", err
@@ -343,10 +352,6 @@ func approveRemap(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p lockedRe
 		return uuid.Nil, uuid.Nil, "", err
 	}
 
-	before, err := getView(ctx, q, tenantID, legacy.ID)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, "", err
-	}
 	row, err := q.InsertOverlayEdge(ctx, dbx.InsertOverlayEdgeParams{
 		TenantID:               pgUUID(tenantID),
 		FrameworkRequirementID: legacy.FrameworkRequirementID,
@@ -371,7 +376,14 @@ func approveRemap(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p lockedRe
 	if err := writeAudit(ctx, q, tenantID, "create", nil, &created, actor); err != nil {
 		return uuid.Nil, uuid.Nil, "", err
 	}
+	if !retireLegacy {
+		return uuid.UUID(row.ID.Bytes), anchor, code, nil
+	}
 
+	before, err := getView(ctx, q, tenantID, legacy.ID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, "", err
+	}
 	if _, err := q.RetireOverlayEdge(ctx, dbx.RetireOverlayEdgeParams{
 		Reason: RemapRetirementReason, Actor: actor, TenantID: pgUUID(tenantID), ID: legacy.ID,
 	}); err != nil {
