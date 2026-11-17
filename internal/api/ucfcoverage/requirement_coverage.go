@@ -384,7 +384,16 @@ func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UU
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	var overlays []*overlayWire
+	for _, a := range out {
+		if a.overlay != nil {
+			overlays = append(overlays, a.overlay)
+		}
+	}
+	return out, h.nameOverlays(ctx, overlays)
 }
 
 // listControlsForAnchors runs the tenant-scoped controls lookup inside

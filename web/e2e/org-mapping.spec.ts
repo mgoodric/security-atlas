@@ -116,7 +116,7 @@ test.describe("overlay edges shown as org mapping (#1800)", () => {
     );
     await expect(row.getByTestId("org-mapping-source")).toHaveText(SOURCE);
     await expect(row.getByTestId("org-mapping-added")).toHaveText(
-      "2026-11-01 by org-mapping-e2e-author",
+      "2026-11-01 by Org Mapping Author",
     );
 
     // The catalog edge is listed apart, unlabelled.
