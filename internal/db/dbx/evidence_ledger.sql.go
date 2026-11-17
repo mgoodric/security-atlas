@@ -79,6 +79,59 @@ func (q *Queries) CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgt
 	return count, err
 }
 
+const existsAttestationAfter = `-- name: ExistsAttestationAfter :one
+SELECT EXISTS (
+    SELECT 1
+    FROM evidence_records
+    WHERE tenant_id = $1
+      AND (control_id = $2 OR control_ref = $3::text)
+      AND evidence_kind = $4::text
+      AND id <> $5
+      AND (
+        LEAST(observed_at, ingested_at) > $6::timestamptz
+        OR (LEAST(observed_at, ingested_at) = $6::timestamptz
+            AND ingested_at > $7::timestamptz)
+        OR (LEAST(observed_at, ingested_at) = $6::timestamptz
+            AND ingested_at = $7::timestamptz
+            AND id::text COLLATE "C" > $8::text)
+      )
+) AS newer
+`
+
+type ExistsAttestationAfterParams struct {
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	EvidenceKind string             `json:"evidence_kind"`
+	ID           pgtype.UUID        `json:"id"`
+	AttestedAt   pgtype.Timestamptz `json:"attested_at"`
+	IngestedAt   pgtype.Timestamptz `json:"ingested_at"`
+	IDText       string             `json:"id_text"`
+}
+
+// #2520: is there an attestation for the control later than the given one,
+// under the evaluation engine's latest-attestation order (internal/eval
+// latestAttestationWins): min(observed_at, ingested_at), then ingested_at,
+// then id compared bytewise? The attest handler asks this on a dedupe hit
+// for a server-derived key, so a repeat of an older attestation is recorded
+// when a newer one would otherwise stand. Control resolution mirrors
+// ListEvidenceForControlAsOf.
+func (q *Queries) ExistsAttestationAfter(ctx context.Context, arg ExistsAttestationAfterParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsAttestationAfter,
+		arg.TenantID,
+		arg.ControlID,
+		arg.ControlRef,
+		arg.EvidenceKind,
+		arg.ID,
+		arg.AttestedAt,
+		arg.IngestedAt,
+		arg.IDText,
+	)
+	var newer bool
+	err := row.Scan(&newer)
+	return newer, err
+}
+
 const getEvidenceAuditEntryByReceipt = `-- name: GetEvidenceAuditEntryByReceipt :one
 SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module
 FROM evidence_audit_log

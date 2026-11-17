@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
+import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { listMySessions, MeSession, revokeMySession } from "@/lib/api/me";
@@ -29,6 +30,9 @@ import { sessionLine } from "../session-line";
 
 export function SessionsSection() {
   const qc = useQueryClient();
+  // #2280: Revoke signs another device out at once and can't be undone
+  // from there, so it asks first.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const sessionsQuery = useQuery({
     queryKey: ["settings-me-sessions"],
     queryFn: listMySessions,
@@ -36,6 +40,7 @@ export function SessionsSection() {
   const revokeMut = useMutation({
     mutationFn: revokeMySession,
     onSuccess: () => {
+      setConfirming(null);
       qc.invalidateQueries({ queryKey: ["settings-me-sessions"] });
     },
   });
@@ -100,11 +105,21 @@ export function SessionsSection() {
                   <div className="flex items-center gap-2">
                     {s.is_current ? (
                       <Badge variant="outline">current</Badge>
+                    ) : confirming === s.id ? (
+                      <ConfirmInline
+                        prompt="Revoke this session? That device is signed out immediately."
+                        confirmLabel="Revoke session"
+                        ariaLabel={`Confirm: revoke session …${s.last4}`}
+                        busy={revokeMut.isPending}
+                        onCancel={() => setConfirming(null)}
+                        onConfirm={() => revokeMut.mutate(s.id)}
+                        data-testid="settings-session-revoke-confirm"
+                      />
                     ) : (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => revokeMut.mutate(s.id)}
+                        onClick={() => setConfirming(s.id)}
                         disabled={revokeMut.isPending}
                         data-testid="settings-session-revoke"
                       >

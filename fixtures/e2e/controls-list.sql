@@ -146,6 +146,13 @@ VALUES (
 )
 ON CONFLICT DO NOTHING;
 
+-- #2501: the live roles the e2e token claims (settings.sql seeds the
+-- same rows), so owner pickers that run after this fixture list the user.
+INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
+VALUES ('00000000-0000-0000-0000-00000000d3a0', '44444444-4444-4444-4444-444444440001', 'admin', 'e2e:2501'),
+       ('00000000-0000-0000-0000-00000000d3a0', '44444444-4444-4444-4444-444444440001', 'grc_engineer', 'e2e:2501')
+ON CONFLICT DO NOTHING;
+
 -- ============================================================
 -- 3 SCF anchors (varied family) + 3 matching controls (same id)
 -- ============================================================

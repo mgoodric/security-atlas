@@ -48,8 +48,8 @@ func (h *Handler) writeDetail(w http.ResponseWriter, r *http.Request, status int
 		return
 	}
 	for path, ids := range map[string]*[]uuid.UUID{
-		"/v1/risks":   &d.Links.RiskIDs,
-		"/v1/vendors": &d.Links.VendorIDs,
+		riskRoute:   &d.Links.RiskIDs,
+		vendorRoute: &d.Links.VendorIDs,
 	} {
 		sees, err := viewer.Sees(path)
 		if err != nil {
@@ -61,6 +61,47 @@ func (h *Handler) writeDetail(w http.ResponseWriter, r *http.Request, status int
 		}
 	}
 	httpresp.WriteJSON(w, status, map[string]any{"incident": detailWireFrom(d)})
+}
+
+// Routes the registry places under the modules an incident links into.
+const (
+	riskRoute   = "/v1/risks"
+	vendorRoute = "/v1/vendors"
+)
+
+// refuseHiddenLinks answers 403 when a create names risk_ids or
+// vendor_ids in a module the caller cannot see (#2501), and reports
+// whether it answered. It runs before the store, and the answer names only
+// the field, so it is the same whether the ids exist or not: a caller
+// cannot probe a hidden module's records through it. A failed access read
+// fails closed (500).
+func (h *Handler) refuseHiddenLinks(w http.ResponseWriter, r *http.Request, ids parsedLinks) bool {
+	viewer, err := h.views.For(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "incident link modules", err)
+		return true
+	}
+	for _, l := range []struct {
+		field, path string
+		ids         []uuid.UUID
+	}{
+		{"risk_ids", riskRoute, ids.RiskIDs},
+		{"vendor_ids", vendorRoute, ids.VendorIDs},
+	} {
+		if len(l.ids) == 0 {
+			continue
+		}
+		sees, err := viewer.Sees(l.path)
+		if err != nil {
+			httperr.WriteInternal(w, r, "incident link modules", err)
+			return true
+		}
+		if !sees {
+			httpresp.WriteError(w, http.StatusForbidden, l.field+": links into a module you cannot use")
+			return true
+		}
+	}
+	return false
 }
 
 type createReq struct {
@@ -99,6 +140,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	ids, ok := parseLinkIDs(w, req)
 	if !ok {
+		return
+	}
+	if h.refuseHiddenLinks(w, r, ids) {
 		return
 	}
 	detectedAt := time.Time{}
