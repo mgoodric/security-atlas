@@ -54,6 +54,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { invalidateApprovals } from "@/lib/api/approvals";
 import { APIError } from "@/lib/api/base";
 import {
   FrameworkScope,
@@ -145,8 +146,10 @@ export default function FrameworkScopesPage() {
   const [tab, setTab] = useState<"scopes" | "soa">("scopes");
   const soaTitle = useSoATitle(fv);
 
-  const reset = () =>
-    qc.invalidateQueries({ queryKey: ["framework-scopes", fv] });
+  const reset = () => {
+    void invalidateApprovals(qc);
+    return qc.invalidateQueries({ queryKey: ["framework-scopes", fv] });
+  };
 
   const onTransitionError = (e: unknown) => setBanner((e as Error).message);
   const submitMut = useMutation({

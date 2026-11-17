@@ -2827,6 +2827,26 @@ type MeAuditLog struct {
 	SubjectModule string             `json:"subject_module"`
 }
 
+type MemberModuleAccess struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    string             `json:"user_id"`
+	Modules   []string           `json:"modules"`
+	UpdatedBy string             `json:"updated_by"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MemberModuleAccessAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	UserID        string             `json:"user_id"`
+	Action        string             `json:"action"`
+	Before        []string           `json:"before"`
+	After         []string           `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
 type MetricCascadeEdge struct {
 	ParentID  string             `json:"parent_id"`
 	ChildID   string             `json:"child_id"`

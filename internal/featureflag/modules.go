@@ -234,6 +234,7 @@ var Modules = []Module{
 		Routes: []string{
 			"/v1/dashboard",
 			"/v1/activity",
+			"/v1/approvals",
 			"/v1/calendar",
 			"/v1/calendar.ics",
 			"/v1/search",
@@ -439,6 +440,23 @@ func ModuleGate(looker Looker) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RouteOn reports whether ModuleGate would let a request to path through:
+// false when the module or feature owning it is switched off for the
+// request's tenant. A path the registry cannot place is on, as ModuleGate
+// passes it to chi. GET /v1/approvals (#2119) uses it to list only what
+// the caller could approve, so a switched-off module lists nothing.
+func RouteOn(r *http.Request, looker Looker, path string) (bool, error) {
+	o, err := Resolve(path)
+	if err != nil {
+		return true, nil
+	}
+	off, err := switchedOffKey(r, looker, o)
+	if err != nil {
+		return false, err
+	}
+	return off == "", nil
 }
 
 // switchedOffKey returns the switch that turns the owner off, or "" when

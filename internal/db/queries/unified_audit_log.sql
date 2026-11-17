@@ -345,6 +345,24 @@ WITH unified AS (
         (to_jsonb(pt) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'framework_version_id' - 'subject_module')::jsonb AS payload_json
     FROM framework_posture_target_audit_log pt
+
+    UNION ALL
+
+    -- 16. member_module_access_audit_log (#2172): a member's module
+    -- access set, before -> after (NULL = all modules).
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'module_access'::text AS kind,
+        'user'::text AS target_type,
+        user_id        AS target_id,
+        'module_access.set'::text AS action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ma) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'user_id' - 'subject_module')::jsonb AS payload_json
+    FROM member_module_access_audit_log ma
 )
 -- Slice 129 — LEFT JOIN onto users to resolve human-readable actor_name.
 --
@@ -408,6 +426,9 @@ WHERE unified.occurred_at >= sqlc.arg('from_ts')::timestamptz
       sqlc.arg('caller_is_privileged')::boolean = true
       OR (
           unified.kind <> 'feature_flag'
+          -- #2172: a member's module access, like a module switch, is
+          -- tenant administration.
+          AND unified.kind <> 'module_access'
           AND (unified.kind <> 'me' OR unified.actor_id = sqlc.arg('caller_user_id')::text)
       )
   )

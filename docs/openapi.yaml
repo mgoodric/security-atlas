@@ -70,6 +70,7 @@ tags:
   - name: admin-tenants
   - name: admin-users
   - name: admin-vendors
+  - name: approvals
   - name: artifacts
   - name: audit-notes
   - name: audit-periods
@@ -1381,6 +1382,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/users/{id}/module-access:
+    put:
+      summary: PUT /v1/admin/users/{id}/module-access — set a member's module access and write an access audit-log row (#2172)
+      tags: [admin-users]
+      operationId: put-v1-admin-users-id-module-access
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/users/{id}/roles:
     patch:
       summary: PATCH /v1/admin/users/{id}/roles
@@ -1577,6 +1598,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/approvals:
+    get:
+      summary: GET /v1/approvals — what the caller can approve now (requested exceptions, proposed risk acceptances, policies under review and framework scopes in review), each under its approve handler's gate; counts per type (#2119)
+      tags: [approvals]
+      operationId: get-v1-approvals
+      security:
+        - bearer: []
       responses:
         default:
           description: Default response envelope.
