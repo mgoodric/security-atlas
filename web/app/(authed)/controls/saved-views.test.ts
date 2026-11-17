@@ -40,6 +40,8 @@ const FRESH_VIEW_FILTERS = {
   freshness: "stale",
   scope: ALL,
   anchor_fit: ALL,
+  owner: ALL,
+  sort: ALL,
 };
 
 describe("sanitizeFilters", () => {
@@ -49,8 +51,10 @@ describe("sanitizeFilters", () => {
       family: "IAC",
       result: "pass",
       freshness: "fresh",
-      scope: "cell-1",
+      scope: "00000000-0000-4000-8000-000000002131",
       anchor_fit: "none",
+      owner: "none",
+      sort: "-last_observed_at",
       // Injection attempt — an arbitrary key that must NOT survive.
       malicious: "DROP TABLE controls",
       __proto__: { polluted: true },
@@ -60,10 +64,30 @@ describe("sanitizeFilters", () => {
       family: "IAC",
       result: "pass",
       freshness: "fresh",
-      scope: "cell-1",
+      scope: "00000000-0000-4000-8000-000000002131",
       anchor_fit: "none",
+      owner: "none",
+      sort: "-last_observed_at",
     });
     expect((out as Record<string, unknown>).malicious).toBeUndefined();
+  });
+
+  // #2131 — a saved value the platform would refuse reads as ALL, and the
+  // two State values the pill used to offer ask for the state they meant.
+  it("normalizes values to what the server accepts", () => {
+    const out = sanitizeFilters({
+      result: "insufficient_evidence",
+      freshness: "old",
+      scope: "cell-1",
+      owner: "me",
+      sort: "title",
+    });
+    expect(out.result).toBe("inconclusive");
+    expect(out.freshness).toBe(ALL);
+    expect(out.scope).toBe(ALL);
+    expect(out.owner).toBe(ALL);
+    expect(out.sort).toBe(ALL);
+    expect(sanitizeFilters({ result: "not_applicable" }).result).toBe("na");
   });
 
   it("falls back to ALL for missing or non-string values", () => {

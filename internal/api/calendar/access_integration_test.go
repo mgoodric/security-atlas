@@ -26,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/dbtest/attention"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -98,7 +99,7 @@ func countType(events map[string]map[string]any, typ string) int {
 func TestCalendar_RiskAndPlanEventsFollowOPA(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	now := time.Now().UTC()
-	fx := seedAttentionFixture(t, admin, now)
+	fx := attention.Seed(t, admin, now)
 	window := "from=" + ymd(now.AddDate(0, 0, -7)) + "&to=" + ymd(now.AddDate(0, 0, 14))
 
 	cases := []struct {
@@ -154,7 +155,7 @@ func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	now := time.Now().UTC()
-	fx := seedAttentionFixture(t, admin, now)
+	fx := attention.Seed(t, admin, now)
 	env := testServer(t, app, fx.A.ID)
 
 	subReq, _ := http.NewRequest(http.MethodPost, env.server.URL+"/v1/calendar/subscription", nil)
@@ -218,7 +219,7 @@ func TestCalendar_PolicyAckExpiries(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	now := time.Now().UTC()
 	day := 24 * time.Hour
-	fx := seedAttentionFixture(t, admin, now)
+	fx := attention.Seed(t, admin, now)
 	dueSoon := ackEventID(fx.A.OverduePolicy, now.Add(10*day))
 	overdue := ackEventID(fx.A.OverduePolicy, now.Add(-35*day))
 

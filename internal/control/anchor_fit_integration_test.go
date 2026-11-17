@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
@@ -95,7 +94,7 @@ implementation_type: manual_attested
 		{"none", []uuid.UUID{noneAnchoredID, noneBareID}},
 		{"partial", nil},
 	} {
-		rows, total, err := store.ListWithState(ctx, 100, 0, pgtype.UUID{}, tc.fit, pgtype.UUID{})
+		rows, total, err := store.ListWithState(ctx, 100, 0, control.ListFilter{AnchorFit: tc.fit})
 		if err != nil {
 			t.Fatalf("ListWithState(%q): %v", tc.fit, err)
 		}

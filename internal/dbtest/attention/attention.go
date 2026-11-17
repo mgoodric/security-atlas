@@ -1,13 +1,15 @@
 //go:build integration
 
-// #2130 — the front-door fixture (parent #2072, Testing Decisions): two
-// tenants, two users in each, and every needs-attention source. The
-// calendar's due-date tests below read the dated subset; the other
-// sources (a failing control, a pending approval, ownership gaps) are
-// seeded so the fixture is the whole picture each tenant would show, and
-// so a test can prove none of them leaks into the other tenant.
-
-package calendar_test
+// Package attention is the front-door fixture (#2130, parent #2072,
+// Testing Decisions): two tenants, two users in each, and every
+// needs-attention source. Each suite reads the subset it is about: the
+// calendar's due-date tests read the dated sources, the controls list
+// (#2131) reads the controls. Every source is seeded in both tenants so a
+// test can prove none of them leaks into the other tenant.
+//
+// It began in internal/api/calendar's tests (#2130) and moved here so
+// more than one package can seed it (#2131).
+package attention
 
 import (
 	"context"
@@ -20,9 +22,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// attentionTenant is one tenant's slice of the fixture: the ids of its two
+// Tenant is one tenant's slice of the fixture: the ids of its two
 // users and of each needs-attention source.
-type attentionTenant struct {
+type Tenant struct {
 	ID string
 
 	Owner uuid.UUID // owns the controls, risks and plans below
@@ -46,20 +48,20 @@ type attentionTenant struct {
 	AckDueSoon        uuid.UUID // Owner's latest ack of OverduePolicy, lapses in 10 days
 	AckOverdue        uuid.UUID // Other's ack of OverduePolicy, lapsed 35 days ago
 	AckSuperseded     uuid.UUID // Owner's older ack, superseded by AckDueSoon
-	riskTitlePrefix   string
-	planTitlePrefix   string
-	policyTitlePrefix string
+	RiskTitlePrefix   string
+	PlanTitlePrefix   string
+	PolicyTitlePrefix string
 }
 
-// attentionFixture is the two-tenant fixture.
-type attentionFixture struct {
-	A, B attentionTenant
+// Fixture is the two-tenant fixture.
+type Fixture struct {
+	A, B Tenant
 	Now  time.Time
 }
 
-// attentionCleanupTables lists, children first, every table the fixture
+// CleanupTables lists, children first, every table the fixture
 // writes, for dbtest.SeedTenant's cleanup.
-var attentionCleanupTables = []string{
+var CleanupTables = []string{
 	"control_owner_assignments",
 	"control_evaluations",
 	"exceptions",
@@ -73,28 +75,28 @@ var attentionCleanupTables = []string{
 	"users",
 }
 
-// seedAttentionFixture seeds both tenants through the privileged migrate
+// Seed seeds both tenants through the privileged migrate
 // pool. now anchors every relative date.
-func seedAttentionFixture(t *testing.T, admin *pgxpool.Pool, now time.Time) attentionFixture {
+func Seed(t *testing.T, admin *pgxpool.Pool, now time.Time) Fixture {
 	t.Helper()
-	return attentionFixture{
-		A:   seedAttentionTenant(t, admin, now, "A"),
-		B:   seedAttentionTenant(t, admin, now, "B"),
+	return Fixture{
+		A:   seedTenant(t, admin, now, "A"),
+		B:   seedTenant(t, admin, now, "B"),
 		Now: now,
 	}
 }
 
-func seedAttentionTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label string) attentionTenant {
+func seedTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label string) Tenant {
 	t.Helper()
 	ctx := context.Background()
 	day := 24 * time.Hour
-	at := attentionTenant{
-		ID:                dbtest.SeedTenant(t, admin, attentionCleanupTables...),
+	at := Tenant{
+		ID:                dbtest.SeedTenant(t, admin, CleanupTables...),
 		Owner:             uuid.New(),
 		Other:             uuid.New(),
-		riskTitlePrefix:   "tenant " + label + " risk: ",
-		planTitlePrefix:   "tenant " + label + " plan: ",
-		policyTitlePrefix: "tenant " + label + " policy: ",
+		RiskTitlePrefix:   "tenant " + label + " risk: ",
+		PlanTitlePrefix:   "tenant " + label + " plan: ",
+		PolicyTitlePrefix: "tenant " + label + " policy: ",
 	}
 	exec := func(what, sql string, args ...any) {
 		t.Helper()
@@ -176,7 +178,7 @@ func seedAttentionTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label
 		VALUES ($1, $2, $3, '1.0.0', 'published', now()::date,
 		        '# body', 'security_lead', 'ciso', 'tester',
 		        now(), 'tester', $4)
-	`, at.OverduePolicy, at.ID, at.policyTitlePrefix+"overdue review", now.Add(-5*day))
+	`, at.OverduePolicy, at.ID, at.PolicyTitlePrefix+"overdue review", now.Add(-5*day))
 
 	ack := func(user uuid.UUID, when time.Time) uuid.UUID {
 		id := uuid.New()
@@ -202,7 +204,7 @@ func seedAttentionTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label
 			)
 			VALUES ($1, $2, $3, risk_category_id($2, 'operational'), 'mitigate'::risk_treatment, $4,
 			        '{"likelihood": 3, "impact": 4}'::jsonb, '{"likelihood": 2, "impact": 3}'::jsonb, $5)
-		`, id, at.ID, at.riskTitlePrefix+title, owner, reviewDue)
+		`, id, at.ID, at.RiskTitlePrefix+title, owner, reviewDue)
 		return id
 	}
 	at.OverdueRisk = risk("overdue review", at.Owner.String(), now.Add(-3*day))
@@ -221,7 +223,7 @@ func seedAttentionTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label
 		exec("action plan "+title, `
 			INSERT INTO action_plans (id, tenant_id, title, owner_id, due_date, status)
 			VALUES ($1, $2, $3, $4, $5::date, $6)
-		`, id, at.ID, at.planTitlePrefix+title, at.Owner, due.UTC().Format("2006-01-02"), status)
+		`, id, at.ID, at.PlanTitlePrefix+title, at.Owner, due.UTC().Format("2006-01-02"), status)
 		return id
 	}
 	at.OverduePlan = plan("past due", "in_progress", now.Add(-2*day))
