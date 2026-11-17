@@ -2818,6 +2818,8 @@ type Querier interface {
 	// parents (e.g., an ownership-themed risk feeds both an org-level ownership
 	// meta-risk and a team-level meta-risk).
 	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
+	// #2311: capped at row_limit; the caller asks for one more than it shows
+	// to learn whether older rows exist.
 	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
 	// The tenant's categories, active and archived, by display name.
 	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]OrgRiskCategory, error)

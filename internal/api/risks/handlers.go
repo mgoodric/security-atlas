@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -604,6 +605,7 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wire := riskWireFrom(rk)
+	w.Header().Set("ETag", riskETag(rk.UpdatedAt))
 	_, rollUp, err := h.store.ListChildren(ctx, id)
 	if err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
@@ -701,17 +703,35 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	in, msg := decodePatch(r)
+	ifUnmodified, msg := parseIfMatch(r.Header.Get("If-Match"))
+	if msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPatchBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d bytes", maxPatchBytes))
+			return
+		}
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	in, msg := decodePatch(body)
 	if msg != "" {
 		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 	in.Actor = actor
+	in.IfUnmodifiedAt = ifUnmodified
 	updated, err := h.store.UpdatePlacement(ctx, id, in)
 	if err != nil {
 		switch {
 		case errors.Is(err, risk.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
+		case errors.Is(err, risk.ErrRiskModified):
+			httpresp.WriteError(w, http.StatusPreconditionFailed, "risk changed since it was read; reload it and reapply the edit")
 		case errors.Is(err, risk.ErrScoreNotNumeric):
 			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		case risk.IsPlacementValidation(err), risk.IsCategoryRefusal(err),
@@ -724,16 +744,45 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	w.Header().Set("ETag", riskETag(updated.UpdatedAt))
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(updated)})
+}
+
+// maxPatchBytes caps a PATCH /v1/risks/{id} body (#2311). The record
+// fields are short text and one score object; a larger body is a 413.
+const maxPatchBytes = 1 << 20
+
+// riskETag is the risk's version as GET and PATCH /v1/risks/{id} return it
+// in the ETag header (#2311): its updated_at, quoted. A client may send it
+// back in If-Match, or quote the updated_at from the JSON body itself.
+func riskETag(updatedAt time.Time) string {
+	return `"` + updatedAt.UTC().Format(time.RFC3339Nano) + `"`
+}
+
+// parseIfMatch reads PATCH /v1/risks/{id}'s optional If-Match header
+// (#2311). Absent, or "*", it returns nil: the write is unconditional.
+// Otherwise it must be one ETag, an RFC 3339 updated_at in quotes (a W/
+// prefix is tolerated); anything else is the 400 message returned.
+func parseIfMatch(h string) (*time.Time, string) {
+	h = strings.TrimSpace(h)
+	if h == "" || h == "*" {
+		return nil, ""
+	}
+	const want = `If-Match must be one ETag: the risk's updated_at in double quotes`
+	tag := strings.TrimPrefix(h, "W/")
+	if len(tag) < 2 || tag[0] != '"' || tag[len(tag)-1] != '"' {
+		return nil, want
+	}
+	t, err := time.Parse(time.RFC3339Nano, tag[1:len(tag)-1])
+	if err != nil {
+		return nil, want
+	}
+	return &t, ""
 }
 
 // decodePatch parses a PATCH /v1/risks/{id} body into a PlacementInput. A
 // non-empty message is the 400 to return.
-func decodePatch(r *http.Request) (risk.PlacementInput, string) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return risk.PlacementInput{}, "invalid JSON body"
-	}
+func decodePatch(body []byte) (risk.PlacementInput, string) {
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(body, &keys); err != nil {
 		return risk.PlacementInput{}, "invalid JSON body: want an object"
