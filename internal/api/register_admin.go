@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/adminvendors"
+	approvalsapi "github.com/mgoodric/security-atlas/internal/api/approvals"
 	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
 	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
@@ -123,6 +124,11 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// under the caller's RLS tenant, never authPool: a super-admin sees
 	// only the tenant it is signed in to.
 	root.Get("/v1/people", people.New(s.dbPool).List)
+	// #2119: what is waiting for the caller's approval across exceptions,
+	// risk acceptances, policies and framework scopes, under each type's
+	// own approve gate. Every signed-in role reads it (defaults.rego); a
+	// caller who cannot approve gets an empty list.
+	root.Get("/v1/approvals", approvalsapi.New(s.dbPool, featureFlagStore).List)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each

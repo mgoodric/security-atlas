@@ -69,6 +69,7 @@ GET /v1/anchors 10
 GET /v1/anchors/export 10
 GET /v1/anchors/{id} 10
 GET /v1/anchors/{id}/requirements 10
+GET /v1/approvals 10
 GET /v1/audit-notes 10
 GET /v1/audit-notes/thread 10
 GET /v1/audit-periods 10

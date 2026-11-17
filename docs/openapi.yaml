@@ -70,6 +70,7 @@ tags:
   - name: admin-tenants
   - name: admin-users
   - name: admin-vendors
+  - name: approvals
   - name: artifacts
   - name: audit-notes
   - name: audit-periods
@@ -1597,6 +1598,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/approvals:
+    get:
+      summary: GET /v1/approvals — what the caller can approve now (requested exceptions, proposed risk acceptances, policies under review and framework scopes in review), each under its approve handler's gate; counts per type (#2119)
+      tags: [approvals]
+      operationId: get-v1-approvals
+      security:
+        - bearer: []
       responses:
         default:
           description: Default response envelope.

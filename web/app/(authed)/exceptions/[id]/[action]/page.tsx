@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { invalidateApprovals } from "@/lib/api/approvals";
 import { APIError } from "@/lib/api/base";
 import { fetchException, transitionException } from "@/lib/api/exceptions";
 
@@ -84,6 +85,7 @@ function ActionForm({ id, action }: { id: string; action: FormAction }) {
       const resp = await transitionException(id, action, r.body);
       qc.setQueryData(["exceptions", id], resp);
       await qc.invalidateQueries({ queryKey: ["exceptions"] });
+      void invalidateApprovals(qc);
       toast(copy.done);
       router.push(back);
     } catch (err) {

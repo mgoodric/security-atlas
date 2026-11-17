@@ -44,7 +44,13 @@ export const NAV_GROUPS: readonly {
 }[] = [
   {
     label: "Program",
-    routes: ["/dashboard", "/calendar", "/dashboards/metrics", "/activity"],
+    routes: [
+      "/dashboard",
+      "/approvals",
+      "/calendar",
+      "/dashboards/metrics",
+      "/activity",
+    ],
   },
   {
     label: "Controls",

@@ -487,7 +487,7 @@ type Approver = approval.Approver
 const auditActionSelfApproved = "self_approved"
 
 // Approve transitions under_review -> approved. Handler validates
-// IsApprover before calling; the store applies checkApprover (#1807) in
+// IsApprover before calling; the store applies CheckApprover (#1807) in
 // the same transaction as the approval, reading the organisation's Allow
 // self-approval setting there too (#2101). Every approval appends a
 // policy_audit_log row (#2200); a self-approval also flags the row and
@@ -516,7 +516,7 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 				if err != nil {
 					return dbx.Policy{}, err
 				}
-				if self, err = checkApprover(current, approver, allowSelf); err != nil {
+				if self, err = CheckApprover(current, approver, allowSelf); err != nil {
 					return dbx.Policy{}, err
 				}
 			}
@@ -541,7 +541,7 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 	})
 }
 
-// checkApprover applies the shared approval rule (internal/approval,
+// CheckApprover applies the shared approval rule (internal/approval,
 // #1807 / #2101) to a policy and maps its errors onto this package's. Only
 // a person approves, and never the person who submitted the policy unless
 // the organisation allows self-approval; selfApproved reports that case.
@@ -557,7 +557,10 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 // edited it, #2446) is an author too: an editor approving is refused with
 // ErrEditorApproval unless the organisation allows self-approval, and is
 // then self-approved, whoever submitted the policy.
-func checkApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
+//
+// GET /v1/approvals (#2119) calls it per row, so it lists exactly what
+// Approve accepts.
+func CheckApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
 	self, err := checkSubmitter(p, a, allowSelf)
 	if err != nil {
 		return false, err
@@ -574,7 +577,7 @@ func checkApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool,
 	return self, nil
 }
 
-// checkSubmitter is the submitter half of checkApprover.
+// checkSubmitter is the submitter half of CheckApprover.
 func checkSubmitter(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
 	submitter := ""
 	if p.SubmittedBy != nil {

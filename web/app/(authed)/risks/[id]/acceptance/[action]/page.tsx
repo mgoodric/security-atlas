@@ -21,6 +21,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
+import { invalidateApprovals } from "@/lib/api/approvals";
 import { APIError } from "@/lib/api/base";
 import { fetchRiskDetail, transitionRisk } from "@/lib/api/risks";
 
@@ -105,6 +106,7 @@ function AcceptanceForm({
       await transitionRisk(id, `acceptance/${action}`, r.body);
       await qc.invalidateQueries({ queryKey: ["risk", id] });
       await qc.invalidateQueries({ queryKey: ["risks"] });
+      void invalidateApprovals(qc);
       toast(copy.done);
       router.push(back);
     } catch (err) {
