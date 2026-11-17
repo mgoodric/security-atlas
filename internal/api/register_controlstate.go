@@ -36,6 +36,12 @@ func (s *Server) registerControlState(root *chi.Mux) {
 	controlStateH := controlstateapi.New(controlStateEngine)
 	root.Get("/v1/controls/{id}/state", controlStateH.State)
 	root.Get("/v1/controls/{id}/effectiveness", controlStateH.Effectiveness)
+	// #2110: Evaluate now. Runs the same EvaluateControl the ingest
+	// subscriber and scheduler run (trigger=manual) and returns the new
+	// state. A tenant admin or the control's assigned owner only; OPA
+	// admits control_owner at this one path (control_owner.rego).
+	evaluateH := controlstateapi.NewEvaluateHandler(controlStateEngine, s.dbPool)
+	root.Post("/v1/controls/{id}/evaluate", evaluateH.Evaluate)
 	// Slice 064: control-detail backend read endpoints. Four pure reads that
 	// fill the four binding placeholders slice 041's control-detail view
 	// shipped (evidence stream, linked policies, linked risks, control

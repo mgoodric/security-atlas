@@ -30,6 +30,11 @@ func TestScoreValueReadsEveryShape(t *testing.T) {
 		{"empty object", `{}`, 0, false},
 		{"partial pair", `{"likelihood":3}`, 0, false},
 		{"non-numeric score", `{"score":"high"}`, 0, false},
+		// #2482: a numeric string is not a number, as in the SQL sort's
+		// jsonb_typeof(...) = 'number'. It falls through to the next shape.
+		{"numeric-string score", `{"score":"20"}`, 0, false},
+		{"numeric-string score falls through", `{"score":"20","severity":9}`, 9, true},
+		{"numeric-string pair", `{"likelihood":"3","impact":"4"}`, 0, false},
 		{"not JSON", `nope`, 0, false},
 		{"empty", ``, 0, false},
 	}
