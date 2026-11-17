@@ -186,11 +186,11 @@ test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
     await expect(derivedRow.getByTestId("risks-row-residual-band")).toHaveText(
       "Medium",
     );
-    // Same 1..25 scale and bands as inherent severity.
-    await expect(derivedRow.getByTestId("risks-row-severity")).toHaveText("16");
-    await expect(derivedRow.getByTestId("risks-row-severity-band")).toHaveText(
-      "High",
-    );
+    // Same 1..25 scale and bands as inherent severity, which the register
+    // shows on hover over the residual (#2132).
+    await expect(
+      derivedRow.getByTestId("risks-row-residual").locator("xpath=.."),
+    ).toHaveAttribute("title", "Inherent: 16 (High)");
     await expect(derivedRow.getByText("Pending evaluation")).toHaveCount(0);
   });
 
@@ -225,7 +225,7 @@ test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
     ).not.toContainText("Pending evaluation");
   });
 
-  test("column headers name the independent axes (Inherent severity vs Residual after controls)", async ({
+  test("the Residual header names its axis; inherent is on hover, not a column (#2132)", async ({
     authedPage,
   }) => {
     await authedPage.route(
@@ -248,22 +248,25 @@ test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
 
     await authedPage.goto("/risks");
 
-    // Slice 680 / ATLAS-038: the headers explicitly name the axes so the
-    // residual-vs-severity columns no longer read as inconsistent. Scope
-    // to the desktop table header (the mobile card stack repeats the
-    // column labels as inline `<dt>`s, so the page-wide text appears
-    // more than once).
+    // #2132: the default columns carry Residual only; inherent severity is
+    // the residual's hover text, so the two never read as two columns
+    // that disagree. Scope to the desktop table header (the mobile card
+    // stack repeats the column labels as inline `<dt>`s).
     const desktop = authedPage.locator('[data-testid="list-table-wrap"]');
     await expect(
       desktop.getByText("Inherent severity", { exact: true }),
-    ).toBeVisible();
-    // #2144: "Residual" is now a <Term> beside the sort button, so the
-    // axis name is read from the term and the sort button's label.
+    ).toHaveCount(0);
+    // #2144: "Residual" is a <Term> beside the sort button, so the axis
+    // name is read from the term and the sort button's label.
     await expect(desktop.getByTestId("term-residual-risk-trigger")).toHaveText(
       "Residual",
     );
     await expect(
       desktop.getByTestId("risks-sort-residual"),
-    ).toHaveAccessibleName(/^Residual \(after controls\), /);
+    ).toHaveAccessibleName(/^Residual, sorted descending\./);
+    await expect(desktop.getByTestId("risks-sort-residual")).toHaveAttribute(
+      "title",
+      /inherent severity/i,
+    );
   });
 });

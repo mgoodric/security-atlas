@@ -1,9 +1,10 @@
 // #2080 — PageShell + AppShell contracts that the route sweep
 // (`route-sweep.spec.ts`) checks only in general.
 //
-//   1. The risk register's table (~1,822px of columns) scrolls inside its
-//      own container; the page and the main column do not scroll
-//      sideways at 1316px.
+//   1. The risk register's table scrolls inside its own container; the
+//      page and the main column do not scroll sideways at 1316px. Since
+//      #2132 the default columns fit, so the check adds every chooser
+//      column to make the table wider than its container.
 //   2. The audit log, the auditor workspace and the 404 page render
 //      inside the app shell (top bar + sidebar + main column). Before
 //      #2080 the first and last rendered bare and the workspace had only
@@ -26,14 +27,22 @@ test.describe("PageShell (#2080)", () => {
     authedPage: page,
   }) => {
     await page.setViewportSize({ width: 1316, height: 900 });
-    await page.goto("/risks");
 
+    // #2132: the default columns fit at 1316px, so the container does not
+    // scroll at all...
+    await page.goto("/risks");
     const container = page
       .getByTestId("list-table-wrap")
       .locator('[data-slot="table-container"]');
     await expect(container).toBeVisible({ timeout: 30_000 });
+    expect(
+      await container.evaluate((el) => el.scrollWidth - el.clientWidth),
+    ).toBeLessThanOrEqual(0);
 
-    // The table is wider than its container, so the container scrolls...
+    // ...and with every chooser column on, the table is wider than its
+    // container, so the container scrolls...
+    await page.goto("/risks?cols=methodology,level,org_unit,themes,created_at");
+    await expect(container).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(() => container.evaluate((el) => el.scrollWidth - el.clientWidth))
       .toBeGreaterThan(0);

@@ -7,13 +7,14 @@
 //      to the risk with a toast. The page marks it Closed and shows the
 //      reason and note.
 //   3. Back on the register, the risk is gone and the count is two. With
-//      "Show closed" on it is back, marked Closed, and the count is three.
+//      the Status filter on "Open and closed" (#2132) it is back, marked
+//      Closed, and the count is three.
 //   4. From its page the owner reopens it (one click, confirmed inline).
 //      The register lists it again without the toggle.
 //
 // MOCK STRATEGY: the /api/risks BFFs are mocked with one in-memory store.
-// The register mock leaves closed risks out unless include_closed=true, as
-// upstream does; the Go tier covers the real filtering, the state machine
+// The register mock reads ?status= as upstream does (#2132: open by
+// default, closed or all on request); the Go tier covers the real filtering, the state machine
 // and the audit rows against Postgres
 // (internal/api/risks/lifecycle_integration_test.go).
 //
@@ -68,15 +69,12 @@ function json(body: unknown, status = 200) {
 async function mockRisks(page: Page, store: Store) {
   const target = () => store.risks.find((r) => r.id === RISK_ID)!;
   await page.route(/\/api\/risks(\?.*)?$/, (route: Route, req: Request) => {
-    const withClosed =
-      new URL(req.url()).searchParams.get("include_closed") === "true";
-    return route.fulfill(
-      json({
-        risks: withClosed
-          ? store.risks
-          : store.risks.filter((r) => r.status !== "closed"),
-      }),
-    );
+    const status = new URL(req.url()).searchParams.get("status") ?? "open";
+    const risks =
+      status === "all"
+        ? store.risks
+        : store.risks.filter((r) => r.status === status);
+    return route.fulfill(json({ risks, total: risks.length }));
   });
   await page.route("**/api/risks/categories**", (route: Route) =>
     route.fulfill(
@@ -207,16 +205,16 @@ test.describe("/risks lifecycle (#2107)", () => {
       note: "Site decommissioned.",
     });
 
-    // 3. It leaves the register, and comes back under "Show closed".
+    // 3. It leaves the register, and comes back with the Status filter.
     await page.goto("/risks");
     await expect(count).toHaveText("2 risks", { timeout: 30_000 });
     await expect(row).toHaveCount(0);
-    const showClosed = page.getByTestId("risks-show-closed");
-    await expect(showClosed).not.toBeChecked();
-    // URL-driven checkbox: click and assert, as the roll-ups toggle does.
-    await showClosed.click();
-    await expect(page).toHaveURL(/[?&]closed=1/);
-    await expect(showClosed).toBeChecked();
+    const status = page
+      .getByTestId("list-filter-pill-status")
+      .locator("select");
+    await expect(status).toHaveValue("open");
+    await status.selectOption("all");
+    await expect(page).toHaveURL(/[?&]status=all/);
     await expect(count).toHaveText("3 risks");
     await expect(row).toHaveCount(1);
     await expect(

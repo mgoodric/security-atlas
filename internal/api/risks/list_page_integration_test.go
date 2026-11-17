@@ -223,7 +223,7 @@ func TestListRisksPage_Filters(t *testing.T) {
 			rows, total := listPage(t, fx.env, tc.query)
 			assertTenantA(t, fx, rows)
 			got := titles(fx, rows)
-			if !slices.Equal(got, tc.want) && !(len(got) == 0 && len(tc.want) == 0) {
+			if !slices.Equal(got, tc.want) {
 				t.Errorf("got %v; want %v", got, tc.want)
 			}
 			if total != len(tc.want) {

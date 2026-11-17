@@ -152,9 +152,19 @@ test.describe("/risks organisation categories (#1817)", () => {
     authedPage: page,
   }) => {
     await mockCategories(page);
-    await page.route(/\/api\/risks(\?.*)?$/, (route) =>
-      json(route, 200, { risks: RISKS }),
-    );
+    // #2132: the platform filters by ?category=, so the mock does too and
+    // records each request's category.
+    const asked: (string | null)[] = [];
+    await page.route(/\/api\/risks(\?.*)?$/, (route) => {
+      const category = new URL(route.request().url()).searchParams.get(
+        "category",
+      );
+      asked.push(category);
+      const risks = category
+        ? RISKS.filter((r) => r.category === category)
+        : RISKS;
+      return json(route, 200, { risks, total: risks.length });
+    });
 
     await page.goto("/risks");
     const pill = page
@@ -173,6 +183,7 @@ test.describe("/risks organisation categories (#1817)", () => {
     await expect(table.getByTestId("risks-row-title")).toHaveText([
       "Ledger reconciliation gap",
     ]);
+    expect(asked).toContain("financial");
 
     // The toggles are URL-driven: the state flips once router.replace
     // lands, not synchronously, so click and assert rather than check().
