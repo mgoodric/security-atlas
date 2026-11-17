@@ -192,9 +192,11 @@ func readRouter(pool *pgxpool.Pool, tenant string) http.Handler {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := authctx.WithCredential(req.Context(), credstore.Credential{
-				ID:         "key_oe426_read",
-				TenantID:   tenant,
-				UserID:     "oe426-reader",
+				ID:       "key_oe426_read",
+				TenantID: tenant,
+				// An unbound key: apikeystore stamps UserID with the key's
+				// own id, so its owner_roles label is its grant (#2505).
+				UserID:     "key_oe426_read",
 				OwnerRoles: []string{"control_owner"},
 			})
 			next.ServeHTTP(w, req.WithContext(ctx))
