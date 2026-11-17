@@ -7120,6 +7120,12 @@ components:
         error:
           type: string
           description: Human-readable error message.
+        code:
+          type: string
+          description: |
+            Optional stable machine-readable code for a refusal a client
+            must tell apart from others with the same status (for example
+            `audit_period_not_found`). Match on this, not on the message.
       description: |
         Generic error envelope. Specific operations may return richer
         error shapes (validation details, field-level messages); this
