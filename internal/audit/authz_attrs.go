@@ -87,30 +87,33 @@ func (s *Store) EvidencePeriods(ctx context.Context, id uuid.UUID) (out Evidence
 		if !rec.ObservedAt.Valid {
 			return nil
 		}
-		out.Periods, err = periodsCovering(ctx, q, tenantID, uuid.UUID(rec.ControlID.Bytes), &rec.ObservedAt.Time, out.ScopeCellID)
+		at := rec.ObservedAt.Time
+		out.Periods, err = periodsCovering(ctx, q, tenantID, uuid.UUID(rec.ControlID.Bytes), &at, &at, out.ScopeCellID)
 		return err
 	})
 	return out, ok, err
 }
 
 // ControlPeriods returns the audit periods with an attached population that
-// covers the whole of controlID: a match-every-cell predicate, any window.
-func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID) ([]uuid.UUID, error) {
+// covers the whole of controlID (a match-every-cell predicate) and whose
+// window holds both since and until, neither after its frozen_at (#2424).
+func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, until time.Time) ([]uuid.UUID, error) {
 	var out []uuid.UUID
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var err error
-		out, err = periodsCovering(ctx, q, tenantID, controlID, nil, nil)
+		out, err = periodsCovering(ctx, q, tenantID, controlID, &since, &until, nil)
 		return err
 	})
 	return out, err
 }
 
 // periodsCovering lists the periods of the period-attached populations on
-// controlID that cover (observedAt, cellID). A nil observedAt skips the
-// time test; a nil cellID is covered only by a match-every-cell predicate.
+// controlID that cover ([since, until], cellID): both bounds inside the
+// population's window and freeze horizon. A record passes its observed_at
+// as both. A nil cellID is covered only by a match-every-cell predicate.
 func periodsCovering(
 	ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID,
-	observedAt *time.Time, cellID *uuid.UUID,
+	since, until *time.Time, cellID *uuid.UUID,
 ) ([]uuid.UUID, error) {
 	pops, err := q.ListPeriodPopulationsForControl(ctx, dbx.ListPeriodPopulationsForControlParams{
 		TenantID: pgUUID(tenantID), ControlID: pgUUID(controlID),
@@ -124,7 +127,7 @@ func periodsCovering(
 	var out []uuid.UUID
 	for _, pop := range pops {
 		period, ok := uuidFromPG(pop.AuditPeriodID)
-		if !ok || seen[period] || !populationWindowCovers(pop, observedAt) {
+		if !ok || seen[period] || !populationWindowCovers(pop, since) || !populationWindowCovers(pop, until) {
 			continue
 		}
 		if !isTrivialPredicate(pop.ScopePredicate) {
