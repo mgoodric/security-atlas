@@ -126,6 +126,26 @@ allow if {
     count(input.user.roles) > 0
 }
 
+# #2494 — a signed-in user with no role in the current tenant reads its
+# own profile and its tenant list, so the web shows "You don't have a role
+# in <tenant>" with a switcher instead of a dashboard of 403s. GET /v1/me
+# carries has_tenant_role; GET /v1/me/tenants lists the tenants in the
+# caller's own token. Both answer from the verified credential alone.
+# Exact paths, reads only, and only for a credential that names a user in
+# a tenant; every other path still needs a role.
+allow if {
+    is_read
+    input.resource.type == "me"
+    roleless_self_read_paths[input.request.path]
+    input.tenant_id != ""
+    input.user.id != ""
+}
+
+roleless_self_read_paths := {
+    "/v1/me",
+    "/v1/me/tenants",
+}
+
 me_self_read_paths := {
     "/v1/me",
     "/v1/me/tenancy",
