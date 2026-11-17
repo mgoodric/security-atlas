@@ -66,6 +66,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
 // activitySurfaceTag is the value written into `metaAuditParams.Surface`
@@ -164,6 +165,18 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 		nextCursor *unifiedlog.Cursor
 	)
 	gate := h.newPayloadGate(r, userIdentifier)
+	// #2173: resolved before the transaction, like the payload gate, so
+	// filtering rows reads nothing while the transaction holds a
+	// connection.
+	viewer, err := h.views.For(r)
+	var modules moduleaccess.ModuleSet
+	if err == nil {
+		modules, err = viewer.Modules()
+	}
+	if err != nil {
+		httperr.WriteInternal(w, r, "activity module access", err)
+		return
+	}
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		got, _, qErr := unifiedlog.Query(ctx, q, params.queryParams)
 		if qErr != nil {
@@ -183,7 +196,7 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 			}
 			got = got[:unifiedPageSize]
 		}
-		entries = got
+		entries = visibleEntries(got, modules)
 
 		// Meta-audit: one row per successful query, surface-tagged so
 		// forensic review can split slice 124 vs slice 270 traffic.

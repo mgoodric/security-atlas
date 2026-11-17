@@ -128,7 +128,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// risk acceptances, policies and framework scopes, under each type's
 	// own approve gate. Every signed-in role reads it (defaults.rego); a
 	// caller who cannot approve gets an empty list.
-	root.Get("/v1/approvals", approvalsapi.New(s.dbPool, featureFlagStore).List)
+	root.Get("/v1/approvals", approvalsapi.New(s.dbPool, featureFlagStore).WithModules(s.moduleViews).List)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each
@@ -259,7 +259,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Get("/v1/admin/demo/status", adminDemoH.Status)
 	root.Post("/v1/admin/demo/seed", adminDemoH.Seed)
 	root.Post("/v1/admin/demo/teardown", adminDemoH.Teardown)
-	auditLogH := adminauditlog.New(s.dbPool).WithAuthz(s.authzEngine)
+	auditLogH := adminauditlog.New(s.dbPool).WithAuthz(s.authzEngine).WithModules(s.moduleViews)
 	root.Get("/v1/admin/audit-log", auditLogH.List)
 	// Slice 124: unified audit-log aggregation read across all nine
 	// per-domain audit-log tables (decision/evidence/exception/sample/

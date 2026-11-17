@@ -381,6 +381,29 @@ func (s *Store) IssueMinted(tenantID, scope string, kinds []string, ttl time.Dur
 	return cred, token, nil
 }
 
+// IssueOwned is Issue for a key that belongs to a person: its UserID is
+// userID, a users(id) uuid, persisted as api_keys.issued_by. The key is
+// that person's own: Authenticate refuses it once they are deactivated,
+// and deactivation revokes it. The calendar subscription mints its ICS
+// token this way, so the feed can show its owner only the modules they
+// may see (#2173). An empty userID mints an ordinary unowned key, as Issue.
+func (s *Store) IssueOwned(tenantID string, kinds []string, ttl time.Duration, userID string) (Credential, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cred, token, r, err := s.buildLocked(tenantID, "", kinds, ttl, "", false, false, nil)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	if userID != "" {
+		cred.UserID = userID
+		r.cred = cred
+	}
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
+}
+
 // IssueAdmin mints an admin-flagged credential for tenantID. Admin
 // credentials are still tenant-scoped — they unlock admin-only actions
 // (e.g. POST /v1/schemas) for THIS tenant only. There is no global admin

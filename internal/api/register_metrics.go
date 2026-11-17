@@ -22,7 +22,7 @@ func (s *Server) registerMetrics(root *chi.Mux) {
 	// keeps the cascade route ahead of the generic /{id} route. The
 	// /{id}/observations + /{id}/inputs + /{id}/target sub-routes are
 	// distinct path shapes, no shadowing.
-	metricsH := metricsapi.New(s.dbPool)
+	metricsH := metricsapi.New(s.dbPool).WithModules(s.moduleViews)
 	root.Get("/v1/metrics", metricsH.ListCatalog)
 	root.Get("/v1/metrics/cascade", metricsH.GetCascade)
 	root.Get("/v1/metrics/{id}", metricsH.GetCatalog)

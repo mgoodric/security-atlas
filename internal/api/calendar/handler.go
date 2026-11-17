@@ -29,12 +29,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -82,6 +85,7 @@ type Handler struct {
 	store  *Store
 	creds  *credstore.Store
 	engine *authz.Engine
+	views  *moduleaccess.Views
 	nowFn  func() time.Time
 	urlGen func(token string) string
 }
@@ -113,6 +117,15 @@ func (h *Handler) WithNow(fn func() time.Time) *Handler {
 // search handler does; the ICS feed leaves the gated types out either way.
 func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
 	h.engine = engine
+	return h
+}
+
+// WithModules wires the module views (#2173): event types from a module
+// that is switched off, or outside the viewer's module access, are left
+// out of the list and the ICS feed. With none (unit-test servers) every
+// module is shown.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
 	return h
 }
 
@@ -191,6 +204,17 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	typeFilter, anyLeft := h.readableTypes(r, typeFilter)
+	viewer, err := h.views.For(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "calendar module access", err)
+		return
+	}
+	if anyLeft {
+		if typeFilter, anyLeft, err = VisibleTypes(viewer, typeFilter); err != nil {
+			httperr.WriteInternal(w, r, "calendar module access", err)
+			return
+		}
+	}
 	var rows []dbx.ListCalendarEventsRow
 	if anyLeft {
 		rows, err = h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
@@ -254,11 +278,13 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, plaintext, err := h.creds.Issue(
+	// #2173: the token belongs to the subscriber, so the feed shows them
+	// only the modules they may see, re-read at every fetch.
+	_, plaintext, err := h.creds.IssueOwned(
 		cred.TenantID,
-		"",
 		[]string{calendarScopeKind},
 		subscriptionTTL,
+		credstore.MinterUserID(cred),
 	)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("issue calendar token: %v", err))
@@ -322,6 +348,24 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 	// #2130: an ICS token names no user, so there is no caller to ask OPA
 	// about; the gated types are left out of every feed (fail closed).
 	typeFilter, anyLeft := withoutTypes(typeFilter, gatedEventTypes)
+	// #2173: the feed shows the modules its subscriber may see now, not
+	// when they subscribed.
+	if anyLeft {
+		tenantID, perr := uuid.Parse(cred.TenantID)
+		if perr != nil {
+			httperr.WriteInternal(w, r, "calendar", perr)
+			return
+		}
+		viewer, verr := h.views.ForUser(r.WithContext(ctx), tenantID, credstore.MinterUserID(cred))
+		if verr != nil {
+			httperr.WriteInternal(w, r, "calendar module access", verr)
+			return
+		}
+		if typeFilter, anyLeft, err = VisibleTypes(viewer, typeFilter); err != nil {
+			httperr.WriteInternal(w, r, "calendar module access", err)
+			return
+		}
+	}
 	var rows []dbx.ListCalendarEventsRow
 	if anyLeft {
 		rows, err = h.store.ListEvents(ctx, from, to, h.nowFn(), typeFilter, int32(truncateThreshold+1))
@@ -521,6 +565,40 @@ func withoutTypes(typeFilter string, drop map[string]string) (string, bool) {
 		}
 	}
 	return strings.Join(kept, ","), len(kept) > 0
+}
+
+// eventTypeRoutes names, for each event type, a route of the module that
+// owns its records, so the module registry (featureflag.Modules) decides
+// which module an event belongs to (#2173). Audit and control events are
+// core and always shown.
+var eventTypeRoutes = map[string]string{
+	"audit":       "/v1/audit-periods",
+	"exception":   "/v1/exceptions",
+	"policy":      "/v1/policies",
+	"vendor":      "/v1/vendors",
+	"control":     "/v1/controls",
+	"risk":        "/v1/risks",
+	"action_plan": "/v1/action-plans",
+	"policy_ack":  "/v1/me/acknowledgments",
+	"offboarding": "/v1/personnel-security",
+}
+
+// VisibleTypes narrows a normalized type filter to the event types whose
+// module the viewer may see: switched on, and inside their module access
+// (#2173). It returns the filter to query with and whether any type is
+// left. The dashboard export's upcoming panel calls it too, so the export
+// and the calendar agree.
+func VisibleTypes(v moduleaccess.Viewer, typeFilter string) (string, bool, error) {
+	hidden, err := v.Hidden(eventTypeRoutes)
+	if err != nil {
+		return "", false, err
+	}
+	drop := make(map[string]string, len(hidden))
+	for t := range hidden {
+		drop[t] = ""
+	}
+	filter, left := withoutTypes(typeFilter, drop)
+	return filter, left, nil
 }
 
 // rowToWire maps a sqlc-generated row into the AC-2 wire shape.

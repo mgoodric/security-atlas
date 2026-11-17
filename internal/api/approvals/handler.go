@@ -46,6 +46,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -116,12 +117,21 @@ func emptyResponse() Response {
 type Handler struct {
 	pool  *pgxpool.Pool
 	flags featureflag.Looker
+	views *moduleaccess.Views
 }
 
 // New builds a Handler on the app pool. flags is the module switch store
 // ModuleGate reads.
 func New(pool *pgxpool.Pool, flags featureflag.Looker) *Handler {
 	return &Handler{pool: pool, flags: flags}
+}
+
+// WithModules wires the module views (#2173): a type whose module is
+// outside the caller's module access is not listed or counted, as its
+// approve route would answer 403. With none only the switch is checked.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
 }
 
 // List handles GET /v1/approvals.
@@ -147,10 +157,22 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "approvals unavailable: no database")
 		return
 	}
+	viewer, err := h.views.For(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "approvals module access", err)
+		return
+	}
 	on := map[string]bool{}
 	for _, t := range Types {
 		if on[t], err = featureflag.RouteOn(r, h.flags, approveRoutes[t]); err != nil {
 			httperr.WriteInternal(w, r, "approvals module check", err)
+			return
+		}
+		if !on[t] {
+			continue
+		}
+		if on[t], err = viewer.Sees(approveRoutes[t]); err != nil {
+			httperr.WriteInternal(w, r, "approvals module access", err)
 			return
 		}
 	}

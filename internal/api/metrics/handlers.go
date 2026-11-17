@@ -42,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -68,7 +69,8 @@ const DefaultObservationWindow = 90 * 24 * time.Hour
 
 // Handler bundles every slice-076 route over the platform pool.
 type Handler struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	views *moduleaccess.Views
 }
 
 // New constructs a Handler.
@@ -172,8 +174,16 @@ func (h *Handler) ListCatalog(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list catalog", err)
 		return
 	}
+	set, err := h.moduleSet(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "metrics module access", err)
+		return
+	}
 	out := make([]metricWire, 0, len(rows))
 	for _, row := range rows {
+		if !seesMetric(set, row.ID, row.Category) {
+			continue
+		}
 		out = append(out, metricWireFromRow(row))
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
@@ -204,6 +214,16 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "get catalog", err)
 		return
 	}
+	set, err := h.moduleSet(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "metrics module access", err)
+		return
+	}
+	// #2173: a hidden module's metric reads as absent, not forbidden.
+	if !seesMetric(set, row.ID, row.Category) {
+		httpresp.WriteError(w, http.StatusNotFound, "metric not found")
+		return
+	}
 	parents, err := q.ListMetricCatalogParents(r.Context(), id)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list parents", err)
@@ -220,10 +240,14 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 		Children: make([]metricWire, 0, len(children)),
 	}
 	for _, p := range parents {
-		out.Parents = append(out.Parents, metricWireFromRow(p))
+		if seesMetric(set, p.ID, p.Category) {
+			out.Parents = append(out.Parents, metricWireFromRow(p))
+		}
 	}
 	for _, c := range children {
-		out.Children = append(out.Children, metricWireFromRow(c))
+		if seesMetric(set, c.ID, c.Category) {
+			out.Children = append(out.Children, metricWireFromRow(c))
+		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, out)
 }
@@ -260,11 +284,33 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "cascade", err)
 		return
 	}
+	// #2173: a hidden module's metric is pruned with its subtree, so no
+	// node points at a parent the response leaves out. The cascade rows
+	// carry no category, so the catalog supplies it.
+	set, err := h.moduleSet(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "metrics module access", err)
+		return
+	}
+	catalog, err := dbx.New(h.pool).ListMetricsCatalog(r.Context(), dbx.ListMetricsCatalogParams{})
+	if err != nil {
+		httperr.WriteInternal(w, r, "cascade catalog", err)
+		return
+	}
+	categoryOf := make(map[string]string, len(catalog))
+	for _, m := range catalog {
+		categoryOf[m.ID] = m.Category
+	}
+	pruned := map[string]bool{}
 	out := make([]cascadeNodeWire, 0, len(rows))
 	for _, row := range rows {
 		parent := ""
 		if row.ParentID != nil {
 			parent = *row.ParentID
+		}
+		if pruned[parent] || !seesMetric(set, row.MetricID, categoryOf[row.MetricID]) {
+			pruned[row.MetricID] = true
+			continue
 		}
 		out = append(out, cascadeNodeWire{
 			MetricID: row.MetricID,

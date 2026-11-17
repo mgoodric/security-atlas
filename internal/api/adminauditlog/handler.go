@@ -60,6 +60,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -82,6 +83,9 @@ type Handler struct {
 	// (#2375, payloadgate.go). Nil hides every payload from a
 	// non-admin caller.
 	engine *authz.Engine
+	// views leaves hidden modules' rows out of the Activity feed (#2173,
+	// modules.go). Nil shows every module.
+	views *moduleaccess.Views
 }
 
 // New constructs a Handler.
