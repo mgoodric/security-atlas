@@ -25,6 +25,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
+	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
 	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
@@ -325,6 +326,8 @@ func main() {
 		// public, no-auth metadata endpoint (see api.NewVersionHandler
 		// for the documented intent).
 		VersionFieldsFn: versionFields,
+		// #2479: per-principal limit on POST /v1/controls/{id}/evaluate.
+		EvaluateRatePerMin: positiveIntEnv(logger, "ATLAS_EVALUATE_RATE_PER_MIN", controlstateapi.DefaultEvaluateRatePerMin),
 	}
 	if streamPub != nil {
 		cfg.EvidencePublisher = streamPub

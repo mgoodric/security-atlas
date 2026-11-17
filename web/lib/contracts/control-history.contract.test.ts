@@ -86,6 +86,12 @@ describe("contract: GET /api/controls/[id]/history <-> atlas GET /v1/controls/{i
         if (ev.scope_cell !== null) {
           expect(typeof ev.scope_cell, `${name}.scope_cell`).toBe("string");
         }
+        // #2479: trigger is a string; triggered_by is string-or-null.
+        expect(typeof ev.trigger, `${name}.trigger`).toBe("string");
+        expect("triggered_by" in ev, `${name}.triggered_by`).toBe(true);
+        if (ev.triggered_by !== null) {
+          expect(typeof ev.triggered_by, `${name}.triggered_by`).toBe("string");
+        }
       }
     }
   });
