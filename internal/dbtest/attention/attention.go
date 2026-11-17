@@ -32,9 +32,9 @@ type Tenant struct {
 
 	FailingControl    uuid.UUID // in scope, latest evaluation failed
 	PendingApproval   uuid.UUID // an exception requested and awaiting approval
-	OverduePolicy     uuid.UUID // published, review due 5 days ago
+	OverduePolicy     uuid.UUID // published, review due 5 days ago, owner role admin
 	OverdueRisk       uuid.UUID // review due 3 days ago
-	OverdueVendor     uuid.UUID // monthly review, last done 40 days ago
+	OverdueVendor     uuid.UUID // monthly review, last done 40 days ago, owned by Owner
 	OverduePlan       uuid.UUID // open action plan due 2 days ago
 	PeriodicControl   uuid.UUID // quarterly manual control, last evaluated 150 days ago (due 30 days ago)
 	ExpiringWaiver    uuid.UUID // active exception expiring in 10 days
@@ -168,6 +168,8 @@ func seedTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label string) 
 	at.PendingApproval = exception("requested", now.Add(60*day))
 	at.ExpiringWaiver = exception("active", now.Add(10*day))
 
+	// The policy's owner role is a live tenant role, so a user holding it
+	// counts the review as theirs (#2134).
 	at.OverduePolicy = uuid.New()
 	exec("policy", `
 		INSERT INTO policies (
@@ -176,7 +178,7 @@ func seedTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label string) 
 			published_at, published_by, next_review_at
 		)
 		VALUES ($1, $2, $3, '1.0.0', 'published', now()::date,
-		        '# body', 'security_lead', 'ciso', 'tester',
+		        '# body', 'admin', 'ciso', 'tester',
 		        now(), 'tester', $4)
 	`, at.OverduePolicy, at.ID, at.PolicyTitlePrefix+"overdue review", now.Add(-5*day))
 
@@ -217,9 +219,9 @@ func seedTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label string) 
 
 	at.OverdueVendor = uuid.New()
 	exec("vendor", `
-		INSERT INTO vendors (id, tenant_id, name, criticality, review_cadence, last_review_date)
-		VALUES ($1, $2, $3, 'high', 'monthly', $4)
-	`, at.OverdueVendor, at.ID, "tenant "+label+" vendor", now.Add(-40*day))
+		INSERT INTO vendors (id, tenant_id, name, criticality, review_cadence, last_review_date, owner_user_id)
+		VALUES ($1, $2, $3, 'high', 'monthly', $4, $5)
+	`, at.OverdueVendor, at.ID, "tenant "+label+" vendor", now.Add(-40*day), at.Owner)
 
 	plan := func(title, status string, due time.Time) uuid.UUID {
 		id := uuid.New()
