@@ -41,7 +41,10 @@ import adminUsersSource from "@/help/modules/admin-users.md";
 import auditsSource from "@/help/modules/audits.md";
 import boardPacksSource from "@/help/modules/board-packs.md";
 import controlsSource from "@/help/modules/controls.md";
+import controlsChecklistSource from "@/help/modules/controls-checklist.md";
 import csfSource from "@/help/modules/csf.md";
+import evidenceSource from "@/help/modules/evidence.md";
+import exceptionsSource from "@/help/modules/exceptions.md";
 import frameworkScopesSource from "@/help/modules/framework-scopes.md";
 import personnelSecuritySource from "@/help/modules/personnel-security.md";
 import policiesSource from "@/help/modules/policies.md";
@@ -98,6 +101,10 @@ export type HelpModule = {
  *  until then the hint shows but its dismissal is refused with a 400. */
 export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "controls.md": controlsSource,
+  // #2150: Controls.
+  "evidence.md": evidenceSource,
+  "exceptions.md": exceptionsSource,
+  "controls-checklist.md": controlsChecklistSource,
   // #2155: Settings & admin.
   "settings.md": settingsSource,
   "admin.md": adminSource,

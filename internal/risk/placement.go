@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,7 +107,15 @@ type PlacementInput struct {
 	Fields RecordFields
 	// Actor is recorded on the audit row. It must be non-empty.
 	Actor string
+	// IfUnmodifiedAt, when set, is the updated_at the caller last read
+	// (#2311). A risk whose updated_at differs is refused with
+	// ErrRiskModified before anything is written.
+	IfUnmodifiedAt *time.Time
 }
+
+// ErrRiskModified is returned by UpdatePlacement when the risk changed
+// after the caller read it (PlacementInput.IfUnmodifiedAt).
+var ErrRiskModified = errors.New("risk: changed since it was read")
 
 // categoryState is the before/after shape of a category_changed
 // risk_audit_log row.
@@ -176,6 +185,11 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 			return err
 		}
 		current := riskFromRow(row)
+		// Checked under the row lock, so of two editors who read the same
+		// version only the first one's write lands.
+		if in.IfUnmodifiedAt != nil && !sameInstant(*in.IfUnmodifiedAt, current.UpdatedAt) {
+			return ErrRiskModified
+		}
 		before := placementState{Level: current.Level, OrgUnitID: current.OrgUnitID}
 
 		after := before
@@ -320,18 +334,27 @@ type PlacementAuditEntry struct {
 	AfterState  json.RawMessage
 }
 
-// ListPlacementAudit returns a risk's audit rows, newest first. A risk
-// that does not exist, or has been deleted, returns its trail (possibly
-// empty): the trail outlives the risk.
-func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID) ([]PlacementAuditEntry, error) {
+// ListPlacementAudit returns a risk's latest limit audit rows, newest
+// first, and whether older rows exist past them (#2311). A risk that does
+// not exist, or has been deleted, returns its trail (possibly empty): the
+// trail outlives the risk. limit must be positive.
+func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID, limit int) ([]PlacementAuditEntry, bool, error) {
+	if limit <= 0 || limit >= math.MaxInt32 {
+		return nil, false, fmt.Errorf("risk: audit log limit %d out of range", limit)
+	}
 	var out []PlacementAuditEntry
+	var truncated bool
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		rows, err := q.ListRiskAuditLog(ctx, dbx.ListRiskAuditLogParams{
 			TenantID: pgUUID(tenantID),
 			RiskID:   pgUUID(riskID),
+			RowLimit: int32(limit + 1), //nolint:gosec // bounded above
 		})
 		if err != nil {
 			return fmt.Errorf("list risk audit log: %w", err)
+		}
+		if truncated = len(rows) > limit; truncated {
+			rows = rows[:limit]
 		}
 		out = make([]PlacementAuditEntry, len(rows))
 		for i, r := range rows {
@@ -346,7 +369,7 @@ func (s *Store) ListPlacementAudit(ctx context.Context, riskID uuid.UUID) ([]Pla
 		}
 		return nil
 	})
-	return out, err
+	return out, truncated, err
 }
 
 // withLinks fills r.LinkedControlIDs so a write's response has the same
@@ -364,6 +387,11 @@ func (s *Store) withLinks(ctx context.Context, q *dbx.Queries, tenantID uuid.UUI
 		r.LinkedControlIDs[i] = uuid.UUID(l.ControlID.Bytes)
 	}
 	return r, nil
+}
+
+// sameInstant compares two timestamps at Postgres's microsecond precision.
+func sameInstant(a, b time.Time) bool {
+	return a.Truncate(time.Microsecond).Equal(b.Truncate(time.Microsecond))
 }
 
 func sameUnit(a, b *uuid.UUID) bool {

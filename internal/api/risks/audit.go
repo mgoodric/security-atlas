@@ -2,7 +2,9 @@ package risks
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,8 +34,13 @@ type auditEntryWire struct {
 // change history, newest first. Tenant-scoped by RLS; a caller who can
 // read the risk can read its history (the OPA `risks` resource). A risk
 // with no changes, or an id with no rows, returns an empty list: the trail
-// has no FK to risks and outlives a deleted risk. One risk's trail is a
-// handful of rows per edit, so the route returns it whole.
+// has no FK to risks and outlives a deleted risk.
+//
+// ?limit= caps the rows (#2311): default 200, at most 500; a value outside
+// 1..500 is a 400 rather than silently clamped. The response's truncated
+// is true when older rows exist past the ones returned, so a UI can say it
+// shows only the latest N. There is no cursor yet: a reader that needs the
+// whole trail of a risk with more than 500 changes has the export.
 func (h *Handler) ListAuditLog(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
@@ -45,7 +52,12 @@ func (h *Handler) ListAuditLog(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	entries, err := h.store.ListPlacementAudit(ctx, id)
+	limit, msg := parseAuditLimit(r.URL.Query().Get("limit"))
+	if msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	entries, truncated, err := h.store.ListPlacementAudit(ctx, id, limit)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list risk audit log", err)
 		return
@@ -61,5 +73,26 @@ func (h *Handler) ListAuditLog(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: e.CreatedAt,
 		}
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"entries": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"entries": out, "count": len(out), "limit": limit, "truncated": truncated,
+	})
+}
+
+// Audit-log page bounds for GET /v1/risks/{id}/audit-log (#2311).
+const (
+	defaultAuditLimit = 200
+	maxAuditLimit     = 500
+)
+
+// parseAuditLimit reads ?limit=. Empty is the default; a non-integer or a
+// value outside 1..maxAuditLimit returns the 400 message.
+func parseAuditLimit(v string) (int, string) {
+	if v == "" {
+		return defaultAuditLimit, ""
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > maxAuditLimit {
+		return 0, fmt.Sprintf("limit must be an integer from 1 to %d", maxAuditLimit)
+	}
+	return n, ""
 }

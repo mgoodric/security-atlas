@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -235,7 +236,13 @@ type setupResult struct {
 	adminBear string
 	ownerBear string
 	plainBear string
-	tenant    string
+	// viewerBear is a live viewer's session (#2523).
+	viewerBear string
+	tenant     string
+	// admin is the migrate pool; ownerUser is the user behind ownerBear,
+	// whose live user_roles a test may change mid-session (#2523).
+	admin     *pgxpool.Pool
+	ownerUser uuid.UUID
 	registry  *schemaregistry.Service
 	hasMinIO  bool
 	bucket    string
@@ -243,9 +250,15 @@ type setupResult struct {
 
 const ownerRole = "control_owner"
 
-// setupHTTP builds an HTTP test server with auth, ingest, registry,
-// optional artifact store. Three pre-issued credentials are returned:
-// admin, owner (holding control_owner role), and plain (no role).
+// setupHTTP builds an HTTP test server with auth, authz, ingest, registry,
+// optional artifact store. Four pre-issued credentials are returned:
+// admin, owner (a user session holding live control_owner), plain (a user
+// session holding live grc_engineer, which OPA lets write but which is not
+// the control's owner_role) and viewer (live viewer, which OPA refuses).
+//
+// #2523: the attest gate counts a user session's live user_roles, which the
+// authz middleware resolves, so the server runs it with a DB roles resolver.
+// Each session's role claim matches its live roles at mint time.
 func setupHTTP(t *testing.T) setupResult {
 	t.Helper()
 	admin := dbtest.NewMigratePool(t)
@@ -268,12 +281,24 @@ func setupHTTP(t *testing.T) setupResult {
 		ArtifactStore:  store,
 	})
 	srv.AttachDB(app)
+	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
 
 	// Slice 197: JWT bearers via slice 190 path.
 	tenantUUID := uuid.MustParse(tenant)
+	session := func(roles ...string) (uuid.UUID, string) {
+		u := seedRoleUser(t, admin, tenant, roles...)
+		c := testjwt.OwnerFor(tenantUUID, roles)
+		c.Subject = "user:" + u.String()
+		return u, srv.IssueTestJWT(t, c)
+	}
 	adminBear := srv.IssueTestJWT(t, testjwt.AdminFor(tenantUUID))
-	ownerBear := srv.IssueTestJWT(t, testjwt.OwnerFor(tenantUUID, []string{ownerRole}))
-	plainBear := srv.IssueTestJWT(t, testjwt.ViewerFor(tenantUUID))
+	ownerUser, ownerBear := session(ownerRole)
+	_, plainBear := session("grc_engineer")
+	_, viewerBear := session("viewer")
 
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
@@ -284,27 +309,75 @@ func setupHTTP(t *testing.T) setupResult {
 		ts.Close()
 	})
 	return setupResult{
-		server:    ts,
-		adminBear: adminBear,
-		ownerBear: ownerBear,
-		plainBear: plainBear,
-		tenant:    tenant,
-		registry:  reg,
-		hasMinIO:  store != nil,
-		bucket:    bucket,
+		server:     ts,
+		adminBear:  adminBear,
+		ownerBear:  ownerBear,
+		plainBear:  plainBear,
+		viewerBear: viewerBear,
+		tenant:     tenant,
+		admin:      admin,
+		ownerUser:  ownerUser,
+		registry:   reg,
+		hasMinIO:   store != nil,
+		bucket:     bucket,
 	}
 }
 
-// uploadBundle posts a manual control bundle and returns the new
-// control id.
+// seedRoleUser inserts an active user in tenant holding roles in user_roles,
+// removed at cleanup.
+func seedRoleUser(t *testing.T, admin *pgxpool.Pool, tenant string, roles ...string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO users (id, tenant_id, email, display_name, status) VALUES ($1, $2, $3, 'attest user', 'active')`,
+		id, tenant, "attest-"+id.String()+"@example.invalid"); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`, tenant, id.String())
+		_, _ = admin.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, id)
+	})
+	for _, r := range roles {
+		grantRole(t, admin, tenant, id, r)
+	}
+	return id
+}
+
+func grantRole(t *testing.T, admin *pgxpool.Pool, tenant string, user uuid.UUID, role string) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-attest')`,
+		tenant, user.String(), role); err != nil {
+		t.Fatalf("grant %s: %v", role, err)
+	}
+}
+
+func revokeRole(t *testing.T, admin *pgxpool.Pool, tenant string, user uuid.UUID, role string) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(),
+		`DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2 AND role = $3`,
+		tenant, user.String(), role); err != nil {
+		t.Fatalf("revoke %s: %v", role, err)
+	}
+}
+
+// uploadBundle posts a manual control bundle owned by ownerRole and returns
+// the new control id.
 func uploadBundle(t *testing.T, s setupResult, bundleID string) string {
+	t.Helper()
+	return uploadBundleOwnedBy(t, s, bundleID, ownerRole)
+}
+
+// uploadBundleOwnedBy posts a manual control bundle whose owner_role is role
+// and returns the new control id.
+func uploadBundleOwnedBy(t *testing.T, s setupResult, bundleID, role string) string {
 	t.Helper()
 	yaml := `bundle_schema_version: "1"
 bundle_id: ` + bundleID + `
 title: "Manual review of access list"
 implementation_type: manual_attested
 scf_anchor_id: IAC-37
-owner_role: ` + ownerRole + `
+owner_role: ` + role + `
 freshness_class: quarterly
 manual_evidence_schema:
   type: object
@@ -990,6 +1063,68 @@ func TestAttest_FutureObservedAt_Refused(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("a refused attestation must write nothing; got %d records", n)
+	}
+}
+
+// #2523: the attest gate reads the caller's live user_roles, not the role
+// claim in its session. One session, minted while the user held
+// control_owner, is held across a revoke and a re-grant; its claim says
+// control_owner throughout. With control_owner revoked (the user also holds
+// grc_engineer, so the authz middleware lets the write through to the handler)
+// the owner_role gate refuses the attest with no re-login. Granted back, it
+// is allowed.
+// #2523: the attest route through the real authz middleware, per role. A
+// user whose only role is control_owner attests a control whose owner_role
+// is control_owner (OPA's narrow control_owner attestations rule). A viewer
+// is refused by OPA. A control_owner on a control owned by another role
+// passes OPA and is refused by the handler's owner_role gate.
+func TestAttest2523_RoleMatrix(t *testing.T) {
+	s := setupHTTP(t)
+	owned := uploadBundle(t, s, "attest_2523_matrix_owned")
+	other := uploadBundleOwnedBy(t, s, "attest_2523_matrix_other", "security-engineering")
+	post := func(controlID, bearer, stmt string) (int, []byte) {
+		return httpJSON(t, s, http.MethodPost, "/v1/controls/"+controlID+"/attestations", bearer, attestBody(stmt, nil))
+	}
+
+	if status, raw := post(owned, s.ownerBear, "2523 control_owner, owner_role matches."); status != http.StatusCreated {
+		t.Fatalf("control_owner on its control: %d body=%s; want 201", status, raw)
+	}
+	if status, raw := post(owned, s.viewerBear, "2523 viewer."); status != http.StatusForbidden || !strings.Contains(string(raw), `"forbidden"`) {
+		t.Fatalf("viewer: %d body=%s; want 403 forbidden from authz", status, raw)
+	}
+	status, raw := post(other, s.ownerBear, "2523 control_owner, owner_role differs.")
+	if status != http.StatusForbidden || !strings.Contains(string(raw), "security-engineering") {
+		t.Fatalf("control_owner on another role's control: %d body=%s; want 403 from the owner_role gate", status, raw)
+	}
+}
+
+func TestAttest2523_RevokedOwnerRole_RefusedWithoutRelogin(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_2523_revoke")
+	path := "/v1/controls/" + controlID + "/attestations"
+	attest := func(stmt string) (int, []byte) {
+		return httpJSON(t, s, http.MethodPost, path, s.ownerBear, attestBody(stmt, nil))
+	}
+
+	// A second live role, so OPA still admits the write after control_owner
+	// is revoked and the refusal is the handler's owner_role gate.
+	grantRole(t, s.admin, s.tenant, s.ownerUser, "grc_engineer")
+	if status, raw := attest("2523 live control_owner."); status != http.StatusCreated {
+		t.Fatalf("live control_owner: %d body=%s; want 201", status, raw)
+	}
+
+	revokeRole(t, s.admin, s.tenant, s.ownerUser, ownerRole)
+	status, raw := attest("2523 control_owner revoked.")
+	if status != http.StatusForbidden {
+		t.Fatalf("control_owner revoked, claim still holds it: %d body=%s; want 403", status, raw)
+	}
+	if !strings.Contains(string(raw), ownerRole) {
+		t.Fatalf("the 403 should come from the owner_role gate, naming %q; got %s", ownerRole, raw)
+	}
+
+	grantRole(t, s.admin, s.tenant, s.ownerUser, ownerRole)
+	if status, raw := attest("2523 control_owner granted back."); status != http.StatusCreated {
+		t.Fatalf("control_owner granted back: %d body=%s; want 201", status, raw)
 	}
 }
 

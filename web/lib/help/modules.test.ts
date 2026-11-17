@@ -241,6 +241,34 @@ describe("the real help files", () => {
     expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual(["policy"]);
   });
 
+  // #2150 — every Controls page resolves to its own module; the
+  // checklist claims its deeper route from the Controls help.
+  it.each([
+    ["/controls", "controls"],
+    ["/controls/abc", "controls"],
+    ["/controls/abc/attest", "controls"],
+    ["/controls/imports", "controls"],
+    ["/controls/checklist", "controls-checklist"],
+    ["/evidence", "evidence"],
+    ["/evidence/abc", "evidence"],
+    ["/exceptions", "exceptions"],
+    ["/exceptions/new", "exceptions"],
+    ["/exceptions/abc", "exceptions"],
+    ["/exceptions/abc/revoke", "exceptions"],
+  ])("covers %s with the %s help", (route, id) => {
+    expect(helpModuleForPath(route)?.id).toBe(id);
+  });
+
+  // #2150 — control state on Controls; the exception lifecycle moved from
+  // Controls to Exceptions.
+  it.each([
+    ["controls", "control_state"],
+    ["exceptions", "exception"],
+  ])("embeds the %s lifecycle diagram", (id, lifecycle) => {
+    const mod = HELP_MODULES.find((m) => m.id === id);
+    expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual([lifecycle]);
+  });
+
   // #2145 — a module's hint dismissal is refused unless its id is in
   // userprefs.HintModules and the migration's CHECK, so the three lists
   // move together.

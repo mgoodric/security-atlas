@@ -416,6 +416,18 @@ export function RiskForm(props: Props) {
           <p className={HELP_CLASS}>
             NIST 800-30 is the default. FAIR uses annualized dollar exposure.
           </p>
+          {opening && state.methodology !== opening.methodology ? (
+            // #2311: D4 of #2104 resets the residual on a methodology
+            // change; say so before the user saves.
+            <p
+              className="mt-1 text-sm text-amber-700 dark:text-amber-400"
+              data-testid="risk-edit-methodology-reset-note"
+            >
+              Changing the methodology resets the residual score, because a
+              residual on the old scale does not read on the new one. The
+              previous residual stays in this risk&apos;s history.
+            </p>
+          ) : null}
         </div>
       </div>
 

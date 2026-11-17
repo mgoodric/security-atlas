@@ -113,6 +113,9 @@ nav:
   # the same files the app's "How this works" panel shows.
   - In-app help:
       - Controls: help/controls.md
+      - Evidence: help/evidence.md
+      - Exceptions: help/exceptions.md
+      - Implementation checklist: help/controls-checklist.md
       - Settings: help/settings.md
       - Admin: help/admin.md
       - Users: help/admin-users.md

@@ -51,6 +51,10 @@ var HintModules = []string{
 	"personnel-security",
 	"questionnaires",
 	"scf-catalog",
+	// #2150: Controls.
+	"evidence",
+	"exceptions",
+	"controls-checklist",
 }
 
 // HintChange is one PATCH's worth of hint edits. Reset clears every
