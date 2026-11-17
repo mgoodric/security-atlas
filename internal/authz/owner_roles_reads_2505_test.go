@@ -48,7 +48,34 @@ var ownerRolesReads2505 = map[string]string{
 
 	"internal/policy/acknowledgment.go AckStore.PendingForUser": "AckCaller.OwnerRoles, which policyacks fills from authz.AckRoleLabels",
 	"internal/policy/acknowledgment.go rolesIntersect":          "AckCaller.OwnerRoles, which policyacks fills from authz.AckRoleLabels",
+
+	// The `IsAdmin || IsApprover || len(OwnerRoles) > 0` read gates. They ARE
+	// role gates that still count a session's claim; moving them to live
+	// roles needs the integration fixtures that reach them to authenticate
+	// with live roles first. Tracked by #2507; remove each entry as it moves.
+	"internal/api/actionplans/authz.go hasProgramRead":           readGate2507,
+	"internal/api/actionplans/authz.go hasProgramWrite":          readGate2507,
+	"internal/api/audit/export.go samplesHasProgramRead":         readGate2507,
+	"internal/api/checklist/handler.go Handler.ExportMarkdown":   readGate2507,
+	"internal/api/checklist/handler.go Handler.LoadGeneration":   readGate2507,
+	"internal/api/controldetail/authz.go hasControlRead":         readGate2507,
+	"internal/api/controls/export.go controlsHasProgramRead":     readGate2507,
+	"internal/api/dashboard/authz.go hasProgramRead":             readGate2507,
+	"internal/api/decisions/authz.go hasProgramRead":             readGate2507,
+	"internal/api/evidence/export.go evidenceHasProgramRead":     readGate2507,
+	"internal/api/evidencesummary/handler.go hasControlRead":     readGate2507,
+	"internal/api/exceptions/export.go exceptionsHasProgramRead": readGate2507,
+	"internal/api/gapexplain/handler.go hasControlRead":          readGate2507,
+	"internal/api/orgunits/authz.go hasProgramRead":              readGate2507,
+	"internal/api/oscalcomponents/handler.go hasOscalRead":       readGate2507,
+	"internal/api/oscalprovenance/handler.go hasOscalRead":       readGate2507,
+	"internal/api/personnelsecurity/authz.go hasProgramRead":     readGate2507,
+	"internal/api/policies/export.go policiesHasProgramRead":     readGate2507,
+	"internal/api/risks/authz.go hasProgramRead":                 readGate2507,
 }
+
+// readGate2507 is the reason on a read gate left on OwnerRoles until #2507.
+const readGate2507 = "read gate still counting a session's claim; moves to live roles in #2507"
 
 // scanOwnerRolesReads2505 returns the functions reading x.OwnerRoles.
 func scanOwnerRolesReads2505(t *testing.T) map[string]bool {

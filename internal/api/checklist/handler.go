@@ -169,7 +169,7 @@ func (h *Handler) LoadGeneration(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !authz.IsTenantApprover(cred) && !authz.HasAnyTenantRole(cred) {
+	if !authz.IsTenantApprover(cred) && len(cred.OwnerRoles) == 0 {
 		httpresp.WriteError(w, http.StatusForbidden, "role does not grant checklist-read access")
 		return
 	}
@@ -247,7 +247,7 @@ func (h *Handler) ExportMarkdown(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !authz.IsTenantApprover(cred) && !authz.HasAnyTenantRole(cred) {
+	if !authz.IsTenantApprover(cred) && len(cred.OwnerRoles) == 0 {
 		httpresp.WriteError(w, http.StatusForbidden, "role does not grant checklist-read access")
 		return
 	}

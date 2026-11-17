@@ -52,6 +52,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -244,6 +245,20 @@ type setupResult struct {
 
 func setup(t *testing.T) setupResult {
 	t.Helper()
+	return setupWith(t, false)
+}
+
+// setupWithLiveRoles is setup with OPA and authzmw mounted as in
+// production, so a session's roles are its user's live user_roles
+// (cred.TenantRoles), not its role claim. Policy acknowledgment matches on
+// those roles (#2505); the tests that acknowledge use it.
+func setupWithLiveRoles(t *testing.T) setupResult {
+	t.Helper()
+	return setupWith(t, true)
+}
+
+func setupWith(t *testing.T, liveRoles bool) setupResult {
+	t.Helper()
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
@@ -258,6 +273,13 @@ func setup(t *testing.T) setupResult {
 		IngestService:  ingester,
 	})
 	apiServer.AttachDB(app)
+	if liveRoles {
+		engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+		if err != nil {
+			t.Fatalf("authz.NewEngine: %v", err)
+		}
+		apiServer.AttachAuthz(engine, authz.NewAuditWriter(app))
+	}
 
 	// Slice 197: JWT bearer via slice 190 path; Subject = admin user
 	// id so policy_acknowledgments FK targets resolve.
@@ -423,10 +445,12 @@ func TestListPolicies_IncludeAckRate_DraftOnly_AllNull(t *testing.T) {
 // numerator>=1, denominator>=1. The freshness window applies (cutoff
 // in the SQL); a fresh ack made just now counts.
 func TestListPolicies_IncludeAckRate_PublishedWithAck_PopulatedCell(t *testing.T) {
-	s := setup(t)
-	requiredRole := "employee"
+	s := setupWithLiveRoles(t)
+	// A live tenant role, which a session can hold and OPA admits to
+	// acknowledge (#2505).
+	requiredRole := "grc_engineer"
 
-	// Publish a policy that requires the `employee` role.
+	// Publish a policy that requires the role.
 	policyID := createAndPublishPolicy(t, s, "Acked-Policy", "1", []string{requiredRole})
 
 	// Mint a user + api_key with the required role, then acknowledge.
@@ -479,8 +503,10 @@ func TestListPolicies_IncludeAckRate_PublishedWithAck_PopulatedCell(t *testing.T
 // B's bearer hits the SAME joined endpoint and MUST NOT see any of
 // Tenant A's rows.
 func TestListPolicies_IncludeAckRate_RLS_TenantIsolation(t *testing.T) {
-	s := setup(t)
-	requiredRole := "employee"
+	s := setupWithLiveRoles(t)
+	// A live tenant role, which a session can hold and OPA admits to
+	// acknowledge (#2505).
+	requiredRole := "grc_engineer"
 
 	// Tenant A: publish a policy + ack it.
 	policyA := createAndPublishPolicy(t, s, "TenantA-Policy", "1", []string{requiredRole})
@@ -520,8 +546,10 @@ func TestListPolicies_IncludeAckRate_RLS_TenantIsolation(t *testing.T) {
 // is the canonical anti-criterion check: the same predicates, the same
 // math.
 func TestListPolicies_IncludeAckRate_MatchesPerPolicyHandler(t *testing.T) {
-	s := setup(t)
-	requiredRole := "employee"
+	s := setupWithLiveRoles(t)
+	// A live tenant role, which a session can hold and OPA admits to
+	// acknowledge (#2505).
+	requiredRole := "grc_engineer"
 
 	policyID := createAndPublishPolicy(t, s, "Cross-Check", "1", []string{requiredRole})
 	_, bearer := s.issueRoledUserBearer(t, "bob@slice107.test", []string{requiredRole})
@@ -677,6 +705,15 @@ func (s *setupResult) issueRoledUserBearer(t *testing.T, email string, roles []s
 	t.Helper()
 	userID := seedUser(t, s.admin, s.tenant, email)
 	seedAPIKeyForUser(t, s.admin, s.tenant, userID, false, roles)
+	// The roles are also the user's live user_roles, which a session's
+	// policy acknowledgment matches on (#2505).
+	for _, role := range roles {
+		if _, err := s.admin.Exec(context.Background(),
+			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-2505')`,
+			s.tenant, userID.String(), role); err != nil {
+			t.Fatalf("seed user_roles %q: %v", role, err)
+		}
+	}
 	// Slice 197: JWT bearer with Subject = users row id (replaces
 	// the legacy RebindBearerUserIDForTests hook).
 	claims := testjwt.OwnerFor(uuid.MustParse(s.tenant), roles)

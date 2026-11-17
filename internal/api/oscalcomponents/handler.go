@@ -340,7 +340,7 @@ func requireOscalRead(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func hasOscalRead(c credstore.Credential) bool {
-	return authz.HasAnyTenantRole(c)
+	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
 }
 
 // ===== helpers =====

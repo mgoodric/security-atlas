@@ -117,18 +117,6 @@ func TenantRoleLabels(cred credstore.Credential) []string {
 	return out
 }
 
-// HasAnyTenantRole reports whether cred may use a tenant's read surfaces: the
-// admin or approver flag, or any role TenantRoleLabels counts (#2505). It
-// replaces the read gates' `IsAdmin || IsApprover || len(OwnerRoles) > 0`,
-// which admitted a session whose role claim had been revoked.
-//
-// A credential with no flag and no counted role is refused, as before: the
-// read gates were deliberately stricter than derivedRolesFor, which grants a
-// bare connector credential grc_engineer.
-func HasAnyTenantRole(cred credstore.Credential) bool {
-	return cred.IsAdmin || cred.IsApprover || len(TenantRoleLabels(cred)) > 0
-}
-
 // AckRoleLabels returns the roles a policy acknowledgment matches against a
 // policy's acknowledgment_required_roles (#2505): the live user_roles authzmw
 // resolved, plus the credential's OwnerRoles unless it is a user's JWT

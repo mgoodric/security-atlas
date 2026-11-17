@@ -16,7 +16,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -157,7 +156,7 @@ func requireOscalRead(w http.ResponseWriter, r *http.Request) bool {
 // hasOscalRead reports whether the credential carries an explicit
 // OSCAL-read role signal. Mirrors controldetail.hasControlRead.
 func hasOscalRead(c credstore.Credential) bool {
-	return authz.HasAnyTenantRole(c)
+	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
 }
 
 // ===== helpers =====

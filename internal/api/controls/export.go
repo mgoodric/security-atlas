@@ -69,7 +69,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/export"
@@ -662,7 +661,7 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 // Deliberately stricter than authz.derivedRolesFor — a bare push
 // credential (no flags) has no business reading the control catalog.
 func controlsHasProgramRead(c credstore.Credential) bool {
-	return authz.HasAnyTenantRole(c)
+	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
 }
 
 // ===== Counting writer =====

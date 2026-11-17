@@ -27,7 +27,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 // hasProgramRead reports whether the credential carries an explicit
@@ -45,7 +44,7 @@ import (
 // program-read access" is exactly a credential carrying none of the three
 // signals.
 func hasProgramRead(c credstore.Credential) bool {
-	return authz.HasAnyTenantRole(c)
+	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
 }
 
 // requireProgramRead is the guard the dashboard handlers call FIRST —

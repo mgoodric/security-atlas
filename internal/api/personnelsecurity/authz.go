@@ -23,7 +23,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 // hasProgramRead reports whether the credential carries an explicit
@@ -32,7 +31,7 @@ import (
 // authz.derivedRolesFor, which maps a bare tenant credential to
 // grc_engineer.
 func hasProgramRead(c credstore.Credential) bool {
-	return authz.HasAnyTenantRole(c)
+	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
 }
 
 // requireProgramRead is the guard every OE-663 handler calls FIRST —

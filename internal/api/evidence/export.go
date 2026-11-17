@@ -44,7 +44,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -509,7 +508,7 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 // (no flags) MUST NOT enumerate the ledger; that's a deliberate
 // separation from the push-side rate-limited POST surface.
 func evidenceHasProgramRead(c credstore.Credential) bool {
-	return authz.HasAnyTenantRole(c)
+	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
 }
 
 // ===== Counting writer / shared helpers =====
