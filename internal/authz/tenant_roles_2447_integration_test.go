@@ -2,8 +2,9 @@
 
 // #2447: the multi-tenant row with real JWTs and real user_roles. One
 // person is admin in tenant A and viewer in tenant B. Their tenant-B
-// token, even one whose B role claim still says admin, is refused every
-// gate in routes2428; their tenant-A token passes every gate.
+// token, even one whose B role claim still says admin, gets a viewer's
+// answer from every gate in routes2428 (refused all but the #2556
+// risk-read gate); their tenant-A token passes every gate.
 //
 // Run with:  go test -tags=integration -race -run 2447 ./internal/authz/...
 
@@ -77,11 +78,13 @@ func TestTenantGates2447_AdminInAViewerInBRealJWT(t *testing.T) {
 		if code, _ := s.do(inA, rt.method, rt.path); code != http.StatusNoContent {
 			t.Errorf("tenant-A token: %s %s = %d, want 204", rt.method, rt.path, code)
 		}
-		if code, _ := s.do(inB, rt.method, rt.path); code != http.StatusForbidden {
-			t.Errorf("tenant-B token: %s %s = %d, want 403", rt.method, rt.path, code)
+		// The live B row is viewer, so B gets a viewer's answer (#2556).
+		want := viewerStatus2447(rt)
+		if code, _ := s.do(inB, rt.method, rt.path); code != want {
+			t.Errorf("tenant-B token: %s %s = %d, want %d", rt.method, rt.path, code, want)
 		}
-		if code, _ := s.do(inBStale, rt.method, rt.path); code != http.StatusForbidden {
-			t.Errorf("tenant-B token claiming admin in B: %s %s = %d, want 403", rt.method, rt.path, code)
+		if code, _ := s.do(inBStale, rt.method, rt.path); code != want {
+			t.Errorf("tenant-B token claiming admin in B: %s %s = %d, want %d", rt.method, rt.path, code, want)
 		}
 	}
 }

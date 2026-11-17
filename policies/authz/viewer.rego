@@ -24,6 +24,10 @@ viewer_readable_resources := {
     "framework-scopes",
     "vendors",
     "risks",
+    # #2556: the decision log (GET /v1/decisions and below), read beside
+    # the register. Read only: the is_read predicate above keeps decision
+    # create / update / supersede / link writes denied to viewer.
+    "decisions",
     "themes",
     "org_units",
     "scopes",
