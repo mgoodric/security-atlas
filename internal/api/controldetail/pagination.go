@@ -127,6 +127,9 @@ type evidencePage struct {
 	until    time.Time
 	cursor   keyset
 	pageRows int32
+	// idOnly resolves the control by control_id alone, without the
+	// control_ref leg (#2470). Set for a period-scoped caller.
+	idOnly bool
 }
 
 // evidenceListPage is the resolved parameter set for the tenant-wide
