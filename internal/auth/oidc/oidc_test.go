@@ -22,10 +22,15 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 // testStateKey signs the OIDC flow state in tests (#2177).
 var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
+// loopbackIdP lets an Authenticator reach an httptest fake IdP on
+// 127.0.0.1, which the strict issuer policy denies (#2534).
+var loopbackIdP = oidc.WithIssuerPolicy(netguard.Policy{AllowLoopback: true})
 
 // newDiscoveryOnlyIDP serves just the well-known config endpoint and
 // a stub JWKS — enough for go-oidc's NewProvider call to succeed,
@@ -80,7 +85,7 @@ func runBeginLogin(t *testing.T) oidc.LoginResult {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver, testStateKey)
+	a := oidc.New(resolver, testStateKey, loopbackIdP)
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
 		IdpName:  "primary",
@@ -158,7 +163,7 @@ func TestBeginLoginDiscoveryFailureIsProviderUnavailableAndTimeoutBounded(t *tes
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
-	}}, testStateKey, 25*time.Millisecond)
+	}}, testStateKey, 25*time.Millisecond, loopbackIdP)
 
 	start := time.Now()
 	_, err := a.BeginLogin(context.Background(), oidc.LoginInput{
@@ -277,7 +282,7 @@ func TestBeginLoginBindsTenantCookie(t *testing.T) {
 	a := oidc.New(unitStubResolver{cfg: oidc.IdpConfig{
 		TenantID: tenantID, Name: "primary", IssuerURL: idp.URL,
 		ClientID: "test-client", RedirectURL: "http://localhost:9999/auth/oidc/callback",
-	}}, testStateKey)
+	}}, testStateKey, loopbackIdP)
 	res, err := a.BeginLogin(context.Background(), oidc.LoginInput{TenantID: tenantID, IdpName: "primary"}, true)
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)

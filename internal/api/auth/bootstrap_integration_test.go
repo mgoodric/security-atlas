@@ -38,10 +38,15 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 // testStateKey signs the OIDC flow state in tests (#2177).
 var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
+// loopbackIdP lets an Authenticator reach an httptest fake IdP on
+// 127.0.0.1, which the strict issuer policy denies (#2534).
+var loopbackIdP = oidc.WithIssuerPolicy(netguard.Policy{AllowLoopback: true})
 
 const fakeClientID = "atlas-test-client"
 
@@ -216,7 +221,7 @@ func (h harness) callbackVia(t *testing.T, idp *fakeIdP, urlTenant uuid.UUID) *h
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 
 		TrustUnverifiedEmailForLink: idp.trustUnverifiedEmail,
-	}}, testStateKey)
+	}}, testStateKey, loopbackIdP)
 	login, err := authn.BeginLogin(context.Background(), oidc.LoginInput{TenantID: urlTenant, IdpName: "primary"}, false)
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)

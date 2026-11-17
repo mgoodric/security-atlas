@@ -772,7 +772,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "atlas: oidc state key: %v\n", err)
 			os.Exit(1)
 		}
-		oidcAuth := oidc.New(localModeIdpResolver{}, oidcStateKey)
+		// #2534: every request to a tenant's IdP is SSRF-guarded; private
+		// issuers only with the deployment opt-in.
+		issuerPolicy, err := oidc.IssuerPolicyFromEnv()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+			os.Exit(1)
+		}
+		oidcAuth := oidc.New(localModeIdpResolver{}, oidcStateKey, oidc.WithIssuerPolicy(issuerPolicy))
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
 		// Slice 209: bundle the local-AS deps when OAuth wiring exists.
 		// nil when ATLAS_ISSUER_URL is unset OR pool is nil; LocalLogin
