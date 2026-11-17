@@ -1,8 +1,14 @@
 package metrics
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
@@ -42,6 +48,34 @@ func seesMetric(set moduleaccess.ModuleSet, id, category string) bool {
 		return set.Sees(route)
 	}
 	return true
+}
+
+// hideMetric answers a per-metric sub-route (#2477: observations, inputs,
+// target) for a metric the caller may not see, as GetCatalog does: it
+// writes 404 and returns true. It also returns true, after writing a 500,
+// when the answer cannot be had, so the caller never serves the metric's
+// values on an error. A metric with no catalog row is placed by its id
+// alone; the sub-route's own lookup answers whether it exists.
+func (h *Handler) hideMetric(w http.ResponseWriter, r *http.Request, id string) bool {
+	set, err := h.moduleSet(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "metrics module access", err)
+		return true
+	}
+	category := ""
+	row, err := dbx.New(h.pool).GetMetricCatalog(r.Context(), id)
+	switch {
+	case err == nil:
+		category = row.Category
+	case !errors.Is(err, pgx.ErrNoRows):
+		httperr.WriteInternal(w, r, "metrics catalog lookup", err)
+		return true
+	}
+	if !seesMetric(set, id, category) {
+		httpresp.WriteError(w, http.StatusNotFound, "metric not found")
+		return true
+	}
+	return false
 }
 
 // moduleSet resolves the caller's visible modules once per request.

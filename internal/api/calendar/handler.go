@@ -68,7 +68,7 @@ const (
 	// calendarScopeKind is the api_keys AllowedKinds entry used to
 	// scope a credential to "may only fetch the ICS feed." See decision
 	// D3 in the slice-094 decisions log.
-	calendarScopeKind = "calendar.read.v1"
+	calendarScopeKind = credstore.KindCalendarRead
 
 	// subscriptionTTL is the lifetime of a freshly-minted ICS URL
 	// token. One year matches the typical "subscribe once, forget"

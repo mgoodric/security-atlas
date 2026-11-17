@@ -371,6 +371,9 @@ func (h *Handler) ListObservations(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	if h.hideMetric(w, r, id) {
+		return
+	}
 	var rows []dbx.MetricObservation
 	err := h.runInTx(ctx, func(q *dbx.Queries) error {
 		var inErr error
@@ -430,6 +433,16 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httperr.WriteInternal(w, r, "lookup", err)
+		return
+	}
+	set, err := h.moduleSet(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "metrics module access", err)
+		return
+	}
+	// #2477: a hidden module's metric takes no input; it reads as absent.
+	if !seesMetric(set, cat.ID, cat.Category) {
+		httpresp.WriteError(w, http.StatusNotFound, "metric not found")
 		return
 	}
 	if cat.ComputeStrategy != "manual_input" && cat.ComputeStrategy != "external_integration" {
@@ -496,6 +509,9 @@ func (h *Handler) GetTarget(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id required")
 		return
 	}
+	if h.hideMetric(w, r, id) {
+		return
+	}
 	var row dbx.MetricTarget
 	err := h.runInTx(ctx, func(q *dbx.Queries) error {
 		var inErr error
@@ -556,6 +572,9 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		owner = pgtype.UUID{Bytes: u, Valid: true}
+	}
+	if h.hideMetric(w, r, id) {
+		return
 	}
 	var row dbx.MetricTarget
 	err = h.runInTx(ctx, func(q *dbx.Queries) error {

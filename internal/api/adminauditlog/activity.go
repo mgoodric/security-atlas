@@ -182,7 +182,6 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 		if qErr != nil {
 			return qErr
 		}
-		gate.apply(got)
 		// Apply the page-size cap + cursor derivation here (mirrors
 		// UnifiedList — the aggregator returns up to Limit rows, and
 		// the handler asks for one more than the page size to detect
@@ -196,7 +195,10 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 			}
 			got = got[:unifiedPageSize]
 		}
+		// #2477: filter by module before the payload gate, which can
+		// clear the request path a decision row is placed by.
 		entries = visibleEntries(got, modules)
+		gate.apply(entries)
 
 		// Meta-audit: one row per successful query, surface-tagged so
 		// forensic review can split slice 124 vs slice 270 traffic.

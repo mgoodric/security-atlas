@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -96,9 +97,15 @@ func switchOff(t *testing.T, admin *pgxpool.Pool, tenant, key string) {
 	}
 }
 
-// moduleRouter serves the metrics read routes through the real handler
-// for a viewer of tenant, with module views over pool.
+// moduleRouter serves the metrics routes through the real handler for a
+// viewer of tenant, with module views over pool.
 func moduleRouter(t *testing.T, app, viewsPool *pgxpool.Pool, tenant string) http.Handler {
+	t.Helper()
+	return moduleRouterAs(t, app, viewsPool, tenant, "viewer")
+}
+
+// moduleRouterAs is moduleRouter for a caller holding role.
+func moduleRouterAs(t *testing.T, app, viewsPool *pgxpool.Pool, tenant, role string) http.Handler {
 	t.Helper()
 	views := moduleaccess.NewViews(moduleaccess.NewStore(viewsPool), featureflag.NewStore(viewsPool))
 	h := metricsapi.New(app).WithModules(views)
@@ -107,7 +114,7 @@ func moduleRouter(t *testing.T, app, viewsPool *pgxpool.Pool, tenant string) htt
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := authctx.WithCredential(req.Context(), credstore.Credential{
 				ID: "metrics-2173", TenantID: tenant,
-				UserID: "user:" + uuid.NewString(), TenantRoles: []string{"viewer"},
+				UserID: "user:" + uuid.NewString(), TenantRoles: []string{role},
 			})
 			ctx, err := tenancy.WithTenant(ctx, tenant)
 			if err != nil {
@@ -120,7 +127,29 @@ func moduleRouter(t *testing.T, app, viewsPool *pgxpool.Pool, tenant string) htt
 	r.Get("/v1/metrics", h.ListCatalog)
 	r.Get("/v1/metrics/cascade", h.GetCascade)
 	r.Get("/v1/metrics/{id}", h.GetCatalog)
+	r.Get("/v1/metrics/{id}/observations", h.ListObservations)
+	r.Post("/v1/metrics/{id}/inputs", h.CreateInput)
+	r.Get("/v1/metrics/{id}/target", h.GetTarget)
+	r.Put("/v1/metrics/{id}/target", h.UpsertTarget)
 	return r
+}
+
+// subRoutes are the per-metric sub-routes of id (#2477), each with the
+// method and body it takes.
+func subRoutes(id string) []struct{ method, path, body string } {
+	return []struct{ method, path, body string }{
+		{http.MethodGet, "/v1/metrics/" + id + "/observations", ""},
+		{http.MethodPost, "/v1/metrics/" + id + "/inputs", `{"numeric_value": 1}`},
+		{http.MethodGet, "/v1/metrics/" + id + "/target", ""},
+		{http.MethodPut, "/v1/metrics/" + id + "/target", `{"direction": "higher_is_better", "target_value": 1}`},
+	}
+}
+
+func serveMethod(t *testing.T, h http.Handler, method, path, body string) int {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+	return rec.Code
 }
 
 func serve(t *testing.T, h http.Handler, path string) (int, map[string]any) {
@@ -220,5 +249,45 @@ func TestIntegration_Metrics_ViewsErrorIs500(t *testing.T) {
 		if code, _ := serve(t, h, path); code != http.StatusInternalServerError {
 			t.Errorf("GET %s with failing views = %d; want 500", path, code)
 		}
+	}
+	admin500 := moduleRouterAs(t, app, broken, tenant, "admin")
+	for _, sr := range subRoutes(m.board) {
+		if code := serveMethod(t, admin500, sr.method, sr.path, sr.body); code != http.StatusInternalServerError {
+			t.Errorf("%s %s with failing views = %d; want 500", sr.method, sr.path, code)
+		}
+	}
+}
+
+// #2477: a hidden module's metric reads as not found on every per-metric
+// sub-route, as GetCatalog answers, so its observations, inputs and
+// target are neither readable nor writable by id. A core metric's
+// sub-routes are untouched.
+func TestIntegration_Metrics_HiddenModuleSubRoutes404(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := dbtest.SeedTenant(t, admin, "feature_flag_audit_log", "feature_flags", "member_module_access", "metric_targets")
+	m := seedModuleCatalog(t, admin)
+	h := moduleRouterAs(t, app, app, tenant, "admin")
+
+	// Switched on, the vendor metric's target can be set and read.
+	if code := serveMethod(t, h, http.MethodPut, "/v1/metrics/"+m.vendor+"/target", `{"direction": "higher_is_better", "target_value": 1}`); code != http.StatusOK {
+		t.Fatalf("switched on: PUT vendor target = %d; want 200", code)
+	}
+	if code := serveMethod(t, h, http.MethodGet, "/v1/metrics/"+m.vendor+"/target", ""); code != http.StatusOK {
+		t.Fatalf("switched on: GET vendor target = %d; want 200", code)
+	}
+
+	switchOff(t, admin, tenant, "vendor.enabled")
+
+	for _, sr := range subRoutes(m.vendor) {
+		if code := serveMethod(t, h, sr.method, sr.path, sr.body); code != http.StatusNotFound {
+			t.Errorf("switched off: %s %s = %d; want 404", sr.method, sr.path, code)
+		}
+	}
+	if code := serveMethod(t, h, http.MethodGet, "/v1/metrics/"+m.board+"/observations", ""); code != http.StatusOK {
+		t.Errorf("switched off: GET core observations = %d; want 200", code)
+	}
+	if code := serveMethod(t, h, http.MethodPut, "/v1/metrics/"+m.board+"/target", `{"direction": "higher_is_better", "target_value": 1}`); code != http.StatusOK {
+		t.Errorf("switched off: PUT core target = %d; want 200", code)
 	}
 }
