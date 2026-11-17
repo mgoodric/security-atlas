@@ -18,6 +18,7 @@ package risks_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -28,8 +29,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/dbtest/attention"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 type pageFixture struct {
@@ -264,17 +267,16 @@ func TestListRisksPage_RefusesUnknownValues(t *testing.T) {
 	}
 }
 
-// residualOf mirrors risk.ScoreValue's reading of a residual: score, then
-// severity, then likelihood x impact.
-func residualOf(r pageRow) (float64, bool) {
-	for _, k := range []string{"score", "severity"} {
-		if v, ok := r.Residual[k].(float64); ok {
-			return v, true
-		}
+// residualOf reads a row's residual with #2185's risk.ScoreValue, and
+// whether its methodology is risk.Monetary (FAIR dollars).
+func residualOf(t *testing.T, r pageRow) (value float64, scored, monetary bool) {
+	t.Helper()
+	raw, err := json.Marshal(r.Residual)
+	if err != nil {
+		t.Fatalf("marshal residual: %v", err)
 	}
-	l, lok := r.Residual["likelihood"].(float64)
-	i, iok := r.Residual["impact"].(float64)
-	return l * i, lok && iok
+	value, scored = risk.ScoreValue(raw)
+	return value, scored, risk.Monetary(dbx.RiskMethodology(r.Methodology))
 }
 
 // sortValue is what a key orders on, read from the wire, and whether the
@@ -381,33 +383,60 @@ func assertOrdered(t *testing.T, fx pageFixture, key string, desc bool, rows []p
 // requested direction, unscored last within each group.
 func assertResidualOrder(t *testing.T, rows []pageRow, desc bool) {
 	t.Helper()
-	type key struct {
-		group    int
-		unscored bool
-		value    float64
-	}
-	keyOf := func(r pageRow) key {
-		v, ok := residualOf(r)
-		g := 0
-		if r.Methodology == "fair" {
-			g = 1
-		}
-		return key{group: g, unscored: !ok, value: v}
-	}
 	for i := 1; i < len(rows); i++ {
-		a, b := keyOf(rows[i-1]), keyOf(rows[i])
+		a, b := rows[i-1], rows[i]
+		av, aok, amon := residualOf(t, a)
+		bv, bok, bmon := residualOf(t, b)
 		switch {
-		case a.group != b.group:
-			if a.group > b.group {
-				t.Fatalf("FAIR %q ranks above 5x5 %q", rows[i-1].Title, rows[i].Title)
+		case amon != bmon:
+			// The groups never flip with the direction.
+			if risk.RanksAbove(bmon, 0, amon, 0) {
+				t.Fatalf("FAIR %q ranks above 5x5 %q", a.Title, b.Title)
 			}
-		case a.unscored != b.unscored:
-			if a.unscored {
-				t.Fatalf("unscored %q ranks above scored %q", rows[i-1].Title, rows[i].Title)
+		case aok != bok:
+			if !aok {
+				t.Fatalf("unscored %q ranks above scored %q", a.Title, b.Title)
 			}
-		case !a.unscored && ((desc && a.value < b.value) || (!desc && a.value > b.value)):
-			t.Fatalf("desc=%v: %q (%v) before %q (%v)", desc, rows[i-1].Title, a.value, rows[i].Title, b.value)
+		case !aok:
+		case desc && risk.RanksAbove(bmon, bv, amon, av):
+			t.Fatalf("desc: %q (%v) before %q (%v), which RanksAbove it", a.Title, av, b.Title, bv)
+		case !desc && av > bv:
+			t.Fatalf("asc: %q (%v) before %q (%v)", a.Title, av, b.Title, bv)
 		}
+	}
+}
+
+// TestListRisksPage_ResidualOrderMatchesRanksAbove: the SQL default order
+// is exactly the Go order #2185 defines. Sorting the same rows in Go with
+// risk.RanksAbove (unscored last within each group, id on a tie) gives the
+// order the API returned.
+func TestListRisksPage_ResidualOrderMatchesRanksAbove(t *testing.T) {
+	fx := seedPageFixture(t)
+	rows, _ := listPage(t, fx.env, "status=all&include_rollups=true")
+	want := slices.Clone(rows)
+	slices.SortStableFunc(want, func(a, b pageRow) int {
+		av, aok, amon := residualOf(t, a)
+		bv, bok, bmon := residualOf(t, b)
+		switch {
+		case amon != bmon:
+			if risk.RanksAbove(amon, 0, bmon, 0) {
+				return -1
+			}
+			return 1
+		case aok != bok:
+			if aok {
+				return -1
+			}
+			return 1
+		case aok && risk.RanksAbove(amon, av, bmon, bv):
+			return -1
+		case aok && risk.RanksAbove(bmon, bv, amon, av):
+			return 1
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if got, exp := titles(fx, rows), titles(fx, want); !slices.Equal(got, exp) {
+		t.Fatalf("SQL residual order differs from risk.RanksAbove:\n got %v\nwant %v", got, exp)
 	}
 }
 
