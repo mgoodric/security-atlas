@@ -236,6 +236,15 @@ func orgUnitFromRow(r dbx.OrgUnit) OrgUnit {
 	return u
 }
 
+// uuidPtr is the inverse of pgUUIDPtr: nil for a NULL id.
+func uuidPtr(u pgtype.UUID) *uuid.UUID {
+	if !u.Valid {
+		return nil
+	}
+	id := uuid.UUID(u.Bytes)
+	return &id
+}
+
 func pgUUIDPtr(u *uuid.UUID) pgtype.UUID {
 	if u == nil {
 		return pgtype.UUID{}

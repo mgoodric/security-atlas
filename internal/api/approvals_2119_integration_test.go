@@ -278,3 +278,81 @@ func TestApprovals2119_ListMatchesApproveGate(t *testing.T) {
 		}
 	}
 }
+
+// #2446: a policy's draft editors are authors too. A policy submitted by
+// one person and edited by another is listed for the editor only under
+// Allow self-approval, and then marked; the approve route agrees both
+// ways. A person who neither submitted nor edited it sees it unmarked.
+func TestApprovals2119_DraftEditorMatchesApproveGate(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := seed2119Tenant(t, migrate)
+	tid := uuid.MustParse(tenant)
+
+	submitter := seedPeriodUser(t, migrate, tenant, "active", "grc_engineer")
+	editor := seedPeriodUser(t, migrate, tenant, "active", "grc_engineer")
+	approver := seedPeriodUser(t, migrate, tenant, "active", "grc_engineer")
+	policyID := uuid.New()
+	if _, err := migrate.Exec(context.Background(),
+		`INSERT INTO policies (id, tenant_id, title, version, body_md, status, owner_role, approver_role,
+		                       created_by, submitted_by, submitted_at, draft_editors)
+		 VALUES ($1, $2, '#2119 edited policy', '1.0', '# Access', 'under_review', 'grc_engineer', 'admin',
+		         $3, $3, now(), ARRAY[$3, $4]::text[])`,
+		policyID, tenant, submitter.String(), editor.String()); err != nil {
+		t.Fatalf("seed edited policy: %v", err)
+	}
+
+	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	srv := api.New(api.Config{})
+	srv.AttachDB(app)
+	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
+	bearer := func(u uuid.UUID) string {
+		c := testjwt.OwnerFor(tid, []string{"grc_engineer"})
+		c.Subject = "user:" + u.String()
+		return srv.IssueTestJWT(t, c)
+	}
+	asSubmitter := periodAuditorsCall{t, "", bearer(submitter)}
+	asEditor := periodAuditorsCall{t, "", bearer(editor)}
+	asApprover := periodAuditorsCall{t, "", bearer(approver)}
+	ts := httptest.NewServer(srv.HTTPHandlerForTests())
+	t.Cleanup(ts.Close)
+	for _, c := range []*periodAuditorsCall{&asSubmitter, &asEditor, &asApprover} {
+		c.url = ts.URL
+	}
+	approvePath := "/v1/policies/" + policyID.String() + "/approve"
+
+	// Setting off: only the uninvolved approver sees it, unmarked; the
+	// editor and the submitter see nothing, and the route refuses both.
+	if got, out := list2119(t, asApprover); got["policy"] == nil || got["policy"]["self_approval"] != false {
+		t.Fatalf("uninvolved approver's view: %v", out)
+	}
+	for name, c := range map[string]periodAuditorsCall{"editor": asEditor, "submitter": asSubmitter} {
+		if got, out := list2119(t, c); len(got) != 0 {
+			t.Fatalf("%s sees the policy with self-approval off: %v", name, out)
+		}
+		if st, body := c.do(http.MethodPatch, approvePath, nil); st != http.StatusForbidden {
+			t.Fatalf("%s approve with self-approval off: %d %v, want 403", name, st, body)
+		}
+	}
+
+	// Setting on: the editor sees it marked, and the route accepts it.
+	set2119SelfApproval(t, migrate, tenant, true)
+	got, out := list2119(t, asEditor)
+	if got["policy"] == nil || got["policy"]["self_approval"] != true {
+		t.Fatalf("editor with self-approval on: %v, want the policy marked self_approval", out)
+	}
+	if got, _ := list2119(t, asApprover); got["policy"]["self_approval"] != false {
+		t.Fatalf("uninvolved approver's row became marked: %v", got["policy"])
+	}
+	if st, body := asEditor.do(http.MethodPatch, approvePath, nil); st != http.StatusOK {
+		t.Fatalf("editor approve with self-approval on: %d %v, want 200", st, body)
+	}
+	for name, c := range map[string]periodAuditorsCall{"editor": asEditor, "approver": asApprover} {
+		if got, out := list2119(t, c); len(got) != 0 {
+			t.Fatalf("%s still sees the approved policy: %v", name, out)
+		}
+	}
+}

@@ -5968,7 +5968,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — edit a risk's record fields and placement; body {title?, description?, category?, methodology?, inherent_score?, treatment_owner?, review_due_at?, instrument_reference?, level?, org_unit_id?}; category is a slug, id or display name, refused when unknown, ambiguous or archived; treatment and acceptance fields are refused (400); each change is audit-logged
+      summary: PATCH /v1/risks/{id} — edit a risk's record fields and placement; body {title?, description?, category?, methodology?, inherent_score?, treatment_owner?, owner_user_id?, review_due_at?, instrument_reference?, level?, org_unit_id?}; category is a slug, id or display name, refused when unknown, ambiguous or archived; owner_user_id is a user id or null, refused (422) unless an active user of the tenant; treatment and acceptance fields are refused (400); each change is audit-logged
       tags: [risks]
       operationId: patch-v1-risks-id
       security:

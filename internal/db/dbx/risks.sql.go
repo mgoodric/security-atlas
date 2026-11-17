@@ -63,7 +63,7 @@ VALUES (
     $7, $8, $9, $10,
     $11, $12, $13, $14, $15::text[]
 )
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type CreateAggregateRiskParams struct {
@@ -140,6 +140,7 @@ func (q *Queries) CreateAggregateRisk(ctx context.Context, arg CreateAggregateRi
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -150,16 +151,16 @@ INSERT INTO risks (
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
     acceptance_status, level, org_unit_id,
-    acceptance_proposed_by, acceptance_proposed_at
+    acceptance_proposed_by, acceptance_proposed_at, owner_user_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17,
-    $18, $19
+    $18, $19, $20
 )
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type CreateRiskParams struct {
@@ -182,6 +183,7 @@ type CreateRiskParams struct {
 	OrgUnitID            pgtype.UUID           `json:"org_unit_id"`
 	AcceptanceProposedBy string                `json:"acceptance_proposed_by"`
 	AcceptanceProposedAt pgtype.Timestamptz    `json:"acceptance_proposed_at"`
+	OwnerUserID          pgtype.UUID           `json:"owner_user_id"`
 }
 
 // Insert a new risk. The application validates methodology-specific
@@ -209,6 +211,7 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		arg.OrgUnitID,
 		arg.AcceptanceProposedBy,
 		arg.AcceptanceProposedAt,
+		arg.OwnerUserID,
 	)
 	var i Risk
 	err := row.Scan(
@@ -243,6 +246,7 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -263,7 +267,7 @@ func (q *Queries) DeleteRisk(ctx context.Context, arg DeleteRiskParams) error {
 }
 
 const getRiskByAggregationKey = `-- name: GetRiskByAggregationKey :one
-SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks
 WHERE tenant_id = $1
   AND inherent_score->>'aggregation_key' = $2::text
@@ -318,12 +322,13 @@ func (q *Queries) GetRiskByAggregationKey(ctx context.Context, arg GetRiskByAggr
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
 
 const getRiskByID = `-- name: GetRiskByID :one
-SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks
 WHERE tenant_id = $1 AND id = $2
 `
@@ -368,6 +373,7 @@ func (q *Queries) GetRiskByID(ctx context.Context, arg GetRiskByIDParams) (Risk,
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -739,7 +745,7 @@ func (q *Queries) ListRiskIDsLinkedToControl(ctx context.Context, arg ListRiskID
 }
 
 const listRisks = `-- name: ListRisks :many
-SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -789,6 +795,7 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 			&i.ClosureNote,
 			&i.ClosedAt,
 			&i.ClosedBy,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -801,7 +808,7 @@ func (q *Queries) ListRisks(ctx context.Context, tenantID pgtype.UUID) ([]Risk, 
 }
 
 const listRisksByIDs = `-- name: ListRisksByIDs :many
-SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks
 WHERE tenant_id = $1 AND id = ANY($2::uuid[])
 ORDER BY id ASC
@@ -856,6 +863,7 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 			&i.ClosureNote,
 			&i.ClosedAt,
 			&i.ClosedBy,
+			&i.OwnerUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -868,7 +876,7 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 }
 
 const lockRiskByID = `-- name: LockRiskByID :one
-SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks
 WHERE tenant_id = $1 AND id = $2
 FOR NO KEY UPDATE
@@ -919,6 +927,7 @@ func (q *Queries) LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Ris
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -932,7 +941,7 @@ SET status = $1,
     closed_by = $5,
     updated_at = now()
 WHERE tenant_id = $6 AND id = $7
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type SetRiskStatusParams struct {
@@ -991,6 +1000,7 @@ func (q *Queries) SetRiskStatus(ctx context.Context, arg SetRiskStatusParams) (R
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -1010,7 +1020,7 @@ SET treatment = $3,
     self_approved = $13,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type SetRiskTreatmentParams struct {
@@ -1082,6 +1092,7 @@ func (q *Queries) SetRiskTreatment(ctx context.Context, arg SetRiskTreatmentPara
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -1116,9 +1127,10 @@ SET title = $3,
     accepter = $12,
     instrument_reference = $13,
     acceptance_status = $14,
+    owner_user_id = $15,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type UpdateRiskParams struct {
@@ -1136,6 +1148,7 @@ type UpdateRiskParams struct {
 	Accepter            string                `json:"accepter"`
 	InstrumentReference string                `json:"instrument_reference"`
 	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
+	OwnerUserID         pgtype.UUID           `json:"owner_user_id"`
 }
 
 // Full-update path (PATCH handler reads existing, mutates fields, writes).
@@ -1158,6 +1171,7 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		arg.Accepter,
 		arg.InstrumentReference,
 		arg.AcceptanceStatus,
+		arg.OwnerUserID,
 	)
 	var i Risk
 	err := row.Scan(
@@ -1192,6 +1206,7 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -1201,7 +1216,7 @@ UPDATE risks
 SET category_id = $1,
     updated_at = now()
 WHERE tenant_id = $2 AND id = $3
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type UpdateRiskCategoryParams struct {
@@ -1248,6 +1263,7 @@ func (q *Queries) UpdateRiskCategory(ctx context.Context, arg UpdateRiskCategory
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -1258,7 +1274,7 @@ SET level = $3,
     org_unit_id = $4,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type UpdateRiskPlacementParams struct {
@@ -1311,6 +1327,7 @@ func (q *Queries) UpdateRiskPlacement(ctx context.Context, arg UpdateRiskPlaceme
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -1320,7 +1337,7 @@ UPDATE risks
 SET residual_score = $3::jsonb,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type UpdateRiskResidualParams struct {
@@ -1369,6 +1386,7 @@ func (q *Queries) UpdateRiskResidual(ctx context.Context, arg UpdateRiskResidual
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }
@@ -1378,7 +1396,7 @@ UPDATE risks
 SET themes = $3::text[],
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by
+RETURNING id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 `
 
 type UpdateRiskThemesParams struct {
@@ -1426,6 +1444,7 @@ func (q *Queries) UpdateRiskThemes(ctx context.Context, arg UpdateRiskThemesPara
 		&i.ClosureNote,
 		&i.ClosedAt,
 		&i.ClosedBy,
+		&i.OwnerUserID,
 	)
 	return i, err
 }

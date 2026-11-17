@@ -1617,6 +1617,7 @@ type ActionPlanAuditLog struct {
 	BeforeState  []byte             `json:"before_state"`
 	AfterState   []byte             `json:"after_state"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	SystemActor  *string            `json:"system_actor"`
 }
 
 type ActionPlanControl struct {
@@ -3020,6 +3021,7 @@ type Policy struct {
 	ImportedBy                  *string            `json:"imported_by"`
 	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
 	SelfApproved                bool               `json:"self_approved"`
+	DraftEditors                []string           `json:"draft_editors"`
 }
 
 type PolicyAcknowledgment struct {
@@ -3052,6 +3054,8 @@ type PolicyAuditLog struct {
 	PolicyVersion          *string            `json:"policy_version"`
 	PreviousState          *string            `json:"previous_state"`
 	NewState               *string            `json:"new_state"`
+	BodySha256             *string            `json:"body_sha256"`
+	Editors                []string           `json:"editors"`
 }
 
 type Population struct {
@@ -3145,6 +3149,7 @@ type Risk struct {
 	ClosureNote             string                `json:"closure_note"`
 	ClosedAt                pgtype.Timestamptz    `json:"closed_at"`
 	ClosedBy                string                `json:"closed_by"`
+	OwnerUserID             pgtype.UUID           `json:"owner_user_id"`
 }
 
 type RiskAggregation struct {
@@ -3587,6 +3592,7 @@ type Vendor struct {
 	CostOwner        string                 `json:"cost_owner"`
 	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
 	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
+	OwnerUserID      pgtype.UUID            `json:"owner_user_id"`
 }
 
 type VendorReview struct {

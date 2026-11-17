@@ -131,9 +131,13 @@ test.describe("read-only vendor detail (slice 686)", () => {
     await mockDetail(page, roleOwner);
     await page.goto("/vendors/" + roleOwner.id);
 
-    await expect(page.getByTestId("vendor-detail-owner")).toHaveText(
+    // #2129: free text no user matched is marked unlinked.
+    await expect(page.getByTestId("vendor-detail-owner")).toContainText(
       "Head of Security",
     );
+    await expect(
+      page.getByTestId("vendor-detail-owner-unlinked"),
+    ).toBeVisible();
     await expect(page.getByTestId("vendor-detail-owner-mailto")).toHaveCount(0);
   });
 

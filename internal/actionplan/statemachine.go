@@ -11,10 +11,11 @@
 //
 // The ActionPlan lifecycle is its own state machine:
 //
-//	draft -> in_progress -> blocked -> completed -> verified
+//	draft -> in_progress -> blocked -> completed <-> verified
 //
-// with `verified` terminal and no edge back to `draft` (a new plan is the
-// way to restart). The allowed edges are enumerated in AllowedTransition;
+// with no edge back to `draft` (a new plan is the way to restart). The only
+// way out of `verified` is the system's: a linked control failing its latest
+// evaluation returns the plan to `completed` (#2109). The allowed edges are enumerated in AllowedTransition;
 // they are validated at the handler/store layer AND by the DB transition
 // trigger (defense in depth, AC-13/AC-15).
 //
@@ -49,6 +50,11 @@ const (
 	ActionControlUnlinked = "control_unlinked"
 	ActionTombstoned      = "tombstoned"
 )
+
+// SystemActor names the system in an audit row it writes: the
+// completed <-> verified moves made from control evaluations (#2109). It
+// must match the action_plan_audit_log_system_actor_known CHECK.
+const SystemActor = "system:action-plan-verification"
 
 // Field length bounds (threat-model T) — mirror the DB CHECK constraints.
 const (
@@ -91,11 +97,13 @@ func ValidStatus(s string) bool {
 //	in_progress -> blocked | completed
 //	blocked     -> in_progress | completed
 //	completed   -> verified | in_progress    (reopen if verification fails)
-//	verified    -> (terminal)
+//	verified    -> completed                 (system only, #2109)
 //
 // No edge BACK to draft from any state (AC-15: "* -> draft" rejected except
-// creation). `verified` has no outbound edge (terminal). Unknown statuses
-// are never allowed.
+// creation). verified -> completed is the system's move, made by
+// action_plans_reconcile_verification when a linked control fails; Update
+// refuses it for a person and the DB trigger refuses it outside that
+// function. Unknown statuses are never allowed.
 func AllowedTransition(from, to string) bool {
 	if !ValidStatus(from) || !ValidStatus(to) {
 		return false
@@ -113,7 +121,7 @@ func AllowedTransition(from, to string) bool {
 	case StatusCompleted:
 		return to == StatusVerified || to == StatusInProgress
 	case StatusVerified:
-		return false // terminal
+		return to == StatusCompleted // system only (#2109)
 	}
 	return false
 }

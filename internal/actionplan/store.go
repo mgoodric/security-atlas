@@ -50,6 +50,10 @@ type ActionPlan struct {
 	TombstonedAt    *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// ControlsFailing: the plan is completed and its linked controls do not
+	// all pass their latest evaluation (#2109). Set by Get and
+	// GetWithLinkage.
+	ControlsFailing bool
 }
 
 // Link is one M2M linkage row (a risk or a control target).
@@ -72,17 +76,22 @@ type PlanRef struct {
 	Title   string
 	Status  string
 	DueDate *time.Time
+	// ControlsFailing: completed, with linked controls still failing (#2109).
+	ControlsFailing bool
 }
 
 // AuditEntry is the public shape of an action_plan_audit_log row.
 type AuditEntry struct {
 	ID           uuid.UUID
 	ActionPlanID uuid.UUID
-	ActorID      uuid.UUID
-	ActionType   string
-	BeforeState  json.RawMessage
-	AfterState   json.RawMessage
-	CreatedAt    time.Time
+	// ActorID is the person, uuid.Nil on a row the system wrote.
+	ActorID uuid.UUID
+	// SystemActor is SystemActor on a row the system wrote, else empty.
+	SystemActor string
+	ActionType  string
+	BeforeState json.RawMessage
+	AfterState  json.RawMessage
+	CreatedAt   time.Time
 }
 
 // Store wraps the sqlc Queries with the tenancy plumbing required for RLS.
@@ -188,7 +197,8 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (ActionPlan, error) {
 			return fmt.Errorf("get action plan: %w", err)
 		}
 		out = planFromRow(row)
-		return nil
+		out.ControlsFailing, err = controlsFailing(ctx, q, tenantID, id)
+		return err
 	})
 	return out, err
 }
@@ -210,6 +220,9 @@ func (s *Store) GetWithLinkage(ctx context.Context, id uuid.UUID) (ActionPlan, L
 			return fmt.Errorf("get action plan: %w", err)
 		}
 		pOut = planFromRow(row)
+		if pOut.ControlsFailing, err = controlsFailing(ctx, q, tenantID, id); err != nil {
+			return err
+		}
 		lk, err := loadLinkage(ctx, q, tenantID, id)
 		if err != nil {
 			return err
@@ -335,12 +348,53 @@ type UpdateInput struct {
 //
 // Update never moves a plan to verified: an approver verifies a plan with
 // no linked controls through Verify (#2108), and the platform verifies the
-// rest from their controls' evaluations (#2109).
+// rest from their controls' evaluations (#2109). Nor does it move a plan
+// out of verified: verified -> completed is the system's, when a linked
+// control fails (ReconcileVerification).
 func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateInput) (ActionPlan, error) {
 	if in.Status != nil && *in.Status == StatusVerified {
 		return ActionPlan{}, ErrVerifyThroughVerify
 	}
-	return s.update(ctx, id, in, nil)
+	var guard func(context.Context, *dbx.Queries, uuid.UUID, ActionPlan) error
+	if in.Status != nil {
+		guard = func(_ context.Context, _ *dbx.Queries, _ uuid.UUID, cur ActionPlan) error {
+			if cur.Status == StatusVerified && *in.Status != StatusVerified {
+				return ErrIllegalTransition
+			}
+			return nil
+		}
+	}
+	return s.update(ctx, id, in, guard)
+}
+
+// ReconcileVerification makes the system's completed <-> verified moves for
+// the plans linked to controlID, inside the caller's transaction q (#2109).
+// The control evaluator calls it after appending an evaluation. A completed
+// plan whose linked controls all pass their latest evaluation becomes
+// verified; a verified plan with a linked control that does not pass
+// returns to completed. A plan with no linked control is never touched: a
+// person verifies it. Each move writes a status_changed audit row under
+// SystemActor in the same transaction. The work is
+// action_plans_reconcile_verification, the only path the DB trigger admits
+// for verified -> completed; it reads the tenant from app.current_tenant,
+// which the caller's transaction must have set. Returns the plans moved.
+func ReconcileVerification(ctx context.Context, q *dbx.Queries, controlID uuid.UUID) (int, error) {
+	n, err := q.ReconcileActionPlanVerification(ctx, pgUUID(controlID))
+	if err != nil {
+		return 0, fmt.Errorf("actionplan: reconcile verification for control %s: %w", controlID, err)
+	}
+	return int(n), nil
+}
+
+func controlsFailing(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID) (bool, error) {
+	failing, err := q.ActionPlanControlsFailing(ctx, dbx.ActionPlanControlsFailingParams{
+		TenantID: pgUUID(tenantID),
+		ID:       pgUUID(id),
+	})
+	if err != nil {
+		return false, fmt.Errorf("action plan controls failing: %w", err)
+	}
+	return failing, nil
 }
 
 // Verify moves a completed plan with no linked controls to verified (#2108).
@@ -633,7 +687,7 @@ func (s *Store) PlansForRisk(ctx context.Context, riskID uuid.UUID) ([]PlanRef, 
 		}
 		out = make([]PlanRef, len(rows))
 		for i, r := range rows {
-			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate)}
+			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate), ControlsFailing: r.ControlsFailing}
 		}
 		return nil
 	})
@@ -652,7 +706,7 @@ func (s *Store) PlansForControl(ctx context.Context, controlID uuid.UUID) ([]Pla
 		}
 		out = make([]PlanRef, len(rows))
 		for i, r := range rows {
-			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate)}
+			out[i] = PlanRef{ID: uuid.UUID(r.ID.Bytes), Title: r.Title, Status: r.Status, DueDate: datePtr(r.DueDate), ControlsFailing: r.ControlsFailing}
 		}
 		return nil
 	})
@@ -676,6 +730,7 @@ func (s *Store) ListAuditLog(ctx context.Context, planID uuid.UUID) ([]AuditEntr
 				ActionPlanID: uuid.UUID(r.ActionPlanID.Bytes),
 				ActorID:      uuid.UUID(r.ActorID.Bytes),
 				ActionType:   r.ActionType,
+				SystemActor:  derefStr(r.SystemActor),
 				BeforeState:  append(json.RawMessage(nil), r.BeforeState...),
 				AfterState:   append(json.RawMessage(nil), r.AfterState...),
 				CreatedAt:    tsTime(r.CreatedAt),
@@ -940,6 +995,13 @@ func tsTime(t pgtype.Timestamptz) time.Time {
 		return time.Time{}
 	}
 	return t.Time
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func strPtr(s string) *string {

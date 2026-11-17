@@ -66,3 +66,17 @@ risk acceptance form, the framework-scope page) invalidate it on any
 transition, so the badge drops without a reload. The route lives in the
 core Dashboard module (Program group), so it has no module switch of its
 own.
+
+## D6 — draft editors follow the policy rule, not a second copy of it
+
+#2446 made a policy's draft editors authors: an editor is refused
+unless Allow self-approval is on, and is then self-approved. The editor
+loop lives inside the exported `policy.CheckApprover`, so the list picks
+it up with no change of its own. `TestApprovals2119_DraftEditorMatchesApproveGate`
+pins it end to end: an editor who did not submit sees the policy only
+with the setting on, marked, and the approve route agrees both ways. A
+mutation that drops the editor set before the check fails that test.
+
+The #2447 gate-site inventory lists `approvals/handler.go Handler.List`
+as a not-a-route site: its `IsTenantApprover` call filters the list and
+never refuses a request.

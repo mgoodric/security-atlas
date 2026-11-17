@@ -43,14 +43,15 @@ func TestAllowedTransition(t *testing.T) {
 		{"blocked->completed", StatusBlocked, StatusCompleted, true},
 		{"completed->verified", StatusCompleted, StatusVerified, true},
 		{"completed->in_progress (reopen)", StatusCompleted, StatusInProgress, true},
+		{"verified->completed (system, #2109)", StatusVerified, StatusCompleted, true},
 		// Same-status (non-status field edit) always allowed.
 		{"draft->draft", StatusDraft, StatusDraft, true},
 		{"verified->verified", StatusVerified, StatusVerified, true},
 		// AC-15 explicit illegal edges.
 		{"draft->completed (skip)", StatusDraft, StatusCompleted, false},
 		{"draft->verified (skip)", StatusDraft, StatusVerified, false},
-		{"verified->draft (terminal)", StatusVerified, StatusDraft, false},
-		{"verified->in_progress (terminal)", StatusVerified, StatusInProgress, false},
+		{"verified->draft", StatusVerified, StatusDraft, false},
+		{"verified->in_progress", StatusVerified, StatusInProgress, false},
 		{"completed->draft (back to draft)", StatusCompleted, StatusDraft, false},
 		{"in_progress->draft (back to draft)", StatusInProgress, StatusDraft, false},
 		{"blocked->draft (back to draft)", StatusBlocked, StatusDraft, false},

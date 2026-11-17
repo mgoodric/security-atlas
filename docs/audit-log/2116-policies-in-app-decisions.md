@@ -24,15 +24,20 @@ and source attribution are fixed at create. The authz derivation is the same
 **Why.** The form always holds every field, so a partial-update shape buys
 nothing and adds a "which fields changed" rule to test.
 
-## D2 — A draft edit writes no policy_audit_log row
+## D2 — A draft edit writes no policy_audit_log row (superseded by #2446)
 
-**Decision.** Edits are not audit-logged; transitions (submit, approve,
-self-approval), review-date changes and discards already are.
+**Decision (original).** Edits were not audit-logged; transitions (submit,
+approve, self-approval), review-date changes and discards already were.
 
-**Why.** A draft is not audit-binding, and the submitted text is what the
-approver sees and what the audit trail of the transition pins. Logging edits
-would need a migration to widen the `policy_audit_log.action` CHECK for no
-reader. Revisit if edit history on drafts becomes a requirement.
+**Correction (#2446).** The reason given here was wrong. It said the
+transition's audit row pins the submitted text, but that row pins the
+title, version and state, not the body, so nothing recorded who wrote the
+text the approver saw. That left a gap in separation of duties: an author
+could have someone else submit their draft and then approve it unflagged.
+#2446 records every draft editor, appends a `draft_edited` row with the
+body's sha256 on each edit, records the hash and the editor set on submit,
+and counts editors as authors in the approval rule. See
+`docs/audit-log/2446-policy-draft-editors-decisions.md`.
 
 ## D3 — "Create new version" is a prefilled create form, not a one-click copy
 

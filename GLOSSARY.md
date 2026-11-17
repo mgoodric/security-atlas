@@ -136,6 +136,14 @@ Risks roll up through the `risk_aggregations` join table (parent → child, many
 
 **Organisation theme** — a theme a tenant adds beside the built-ins, visible only to that tenant. Its name must be unique across the built-ins and the tenant's own themes. A rename rewrites the name on every one of the tenant's risks and aggregation rules in one transaction; a delete is refused while any risk or rule uses it.
 
+## Owner and Owner role (#2129)
+
+**Owner** — the person accountable for a record: always a user of the record's own tenant, never free text or a role. A control's owner is the user "assign owner" sets (`control_owner_assignments`, #2128); a risk's and a vendor's is `owner_user_id` (#2129). Setting one checks the user is active in the tenant (422 otherwise) and writes an audit row: a risk's `fields_changed` row, a vendor's `vendor_owner_update` row in `me_audit_log`. The API returns the owner as a user id, which the web app shows by name.
+
+**Owner (unlinked)** — the free text a risk (`treatment_owner`) or vendor (`owner_user`) carried before owners were users, when no single user matched it. The #2129 migration linked text equal to exactly one active user's name or email (ignoring case) and left the rest, including names two users share, as unlinked text. It is display-only, returned as `owner_unlinked`, and shown with a prompt to pick the user it names; picking one clears it. A record with an owner has no unlinked text.
+
+**Owner role** — a role, not a person: the role that owns a **policy** (`policies.owner_role`), and a control's **default owner role** from its manifest (`owner_role`), shown beside the control's Owner. A user counts as a policy's owner while they hold its owner role.
+
 ## Exception (slice 021)
 
 A time-bounded, scope-bounded waiver of a control's normal evaluation. Always:
@@ -181,6 +189,17 @@ In the app, an exception is requested from its control (`/exceptions/new?control
 An approval made by the person who requested it: the submitter of a policy or framework scope, the requester of an exception, or the proposer of a risk acceptance. Refused by default. Approvals require a second person, and only a person (never an API key, OAuth client or bootstrap credential) approves.
 
 An organisation may turn on **Allow self-approval** (`tenants.allow_self_approval`; admin-only; every change written to the audit log). While it is on, the requester may approve their own record, and the record is flagged `self_approved` and shown as **Self-approved** in the UI, the exports and the audit log. The setting relaxes only "same person": a machine credential still never approves. One rule decides every approval (`internal/approval`); see [ADR 0024](docs/adr/0024-approvals-require-a-second-person.md).
+
+## Action plan: Completed and Verified (#2108, #2109)
+
+An action plan moves `draft → in_progress (⇄ blocked) → completed → verified`. The last two states say different things:
+
+- **Completed** — the plan's owner says the work is done. A person sets it (`PATCH /v1/action-plans/{id}`, Mark complete) and can reopen it to `in_progress`. Completed is a claim, not proof.
+- **Verified** — the work is shown to have closed the gap. How a plan gets there depends on whether it has linked controls:
+  - **With linked controls**, the platform verifies it. After every control evaluation, a completed plan whose linked controls all pass their latest evaluation becomes verified, and a verified plan with a linked control that no longer passes returns to completed. "Passes" means every cell of the control's most recent evaluation run is `pass`; `excepted` is not a pass, and a control never evaluated does not pass. No person or API key makes either move: the audit row names the system actor `system:action-plan-verification`, and the database refuses `verified → completed` outside the evaluation path.
+  - **With no linked controls**, an approver verifies it by hand (`POST /v1/action-plans/{id}/verify`); the plan's owner never can.
+
+**Completed · linked controls still failing** is how the plan page and the controls' and risks' linked-plan lists show a completed plan whose linked controls do not all pass yet (`controls_failing: true` in the API). It is still `completed`; the next evaluation in which they all pass verifies it.
 
 ## Decision Log (slice 055)
 

@@ -17,6 +17,7 @@
 import type { Page, Route } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { pickFirstUser } from "./owner-picker";
 
 const RISK_ID = "00000000-0000-4000-8000-0000000b2089";
 const VENDOR_ID = "00000000-0000-4000-8000-0000000c2089";
@@ -87,7 +88,7 @@ test.describe("create lands on the new record with a toast (#2089)", () => {
 
     await page.goto("/risks/new");
     await page.getByTestId("risks-create-title").fill(RISK.title);
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     await page.getByTestId("risks-create-submit").click();
 
     await expect(page).toHaveURL(new RegExp(`/risks/${RISK_ID}$`), {
@@ -110,18 +111,15 @@ test.describe("create lands on the new record with a toast (#2089)", () => {
 
     await page.goto("/risks/new");
     await page.getByTestId("risks-create-title").fill(RISK.title);
-    // Treatment owner is required and left empty.
+    // The owner is required and left empty.
     await page.getByTestId("risks-create-submit").click();
 
-    const err = page.getByTestId("risks-create-treatment-owner-error");
+    const err = page.getByTestId("risk-owner-error");
     await expect(err).toBeVisible({ timeout: 30_000 });
-    const owner = page.getByTestId("risks-create-treatment-owner");
+    const owner = page.getByTestId("risks-create-owner");
     await expect(owner).toHaveAttribute("aria-invalid", "true");
-    await expect(owner).toHaveAttribute(
-      "aria-describedby",
-      "risk-treatment-owner-error",
-    );
-    await expect(err).toHaveAttribute("id", "risk-treatment-owner-error");
+    await expect(owner).toHaveAttribute("aria-describedby", "risk-owner-error");
+    await expect(err).toHaveAttribute("id", "risk-owner-error");
     // The browser's constraint validation never ran: the form opts out,
     // so the submit reached React, which rendered the inline error.
     expect(

@@ -587,3 +587,68 @@ func TestCheckApprover(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckApprover_Editors covers #2446: whoever created or edited the
+// draft is an author, so they are refused as approver however the policy
+// was submitted, unless self-approval is on, and then flagged.
+func TestCheckApprover_Editors(t *testing.T) {
+	t.Parallel()
+	submitter := "user-2"
+	person := func(u string) Approver { return Approver{UserID: u, CredentialID: "key_other"} }
+	cases := []struct {
+		name      string
+		editors   []string
+		approver  Approver
+		allowSelf bool
+		want      error
+		wantSelf  bool
+	}{
+		{"author approves what another submitted", []string{"user-1"}, person("user-1"), false, ErrEditorApproval, false},
+		{"later editor approves", []string{"user-1", "user-3"}, person("user-3"), false, ErrEditorApproval, false},
+		{"editor by credential id", []string{"key_abc"}, Approver{UserID: "user-9", CredentialID: "key_abc"}, false, ErrEditorApproval, false},
+		{"a person who never edited", []string{"user-1", "user-3"}, person("user-4"), false, nil, false},
+		{"no editors recorded", nil, person("user-1"), false, nil, false},
+		{"empty editor entry matches nobody", []string{""}, person("user-1"), false, nil, false},
+		{"self-approval on: author approves, flagged", []string{"user-1"}, person("user-1"), true, nil, true},
+		{"self-approval on: a person who never edited is not flagged", []string{"user-1"}, person("user-4"), true, nil, false},
+		{"submitter rule still applies", []string{"user-1"}, person("user-2"), false, ErrSelfApproval, false},
+		{"machine refused before editors", []string{"user-1"}, Approver{CredentialID: "key_m"}, true, ErrApproverNotPerson, false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := dbx.Policy{SubmittedBy: &submitter, DraftEditors: tc.editors}
+			self, got := CheckApprover(row, tc.approver, tc.allowSelf)
+			if !errors.Is(got, tc.want) {
+				t.Fatalf("checkApprover = %v, want %v", got, tc.want)
+			}
+			if self != tc.wantSelf {
+				t.Fatalf("selfApproved = %v, want %v", self, tc.wantSelf)
+			}
+		})
+	}
+}
+
+// TestBodySHA256 pins the audit-log body hash: hex sha256, 64 characters,
+// matching the policy_audit_log.body_sha256 CHECK.
+func TestBodySHA256(t *testing.T) {
+	t.Parallel()
+	const emptySHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if got := bodySHA256(""); got != emptySHA {
+		t.Fatalf("bodySHA256 of the empty body = %s, want %s", got, emptySHA)
+	}
+	if a, b := bodySHA256("# A"), bodySHA256("# B"); a == b || len(a) != 64 {
+		t.Fatalf("bodySHA256 = %s / %s", a, b)
+	}
+}
+
+func TestEditorsOrEmpty(t *testing.T) {
+	t.Parallel()
+	if got := editorsOrEmpty(nil); got == nil || len(got) != 0 {
+		t.Fatalf("editorsOrEmpty(nil) = %#v, want empty non-nil", got)
+	}
+	if got := editorsOrEmpty([]string{"u"}); len(got) != 1 {
+		t.Fatalf("editorsOrEmpty = %#v", got)
+	}
+}

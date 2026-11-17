@@ -1,7 +1,7 @@
 // #2116 — Playwright E2E for policies in the app, against the real platform.
 //
 //   1. Create a policy from /policies/new (a linked control, a Markdown
-//      body whose <script> stays text), submit it; a second user approves
+//      body whose <script> and <img onerror> stay text), submit it; a second user approves
 //      and publishes it with a review date; it shows published with that
 //      date.
 //   2. "Create new version" on the published policy opens a draft linked
@@ -19,6 +19,18 @@ import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { ATLAS_JWT_COOKIE } from "../lib/auth";
 import { expect, test } from "./fixtures";
 import { DEMO_CONTROL_ID, DEMO_TENANT_ID, seedFromFixture } from "./seed";
+
+// Two XSS payloads in the policy body (#2446): a <script> and an <img>
+// whose onerror handler runs as soon as the browser fails to load it.
+// Both must render as text, so window.__pwned is never set.
+const SCRIPT_PAYLOAD = "<script>window.__pwned=1</script>";
+const IMG_PAYLOAD = "<img src=x onerror=window.__pwned=1>";
+
+function pwned(page: Page): Promise<number | undefined> {
+  return page.evaluate(
+    () => (window as unknown as { __pwned?: number }).__pwned,
+  );
+}
 
 const APPROVER = "44444444-4444-4444-4444-444444442116";
 const RUN = Date.now().toString(36);
@@ -134,16 +146,19 @@ test.describe("policies in the app (#2116)", () => {
     await page
       .getByTestId("policy-body")
       .fill(
-        "# Purpose\n\nAccess is **least privilege**.\n\n<script>window.__pwned=1</script>",
+        `# Purpose\n\nAccess is **least privilege**.\n\n${SCRIPT_PAYLOAD}\n\n${IMG_PAYLOAD}`,
       );
 
     // The preview renders Markdown through the shared component; the
-    // <script> is shown as text and never runs.
+    // <script> and the <img onerror> are shown as text and never run.
     await page.getByTestId("policy-body-preview-toggle").click();
     const preview = page.getByTestId("policy-body-preview");
     await expect(preview.locator("h1")).toHaveText("Purpose");
-    await expect(preview).toContainText("<script>window.__pwned=1</script>");
+    await expect(preview).toContainText(SCRIPT_PAYLOAD);
+    await expect(preview).toContainText(IMG_PAYLOAD);
     await expect(preview.locator("script")).toHaveCount(0);
+    await expect(preview.locator("img")).toHaveCount(0);
+    expect(await pwned(page)).toBeUndefined();
     await page.getByTestId("policy-body-preview-toggle").click();
 
     // Until a control is linked, the form warns before submit.
@@ -162,14 +177,11 @@ test.describe("policies in the app (#2116)", () => {
     );
     await expect(page.getByTestId("policy-detail-status")).toHaveText("draft");
     await expect(page.getByTestId("policy-detail-edit")).toBeVisible();
-    await expect(page.getByTestId("policy-detail-body")).toContainText(
-      "<script>window.__pwned=1</script>",
-    );
-    expect(
-      await page.evaluate(
-        () => (window as unknown as { __pwned?: number }).__pwned,
-      ),
-    ).toBeUndefined();
+    const detailBody = page.getByTestId("policy-detail-body");
+    await expect(detailBody).toContainText(SCRIPT_PAYLOAD);
+    await expect(detailBody).toContainText(IMG_PAYLOAD);
+    await expect(detailBody.locator("img")).toHaveCount(0);
+    expect(await pwned(page)).toBeUndefined();
 
     await transition(page, "submit", "Policy submitted for review");
     await expect(page.getByTestId("policy-detail-status")).toHaveText(

@@ -20,6 +20,7 @@
 import type { Page, Route } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { pickFirstUser } from "./owner-picker";
 
 const ACTIVE_ID = "00000000-0000-4000-8000-000000001817";
 const ARCHIVED_ID = "00000000-0000-4000-8000-000000001818";
@@ -135,7 +136,7 @@ test.describe("/risks organisation categories (#1817)", () => {
     await expect(picker).toHaveValue("operational");
 
     await page.getByTestId("risks-create-title").fill("Neutral test risk");
-    await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    await pickFirstUser(page, "risks-create-owner");
     await picker.selectOption({ label: "Cloud posture" });
     await page.getByTestId("risks-create-submit").click();
 

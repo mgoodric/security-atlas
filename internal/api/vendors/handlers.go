@@ -26,6 +26,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -68,8 +70,14 @@ type vendorWire struct {
 	// FirstReviewDue is set only while the vendor has never been reviewed:
 	// its creation date (UTC) plus the tenant's initial-review window
 	// (#2061). Overdue is false until that day has passed.
-	FirstReviewDue *string   `json:"first_review_due,omitempty"`
-	Overdue        bool      `json:"overdue"`
+	FirstReviewDue *string `json:"first_review_due,omitempty"`
+	Overdue        bool    `json:"overdue"`
+	// OwnerUserID is the owner, a user of the tenant, or null (#2129).
+	// OwnerUnlinked is the free-text owner no user matched, shown as
+	// "Owner (unlinked)"; it is empty whenever OwnerUserID is set.
+	// OwnerUser is the stored free text, kept for older clients.
+	OwnerUserID    *string   `json:"owner_user_id"`
+	OwnerUnlinked  string    `json:"owner_unlinked"`
 	OwnerUser      string    `json:"owner_user"`
 	LinkedSOWURI   *string   `json:"linked_sow_uri,omitempty"`
 	Notes          string    `json:"notes"`
@@ -98,6 +106,7 @@ type writeReq struct {
 	ReviewCadence  string   `json:"review_cadence"`
 	LastReviewDate *string  `json:"last_review_date"`
 	OwnerUser      string   `json:"owner_user"`
+	OwnerUserID    *string  `json:"owner_user_id"`
 	LinkedSOWURI   *string  `json:"linked_sow_uri"`
 	Notes          string   `json:"notes"`
 	AnnualCost     *float64 `json:"annual_cost"`
@@ -167,6 +176,7 @@ func (h *Handler) CreateVendor(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, herr.status, herr.msg)
 		return
 	}
+	in.Actor = actor(r)
 	v, err := h.store.Create(ctx, in)
 	if err != nil {
 		h.writeStoreErr(w, r, "create vendor", err)
@@ -313,6 +323,7 @@ func (h *Handler) UpdateVendor(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, herr.status, herr.msg)
 		return
 	}
+	in.Actor = actor(r)
 	v, err := h.store.Update(ctx, id, in)
 	if err != nil {
 		h.writeStoreErr(w, r, "update vendor", err)
@@ -512,6 +523,13 @@ func decodeWrite(r *http.Request) (vendor.CreateVendorInput, *httpErr) {
 	if in.RenewalDate, err = parseOptDate(req.RenewalDate); err != nil {
 		return vendor.CreateVendorInput{}, &httpErr{http.StatusBadRequest, "renewal_date: " + err.Error()}
 	}
+	if req.OwnerUserID != nil && strings.TrimSpace(*req.OwnerUserID) != "" {
+		ownerID, err := uuid.Parse(strings.TrimSpace(*req.OwnerUserID))
+		if err != nil {
+			return vendor.CreateVendorInput{}, &httpErr{http.StatusBadRequest, "owner_user_id must be a UUID"}
+		}
+		in.OwnerUserID = &ownerID
+	}
 	for _, s := range req.ScopeCellIDs {
 		id, err := uuid.Parse(s)
 		if err != nil {
@@ -577,6 +595,12 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 		s := string(*v.BillingCadence)
 		w.BillingCadence = &s
 	}
+	if v.OwnerUserID != nil {
+		s := v.OwnerUserID.String()
+		w.OwnerUserID = &s
+	} else {
+		w.OwnerUnlinked = strings.TrimSpace(v.OwnerUser)
+	}
 	return w
 }
 
@@ -600,6 +624,14 @@ func dateString(t *time.Time) *string {
 	return &s
 }
 
+// actor names the caller on the owner audit row (#2129): the user behind
+// the credential, or uuid.Nil for a caller that is not a user.
+func actor(r *http.Request) uuid.UUID {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	u, _ := credstore.CallerUserID(cred)
+	return u
+}
+
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
 	// Slice 033: tenancy.Middleware (httpserver.go) lifted cred.TenantID
 	// onto r.Context() via tenancy.WithTenant. Confirm the tenant is set
@@ -616,6 +648,8 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op strin
 		httpresp.WriteError(w, http.StatusNotFound, "vendor not found")
 	case errors.Is(err, vendor.ErrInvalidInput):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, vendor.ErrOwnerNotActiveUser):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, "owner_user_id: target owner is not an active user in this tenant")
 	case errors.Is(err, vendor.ErrDuplicateDomain):
 		httpresp.WriteError(w, http.StatusConflict, "a vendor with this domain already exists")
 	default:

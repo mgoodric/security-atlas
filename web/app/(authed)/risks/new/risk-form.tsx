@@ -43,7 +43,7 @@ import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { EntityMultiPicker } from "@/components/ui/entity-picker";
+import { EntityMultiPicker, EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
 import type { EntityKind } from "@/lib/entity-picker";
 import Link from "next/link";
@@ -125,7 +125,7 @@ function toCreateInput(
     category: s.category,
     methodology: s.methodology,
     treatment: s.treatment,
-    treatment_owner: s.treatment_owner.trim(),
+    owner_user_id: s.owner_user_id,
     inherent_score: inherentScore,
   };
   if (s.treatment === "accept") {
@@ -460,33 +460,36 @@ export function RiskForm(props: Props) {
         )}
 
         <div>
-          <label className={LABEL_CLASS} htmlFor="risk-treatment-owner">
-            Treatment owner <span className="text-destructive">*</span>
+          <label className={LABEL_CLASS} htmlFor="risk-owner">
+            Owner <span className="text-destructive">*</span>
           </label>
-          <Input
-            id="risk-treatment-owner"
-            name="treatment_owner"
-            required
-            value={state.treatment_owner}
-            onChange={(e) => update("treatment_owner", e.target.value)}
-            placeholder="Person or role accountable for treatment"
-            aria-invalid={fieldErrors.treatment_owner ? true : undefined}
-            aria-describedby={
-              fieldErrors.treatment_owner
-                ? "risk-treatment-owner-error"
+          <EntityPicker
+            kinds={["user"]}
+            id="risk-owner"
+            value={state.owner_user_id}
+            onChange={(id) => update("owner_user_id", id)}
+            testId="risks-create-owner"
+            error={fieldErrors.owner}
+            errorId="risk-owner-error"
+            placeholder="Search people by name"
+            describedBy={
+              !state.owner_user_id && state.treatment_owner
+                ? "risk-owner-unlinked"
                 : undefined
             }
-            data-testid="risks-create-treatment-owner"
           />
-          {fieldErrors.treatment_owner && (
+          {/* #2129: a free-text owner no user matched, kept until a user
+              is picked. Rendered as text, never as markup. */}
+          {!state.owner_user_id && state.treatment_owner ? (
             <p
-              id="risk-treatment-owner-error"
-              className="mt-1 text-sm text-destructive"
-              data-testid="risks-create-treatment-owner-error"
+              id="risk-owner-unlinked"
+              className={HELP_CLASS}
+              data-testid="risks-form-owner-unlinked"
             >
-              {fieldErrors.treatment_owner}
+              Owner (unlinked): {state.treatment_owner}. Pick the person this
+              names.
             </p>
-          )}
+          ) : null}
         </div>
       </div>
 

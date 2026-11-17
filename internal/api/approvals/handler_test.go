@@ -129,6 +129,25 @@ func TestPendingPolicies(t *testing.T) {
 	}
 }
 
+// #2446: a draft editor is an author too. A policy submitted by someone
+// else but edited by the caller is listed for them only under Allow
+// self-approval, and then marked; a person who neither submitted nor
+// edited it sees it unmarked.
+func TestPendingPolicies_DraftEditor(t *testing.T) {
+	t.Parallel()
+	const submitter = "33333333-3333-3333-3333-333333333333"
+	rows := []dbx.Policy{{
+		ID: pgID(uuid.NewString()), Title: "Edited", Version: "2.0", Status: "under_review",
+		SubmittedBy: strp(submitter), DraftEditors: []string{submitter, requester},
+	}}
+	for _, tc := range shared {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertOne(t, PendingPolicies(rows, tc.approver, tc.allowSelf), tc, TypePolicy)
+		})
+	}
+}
+
 func TestPendingFrameworkScopes(t *testing.T) {
 	t.Parallel()
 	fv := uuid.NewString()
