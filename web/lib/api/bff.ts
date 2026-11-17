@@ -21,6 +21,9 @@ type ForwardInit = {
   method?: string;
   // JSON body to forward. Omit for GET. For multipart use forwardMultipart.
   jsonBody?: unknown;
+  // Extra request headers to forward (e.g. If-Match, #2311). They cannot
+  // replace Authorization or Content-Type, which this helper sets.
+  headers?: Record<string, string>;
 };
 
 // forwardJSON proxies a JSON request to the platform. Returns a
@@ -35,6 +38,7 @@ export async function forwardJSON(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   const headers: Record<string, string> = {
+    ...init?.headers,
     Authorization: `Bearer ${bearer}`,
   };
   let body: string | undefined;

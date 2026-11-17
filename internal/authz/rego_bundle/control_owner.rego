@@ -88,6 +88,19 @@ allow if {
     regex.match(`^/v1/controls/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/evaluate$`, input.request.path)
 }
 
+# #2523: Attest. A control_owner may submit a manual attestation through
+# POST /v1/controls/{uuid}/attestations, and gains no other controls write.
+# Whether they own that control (its owner_role among their live roles) is
+# the handler's check, authz.HasOwnerRole; rego admits the role at this one
+# path, as the evaluate rule above does.
+allow if {
+    has_role("control_owner")
+    input.action == "write"
+    input.resource.type == "controls"
+    input.request.method == "POST"
+    regex.match(`^/v1/controls/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/attestations$`, input.request.path)
+}
+
 control_owner_writable_resources := {
     "evidence",
     "artifacts",

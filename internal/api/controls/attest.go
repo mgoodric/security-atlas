@@ -18,7 +18,8 @@
 //     credstore.Credential to the request context. Missing → 401.
 //   - AuthZ (AC-5): POST requires the caller to hold the control's
 //     `owner_role` (declared in the slice-009 bundle manifest) via
-//     credstore.Credential.HasOwnerRole. IsAdmin is a wildcard.
+//     authz.HasOwnerRole. IsAdmin is a wildcard; a user session counts
+//     its live user_roles, not its role claim (#2523).
 //   - Tenant boundary: GetControlByID is parameterized on the tenant
 //     from the credential; cross-tenant control ids resolve to 404
 //     (we map pgx.ErrNoRows → 404 without disclosing existence).
@@ -60,6 +61,7 @@ import (
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/control/attestation"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/eval"
@@ -419,7 +421,7 @@ func (h *AttestHandler) AttestForm(w http.ResponseWriter, r *http.Request) {
 		OwnerRole:              row.OwnerRole,
 		FreshnessClass:         row.FreshnessClass,
 		ManualEvidenceSchema:   schemaMap,
-		CallerCanAttest:        cred.HasOwnerRole(row.OwnerRole),
+		CallerCanAttest:        authz.HasOwnerRole(cred, row.OwnerRole),
 		PlatformSchemaKind:     AttestationKind,
 		PlatformSchemaVersion:  AttestationVersion,
 		PlatformSchemaRequires: []string{"attestor", "statement"},
@@ -510,7 +512,7 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// AC-5: owner-role gate. Admins satisfy any role (wildcard).
-	if !cred.HasOwnerRole(row.OwnerRole) {
+	if !authz.HasOwnerRole(cred, row.OwnerRole) {
 		writeAttestError(w, http.StatusForbidden,
 			fmt.Sprintf("caller credential does not hold owner_role %q for this control", row.OwnerRole))
 		return
