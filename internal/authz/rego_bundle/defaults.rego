@@ -126,6 +126,23 @@ allow if {
     count(input.user.roles) > 0
 }
 
+# #2134 — GET /v1/needs-attention, the dashboard's ranked list of what
+# needs attention.
+#
+# Every signed-in role reads it: for=me lists only the caller's own items
+# (records they own, policies whose owner role they hold, approvals waiting
+# for them), each under the calendar's per-type read check. for=all is
+# refused in the handler to anyone but an admin or GRC lead
+# (authz.IsTenantApprover), which this rule cannot see because the view is
+# a query parameter. Exact path: any sub-path stays denied. Default-deny
+# still applies to a roleless credential.
+allow if {
+    is_read
+    input.resource.type == "needs-attention"
+    input.request.path == "/v1/needs-attention"
+    count(input.user.roles) > 0
+}
+
 # #2494 — a signed-in user with no role in the current tenant reads its
 # own profile and its tenant list, so the web shows "You don't have a role
 # in <tenant>" with a switcher instead of a dashboard of 403s. GET /v1/me
