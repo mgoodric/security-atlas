@@ -4,10 +4,15 @@
   "variants": {
     "empty": {
       "count": 0,
-      "risks": []
+      "limit": 500,
+      "offset": 0,
+      "risks": [],
+      "total": 0
     },
     "lifecycle_states": {
       "count": 2,
+      "limit": 500,
+      "offset": 0,
       "risks": [
         {
           "accepter": "",
@@ -59,10 +64,13 @@
           "treatment_owner": "",
           "updated_at": "2026-05-12T00:00:00Z"
         }
-      ]
+      ],
+      "total": 2
     },
     "populated": {
       "count": 2,
+      "limit": 500,
+      "offset": 0,
       "risks": [
         {
           "accepted_until": "2026-12-31",
@@ -121,10 +129,13 @@
           "treatment_owner": "",
           "updated_at": "2026-05-12T00:00:00Z"
         }
-      ]
+      ],
+      "total": 2
     },
     "treatment_states": {
       "count": 2,
+      "limit": 500,
+      "offset": 0,
       "risks": [
         {
           "accepter": "",
@@ -175,7 +186,8 @@
           "treatment_owner": "",
           "updated_at": "2026-05-12T00:00:00Z"
         }
-      ]
+      ],
+      "total": 2
     }
   }
 }

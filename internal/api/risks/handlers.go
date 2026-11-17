@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -50,8 +51,11 @@ import (
 // (ADR-0007 / P0-409-1). The production *risk.Store satisfies it verbatim;
 // the seam is unexported and New(*risk.Store) is unchanged (P0-409-2). The
 // rest of the handler keeps using the concrete *risk.Store directly.
+//
+// #2132: the seam is ListPage, the filtered, sorted and paged read, which
+// also returns the filtered total.
 type riskLister interface {
-	List(ctx context.Context, filter risk.ListFilter) ([]risk.Risk, error)
+	ListPage(ctx context.Context, filter risk.PageFilter) ([]risk.Risk, int64, error)
 }
 
 // Handler bundles the slice-019 routes over a single risk.Store. Slice 020
@@ -308,45 +312,12 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	sortOrder, err := risk.ParseListSort(r.URL.Query().Get("sort"))
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	filter, msg := parsePageFilter(r)
+	if msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
-	filter := risk.ListFilter{
-		Treatment:   dbx.RiskTreatment(r.URL.Query().Get("treatment")),
-		Categories:  categoryRefs(r.URL.Query()["category"]),
-		Methodology: dbx.RiskMethodology(r.URL.Query().Get("methodology")),
-		Sort:        sortOrder,
-		Theme:       r.URL.Query().Get("theme"),
-	}
-	// Slice 067 (AC-4): ?org_unit= is an optional UUID. A present-but-
-	// malformed value is a 400 rather than a silently-ignored filter.
-	if raw := r.URL.Query().Get("org_unit"); raw != "" {
-		ouID, perr := uuid.Parse(raw)
-		if perr != nil {
-			httpresp.WriteError(w, http.StatusBadRequest, "org_unit must be a UUID")
-			return
-		}
-		filter.OrgUnitID = &ouID
-	}
-	if raw := r.URL.Query().Get("include_rollups"); raw != "" {
-		include, perr := strconv.ParseBool(raw)
-		if perr != nil {
-			httpresp.WriteError(w, http.StatusBadRequest, "include_rollups must be true or false")
-			return
-		}
-		filter.IncludeRollUps = include
-	}
-	if raw := r.URL.Query().Get("include_closed"); raw != "" {
-		include, perr := strconv.ParseBool(raw)
-		if perr != nil {
-			httpresp.WriteError(w, http.StatusBadRequest, "include_closed must be true or false")
-			return
-		}
-		filter.IncludeClosed = include
-	}
-	risks, err := h.lister.List(ctx, filter)
+	risks, total, err := h.lister.ListPage(ctx, filter)
 	if err != nil {
 		if risk.IsUnknownCategory(err) {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
@@ -359,7 +330,148 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	for i, rk := range risks {
 		out[i] = riskWireFrom(rk)
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risks": out, "count": len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"risks":  out,
+		"count":  len(out),
+		"total":  total,
+		"limit":  filter.Limit,
+		"offset": filter.Offset,
+	})
+}
+
+// Register paging (#2132). One page is at most 500 risks, the controls
+// list's cap (#2131); with no ?limit= a caller gets a full page, so the
+// pickers that read the whole list keep working at v1 tenant sizes.
+const (
+	listDefaultLimit int32 = 500
+	listMaxLimit     int32 = 500
+)
+
+// ownerUnowned is the `?owner=` value that keeps the risks with no owner
+// user (#2132).
+const ownerUnowned = "none"
+
+// parsePageFilter reads GET /v1/risks's filters, sort and paging (#2132).
+// Every value is checked against an allow-list or parsed as a UUID or
+// date; the returned string is the 400 message.
+func parsePageFilter(r *http.Request) (risk.PageFilter, string) {
+	q := r.URL.Query()
+	f := risk.PageFilter{
+		Status:     dbx.RiskStatusOpen,
+		Categories: categoryRefs(q["category"]),
+		Theme:      q.Get("theme"),
+		Limit:      listDefaultLimit,
+	}
+	sortOrder, err := risk.ParsePageSort(q.Get("sort"))
+	if err != nil {
+		return f, err.Error()
+	}
+	f.Sort = sortOrder
+
+	// Status: open (the default) | closed | all. The older
+	// include_closed=true still means all (#2107).
+	if raw := q.Get("include_closed"); raw != "" {
+		include, perr := strconv.ParseBool(raw)
+		if perr != nil {
+			return f, "include_closed must be true or false"
+		}
+		if include {
+			f.Status = ""
+		}
+	}
+	switch v := q.Get("status"); v {
+	case "":
+	case "all":
+		f.Status = ""
+	case string(dbx.RiskStatusOpen), string(dbx.RiskStatusClosed):
+		f.Status = dbx.RiskStatus(v)
+	default:
+		return f, "status must be one of open|closed|all"
+	}
+
+	if v := dbx.RiskTreatment(q.Get("treatment")); v != "" {
+		if !slices.Contains(dbx.AllRiskTreatmentValues(), v) {
+			return f, "treatment must be one of accept|mitigate|transfer|avoid|untreated"
+		}
+		f.Treatment = v
+	}
+	if v := dbx.RiskMethodology(q.Get("methodology")); v != "" {
+		if !slices.Contains(dbx.AllRiskMethodologyValues(), v) {
+			return f, "methodology is not a known risk methodology"
+		}
+		f.Methodology = v
+	}
+	if v := dbx.RiskLevel(q.Get("level")); v != "" {
+		if !slices.Contains(dbx.AllRiskLevelValues(), v) {
+			return f, "level must be one of team|org|company"
+		}
+		f.Level = v
+	}
+	// Slice 067 (AC-4): ?org_unit= is an optional UUID. A present-but-
+	// malformed value is a 400 rather than a silently-ignored filter.
+	if raw := q.Get("org_unit"); raw != "" {
+		ouID, perr := uuid.Parse(raw)
+		if perr != nil {
+			return f, "org_unit must be a UUID"
+		}
+		f.OrgUnitID = &ouID
+	}
+	// #2132: ?owner=<user id> keeps that person's risks, ?owner=none the
+	// risks with no owner user. RLS keeps another tenant's users out, so a
+	// foreign id matches nothing.
+	switch v := q.Get("owner"); v {
+	case "":
+	case ownerUnowned:
+		f.Unowned = true
+	default:
+		id, perr := uuid.Parse(v)
+		if perr != nil {
+			return f, "owner must be a UUID or none"
+		}
+		f.Owner = &id
+	}
+	switch v := risk.ReviewDue(q.Get("review_due")); v {
+	case risk.ReviewDueAny, risk.ReviewDueOverdue, risk.ReviewDueSoon:
+		f.ReviewDue = v
+	default:
+		return f, "review_due must be one of overdue|due_soon"
+	}
+	if raw := q.Get("review_due_from"); raw != "" {
+		d, perr := time.Parse(time.DateOnly, raw)
+		if perr != nil {
+			return f, "review_due_from must be a date (YYYY-MM-DD)"
+		}
+		f.DueFrom = &d
+	}
+	if raw := q.Get("review_due_to"); raw != "" {
+		d, perr := time.Parse(time.DateOnly, raw)
+		if perr != nil {
+			return f, "review_due_to must be a date (YYYY-MM-DD)"
+		}
+		f.DueTo = &d
+	}
+	if raw := q.Get("include_rollups"); raw != "" {
+		include, perr := strconv.ParseBool(raw)
+		if perr != nil {
+			return f, "include_rollups must be true or false"
+		}
+		f.IncludeRollUps = include
+	}
+	if raw := q.Get("limit"); raw != "" {
+		n, perr := strconv.ParseInt(raw, 10, 32)
+		if perr != nil || n <= 0 {
+			return f, "limit must be a positive integer"
+		}
+		f.Limit = int32(min(n, int64(listMaxLimit)))
+	}
+	if raw := q.Get("offset"); raw != "" {
+		n, perr := strconv.ParseInt(raw, 10, 32)
+		if perr != nil || n < 0 {
+			return f, "offset must be a non-negative integer"
+		}
+		f.Offset = int32(n)
+	}
+	return f, ""
 }
 
 // categoryRefs flattens ?category= values into category refs (#1812). The
