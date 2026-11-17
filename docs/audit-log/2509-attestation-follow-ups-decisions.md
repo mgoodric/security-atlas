@@ -60,11 +60,20 @@ the cost is one extra ledger row. An API caller that needs exact-once
 sends its own `idempotency_key`. Rejected: a client-supplied key only,
 because existing API callers send none and would keep the 409.
 
+Known limit: the ledger hash covers `source_attribution.session_id`, which
+for a JWT caller is the token's `jti`. A retry sent after an access-token
+refresh hashes differently and still gets 409, as before this change. Retry
+dedupe holds within one token.
+
 ## D3 — replays do not evaluate
 
 When the receipt is `Deduplicated`, nothing was written and the first
 request already evaluated, so the handler skips `EvaluateControl` and
 returns `evaluated: false` with the 200. The web does not read `evaluated`.
+The cost: if the first request's evaluation failed or timed out, a retry no
+longer re-evaluates, and the control waits for the scheduled run (or
+Evaluate now). The ticket asks for the skip, and replays should not be a way
+around the evaluation rate limit (D4).
 
 ## D4 — rate limit noted on #2111's D4
 

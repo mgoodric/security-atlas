@@ -904,6 +904,13 @@ func TestAttest_RetryWithoutKeyOrObservedAt_Dedupes(t *testing.T) {
 	body := attestBody("Quarterly review complete.", map[string]any{})
 	path := "/v1/controls/" + controlID + "/attestations"
 
+	// The server key covers a fixed 5-minute window; two posts straddling
+	// its boundary are two attestations by design. Start clear of one.
+	const window = 5 * time.Minute
+	if left := window - time.Duration(time.Now().UnixNano())%window; left < 5*time.Second {
+		time.Sleep(left + time.Second)
+	}
+
 	status1, raw1 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, body)
 	if status1 != http.StatusCreated {
 		t.Fatalf("first: expected 201; got %d body=%s", status1, raw1)
