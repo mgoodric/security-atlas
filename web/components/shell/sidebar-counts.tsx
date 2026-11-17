@@ -52,41 +52,12 @@ import {
   type ApprovalsResponse,
 } from "@/lib/api/approvals";
 import { fetchMyControlsTotal } from "@/lib/api/controls-list";
-import {
-  fetchRisksList,
-  type Risk,
-  type RisksListResponse,
-} from "@/lib/api/risks";
-
-/**
- * The slice-100 `filters.ts` defines severity bands on the 5x5 scalar
- * (0..25):
- *
- *     high   = severity >= 15   (rose)
- *     medium = 8..14            (amber)
- *     low    = 1..7             (emerald)
- *     none   = 0
- *
- * The Risks badge counts only the high tier — the mockup's rose `3`
- * is unambiguously the "rose" band. The schema has no `status` column
- * on the risk wire shape and no `critical` band, so the slice spec's
- * "open critical" phrase resolves to this canonical high tier. See
- * `docs/audit-log/214-sidebar-item-counts-decisions.md` D1.
- */
-const HIGH_SEVERITY_THRESHOLD = 15;
-
-/**
- * countHighSeverityRisks returns the count of rows whose 5x5
- * `severity` scalar is at or above the high-tier threshold. Pure;
- * unit-tested in `sidebar-counts.test.ts`.
- */
-export function countHighSeverityRisks(risks: Risk[]): number {
-  let n = 0;
-  for (const r of risks) {
-    if (r.severity >= HIGH_SEVERITY_THRESHOLD) n++;
-  }
-  return n;
-}
+// The Risks badge counts the open, non-roll-up risks in the High severity
+// band (slice 214 D1: the mockup's rose count is the high tier). Since
+// #2490 the platform counts them (`?severity_band=high`, the bands of
+// risk.SeverityBand, FAIR left out) and the badge reads `total` off a
+// one-row page, instead of downloading the register every 60s.
+import { fetchHighSeverityRiskTotal } from "@/lib/api/risks";
 
 /**
  * Slice 681 / ATLAS-036 — the badge's accessible + visible label text.
@@ -169,9 +140,9 @@ export function ControlsCountBadge() {
 }
 
 export function RisksCountBadge() {
-  const q = useQuery<RisksListResponse>({
+  const q = useQuery<number>({
     queryKey: ["sidebar", "risks-count"],
-    queryFn: fetchRisksList,
+    queryFn: fetchHighSeverityRiskTotal,
     staleTime: 60_000,
     refetchInterval: 60_000,
     retry: false,
@@ -179,8 +150,7 @@ export function RisksCountBadge() {
 
   if (q.isLoading || q.isError || !q.data) return null;
 
-  const count = countHighSeverityRisks(q.data.risks ?? []);
-  if (count === 0) return null;
+  const count = q.data;
 
   // Slice 681 / ATLAS-036 — the rose count is disambiguated as
   // high-severity (not a total) by a leading "▲" marker glyph + an

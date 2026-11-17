@@ -132,9 +132,9 @@ async function mockRegister(page: Page): Promise<URLSearchParams[]> {
   );
   await page.route(/\/api\/risks(\?.*)?$/, (route: Route, req: Request) => {
     const q = new URL(req.url()).searchParams;
-    // The sidebar badge reads the same BFF with no query; only the
-    // register sends limit.
-    if (q.has("limit")) seen.push(q);
+    // The sidebar badge and the "N of M" size read the same BFF with
+    // limit=1 and no offset (#2490); only the register page sends offset.
+    if (q.has("offset")) seen.push(q);
     const status = q.get("status") ?? "open";
     let rows =
       status === "all"
