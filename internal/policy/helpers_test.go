@@ -629,6 +629,12 @@ func TestCheckApprover_Editors(t *testing.T) {
 		{"unbound key", "key_abc"},
 		{"OAuth client", "oauth_client:ci-bot"},
 		{"bootstrap admin", "bootstrap-admin"},
+		// #2478: uuid.Parse accepts these, but only the canonical form
+		// names a person.
+		{"32-hex uuid", "44444444444444444444444444444444"},
+		{"braced uuid", "{" + user4 + "}"},
+		{"urn uuid", "urn:uuid:" + user4},
+		{"upper-case uuid", "AAAAAAAA-4444-4444-8444-444444444444"},
 	} {
 		cases = append(cases,
 			editorCase{kind.name + ": a person who never used it", []string{kind.principal}, person(user4), false, ErrEditorNotPerson, false},

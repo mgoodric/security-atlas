@@ -20,12 +20,26 @@ import (
 // uuid-shaped from a user. For a live credential use credstore.CallerUserID,
 // which rules that case out first; call this directly only for strings
 // already recorded as a user id.
+//
+// The uuid must be in its canonical 36-character lowercase form (#2478).
+// uuid.Parse alone also accepts 32-hex, "{...}" and "urn:uuid:" forms;
+// those name no user here, so a non-person string can never pass as a
+// person in a separation-of-duties check.
 func UserID(s string) (uuid.UUID, bool) {
-	u, err := uuid.Parse(strings.TrimPrefix(s, "user:"))
-	if err != nil || u == uuid.Nil {
+	raw := strings.TrimPrefix(s, "user:")
+	u, err := uuid.Parse(raw)
+	if err != nil || u == uuid.Nil || u.String() != raw {
 		return uuid.Nil, false
 	}
 	return u, true
+}
+
+// IsBareUserID reports whether s is a bare users(id) uuid in canonical form,
+// the shape credstore.PrincipalOf records for a person. A "user:<uuid>"
+// subject is not bare.
+func IsBareUserID(s string) bool {
+	u, ok := UserID(s)
+	return ok && u.String() == s
 }
 
 // RolesKey returns the user_roles.user_id a principal's roles are stored
