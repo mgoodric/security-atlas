@@ -565,7 +565,11 @@ function ControlDetailPageInner() {
                 Download bundle, Upload new version and Request exception,
                 with the "last evaluated <relative-time>" sub-line. See
                 web/components/control/header-actions.tsx. */}
-            <ControlHeaderActions controlID={id} state={state} />
+            <ControlHeaderActions
+              controlID={id}
+              state={state}
+              implementationType={control.implementation_type}
+            />
           </>
         }
       >

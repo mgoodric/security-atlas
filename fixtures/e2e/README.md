@@ -50,6 +50,7 @@ cross-references slice 050 sanitization rules and slice 057 P0-A2):
 | `framework-scope-soa.sql`  | `web/e2e/framework-scope-soa.spec.ts`  |
 | `framework-scope-diff.sql` | `web/e2e/framework-scope-diff.spec.ts` |
 | `attest.sql`               | `web/e2e/attest.spec.ts`               |
+| `attest-result.sql`        | `web/e2e/attest-result.spec.ts`        |
 | `theme.sql`                | `web/e2e/settings-theme.spec.ts`       |
 | `sidebar-nav.sql`          | `web/e2e/sidebar-nav.spec.ts`          |
 

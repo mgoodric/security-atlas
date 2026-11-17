@@ -27,6 +27,12 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
+// Kind is the platform evidence_kind of a manual attestation. The attest
+// handler writes it and the evaluation engine reads it: for this kind the
+// latest attestation in the freshness window decides the outcome (#2111),
+// where every other kind fails on any fail in the window.
+const Kind = "manual.attestation.v1"
+
 // ValidateAttestationData compiles controlSchema (a JSON Schema object
 // from the control bundle's manual_evidence_schema field) and validates
 // data against it. Returns nil when controlSchema is empty (the control

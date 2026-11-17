@@ -24,7 +24,7 @@
       "owner_role": "control_owner",
       "platform_schema_kind": "manual.attestation.v1",
       "platform_schema_requires": ["attestor", "statement"],
-      "platform_schema_version": "1.1.0",
+      "platform_schema_version": "1.2.0",
       "title": "Quarterly Access Review"
     },
     "viewer": {
@@ -49,7 +49,7 @@
       "owner_role": "control_owner",
       "platform_schema_kind": "manual.attestation.v1",
       "platform_schema_requires": ["attestor", "statement"],
-      "platform_schema_version": "1.1.0",
+      "platform_schema_version": "1.2.0",
       "title": "Quarterly Access Review"
     }
   }
