@@ -33,8 +33,7 @@ var ownerRolesReads2505 = map[string]string{
 	"internal/api/admincreds/http.go Handler.Issue": "the issue request body's owner_roles, written to the new key",
 	"internal/api/admincreds/http.go Handler.List":  "lists each key's stored label; display only",
 
-	"internal/api/credstore/credstore.go Credential.HasOwnerRole": "slice-011 attestation owner-role match against a control's free-text owner_role; not a tenant-role gate",
-	"internal/api/credstore/credstore.go Store.Rotate":            "a rotated key's successor inherits its label",
+	"internal/api/credstore/credstore.go Store.Rotate": "a rotated key's successor inherits its label",
 
 	"internal/api/me/profile.go ProfileHandler.buildProfile": "echoes owner_roles on /v1/me; display only",
 	"internal/api/me/profile.go profileWireFrom":             "echoes owner_roles on /v1/me; display only",
