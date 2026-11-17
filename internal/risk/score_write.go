@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
@@ -48,7 +49,7 @@ func ValidateScoreNumbers(methodology dbx.RiskMethodology, inherent, residual []
 	if err := checkScoreFields("inherent_score", inherent); err != nil {
 		return err
 	}
-	if unscoredResidual(residual) {
+	if unscoredScore(residual) {
 		return nil
 	}
 	if err := checkScoreFields("residual_score", residual); err != nil {
@@ -68,7 +69,21 @@ func ValidateScoreNumbers(methodology dbx.RiskMethodology, inherent, residual []
 // normalised to its canonical shape, and an empty FAIR residual takes the
 // normalised inherent. A non-FAIR score's fields must then be JSON numbers
 // in range (ValidateScoreNumbers). The returned blobs are what to persist.
+//
+// An omitted inherent score (empty, `null` or `{}`) is an unscored risk,
+// logged before it is assessed (#2511): both blobs are stored as `{}` and
+// read as Unscored. The methodology is still checked, and a residual
+// without an inherent score is refused.
 func PrepareCreateScores(methodology dbx.RiskMethodology, inherent, residual []byte) ([]byte, []byte, error) {
+	if unscoredScore(inherent) {
+		if !slices.Contains(AllowedMethodologies(), methodology) {
+			return nil, nil, fmt.Errorf("%w: %q", ErrInvalidMethodology, methodology)
+		}
+		if !unscoredScore(residual) {
+			return nil, nil, fmt.Errorf("%w: residual_score requires an inherent_score", ErrInherentScoreInvalid)
+		}
+		return []byte(`{}`), []byte(`{}`), nil
+	}
 	if err := ValidateInherentScore(methodology, inherent); err != nil {
 		return nil, nil, err
 	}
@@ -118,7 +133,9 @@ func jsonKind(v json.RawMessage) string {
 	}
 }
 
-func unscoredResidual(raw []byte) bool {
+// unscoredScore reports whether a score blob is unscored: empty, `null`
+// or `{}`.
+func unscoredScore(raw []byte) bool {
 	t := bytes.TrimSpace(raw)
 	return len(t) == 0 || bytes.Equal(t, []byte("null")) || bytes.Equal(t, []byte("{}"))
 }

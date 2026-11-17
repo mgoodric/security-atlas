@@ -44,6 +44,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 // approvalHarness mounts the device-approval endpoints on the public
@@ -60,6 +61,13 @@ type approvalHarness struct {
 
 func newApprovalHarness(t *testing.T, cred credstore.Credential, now func() time.Time) approvalHarness {
 	t.Helper()
+	return newApprovalHarnessWithRoles(t, cred, now, nil)
+}
+
+// newApprovalHarnessWithRoles is newApprovalHarness with the approver's
+// live-role resolver wired, as cmd/atlas wires it (#2505).
+func newApprovalHarnessWithRoles(t *testing.T, cred credstore.Credential, now func() time.Time, roles authz.RolesResolver) approvalHarness {
+	t.Helper()
 	pool := openTokenIntegrationPool(t)
 	ks, err := fsstore.Open(t.TempDir())
 	if err != nil {
@@ -71,6 +79,7 @@ func newApprovalHarness(t *testing.T, cred credstore.Credential, now func() time
 	approvalEP := oauth.NewDeviceApprovalEndpoint(devCodes, oauth.DeviceApprovalConfig{
 		Now:         now,
 		SuperAdmins: superadmin.NewDBChecker(pool),
+		Roles:       roles,
 	})
 
 	h := oauth.New(ks, oauth.Config{Issuer: testIssuer})

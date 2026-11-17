@@ -125,7 +125,27 @@ func TestValidateToolInput_OtherToolsAndUndecodable(t *testing.T) {
 	if err := validateToolInput(ToolPushEvidence, json.RawMessage(`{"inherent_score":"x"}`)); err != nil {
 		t.Fatalf("validateToolInput(push_evidence) = %v, want nil", err)
 	}
-	if err := validateToolInput(ToolCreateRisk, json.RawMessage(`{"title":5}`)); err != nil {
-		t.Fatalf("validateToolInput(undecodable) = %v, want nil (left to the applier)", err)
+	// #2511: undecodable create_risk input is refused when it is filed.
+	if err := validateToolInput(ToolCreateRisk, json.RawMessage(`{"title":5}`)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("validateToolInput(undecodable) = %v, want ErrInvalidInput", err)
+	}
+}
+
+// #2511: MCP and REST store the same row for an unscored risk.
+func TestCreateRiskScores_UnscoredMatchesREST(t *testing.T) {
+	t.Parallel()
+	for _, score := range []string{"", "null", "{}"} {
+		in := CreateRiskInput{InherentScore: json.RawMessage(score)}
+		inherent, residual, err := createRiskScores(in)
+		if err != nil {
+			t.Fatalf("createRiskScores(%q): %v", score, err)
+		}
+		restInherent, restResidual, err := risk.PrepareCreateScores(createRiskMethodology(in), in.InherentScore, nil)
+		if err != nil {
+			t.Fatalf("PrepareCreateScores(%q): %v", score, err)
+		}
+		if string(inherent) != string(restInherent) || string(residual) != string(restResidual) {
+			t.Fatalf("%q: MCP stores %s / %s, REST %s / %s", score, inherent, residual, restInherent, restResidual)
+		}
 	}
 }

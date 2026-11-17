@@ -30,6 +30,8 @@
 // Hard rule (P0-A9): neutral test strings only; no vendor-prefixed
 // tokens.
 
+import type { Risk } from "@/lib/api/risks";
+
 import { expect, test } from "./fixtures";
 import { pickFirstUser } from "./owner-picker";
 
@@ -307,5 +309,91 @@ test.describe("/risks/new risk-create form", () => {
     // Stayed on the create form; no server round-trip happened.
     await expect(page).toHaveURL(/\/risks\/new$/);
     expect(postFired).toBe(false);
+  });
+
+  test("#2511: Score later posts no inherent score and the risk reads as Unscored", async ({
+    authedPage: page,
+  }) => {
+    // The whole wire shape the platform returns, typed so a field the
+    // detail page reads cannot be left out of the mock.
+    const unscored: Risk = {
+      id: CREATED_RISK_ID,
+      title: NEW_RISK_TITLE,
+      description: "",
+      category: "operational",
+      methodology: "nist_800_30",
+      inherent_score: {},
+      treatment: "untreated",
+      treatment_owner: "e2e-owner",
+      residual_score: {},
+      review_due_at: "2027-01-01T00:00:00Z",
+      accepter: "",
+      instrument_reference: "",
+      linked_control_ids: [],
+      created_at: "2026-11-17T00:00:00Z",
+      updated_at: "2026-11-17T00:00:00Z",
+      themes: [],
+      severity: 0,
+      status: "open",
+    };
+    let posted: Record<string, unknown> | undefined;
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      posted = JSON.parse(req.postData() ?? "{}") as Record<string, unknown>;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ risk: unscored }),
+      });
+    });
+    await page.route(`**/api/risks/${CREATED_RISK_ID}`, async (route, req) => {
+      if (req.method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risk: unscored }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
+    await pickFirstUser(page, "risks-create-owner");
+
+    await page.getByTestId("risks-create-score-later").check();
+    await expect(page.getByTestId("risks-create-inherent-score")).toHaveCount(
+      0,
+    );
+
+    const createResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/risks") &&
+        r.request().method() === "POST" &&
+        r.status() === 201,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("risks-create-submit").click();
+    await createResp;
+    expect(posted).toBeDefined();
+    expect(posted).not.toHaveProperty("inherent_score");
+
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("risk-detail-unscored")).toHaveText(
+      "Unscored",
+      { timeout: 30_000 },
+    );
+    await expect(page.getByTestId("risk-detail-residual")).toHaveText(
+      "Unscored",
+    );
   });
 });

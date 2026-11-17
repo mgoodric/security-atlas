@@ -59,6 +59,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -306,9 +307,34 @@ type anchorWire struct {
 // reference the organisation recorded, who created it and when. The
 // rationale stays on the edge row, where catalog edges carry theirs.
 type overlayWire struct {
-	SourceRef string    `json:"source_ref"`
-	CreatedBy string    `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
+	SourceRef string `json:"source_ref"`
+	CreatedBy string `json:"created_by"`
+	// CreatedByName is the author's readable name (#2286), resolved on
+	// the server from the caller tenant's people: a user's name, "API key
+	// …<last4>", "System" or "Unknown".
+	CreatedByName string    `json:"created_by_name"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// nameOverlays sets each overlay's CreatedByName (#2286). The caller
+// tenant's people are read only when there is an overlay to name, under
+// its RLS tenant, so another tenant's actor reads "Unknown".
+func (h *Handler) nameOverlays(ctx context.Context, overlays []*overlayWire) error {
+	if len(overlays) == 0 {
+		return nil
+	}
+	var dir *people.Directory
+	if h.pool != nil {
+		d, err := people.Load(ctx, h.pool)
+		if err != nil {
+			return fmt.Errorf("ucfcoverage: name overlay authors: %w", err)
+		}
+		dir = d
+	}
+	for _, o := range overlays {
+		o.CreatedByName = dir.Name(o.CreatedBy)
+	}
+	return nil
 }
 
 // overlayFrom builds the overlay provenance for a traversal row. It returns

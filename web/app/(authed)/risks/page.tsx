@@ -69,6 +69,7 @@ import {
   fairScore,
   formatDollars,
   formatResidualScore,
+  isUnscored,
   patternNoLongerMet,
   residualClass,
   residualSeverity,
@@ -77,6 +78,7 @@ import {
   reviewOverdue,
   severityBand,
   severityBandLabel,
+  UNSCORED_LABEL,
 } from "./filters";
 import {
   ALL,
@@ -910,6 +912,18 @@ function RisksPageInner() {
 // hover. A 5x5 residual shows its 1..25 value and band; a FAIR residual is
 // dollars and carries no band; a risk not yet evaluated says so.
 function ResidualCell({ row }: { row: Risk }) {
+  if (isUnscored(row.inherent_score)) {
+    // #2511: logged before it was assessed. Nothing to evaluate yet.
+    return (
+      <span
+        className="text-xs italic text-muted-foreground"
+        title="This risk has not been scored yet. Edit it to add an inherent score."
+        data-testid="risks-row-residual-unscored"
+      >
+        {UNSCORED_LABEL}
+      </span>
+    );
+  }
   const inherentFair =
     row.methodology === "fair" ? fairScore(row.inherent_score) : null;
   const inherentText = inherentFair
