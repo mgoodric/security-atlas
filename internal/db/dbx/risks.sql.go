@@ -666,15 +666,19 @@ SELECT id, tenant_id, risk_id, actor, action_type, before_state, after_state, cr
 FROM risk_audit_log
 WHERE tenant_id = $1 AND risk_id = $2
 ORDER BY created_at DESC, id DESC
+LIMIT $3
 `
 
 type ListRiskAuditLogParams struct {
 	TenantID pgtype.UUID `json:"tenant_id"`
 	RiskID   pgtype.UUID `json:"risk_id"`
+	RowLimit int32       `json:"row_limit"`
 }
 
+// #2311: capped at row_limit; the caller asks for one more than it shows
+// to learn whether older rows exist.
 func (q *Queries) ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error) {
-	rows, err := q.db.Query(ctx, listRiskAuditLog, arg.TenantID, arg.RiskID)
+	rows, err := q.db.Query(ctx, listRiskAuditLog, arg.TenantID, arg.RiskID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

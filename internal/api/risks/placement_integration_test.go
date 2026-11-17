@@ -75,7 +75,7 @@ func riskField(t *testing.T, body map[string]any, field string) any {
 
 func placementAudit(t *testing.T, app *pgxpool.Pool, tenant string, riskID string) []risk.PlacementAuditEntry {
 	t.Helper()
-	entries, err := risk.NewStore(app).ListPlacementAudit(dbtest.WithTenantCtx(t, tenant), uuid.MustParse(riskID))
+	entries, _, err := risk.NewStore(app).ListPlacementAudit(dbtest.WithTenantCtx(t, tenant), uuid.MustParse(riskID), 500)
 	if err != nil {
 		t.Fatalf("list placement audit: %v", err)
 	}
