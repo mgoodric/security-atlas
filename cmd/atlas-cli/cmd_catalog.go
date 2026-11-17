@@ -99,15 +99,18 @@ func newCatalogImportSCFCmd() *cobra.Command {
 				return err
 			}
 			printEdgeRemapCounts(os.Stdout, edges.Queued)
-			fmt.Printf("crosswalk_edges carried_forward=%d\n", edges.Carried)
+			fmt.Printf("crosswalk_edges carried_forward=%d closed=%d\n", edges.Carried, edges.Closed)
 
 			// #1804: queue every tenant's active overlay edge left on an
-			// older release's anchor for that tenant's writers.
+			// older release's anchor for that tenant's writers; #2554:
+			// carry the ones whose anchor kept its code and title forward,
+			// in each tenant's own context.
 			overlays, err := scfimport.QueueOverlayRemapProposals(ctx, pool)
 			if err != nil {
 				return err
 			}
-			printOverlayRemapCounts(os.Stdout, overlays)
+			printOverlayRemapCounts(os.Stdout, overlays.Queued)
+			fmt.Printf("overlay_edges carried_forward=%d closed=%d\n", overlays.Carried, overlays.Closed)
 			return nil
 		},
 	}

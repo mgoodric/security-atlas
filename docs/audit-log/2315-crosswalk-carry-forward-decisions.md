@@ -91,13 +91,25 @@ approved remap. That is no worse than a super-admin approval today.
 - `decided_by` is `system:scf-import`, `bulk` is true, and the reason says
   which code carried into which release.
 
-## D5 — Overlay edges are not carried
+## D5 — Overlay edges are not carried (superseded by #2554)
 
 Tenant overlay edges (`fw_to_scf_overlay_edges`) belong to a tenant, and their
 remap is decided by that tenant's writers (#1804). The import keeps queueing
 them and decides none, so a tenant's own mapping is never changed across
 tenants by a catalog import. The carry only inserts catalog edges and never
 deletes one, so the #2240 catalog-delete guard has nothing to fire on.
+
+**Superseded, 2026-11-17 (Matt's call, #2554).** The import now carries
+exact-match overlay edges too, with the same `SameCodeAndTitle` rule. The
+concern above, a catalog import changing a tenant's mapping across tenants,
+is met a different way: the carry runs once per tenant, as `atlas_app` under
+that tenant's `app.current_tenant`, so RLS binds it as it binds a writer.
+It is recorded by `system:scf-import` in that tenant's remap history and
+overlay audit trail, and it keeps the legacy overlay edge, mirroring D3.
+Everything else stays an open proposal for the tenant's writers. D4's "the
+carry is skipped and the proposal stays open" is also superseded: a proposal
+whose target pair already exists is now closed as `kept_legacy`. See
+`docs/audit-log/2554-overlay-carry-forward-decisions.md`.
 
 ## D6 — Web: document the limitation rather than forward `scf_release`
 

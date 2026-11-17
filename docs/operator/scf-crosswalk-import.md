@@ -270,6 +270,23 @@ proposals:
 
 A person must decide: a machine credential gets 403.
 
+**Carried at import (#2554).** As for catalog edges, an overlay edge whose
+anchor has the **same code and the same title** in the new release is carried
+by the import itself: a copy lands on that anchor in the same tenant and its
+proposal is approved. The carry runs once per tenant, as `atlas_app` under that
+tenant, so it reads and writes only that tenant's rows. The new edge, its
+audit row and the decision all record `system:scf-import`, shown as "System".
+Unlike a writer's approval, the carry **keeps the legacy overlay edge
+active**, so `?scf_release=<old>` reads the same as before. Every other
+overlay edge stays an open proposal for the tenant's writers. The import
+prints `overlay_edges carried_forward=<n> closed=<n>`.
+
+**Closed proposals.** If the requirement already maps to the same code in the
+new release (the tenant already holds that overlay pair, or a live catalog
+edge joins it), approval could never succeed. The import then closes the
+proposal as `kept_legacy` with the reason, instead of leaving it open. The
+same applies to catalog edge proposals (`crosswalk_edges … closed=<n>`).
+
 ### Deleting catalog rows that overlay edges use (#2240)
 
 The database refuses to delete an SCF anchor, a framework requirement, or a
