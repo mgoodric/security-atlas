@@ -158,8 +158,10 @@ test.describe("enum display labels (#2083)", () => {
     await expect(tiles.nth(1)).not.toContainText("SCF 2025.2 2025.2");
     await expect(tiles.nth(2)).toContainText("NIST CSF 2.0");
 
-    await expect(page.getByTestId("top-risk-row").first()).toContainText(
-      "Qualitative 5×5",
+    // #2135: the top-risks card shows band, owner and treatment, not the
+    // methodology; the raw methodology code must still never render.
+    await expect(page.getByTestId("top-risk-row").first()).not.toContainText(
+      "qualitative_5x5",
     );
     // No hash prefix under the title.
     await expect(page.getByTestId("top-risk-row").first()).not.toContainText(
