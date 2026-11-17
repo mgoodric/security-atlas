@@ -54,6 +54,7 @@ import Link from "next/link";
 import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Person } from "@/components/ui/person";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Timestamp } from "@/components/ui/timestamp";
@@ -319,6 +320,17 @@ export function HistoryBody({
               ({h.evidence_count} evidence ·{" "}
               <span className="font-mono">{h.freshness_status}</span>)
             </span>
+            {h.trigger === "manual" && h.triggered_by ? (
+              <>
+                {" "}
+                · run by{" "}
+                <Person
+                  id={h.triggered_by}
+                  className="text-foreground"
+                  testId="audit-log-triggered-by"
+                />
+              </>
+            ) : null}
           </li>
         ))}
       </ul>
