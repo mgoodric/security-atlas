@@ -61,6 +61,9 @@ const (
 	contractScopeID   = "44444444-4444-4444-8444-444444444444"
 )
 
+// contractTriggeredBy is the principal on the manual history row (#2479).
+var contractTriggeredBy = "55555555-5555-4555-8555-555555555555"
+
 // stubReader is the fixed-row implementation of the per-route
 // controlDetailReader seam. It returns deterministic rows with no Postgres.
 type stubReader struct {
@@ -223,6 +226,8 @@ func TestContract_ControlHistory(t *testing.T) {
 			Result:                dbx.EvidenceResult("pass"),
 			FreshnessStatus:       "fresh",
 			EvidenceCountInWindow: 3,
+			Trigger:               "manual",
+			TriggeredBy:           &contractTriggeredBy,
 		},
 		{
 			ID:                    pgID(contractPolicyID),
@@ -231,6 +236,7 @@ func TestContract_ControlHistory(t *testing.T) {
 			Result:                dbx.EvidenceResult("fail"),
 			FreshnessStatus:       "stale",
 			EvidenceCountInWindow: 0,
+			Trigger:               "scheduled",
 		},
 	}}
 	empty := stubReader{history: nil}

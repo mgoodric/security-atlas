@@ -18,7 +18,13 @@
 // Abuse: concurrent calls for one control share one evaluation
 // (single-flight keyed by tenant + control), and an evaluation is bounded by
 // evaluateTimeout. The shared run is detached from any one caller's
-// cancellation so a caller that hangs up does not fail the others.
+// cancellation so a caller that hangs up does not fail the others. Each
+// principal may start DefaultEvaluateRatePerMin evaluations a minute
+// (evaluate_limit.go, #2479); past that the call is 429 with Retry-After.
+//
+// Who ran it (#2479): the run records the caller's credstore.PrincipalOf as
+// control_evaluations.triggered_by. A caller who joins a run already in
+// flight shares it, so the rows name the caller who started it.
 package controlstate
 
 import (
@@ -26,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -51,7 +58,7 @@ const evaluateTimeout = 30 * time.Second
 // controlRunner is the evaluate seam: run evaluation, then read the state
 // back. *eval.Engine satisfies it.
 type controlRunner interface {
-	EvaluateControl(ctx context.Context, controlID uuid.UUID, trigger string, asOf time.Time) (int, error)
+	EvaluateControlBy(ctx context.Context, controlID uuid.UUID, trigger, actor string, asOf time.Time) (int, error)
 	ControlState(ctx context.Context, controlID uuid.UUID, scopePredicate string, asOf time.Time) ([]eval.State, error)
 }
 
@@ -65,13 +72,20 @@ type EvaluateHandler struct {
 	ownerOf ownerLookup
 	timeout time.Duration
 	flight  singleflight.Group
+	limiter *principalLimiter
 }
 
 // NewEvaluateHandler wires the handler over the eval engine and the app-role
 // pool the owner assignment is read through (RLS-scoped to the caller's
-// tenant).
-func NewEvaluateHandler(engine *eval.Engine, pool *pgxpool.Pool) *EvaluateHandler {
-	return &EvaluateHandler{runner: engine, ownerOf: poolOwnerLookup(pool), timeout: evaluateTimeout}
+// tenant). ratePerMin is the per-principal limit; 0 or less uses
+// DefaultEvaluateRatePerMin.
+func NewEvaluateHandler(engine *eval.Engine, pool *pgxpool.Pool, ratePerMin int) *EvaluateHandler {
+	return &EvaluateHandler{
+		runner:  engine,
+		ownerOf: poolOwnerLookup(pool),
+		timeout: evaluateTimeout,
+		limiter: newPrincipalLimiter(ratePerMin, nil),
+	}
 }
 
 // Evaluate handles POST /v1/controls/{id}/evaluate.
@@ -105,6 +119,17 @@ func (h *EvaluateHandler) Evaluate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Checked after authz, so a caller who may not evaluate never spends
+	// a token, and before single-flight, so a joiner counts too.
+	actor := credstore.PrincipalOf(cred)
+	if h.limiter != nil {
+		if wait := h.limiter.allow(actor); wait > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(wait)))
+			httpresp.WriteError(w, http.StatusTooManyRequests, "too many evaluations; retry later")
+			return
+		}
+	}
+
 	// One evaluation per (tenant, control) at a time; callers that arrive
 	// while it runs share its result.
 	key := tenantID + "/" + controlID.String()
@@ -112,7 +137,7 @@ func (h *EvaluateHandler) Evaluate(w http.ResponseWriter, r *http.Request) {
 	res, err, _ := h.flight.Do(key, func() (any, error) {
 		ctx, cancel := context.WithTimeout(runCtx, h.timeout)
 		defer cancel()
-		if _, err := h.runner.EvaluateControl(ctx, controlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		if _, err := h.runner.EvaluateControlBy(ctx, controlID, eval.TriggerManual, actor, eval.FarFuture); err != nil {
 			return nil, err
 		}
 		return h.runner.ControlState(ctx, controlID, "", eval.FarFuture)

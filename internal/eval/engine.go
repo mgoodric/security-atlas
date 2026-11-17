@@ -79,6 +79,23 @@ func NewEngine(store *Store, cells cellResolver) *Engine {
 // Idempotent: running twice over the same ledger slice produces identical
 // computed columns (AC-3).
 func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigger string, asOf time.Time) (int, error) {
+	return e.EvaluateControlBy(ctx, controlID, trigger, "", asOf)
+}
+
+// ErrActorNotManual is returned when an actor is passed for a trigger other
+// than manual. Only a manual run has a caller to record (#2479); the
+// control_evaluations_triggered_by_manual_only CHECK enforces the same rule.
+var ErrActorNotManual = errors.New("eval: an actor is recorded only on a manual evaluation")
+
+// EvaluateControlBy is EvaluateControl recording who started the run: actor
+// is stamped as triggered_by on every row the run appends (#2479). It is the
+// caller's principal (credstore.PrincipalOf) for POST
+// /v1/controls/{id}/evaluate; "" records no actor. A non-empty actor is
+// accepted only with TriggerManual.
+func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, trigger, actor string, asOf time.Time) (int, error) {
+	if actor != "" && trigger != TriggerManual {
+		return 0, ErrActorNotManual
+	}
 	// Resolve applicable cells OUTSIDE the eval transaction — scope.Store
 	// opens its own tenant-GUC transaction. The two transactions are
 	// independent reads; the ledger is append-only so there is no
@@ -128,6 +145,7 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 			if err != nil {
 				return err
 			}
+			row.triggeredBy = actor
 			if err := e.store.appendEvaluation(ctx, q, tenantID, row, evaluatedAt); err != nil {
 				return err
 			}

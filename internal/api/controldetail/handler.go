@@ -166,6 +166,10 @@ type historyWire struct {
 	ComputedState   string  `json:"computed_state"`
 	FreshnessStatus string  `json:"freshness_status"`
 	EvidenceCount   int     `json:"evidence_count"`
+	// Trigger is what started the run (ingest | scheduled | manual |
+	// replay); TriggeredBy is who, for a manual run (#2479), else null.
+	Trigger     string  `json:"trigger"`
+	TriggeredBy *string `json:"triggered_by"`
 }
 
 // ===== AC-1: GET /v1/evidence?control_id=<id> =====
@@ -469,6 +473,8 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 			ComputedState:   string(ev.Result),
 			FreshnessStatus: ev.FreshnessStatus,
 			EvidenceCount:   int(ev.EvidenceCountInWindow),
+			Trigger:         ev.Trigger,
+			TriggeredBy:     ev.TriggeredBy,
 		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{

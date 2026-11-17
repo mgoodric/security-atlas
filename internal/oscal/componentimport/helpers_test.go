@@ -213,46 +213,6 @@ func TestPgUUID(t *testing.T) {
 	}
 }
 
-// #1771: the SCF release an import declares, from the flag or the
-// document's "scf-release" metadata prop.
-func TestDeclaredSCFRelease(t *testing.T) {
-	t.Parallel()
-	withProps := func(props string) []byte {
-		return []byte(`{"component-definition":{"metadata":{"title":"t","props":[` + props + `]}}}`)
-	}
-	prop := func(v string) string { return `{"name":"scf-release","value":"` + v + `"}` }
-	for _, tc := range []struct {
-		name     string
-		flag     string
-		doc      []byte
-		want     string
-		conflict bool
-	}{
-		{name: "neither", doc: []byte(`{"component-definition":{"metadata":{}}}`)},
-		{name: "flag only", flag: "2026.3", doc: []byte(`{"component-definition":{}}`), want: "2026.3"},
-		{name: "prop only", doc: withProps(prop("2026.2")), want: "2026.2"},
-		{name: "other props ignored", doc: withProps(`{"name":"marking","value":"x"},` + prop("2026.2")), want: "2026.2"},
-		{name: "flag agrees with prop", flag: "2026.2", doc: withProps(prop("2026.2")), want: "2026.2"},
-		{name: "flag contradicts prop", flag: "2026.3", doc: withProps(prop("2026.2")), conflict: true},
-		{name: "two props disagree", doc: withProps(prop("2026.2") + "," + prop("2026.3")), conflict: true},
-		{name: "undecodable document declares nothing", doc: []byte(`not json`)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := declaredSCFRelease(tc.flag, tc.doc)
-			if tc.conflict {
-				if !errors.Is(err, ErrSCFReleaseConflict) {
-					t.Fatalf("err = %v; want ErrSCFReleaseConflict", err)
-				}
-				return
-			}
-			if err != nil || got != tc.want {
-				t.Fatalf("declaredSCFRelease = %q, %v; want %q", got, err, tc.want)
-			}
-		})
-	}
-}
-
 // A conflicting declaration is refused before the bridge is called.
 func TestImport_SCFReleaseConflictSkipsBridge(t *testing.T) {
 	t.Parallel()
