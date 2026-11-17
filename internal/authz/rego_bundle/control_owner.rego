@@ -75,6 +75,19 @@ allow if {
     input.request.path == "/v1/calendar/subscription"
 }
 
+# #2110: Evaluate now. A control_owner may run evaluation for a control
+# through POST /v1/controls/{uuid}/evaluate, and gains no other controls
+# write. Which control they may evaluate (only one assigned to them,
+# owner_user_id) is the handler's check; rego admits the role at this one
+# path, as the calendar subscription rule above does.
+allow if {
+    has_role("control_owner")
+    input.action == "write"
+    input.resource.type == "controls"
+    input.request.method == "POST"
+    regex.match(`^/v1/controls/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/evaluate$`, input.request.path)
+}
+
 control_owner_writable_resources := {
     "evidence",
     "artifacts",

@@ -193,6 +193,36 @@ func TestListRisks_ForwardsStatusFilter(t *testing.T) {
 	}
 }
 
+// #2482: the platform pages the register, so list_risks asks for its limit
+// and reports capped from the filtered total, not from the rows it got.
+func TestListRisks_CappedFollowsPlatformTotal(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, body string
+		capped     bool
+	}{
+		{"whole", `{"risks":[{"id":"r1"},{"id":"r2"}],"count":2,"total":2}`, false},
+		{"more on the platform", `{"risks":[{"id":"r1"},{"id":"r2"}],"count":2,"total":900}`, true},
+		{"no total, rows over limit", `{"risks":[{"id":"r1"},{"id":"r2"},{"id":"r3"}],"count":3}`, true},
+	} {
+		client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("limit"); got != "2" {
+				t.Errorf("%s: limit query = %q, want 2", tc.name, got)
+			}
+			_, _ = fmt.Fprint(w, tc.body)
+		})
+		got, err := tools.NewListRisks(client).Handle(context.Background(), json.RawMessage(`{"limit":2}`))
+		srv.Close()
+		if err != nil {
+			t.Fatalf("%s: Handle: %v", tc.name, err)
+		}
+		if c := got.(map[string]any)["capped"].(bool); c != tc.capped {
+			t.Errorf("%s: capped = %v, want %v", tc.name, c, tc.capped)
+		}
+	}
+}
+
 // #2217: list_risks leaves roll-ups to the platform default and forwards
 // include_rollups only when asked; an included roll-up keeps its child_count.
 func TestListRisks_ForwardsIncludeRollUps(t *testing.T) {

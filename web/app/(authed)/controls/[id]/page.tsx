@@ -539,11 +539,10 @@ function ControlDetailPageInner() {
         }
         actions={
           <>
-            {/* Slice 255 — header actions well: Run query + Edit YAML +
-                Request exception, with "last evaluated <relative-time>"
-                sub-line. See web/components/control/header-actions.tsx for
-                the JUDGMENT decisions on disabled-vs-link semantics per
-                button. */}
+            {/* Slice 255 / #2110 — header actions well: Evaluate now,
+                Download bundle, Upload new version and Request exception,
+                with the "last evaluated <relative-time>" sub-line. See
+                web/components/control/header-actions.tsx. */}
             <ControlHeaderActions controlID={id} state={state} />
           </>
         }
