@@ -259,10 +259,13 @@ INSERT INTO risk_audit_log (
 VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: ListRiskAuditLog :many
+-- #2311: capped at row_limit; the caller asks for one more than it shows
+-- to learn whether older rows exist.
 SELECT *
 FROM risk_audit_log
 WHERE tenant_id = $1 AND risk_id = $2
-ORDER BY created_at DESC, id DESC;
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit);
 
 -- name: GetRiskReviewCadenceDays :one
 -- #2059: the tenant's risk review cadence in days, as the

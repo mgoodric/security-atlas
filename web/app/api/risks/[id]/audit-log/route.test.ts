@@ -70,6 +70,40 @@ describe("risk edit + history BFF routes (#2104)", () => {
     ).toBe(`Bearer ${TEST_BEARER_TOKEN}`);
   });
 
+  test("PATCH forwards If-Match and passes the upstream 412 through (#2311)", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    const calls = captureFetch(412, {
+      error: "risk changed since it was read",
+    });
+    const tag = '"2026-11-17T19:11:33.123456Z"';
+
+    const req = new Request("http://x", {
+      method: "PATCH",
+      headers: { "If-Match": tag },
+      body: JSON.stringify({ title: "New" }),
+    });
+    const res = await PATCH(req as never, params(RISK));
+
+    expect(res.status).toBe(412);
+    const headers = calls[0].init?.headers as Record<string, string>;
+    expect(headers["If-Match"]).toBe(tag);
+    expect(headers.Authorization).toBe(`Bearer ${TEST_BEARER_TOKEN}`);
+  });
+
+  test("PATCH without If-Match forwards none", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    const calls = captureFetch(200, { risk: { id: RISK } });
+
+    const req = new Request("http://x", {
+      method: "PATCH",
+      body: JSON.stringify({ title: "New" }),
+    });
+    await PATCH(req as never, params(RISK));
+
+    const headers = calls[0].init?.headers as Record<string, string>;
+    expect(headers["If-Match"]).toBeUndefined();
+  });
+
   test("PATCH passes an upstream 400 through", async () => {
     cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
     const msg = "treatment cannot be changed by PATCH /v1/risks/{id}";
