@@ -290,6 +290,9 @@ type Querier interface {
 	CountSinkFailures(ctx context.Context) (int64, error)
 	// Count claims for a recipient (tests assert no duplicate rows after a re-run).
 	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
+	// #2446 — how many of the given control ids exist in the tenant. A policy's
+	// linked_control_ids must all resolve here on create and draft edit.
+	CountTenantControls(ctx context.Context, arg CountTenantControlsParams) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)

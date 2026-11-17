@@ -18,14 +18,14 @@ INSERT INTO policies (
     title, version, body_md,
     owner_role, approver_role,
     linked_control_ids, acknowledgment_required_roles,
-    status, source_attribution, created_by
+    status, source_attribution, created_by, draft_editors
 )
 VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7, $8,
     $9, $10,
-    'draft', $11, $12
+    'draft', $11, $12, COALESCE(sqlc.narg('draft_editors')::text[], '{}')
 )
 RETURNING *;
 
@@ -280,14 +280,16 @@ INSERT INTO policy_audit_log (
     historical_approver_name, historical_approved_at, source_url,
     previous_next_review_at, new_next_review_at,
     policy_title, policy_version,
-    previous_state, new_state
+    previous_state, new_state,
+    body_sha256, editors
 )
 VALUES (
     sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
     sqlc.narg('historical_approver_name'), sqlc.narg('historical_approved_at'), sqlc.narg('source_url'),
     sqlc.narg('previous_next_review_at'), sqlc.narg('new_next_review_at'),
     sqlc.narg('policy_title'), sqlc.narg('policy_version'),
-    sqlc.narg('previous_state'), sqlc.narg('new_state')
+    sqlc.narg('previous_state'), sqlc.narg('new_state'),
+    sqlc.narg('body_sha256'), sqlc.narg('editors')
 )
 RETURNING *;
 
@@ -335,8 +337,20 @@ SET title = sqlc.arg('title'),
     approver_role = sqlc.arg('approver_role'),
     linked_control_ids = sqlc.arg('linked_control_ids'),
     acknowledgment_required_roles = sqlc.arg('acknowledgment_required_roles'),
+    draft_editors = CASE
+        WHEN sqlc.arg('editor')::text = ANY(draft_editors) THEN draft_editors
+        ELSE array_append(draft_editors, sqlc.arg('editor')::text)
+    END,
     updated_at = now()
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = sqlc.arg('id')
   AND status = 'draft'
 RETURNING *;
+
+-- name: CountTenantControls :one
+-- #2446 — how many of the given control ids exist in the tenant. A policy's
+-- linked_control_ids must all resolve here on create and draft edit.
+SELECT count(*)::bigint AS n
+FROM controls
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = ANY(sqlc.arg('ids')::uuid[]);
