@@ -66,13 +66,15 @@ appending three. `internal/db/llm_settings_audit_integration_test.go` reads
 both lists, inserts every value, checks the down migration refuses while a row
 with any new value exists, and re-applies the up migration.
 
-## D5 — per-tenant fairness on rerank runs: not now
+## D5 — per-tenant fairness on rerank runs: deferred to #2329
 
 The ticket's optional item: one tenant could take every `Stager.runs` slot
-(default 4 per process). Declined for this change:
+(default 4 per process). Deferred from this change, because it is a
+scheduling change to `Stager.suggest`, separate from auditing.
 
-- The slots are taken for a run's whole computation, and a waiting run gives
-  up on its context and marks its batch failed, so a busy tenant delays
-  another tenant's imports but cannot hold a slot forever.
-- A per-tenant cap is a scheduling change to `Stager.suggest`, separate from
-  auditing. If multi-tenant load shows starvation, it is its own ticket.
+The original wording here understated the cost. A waiting inline run gave
+up when its request context ended and marked its batch **failed**, so a busy
+tenant's reranks did not only delay another tenant's import: they could fail
+it. #2329 fixes it with fair slot sharing between tenants and by deferring an
+inline run that gets no slot to the background instead of failing it; see
+`docs/audit-log/2329-llm-settings-audit-follow-ups-decisions.md` D3.
