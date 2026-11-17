@@ -1,6 +1,7 @@
 // Slice 468 — BFF proxy for per-user saved filter-views (controls list).
 //
-// GET  /api/saved-views  -> GET  /v1/saved-views   (the caller's own views)
+// GET  /api/saved-views  -> GET  /v1/saved-views   (the caller's own views;
+//                                                  ?surface= picks the list)
 // POST /api/saved-views  -> POST /v1/saved-views   (create a view)
 //
 // The bearer cookie is read server-side by forwardJSON and never reaches
@@ -23,8 +24,11 @@ import { forwardJSON, noStore } from "@/lib/api/bff";
 // cache-friendly GET routes rely on — widening its blast radius is a P0
 // anti-criterion (slice 746).
 
-export async function GET(): Promise<Response> {
-  return noStore(await forwardJSON("/v1/saved-views"));
+export async function GET(req?: NextRequest): Promise<Response> {
+  // #2133: the list the views belong to. The upstream validates it.
+  const surface = req ? new URL(req.url).searchParams.get("surface") : null;
+  const qs = surface ? `?surface=${encodeURIComponent(surface)}` : "";
+  return noStore(await forwardJSON(`/v1/saved-views${qs}`));
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
