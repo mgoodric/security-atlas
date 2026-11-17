@@ -206,6 +206,123 @@ func TestModuleLinks_VendorOwnerLostAccessFlagged(t *testing.T) {
 	}
 }
 
+// #2501: a vendor owned by a user with no live role is flagged, though
+// nothing narrowed them; granting a role clears the flag. A super-admin
+// owner with no role row is not flagged.
+func TestModuleLinks_VendorOwnerWithNoLiveRoleFlagged(t *testing.T) {
+	e := newModuleLinksEnv(t)
+	roleless := seedPeriodUser(t, e.migrate, e.tenant, "active")
+	vendor := e.createVendor(t, roleless)
+	if one, listed := e.readVendor(t, e.admin, vendor); !one.OwnerLacksAccess || !listed.OwnerLacksAccess {
+		t.Errorf("owner with no live role: flag one=%v list=%v; want true on both", one.OwnerLacksAccess, listed.OwnerLacksAccess)
+	}
+
+	if _, err := e.migrate.Exec(context.Background(),
+		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, 'grc_engineer', 'test-2501')`,
+		e.tenant, roleless.String()); err != nil {
+		t.Fatalf("grant role: %v", err)
+	}
+	if one, _ := e.readVendor(t, e.admin, vendor); one.OwnerLacksAccess {
+		t.Errorf("role granted: still flagged")
+	}
+
+	super := seedPeriodUser(t, e.migrate, e.tenant, "active")
+	e.grantSuperAdmin(t, super)
+	if one, _ := e.readVendor(t, e.admin, e.createVendor(t, super)); one.OwnerLacksAccess {
+		t.Errorf("super-admin owner with no role row: flagged; want no flag")
+	}
+}
+
+// grantSuperAdmin makes user a platform super-admin for the test.
+func (e *moduleAccessEnv) grantSuperAdmin(t *testing.T, user uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := e.migrate.Exec(ctx,
+		`INSERT INTO super_admins (user_id, granted_via) VALUES ($1, 'manual_grant')`, user); err != nil {
+		t.Fatalf("grant super-admin: %v", err)
+	}
+	t.Cleanup(func() { _, _ = e.migrate.Exec(ctx, `DELETE FROM super_admins WHERE user_id = $1`, user) })
+}
+
+// #2501: only a caller who can work in a module may ask who else can. A
+// member narrowed out of Third-party risk gets 403 for ?module= on it,
+// whatever the directory holds; a core module still answers.
+func TestModuleLinks_PeopleModuleFilterNeedsAccess(t *testing.T) {
+	e := newModuleLinksEnv(t)
+	narrowed, bearer := e.member(t, "grc_engineer")
+	e.setAccess(t, narrowed, everyOptionalBut("third_party_risk"))
+
+	if got := e.do(t, http.MethodGet, "/v1/people?module=third_party_risk", bearer, nil); got.status != http.StatusForbidden {
+		t.Errorf("narrowed caller ?module=third_party_risk: status %d body=%s; want 403", got.status, got.body)
+	}
+	if got := e.peopleIDs(t, bearer, "?module=risk"); !got[narrowed.String()] {
+		t.Errorf("narrowed caller ?module=risk leaves themself out: %v", got)
+	}
+	if got := e.peopleIDs(t, bearer, "?module=controls"); !got[narrowed.String()] {
+		t.Errorf("narrowed caller ?module=controls leaves themself out: %v", got)
+	}
+}
+
+// #2501: a caller without Third-party risk access cannot link an incident
+// to a vendor, and the refusal is the same for a vendor that exists and
+// an id that names none, so it cannot be used to probe. Nothing is
+// written. A caller with access links the vendor.
+func TestModuleLinks_IncidentCreateRefusesHiddenLinks(t *testing.T) {
+	e := newModuleLinksEnv(t)
+	owner, _ := e.member(t, "grc_engineer")
+	narrowed, narrowedBearer := e.member(t, "grc_engineer")
+	_, fullBearer := e.member(t, "grc_engineer")
+	vendor := e.createVendor(t, owner)
+	e.setAccess(t, narrowed, everyOptionalBut("third_party_risk", "risk"))
+
+	ctx := context.Background()
+	count := func() int {
+		var n int
+		if err := e.migrate.QueryRow(ctx, `SELECT count(*) FROM incidents WHERE tenant_id = $1`, e.tenant).Scan(&n); err != nil {
+			t.Fatalf("count incidents: %v", err)
+		}
+		return n
+	}
+	before := count()
+	var answers []moduleGateResponse
+	for _, body := range []map[string]any{
+		{"title": "#2501 existing vendor", "severity": "p3", "vendor_ids": []string{vendor}},
+		{"title": "#2501 missing vendor", "severity": "p3", "vendor_ids": []string{uuid.NewString()}},
+	} {
+		answers = append(answers, e.do(t, http.MethodPost, "/v1/incidents", narrowedBearer, body))
+	}
+	for _, got := range answers {
+		if got.status != http.StatusForbidden {
+			t.Errorf("no access: POST /v1/incidents vendor_ids status %d body=%s; want 403", got.status, got.body)
+		}
+	}
+	if answers[0].status != answers[1].status || answers[0].body != answers[1].body {
+		t.Errorf("existing and missing vendor answer differently: %d %s / %d %s",
+			answers[0].status, answers[0].body, answers[1].status, answers[1].body)
+	}
+	risk := e.do(t, http.MethodPost, "/v1/incidents", narrowedBearer, map[string]any{
+		"title": "#2501 risk", "severity": "p3", "risk_ids": []string{uuid.NewString()},
+	})
+	if risk.status != http.StatusForbidden || !strings.Contains(risk.body, "risk_ids") {
+		t.Errorf("no Risk access: POST /v1/incidents risk_ids status %d body=%s; want 403 naming risk_ids", risk.status, risk.body)
+	}
+	if after := count(); after != before {
+		t.Errorf("refused creates wrote %d incidents", after-before)
+	}
+
+	// Without links the narrowed caller still records an incident (core).
+	if got := e.do(t, http.MethodPost, "/v1/incidents", narrowedBearer, map[string]any{
+		"title": "#2501 no links", "severity": "p3",
+	}); got.status != http.StatusCreated {
+		t.Errorf("no links: POST /v1/incidents status %d body=%s; want 201", got.status, got.body)
+	}
+	if got := e.do(t, http.MethodPost, "/v1/incidents", fullBearer, map[string]any{
+		"title": "#2501 with access", "severity": "p3", "vendor_ids": []string{vendor},
+	}); got.status != http.StatusCreated || !strings.Contains(got.body, vendor) {
+		t.Errorf("with access: POST /v1/incidents status %d body=%s; want 201 naming the vendor", got.status, got.body)
+	}
+}
+
 // The assignee options for a Third-party risk record leave out members
 // without access to it. Admins and auditors are exempt; a member on "all"
 // is listed. The unfiltered directory still lists everyone.
@@ -224,15 +341,21 @@ func TestModuleLinks_AssigneeOptionsLeaveOutMembersWithoutAccess(t *testing.T) {
 	if got[without.String()] {
 		t.Errorf("assignee options list %s, who has no Third-party risk access", without)
 	}
-	// A user with no user_roles row has no stored narrowing: their roles
-	// may come from their credential, which cannot be read for someone
-	// else, so they are offered as before.
+	// #2501: a user with no live role cannot use anything, so they are
+	// not offered, though nothing narrowed them; a super-admin with no
+	// role row in the tenant is.
 	roleless := seedPeriodUser(t, e.migrate, e.tenant, "active")
-	if !got[roleless.String()] && !e.peopleIDs(t, e.admin, "?module=third_party_risk")[roleless.String()] {
-		t.Errorf("assignee options leave out %s, who has no role row and no narrowing", roleless)
+	super := seedPeriodUser(t, e.migrate, e.tenant, "active")
+	e.grantSuperAdmin(t, super)
+	got = e.peopleIDs(t, e.admin, "?module=third_party_risk")
+	if got[roleless.String()] {
+		t.Errorf("assignee options list %s, who has no live role", roleless)
 	}
-	if all := e.peopleIDs(t, e.admin, ""); !all[without.String()] {
-		t.Errorf("the unfiltered directory leaves out %s; it should list everyone", without)
+	if !got[super.String()] {
+		t.Errorf("assignee options leave out %s, a super-admin with no role row", super)
+	}
+	if all := e.peopleIDs(t, e.admin, ""); !all[without.String()] || !all[roleless.String()] {
+		t.Errorf("the unfiltered directory leaves out %s or %s; it should list everyone", without, roleless)
 	}
 	// A core module filters no one; an unknown one is a 400.
 	if core := e.peopleIDs(t, e.admin, "?module=controls"); !core[without.String()] {
