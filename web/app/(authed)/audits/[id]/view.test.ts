@@ -13,6 +13,7 @@ import {
   isOscalBridgeUnavailable,
   OSCAL_UNAVAILABLE_MESSAGE,
   oscalExportErrorMessage,
+  PERIOD_NOT_FOUND_CODE,
   summarizeControlState,
   toWorkspacePeriod,
 } from "./view";
@@ -97,8 +98,20 @@ describe("isOscalBridgeUnavailable", () => {
   });
   test("the period's own 404 is not the bridge", () => {
     expect(
-      isOscalBridgeUnavailable(new APIError(404, "audit period not found")),
+      isOscalBridgeUnavailable(
+        new APIError(404, "audit period not found", PERIOD_NOT_FOUND_CODE),
+      ),
     ).toBe(false);
+  });
+  test("the period 404 is matched on its code, not its message (#2312)", () => {
+    expect(
+      isOscalBridgeUnavailable(
+        new APIError(404, "no such period", PERIOD_NOT_FOUND_CODE),
+      ),
+    ).toBe(false);
+    expect(
+      isOscalBridgeUnavailable(new APIError(404, "audit period not found")),
+    ).toBe(true);
   });
   test("502 and 503 read as the bridge being down", () => {
     expect(isOscalBridgeUnavailable(new APIError(502, "x"))).toBe(true);

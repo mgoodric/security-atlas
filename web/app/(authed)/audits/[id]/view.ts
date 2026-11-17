@@ -48,10 +48,11 @@ export const FREEZE_CONFIRM_PROMPT =
 export const FREEZE_CONFIRM_DETAIL =
   "The period's evidence becomes immutable: samples draw only from evidence observed up to this moment, and the period can't be unfrozen or edited. A hash of the frozen state is recorded. Live work outside the audit carries on as normal.";
 
-/** The platform's 404 body for a period that is not there (or is
- *  another tenant's). Any other 404 from the export route means the
- *  route itself is not mounted: the OSCAL bridge isn't running. */
-const PERIOD_NOT_FOUND = "audit period not found";
+/** The platform's stable `code` on the 404 for a period that is not
+ *  there (or is another tenant's); `CodePeriodNotFound` in
+ *  internal/api/oscalexport. Any other 404 from the export route means
+ *  the route itself is not mounted: the OSCAL bridge isn't running. */
+export const PERIOD_NOT_FOUND_CODE = "audit_period_not_found";
 
 export const OSCAL_UNAVAILABLE_MESSAGE =
   "OSCAL export isn't available on this deployment: the OSCAL bridge isn't running.";
@@ -98,7 +99,7 @@ export function freezeErrorMessage(err: unknown): string {
  *  than the export being refused for this period. */
 export function isOscalBridgeUnavailable(err: unknown): boolean {
   if (!(err instanceof APIError)) return false;
-  if (err.status === 404) return err.message !== PERIOD_NOT_FOUND;
+  if (err.status === 404) return err.code !== PERIOD_NOT_FOUND_CODE;
   return err.status === 502 || err.status === 503;
 }
 
