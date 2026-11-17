@@ -18,6 +18,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 func adminDSN(t *testing.T) string {
@@ -187,6 +188,110 @@ func TestIsCatalogComplete_TracksCurrentVersionOnly(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("catalog with no current version must read as incomplete")
+	}
+}
+
+// TestEnsureFullCatalog_ReseedAuditsOverlayEdges is the #2481 regression: a
+// reseed deletes every overlay edge with the catalog, and each one, active
+// or retired, leaves a cascade_removed audit row in its own tenant under the
+// reseed actor.
+func TestEnsureFullCatalog_ReseedAuditsOverlayEdges(t *testing.T) {
+	pool := openAdminPool(t)
+	ctx := context.Background()
+
+	wipeCatalog(t, pool)
+	if err := scfseed.EnsureFullCatalog(ctx, pool); err != nil {
+		t.Fatalf("initial seed: %v", err)
+	}
+
+	tenant := dbtest.SeedTenant(t, pool, "fw_to_scf_overlay_edges")
+	var reqID, anchorID string
+	if err := pool.QueryRow(ctx, `
+		SELECT fr.id::text, a.id::text
+		FROM framework_requirements fr
+		JOIN framework_versions fv ON fv.id = fr.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id AND f.slug = 'soc2' AND f.tenant_id IS NULL
+		CROSS JOIN LATERAL (
+			SELECT a.id FROM scf_anchors a
+			JOIN framework_versions av ON av.id = a.framework_version_id
+			JOIN frameworks sf ON sf.id = av.framework_id AND sf.slug = 'scf' AND sf.tenant_id IS NULL
+			WHERE av.status = 'current' AND a.scf_id <> $1
+			ORDER BY a.scf_id LIMIT 1
+		) a
+		ORDER BY fr.code LIMIT 1`, scfseed.SentinelAnchor).Scan(&reqID, &anchorID); err != nil {
+		t.Fatalf("pick requirement and anchor: %v", err)
+	}
+	edges := map[string]string{} // edge id -> status
+	for _, stmt := range []string{
+		`INSERT INTO fw_to_scf_overlay_edges (tenant_id, framework_requirement_id, scf_anchor_id,
+			relationship_type, strength, rationale, source_ref, created_by)
+		VALUES ($1, $2, $3, 'equal', 1.0, 'reseed test', 'reseed test', 'test')
+		RETURNING id::text, status`,
+		`INSERT INTO fw_to_scf_overlay_edges (tenant_id, framework_requirement_id, scf_anchor_id,
+			relationship_type, strength, rationale, source_ref, created_by,
+			status, retirement_reason, retired_by, retired_at)
+		VALUES ($1, $2, $3, 'subset_of', 0.5, 'reseed test', 'reseed test', 'test',
+			'retired', 'superseded', 'test', now())
+		RETURNING id::text, status`,
+	} {
+		var id, status string
+		if err := pool.QueryRow(ctx, stmt, tenant, reqID, anchorID).Scan(&id, &status); err != nil {
+			t.Fatalf("seed overlay edge: %v", err)
+		}
+		edges[id] = status
+	}
+
+	// Leave the catalog partial so EnsureFullCatalog takes the reseed path.
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM scf_anchors
+		WHERE scf_id = $1
+		  AND framework_version_id IN (
+			SELECT fv.id FROM framework_versions fv
+			JOIN frameworks f ON f.id = fv.framework_id
+			WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+		)
+	`, scfseed.SentinelAnchor); err != nil {
+		t.Fatalf("simulate partial delete: %v", err)
+	}
+	if err := scfseed.EnsureFullCatalog(ctx, pool); err != nil {
+		t.Fatalf("EnsureFullCatalog reseed with overlay edges present: %v", err)
+	}
+
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM fw_to_scf_overlay_edges WHERE tenant_id = $1`, tenant).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("overlay edges after reseed: %d, err %v; want 0", left, err)
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT overlay_edge_id::text, actor, before->>'status', before->>'anchor_code', after->>'removed_with'
+		FROM fw_to_scf_overlay_edge_audit_log
+		WHERE tenant_id = $1 AND action = 'cascade_removed'`, tenant)
+	if err != nil {
+		t.Fatalf("read audit rows: %v", err)
+	}
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var id, actor, status, anchor, removedWith string
+		if err := rows.Scan(&id, &actor, &status, &anchor, &removedWith); err != nil {
+			t.Fatalf("scan audit row: %v", err)
+		}
+		want, ok := edges[id]
+		if !ok {
+			t.Errorf("cascade_removed row for unknown edge %s", id)
+			continue
+		}
+		seen++
+		if actor != scfseed.ReseedOverlayActor || status != want || anchor == "" || removedWith != "catalog_reseed" {
+			t.Errorf("edge %s audit: actor %q, before status %q (want %q), anchor %q, removed_with %q",
+				id, actor, status, want, anchor, removedWith)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("audit rows: %v", err)
+	}
+	if seen != len(edges) {
+		t.Errorf("cascade_removed rows for the tenant: %d; want %d (one per edge)", seen, len(edges))
 	}
 }
 
