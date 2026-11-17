@@ -44,6 +44,12 @@ type oscalExporter interface {
 	Export(ctx context.Context, in oscal.ExportInput) (*oscal.Bundle, error)
 }
 
+// CodePeriodNotFound is the stable `code` on the 404 for a period that is
+// not there (or is another tenant's). The web tells it apart from the bare
+// 404 of an unmounted route (the OSCAL bridge not running) by this code,
+// not by the message text, which stays free to change (#2312).
+const CodePeriodNotFound = "audit_period_not_found"
+
 // Handler wires the OSCAL Exporter behind an HTTP route.
 type Handler struct {
 	exporter oscalExporter
@@ -235,7 +241,10 @@ func writeExportError(w http.ResponseWriter, err error) {
 			"audit period is not frozen; freeze it before exporting (invariant 10)")
 
 	case errors.Is(err, oscal.ErrPeriodNotFound):
-		httpresp.WriteError(w, http.StatusNotFound, "audit period not found")
+		httpresp.WriteJSON(w, http.StatusNotFound, map[string]string{
+			"error": "audit period not found",
+			"code":  CodePeriodNotFound,
+		})
 	case errors.Is(err, oscal.ErrBridgeUnavailable):
 		httpresp.WriteError(w, http.StatusBadGateway, "oscal-bridge service unavailable")
 	case errors.Is(err, oscal.ErrRoundTripFailed):

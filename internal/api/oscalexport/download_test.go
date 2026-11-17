@@ -195,6 +195,28 @@ func TestDownload_ErrorMapping_NoAttachmentOnError(t *testing.T) {
 	}
 }
 
+// TestDownload_PeriodNotFound_CarriesCode pins the stable code the web
+// matches on to tell a missing period from an unmounted route (#2312).
+func TestDownload_PeriodNotFound_CarriesCode(t *testing.T) {
+	r := newDownloadRouter(&fakeExporter{err: oscal.ErrPeriodNotFound})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, newDownloadRequest(""))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["code"] != "audit_period_not_found" {
+		t.Errorf("code = %q, want audit_period_not_found", body["code"])
+	}
+	if body["error"] == "" {
+		t.Error("error message is empty; it stays human-readable")
+	}
+}
+
 func TestDownloadFilename_FrozenDateHandling(t *testing.T) {
 	const pid = "11111111-1111-1111-1111-111111111111"
 	cases := []struct {

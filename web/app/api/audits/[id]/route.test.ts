@@ -18,9 +18,11 @@ vi.mock("next/headers", () => ({
 import { GET as getPeriod } from "./route";
 import { POST as freeze } from "./freeze/route";
 import { GET as getControlState } from "./control-state/route";
+import { GET as getOscalExport } from "./oscal-export/route";
 
 const ID = "00000000-0000-0000-0000-000000002117";
 const params = { params: Promise.resolve({ id: ID }) };
+const dotdot = { params: Promise.resolve({ id: ".." }) };
 
 function upstream(status: number, body: unknown) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -95,5 +97,33 @@ describe("/api/audits/[id] BFFs", () => {
     expect(String(spy.mock.calls[0]?.[0])).toBe(
       `http://atlas:8080/v1/audit-periods/${ID}/control-state?control=ctl-1`,
     );
+  });
+
+  // #2312: `..` survives encodeURIComponent, so without the guard
+  // `/api/audits/%2E%2E/freeze` would reach upstream as `POST /v1/freeze`.
+  test.each([
+    ["GET", () => getPeriod(new Request("http://web"), dotdot)],
+    ["freeze", () => freeze(new Request("http://web"), dotdot)],
+    ["control-state", () => getControlState(controlReq("ctl-1"), dotdot)],
+    ["oscal-export", () => getOscalExport(new Request("http://web"), dotdot)],
+  ])(
+    "%s refuses a non-UUID id with 400 and no upstream call",
+    async (_n, call) => {
+      mockCookieGet.mockReturnValue({ value: "test-bearer-2117" });
+      const spy = vi.spyOn(globalThis, "fetch");
+      const res = await call();
+      expect(res.status).toBe(400);
+      expect(spy).not.toHaveBeenCalled();
+    },
+  );
+
+  test("the GET reads are marked no-store", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-2117" });
+    upstream(200, { id: ID, status: "open" });
+    const period = await getPeriod(new Request("http://web"), params);
+    expect(period.headers.get("Cache-Control")).toBe("no-store");
+    upstream(200, { observations: [], count: 0 });
+    const state = await getControlState(controlReq("ctl-1"), params);
+    expect(state.headers.get("Cache-Control")).toBe("no-store");
   });
 });

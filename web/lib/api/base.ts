@@ -41,8 +41,12 @@ export function apiBaseURL(): string {
 
 export class APIError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  // The platform's stable machine-readable `code`, when the error body
+  // carries one. Match on it rather than on the message (#2312).
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
