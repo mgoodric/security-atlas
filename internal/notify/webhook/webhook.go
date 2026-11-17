@@ -228,11 +228,21 @@ type Channel struct {
 	transport Transport
 	baseURL   string
 	now       func() time.Time
+	// modules hides the kinds of a switched-off module, or one outside
+	// the recipient's access (#2175). nil hides nothing.
+	modules notify.Reacher
 }
 
 // NewChannel wires the channel.
 func NewChannel(pool *pgxpool.Pool, transport Transport, baseURL string) *Channel {
 	return &Channel{pool: pool, transport: transport, baseURL: baseURL, now: time.Now}
+}
+
+// WithModules makes the digest leave out notification kinds whose module
+// is switched off or outside the recipient's module access (#2175).
+func (c *Channel) WithModules(r notify.Reacher) *Channel {
+	c.modules = r
+	return c
 }
 
 // SetOptIn sets the caller's webhook-channel master opt-in (default OUT).
@@ -285,6 +295,13 @@ func (c *Channel) DeliverDigest(ctx context.Context, userID uuid.UUID, recipient
 		return DeliveryResult{Skipped: true, Reason: "user opted out"}, nil
 	}
 
+	// Module switches and access (#2175), read before the digest tx: a
+	// failed read sends nothing.
+	hidden, err := notify.HiddenKinds(ctx, c.modules, tenantID, recipientUserID)
+	if err != nil {
+		return DeliveryResult{}, fmt.Errorf("webhook: module access: %w", err)
+	}
+
 	digestKey := notify.DigestKeyForDay(channelName, c.now().UTC().Format("2006-01-02"))
 
 	var result DeliveryResult
@@ -320,7 +337,8 @@ func (c *Channel) DeliverDigest(ctx context.Context, userID uuid.UUID, recipient
 		if err != nil {
 			return fmt.Errorf("webhook: list notification preferences: %w", err)
 		}
-		counts, total := notify.FilterCountsByChannelPref(counts, channelPrefMap(prefs, channelName))
+		counts, _ = notify.FilterCountsByChannelPref(counts, channelPrefMap(prefs, channelName))
+		counts, total := notify.DropKinds(counts, hidden)
 		if total == 0 {
 			result = DeliveryResult{Skipped: true, Reason: "no unread notifications"}
 			return nil

@@ -182,6 +182,7 @@ type Store struct {
 	pool       *pgxpool.Pool
 	appliers   map[string]Applier
 	pendingCap int
+	switches   Switches
 }
 
 // NewStore constructs a Store wired against the given pool. Use
@@ -397,6 +398,16 @@ func (s *Store) Confirm(ctx context.Context, id uuid.UUID, approver string) (Pro
 func (s *Store) ConfirmAs(ctx context.Context, id uuid.UUID, approver string, by Confirmer) (Proposal, error) {
 	if approver == "" {
 		return Proposal{}, fmt.Errorf("%w: approver is required", ErrInvalidInput)
+	}
+	// A proposal into a switched-off module stays pending (#2175).
+	if s.switches != nil {
+		p, err := s.Get(ctx, id)
+		if err != nil {
+			return Proposal{}, err
+		}
+		if err := s.moduleOff(ctx, p); err != nil {
+			return Proposal{}, err
+		}
 	}
 	var out Proposal
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ uuid.UUID) error {

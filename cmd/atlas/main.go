@@ -53,9 +53,11 @@ import (
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
 	metricseval "github.com/mgoodric/security-atlas/internal/metrics/eval"
 	metricsscheduler "github.com/mgoodric/security-atlas/internal/metrics/scheduler"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	notifyemail "github.com/mgoodric/security-atlas/internal/notify/email"
 	notifyscheduler "github.com/mgoodric/security-atlas/internal/notify/scheduler"
 	notifyslack "github.com/mgoodric/security-atlas/internal/notify/slack"
@@ -986,6 +988,15 @@ func main() {
 		}()
 	}
 
+	// #2175: the reminder and notification jobs follow module switches and
+	// module access, through the same moduleaccess answers the API uses.
+	// With no app pool there is nothing to read, and the nil Views reaches
+	// everyone, as a server with no database does.
+	var bgModules *moduleaccess.Views
+	if pool != nil {
+		bgModules = moduleaccess.NewViews(moduleaccess.NewStore(pool), featureflag.NewStore(pool))
+	}
+
 	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
 	// role (BYPASSRLS) so the sweep can cross tenants -- the per-tenant
 	// transaction inside applies the GUC for RLS-honest writes. Default
@@ -1046,7 +1057,7 @@ func main() {
 					fmt.Fprintf(os.Stderr, "atlas: ATLAS_DECISION_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
 				}
 			}
-			notifier := decision.NewNotifier(overduePool, logger)
+			notifier := decision.NewNotifier(overduePool, logger).WithModules(bgModules)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -1083,7 +1094,7 @@ func main() {
 					fmt.Fprintf(os.Stderr, "atlas: ATLAS_PERSONNEL_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
 				}
 			}
-			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool).WithIngest(ingestSvc), logger)
+			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool).WithIngest(ingestSvc), logger).WithModules(bgModules)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -1339,14 +1350,14 @@ func main() {
 			// Email channel (slice 445) — mounts only when SMTP is configured.
 			emailCfg := notifyemail.ConfigFromEnv()
 			if emailCfg.Enabled() {
-				emailCh := notifyemail.NewChannel(pool, notifyemail.NewSMTPProvider(emailCfg), emailCfg.BaseURL)
+				emailCh := notifyemail.NewChannel(pool, notifyemail.NewSMTPProvider(emailCfg), emailCfg.BaseURL).WithModules(bgModules)
 				channels = append(channels, notifyscheduler.EmailChannel(emailCh))
 			}
 
 			// Slack channel (slice 543) — mounts only when a webhook URL is set.
 			slackCfg := notifyslack.ConfigFromEnv()
 			if slackCfg.Enabled() {
-				slackCh := notifyslack.NewChannel(pool, notifyslack.NewHTTPTransport(slackCfg), slackCfg.BaseURL)
+				slackCh := notifyslack.NewChannel(pool, notifyslack.NewHTTPTransport(slackCfg), slackCfg.BaseURL).WithModules(bgModules)
 				channels = append(channels, notifyscheduler.SlackChannel(slackCh))
 			}
 
@@ -1358,7 +1369,7 @@ func main() {
 				if terr != nil {
 					fmt.Fprintf(os.Stderr, "atlas: webhook digest channel: %v\n", terr)
 				} else {
-					webhookCh := notifywebhook.NewChannel(pool, transport, webhookCfg.BaseURL)
+					webhookCh := notifywebhook.NewChannel(pool, transport, webhookCfg.BaseURL).WithModules(bgModules)
 					channels = append(channels, notifyscheduler.WebhookChannel(webhookCh))
 				}
 			}

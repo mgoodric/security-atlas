@@ -37,6 +37,7 @@ package board
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -147,9 +148,41 @@ type Pack struct {
 	// Status mirrors the board_packs.status column — "draft" | "published".
 	// Carried in content so a serialized pack is self-describing.
 	Status string `json:"status"`
-	// Sections is the per-section content, keyed by SectionKeys. Always
-	// contains exactly the fixed set of keys after generation.
+	// Sections is the per-section content, keyed by SectionKeys. After
+	// generation it holds every fixed key except those in Omitted.
 	Sections map[string]Section `json:"sections"`
+	// Omitted lists the sections left out when the pack was generated,
+	// because the module that owns them was switched off (#2175), in
+	// SectionKeys order. A pack generated earlier keeps the sections it
+	// has; switching the module back on changes only packs generated
+	// afterwards.
+	Omitted []string `json:"omitted_sections,omitempty"`
+}
+
+// sectionModule maps a generated section to the registry key
+// (featureflag.Modules) of the optional module whose data it shows. A
+// section absent from it belongs to the core program and is always
+// generated.
+var sectionModule = map[string]string{
+	SectionTopRisks:       "risk",
+	SectionVendorBurndown: "third_party_risk",
+}
+
+// isOmitted reports whether key was left out of p at generation.
+func (p Pack) isOmitted(key string) bool {
+	return slices.Contains(p.Omitted, key)
+}
+
+// Keys returns the section keys p carries, in canonical order: SectionKeys
+// without the omitted ones.
+func (p Pack) Keys() []string {
+	out := make([]string, 0, len(SectionKeys))
+	for _, key := range SectionKeys {
+		if !p.isOmitted(key) {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 // Section is one section of the pack. Every section — generated or
@@ -290,7 +323,7 @@ func (sp StoredPack) IsPublished() bool {
 // publish gate (decision D6). Returns the first unapproved section title for
 // a precise error message.
 func allSectionsApproved(p Pack) (string, bool) {
-	for _, key := range SectionKeys {
+	for _, key := range p.Keys() {
 		sec, ok := p.Sections[key]
 		if !ok || !sec.Approved {
 			return sectionTitles[key], false

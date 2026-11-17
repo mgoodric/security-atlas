@@ -89,7 +89,7 @@ th { background: #f8fafc; font-weight: 600; }
 	}
 
 	// One numbered card per section.
-	for i, key := range SectionKeys {
+	for i, key := range p.Keys() {
 		sec := p.Sections[key]
 		w.WriteString(`<section>`)
 		fmt.Fprintf(&w, `<div class="sec-num">§ %02d</div>`, i+1)

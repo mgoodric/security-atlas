@@ -169,7 +169,7 @@ func RenderPackNarrative(p Pack) (string, error) {
 	fmt.Fprintf(&sb, "# Quarterly Board Pack — %s\n\n", p.PeriodEnd)
 	fmt.Fprintf(&sb, "_Generated %s. Status: %s._\n", p.GeneratedAt, p.Status)
 
-	for i, key := range SectionKeys {
+	for i, key := range p.Keys() {
 		sec, ok := p.Sections[key]
 		if !ok {
 			return "", fmt.Errorf("board: pack missing section %q", key)

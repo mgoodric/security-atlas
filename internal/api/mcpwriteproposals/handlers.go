@@ -291,6 +291,12 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 		httpresp.WriteError(w, http.StatusConflict, "proposal not in ai_proposed state")
 	case errors.Is(err, writeproposals.ErrUnknownTool):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, writeproposals.ErrModuleOff):
+		// #2175: the proposal stays pending until its module is back on.
+		httpresp.WriteJSON(w, http.StatusConflict, transitionErrBody{
+			Error: "The module this proposal writes into is switched off. It stays pending; switch the module on in Admin > Features to apply it.",
+			Code:  "module_switched_off",
+		})
 	default:
 		if status, code, ok := applyErrStatus(err); ok {
 			if status >= http.StatusInternalServerError {
