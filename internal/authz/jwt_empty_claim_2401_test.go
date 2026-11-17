@@ -41,8 +41,9 @@ func TestBuildInput2401_EmptyClaimDerivedRoles(t *testing.T) {
 		// Not JWTs: unchanged by #2401.
 		{"push key", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1"}, grc},
 		{"bootstrap credential", credstore.Credential{ID: "boot", TenantID: "t", UserID: "bootstrap-admin"}, grc},
+		// A control_owner claim derives nothing either (#2496).
+		{"JWT user, control_owner claim", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:" + user, OwnerRoles: []string{"control_owner"}}, nil},
 		// Unchanged by #2401.
-		{"JWT user, control_owner claim", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:" + user, OwnerRoles: []string{"control_owner"}}, []authz.Role{authz.RoleControlOwner}},
 		{"JWT super_admin, empty claim", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:" + user, IsAdmin: true, IsApprover: true}, []authz.Role{authz.RoleAdmin}},
 		{"no tenant", credstore.Credential{ID: "jwt:1", UserID: "user:" + user}, nil},
 	} {

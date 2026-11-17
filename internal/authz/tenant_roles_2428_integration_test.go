@@ -161,8 +161,8 @@ func TestTenantGates2428_RealJWTRoleMatrix(t *testing.T) {
 // TestTenantGates2428_RevokedGrantRefusedWhileTokenLive: the token still
 // says admin after the grant is deleted, and is still valid, but every
 // gate refuses it, because the gates read the live user_roles and not the
-// claim. A walkthrough write shows the handler doing the refusing: OPA
-// admits it on the claim-derived control_owner, the gate does not.
+// claim. A walkthrough write is refused by OPA before the handler runs:
+// since #2496 the claim no longer derives control_owner.
 func TestTenantGates2428_RevokedGrantRefusedWhileTokenLive(t *testing.T) {
 	t.Parallel()
 	appPool := dbtest.NewAppPool(t)
@@ -191,7 +191,7 @@ func TestTenantGates2428_RevokedGrantRefusedWhileTokenLive(t *testing.T) {
 		}
 	}
 	code, reached := s.do(bearer, http.MethodPost, "/v1/walkthroughs")
-	if !reached || code != http.StatusForbidden {
-		t.Errorf("revoked admin: POST /v1/walkthroughs = %d reached=%v, want the handler gate's 403", code, reached)
+	if reached || code != http.StatusForbidden {
+		t.Errorf("revoked admin: POST /v1/walkthroughs = %d reached=%v, want OPA's 403", code, reached)
 	}
 }

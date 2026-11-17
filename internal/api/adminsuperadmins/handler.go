@@ -15,8 +15,8 @@
 // LOAD-BEARING DESIGN: last-super_admin safety rail. The DELETE handler
 // wraps the demote in a single transaction that:
 //
-//  1. Acquires `pg_advisory_xact_lock(0x142142142142)` — a slice-142
-//     stable BIGINT advisory lock that serialises concurrent demotes so
+//  1. Acquires the advisorylock.SuperAdminDemote transaction lock
+//     (slice 142; namespaced in #2273), which serialises concurrent demotes so
 //     two callers cannot each see count=2 and proceed to DELETE both.
 //     Advisory locks were chosen over `SELECT ... FOR UPDATE` because
 //     atlas_app lacks the Postgres UPDATE privilege required for
@@ -71,6 +71,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -396,22 +397,16 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 	var res result
 	err = h.inTx(r.Context(), func(ctx context.Context, tx pgx.Tx) error {
 		// LOAD-BEARING: serialise concurrent demotes via an advisory
-		// transaction lock keyed on a slice-142-stable bigint. The
-		// `pg_advisory_xact_lock(BIGINT)` call blocks until the
-		// lock is acquired; the lock is automatically released at
+		// transaction lock in the advisorylock.SuperAdminDemote
+		// namespace (#2273). The call blocks until the lock is
+		// acquired; the lock is automatically released at
 		// transaction commit. This is the slice-198 D1 candidate-#2
 		// pattern (advisory lock + count recheck) applied here
 		// because the table-row alternative `SELECT ... FOR UPDATE`
 		// requires UPDATE privilege on super_admins which atlas_app
 		// intentionally does NOT hold (the table is functionally
 		// append+delete only — no UPDATE writes).
-		//
-		// The key (142_142_142_142_142_1) is a slice-142-unique
-		// constant; future slices that need their own advisory locks
-		// must pick a distinct key to avoid cross-feature blocking.
-		if _, lErr := tx.Exec(ctx,
-			`SELECT pg_advisory_xact_lock(0x142142142142)`,
-		); lErr != nil {
+		if lErr := advisorylock.Lock(ctx, tx, advisorylock.SuperAdminDemote, 0); lErr != nil {
 			return fmt.Errorf("acquire super_admin lock: %w", lErr)
 		}
 

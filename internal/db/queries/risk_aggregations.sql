@@ -84,8 +84,8 @@ ORDER BY child_risk_id ASC, created_at ASC, parent_risk_id ASC;
 -- check on a snapshot that lacks the other. Transaction-scoped and
 -- re-entrant within a session. Callers take it before any meta-risk key
 -- lock (LockAggregationKey) so the two locks are always acquired in the
--- same order.
-SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || sqlc.arg(tenant_id)::uuid::text, 0));
+-- same order. Namespace 6 is advisorylock.RiskHierarchy (#2273).
+SELECT pg_advisory_xact_lock(6, hashtext(sqlc.arg(tenant_id)::uuid::text));
 
 -- name: ListRiskChildCountsForTenant :many
 -- How many children each roll-up parent has, for the risk register (#2060).
