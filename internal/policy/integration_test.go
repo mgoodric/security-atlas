@@ -235,6 +235,100 @@ func TestPublish_OrphanRejected(t *testing.T) {
 	}
 }
 
+// ---- #2478: a retired-only link does not satisfy the orphan rule ----
+
+// setControlState moves a control's lifecycle_state directly via the admin
+// pool, standing in for a retirement that happens after the policy's last
+// edit.
+func setControlState(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl uuid.UUID, state string) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE controls SET lifecycle_state = $3 WHERE tenant_id = $1 AND id = $2`,
+		tenant, ctrl, state); err != nil {
+		t.Fatalf("set control %s %s: %v", ctrl, state, err)
+	}
+}
+
+// Publish is refused while the policy's only linked control is retired, and
+// allowed once a live control backs it again.
+func TestPublish_RetiredOnlyLinkRejected(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrl := seedControl(t, admin, tenant)
+	store := policy.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	created, err := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := store.SubmitForReview(ctx, created.ID, submitterPerson); err != nil {
+		t.Fatalf("SubmitForReview: %v", err)
+	}
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	// Retired after the last edit (and after approval, which does not check).
+	setControlState(t, admin, tenant, ctrl, "retired")
+	now := time.Now().UTC().Truncate(24 * time.Hour)
+	in := policy.PublishInput{NewVersion: "1.0.0", EffectiveDate: &now, PublishedBy: "key_approver"}
+	if _, err := store.Publish(ctx, created.ID, in); !errors.Is(err, policy.ErrNoLiveLinkedControl) {
+		t.Fatalf("Publish with retired-only link: want ErrNoLiveLinkedControl, got %v", err)
+	}
+	setControlState(t, admin, tenant, ctrl, "active")
+	published, err := store.Publish(ctx, created.ID, in)
+	if err != nil {
+		t.Fatalf("Publish with live link: %v", err)
+	}
+	if published.Status != policy.StatePublished {
+		t.Fatalf("status = %q; want published", published.Status)
+	}
+}
+
+// Submit re-runs the create / draft-edit link check: a draft whose linked
+// control was retired after its last edit is refused, and submits once the
+// author links a live control instead.
+func TestSubmit_RetiredLinkRejected(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	retired := seedControl(t, admin, tenant)
+	live := seedControl(t, admin, tenant)
+	store := policy.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	created, err := store.Create(ctx, validCreate([]uuid.UUID{retired}, submitterPerson))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	setControlState(t, admin, tenant, retired, "retired")
+	if _, err := store.SubmitForReview(ctx, created.ID, submitterPerson); !errors.Is(err, policy.ErrUnknownLinkedControl) {
+		t.Fatalf("SubmitForReview with retired link: want ErrUnknownLinkedControl, got %v", err)
+	}
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != policy.StateDraft {
+		t.Fatalf("refused submit left status %q; want draft", got.Status)
+	}
+	if _, err := store.UpdateDraft(ctx, created.ID, policy.UpdateDraftInput{
+		Title:                       created.Title,
+		BodyMd:                      created.BodyMd,
+		OwnerRole:                   created.OwnerRole,
+		ApproverRole:                created.ApproverRole,
+		LinkedControlIDs:            []uuid.UUID{live},
+		AcknowledgmentRequiredRoles: created.AcknowledgmentRequiredRoles,
+		Editor:                      submitterPerson,
+	}); err != nil {
+		t.Fatalf("UpdateDraft: %v", err)
+	}
+	if _, err := store.SubmitForReview(ctx, created.ID, submitterPerson); err != nil {
+		t.Fatalf("SubmitForReview with live link: %v", err)
+	}
+}
+
 // ---- transitions reject wrong prior state ----
 
 func TestApprove_RejectsFromDraft(t *testing.T) {

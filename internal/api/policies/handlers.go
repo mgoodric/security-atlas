@@ -918,6 +918,8 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 		httpresp.WriteError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, policy.ErrSubmitterUnknown):
 		httpresp.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, policy.ErrUnknownLinkedControl):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, policy.ErrWrongState):
 		httpresp.WriteError(w, http.StatusConflict, "policy not in expected state for this transition")
 	default:
@@ -929,6 +931,8 @@ func (h *Handler) writePublishErr(w http.ResponseWriter, r *http.Request, err er
 	switch {
 	case errors.Is(err, policy.ErrOrphanPublish):
 		httpresp.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, policy.ErrNoLiveLinkedControl):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrWrongState):
