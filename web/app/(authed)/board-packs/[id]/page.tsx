@@ -29,11 +29,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
 import {
-  BOARD_PACK_SECTION_KEYS,
   BoardPack,
   BoardPackSection,
   getBoardPack,
   getSessionMe,
+  packSectionKeys,
   sectionLabel,
 } from "@/lib/api/board";
 
@@ -108,12 +108,15 @@ export default function BoardPackDetailPage({
   const pack = packQuery.data;
   const isPublished = pack.status === "published";
   const { allApproved, unapprovedTitles } = approvalState(pack);
+  // Sections of a module switched off at generation are not part of the
+  // pack (#2175).
+  const sectionKeys = packSectionKeys(pack.content);
 
   const onMutated = (updated: BoardPack) =>
     queryClient.setQueryData(["board-pack", id], updated);
 
   // Approved sections count — used in the header progress badge.
-  const approvedCount = BOARD_PACK_SECTION_KEYS.filter(
+  const approvedCount = sectionKeys.filter(
     (k) => pack.content.sections[k]?.approved,
   ).length;
 
@@ -138,10 +141,10 @@ export default function BoardPackDetailPage({
           generatedAt={pack.content.generated_at}
           publishedBy={pack.published_by}
           approvedCount={approvedCount}
-          totalSections={BOARD_PACK_SECTION_KEYS.length}
+          totalSections={sectionKeys.length}
         />
 
-        {BOARD_PACK_SECTION_KEYS.map((key, i) => {
+        {sectionKeys.map((key, i) => {
           const section = pack.content.sections[key];
           // AC-3: never silently drop a slot. A missing section (an
           // incomplete stored pack) renders a clear "not generated" state
@@ -301,7 +304,7 @@ function approvalState(pack: BoardPack): {
   unapprovedTitles: string[];
 } {
   const unapproved: string[] = [];
-  for (const key of BOARD_PACK_SECTION_KEYS) {
+  for (const key of packSectionKeys(pack.content)) {
     const section = pack.content.sections[key];
     if (!section || !section.approved) {
       unapproved.push(sectionLabel(key, section));

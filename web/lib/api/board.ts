@@ -91,6 +91,9 @@ export type BoardPackContent = {
   generated_at: string;
   status: string;
   sections: Record<string, BoardPackSection>;
+  // Sections left out at generation because the module that owns them was
+  // switched off (#2175). Mirrors internal/board/pack.go Pack.Omitted.
+  omitted_sections?: string[];
 };
 
 export type BoardPack = {
@@ -127,6 +130,16 @@ export const BOARD_PACK_SECTION_KEYS: string[] = [
   "investment",
   "asks",
 ];
+
+// packSectionKeys returns the section keys a pack carries, in canonical
+// order: the fixed keys without those left out at generation because their
+// module was switched off (#2175). A pack generated before then keeps every
+// section it has, and a missing section that was not omitted still renders
+// as "not generated".
+export function packSectionKeys(content: BoardPackContent): string[] {
+  const omitted = new Set(content.omitted_sections ?? []);
+  return BOARD_PACK_SECTION_KEYS.filter((key) => !omitted.has(key));
+}
 
 // SECTION_TITLES maps each fixed section key to its board-facing human
 // label. Mirrors internal/board/pack.go `sectionTitles` (all eight keys).

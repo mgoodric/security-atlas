@@ -14,6 +14,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/notify"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -21,6 +22,10 @@ import (
 // decision-overdue notification. The /v1/me/notifications wire layer
 // renders type-specific UI off this constant.
 const NotificationTypeOverdue = "decision.overdue"
+
+// decisionLogModule is the registry key (featureflag.Modules) of the
+// Decision log feature of Risk, which owns overdue-decision notifications.
+const decisionLogModule = "decision_log"
 
 // DefaultOverdueInterval is the cadence at which Notifier.Run sweeps for
 // overdue decisions. Daily (per AC-6) is the canvas-implied cadence; the
@@ -52,8 +57,9 @@ type overduePayload struct {
 // the SAME transaction, so a partial state (notified but not recorded, or
 // recorded but not notified) is impossible.
 type Notifier struct {
-	pool   *pgxpool.Pool
-	logger *slog.Logger
+	pool    *pgxpool.Pool
+	logger  *slog.Logger
+	modules notify.Reacher
 }
 
 // NewNotifier constructs a Notifier. The pool MUST be connected as the
@@ -65,6 +71,17 @@ func NewNotifier(pool *pgxpool.Pool, logger *slog.Logger) *Notifier {
 		logger = slog.New(slog.NewTextHandler(discardWriter{}, nil))
 	}
 	return &Notifier{pool: pool, logger: logger}
+}
+
+// WithModules makes the sweep follow module switches and module access
+// (#2175): a decision is notified only while Risk and its Decision log
+// feature are switched on and the decision_maker can work in Risk. A
+// skipped decision gets no `overdue_notified` marker, so it is notified
+// once the module is switched back on or access is widened. A failed
+// access read skips the decision and is logged. nil notifies as before.
+func (n *Notifier) WithModules(r notify.Reacher) *Notifier {
+	n.modules = r
+	return n
 }
 
 // Run executes the tick loop until ctx is cancelled. Each tick sweeps all
@@ -190,6 +207,17 @@ func (n *Notifier) sweepTenant(ctx context.Context, tenantID uuid.UUID, today ti
 		}
 		if already > 0 {
 			continue
+		}
+		if n.modules != nil {
+			ok, err := n.modules.Reaches(ctx, tenantID, d.DecisionMaker, decisionLogModule)
+			if err != nil {
+				n.logger.Error("decision overdue: module access read failed; not notifying",
+					"tenant_id", tenantID.String(), "decision_id", d.ID.String(), "err", err.Error())
+				continue
+			}
+			if !ok {
+				continue
+			}
 		}
 
 		revisit := ""
