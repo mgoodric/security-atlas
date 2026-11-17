@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 // hasProgramRead reports whether the credential carries an explicit
@@ -31,7 +32,7 @@ import (
 // OwnerRoles). Deliberately stricter than authz.derivedRolesFor — a bare
 // push credential has no business reading the slice-056 decision timeline.
 func hasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // requireProgramRead is the guard ListDecisions calls FIRST — before

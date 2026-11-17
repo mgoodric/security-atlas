@@ -32,6 +32,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidencesummary"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -197,7 +198,7 @@ func summaryWireFrom(sum evidencesummary.Summary) summaryWire {
 // gate in production; this handler-level guard is the testable enforcement point
 // when OPA is not wired (unit/integration servers).
 func hasControlRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // requireControlRead is the guard the handler calls FIRST. It returns true when

@@ -21,13 +21,14 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 // hasProgramRead reports whether the credential carries a program-read
 // signal. Mirrors the slice-067 decisions guard exactly — a bare push
 // credential has no business reading the risk-register timeline.
 func hasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // hasProgramWrite reports whether the credential may mutate risk-register
@@ -36,7 +37,7 @@ func hasProgramRead(c credstore.Credential) bool {
 // a remediation commitment. (The OPA middleware enforces the precise
 // risk_register:write predicate in production.)
 func hasProgramWrite(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // requireProgramRead guards the read endpoints. On denial it writes 403 and

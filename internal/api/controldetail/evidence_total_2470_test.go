@@ -55,7 +55,8 @@ func TestEvidence2470_PerControlTotalAndResolution(t *testing.T) {
 		{"live tenant admin", jwt("admin"), false},
 		{"live grc_engineer", jwt("grc_engineer"), false},
 		{"live control_owner", jwt("control_owner"), false},
-		{"api key control_owner label", credstore.Credential{ID: "key_2470", TenantID: contractTenantID, OwnerRoles: []string{"control_owner"}}, false},
+		// An unbound key: apikeystore stamps UserID with the key's own id.
+		{"api key control_owner label", credstore.Credential{ID: "key_2470", UserID: "key_2470", TenantID: contractTenantID, OwnerRoles: []string{"control_owner"}}, false},
 		{"auditor", jwt("auditor"), true},
 		{"auditor with a stale grc_engineer claim", credstore.Credential{ID: "jwt:2470", TenantID: contractTenantID, OwnerRoles: []string{"grc_engineer", "auditor"}, TenantRoles: []string{"auditor"}}, true},
 		{"unknown role", jwt("viewer"), true},
