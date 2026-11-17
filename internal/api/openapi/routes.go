@@ -102,7 +102,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/board-packs/{id}/pdf", Tag: "board", Tier: "bearer", Internal: false, Summary: "GET /v1/board-packs/{id}/pdf"},
 	{Method: "GET", Path: "/v1/calendar", Tag: "calendar", Tier: "bearer", Internal: false, Summary: "GET /v1/calendar"},
 	{Method: "GET", Path: "/v1/calendar.ics", Tag: "calendar", Tier: "none", Internal: false, Summary: "GET /v1/calendar.ics"},
-	{Method: "GET", Path: "/v1/controls", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls"},
+	{Method: "GET", Path: "/v1/controls", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls — the organisation's active controls; with ?include=state, one page of them with their state and the unpaged total, filtered by ?result, ?freshness, ?owner (a user id, or none), ?family, ?framework, ?anchor_fit and ?scope, sorted by ?sort=[-]scf_id|name|family|state|freshness|last_observed_at|owner|frameworks (by default failing first, then stalest evidence; #2131)"},
 	{Method: "GET", Path: "/v1/controls/drift", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/drift"},
 	{Method: "GET", Path: "/v1/controls/export", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/export"},
 	{Method: "GET", Path: "/v1/controls/history/export", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/history/export"},

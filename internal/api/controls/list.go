@@ -165,42 +165,98 @@ type listWithStateResp struct {
 	Controls []controlWithStateWire `json:"controls"`
 	Count    int                    `json:"count"`
 	Total    int64                  `json:"total"`
+	// Families is every family of the tenant's active controls, unfiltered
+	// and unpaged, so the page's Family filter offers the whole set while it
+	// holds one page of rows (#2131).
+	Families []string `json:"families"`
+}
+
+// ownerUnowned is the `?owner=` value that keeps only controls with no
+// assigned person (#2131).
+const ownerUnowned = "none"
+
+// stateResultFilters are the `?result=` values: the evidence_result enum.
+var stateResultFilters = map[string]bool{
+	"pass": true, "fail": true, "inconclusive": true, "excepted": true, "na": true,
+}
+
+// freshnessFilters are the `?freshness=` values the rollup produces.
+var freshnessFilters = map[string]bool{
+	"fresh": true, "stale": true, "expired": true, "no_evidence": true,
+}
+
+// parseListFilter reads the `?include=state` filters and sort (#2131). Every
+// value is checked against an allow-list or parsed as a UUID; the returned
+// error is the 400 message.
+func parseListFilter(r *http.Request) (control.ListFilter, string) {
+	q := r.URL.Query()
+	var f control.ListFilter
+	if v := q.Get("scope"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			return f, "scope must be a UUID"
+		}
+		f.ScopeCell = pgtype.UUID{Bytes: id, Valid: true}
+	}
+	f.AnchorFit = q.Get("anchor_fit")
+	if !validAnchorFitFilter(f.AnchorFit) {
+		return f, "anchor_fit must be one of exact|partial|none"
+	}
+	// #2128: ?owner=<user id> narrows the page and total to that person's
+	// controls. RLS keeps another tenant's assignments invisible, so a
+	// foreign user id matches nothing. #2131: ?owner=none keeps the
+	// controls nobody owns.
+	switch v := q.Get("owner"); v {
+	case "":
+	case ownerUnowned:
+		f.Unowned = true
+	default:
+		id, err := uuid.Parse(v)
+		if err != nil {
+			return f, "owner must be a UUID or none"
+		}
+		f.Owner = pgtype.UUID{Bytes: id, Valid: true}
+	}
+	f.Result = q.Get("result")
+	if f.Result != "" && !stateResultFilters[f.Result] {
+		return f, "result must be one of pass|fail|inconclusive|excepted|na"
+	}
+	f.Freshness = q.Get("freshness")
+	if f.Freshness != "" && !freshnessFilters[f.Freshness] {
+		return f, "freshness must be one of fresh|stale|expired|no_evidence"
+	}
+	f.Family = q.Get("family")
+	// The framework filter matches the catalog framework slugs the list's
+	// frameworks column shows; an unknown slug matches nothing.
+	f.Framework = q.Get("framework")
+	sortKey, desc, err := control.ParseListSort(q.Get("sort"))
+	if err != nil {
+		return f, err.Error()
+	}
+	f.Sort, f.SortDesc = sortKey, desc
+	return f, ""
 }
 
 func (h *ListHandler) listWithState(w http.ResponseWriter, r *http.Request) {
 	limit, offset := listPagination(r)
-	var scopeCell pgtype.UUID
-	if v := r.URL.Query().Get("scope"); v != "" {
-		id, err := uuid.Parse(v)
-		if err != nil {
-			httpresp.WriteError(w, http.StatusBadRequest, "scope must be a UUID")
-			return
-		}
-		scopeCell = pgtype.UUID{Bytes: id, Valid: true}
-	}
-	anchorFit := r.URL.Query().Get("anchor_fit")
-	if !validAnchorFitFilter(anchorFit) {
-		httpresp.WriteError(w, http.StatusBadRequest, "anchor_fit must be one of exact|partial|none")
+	filter, msg := parseListFilter(r)
+	if msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 
-	// #2128: ?owner=<user id> narrows the page and total to that person's
-	// controls. RLS keeps another tenant's assignments invisible, so a
-	// foreign user id matches nothing.
-	var owner pgtype.UUID
-	if v := r.URL.Query().Get("owner"); v != "" {
-		id, err := uuid.Parse(v)
-		if err != nil {
-			httpresp.WriteError(w, http.StatusBadRequest, "owner must be a UUID")
-			return
-		}
-		owner = pgtype.UUID{Bytes: id, Valid: true}
-	}
-
-	rows, total, err := h.store.ListWithState(r.Context(), limit, offset, scopeCell, anchorFit, owner)
+	rows, total, err := h.store.ListWithState(r.Context(), limit, offset, filter)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list controls with state", err)
 		return
+	}
+	families, err := h.store.ListFamilies(r.Context())
+	if err != nil {
+		httperr.WriteInternal(w, r, "list controls with state", err)
+		return
+	}
+	if families == nil {
+		families = []string{}
 	}
 	ids := make([]uuid.UUID, len(rows))
 	for i, row := range rows {
@@ -216,7 +272,7 @@ func (h *ListHandler) listWithState(w http.ResponseWriter, r *http.Request) {
 		out[i] = controlWithStateWireFrom(row)
 		out[i].Demo = demo.Has(ids[i])
 	}
-	httpresp.WriteJSON(w, http.StatusOK, listWithStateResp{Controls: out, Count: len(out), Total: total})
+	httpresp.WriteJSON(w, http.StatusOK, listWithStateResp{Controls: out, Count: len(out), Total: total, Families: families})
 }
 
 func controlWithStateWireFrom(row dbx.ListActiveControlsWithStateRow) controlWithStateWire {

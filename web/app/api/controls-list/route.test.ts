@@ -203,4 +203,39 @@ describe("GET /api/controls-list", () => {
     expect(calledURL).not.toContain("limit=");
     expect(calledURL).not.toContain("offset=");
   });
+
+  // #2131 — the filters and the sort pass through to the platform; a
+  // parameter off the allow-list does not.
+  test("issue 2131: include=state forwards filters and sort, and families", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-2131" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          controls: [],
+          count: 0,
+          total: 0,
+          families: ["IAC"],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const res = await GET(
+      makeReq(
+        "/api/controls-list?include=state&result=fail&freshness=stale&owner=none&family=IAC&framework=soc2&anchor_fit=partial&sort=-last_observed_at&evil=1",
+      ) as never,
+    );
+    expect(res.status).toBe(200);
+    const upstream = new URL(String(fetchSpy.mock.calls[0]?.[0] ?? ""));
+    const q = upstream.searchParams;
+    expect(q.get("result")).toBe("fail");
+    expect(q.get("freshness")).toBe("stale");
+    expect(q.get("owner")).toBe("none");
+    expect(q.get("family")).toBe("IAC");
+    expect(q.get("framework")).toBe("soc2");
+    expect(q.get("anchor_fit")).toBe("partial");
+    expect(q.get("sort")).toBe("-last_observed_at");
+    expect(q.get("evil")).toBeNull();
+    const body = (await res.json()) as { families: string[] };
+    expect(body.families).toEqual(["IAC"]);
+  });
 });

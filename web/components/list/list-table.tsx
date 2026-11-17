@@ -9,8 +9,9 @@
 //
 // Used by all five list-view slices (098/099/100/101/102). The shell
 // stays domain-agnostic: column cells render whatever the page supplies
-// (string, JSX, badge, link, etc.). Sort + paginate stay out-of-scope
-// for v1 — file as spillover slices if a downstream list needs them.
+// (string, JSX, badge, link, etc.). Sort + paginate stay out of the
+// table: a page that sorts or pages on its server renders the controls
+// (#2131: /controls puts a sort button in `header` and sets `ariaSort`).
 //
 // Constitutional commitment: NO controls-specific imports, types, or
 // strings here. The page is the only place that knows about anchors,
@@ -65,6 +66,18 @@ export type ListColumn<Row> = {
   align?: "left" | "right";
   /** Optional Tailwind class to add to the <th> + <td>. */
   className?: string;
+  /**
+   * #2131 — `aria-sort` for the header cell, set by a page whose server
+   * sorts on this column. The table does not sort; the page puts its sort
+   * control in `header`.
+   */
+  ariaSort?: "ascending" | "descending" | "none";
+  /**
+   * #2131 — the label a mobile card shows for this column, when `header`
+   * is a control (a sort button) that should not repeat on every card.
+   * Defaults to `header`.
+   */
+  cardLabel?: ReactNode;
 };
 
 /**
@@ -174,6 +187,7 @@ export function ListTable<Row>({
             {columns.map((col) => (
               <TableHead
                 key={col.id}
+                aria-sort={col.ariaSort}
                 className={
                   (col.align === "right" ? "text-right " : "") +
                   (col.className ?? "")
@@ -256,7 +270,7 @@ export function ListTable<Row>({
                     className="contents"
                   >
                     <dt className="text-[11px] uppercase tracking-wider text-muted-foreground self-center">
-                      {col.header}
+                      {col.cardLabel ?? col.header}
                     </dt>
                     <dd
                       className={[

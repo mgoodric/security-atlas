@@ -194,17 +194,22 @@ export const ENUM_LABELS = {
   // A control's rolled-up evaluation state and evidence freshness, as the
   // controls list API reports them. These are computed by the API, not
   // stored as a Postgres enum, so the coverage test does not check them.
+  // #2131: the keys are the values the rollup produces (evidence_result,
+  // and the freshness ranks), because the list now filters on the server
+  // and refuses any other value. `insufficient_evidence` and
+  // `not_applicable` were never produced.
   EvaluationState: {
     pass: "Pass",
     fail: "Fail",
-    insufficient_evidence: "Insufficient evidence",
-    not_applicable: "Not applicable",
+    inconclusive: "Inconclusive",
     excepted: "Excepted",
+    na: "Not applicable",
   },
   FreshnessState: {
     fresh: "Fresh",
     stale: "Stale",
     expired: "Expired",
+    no_evidence: "No evidence",
   },
   // Statuses held in CHECK-constrained text columns, not Postgres enums.
   ActionPlanStatus: {

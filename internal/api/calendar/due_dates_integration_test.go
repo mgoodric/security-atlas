@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/dbtest/attention"
 )
 
 // calendarEvents GETs path and returns the events keyed by event id.
@@ -57,7 +58,7 @@ func TestCalendar_RiskReviewsAndActionPlansCarryStatus(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	now := time.Now().UTC()
-	fx := seedAttentionFixture(t, admin, now)
+	fx := attention.Seed(t, admin, now)
 
 	path := "/v1/calendar?types=risk,action_plan&from=" + ymd(now.AddDate(0, 0, -7)) + "&to=" + ymd(now.AddDate(0, 0, 14))
 	events := calendarEvents(t, testServer(t, app, fx.A.ID), path)
@@ -111,7 +112,7 @@ func TestCalendar_PastWindowIncludesPastDueItems(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	now := time.Now().UTC()
-	fx := seedAttentionFixture(t, admin, now)
+	fx := attention.Seed(t, admin, now)
 	env := testServer(t, app, fx.A.ID)
 
 	past := calendarEvents(t, env, "/v1/calendar?from="+ymd(now.AddDate(0, 0, -60))+"&to="+ymd(now.AddDate(0, 0, -1)))
@@ -143,7 +144,7 @@ func TestCalendar_FixtureOtherSourcesStayInTheirTenant(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	now := time.Now().UTC()
-	fx := seedAttentionFixture(t, admin, now)
+	fx := attention.Seed(t, admin, now)
 
 	events := calendarEvents(t, testServer(t, app, fx.B.ID),
 		"/v1/calendar?from="+ymd(now.AddDate(0, 0, -60))+"&to="+ymd(now.AddDate(0, 0, 60)))
@@ -167,7 +168,7 @@ func TestCalendar_RollUpAndChildrenEachListedOnce(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	now := time.Now().UTC()
-	fx := seedAttentionFixture(t, admin, now)
+	fx := attention.Seed(t, admin, now)
 	t.Cleanup(func() {
 		_, _ = admin.Exec(context.Background(), `DELETE FROM risk_aggregations WHERE tenant_id = $1`, fx.A.ID)
 	})

@@ -639,18 +639,87 @@ func (s *Store) List(ctx context.Context) ([]ActiveControl, error) {
 	return out, nil
 }
 
+// ListSortKey names one ordering of ListWithState (#2131). Each key maps
+// to a fixed SQL expression in ListActiveControlsWithState; the column is
+// never interpolated.
+type ListSortKey string
+
+// The ListWithState sort keys, one per column of the /controls table.
+// SortDefault is failing controls first, then the stalest evidence.
+const (
+	SortDefault        ListSortKey = "default"
+	SortSCFID          ListSortKey = "scf_id"
+	SortName           ListSortKey = "name"
+	SortFamily         ListSortKey = "family"
+	SortState          ListSortKey = "state"
+	SortFreshness      ListSortKey = "freshness"
+	SortLastObservedAt ListSortKey = "last_observed_at"
+	SortOwner          ListSortKey = "owner"
+	SortFrameworks     ListSortKey = "frameworks"
+)
+
+var listSortKeys = map[ListSortKey]bool{
+	SortSCFID: true, SortName: true, SortFamily: true, SortState: true,
+	SortFreshness: true, SortLastObservedAt: true, SortOwner: true,
+	SortFrameworks: true,
+}
+
+// ErrInvalidListSort is returned by ParseListSort for a sort value that is
+// not on the allow-list. The HTTP layer maps it to 400.
+var ErrInvalidListSort = errors.New("control: sort must be one of scf_id|name|family|state|freshness|last_observed_at|owner|frameworks, optionally prefixed with -")
+
+// ParseListSort reads `?sort=`: empty is the default order, `key` sorts
+// ascending and `-key` descending. Anything else is ErrInvalidListSort.
+func ParseListSort(raw string) (ListSortKey, bool, error) {
+	if raw == "" {
+		return SortDefault, false, nil
+	}
+	desc := strings.HasPrefix(raw, "-")
+	key := ListSortKey(strings.TrimPrefix(raw, "-"))
+	if !listSortKeys[key] {
+		return SortDefault, false, ErrInvalidListSort
+	}
+	return key, desc, nil
+}
+
+// ListFilter narrows and orders ListWithState. Zero fields are no filter;
+// a zero Sort is SortDefault.
+type ListFilter struct {
+	// ScopeCell narrows the state rollup to one scope cell (slice 224).
+	ScopeCell pgtype.UUID
+	// AnchorFit is exact|partial|none (issue #1736).
+	AnchorFit string
+	// Owner is the assigned person (#2128); Unowned keeps only controls
+	// with nobody assigned. The handler never sets both.
+	Owner   pgtype.UUID
+	Unowned bool
+	// Result is the rolled-up evaluation result (an evidence_result value).
+	Result string
+	// Freshness is the rolled-up freshness status.
+	Freshness string
+	// Family matches control_family, case-insensitively.
+	Family string
+	// Framework is a catalog framework slug the control's anchor satisfies.
+	Framework string
+	Sort      ListSortKey
+	SortDesc  bool
+}
+
+func optText(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
 // ListWithState returns one page of the active tenant's active controls,
 // each with its own worst-state-wins evaluation rollup and its anchor's
-// framework slugs, plus the unpaged total (issue #1741). A valid
-// scopeCell narrows the rollup to that cell; the zero value is no filter.
-//
-// A non-empty anchorFit narrows both the page and the total to controls
-// with that fit (issue #1736). A valid owner narrows both to controls
-// assigned to that person (#2128); the zero value is no filter.
-func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID, anchorFit string, owner pgtype.UUID) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
-	var fit *string
-	if anchorFit != "" {
-		fit = &anchorFit
+// framework slugs, plus the total matching the filter (issues #1741,
+// #2131). Every filter narrows both the page and the total.
+func (s *Store) ListWithState(ctx context.Context, limit, offset int32, f ListFilter) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
+	sortKey := f.Sort
+	if sortKey == "" {
+		sortKey = SortDefault
 	}
 	var (
 		rows  []dbx.ListActiveControlsWithStateRow
@@ -662,17 +731,30 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 			TenantID:    pgUUID(tenantID),
 			RowLimit:    limit,
 			RowOffset:   offset,
-			ScopeCellID: scopeCell,
-			AnchorFit:   fit,
-			OwnerUserID: owner,
+			ScopeCellID: f.ScopeCell,
+			AnchorFit:   optText(f.AnchorFit),
+			OwnerUserID: f.Owner,
+			Unowned:     f.Unowned,
+			Result:      optText(f.Result),
+			Freshness:   optText(f.Freshness),
+			Family:      optText(f.Family),
+			Framework:   optText(f.Framework),
+			SortKey:     string(sortKey),
+			SortDesc:    f.SortDesc,
 		})
 		if err != nil {
 			return fmt.Errorf("list active controls with state: %w", err)
 		}
 		total, err = q.CountActiveControls(ctx, dbx.CountActiveControlsParams{
 			TenantID:    pgUUID(tenantID),
-			AnchorFit:   fit,
-			OwnerUserID: owner,
+			ScopeCellID: f.ScopeCell,
+			AnchorFit:   optText(f.AnchorFit),
+			OwnerUserID: f.Owner,
+			Unowned:     f.Unowned,
+			Result:      optText(f.Result),
+			Freshness:   optText(f.Freshness),
+			Family:      optText(f.Family),
+			Framework:   optText(f.Framework),
 		})
 		if err != nil {
 			return fmt.Errorf("count active controls: %w", err)
@@ -683,6 +765,21 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+// ListFamilies returns the distinct families of the active tenant's active
+// controls, for the /controls Family filter (#2131).
+func (s *Store) ListFamilies(ctx context.Context) ([]string, error) {
+	var out []string
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		out, err = q.ListActiveControlFamilies(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("list active control families: %w", err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ListOnLegacySCFAnchors returns the active tenant's active controls still

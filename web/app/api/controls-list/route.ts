@@ -16,13 +16,19 @@
 // `GET /v1/controls?include=state` read the /controls page lists by
 // default; `scope`, `limit` and `offset` pass through. Without it the
 // flat slice-151 envelope is unchanged.
+//
+// #2131 — the filters (`owner`, `result`, `freshness`, `family`,
+// `framework`, `anchor_fit`) and `sort` pass through too, so the page gets
+// back one filtered, sorted page.
 
 import { cookies } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
 import {
+  CONTROLS_WITH_STATE_PARAMS,
   fetchTenantControls,
   fetchTenantControlsWithState,
+  type ControlsWithStateParam,
 } from "@/lib/api/controls-list";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
@@ -43,9 +49,15 @@ export async function GET(req?: NextRequest): Promise<Response> {
   const include = params?.get("include") ?? "";
   if (include.split(",").some((p) => p.trim() === "state")) {
     try {
+      // #2131: the filter and sort names on the allow-list pass through
+      // verbatim; the platform validates each value.
+      const passThrough: Partial<Record<ControlsWithStateParam, string>> = {};
+      for (const key of CONTROLS_WITH_STATE_PARAMS) {
+        const v = params?.get(key);
+        if (v) passThrough[key] = v;
+      }
       const page = await fetchTenantControlsWithState(bearer, {
-        scope: params?.get("scope") || undefined,
-        owner: params?.get("owner") || undefined,
+        ...passThrough,
         limit: parseNonNegativeInt(params?.get("limit") ?? null),
         offset: parseNonNegativeInt(params?.get("offset") ?? null),
       });

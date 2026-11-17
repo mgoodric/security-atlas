@@ -43,8 +43,13 @@ import boardPacksSource from "@/help/modules/board-packs.md";
 import controlsSource from "@/help/modules/controls.md";
 import csfSource from "@/help/modules/csf.md";
 import frameworkScopesSource from "@/help/modules/framework-scopes.md";
+import personnelSecuritySource from "@/help/modules/personnel-security.md";
+import policiesSource from "@/help/modules/policies.md";
+import questionnairesSource from "@/help/modules/questionnaires.md";
+import scfCatalogSource from "@/help/modules/scf-catalog.md";
 import settingsSource from "@/help/modules/settings.md";
 import vendorClaimsSource from "@/help/modules/vendor-claims.md";
+import vendorsSource from "@/help/modules/vendors.md";
 import {
   describeLifecycle,
   extractLifecycleBlocks,
@@ -109,6 +114,12 @@ export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "board-packs.md": boardPacksSource,
   "csf.md": csfSource,
   "vendor-claims.md": vendorClaimsSource,
+  // #2154: Library.
+  "policies.md": policiesSource,
+  "vendors.md": vendorsSource,
+  "personnel-security.md": personnelSecuritySource,
+  "questionnaires.md": questionnairesSource,
+  "scf-catalog.md": scfCatalogSource,
 };
 
 export const HELP_DOCS_BASE_URL =

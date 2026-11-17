@@ -15,7 +15,8 @@
 #   1. wait for Postgres to accept connections
 #   2. seed: default tenant + builtin scope dimension + default scope cell
 #      + default local user (argon2id password hash)
-#   3. import the SCF catalog + the bundled SOC 2 crosswalk
+#   3. import the SCF catalog + the bundled SOC 2 crosswalk, and re-import
+#      every other bundled crosswalk already imported (#2014)
 #   4. wait for the atlas server's /health to return 200
 #   5. ensure an OAuth client + upload the 50 SOC 2 control bundles
 #
@@ -160,6 +161,17 @@ if [ "$SOC2_PRESENT" = "0" ]; then
             log "  atlas-cli catalog import-crosswalk $cw"
         fi
     done
+fi
+
+# security-atlas#2014: converge every other bundled crosswalk this install
+# already imported to the bundled file, so an upgrade moves HIPAA, ISO, PCI
+# DSS and NIST CSF edges off retired SCF anchors the way it moves SOC 2's.
+# Frameworks never imported are skipped. The import retires edges the
+# bundled file no longer lists (every one is printed) and keeps edges other
+# sources wrote. A failure is a warning: it never blocks boot.
+log "converging the other imported bundled crosswalks in $CROSSWALKS_DIR ..."
+if ! atlas-cli catalog converge-crosswalks --exclude soc2-tsc-2017.yaml "$CROSSWALKS_DIR"; then
+    log "WARNING: a bundled crosswalk did not converge (see above); boot continues, re-run it with atlas-cli catalog import-crosswalk"
 fi
 
 # ----- Phase 4: wait for the atlas server /health -----

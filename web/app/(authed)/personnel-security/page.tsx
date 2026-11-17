@@ -47,6 +47,7 @@ import {
   statusBadgeLabel,
 } from "./status";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 const ALL = "__all__";
 
@@ -213,8 +214,14 @@ function PersonnelSecurityPageInner() {
     />
   );
 
-  const subtitle =
-    "Onboarding / offboarding security checklists · overdue offboarding surfaces first";
+  // #2154: the subtitle names the module's key term.
+  const subtitle = (
+    <>
+      Onboarding / offboarding security{" "}
+      <Term id="personnel-checklist">checklists</Term> · overdue offboarding
+      surfaces first
+    </>
+  );
 
   if (listQ.isLoading) {
     return (
