@@ -142,6 +142,26 @@ func AckRoleLabels(cred credstore.Credential) []string {
 	return out
 }
 
+// HasOwnerRole reports whether cred may act as the owner of a control whose
+// free-text owner_role is role: the slice-011 attestation gate, and the CSF
+// assessment edit gate (#2523). The admin flag is a wildcard. An empty role
+// admits only the admin flag, so a control bundle that declared no
+// owner_role cannot be attested by anyone else.
+//
+// It matches role against AckRoleLabels, not TenantRoleLabels. owner_role is
+// free text set by the control bundle, like a policy's required ack roles,
+// and an api_keys.owner_roles label is the only place a user holds a
+// non-canonical one; that label is set by an admin and goes when the key is
+// revoked. A user's JWT session counts its live user_roles alone: its role
+// claim outlives a revoke until the token expires (#2381), so a revoked
+// owner could otherwise keep attesting.
+func HasOwnerRole(cred credstore.Credential, role string) bool {
+	if cred.IsAdmin {
+		return true
+	}
+	return role != "" && containsLabel(AckRoleLabels(cred), role)
+}
+
 // roleLabelIsGrant reports whether cred's OwnerRoles is its own grant rather
 // than a copy of a user's roles: true unless cred is a user's JWT session or
 // an API key bound to a user (issued_by set, so UserID is the owner, not the

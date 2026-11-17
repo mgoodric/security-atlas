@@ -13,8 +13,8 @@
 // httpAuthMiddleware mounts the credential; READ routes require any
 // authenticated tenant credential, WRITE routes require the grc_engineer role
 // OR admin (a viewer / auditor / control_owner cannot edit the assessment).
-// The role gate uses cred.HasOwnerRole("grc_engineer") (admin is a wildcard
-// inside HasOwnerRole), matching the canvas §9.5 role model.
+// The role gate uses authz.HasOwnerRole(cred, "grc_engineer") (admin is a wildcard
+// inside authz.HasOwnerRole), matching the canvas §9.5 role model.
 package csfassessment
 
 import (
@@ -30,12 +30,13 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/csfassessment"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // editRole is the role permitted to edit the CSF assessment. admin is a
-// wildcard inside Credential.HasOwnerRole, so an admin also passes.
+// wildcard inside authz.HasOwnerRole, so an admin also passes.
 const editRole = "grc_engineer"
 
 // Handler bundles the slice-515 routes over the domain store.
@@ -390,7 +391,7 @@ func (h *Handler) editContext(w http.ResponseWriter, r *http.Request) (context.C
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return nil, "", false
 	}
-	if !cred.HasOwnerRole(editRole) {
+	if !authz.HasOwnerRole(cred, editRole) {
 		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer or admin role required to edit the CSF assessment")
 		return nil, "", false
 	}
