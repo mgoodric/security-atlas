@@ -40,6 +40,15 @@ export function RiskHistory({ riskId }: { riskId: string }) {
             No changes since this risk was created.
           </p>
         ) : null}
+        {data?.truncated ? (
+          <p
+            className="mb-3 text-sm text-muted-foreground"
+            data-testid="risk-history-truncated"
+          >
+            Showing the latest {data.entries.length} changes. Older changes are
+            kept but not listed here.
+          </p>
+        ) : null}
         {data && data.entries.length > 0 ? (
           <ol className="space-y-3">
             {data.entries.map((e) => (
