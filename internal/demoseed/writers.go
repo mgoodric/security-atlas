@@ -666,13 +666,13 @@ const DemoSCFRelease = "2026.3"
 // SCF catalog (securecontrolsframework.com) so anchoring to them is anchoring
 // to real SCF controls, not fabricated ones.
 var demoSCFAnchors = []demoSCFAnchor{
-	{"IAC-37", "Identification & Authentication", "Multi-Factor Authentication"},
+	{"IAC-37", "Identification & Authentication", "Multi-Factor Authentication (MFA)"},
 	{"CRY-07", "Cryptographic Protections", "Encrypting Data At Rest"},
 	{"BCD-24", "Business Continuity & Disaster Recovery", "Data Backups"},
-	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
+	{"TDA-05", "Technology Development & Acquisition", "Secure Software Development Practices (SSDP)"},
 	{"TPM-04", "Third-Party Management", "Supply Chain Risk Management (SCRM)"},
 	{"MON-02", "Continuous Monitoring", "Continuous Monitoring"},
-	{"VPM-02", "Vulnerability & Patch Management", "Vulnerability Remediation"},
+	{"VPM-06", "Vulnerability & Patch Management", "Vulnerability Remediation Process"},
 	{"IRO-06", "Incident Response", "Incident Handling"},
 }
 

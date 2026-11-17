@@ -19,6 +19,12 @@ export type ServerSavedView = {
   filters: Record<string, string>;
 };
 
+/**
+ * The list a view belongs to (#2133). The platform treats a request that
+ * names none as `controls`.
+ */
+export type SavedViewSurface = "controls" | "risks";
+
 type ListResponse = { views: ServerSavedView[] };
 
 // bffJSON is a browser-side fetch against the BFF that unwraps an upstream
@@ -51,9 +57,13 @@ async function bffJSON<T>(
   return (await res.json()) as T;
 }
 
-/** List the calling user's saved views (controls surface). */
-export async function listSavedViews(): Promise<ServerSavedView[]> {
-  const out = await bffJSON<ListResponse>("/api/saved-views");
+/** List the calling user's saved views for one list. */
+export async function listSavedViews(
+  surface: SavedViewSurface = "controls",
+): Promise<ServerSavedView[]> {
+  const out = await bffJSON<ListResponse>(
+    `/api/saved-views?surface=${surface}`,
+  );
   return out.views ?? [];
 }
 
@@ -61,10 +71,11 @@ export async function listSavedViews(): Promise<ServerSavedView[]> {
 export async function createSavedView(
   name: string,
   filters: Record<string, string>,
+  surface: SavedViewSurface = "controls",
 ): Promise<ServerSavedView> {
   return bffJSON<ServerSavedView>("/api/saved-views", {
     method: "POST",
-    body: { name, filters },
+    body: { name, filters, surface },
   });
 }
 
