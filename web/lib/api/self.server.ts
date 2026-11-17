@@ -136,7 +136,8 @@ function isEntry(m: unknown): m is EffectiveFeature {
     typeof (m as EffectiveFeature).key === "string" &&
     typeof (m as EffectiveFeature).name === "string" &&
     ((m as EffectiveFeature).state === "on" ||
-      (m as EffectiveFeature).state === "switched_off") &&
+      (m as EffectiveFeature).state === "switched_off" ||
+      (m as EffectiveFeature).state === "no_access") &&
     Array.isArray((m as EffectiveFeature).pages) &&
     (m as EffectiveFeature).pages.every((p) => typeof p === "string")
   );

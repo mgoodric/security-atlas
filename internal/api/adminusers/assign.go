@@ -180,6 +180,10 @@ type CrossTenantUserResponse struct {
 	IDPIssuer   string   `json:"idp_issuer"`
 	IDPSubject  string   `json:"idp_subject"`
 	Roles       []string `json:"roles"`
+	// ModuleAccess is the membership's module access (#2172): null for
+	// all modules. It is set with PUT /v1/admin/users/{id}/module-access
+	// from inside that tenant.
+	ModuleAccess []string `json:"module_access"`
 }
 
 // CrossTenantListResponse is the super-admin GET /v1/admin/users response.
@@ -230,7 +234,11 @@ func (h *Handler) listCrossTenant(w http.ResponseWriter, r *http.Request) {
 		              WHERE ur.tenant_id = u.tenant_id
 		                AND ur.user_id   = u.id::text),
 		            ARRAY[]::text[]
-		        )::text[] AS roles
+		        )::text[] AS roles,
+		        (SELECT ma.modules
+		           FROM member_module_access ma
+		          WHERE ma.tenant_id = u.tenant_id
+		            AND ma.user_id   = u.id::text) AS module_access
 		   FROM users u
 		  WHERE ($1::uuid IS NULL)
 		     OR (u.tenant_id, u.id) > ($1::uuid, $2::uuid)
@@ -250,9 +258,9 @@ func (h *Handler) listCrossTenant(w http.ResponseWriter, r *http.Request) {
 			id, tenantID               uuid.UUID
 			email, displayName, status string
 			idpIssuer, idpSubject      string
-			roles                      []string
+			roles, moduleAccess        []string
 		)
-		if serr := rows.Scan(&id, &tenantID, &email, &displayName, &status, &idpIssuer, &idpSubject, &roles); serr != nil {
+		if serr := rows.Scan(&id, &tenantID, &email, &displayName, &status, &idpIssuer, &idpSubject, &roles, &moduleAccess); serr != nil {
 			httperr.WriteInternal(w, r, "scan cross-tenant user", serr)
 			return
 		}
@@ -260,14 +268,15 @@ func (h *Handler) listCrossTenant(w http.ResponseWriter, r *http.Request) {
 			roles = []string{}
 		}
 		items = append(items, CrossTenantUserResponse{
-			ID:          id.String(),
-			TenantID:    tenantID.String(),
-			Email:       email,
-			DisplayName: displayName,
-			Status:      status,
-			IDPIssuer:   idpIssuer,
-			IDPSubject:  idpSubject,
-			Roles:       roles,
+			ID:           id.String(),
+			TenantID:     tenantID.String(),
+			Email:        email,
+			DisplayName:  displayName,
+			Status:       status,
+			IDPIssuer:    idpIssuer,
+			IDPSubject:   idpSubject,
+			Roles:        roles,
+			ModuleAccess: moduleAccess,
 		})
 	}
 	if rerr := rows.Err(); rerr != nil {

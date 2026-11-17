@@ -35,6 +35,7 @@ export const AUDIT_LOG_KINDS = [
   "control_import",
   "risk",
   "posture_target",
+  "module_access",
 ] as const;
 
 export type AuditLogKind = (typeof AUDIT_LOG_KINDS)[number];

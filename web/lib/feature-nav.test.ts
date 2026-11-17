@@ -9,6 +9,7 @@ import {
   gateNavItems,
   isFeatureDisabledError,
   moduleForPage,
+  owningModuleName,
   resolveFeatureGate,
 } from "@/lib/feature-nav";
 
@@ -141,9 +142,55 @@ describe("resolveFeatureGate", () => {
     ).toBe("off-member");
   });
 
+  test("a module outside the caller's access reads no-access (#2172)", () => {
+    const modules = [questionnaires("no_access")];
+    expect(resolveFeatureGate(modules, "/questionnaires/q1", false)).toBe(
+      "no-access",
+    );
+    expect(gateNavItems(NAV, modules).map((i) => i.href)).not.toContain(
+      "/questionnaires",
+    );
+  });
+
   test("unknown modules read as off (fail-closed)", () => {
     expect(resolveFeatureGate(null, "/board-packs", false)).toBe("off-member");
     expect(resolveFeatureGate([], "/board-packs", true)).toBe("off-admin");
+  });
+});
+
+describe("owningModuleName (#2172)", () => {
+  test("names the module, not the feature inside it", () => {
+    const modules: EffectiveModule[] = [
+      {
+        key: "third_party_risk",
+        name: "Third-party risk",
+        state: "no_access",
+        pages: ["/vendors"],
+        features: [
+          {
+            key: "vendor_claims",
+            name: "Vendor claims",
+            state: "no_access",
+            pages: ["/oscal/component-definitions"],
+          },
+        ],
+      },
+    ];
+    expect(owningModuleName(modules, "/oscal/component-definitions")).toBe(
+      "Third-party risk",
+    );
+    expect(owningModuleName(modules, "/vendors/v1")).toBe("Third-party risk");
+    expect(owningModuleName(modules, "/controls")).toBeUndefined();
+  });
+
+  test("a module without features, and unknown modules", () => {
+    expect(
+      owningModuleName(
+        [board("on"), questionnaires("no_access")],
+        "/questionnaires/q1",
+      ),
+    ).toBe("questionnaires");
+    expect(owningModuleName(null, "/questionnaires")).toBeUndefined();
   });
 });
 
