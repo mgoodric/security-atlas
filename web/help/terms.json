@@ -92,7 +92,8 @@
       "id": "attestation",
       "name": "Attestation",
       "short": "Evidence a person records by hand, stating that a control was carried out, for checks no tool can make automatically. It counts the same as automated evidence.",
-      "long": "A manual attestation goes into the same evidence record as automated evidence and follows the same freshness rules, so it has to be renewed before it goes stale. Acknowledging a policy is also an attestation: you confirm that you've read the current version, and you're asked again when a new version is published or after a year."
+      "long": "A manual attestation goes into the same evidence record as automated evidence and follows the same freshness rules, so it has to be renewed before it goes stale. You attest that the control passed or failed, and a fail needs a reason. Only the latest attestation counts, so a later pass clears an earlier fail. An attestation can be backdated but not dated in the future. Acknowledging a policy is also an attestation: you confirm that you've read the current version, and you're asked again when a new version is published or after a year.",
+      "glossary": "GLOSSARY.md#attestation-2111"
     },
     {
       "id": "evidence-freshness",
@@ -284,6 +285,32 @@
       "name": "STRM relationship",
       "short": "How a framework requirement relates to an SCF control in a mapping: equal, a subset, a superset, or overlapping. Each mapping also carries a strength.",
       "long": "STRM (set theory relationship mapping) comes from NIST IR 8477, the method the SCF uses for its crosswalks. A subset means the requirement asks for less than the SCF control covers; a superset means it asks for more."
+    },
+    {
+      "id": "evaluation",
+      "name": "Control evaluation",
+      "short": "The check that reads a control's current evidence and works out its result: pass, fail, not applicable, inconclusive or excepted.",
+      "long": "Evaluation runs when new evidence arrives, on a schedule, and when someone chooses Evaluate now on a control. It only reads evidence and never changes it, and every run is kept, so you can see what a control's result was on any past date. A control with no current evidence is inconclusive, which is not the same as failing.",
+      "glossary": "GLOSSARY.md#control-evaluation-slice-012"
+    },
+    {
+      "id": "evidence-ledger",
+      "name": "Evidence ledger",
+      "short": "The permanent record of every piece of evidence your organisation has collected. Records are added to it, never edited or deleted.",
+      "long": "Each record says what was observed, when, by which tool or person, and for which control and part of your scope, with a fingerprint (hash) of its content. Because nothing in the ledger changes, an auditor can check what you knew on any past date, and a mistake in evaluation is fixed by evaluating again rather than by editing evidence."
+    },
+    {
+      "id": "exception",
+      "name": "Exception",
+      "short": "An approved, time-limited decision to accept that a control is not met in part of your scope. While it is active, the control shows as Excepted there.",
+      "long": "An exception needs a reason and an end date no more than a year after it was requested, and it never renews by itself. Someone requests it, an approver (normally a different person) approves or denies it, and an approved exception takes effect once it is activated. It ends when it expires or when an approver revokes it, and every step is logged.",
+      "glossary": "GLOSSARY.md#exception-slice-021"
+    },
+    {
+      "id": "implementation-checklist",
+      "name": "Implementation checklist",
+      "short": "A to-do list, per team, of the work needed to put your in-scope controls in place. It is an AI-assisted draft until each team's section is approved.",
+      "long": "Each control goes to a team (infrastructure, engineering or security) by its owner role, by a fixed rule rather than by the AI. The AI writes the tasks and cites the control behind each one. Controls that match no team are listed separately, so none drop out. Only approved sections can be exported."
     }
   ]
 }
