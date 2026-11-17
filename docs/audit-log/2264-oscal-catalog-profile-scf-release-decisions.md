@@ -15,44 +15,48 @@ does:
 With no release declared, both match in the current release as before and
 report a deprecation warning (the expand step). #1774 is the contract step.
 
-- `detection_tier_actual`: none
-- `detection_tier_target`: none
+- `detection_tier_actual`: manual_review
+- `detection_tier_target`: manual_review
 
-No bug surfaced during the work.
+The bug found during the work: the first version let an unloaded prop
+release fall back to the current release for catalog and profile imports
+(see D2). PR review caught it; the integration tests now expect
+`ErrUnknownRelease`.
 
 ## D1 — One resolver for the three OSCAL importers
 
 **Decision.** The component import's declaration reader and anchor loader
-move to a new package, `internal/oscal/scfbind`. `Declared(flag, doc, root)`
-reads the flag and the `scf-release` prop under the document's top-level
-key (`catalog`, `profile`, `component-definition`). `Bind` picks the release
-through `scfrelease.Lookup` and loads its codes. Each importer's
+move to a new package, `internal/oscal/scfbind`. `Declared(importer, flag,
+doc, root)` reads the flag and the `scf-release` prop under the document's
+top-level key (`catalog`, `profile`, `component-definition`), and prefixes
+a conflict error with the importer's name. `Bind` picks the release through
+`scfrelease.Lookup` and loads its codes. Each importer's
 `ErrSCFReleaseConflict` is `scfbind.ErrConflict`, so `errors.Is` holds across
 all three.
 
-**Why.** The three imports match control ids the same way. Two more copies
-of the reader and loader would drift. The component import's behaviour is
-unchanged: its #1771 integration tests pass untouched. The one visible
-change there is the conflict error's prefix, which now reads
-`oscal import:` instead of `componentimport:`.
+**Why.** The three imports match control ids the same way, and a prop means
+the same thing whichever importer reads it. Two more copies of the reader and
+loader would drift. The component import's behaviour is unchanged, including
+its conflict error text (`componentimport: conflicting SCF release
+declarations: ...`); its #1771 integration tests pass untouched.
 
-## D2 — A prop naming an unloaded release falls back; the flag does not
+## D2 — A declared release that is not loaded fails, flag or prop
 
-**Decision.** For catalog and profile imports, a release named only by the
-document's `scf-release` prop that is not loaded matches in the current
-release and reports `scfbind.PropReleaseNotLoadedWarning`. The warning names
-the release and the remedy: load it with `atlas-cli catalog import-scf`, or
-pass `--scf-release` to refuse the import instead. A `--scf-release` that
-is not loaded is `scfrelease.ErrUnknownRelease`, including one that agrees
-with the prop.
+**Decision.** For catalog and profile imports, as for component imports, a
+release declared by `--scf-release` or by the document's `scf-release` prop
+that is not loaded is `scfrelease.ErrUnknownRelease`, and nothing is
+persisted. Neither falls back to the current release.
 
-**Why.** The ticket asks for the #1771 D5 fallback. D5 drew the line between
-the document's statement (a workbook's sheet name), which falls back, and
-the operator's (`--scf-release`), which stays strict. A metadata prop is the
-document's statement, so it takes the same side. The component import keeps
-its #1771 rule that a prop is strict: changing it is out of this ticket's
-scope, and `scfbind.Policy.PropFallsBack` keeps the two explicit rather
-than implied.
+**Why.** The ticket asks to follow the #1771 D5 fallback. D5 falls back
+only for a release _inferred_ from a workbook's `SCF <release>` sheet name,
+which no one wrote down as a declaration. Every explicit declaration stays
+strict: `--scf-release` and a YAML crosswalk's `scf_release` alike. An OSCAL
+`scf-release` prop is written into the document on purpose, so it is an
+explicit declaration, which is why #1771 made the component import's prop
+strict. Applying D5 here therefore means no fallback, and the shared
+resolver treats the prop the same for all three importers. The first version
+of this PR read D5 the other way and let a prop fall back for catalog and
+profile imports only; review caught it.
 
 ## D3 — For a profile, only the entry profile declares
 

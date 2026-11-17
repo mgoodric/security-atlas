@@ -115,9 +115,8 @@ type Request struct {
 	// SCFRelease is the SCF release the control ids are matched in
 	// (#2264), from atlas-oscal --scf-release. The catalog can declare it
 	// instead with an "scf-release" prop on its metadata; when both are
-	// given they must agree. A prop naming a release that is not loaded
-	// falls back to the current release with a warning (#1771 D5); the
-	// flag never does. Neither matches in the current release, with
+	// given they must agree. A declared release that is not loaded fails
+	// the import. Neither matches in the current release, with
 	// SCFReleaseDeprecationWarning.
 	SCFRelease string
 }
@@ -162,7 +161,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	sum := sha256.Sum256(req.OscalJSON)
 	sourceSha := hex.EncodeToString(sum[:])
 
-	release, err := scfbind.Declared(req.SCFRelease, req.OscalJSON, "catalog")
+	release, err := scfbind.Declared("catalogimport", req.SCFRelease, req.OscalJSON, "catalog")
 	if err != nil {
 		return Report{}, err
 	}
@@ -193,7 +192,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 // transaction under app.current_tenant. RLS scopes every write to the
 // caller's tenant (P0-492-5 / AC-11). The audit row is written in the SAME
 // transaction on success so the success record is atomic with the catalog.
-func (im *Importer) persist(ctx context.Context, req Request, release scfbind.Declaration, sourceSha string, resp *oscalv1.ImportCatalogResponse) (Report, error) {
+func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha string, resp *oscalv1.ImportCatalogResponse) (Report, error) {
 	tx, err := im.pool.Begin(ctx)
 	if err != nil {
 		return Report{}, fmt.Errorf("catalogimport: begin tx: %w", err)
@@ -229,7 +228,7 @@ func (im *Importer) persist(ctx context.Context, req Request, release scfbind.De
 	// requirement -> SCF-anchor mapping (D1) is a single query, not one per
 	// control. A control whose OSCAL control-id exactly matches a scf_id in
 	// that release maps TO that anchor; otherwise NULL.
-	b, err := scfbind.Bind(ctx, tx, release, scfbind.Policy{Deprecation: SCFReleaseDeprecationWarning, PropFallsBack: true})
+	b, err := scfbind.Bind(ctx, tx, release, SCFReleaseDeprecationWarning)
 	if err != nil {
 		return Report{}, fmt.Errorf("catalogimport: scf release: %w", err)
 	}

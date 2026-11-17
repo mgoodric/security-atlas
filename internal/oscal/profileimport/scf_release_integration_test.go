@@ -16,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,7 +24,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal/profileimport"
-	"github.com/mgoodric/security-atlas/internal/oscal/scfbind"
 	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
 )
@@ -190,26 +188,24 @@ func TestImportProfile_SCFReleaseAbsentWarnsAndBindsCurrent(t *testing.T) {
 	assertAnchors(t, controlAnchors(t, admin, tenant), map[string]string{"PRM-07": "", "AST-04.1": "AST-04.1"})
 }
 
-// A prop naming a release that is not loaded falls back to the current
-// release with a warning (#1771 D5).
-func TestImportProfile_SCFReleasePropNotLoadedFallsBack(t *testing.T) {
+// A prop naming a release that is not loaded is an explicit declaration,
+// as the flag is (#1771 D5 falls back only for a release inferred from a
+// workbook sheet name): the import fails and persists no control.
+func TestImportProfile_SCFReleasePropNotLoadedFails(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
 
-	report, err := importProfileWith(t, tenant, profileDoc(t, "no-such-release"), "")
-	if err != nil {
-		t.Fatalf("Import: %v", err)
+	if _, err := importProfileWith(t, tenant, profileDoc(t, "no-such-release"), ""); !errors.Is(err, scfrelease.ErrUnknownRelease) {
+		t.Fatalf("err = %v; want ErrUnknownRelease", err)
 	}
-	want := fmt.Sprintf(scfbind.PropReleaseNotLoadedWarning, "no-such-release", "no-such-release")
-	if report.SCFRelease != scfreleasetest.ReleaseB || len(report.Warnings) != 1 || report.Warnings[0] != want {
-		t.Fatalf("report release=%q warnings=%v; want %q and the not-loaded warning", report.SCFRelease, report.Warnings, scfreleasetest.ReleaseB)
+	if got := controlAnchors(t, admin, tenant); len(got) != 0 {
+		t.Fatalf("controls persisted after a refused import: %v", got)
 	}
-	assertAnchors(t, controlAnchors(t, admin, tenant), map[string]string{"PRM-07": "", "AST-04.1": "AST-04.1"})
 }
 
-// A flag naming a release that is not loaded never falls back, and a flag
-// that contradicts the prop is refused; neither persists a control.
+// A flag naming a release that is not loaded fails too, and a flag that
+// contradicts the prop is refused; neither persists a control.
 func TestImportProfile_SCFReleaseErrors(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	scfreleasetest.LoadAB(t, admin)

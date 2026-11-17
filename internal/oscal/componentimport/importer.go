@@ -196,7 +196,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 	sum := sha256.Sum256(req.OscalJSON)
 	sourceSha := hex.EncodeToString(sum[:])
 
-	release, err := scfbind.Declared(req.SCFRelease, req.OscalJSON, "component-definition")
+	release, err := scfbind.Declared("componentimport", req.SCFRelease, req.OscalJSON, "component-definition")
 	if err != nil {
 		return Report{}, err
 	}
@@ -228,7 +228,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 // write to the caller's tenant (P0-512-6 / AC-12). The success audit row is
 // written in the SAME transaction so the success record is atomic with the
 // import.
-func (im *Importer) persist(ctx context.Context, req Request, release scfbind.Declaration, sourceSha string, resp *oscalv1.ImportComponentDefinitionResponse) (Report, error) {
+func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha string, resp *oscalv1.ImportComponentDefinitionResponse) (Report, error) {
 	tx, err := im.pool.Begin(ctx)
 	if err != nil {
 		return Report{}, fmt.Errorf("componentimport: begin tx: %w", err)
@@ -270,7 +270,7 @@ func (im *Importer) persist(ctx context.Context, req Request, release scfbind.De
 	// loaded fails the import (scfrelease.ErrUnknownRelease); it never falls
 	// back to the current release. A claim whose control id is not in the
 	// release stays unmapped, as any non-SCF control id does (slice 512).
-	b, err := scfbind.Bind(ctx, tx, release, scfbind.Policy{Deprecation: SCFReleaseDeprecationWarning})
+	b, err := scfbind.Bind(ctx, tx, release, SCFReleaseDeprecationWarning)
 	if err != nil {
 		return Report{}, fmt.Errorf("componentimport: scf release: %w", err)
 	}

@@ -150,9 +150,8 @@ type Request struct {
 	// in (#2264), from atlas-oscal --scf-release. The entry profile can
 	// declare it instead with an "scf-release" prop on its metadata; when
 	// both are given they must agree. Intermediate profiles and catalogs
-	// declare nothing. A prop naming a release that is not loaded falls
-	// back to the current release with a warning (#1771 D5); the flag
-	// never does. Neither matches in the current release, with
+	// declare nothing. A declared release that is not loaded fails the
+	// import. Neither matches in the current release, with
 	// SCFReleaseDeprecationWarning.
 	SCFRelease string
 }
@@ -220,7 +219,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 		}
 	}
 
-	release, err := scfbind.Declared(req.SCFRelease, req.ProfileJSON, "profile")
+	release, err := scfbind.Declared("profileimport", req.SCFRelease, req.ProfileJSON, "profile")
 	if err != nil {
 		return Report{}, err
 	}
@@ -279,7 +278,7 @@ func (im *Importer) Import(ctx context.Context, req Request) (Report, error) {
 // ONE transaction under app.current_tenant. RLS scopes every write to the
 // caller's tenant (P0-511-5 / AC-12). The audit row is written in the SAME
 // transaction on success so the success record is atomic with the baseline.
-func (im *Importer) persist(ctx context.Context, req Request, release scfbind.Declaration, sourceSha string, resp *oscalv1.ImportProfileResponse, chain []chainLink) (Report, error) {
+func (im *Importer) persist(ctx context.Context, req Request, release, sourceSha string, resp *oscalv1.ImportProfileResponse, chain []chainLink) (Report, error) {
 	tx, err := im.pool.Begin(ctx)
 	if err != nil {
 		return Report{}, fmt.Errorf("profileimport: begin tx: %w", err)
@@ -318,7 +317,7 @@ func (im *Importer) persist(ctx context.Context, req Request, release scfbind.De
 	// the current release when it declares none, so the deterministic
 	// requirement -> SCF-anchor mapping (slice-511 D3, reusing slice-492's
 	// crosswalk) is a single query, not one per control.
-	b, err := scfbind.Bind(ctx, tx, release, scfbind.Policy{Deprecation: SCFReleaseDeprecationWarning, PropFallsBack: true})
+	b, err := scfbind.Bind(ctx, tx, release, SCFReleaseDeprecationWarning)
 	if err != nil {
 		return Report{}, fmt.Errorf("profileimport: scf release: %w", err)
 	}
