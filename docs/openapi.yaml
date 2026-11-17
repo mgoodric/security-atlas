@@ -2726,7 +2726,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/attestations:
     post:
-      summary: POST /v1/controls/{id}/attestations
+      summary: POST /v1/controls/{id}/attestations — record a manual attestation and evaluate the control; API callers should send their own idempotency_key per attestation, since without one the server derives a key that dedupes identical bodies within a 5-minute window (#2520)
       tags: [controls]
       operationId: post-v1-controls-id-attestations
       security:

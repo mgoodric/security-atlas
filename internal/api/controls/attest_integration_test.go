@@ -992,3 +992,108 @@ func TestAttest_FutureObservedAt_Refused(t *testing.T) {
 		t.Fatalf("a refused attestation must write nothing; got %d records", n)
 	}
 }
+
+// waitClearOfAttestWindowEdge sleeps past the server key's 5-minute window
+// boundary when fewer than 10s of the current window remain, so a test's
+// keyless posts all land in one window.
+func waitClearOfAttestWindowEdge() {
+	const window = 5 * time.Minute
+	if left := window - time.Duration(time.Now().UnixNano())%window; left < 10*time.Second {
+		time.Sleep(left + time.Second)
+	}
+}
+
+// #2520: keyless fail, pass, fail inside one window. The second fail has
+// the first fail's server key, but the pass overtook that record, so the
+// second fail is recorded and evaluated and the control ends failing. A
+// plain retry of the second fail still dedupes, onto the second fail.
+func TestAttest_KeylessRepeatAfterNewer_IsRecorded(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_keyless_repeat_after_newer")
+	path := "/v1/controls/" + controlID + "/attestations"
+	failBody := attestBody("Found a stale account.", map[string]any{
+		"result": "fail", "fail_reason": "leaver still active",
+	})
+	passBody := attestBody("Review clean.", map[string]any{"result": "pass"})
+	type wire struct {
+		RecordID     string `json:"record_id"`
+		Deduplicated bool   `json:"deduplicated"`
+		Evaluated    bool   `json:"evaluated"`
+	}
+	post := func(body map[string]any, want int) wire {
+		t.Helper()
+		status, raw := httpJSON(t, s, http.MethodPost, path, s.ownerBear, body)
+		if status != want {
+			t.Fatalf("expected %d; got %d body=%s", want, status, raw)
+		}
+		var resp wire
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("decode: %v body=%s", err, raw)
+		}
+		return resp
+	}
+
+	waitClearOfAttestWindowEdge()
+	fail1 := post(failBody, http.StatusCreated)
+	post(passBody, http.StatusCreated)
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("fail then pass: control result %q, want pass", got)
+	}
+	fail2 := post(failBody, http.StatusCreated)
+	if fail2.Deduplicated || fail2.RecordID == fail1.RecordID {
+		t.Fatalf("a fail overtaken by a pass must not dedupe onto it: first=%+v again=%+v", fail1, fail2)
+	}
+	if !fail2.Evaluated {
+		t.Fatalf("the repeated fail must be evaluated: %+v", fail2)
+	}
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("fail, pass, fail: control result %q, want fail", got)
+	}
+
+	retry := post(failBody, http.StatusOK)
+	if !retry.Deduplicated || retry.RecordID != fail2.RecordID {
+		t.Fatalf("a retry of the repeated fail must return its receipt: fail2=%+v retry=%+v", fail2, retry)
+	}
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("after retry: control result %q, want fail", got)
+	}
+}
+
+// #2520: a client-supplied idempotency_key keeps strict dedupe. Reusing it
+// after a newer attestation returns the first receipt, records nothing, and
+// leaves the newer attestation standing.
+func TestAttest_ClientKeyRepeatAfterNewer_StillDedupes(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_client_key_strict")
+	path := "/v1/controls/" + controlID + "/attestations"
+	key := "attest-client-" + uuid.NewString()
+	failBody := attestBody("Found a stale account.", map[string]any{
+		"result": "fail", "fail_reason": "leaver still active", "idempotency_key": key,
+	})
+
+	status1, raw1 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, failBody)
+	if status1 != http.StatusCreated {
+		t.Fatalf("first: expected 201; got %d body=%s", status1, raw1)
+	}
+	status2, raw2 := httpJSON(t, s, http.MethodPost, path, s.ownerBear,
+		attestBody("Review clean.", map[string]any{"result": "pass"}))
+	if status2 != http.StatusCreated {
+		t.Fatalf("pass: expected 201; got %d body=%s", status2, raw2)
+	}
+	status3, raw3 := httpJSON(t, s, http.MethodPost, path, s.ownerBear, failBody)
+	if status3 != http.StatusOK {
+		t.Fatalf("client-key repeat: expected 200 (dedup); got %d body=%s", status3, raw3)
+	}
+	var r1, r3 struct {
+		RecordID     string `json:"record_id"`
+		Deduplicated bool   `json:"deduplicated"`
+	}
+	_ = json.Unmarshal(raw1, &r1)
+	_ = json.Unmarshal(raw3, &r3)
+	if !r3.Deduplicated || r3.RecordID != r1.RecordID {
+		t.Fatalf("client key must dedupe strictly: first=%+v repeat=%+v", r1, r3)
+	}
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("client-key repeat: control result %q, want pass", got)
+	}
+}
