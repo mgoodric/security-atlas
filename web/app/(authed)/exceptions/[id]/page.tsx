@@ -39,6 +39,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
+import { invalidateApprovals } from "@/lib/api/approvals";
 import { APIError } from "@/lib/api/base";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
 import {
@@ -98,6 +99,7 @@ export default function ExceptionDetailPage({
     onSuccess: (resp) => {
       qc.setQueryData(["exceptions", id], resp);
       void qc.invalidateQueries({ queryKey: ["exceptions"] });
+      void invalidateApprovals(qc);
       setConfirming(false);
       toast("Exception approved");
     },
