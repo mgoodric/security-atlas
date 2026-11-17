@@ -35,11 +35,16 @@
 -- Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
 -- can surface it (the column has always been on evidence_records; the slice
 -- 064 wire shape simply omitted it).
+--
+-- #2470: id_only drops the control_ref leg, so the rows are exactly the
+-- control_id = $2 set the auditor hydrator (audit.Store.ControlPeriods) and
+-- the population draw resolve. The handler sets it for a period-scoped
+-- caller; every other caller keeps the slice-012 OR resolution.
 SELECT id, tenant_id, control_id, control_ref, scope_id,
        observed_at, evidence_kind, provenance, hash, result
 FROM evidence_records
 WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+  AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3))
   AND observed_at >= $4
   AND observed_at <= $5
   AND (
@@ -48,6 +53,18 @@ WHERE tenant_id = $1
       )
 ORDER BY observed_at DESC, id DESC
 LIMIT sqlc.arg(row_limit);
+
+-- name: CountEvidenceForControlWindow :one
+-- #2470: the `total` of GET /v1/evidence?control_id=. Counts the rows
+-- ListEvidenceForControlPaged pages through, before the cursor: the same
+-- control resolution (id_only included) and [since, until] window. The
+-- per-control list ignores scope_cell_id, so the count does too.
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3))
+  AND observed_at >= $4
+  AND observed_at <= $5;
 
 -- name: ListEvidencePaged :many
 -- Slice 106: tenant-wide evidence ledger window with optional filters. Used

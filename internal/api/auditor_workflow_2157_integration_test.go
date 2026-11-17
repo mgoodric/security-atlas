@@ -21,6 +21,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -322,6 +323,58 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 				t.Errorf("%s GET %s (%s): %d %v; want %d", role, rd.path, rd.name, st, out, c.want)
 			}
 		}
+	}
+
+	// #2470: the per-control list's total is that list's own count, and an
+	// auditor's rows are the control_id set its authz lookup covered. A
+	// record filed under another control whose control_ref names wholeCtl
+	// is listed for admin and grc_engineer (the slice-012 resolution), and
+	// not for the auditor.
+	crossRef := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO evidence_records (id, tenant_id, control_id, scope_id, observed_at, ingested_at,
+		                              provenance, result, payload, hash, control_ref)
+		VALUES ($1, $2, $3, $4, $5, now(), jsonb_build_object('evidence_kind', 'test.2470'), 'pass', '{}'::jsonb, $6, $7)`,
+		crossRef, tenant, s.otherCtl, prod, inWindow, "hash-2470-"+crossRef.String(), s.wholeCtl.String()); err != nil {
+		t.Fatalf("seed cross-ref evidence: %v", err)
+	}
+	listed := func(c periodAuditorsCall, path string) ([]string, float64) {
+		t.Helper()
+		st, out := c.do(http.MethodGet, path, nil)
+		if st != http.StatusOK {
+			t.Fatalf("GET %s: %d %v; want 200", path, st, out)
+		}
+		var ids []string
+		rows, _ := out["evidence"].([]any)
+		for _, r := range rows {
+			id, _ := r.(map[string]any)["evidence_id"].(string)
+			ids = append(ids, id)
+		}
+		total, _ := out["total"].(float64)
+		return ids, total
+	}
+	for role, tc := range map[string]struct {
+		call periodAuditorsCall
+		want []string
+	}{
+		"auditor":      {asAuditor, []string{s.whole.String()}},
+		"admin":        {asAdmin, []string{s.whole.String(), crossRef.String()}},
+		"grc_engineer": {asGRC, []string{s.whole.String(), crossRef.String()}},
+	} {
+		ids, total := listed(tc.call, list(s.wholeCtl))
+		slices.Sort(ids)
+		want := slices.Clone(tc.want)
+		slices.Sort(want)
+		if !slices.Equal(ids, want) {
+			t.Errorf("%s list(wholeCtl) rows = %v; want %v", role, ids, want)
+		}
+		if int(total) != len(want) {
+			t.Errorf("%s list(wholeCtl) total = %v; want the filtered count %d, not the tenant ledger", role, total, len(want))
+		}
+	}
+	// The window bounds total too: an earlier range holds no wholeCtl record.
+	if ids, total := listed(asAdmin, listIn(s.wholeCtl, "2025-01-01T00:00:00Z", "2025-06-30T00:00:00Z")); len(ids) != 0 || total != 0 {
+		t.Errorf("admin list before the window: rows %v total %v; want none and 0", ids, total)
 	}
 
 	// Removing the grant takes the period away on the next request.

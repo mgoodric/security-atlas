@@ -17,7 +17,7 @@
 // the wire shape on the plain `go test ./...` unit surface (ADR-0007,
 // P0-409-1: no recorder on the integration surface) the per-control branch
 // depends on a narrow two-method evidenceWindowReader seam (handler.go) —
-// just EvidenceForControl + CountEvidenceForTenant. This recorder injects a
+// EvidenceForControl + CountEvidenceForControl (#2470). This recorder injects a
 // fixed-row stub via the unexported newHandlerWithEvidenceReader. No Postgres,
 // no pool. The seam is internal — New(*Store) is unchanged (P0-409-2); the
 // tenant-wide branch keeps using the concrete *Store (decisions log D3).
@@ -78,6 +78,10 @@ func (s stubEvidenceReader) EvidencePaged(_ context.Context, _ evidenceListPage)
 }
 
 func (s stubEvidenceReader) CountEvidenceForTenant(_ context.Context) (int64, error) {
+	return s.total, nil
+}
+
+func (s stubEvidenceReader) CountEvidenceForControl(_ context.Context, _ uuid.UUID, _ evidencePage) (int64, error) {
 	return s.total, nil
 }
 
@@ -163,7 +167,7 @@ func TestContract_ControlEvidence(t *testing.T) {
 	}
 	assertContractGolden(t,
 		filepath.Clean("../../../web/lib/contracts/control-evidence.golden.json"),
-		"Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the tenant-wide ledger count (NOT the page length). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
+		"Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the count of the request's control and [since, until] window, not the page length and not the tenant ledger (#2470). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
 		"GET /v1/evidence?control_id={id}",
 		recorded,
 	)
