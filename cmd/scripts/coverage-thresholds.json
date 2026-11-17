@@ -301,6 +301,7 @@
     "internal/mcp/writeproposals": 75,
     "internal/metrics/eval": 76,
     "internal/metrics/scheduler": 76,
+    "internal/netguard": 91,
     "internal/notify": 85,
     "internal/notify/email": 65,
     "internal/notify/scheduler": 69,

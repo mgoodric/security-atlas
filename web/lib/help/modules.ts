@@ -30,6 +30,7 @@
 // The `.md` imports resolve to the file's text: Turbopack's `raw` rule in
 // `next.config.ts`, and a matching plugin in `vitest.config.ts`.
 
+import actionPlansSource from "@/help/modules/action-plans.md";
 import adminSource from "@/help/modules/admin.md";
 import adminApiKeysSource from "@/help/modules/admin-api-keys.md";
 import adminDemoSource from "@/help/modules/admin-demo.md";
@@ -49,6 +50,8 @@ import frameworkScopesSource from "@/help/modules/framework-scopes.md";
 import personnelSecuritySource from "@/help/modules/personnel-security.md";
 import policiesSource from "@/help/modules/policies.md";
 import questionnairesSource from "@/help/modules/questionnaires.md";
+import risksSource from "@/help/modules/risks.md";
+import risksHierarchySource from "@/help/modules/risks-hierarchy.md";
 import scfCatalogSource from "@/help/modules/scf-catalog.md";
 import settingsSource from "@/help/modules/settings.md";
 import vendorClaimsSource from "@/help/modules/vendor-claims.md";
@@ -105,6 +108,10 @@ export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "evidence.md": evidenceSource,
   "exceptions.md": exceptionsSource,
   "controls-checklist.md": controlsChecklistSource,
+  // #2151: Risks.
+  "risks.md": risksSource,
+  "risks-hierarchy.md": risksHierarchySource,
+  "action-plans.md": actionPlansSource,
   // #2155: Settings & admin.
   "settings.md": settingsSource,
   "admin.md": adminSource,

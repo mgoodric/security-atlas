@@ -29,6 +29,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/crosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
@@ -148,6 +149,12 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// SSO / Users / Audit-log UI pages so they can flip from PARTIAL to
 	// PASS.
 	ssoH := adminsso.New(s.dbPool)
+	// #2534: the preflight honours the same private-issuer opt-in as the
+	// sign-in path. cmd/atlas refuses to boot on an invalid value, so an
+	// error here can only mean strict.
+	if p, err := oidc.IssuerPolicyFromEnv(); err == nil && p.AllowPrivate {
+		ssoH = ssoH.WithPreflightOptions(adminsso.PreflightOptions{AllowPrivateIPs: true})
+	}
 	root.Get("/v1/admin/sso", ssoH.Get)
 	root.Patch("/v1/admin/sso", ssoH.Patch)
 	root.Post("/v1/admin/sso/preflight", ssoH.Preflight)

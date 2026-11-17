@@ -51,6 +51,17 @@ import {
   fetchHierarchyThemes,
 } from "@/lib/api/risk-hierarchy";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+
+// #2151 — the header names the page's key terms, so each definition is one
+// hover away. Shared by the Suspense fallback, so it shows while loading.
+const HIERARCHY_SUBTITLE = (
+  <>
+    Navigate risks by <Term id="org-unit">org unit</Term> and level, watch{" "}
+    <Term id="theme">theme</Term> patterns emerge, and track{" "}
+    <Term id="decision">decision</Term>-revisit dates.
+  </>
+);
 
 // ----- URL <-> filter-state codec -----
 
@@ -153,7 +164,7 @@ function HierarchyView() {
     <PageShell
       data-testid="risk-hierarchy-dashboard"
       title={pageTitle("/risks/hierarchy")}
-      subtitle="Navigate risks by org_unit and level, watch theme patterns emerge, and track decision-revisit dates."
+      subtitle={HIERARCHY_SUBTITLE}
       actions={
         // Slice 100 AC-8: reciprocal page-header link to the flat list. The
         // hierarchy was lifted out of the sidebar in slice 100 to close
@@ -237,7 +248,10 @@ export default function RiskHierarchyPage() {
   return (
     <Suspense
       fallback={
-        <PageShell title={pageTitle("/risks/hierarchy")}>
+        <PageShell
+          title={pageTitle("/risks/hierarchy")}
+          subtitle={HIERARCHY_SUBTITLE}
+        >
           <div
             className="text-sm text-muted-foreground"
             data-testid="risk-hierarchy-loading"

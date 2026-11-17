@@ -174,7 +174,7 @@ func TestNonceMismatchRejected(t *testing.T) {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver, testStateKey)
+	a := oidc.New(resolver, testStateKey, loopbackIdP)
 
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
@@ -228,7 +228,7 @@ func TestNonceMatchAccepted(t *testing.T) {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver, testStateKey)
+	a := oidc.New(resolver, testStateKey, loopbackIdP)
 
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
@@ -283,7 +283,7 @@ func TestStateStillEnforcedAlongsideNonce(t *testing.T) {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver, testStateKey)
+	a := oidc.New(resolver, testStateKey, loopbackIdP)
 
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
