@@ -148,9 +148,12 @@ type policyWire struct {
 }
 
 // riskWire is the AC-3 row shape: one linked risk + its link weight.
+// Methodology says how to read the scores (#2185): on a "fair" risk the
+// residual is a dollar amount, not a 1..25 severity, and has no band.
 type riskWire struct {
 	RiskID        string          `json:"risk_id"`
 	Title         string          `json:"title"`
+	Methodology   string          `json:"methodology"`
 	InherentScore json.RawMessage `json:"inherent_score"`
 	ResidualScore json.RawMessage `json:"residual_score"`
 	LinkWeight    *float64        `json:"link_weight"`
@@ -411,6 +414,7 @@ func (h *Handler) Risks(w http.ResponseWriter, r *http.Request) {
 		out[i] = riskWire{
 			RiskID:        uuidString(rk.ID),
 			Title:         rk.Title,
+			Methodology:   string(rk.Methodology),
 			InherentScore: jsonOrNull(rk.InherentScore),
 			ResidualScore: jsonOrNull(rk.ResidualScore),
 			LinkWeight:    numericToFloat(rk.DesignScore),

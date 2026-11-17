@@ -68,6 +68,7 @@ type riskRow struct {
 	Category      string
 	CategoryName  string
 	Treatment     string
+	Methodology   dbx.RiskMethodology
 	ResidualScore []byte
 	InherentScore []byte
 	UpdatedAt     time.Time
@@ -136,6 +137,7 @@ func riskRowsFromDB(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row
 			ID:            uuid.UUID(r.ID.Bytes),
 			Title:         r.Title,
 			Treatment:     treatmentLabel(r),
+			Methodology:   r.Methodology,
 			ResidualScore: r.ResidualScore,
 			InherentScore: r.InherentScore,
 		}

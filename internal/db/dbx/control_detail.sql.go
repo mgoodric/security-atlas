@@ -423,7 +423,7 @@ func (q *Queries) ListPoliciesLinkedToControl(ctx context.Context, arg ListPolic
 }
 
 const listRisksLinkedToControl = `-- name: ListRisksLinkedToControl :many
-SELECT r.id, r.title, r.inherent_score, r.residual_score,
+SELECT r.id, r.title, r.methodology, r.inherent_score, r.residual_score,
        l.design_score, l.created_at
 FROM risk_control_links l
 JOIN risks r
@@ -442,6 +442,7 @@ type ListRisksLinkedToControlParams struct {
 type ListRisksLinkedToControlRow struct {
 	ID            pgtype.UUID        `json:"id"`
 	Title         string             `json:"title"`
+	Methodology   RiskMethodology    `json:"methodology"`
 	InherentScore []byte             `json:"inherent_score"`
 	ResidualScore []byte             `json:"residual_score"`
 	DesignScore   pgtype.Numeric     `json:"design_score"`
@@ -467,6 +468,7 @@ func (q *Queries) ListRisksLinkedToControl(ctx context.Context, arg ListRisksLin
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
+			&i.Methodology,
 			&i.InherentScore,
 			&i.ResidualScore,
 			&i.DesignScore,

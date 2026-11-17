@@ -290,19 +290,3 @@ func signedPts(v float64) string {
 	}
 	return s
 }
-
-// Severity bands on the app's single 1..25 risk scale — the register's
-// bands (web/app/(authed)/risks/filters.ts severityBand): High from 15,
-// Medium from 8, Low from 1, none below.
-func severityBandLabel(severity float64) string {
-	switch {
-	case severity >= 15:
-		return "High"
-	case severity >= 8:
-		return "Medium"
-	case severity >= 1:
-		return "Low"
-	default:
-		return "None"
-	}
-}
