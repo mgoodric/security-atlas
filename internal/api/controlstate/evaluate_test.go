@@ -35,10 +35,16 @@ type stubRunner struct {
 	calls   atomic.Int32
 	release chan struct{} // when non-nil, EvaluateControl blocks on it
 	evalErr error
+
+	mu     sync.Mutex
+	actors []string // the actor each run was started with
 }
 
-func (s *stubRunner) EvaluateControl(ctx context.Context, _ uuid.UUID, trigger string, _ time.Time) (int, error) {
+func (s *stubRunner) EvaluateControlBy(ctx context.Context, _ uuid.UUID, trigger, actor string, _ time.Time) (int, error) {
 	s.calls.Add(1)
+	s.mu.Lock()
+	s.actors = append(s.actors, actor)
+	s.mu.Unlock()
 	if trigger != eval.TriggerManual {
 		return 0, context.Canceled
 	}
@@ -203,5 +209,76 @@ func TestEvaluate_UnknownControlIs404(t *testing.T) {
 	cred := credstore.Credential{ID: "key_admin", UserID: "key_admin", TenantID: evalTenantID, IsAdmin: true}
 	if rec := doEvaluate(t, newEvalTestHandler(r, ""), cred); rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d; want 404", rec.Code)
+	}
+}
+
+// #2479: the run records the caller's principal: the bare users(id) for a
+// person, whether by JWT session or user-bound key, else the key's own id.
+func TestEvaluate_RecordsCallerPrincipal(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		cred credstore.Credential
+		want string
+	}{
+		{"owner via JWT session", credstore.Credential{ID: "jwt:o", UserID: "user:" + evalOwnerID, TenantID: evalTenantID, TenantRoles: []string{"control_owner"}}, evalOwnerID},
+		{"owner via user-bound key", credstore.Credential{ID: "key_o", UserID: evalOwnerID, TenantID: evalTenantID, OwnerRoles: []string{"control_owner"}}, evalOwnerID},
+		{"unbound admin key", credstore.Credential{ID: "key_admin", UserID: "key_admin", TenantID: evalTenantID, IsAdmin: true}, "key_admin"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := &stubRunner{}
+			if rec := doEvaluate(t, newEvalTestHandler(r, evalOwnerID), tc.cred); rec.Code != http.StatusOK {
+				t.Fatalf("status = %d; body %s", rec.Code, rec.Body.String())
+			}
+			if len(r.actors) != 1 || r.actors[0] != tc.want {
+				t.Fatalf("actors = %v; want [%s]", r.actors, tc.want)
+			}
+		})
+	}
+}
+
+// #2479: past the per-principal limit the call is 429 with Retry-After and
+// starts no evaluation; another principal keeps its own budget.
+func TestEvaluate_PerPrincipalRateLimit(t *testing.T) {
+	t.Parallel()
+	r := &stubRunner{}
+	h := newEvalTestHandler(r, evalOwnerID)
+	now := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	h.limiter = newPrincipalLimiter(2, func() time.Time { return now })
+	owner := credstore.Credential{ID: "jwt:o", UserID: "user:" + evalOwnerID, TenantID: evalTenantID, TenantRoles: []string{"control_owner"}}
+	admin := credstore.Credential{ID: "key_admin", UserID: "key_admin", TenantID: evalTenantID, IsAdmin: true}
+
+	for i := 0; i < 2; i++ {
+		if rec := doEvaluate(t, h, owner); rec.Code != http.StatusOK {
+			t.Fatalf("call %d status = %d; want 200", i, rec.Code)
+		}
+	}
+	rec := doEvaluate(t, h, owner)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("third call status = %d; want 429", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "30" {
+		t.Fatalf("Retry-After = %q; want 30", got)
+	}
+	if got := r.calls.Load(); got != 2 {
+		t.Fatalf("EvaluateControlBy calls = %d; want 2 (the refused call runs nothing)", got)
+	}
+	if rec := doEvaluate(t, h, admin); rec.Code != http.StatusOK {
+		t.Fatalf("other principal status = %d; want 200", rec.Code)
+	}
+
+	// A refused caller (403) spends no token.
+	stranger := credstore.Credential{ID: "jwt:s", UserID: "user:" + evalOtherID, TenantID: evalTenantID, TenantRoles: []string{"viewer"}}
+	for i := 0; i < 3; i++ {
+		if rec := doEvaluate(t, h, stranger); rec.Code != http.StatusForbidden {
+			t.Fatalf("stranger status = %d; want 403", rec.Code)
+		}
+	}
+
+	now = now.Add(30 * time.Second)
+	if rec := doEvaluate(t, h, owner); rec.Code != http.StatusOK {
+		t.Fatalf("after 30s status = %d; want 200", rec.Code)
 	}
 }
