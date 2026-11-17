@@ -26,6 +26,8 @@ import {
   DEFAULT_NO_DATA_REASON,
   measuredObservations,
   metricTargetError,
+  metricTargetInputFromStored,
+  metricTargetStoredFromInput,
   neutralBadgeLabel,
   noDataReason,
   reassembleCascade,
@@ -363,5 +365,64 @@ describe("metricTargetError", () => {
       "Critical must be a number.",
     );
     expect(check("", 2, 1, 0)).toBe("Choose a direction.");
+  });
+
+  test("a percent metric's values must be 0..100; other units have no range", () => {
+    const input = {
+      direction: "higher_is_better",
+      target_value: 120,
+      warning_threshold: 80,
+      critical_threshold: 60,
+    };
+    expect(metricTargetError(input, "percent")).toBe(
+      "Target must be between 0 and 100.",
+    );
+    expect(
+      metricTargetError(
+        { ...input, target_value: 90, critical_threshold: -1 },
+        "percent",
+      ),
+    ).toBe("Critical must be between 0 and 100.");
+    expect(metricTargetError({ ...input, target_value: 90 }, "percent")).toBe(
+      null,
+    );
+    expect(metricTargetError(input, "count")).toBeNull();
+  });
+});
+
+// #2341 — a percent target is typed as a percentage and stored as the
+// fraction the metric's observations use.
+describe("metric target percent conversion", () => {
+  test("stored fraction -> shown percentage", () => {
+    expect(metricTargetInputFromStored("0.9", "percent")).toBe("90");
+    expect(metricTargetInputFromStored("0.7", "percent")).toBe("70");
+    expect(metricTargetInputFromStored("0.955", "percent")).toBe("95.5");
+    expect(metricTargetInputFromStored("1", "percent")).toBe("100");
+    expect(metricTargetInputFromStored("0", "percent")).toBe("0");
+    // Already percentage points, as formatValue reads it.
+    expect(metricTargetInputFromStored("85", "percent")).toBe("85");
+    expect(metricTargetInputFromStored(undefined, "percent")).toBe("");
+  });
+
+  test("typed percentage -> stored fraction", () => {
+    expect(metricTargetStoredFromInput(90, "percent")).toBe(0.9);
+    expect(metricTargetStoredFromInput(70.1, "percent")).toBe(0.701);
+    expect(metricTargetStoredFromInput(100, "percent")).toBe(1);
+    expect(metricTargetStoredFromInput(0, "percent")).toBe(0);
+  });
+
+  test("the two directions round-trip", () => {
+    for (const pct of [0, 12.5, 33.33, 70, 99.99, 100]) {
+      const stored = metricTargetStoredFromInput(pct, "percent");
+      expect(metricTargetInputFromStored(String(stored), "percent")).toBe(
+        String(pct),
+      );
+    }
+  });
+
+  test("other units pass through unchanged", () => {
+    expect(metricTargetInputFromStored("14", "days")).toBe("14");
+    expect(metricTargetInputFromStored("0.5", "count")).toBe("0.5");
+    expect(metricTargetStoredFromInput(14, "days")).toBe(14);
   });
 });

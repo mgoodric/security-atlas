@@ -6,9 +6,10 @@
 // The target route is stateful: GET answers 404 until the dialog's PUT,
 // then returns what was sent, so the assertions read the round-trip.
 //
-//   1. an admin sees Set target, the dialog refuses misordered thresholds,
-//      and saving 0.8 / 0.7 / 0.6 (below the 92% value) turns the badge
-//      green, never red;
+//   1. an admin sees Set target, the dialog refuses misordered and
+//      out-of-range percentages, and saving 80 / 70 / 60 % (below the 92%
+//      value) sends 0.8 / 0.7 / 0.6 and turns the badge green, never red;
+//      reopened, the dialog shows the percentages again;
 //   2. a viewer sees no Set target, and the board card's "No target set"
 //      is text, not a link to the form.
 //
@@ -113,21 +114,24 @@ test.describe("metric targets (#2341)", () => {
     const findings = await seriousAxeViolations(page);
     expect(findings, describeAxe(findings)).toEqual([]);
 
+    // A percent metric takes percentages, refused outside 0..100 and out
+    // of order, and saves them as the fractions its observations use.
     await dialog.getByLabel("Direction").selectOption("higher_is_better");
-    await dialog.getByLabel("Target", { exact: true }).fill("0.8");
-    await dialog.getByLabel("Warning threshold").fill("0.9");
-    await dialog.getByLabel("Critical threshold").fill("0.6");
+    await dialog.getByLabel("Target (%)").fill("80");
+    await dialog.getByLabel("Warning threshold (%)").fill("90");
+    await dialog.getByLabel("Critical threshold (%)").fill("60");
     await expect(dialog.getByTestId("metric-target-problem")).toContainText(
       "critical ≤ warning ≤ target",
     );
     await expect(
       dialog.getByRole("button", { name: "Save target" }),
     ).toBeDisabled();
-
-    await dialog.getByLabel("Warning threshold").fill("0.7");
-    await expect(dialog.getByTestId("metric-target-target-preview")).toHaveText(
-      "Shown as 80.0%",
+    await dialog.getByLabel("Warning threshold (%)").fill("170");
+    await expect(dialog.getByTestId("metric-target-problem")).toHaveText(
+      "Warning must be between 0 and 100.",
     );
+
+    await dialog.getByLabel("Warning threshold (%)").fill("70");
     await dialog.getByRole("button", { name: "Save target" }).click();
     await expect(dialog).toBeHidden();
 
@@ -145,6 +149,12 @@ test.describe("metric targets (#2341)", () => {
       "80.0%",
     );
     await expect(setTarget).toHaveText("Edit target");
+
+    // Reopened, the saved fractions show as percentages again.
+    await setTarget.click();
+    await expect(dialog.getByLabel("Target (%)")).toHaveValue("80");
+    await expect(dialog.getByLabel("Warning threshold (%)")).toHaveValue("70");
+    await expect(dialog.getByLabel("Critical threshold (%)")).toHaveValue("60");
   });
 
   test("a viewer cannot set a target and is not linked to the form", async ({

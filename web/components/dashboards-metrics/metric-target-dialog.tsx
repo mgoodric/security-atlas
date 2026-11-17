@@ -28,12 +28,12 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
   metricTargetError,
+  metricTargetInputFromStored,
+  metricTargetStoredFromInput,
   upsertMetricTarget,
   type MetricTarget,
 } from "@/lib/api/metrics";
 import { POSTURE_DIRECTIONS } from "@/lib/api/posture-targets";
-
-import { formatValue, parseValue } from "./format";
 
 type Fields = {
   target: string;
@@ -43,11 +43,11 @@ type Fields = {
   notes: string;
 };
 
-function initialFields(current: MetricTarget | null): Fields {
+function initialFields(current: MetricTarget | null, unit: string): Fields {
   return {
-    target: current?.target_value ?? "",
-    warning: current?.warning_threshold ?? "",
-    critical: current?.critical_threshold ?? "",
+    target: metricTargetInputFromStored(current?.target_value, unit),
+    warning: metricTargetInputFromStored(current?.warning_threshold, unit),
+    critical: metricTargetInputFromStored(current?.critical_threshold, unit),
     direction: current?.direction ?? "higher_is_better",
     notes: current?.notes ?? "",
   };
@@ -67,7 +67,9 @@ export function MetricTargetDialog({
   current: MetricTarget | null;
 }) {
   const [open, setOpen] = useState(false);
-  const [fields, setFields] = useState<Fields>(() => initialFields(current));
+  const [fields, setFields] = useState<Fields>(() =>
+    initialFields(current, unit),
+  );
   const queryClient = useQueryClient();
   const ids = {
     target: useId(),
@@ -84,12 +86,21 @@ export function MetricTargetDialog({
     critical_threshold: num(fields.critical),
     direction: fields.direction,
   };
-  const problem = metricTargetError(input);
+  const problem = metricTargetError(input, unit);
 
   const mutation = useMutation({
     mutationFn: () =>
       upsertMetricTarget(metricID, {
-        ...input,
+        direction: input.direction,
+        target_value: metricTargetStoredFromInput(input.target_value, unit),
+        warning_threshold: metricTargetStoredFromInput(
+          input.warning_threshold,
+          unit,
+        ),
+        critical_threshold: metricTargetStoredFromInput(
+          input.critical_threshold,
+          unit,
+        ),
         notes: fields.notes.trim() === "" ? undefined : fields.notes.trim(),
       }),
     onSuccess: async () => {
@@ -103,16 +114,17 @@ export function MetricTargetDialog({
   const set = (k: keyof Fields) => (v: string) =>
     setFields((f) => ({ ...f, [k]: v }));
 
-  // Percent and ratio metrics record fractions (0..1); formatValue shows
-  // them as percentages.
-  const fractional = unit === "percent" || unit === "ratio";
+  // A percent metric records fractions (0..1) but is entered as a
+  // percentage; the helpers convert both ways.
+  const percent = unit === "percent";
+  const unitSuffix = percent ? " (%)" : "";
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
         // Re-seed from the saved target each time the dialog opens.
-        if (next) setFields(initialFields(current));
+        if (next) setFields(initialFields(current, unit));
         mutation.reset();
         setOpen(next);
       }}
@@ -173,11 +185,14 @@ export function MetricTargetDialog({
               <div key={k} className="flex flex-col gap-1 text-sm">
                 <label htmlFor={ids[k]} className="font-medium">
                   {label}
+                  {unitSuffix}
                 </label>
                 <Input
                   id={ids[k]}
                   type="number"
                   inputMode="decimal"
+                  min={percent ? 0 : undefined}
+                  max={percent ? 100 : undefined}
                   step="any"
                   value={fields[k]}
                   onChange={(e) => set(k)(e.target.value)}
@@ -185,19 +200,15 @@ export function MetricTargetDialog({
                   aria-describedby={ids.hint}
                   data-testid={`metric-target-${k}`}
                 />
-                <span
-                  className="text-xs text-muted-foreground"
-                  data-testid={`metric-target-${k}-preview`}
-                >
-                  Shown as {formatValue(parseValue(fields[k]), unit)}
-                </span>
               </div>
             ))}
-            <p id={ids.hint} className="text-xs text-muted-foreground">
-              {/* The badge compares the raw stored number, so a percentage
-                  is entered the way the metric records it. */}
-              {fractional
-                ? "Enter the value as the metric records it: a fraction, so 0.9 is 90%."
+            <p
+              id={ids.hint}
+              className="text-xs text-muted-foreground"
+              data-testid="metric-target-hint"
+            >
+              {percent
+                ? "Enter a percentage from 0 to 100, so 90 is 90%."
                 : `Enter the value in the metric's unit (${unit}).`}
             </p>
             <div className="flex flex-col gap-1 text-sm">
