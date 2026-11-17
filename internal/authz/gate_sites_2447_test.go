@@ -85,6 +85,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			"per-control evidence list (#2470): narrows a period-scoped caller to control_id resolution; never a refusal"),
 		"controlimports/settings.go requireTenantAdmin":               notRoute(adm, preRoute+" (control import LLM settings)"),
 		"controls/handlers.go Handler.UploadBundle":                   site(adm, r2447(post, "/v1/controls:upload-bundle")),
+		"controlstate/evaluate.go EvaluateHandler.Evaluate":           site(adm, r2447(post, "/v1/controls/"+id+"/evaluate")),
 		"dashboardexport/dashboardexport.go hasDashboardExportAccess": site(apr, r2447(get, "/v1/dashboard/export")),
 		"evidencesummary/periodhandler.go hasAuditWorkspaceRead": site(apr,
 			r2447(get, "/v1/audit-periods/"+id+"/controls/"+id+"/evidence-summary")),

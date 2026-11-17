@@ -159,7 +159,10 @@ export type FixtureName =
   // #2173 — a tenant with a policy, a risk and a vendor review due soon
   // and one grc_engineer member limited to Policies, for
   // combined-views-modules.spec.ts.
-  | "combined-views-modules";
+  | "combined-views-modules"
+  // #2110 — a tenant of its own, so control-actions-2110.spec.ts's
+  // uploads never change the demo tenant's controls.
+  | "control-actions";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

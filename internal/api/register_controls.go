@@ -119,6 +119,9 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// decision the single route does (the role gate is byte-identical).
 	ownerAssignH := controlsapi.NewOwnerAssignHandler(s.dbPool)
 	root.Post("/v1/controls/{id}/owner", ownerAssignH.AssignOwner)
+	// #2110: Download bundle — the control's control.yaml as a tarball
+	// POST /v1/controls:upload-bundle reads back (a read on controls).
+	root.Get("/v1/controls/{id}/bundle", controlsapi.NewBundleDownloadHandler(controlsStore).Download)
 	root.Post("/v1/controls:bulk-assign-owner", ownerAssignH.BulkAssignOwner)
 
 	// Saved filter-views — a per-user self-service surface (resource type
