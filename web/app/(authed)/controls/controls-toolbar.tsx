@@ -157,7 +157,7 @@ export function BulkAssignMessage({ message }: BulkAssignMessageProps) {
 }
 
 export type SavedViewsBarProps = {
-  views: SavedView[];
+  views: Pick<SavedView, "id" | "name">[];
   /** The id of the currently-loaded view, or "" when none is active. */
   activeViewId: string;
   /** True when the current filter set is non-default (worth saving). */
@@ -168,6 +168,8 @@ export type SavedViewsBarProps = {
     name: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
   onDeleteView: (id: string) => void;
+  /** Prefix of every test id, so a second list can host the bar (#2133). */
+  testIdPrefix?: string;
 };
 
 const NO_VIEW = "";
@@ -183,13 +185,14 @@ export function SavedViewsBar({
   onLoadView,
   onSaveView,
   onDeleteView,
+  testIdPrefix = "controls",
 }: SavedViewsBarProps) {
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const errorId = error ? "controls-save-view-error" : undefined;
+  const errorId = error ? `${testIdPrefix}-save-view-error` : undefined;
 
   async function submitSave() {
     if (submitting) return;
@@ -210,14 +213,14 @@ export function SavedViewsBar({
 
   return (
     <div
-      data-testid="controls-saved-views-bar"
+      data-testid={`${testIdPrefix}-saved-views-bar`}
       className="mb-3 flex flex-wrap items-center gap-2 text-xs"
     >
       <label className="flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5">
         <span className="text-muted-foreground">Saved view</span>
         <select
           aria-label="Saved view"
-          data-testid="controls-saved-views-select"
+          data-testid={`${testIdPrefix}-saved-views-select`}
           value={activeViewId}
           onChange={(e) => onLoadView(e.target.value)}
           className="rounded-sm bg-transparent font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -236,7 +239,7 @@ export function SavedViewsBar({
           type="button"
           variant="ghost"
           size="sm"
-          data-testid="controls-saved-views-delete"
+          data-testid={`${testIdPrefix}-saved-views-delete`}
           onClick={() => onDeleteView(activeViewId)}
         >
           Delete view
@@ -247,7 +250,7 @@ export function SavedViewsBar({
         <span className="flex flex-wrap items-center gap-1.5">
           <Input
             aria-label="New view name"
-            data-testid="controls-save-view-name"
+            data-testid={`${testIdPrefix}-save-view-name`}
             value={name}
             maxLength={MAX_VIEW_NAME_LENGTH}
             placeholder="View name"
@@ -269,7 +272,7 @@ export function SavedViewsBar({
             type="button"
             size="sm"
             disabled={submitting}
-            data-testid="controls-save-view-confirm"
+            data-testid={`${testIdPrefix}-save-view-confirm`}
             onClick={() => void submitSave()}
           >
             {submitting ? "Saving…" : "Save"}
@@ -278,7 +281,7 @@ export function SavedViewsBar({
             type="button"
             variant="ghost"
             size="sm"
-            data-testid="controls-save-view-cancel"
+            data-testid={`${testIdPrefix}-save-view-cancel`}
             onClick={() => {
               setSaving(false);
               setName("");
@@ -289,10 +292,10 @@ export function SavedViewsBar({
           </Button>
           {error ? (
             <span
-              id="controls-save-view-error"
+              id={`${testIdPrefix}-save-view-error`}
               role="alert"
               aria-live="polite"
-              data-testid="controls-save-view-error"
+              data-testid={`${testIdPrefix}-save-view-error`}
               className="font-medium text-destructive"
             >
               {error}
@@ -304,7 +307,7 @@ export function SavedViewsBar({
           type="button"
           variant="outline"
           size="sm"
-          data-testid="controls-save-view-open"
+          data-testid={`${testIdPrefix}-save-view-open`}
           disabled={!canSave}
           title={
             canSave
