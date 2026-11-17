@@ -55,6 +55,10 @@ var HintModules = []string{
 	"evidence",
 	"exceptions",
 	"controls-checklist",
+	// #2151: Risks.
+	"risks",
+	"risks-hierarchy",
+	"action-plans",
 }
 
 // HintChange is one PATCH's worth of hint edits. Reset clears every

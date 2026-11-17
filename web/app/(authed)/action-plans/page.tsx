@@ -38,6 +38,7 @@ import {
 
 import { dateLabel, statusLabel, statusPillClass } from "./status";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 const ALL = "__all__";
 
@@ -174,8 +175,13 @@ function ActionPlansPageInner() {
     />
   );
 
-  const subtitle =
-    "Forward-looking remediation commitments · owner, due date, linked risks + controls";
+  // #2151 — the header names the page's key term.
+  const subtitle = (
+    <>
+      Forward-looking <Term id="action-plan">remediation commitments</Term> ·
+      owner, due date, linked risks + controls
+    </>
+  );
 
   if (plansQ.isLoading) {
     return (
