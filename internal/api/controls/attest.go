@@ -46,6 +46,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -158,6 +159,55 @@ func (p poolControlReader) ControlByID(ctx context.Context, tenantID string, id 
 	})
 	return out, err
 }
+
+// idempotencyReader looks up an attestation already on the ledger by its
+// idempotency key (#2509). poolControlReader implements it; the contract
+// test's stub reader does not need to.
+type idempotencyReader interface {
+	ObservedAtByIdempotencyKey(ctx context.Context, tenantID, idemKey string) (time.Time, bool, error)
+}
+
+// ObservedAtByIdempotencyKey returns the observed_at of the tenant's record
+// under idemKey, inside a tenant-GUC read tx. found is false when there is
+// none.
+func (p poolControlReader) ObservedAtByIdempotencyKey(ctx context.Context, tenantID, idemKey string) (time.Time, bool, error) {
+	tenantUUID, err := uuid.Parse(tenantID)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse tenant: %w", err)
+	}
+	var (
+		out   time.Time
+		found bool
+	)
+	err = pgx.BeginTxFunc(ctx, p.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		if terr := tenancy.ApplyTenant(ctx, tx); terr != nil {
+			return terr
+		}
+		rec, gerr := dbx.New(tx).GetEvidenceRecordByIdempotency(ctx, dbx.GetEvidenceRecordByIdempotencyParams{
+			TenantID:       pgtype.UUID{Bytes: tenantUUID, Valid: true},
+			IdempotencyKey: &idemKey,
+		})
+		if errors.Is(gerr, pgx.ErrNoRows) {
+			return nil
+		}
+		if gerr != nil {
+			return gerr
+		}
+		out, found = rec.ObservedAt.Time.UTC(), true
+		return nil
+	})
+	return out, found, err
+}
+
+// attestRetryWindow is how long a server-keyed attestation dedupes: a
+// retry of the same body inside one window returns the first receipt, and
+// the same body after it is a new attestation (#2509).
+const attestRetryWindow = 5 * time.Minute
+
+// attestMaxFutureSkew is how far ahead of server time a client-supplied
+// observed_at may be (#2509): enough for ordinary clock drift, far short
+// of ingest's MaxObservedAtSkew.
+const attestMaxFutureSkew = 5 * time.Minute
 
 // controlEvaluator is the slice-012 engine call the handler runs after an
 // attestation: the same EvaluateControl the ingest subscriber, scheduler
@@ -379,6 +429,31 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Microsecond precision: the ledger stores observed_at as timestamptz,
+	// and a retry that reuses a stored observed_at must hash the same.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	observed := now
+	if req.ObservedAt != "" {
+		parsed, perr := time.Parse(time.RFC3339Nano, req.ObservedAt)
+		if perr != nil {
+			parsed, perr = time.Parse(time.RFC3339, req.ObservedAt)
+			if perr != nil {
+				writeAttestError(w, http.StatusBadRequest, "observed_at must be RFC3339: "+perr.Error())
+				return
+			}
+		}
+		// #2509: a future-dated attestation would outvote every honest
+		// later one until its date passed. Backdating only makes it lose,
+		// so it stays allowed (within ingest's MaxObservedAtSkew).
+		if parsed.After(now.Add(attestMaxFutureSkew)) {
+			writeAttestError(w, http.StatusUnprocessableEntity,
+				fmt.Sprintf("observed_at %s is in the future; at most %s ahead of server time is allowed",
+					parsed.UTC().Format(time.RFC3339), attestMaxFutureSkew))
+			return
+		}
+		observed = parsed
+	}
+
 	// Pre-DB path: short-circuit for the unit-test branches that don't
 	// configure a read path. The handler shouldn't 500 just because tests
 	// pass nil; tests above this gate verify input validation.
@@ -449,25 +524,26 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		payloadURI = uri
 	}
 
-	// Idempotency key default — a deterministic key over the inputs so
-	// retries from the browser don't double-write while still allowing
-	// the caller to opt in to their own key.
+	// Idempotency key default (#2509): the inputs plus the retry window
+	// the request falls in. A retry of the same body inside the window gets
+	// the same key and deduplicates; the same text attested again later
+	// gets a new key and is recorded. A caller may send its own key.
 	idemKey := req.IdempotencyKey
 	if idemKey == "" {
-		idemKey = deriveIdempotencyKey(cred.UserID, id.String(), body)
+		idemKey = deriveIdempotencyKey(cred.UserID, id.String(), body, now.Truncate(attestRetryWindow))
 	}
-
-	observed := time.Now().UTC()
-	if req.ObservedAt != "" {
-		parsed, perr := time.Parse(time.RFC3339Nano, req.ObservedAt)
-		if perr != nil {
-			parsed, perr = time.Parse(time.RFC3339, req.ObservedAt)
-			if perr != nil {
-				writeAttestError(w, http.StatusBadRequest, "observed_at must be RFC3339: "+perr.Error())
-				return
-			}
+	// The server stamps observed_at when the body has none, so a retry
+	// would carry a new time and hash differently. Reuse the first
+	// request's observed_at so the retry deduplicates instead of 409ing.
+	if req.ObservedAt == "" {
+		prior, found, lerr := h.priorObservedAt(ctx, cred.TenantID, idemKey)
+		if lerr != nil {
+			writeAttestError(w, http.StatusInternalServerError, "idempotency lookup: "+lerr.Error())
+			return
 		}
-		observed = parsed
+		if found {
+			observed = prior
+		}
 	}
 
 	// Build the manual.attestation.v1 payload. actor_type=human and
@@ -534,11 +610,13 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		Deduplicated: receipt.Deduplicated,
 		PayloadURI:   payloadURI,
 		Result:       result,
-		Evaluated:    h.evaluateAfterAttest(r.Context(), id),
 	}
 	status := http.StatusCreated
 	if receipt.Deduplicated {
+		// A replay wrote nothing; the first request already evaluated.
 		status = http.StatusOK
+	} else {
+		out.Evaluated = h.evaluateAfterAttest(r.Context(), id)
 	}
 	writeAttestJSON(w, status, out)
 }
@@ -618,17 +696,31 @@ func decodeJSONBObject(b []byte) (map[string]any, error) {
 }
 
 // deriveIdempotencyKey produces a deterministic key for retries. The
-// caller-supplied request body bytes are sha256'd along with the user
-// and control id so two identical attestations within milliseconds
-// deduplicate, but any field-level change produces a fresh key.
-func deriveIdempotencyKey(userID, controlID string, body []byte) string {
+// caller-supplied request body bytes are sha256'd along with the user,
+// the control id and the start of the retry window, so identical requests
+// inside one window deduplicate, while any field-level change, or the same
+// body in a later window, produces a fresh key (#2509).
+func deriveIdempotencyKey(userID, controlID string, body []byte, window time.Time) string {
 	h := sha256.New()
 	h.Write([]byte(userID))
 	h.Write([]byte{0})
 	h.Write([]byte(controlID))
 	h.Write([]byte{0})
 	h.Write(body)
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.FormatInt(window.Unix(), 10)))
 	return "attest-" + hex.EncodeToString(h.Sum(nil))[:32]
+}
+
+// priorObservedAt returns the observed_at of the attestation already
+// recorded under idemKey, if any. Without a reader that can look it up
+// (unit tests) it reports none, and a retry falls back to ingest's 409.
+func (h *AttestHandler) priorObservedAt(ctx context.Context, tenantID, idemKey string) (time.Time, bool, error) {
+	lr, ok := h.reader.(idempotencyReader)
+	if !ok {
+		return time.Time{}, false, nil
+	}
+	return lr.ObservedAtByIdempotencyKey(ctx, tenantID, idemKey)
 }
 
 func ingestErrorToStatus(err error) int {
