@@ -112,8 +112,10 @@ type vendorWire struct {
 	OwnerUnlinked string  `json:"owner_unlinked"`
 	OwnerUser     string  `json:"owner_user"`
 	// OwnerLacksAccess (#2174) is computed at read time: the owner can no
-	// longer work in Third-party risk (narrowed module access, or no live
-	// role). The owner itself is kept.
+	// longer work in Third-party risk, because an admin narrowed their
+	// module access to leave it out, or because they hold no live role in
+	// the tenant and are not a super-admin (#2501). The owner itself is
+	// kept.
 	OwnerLacksAccess bool      `json:"owner_lacks_access,omitempty"`
 	LinkedSOWURI     *string   `json:"linked_sow_uri,omitempty"`
 	Notes            string    `json:"notes"`

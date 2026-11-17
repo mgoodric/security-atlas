@@ -60,6 +60,17 @@ the cost is one extra ledger row. An API caller that needs exact-once
 sends its own `idempotency_key`. Rejected: a client-supplied key only,
 because existing API callers send none and would keep the 409.
 
+**API callers should send their own `idempotency_key`, one per
+attestation.** The server-derived key is a fallback for callers that send
+none. As first shipped it had the same flip-back hole as the window-only
+form: keyless fail, pass, fail inside one window deduped the second fail
+onto the first and left the control passing. #2520 closes that: on a
+dedupe hit for a server-derived key, a record that a newer attestation has
+overtaken does not dedupe, and the request is recorded and evaluated. See
+`docs/audit-log/2520-attest-dedupe-newer-attestation-decisions.md`. A
+client key still dedupes strictly, so the guidance stands: a caller that
+sends its own key gets exactly the dedupe it asked for.
+
 Known limit: the ledger hash covers `source_attribution.session_id`, which
 for a JWT caller is the token's `jti`. A retry sent after an access-token
 refresh hashes differently and still gets 409, as before this change. Retry

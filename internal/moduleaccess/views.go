@@ -113,6 +113,25 @@ func (v Viewer) Sees(path string) (bool, error) {
 	return featureflag.RouteOn(v.r, v.flags, path)
 }
 
+// SeesModule reports whether the viewer can work in the module key: a
+// core module or a key the registry does not list answers true; an
+// optional one must be inside their access and switched on.
+func (v Viewer) SeesModule(key string) (bool, error) {
+	if v.all {
+		return true, nil
+	}
+	for _, m := range featureflag.Modules {
+		if m.Key != key || m.Core {
+			continue
+		}
+		if !v.access.Has(key) {
+			return false, nil
+		}
+		return featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
+	}
+	return true, nil
+}
+
 // Modules resolves the viewer's answer for every optional module at once,
 // for a view that filters many rows inside a transaction: ModuleSet.Sees
 // reads no flag and no access row, so it never asks the pool for a second

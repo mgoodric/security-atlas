@@ -618,6 +618,14 @@ type Querier interface {
 	// disposition is metadata on the claim, not a control satisfaction
 	// (invariant #2). RLS rides the slice-512 tenant_update policy.
 	DispositionImportedComponentClaim(ctx context.Context, arg DispositionImportedComponentClaimParams) (ImportedComponentClaim, error)
+	// #2520: is there an attestation for the control later than the given one,
+	// under the evaluation engine's latest-attestation order (internal/eval
+	// latestAttestationWins): min(observed_at, ingested_at), then ingested_at,
+	// then id compared bytewise? The attest handler asks this on a dedupe hit
+	// for a server-derived key, so a repeat of an older attestation is recorded
+	// when a newer one would otherwise stand. Control resolution mirrors
+	// ListEvidenceForControlAsOf.
+	ExistsAttestationAfter(ctx context.Context, arg ExistsAttestationAfterParams) (bool, error)
 	// AC-5 auto-expiry: marks active rows whose expires_at < threshold as
 	// expired. Returns the affected rows so the cron can write one
 	// exception_audit_log row per expired exception (anti-criterion P0: no

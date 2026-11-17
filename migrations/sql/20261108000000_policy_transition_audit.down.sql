@@ -4,6 +4,12 @@
 -- to run while any 'submitted', 'resubmitted' or 'approved' row exists
 -- (the #2009 rule): the operator archives and removes them deliberately
 -- first, or the narrowed CHECK could not apply.
+--
+-- The guard does not count 'self_approved' rows: that action predates this
+-- migration and survives the narrowed CHECK. A 'self_approved' row written
+-- after the up migration carries previous_state / new_state (#2200 D4), and
+-- dropping the columns below discards those two values from it. The row
+-- itself, its actor and its timestamp are kept.
 
 DO $$
 DECLARE
