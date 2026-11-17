@@ -45,6 +45,12 @@ var HintModules = []string{
 	"board-packs",
 	"csf",
 	"vendor-claims",
+	// #2154: Library.
+	"policies",
+	"vendors",
+	"personnel-security",
+	"questionnaires",
+	"scf-catalog",
 }
 
 // HintChange is one PATCH's worth of hint edits. Reset clears every

@@ -77,6 +77,7 @@ See [Tenant membership](tenant-membership.md) for opting in to multi-tenant.
 | `credentials rotate` / `revoke` / `list` | API-key lifecycle                                                |
 | `catalog import-scf <path>`              | Import the SCF catalog (JSON or SCF `.xlsx`) into Postgres       |
 | `catalog import-crosswalk <path>`        | Import a framework→SCF crosswalk YAML (alias: `import-soc2`)     |
+| `catalog converge-crosswalks <dir>`      | Re-import each crosswalk YAML in `<dir>` already imported        |
 | `controls validate <path>`               | Validate a control bundle locally (no network call)              |
 | `controls test <bundle-dir>`             | Run a bundle's test cases against fixture evidence               |
 | `controls upload <path>`                 | Upload a control bundle to the platform                          |

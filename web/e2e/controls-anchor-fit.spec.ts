@@ -64,13 +64,18 @@ async function mockListBFFs(page: Page) {
   await page.route("**/api/controls**", async (route: Route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/controls-list") {
+      // #2131: the platform applies ?anchor_fit=, so the mock does too.
+      const fit = url.searchParams.get("anchor_fit");
+      const rows = fit
+        ? myControls.filter((c) => c.anchor_fit === fit)
+        : myControls;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          controls: myControls,
-          count: myControls.length,
-          total: myControls.length,
+          controls: rows,
+          count: rows.length,
+          total: rows.length,
         }),
       });
       return;

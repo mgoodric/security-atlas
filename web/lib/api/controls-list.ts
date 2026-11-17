@@ -246,25 +246,45 @@ export type ControlsWithStateResponse = {
   controls: ControlWithState[];
   count: number;
   total: number;
+  // #2131 — every family of the tenant's active controls, unfiltered, for
+  // the Family filter. Optional because hand-rolled fixtures predate it.
+  families?: string[];
 };
 
 /** The platform's page cap for `GET /v1/controls?include=state`. */
 export const CONTROLS_WITH_STATE_PAGE_LIMIT = 500;
 
+// #2131 — the filter and sort parameters the BFF passes through to
+// `GET /v1/controls?include=state`. The platform validates each value; the
+// BFF only decides which names may cross.
+export const CONTROLS_WITH_STATE_PARAMS = [
+  "scope",
+  "owner",
+  "result",
+  "freshness",
+  "family",
+  "framework",
+  "anchor_fit",
+  "sort",
+] as const;
+
+export type ControlsWithStateParam =
+  (typeof CONTROLS_WITH_STATE_PARAMS)[number];
+
 // Server-side fn: one page of `/v1/controls?include=state`, used by the
 // `/api/controls-list` BFF when the browser asks for state.
 export async function fetchTenantControlsWithState(
   bearer: string,
-  opts: {
-    scope?: string;
-    owner?: string;
+  opts: Partial<Record<ControlsWithStateParam, string>> & {
     limit?: number;
     offset?: number;
   } = {},
 ): Promise<ControlsWithStateResponse> {
   const qs = new URLSearchParams({ include: "state" });
-  if (opts.scope) qs.set("scope", opts.scope);
-  if (opts.owner) qs.set("owner", opts.owner);
+  for (const key of CONTROLS_WITH_STATE_PARAMS) {
+    const v = opts[key];
+    if (v) qs.set(key, v);
+  }
   if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
   if (opts.offset !== undefined) qs.set("offset", String(opts.offset));
   const res = await apiFetch(`/v1/controls?${qs.toString()}`, bearer);
@@ -273,6 +293,7 @@ export async function fetchTenantControlsWithState(
     controls: body.controls ?? [],
     count: body.count ?? 0,
     total: body.total ?? 0,
+    families: body.families ?? [],
   };
 }
 
@@ -287,8 +308,10 @@ export function activeControlsTotal(
 }
 
 // Browser-side fn: one page of the caller's controls with state, through
-// the BFF.
-async function fetchMyControlsPage(
+// the BFF. #2131: the /controls page passes its filters, sort, limit and
+// offset here and renders the one page it gets back; the platform does the
+// filtering, sorting and paging.
+export async function fetchMyControlsPage(
   params: Record<string, string>,
 ): Promise<Partial<ControlsWithStateResponse>> {
   const qs = new URLSearchParams({ include: "state", ...params });
@@ -307,32 +330,9 @@ async function fetchMyControlsPage(
 }
 
 // Browser-side fn: the caller's active-control count for the sidebar
-// badge. One row is fetched; only the total is read.
+// badge, and the unfiltered count on the /controls header. One row is
+// fetched; only the total is read.
 export async function fetchMyControlsTotal(): Promise<number> {
   const page = await fetchMyControlsPage({ limit: "1" });
   return activeControlsTotal(page);
-}
-
-// Browser-side fn: every active control of the caller's tenant, walked
-// page by page through the BFF until `total` is reached. The page's
-// family / state / freshness filters run over the full set, so it must
-// not stop at the first page.
-export async function fetchMyControls(
-  scopeCellID?: string,
-): Promise<ControlsWithStateResponse> {
-  const controls: ControlWithState[] = [];
-  let total = 0;
-  for (;;) {
-    const params: Record<string, string> = {
-      limit: String(CONTROLS_WITH_STATE_PAGE_LIMIT),
-      offset: String(controls.length),
-    };
-    if (scopeCellID) params.scope = scopeCellID;
-    const page = await fetchMyControlsPage(params);
-    const rows = page.controls ?? [];
-    total = activeControlsTotal(page);
-    controls.push(...rows);
-    if (rows.length === 0 || controls.length >= total) break;
-  }
-  return { controls, count: controls.length, total };
 }

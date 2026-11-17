@@ -28,6 +28,7 @@
 // isolation to RLS on (tenant, user).
 
 import { ALL, DEFAULT_FILTERS, type ControlFilters } from "./filters";
+import { normalizeFilterValue } from "./server-query";
 
 // Pinned storage key. Changing it silently orphans every user's saved
 // views — the corresponding test fails on rename so the cost is visible
@@ -46,6 +47,9 @@ export const SAVED_VIEW_FILTER_KEYS: (keyof ControlFilters)[] = [
   "freshness",
   "scope",
   "anchor_fit",
+  // #2131 — the owner filter and the server sort.
+  "owner",
+  "sort",
 ];
 
 // Maximum number of saved views per user (v1 cap). A solo operator's
@@ -87,7 +91,12 @@ export function sanitizeFilters(raw: unknown): ControlFilters {
   const obj = raw as Record<string, unknown>;
   for (const key of SAVED_VIEW_FILTER_KEYS) {
     const v = obj[key];
-    out[key] = typeof v === "string" && v.length > 0 ? v : ALL;
+    // #2131: a value the platform would refuse (an old State option, a
+    // hand-edited id) reads as ALL rather than failing the list.
+    out[key] =
+      typeof v === "string" && v.length > 0
+        ? normalizeFilterValue(key, v)
+        : ALL;
   }
   return out;
 }

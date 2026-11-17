@@ -1,8 +1,9 @@
-// Slice 098 — pure filter logic for the /controls list view.
+// Slice 098 — pure filter state for the /controls list view.
 //
-// All filter-related calculations live here as pure functions so they
-// can be vitest-unit-tested without spinning up React. The page imports
-// these and applies them to the fetched anchorWire rows.
+// #2131: the filters are applied on the server. This module holds the
+// filter set the URL carries and the helpers that edit it; `./server-query`
+// turns it into the `GET /v1/controls?include=state` query. Nothing here
+// narrows or sorts rows in the browser.
 //
 // Constitutional commitment: this module knows nothing about React,
 // useSearchParams, or the BFF. It is data-in, data-out.
@@ -31,10 +32,20 @@ export type ControlFilters = {
   scope: string;
   /**
    * Issue #1736 — how well a control's SCF anchor fits it: `exact`,
-   * `partial` or `none`. Only "My controls" rows carry a fit, so a
-   * catalog anchor never matches a non-ALL value.
+   * `partial` or `none`. Only "My controls" rows carry a fit.
    */
   anchor_fit: string;
+  /**
+   * #2131 — the assigned owner: a user id, or `none` for controls nobody
+   * owns. "My controls" only.
+   */
+  owner: string;
+  /**
+   * #2131 — the server sort, `key` or `-key` (see `./server-query`).
+   * `ALL` is the default order: failing first, then stalest evidence.
+   * It rides with the filters so a saved view keeps its order.
+   */
+  sort: string;
 };
 
 export const DEFAULT_FILTERS: ControlFilters = {
@@ -44,71 +55,21 @@ export const DEFAULT_FILTERS: ControlFilters = {
   freshness: ALL,
   scope: ALL,
   anchor_fit: ALL,
+  owner: ALL,
+  sort: ALL,
 };
 
+/** Every filter key, in URL order. */
+export const FILTER_KEYS = Object.keys(
+  DEFAULT_FILTERS,
+) as (keyof ControlFilters)[];
+
 /**
- * True when no filter is narrowing the result set.
+ * True when no filter is narrowing the result set and the order is the
+ * default.
  */
 export function isDefault(filters: ControlFilters): boolean {
-  return (
-    filters.framework === ALL &&
-    filters.family === ALL &&
-    filters.result === ALL &&
-    filters.freshness === ALL &&
-    filters.scope === ALL &&
-    filters.anchor_fit === ALL
-  );
-}
-
-/**
- * Narrow an anchor list against the active filter set.
- *
- * Because the slice ships without per-anchor state (the per-row state
- * fan-out is rejected — see slice 098 §spillover, spillover slice 104),
- * the `result` and `freshness` filters narrow against the optional
- * state attached to each anchor row. If state is absent, those filters
- * skip the row when the filter is set (non-ALL), so the user sees only
- * the anchors that have data.
- */
-export function applyFilters(
-  rows: AnchorRow[],
-  filters: ControlFilters,
-): AnchorRow[] {
-  return rows.filter((row) => {
-    if (
-      filters.family !== ALL &&
-      row.anchor.family.toLowerCase() !== filters.family.toLowerCase()
-    ) {
-      return false;
-    }
-    if (filters.result !== ALL) {
-      if (!row.state || row.state.result !== filters.result) return false;
-    }
-    if (filters.freshness !== ALL) {
-      if (!row.state || row.state.freshness_status !== filters.freshness) {
-        return false;
-      }
-    }
-    if (filters.anchor_fit !== ALL && row.anchorFit !== filters.anchor_fit) {
-      return false;
-    }
-    // framework filter is a no-op for v1 — the anchorWire doesn't carry
-    // the per-anchor framework set; spillover 104 brings it. The pill
-    // still renders so the UI shape stays stable.
-    return true;
-  });
-}
-
-/**
- * Extract the unique family set from a row list. Used to drive the
- * "Family" pill options. Sorted alphabetically for stable ordering.
- */
-export function uniqueFamilies(rows: AnchorRow[]): string[] {
-  const seen = new Set<string>();
-  for (const r of rows) {
-    if (r.anchor.family) seen.add(r.anchor.family);
-  }
-  return Array.from(seen).sort();
+  return FILTER_KEYS.every((k) => filters[k] === ALL);
 }
 
 /**

@@ -210,10 +210,10 @@ test.describe("/controls lists the tenant's controls (issue #1741)", () => {
 });
 
 // Issue #1740 — the catalog view walked only the platform's first page,
-// so 100 of SCF's ~1,600 anchors were reachable and the Family pill only
-// knew the families on that page. The fake BFF pages a 1,200-anchor
-// catalog the way the platform does (limit/offset, capped at 500); the
-// last 200 anchors sit in a family only the third page carries.
+// so 100 of SCF's ~1,600 anchors were reachable. #2131 then moved paging
+// to the server: the catalog view asks for the one page it shows, and the
+// footer counts the platform's total. The fake BFF pages a 1,200-anchor
+// catalog the way the platform does (limit/offset, capped at 500).
 const CATALOG_SIZE = 1200;
 const catalogAnchors = Array.from({ length: CATALOG_SIZE }, (_, i) => ({
   id: `a1740000-0000-4000-8000-${String(i).padStart(12, "0")}`,
@@ -226,8 +226,8 @@ const catalogAnchors = Array.from({ length: CATALOG_SIZE }, (_, i) => ({
   control_count: 0,
 }));
 
-test.describe("/controls SCF catalog walks every page (issue #1740)", () => {
-  test("the catalog lists every anchor and the Family pill reaches the last page", async ({
+test.describe("/controls SCF catalog pages on the server (issues #1740, #2131)", () => {
+  test("the catalog reaches every anchor one server page at a time", async ({
     authedPage: page,
   }) => {
     const seen: string[] = [];
@@ -264,14 +264,28 @@ test.describe("/controls SCF catalog walks every page (issue #1740)", () => {
     await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
       "Showing 1–50 of 1200",
     );
-    expect(seen.filter((s) => s.includes("offset=1000"))).toHaveLength(1);
+    const table = page.getByTestId("list-table-wrap");
+    await expect(table.getByTestId("list-table-row")).toHaveCount(50);
 
-    await page.getByLabel("Family").selectOption("Late Family (1740)");
+    // The last page is one request for its 50 rows, not a walk.
+    await page.goto("/controls?view=catalog&page=21");
     await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
-      "Showing 1–50 of 200",
+      "Showing 1001–1050 of 1200",
     );
-    await expect(
-      page.getByTestId("list-table-wrap").getByTestId("list-table-row").first(),
-    ).toContainText("TST-1000");
+    await expect(table.getByTestId("list-table-row").first()).toContainText(
+      "TST-1000",
+    );
+    const pages = seen.map((s) => new URLSearchParams(s));
+    expect(
+      pages.some((q) => q.get("offset") === "1000" && q.get("limit") === "50"),
+    ).toBe(true);
+    expect(
+      pages.every((q) => q.get("limit") === "50" || q.get("limit") === "1"),
+    ).toBe(true);
+
+    // The catalog's anchors carry no per-control state or owner, so the
+    // "My controls" filters are not offered there.
+    await expect(page.getByLabel("Family", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("State", { exact: true })).toHaveCount(0);
   });
 });

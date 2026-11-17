@@ -107,6 +107,9 @@ func TestSanitizeControlFilters(t *testing.T) {
 			"framework": "soc2", "family": "IAC", "result": "pass",
 			"freshness": "fresh", "scope": "cell-1",
 		}},
+		// #2131: the owner filter and the sort are saved with the view.
+		{"owner and sort", map[string]string{"owner": "none", "sort": "-last_observed_at"},
+			map[string]string{"owner": "none", "sort": "-last_observed_at"}},
 	}
 	for _, tc := range cases {
 		tc := tc

@@ -2243,7 +2243,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/controls:
     get:
-      summary: GET /v1/controls
+      summary: GET /v1/controls — the organisation's active controls; with ?include=state, one page of them with their state and the unpaged total, filtered by ?result, ?freshness, ?owner (a user id, or none), ?family, ?framework, ?anchor_fit and ?scope, sorted by ?sort=[-]scf_id|name|family|state|freshness|last_observed_at|owner|frameworks (by default failing first, then stalest evidence; #2131)
       tags: [controls]
       operationId: get-v1-controls
       security:
