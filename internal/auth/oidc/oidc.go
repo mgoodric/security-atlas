@@ -8,13 +8,17 @@
 // handler verifies that state cookie matches the query param (CSRF guard)
 // and that the state's HMAC binds the flow's tenant, IdP and nonce (#2177)
 // before exchanging the code. With secure cookies the flow cookies carry
-// the __Host- prefix, so a sibling subdomain cannot plant them.
+// the __Host- prefix, so a sibling subdomain cannot plant them. The state
+// also carries its issue time under the MAC, so the server refuses a flow
+// older than FlowCookieMaxAge even where the browser kept its cookies
+// (#2298).
 //
 // Library: github.com/coreos/go-oidc/v3 + golang.org/x/oauth2.
 package oidc
 
 import (
 	"context"
+	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -88,6 +92,11 @@ const (
 
 	// StateKeyMinBytes is the shortest state HMAC key accepted.
 	StateKeyMinBytes = 32
+
+	// StateClockSkew is the replica clock difference the state issue time
+	// tolerates (#2298): a state is refused once it is older than
+	// FlowCookieMaxAge plus this, or dated more than this in the future.
+	StateClockSkew = 30 * time.Second
 
 	// ProviderCacheTTL bounds how long the RP serves a discovered IdP provider
 	// before re-running OIDC discovery. Slice 335's chaos design expected new
@@ -230,13 +239,16 @@ func (a *Authenticator) BeginLogin(ctx context.Context, in LoginInput, secureCoo
 	if err != nil {
 		return LoginResult{}, err
 	}
-	// #2177: state = rand "." HMAC(k, rand|tenant|idp|nonce), so the
-	// callback can tell a flow it issued from cookies planted by hand.
+	// #2177: state = rand "." iat "." HMAC(k, rand|iat|tenant|idp|nonce),
+	// so the callback can tell a flow it issued from cookies planted by
+	// hand. #2298: iat (unix seconds) lets the server expire the flow
+	// itself rather than trust the browser to drop the cookies.
 	stateRand, err := randomState()
 	if err != nil {
 		return LoginResult{}, err
 	}
-	state := stateRand + "." + a.stateMAC(stateRand, in.TenantID.String(), in.IdpName, nonce)
+	iat := strconv.FormatInt(a.now().Unix(), 10)
+	state := stateRand + "." + iat + "." + a.stateMAC(stateRand, iat, in.TenantID.String(), in.IdpName, nonce)
 	oa := &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
@@ -345,7 +357,8 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	}
 	// #2177: the state's HMAC must cover the tenant, IdP and nonce cookies
 	// as they arrived. A state the server did not issue, or flow cookies
-	// mixed from two flows, fails here before any IdP lookup.
+	// mixed from two flows, fails here before any IdP lookup. #2298: so
+	// does a state issued more than FlowCookieMaxAge ago.
 	if !a.verifyState(queryState, tenantCookie.Value, idpCookie.Value, nonceCookie.Value) {
 		return CallbackResult{}, ErrStateMismatch
 	}
@@ -479,13 +492,22 @@ func CookieName(base string, secure bool) string {
 	return base
 }
 
-// DeriveStateKey derives the state HMAC key from a root server secret
-// (BEARER_HASH_KEY), domain-separated so the state MAC never equals a
-// bearer-token hash.
+// stateKeyInfo is the HKDF info label of the derived state key. v1 was
+// HMAC(root, label), which is a bearer.Hash value; v2 (#2298) is HKDF.
+const stateKeyInfo = "atlas-oidc-state-key-v2"
+
+// DeriveStateKey derives the 32-byte state HMAC key from a root server
+// secret (BEARER_HASH_KEY) with HKDF-SHA256: extract, then expand with
+// stateKeyInfo. The extract step keys the final HMAC with a pseudorandom
+// key instead of the root, so the derived key is not HMAC(root, x) for any
+// x, and no bearer-token hash, HMAC(root, token), can equal it.
 func DeriveStateKey(root []byte) []byte {
-	m := hmac.New(sha256.New, root)
-	m.Write([]byte("atlas-oidc-state-key-v1"))
-	return m.Sum(nil)
+	k, err := hkdf.Key(sha256.New, root, nil, stateKeyInfo, 32)
+	if err != nil {
+		// hkdf.Key errors only past 255 hash blocks; 32 bytes is one.
+		panic("oidc: hkdf: " + err.Error())
+	}
+	return k
 }
 
 // StateKeyFromEnv returns the state HMAC key: ATLAS_OIDC_STATE_KEY when
@@ -534,12 +556,13 @@ func (a *Authenticator) provider(ctx context.Context, issuer string) (*coreos.Pr
 	return p, nil
 }
 
-// stateMAC is HMAC-SHA256 over the length-prefixed state random, tenant,
-// IdP name and nonce, base64url-encoded. Length prefixes keep two field
-// lists from encoding to the same bytes.
+// stateMAC is HMAC-SHA256 over the length-prefixed state random, issue
+// time, tenant, IdP name and nonce, base64url-encoded. Length prefixes keep
+// two field lists from encoding to the same bytes. The v2 label (#2298)
+// keeps a v1 MAC, which had no issue time, from verifying.
 func (a *Authenticator) stateMAC(fields ...string) string {
 	m := hmac.New(sha256.New, a.stateKey)
-	m.Write([]byte("atlas-oidc-state-v1"))
+	m.Write([]byte("atlas-oidc-state-v2"))
 	var n [8]byte
 	for _, f := range fields {
 		binary.BigEndian.PutUint64(n[:], uint64(len(f)))
@@ -549,15 +572,27 @@ func (a *Authenticator) stateMAC(fields ...string) string {
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }
 
-// verifyState checks state = rand "." stateMAC(rand, tenant, idp, nonce)
-// in constant time.
+// verifyState checks state = rand "." iat "." stateMAC(rand, iat, tenant,
+// idp, nonce) in constant time, and only then reads iat: the state must
+// have been issued no more than FlowCookieMaxAge ago and not in the
+// future, each give or take StateClockSkew (#2298). A two-part state from
+// before #2298 has no iat and is refused.
 func (a *Authenticator) verifyState(state, tenant, idp, nonce string) bool {
-	stateRand, mac, ok := strings.Cut(state, ".")
-	if !ok || stateRand == "" {
+	parts := strings.Split(state, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
 		return false
 	}
-	want := a.stateMAC(stateRand, tenant, idp, nonce)
-	return hmac.Equal([]byte(mac), []byte(want))
+	stateRand, iat, mac := parts[0], parts[1], parts[2]
+	want := a.stateMAC(stateRand, iat, tenant, idp, nonce)
+	if !hmac.Equal([]byte(mac), []byte(want)) {
+		return false
+	}
+	issued, err := strconv.ParseInt(iat, 10, 64)
+	if err != nil {
+		return false
+	}
+	age := a.now().Sub(time.Unix(issued, 0))
+	return age >= -StateClockSkew && age <= FlowCookieMaxAge+StateClockSkew
 }
 
 func randomState() (string, error) {
