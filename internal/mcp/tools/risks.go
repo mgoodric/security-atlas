@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/mcp"
@@ -102,10 +103,15 @@ func (t *ListRisksTool) Handle(ctx context.Context, args json.RawMessage) (any, 
 	if in.IncludeRollUps {
 		q.Set("include_rollups", "true")
 	}
+	// The platform pages the register (#2132), so ask it for limit rows
+	// and read capped from its filtered total (#2482): with more than 500
+	// risks, a full page no longer means the list was whole.
+	q.Set("limit", strconv.Itoa(limit))
 
 	var resp struct {
 		Risks []riskRow `json:"risks"`
 		Count int       `json:"count"`
+		Total *int      `json:"total"`
 	}
 	if err := t.client.Get(ctx, "/v1/risks", q, &resp); err != nil {
 		return nil, err
@@ -114,11 +120,15 @@ func (t *ListRisksTool) Handle(ctx context.Context, args json.RawMessage) (any, 
 	if len(out) > limit {
 		out = out[:limit]
 	}
+	capped := len(resp.Risks) > limit
+	if resp.Total != nil {
+		capped = *resp.Total > len(out)
+	}
 	return map[string]any{
 		"risks":  out,
 		"count":  len(out),
 		"limit":  limit,
-		"capped": len(resp.Risks) > limit,
+		"capped": capped,
 	}, nil
 }
 
