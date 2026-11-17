@@ -72,6 +72,27 @@ func IsTenantControlOwner(cred credstore.Credential) bool {
 	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleControlOwner)
 }
 
+// HasTenantRole reports whether the caller holds any role in its current
+// tenant, given its live user_roles there (#2494). The web shows a "no role
+// in this organisation" page in place of the dashboard when it is false.
+//
+// A user's session (a "jwt:" credential naming a user) counts only its live
+// roles or the super-admin bit (jwtmw sets IsAdmin from the re-checked
+// atlas:super_admin claim). Its role claim does not count: it outlives a
+// revoke (#2381), and it is empty for a user with no role (#2401). Any
+// other credential, an API key or a client_credentials token, counts the
+// roles BuildInput derives for it, so it never sees the page while the
+// platform admits it.
+func HasTenantRole(cred credstore.Credential, liveRoles []string) bool {
+	if cred.IsAdmin || len(liveRoles) > 0 {
+		return true
+	}
+	if jwtSession(cred) && !machineJWT(cred) {
+		return false
+	}
+	return len(derivedRolesFor(cred)) > 0
+}
+
 func hasLabel(labels []string, role Role) bool {
 	for _, l := range labels {
 		if l == string(role) {

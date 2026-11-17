@@ -58,6 +58,9 @@ func TestMeSelfRead2015_DeniesTheRest(t *testing.T) {
 		}
 	}
 	for _, p := range meSelfReadPaths {
+		if rolelessSelfReadPaths[p] {
+			continue // #2494: the no-role page reads these two
+		}
 		if d := decide(t, meReadInput(nil, p)); d.Allow {
 			t.Errorf("roleless credential admitted to GET %s", p)
 		}

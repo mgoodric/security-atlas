@@ -162,7 +162,10 @@ export type FixtureName =
   | "combined-views-modules"
   // #2110 — a tenant of its own, so control-actions-2110.spec.ts's
   // uploads never change the demo tenant's controls.
-  | "control-actions";
+  | "control-actions"
+  // #2494 — a tenant with one member whose roles are cleared each run,
+  // for no-tenant-role.spec.ts.
+  | "no-tenant-role";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

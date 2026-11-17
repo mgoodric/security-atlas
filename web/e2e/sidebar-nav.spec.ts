@@ -30,6 +30,11 @@ const NAV_TENANT = "00000000-0000-0000-0000-000000002081";
 // No feature_flags rows: every gate reads its seed default (off). Shared
 // with feature-flag-gating.spec.ts; neither spec writes to it.
 const FLAGS_OFF_TENANT = "00000000-0000-0000-0000-0000000020f0";
+// Users holding each role in NAV_TENANT (fixtures/e2e/sidebar-nav.sql).
+const ROLE_USER: Record<string, string> = {
+  viewer: "44444444-4444-4444-4444-44444442081a",
+  auditor: "44444444-4444-4444-4444-44444442081b",
+};
 
 // What the demo tenant's sidebar lists: everything but the flag-gated
 // entries and CSF assessment. Admin depends on the caller's `/v1/me`, so
@@ -69,6 +74,7 @@ async function mintJWT(
   roles: string[],
   superAdmin: boolean,
   tenant: string = NAV_TENANT,
+  userID?: string,
 ): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const res = await fetch(url, {
@@ -78,6 +84,7 @@ async function mintJWT(
       tenant_id: tenant,
       roles,
       super_admin: superAdmin,
+      ...(userID ? { user_id: userID } : {}),
     }),
   });
   if (!res.ok) {
@@ -180,10 +187,13 @@ test.describe("#2081 — sidebar with the gated modules on", () => {
   });
 
   // Restructuring must not show a role anything it was hidden before: a
-  // viewer and an auditor still get no Admin entry.
-  for (const role of ["viewer", "auditor"]) {
+  // viewer and an auditor still get no Admin entry. Each signs in as a
+  // user holding that role in user_roles (fixtures/e2e/sidebar-nav.sql):
+  // a role claim alone derives nothing (#2381), and a user with no live
+  // role sees the no-role page, not the sidebar (#2494).
+  for (const [role, userID] of Object.entries(ROLE_USER)) {
     test(`${role}: no Admin entry`, async ({ authedPage: page }) => {
-      await signInAs(page, await mintJWT([role], false));
+      await signInAs(page, await mintJWT([role], false, NAV_TENANT, userID));
       await page.goto("/dashboard");
       const labels = await sidebarLabels(page);
       expect(labels).toContain("Dashboard");

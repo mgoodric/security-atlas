@@ -5,6 +5,7 @@
     "synthetic_admin": {
       "display_name": "API key ad01",
       "email": "",
+      "has_tenant_role": true,
       "idp_subject": "",
       "is_admin": true,
       "is_approver": true,
@@ -20,6 +21,7 @@
     "synthetic_non_admin": {
       "display_name": "API key vw02",
       "email": "",
+      "has_tenant_role": true,
       "idp_subject": "",
       "is_admin": false,
       "is_approver": false,
