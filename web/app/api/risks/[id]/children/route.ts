@@ -11,7 +11,7 @@
 // pass through verbatim, including the 400 (level) and 409 (cycle)
 // refusals, so the page can show the platform's message.
 
-import { forwardJSON, noStore } from "@/lib/api/bff";
+import { forwardJSON, noStore, rejectNonUUID } from "@/lib/api/bff";
 
 function upstreamPath(id: string): string {
   return `/v1/risks/${encodeURIComponent(id)}/children`;
@@ -22,6 +22,8 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   // The listing changes on every attach / detach; never browser-cache it.
   return noStore(await forwardJSON(upstreamPath(id)));
 }
@@ -31,6 +33,8 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   let body: unknown;
   try {
     body = await req.json();

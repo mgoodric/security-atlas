@@ -13,12 +13,15 @@ import {
   recordVendorReview,
   VendorReviewWrite,
 } from "@/lib/api/vendors";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
@@ -41,6 +44,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {

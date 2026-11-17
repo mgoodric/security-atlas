@@ -33,6 +33,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {

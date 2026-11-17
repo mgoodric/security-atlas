@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // #1794 — POST /v1/framework-scopes/{id}/applicability/import. The body is
 // the CSV file itself (not multipart), so it goes upstream as text/csv
@@ -19,6 +20,9 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (declared > MAX_IMPORT_BYTES) {
     return NextResponse.json(
@@ -31,7 +35,6 @@ export async function POST(
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
   const upstream = await fetch(
     `${apiBaseURL()}/v1/framework-scopes/${encodeURIComponent(
       id,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { forwardJSON } from "@/lib/api/bff";
+import { forwardJSON, rejectNonUUID } from "@/lib/api/bff";
 
 // #1794 — PUT /v1/framework-scopes/{id}/applicability/{requirement_id}.
 // Sets one decision. The justification-required and frozen-revision rules
@@ -11,6 +11,8 @@ export async function PUT(
   ctx: { params: Promise<{ id: string; requirement_id: string }> },
 ) {
   const { id, requirement_id } = await ctx.params;
+  const bad = rejectNonUUID({ id, requirement_id });
+  if (bad) return bad;
   let body: unknown;
   try {
     body = await req.json();

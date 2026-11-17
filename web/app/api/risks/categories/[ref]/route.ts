@@ -10,12 +10,19 @@
 
 import { NextResponse } from "next/server";
 
-import { forwardJSON, noStore } from "@/lib/api/bff";
+import {
+  SEGMENT,
+  forwardJSON,
+  noStore,
+  rejectUnsafeSegment,
+} from "@/lib/api/bff";
 
 type Ctx = { params: Promise<{ ref: string }> };
 
 export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   const { ref } = await ctx.params;
+  const bad = rejectUnsafeSegment({ ref }, SEGMENT.slugOrUUID);
+  if (bad) return bad;
   let body: unknown;
   try {
     body = await req.json();
@@ -32,6 +39,8 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
 
 export async function DELETE(_req: Request, ctx: Ctx): Promise<Response> {
   const { ref } = await ctx.params;
+  const bad = rejectUnsafeSegment({ ref }, SEGMENT.slugOrUUID);
+  if (bad) return bad;
   return noStore(
     await forwardJSON(`/v1/risks/categories/${encodeURIComponent(ref)}`, {
       method: "DELETE",

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { forwardJSON } from "@/lib/api/bff";
+import { forwardJSON, rejectNonUUID } from "@/lib/api/bff";
 
 // #1794 — POST /v1/framework-scopes/{id}/applicability/bulk. One decision,
 // justification and implementation reference on many requirements; all or
@@ -11,6 +11,8 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   let body: unknown;
   try {
     body = await req.json();
