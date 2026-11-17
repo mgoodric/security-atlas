@@ -30,6 +30,8 @@
 // Hard rule (P0-A9): neutral test strings only; no vendor-prefixed
 // tokens.
 
+import type { Risk } from "@/lib/api/risks";
+
 import { expect, test } from "./fixtures";
 import { pickFirstUser } from "./owner-picker";
 
@@ -312,19 +314,27 @@ test.describe("/risks/new risk-create form", () => {
   test("#2511: Score later posts no inherent score and the risk reads as Unscored", async ({
     authedPage: page,
   }) => {
-    const unscored = {
+    // The whole wire shape the platform returns, typed so a field the
+    // detail page reads cannot be left out of the mock.
+    const unscored: Risk = {
       id: CREATED_RISK_ID,
       title: NEW_RISK_TITLE,
+      description: "",
       category: "operational",
-      treatment: "untreated",
-      treatment_owner: "e2e-owner",
       methodology: "nist_800_30",
       inherent_score: {},
+      treatment: "untreated",
+      treatment_owner: "e2e-owner",
       residual_score: {},
+      review_due_at: "2027-01-01T00:00:00Z",
+      accepter: "",
+      instrument_reference: "",
+      linked_control_ids: [],
+      created_at: "2026-11-17T00:00:00Z",
+      updated_at: "2026-11-17T00:00:00Z",
+      themes: [],
       severity: 0,
       status: "open",
-      linked_control_ids: [],
-      themes: [],
     };
     let posted: Record<string, unknown> | undefined;
     await page.route("**/api/risks", async (route, req) => {
