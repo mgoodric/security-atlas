@@ -24,6 +24,12 @@ Low, Medium or High bands. If you choose **Score later**, the risk is
 logged unscored. When you sort by severity, unscored risks come last,
 after the FAIR ones.
 
+Changing a risk's methodology resets its residual, because a score on
+one scale does not read on the other; the old residual stays in the
+risk's history. If someone else saves a risk while you are editing it,
+your changes are not saved over theirs: reload to see the latest
+version, then make your changes again.
+
 ## Deciding what to do
 
 Every risk needs a treatment. Mitigate needs a linked control or action
