@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mockNextServer } from "../../../../../lib/test-utils/next-mocks";
 import { TEST_BEARER_263 } from "../../../../../lib/test-utils/test-tokens";
+import { multipartRequest } from "../../../../../lib/test-utils/upload-requests";
 
 vi.mock("next/server", () => mockNextServer());
 
@@ -17,10 +18,8 @@ vi.mock("next/headers", () => ({
 
 import { POST } from "./route";
 
-function makeReq(form: FormData): {
-  formData: () => Promise<FormData>;
-} {
-  return { formData: async () => form };
+function makeReq(form: FormData): Promise<Request> {
+  return multipartRequest(form);
 }
 
 function paramsFor(id: string): {
@@ -43,7 +42,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
   test("401 when bearer cookie missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
     const form = new FormData();
-    const res = await POST(makeReq(form) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor("abc"));
     expect(res.status).toBe(401);
   });
 
@@ -65,7 +64,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
       "test.xlsx",
     );
 
-    const res = await POST(makeReq(form) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor("abc"));
     expect(res.status).toBe(201);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
     expect(calledURL).toContain("/v1/questionnaires/abc/import-excel");
@@ -84,7 +83,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
       }),
     );
     const form = new FormData();
-    const res = await POST(makeReq(form) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor("abc"));
     expect(res.status).toBe(413);
   });
 });
