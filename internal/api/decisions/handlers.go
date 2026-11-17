@@ -46,6 +46,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/decision"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -57,10 +58,18 @@ const MaxRevisitWindowDays = 3650
 // Handler bundles the slice-055 routes over a single decision.Store.
 type Handler struct {
 	store *decision.Store
+	views *moduleaccess.Views
 }
 
 // New constructs a Handler.
 func New(store *decision.Store) *Handler { return &Handler{store: store} }
+
+// WithModules wires the module views that strip links into hidden modules
+// (#2174). Without them (a unit-test server) every link is shown.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
 
 // ----- wire shapes -----
 
@@ -286,6 +295,23 @@ func (h *Handler) GetDecision(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeStoreErr(w, r, "get decision", err)
 		return
+	}
+	// #2174: links into Exceptions are left out when the caller cannot see
+	// that module (the decision log belongs to Risk; risks, controls and
+	// scope predicates are Risk's own or core). A failed access read fails
+	// closed (500).
+	viewer, err := h.views.For(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "decision link modules", err)
+		return
+	}
+	sees, err := viewer.Sees("/v1/exceptions")
+	if err != nil {
+		httperr.WriteInternal(w, r, "decision link modules", err)
+		return
+	}
+	if !sees {
+		lk.Exceptions = nil
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"decision": decisionWireFrom(d),

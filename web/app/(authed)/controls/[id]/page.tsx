@@ -93,7 +93,14 @@ import { enumLabel } from "@/lib/labels/enum-labels";
 
 import { classifyControlDetailError } from "../error-classifier";
 import { anchorFitLabel } from "../filters";
-import { CONTROL_TABS, formatTabCount, isTabKey, type TabKey } from "./tabs";
+import { useSeesPage } from "@/components/modules-context";
+
+import {
+  formatTabCount,
+  isTabKey,
+  visibleControlTabs,
+  type TabKey,
+} from "./tabs";
 
 import {
   EvidencePanel,
@@ -134,8 +141,23 @@ function ControlDetailPageInner() {
   // missing values default to "overview" (D2). The tab setter writes
   // back through router.replace so the browser back/forward stack
   // navigates between tabs without re-mounting the page (AC-8).
+  //
+  // #2174: link sections into a module the caller cannot see (switched
+  // off, or outside their module access) are hidden entirely, tab and
+  // count included, and never fetched. A `?tab=` naming a hidden tab
+  // falls back to the overview.
+  const seesPolicies = useSeesPage("/policies");
+  const seesRisks = useSeesPage("/risks");
+  const seesActionPlans = useSeesPage("/action-plans");
+  const visibleTabs = visibleControlTabs({
+    policies: seesPolicies,
+    risks: seesRisks,
+  });
   const rawTab = searchParams.get("tab");
-  const activeTab: TabKey = isTabKey(rawTab) ? rawTab : "overview";
+  const activeTab: TabKey =
+    isTabKey(rawTab) && visibleTabs.some((t) => t.key === rawTab)
+      ? rawTab
+      : "overview";
 
   const setTab = useCallback(
     (next: TabKey) => {
@@ -196,13 +218,13 @@ function ControlDetailPageInner() {
   const policiesQ = useQuery({
     queryKey: ["control", id, "policies"],
     queryFn: () => fetchControlPolicies(id),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && seesPolicies,
   });
 
   const risksQ = useQuery({
     queryKey: ["control", id, "risks"],
     queryFn: () => fetchControlRisks(id),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && seesRisks,
   });
 
   const historyQ = useQuery({
@@ -622,7 +644,7 @@ function ControlDetailPageInner() {
           data-sticky-tabs
           className="sticky -top-4 z-20 -mx-4 flex items-center gap-1 overflow-x-auto border-b bg-background px-4 sm:-top-6 sm:-mx-6 sm:px-6"
         >
-          {CONTROL_TABS.map((t) => {
+          {visibleTabs.map((t) => {
             const isActive = activeTab === t.key;
             const chip =
               t.key === "overview" || t.key === "history"
@@ -683,16 +705,16 @@ function ControlDetailPageInner() {
               fvIds={fvIds}
               scopeQueries={scopeQueries}
               requirements={requirements}
-              policiesQ={policiesQ}
-              risksQ={risksQ}
+              policiesQ={seesPolicies ? policiesQ : null}
+              risksQ={seesRisks ? risksQ : null}
               historyQ={historyQ}
               anchorSCF={anchor ? anchor.scf_id : null}
             />
           ) : null}
 
           {/* Slice 384 (AC-26): read-only "Linked Action Plans" section,
-            rendered on the Overview tab. */}
-          {activeTab === "overview" ? (
+            rendered on the Overview tab. #2174: hidden with Risk. */}
+          {activeTab === "overview" && seesActionPlans ? (
             <div className="mt-6">
               <LinkedActionPlans target="control" targetId={id} />
             </div>

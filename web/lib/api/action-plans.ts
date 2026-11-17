@@ -47,6 +47,8 @@ export type ActionPlan = {
   description: string;
   triggering_event: string;
   owner_id: string;
+  // #2174: present and true when the owner can no longer work in Risk.
+  owner_lacks_access?: boolean;
   due_date?: string;
   status: ActionPlanStatus;
   audit_period_id?: string;

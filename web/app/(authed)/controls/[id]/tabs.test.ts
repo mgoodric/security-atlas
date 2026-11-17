@@ -7,7 +7,37 @@
 
 import { describe, expect, it } from "vitest";
 
-import { CONTROL_TABS, formatTabCount, isTabKey } from "./tabs";
+import {
+  CONTROL_TABS,
+  formatTabCount,
+  isTabKey,
+  visibleControlTabs,
+} from "./tabs";
+
+// #2174: a link tab into a module the caller cannot see is gone entirely.
+describe("visibleControlTabs", () => {
+  const keys = (sees: { policies: boolean; risks: boolean }) =>
+    visibleControlTabs(sees).map((t) => t.key);
+
+  it("keeps every tab when both modules are seen", () => {
+    expect(keys({ policies: true, risks: true })).toEqual(
+      CONTROL_TABS.map((t) => t.key),
+    );
+  });
+
+  it("drops Policies and Risks independently", () => {
+    expect(keys({ policies: false, risks: true })).not.toContain("policies");
+    expect(keys({ policies: false, risks: true })).toContain("risks");
+    expect(keys({ policies: true, risks: false })).not.toContain("risks");
+    expect(keys({ policies: false, risks: false })).toEqual([
+      "overview",
+      "evidence",
+      "mappings",
+      "scope",
+      "history",
+    ]);
+  });
+});
 
 describe("CONTROL_TABS", () => {
   it("renders the seven mockup tabs in mockup order", () => {

@@ -50,6 +50,9 @@ export type Vendor = {
   owner_user_id?: string | null;
   owner_unlinked?: string;
   owner_user: string;
+  // #2174: present and true when the owner can no longer work in
+  // Third-party risk. Computed at read time; the owner stays assigned.
+  owner_lacks_access?: boolean;
   linked_sow_uri?: string | null;
   notes: string;
   annual_cost?: number | null;

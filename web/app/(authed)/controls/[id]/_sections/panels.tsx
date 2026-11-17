@@ -111,8 +111,10 @@ export function OverviewPanel({
     error: unknown;
   }>;
   requirements: ControlCoverage["requirements"];
-  policiesQ: ReturnType<typeof useQuery<ControlLinkedPoliciesResponse>>;
-  risksQ: ReturnType<typeof useQuery<ControlLinkedRisksResponse>>;
+  // #2174: null when the caller cannot see the Policies (or Risk) module;
+  // the card is then left out entirely.
+  policiesQ: ReturnType<typeof useQuery<ControlLinkedPoliciesResponse>> | null;
+  risksQ: ReturnType<typeof useQuery<ControlLinkedRisksResponse>> | null;
   historyQ: ReturnType<typeof useQuery<ControlHistoryResponse>>;
   anchorSCF: string | null;
 }) {
@@ -217,24 +219,28 @@ export function OverviewPanel({
         </Card>
 
         {/* LINKED POLICIES — slice 253: GET /v1/controls/{id}/policies */}
-        <Card data-testid="policies-section">
-          <CardHeader>
-            <CardTitle>Policies</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <PoliciesBody policiesQ={policiesQ} />
-          </CardContent>
-        </Card>
+        {policiesQ ? (
+          <Card data-testid="policies-section">
+            <CardHeader>
+              <CardTitle>Policies</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PoliciesBody policiesQ={policiesQ} />
+            </CardContent>
+          </Card>
+        ) : null}
 
         {/* LINKED RISKS — slice 253: GET /v1/controls/{id}/risks */}
-        <Card data-testid="risks-section">
-          <CardHeader>
-            <CardTitle>Risks treated</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <RisksBody risksQ={risksQ} />
-          </CardContent>
-        </Card>
+        {risksQ ? (
+          <Card data-testid="risks-section">
+            <CardHeader>
+              <CardTitle>Risks treated</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <RisksBody risksQ={risksQ} />
+            </CardContent>
+          </Card>
+        ) : null}
 
         {/* AUDIT LOG — slice 253: GET /v1/controls/{id}/history */}
         <Card data-testid="audit-log-section">
