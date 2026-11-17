@@ -298,7 +298,8 @@ func TestOverlayExport_EveryColumnOwnTenantOnly(t *testing.T) {
 		"framework": f.framework, "framework_version": f.version, "requirement_code": "C2",
 		"scf_release": scfreleasetest.ReleaseB, "anchor_code": "IAC-06", "relationship_type": "intersects_with",
 		"strength": "0.8", "rationale": "'" + formula["rationale"].(string), "source_ref": "FY25 SOC 2 report, section 4, C2",
-		"status": "active", "retirement_reason": "", "created_by": active["created_by"].(string), "retired_by": "", "retired_at": "",
+		"status": "active", "retirement_reason": "", "created_by": active["created_by_name"].(string),
+		"created_by_id": active["created_by"].(string), "retired_by": "", "retired_by_id": "", "retired_at": "",
 	} {
 		if a[col] != want {
 			t.Errorf("active edge %s = %q; want %q", col, a[col], want)
@@ -308,7 +309,7 @@ func TestOverlayExport_EveryColumnOwnTenantOnly(t *testing.T) {
 		t.Error("active edge has no created_at")
 	}
 	r := byID[retiredID]
-	if r["status"] != "retired" || r["retirement_reason"] != "auditor withdrew it" || r["retired_by"] == "" || r["retired_at"] == "" {
+	if r["status"] != "retired" || r["retirement_reason"] != "auditor withdrew it" || r["retired_by"] == "" || r["retired_by_id"] == "" || r["retired_at"] == "" {
 		t.Errorf("retired edge = %v", r)
 	}
 

@@ -47,7 +47,9 @@ export function OrgMappingDetails({
           <dt className="font-medium">Added</dt>
           <dd data-testid="org-mapping-added">
             {formatAddedOn(overlay.created_at)} by{" "}
-            <span className="font-mono">{overlay.created_by}</span>
+            <span title={overlay.created_by}>
+              {overlay.created_by_name || "Unknown"}
+            </span>
           </dd>
         </>
       ) : null}
