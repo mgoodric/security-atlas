@@ -523,6 +523,7 @@ func main() {
 			})
 			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{
 				SuperAdmins: superAdmins,
+				Roles:       authz.NewDBRolesResolver(pool),
 			})
 			ep.AttachDeviceCodeStore(deviceCodes)
 			oauthHandler.AttachDeviceAuthorizationEndpoint(deviceAuthEP)
