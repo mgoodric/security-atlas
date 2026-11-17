@@ -593,26 +593,49 @@ func TestCheckApprover(t *testing.T) {
 // was submitted, unless self-approval is on, and then flagged.
 func TestCheckApprover_Editors(t *testing.T) {
 	t.Parallel()
-	submitter := "user-2"
+	// Editors are recorded by credstore.PrincipalOf: a person is a bare
+	// users(id) uuid.
+	const (
+		user1 = "11111111-1111-4111-8111-111111111111"
+		user2 = "22222222-2222-4222-8222-222222222222"
+		user3 = "33333333-3333-4333-8333-333333333333"
+		user4 = "44444444-4444-4444-8444-444444444444"
+	)
+	submitter := user2
 	person := func(u string) Approver { return Approver{UserID: u, CredentialID: "key_other"} }
-	cases := []struct {
+	type editorCase struct {
 		name      string
 		editors   []string
 		approver  Approver
 		allowSelf bool
 		want      error
 		wantSelf  bool
-	}{
-		{"author approves what another submitted", []string{"user-1"}, person("user-1"), false, ErrEditorApproval, false},
-		{"later editor approves", []string{"user-1", "user-3"}, person("user-3"), false, ErrEditorApproval, false},
-		{"editor by credential id", []string{"key_abc"}, Approver{UserID: "user-9", CredentialID: "key_abc"}, false, ErrEditorApproval, false},
-		{"a person who never edited", []string{"user-1", "user-3"}, person("user-4"), false, nil, false},
-		{"no editors recorded", nil, person("user-1"), false, nil, false},
-		{"empty editor entry matches nobody", []string{""}, person("user-1"), false, nil, false},
-		{"self-approval on: author approves, flagged", []string{"user-1"}, person("user-1"), true, nil, true},
-		{"self-approval on: a person who never edited is not flagged", []string{"user-1"}, person("user-4"), true, nil, false},
-		{"submitter rule still applies", []string{"user-1"}, person("user-2"), false, ErrSelfApproval, false},
-		{"machine refused before editors", []string{"user-1"}, Approver{CredentialID: "key_m"}, true, ErrApproverNotPerson, false},
+	}
+	cases := []editorCase{
+		{"author approves what another submitted", []string{user1}, person(user1), false, ErrEditorApproval, false},
+		{"later editor approves", []string{user1, user3}, person(user3), false, ErrEditorApproval, false},
+		{"a person who never edited", []string{user1, user3}, person(user4), false, nil, false},
+		{"no editors recorded", nil, person(user1), false, nil, false},
+		{"empty editor entry matches nobody", []string{""}, person(user1), false, nil, false},
+		{"self-approval on: author approves, flagged", []string{user1}, person(user1), true, nil, true},
+		{"self-approval on: a person who never edited is not flagged", []string{user1}, person(user4), true, nil, false},
+		{"submitter rule still applies", []string{user1}, person(user2), false, ErrSelfApproval, false},
+		{"machine refused before editors", []string{user1}, Approver{CredentialID: "key_m"}, true, ErrApproverNotPerson, false},
+	}
+	// #2459: an editor that names no person is an unknown author. Every
+	// approver is refused with the setting off, the key's own holder
+	// included; with it on, every approval is flagged.
+	for _, kind := range []struct{ name, principal string }{
+		{"unbound key", "key_abc"},
+		{"OAuth client", "oauth_client:ci-bot"},
+		{"bootstrap admin", "bootstrap-admin"},
+	} {
+		cases = append(cases,
+			editorCase{kind.name + ": a person who never used it", []string{kind.principal}, person(user4), false, ErrEditorNotPerson, false},
+			editorCase{kind.name + ": its holder, through that credential", []string{kind.principal}, Approver{UserID: user4, CredentialID: kind.principal}, false, ErrEditorNotPerson, false},
+			editorCase{kind.name + ": alongside a person editor", []string{user1, kind.principal}, person(user4), false, ErrEditorNotPerson, false},
+			editorCase{kind.name + ": self-approval on, flagged", []string{kind.principal}, person(user4), true, nil, true},
+		)
 	}
 	for _, tc := range cases {
 		tc := tc
