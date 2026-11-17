@@ -12,6 +12,14 @@ import { getRequirementCoverage } from "@/lib/api/requirement-coverage";
 // confidence_band) is computed upstream under RLS; this proxy is a pure
 // pass-through and adds NO client-supplied input to the score
 // (P0-482-4).
+//
+// SCF release (#2315): this proxy forwards no ?scf_release, so the UI
+// always reads coverage against the current SCF release (#2203); the
+// response's scf_release echo names it. `catalog import-scf` carries
+// crosswalk edges whose anchor kept its code and title onto the new
+// release, so they stay covered here. An edge waiting on a remap decision
+// is read only through the API with ?scf_release=<old>. See
+// docs/audit-log/2315-crosswalk-carry-forward-decisions.md D6.
 
 export async function GET(
   _req: NextRequest,

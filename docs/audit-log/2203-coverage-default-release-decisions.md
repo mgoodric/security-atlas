@@ -68,5 +68,15 @@ control moved to B, so falling back to A misses it too.
 would only defer the release echo that callers need, with no change in
 coverage.
 
+**Interaction with crosswalk carry-forward (#2315, 2026-11-17).** The
+"crosswalk that declares `scf_release: A`" row above no longer drops R-SAME.
+`catalog import-scf` now carries every edge whose anchor keeps its code and
+title onto the new release in the same step, so the default read keeps it with
+no crosswalk re-import. R-RENAMED (GOV-01, retitled) still drops from the
+default read until a super-admin decides its remap proposal. It is flagged
+there, and `?scf_release=A` still reads it. This matters once declaring
+`scf_release` becomes mandatory: every crosswalk would then be in the
+legacy-pinned row. See `docs/audit-log/2315-crosswalk-carry-forward-decisions.md`.
+
 Matt may override this before merge. The dispatcher took it as a routine call
 on the measured recommendation.

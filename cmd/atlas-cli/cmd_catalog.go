@@ -92,12 +92,14 @@ func newCatalogImportSCFCmd() *cobra.Command {
 			printRebindReport(os.Stdout, rebind)
 
 			// #1777: queue every catalog crosswalk edge left on an older
-			// release's anchor for a super-admin's review.
+			// release's anchor for a super-admin's review; #2315: carry the
+			// ones whose anchor kept its code and title forward.
 			edges, err := scfimport.QueueEdgeRemapProposals(ctx, pool)
 			if err != nil {
 				return err
 			}
-			printEdgeRemapCounts(os.Stdout, edges)
+			printEdgeRemapCounts(os.Stdout, edges.Queued)
+			fmt.Printf("crosswalk_edges carried_forward=%d\n", edges.Carried)
 
 			// #1804: queue every tenant's active overlay edge left on an
 			// older release's anchor for that tenant's writers.

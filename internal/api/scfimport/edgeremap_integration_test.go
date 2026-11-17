@@ -10,6 +10,9 @@ package scfimport_test
 // (-> TRM-30, TRM-31), TRM-04 reused_id (the code now names another
 // lineage; its concept moved to TRM-41) and TRM-05 withdrawn. The crosswalk
 // maps requirement R-0n to TRM-0n in release A.
+//
+// TRM-01 keeps its code and title, so the import carries R-01's edge
+// forward on its own (#2315); the other four wait for a person.
 
 import (
 	"context"
@@ -197,7 +200,7 @@ func TestEdgeRemapQueue_ImportingReleaseBQueuesEachEdgeWithItsClass(t *testing.T
 
 	got := edgeProposals(t, admin)
 	want := map[string]edgeProposal{
-		"R-01": {class: "unchanged", status: "open", successors: []string{"TRM-01"}},
+		"R-01": {class: "unchanged", status: "approved", successors: []string{"TRM-01"}},
 		"R-02": {class: "renamed", status: "open", successors: []string{"TRM-20"}},
 		"R-03": {class: "split", status: "open", successors: []string{"TRM-30", "TRM-31"}},
 		"R-04": {class: "reused_id", status: "open", successors: []string{"TRM-41"}},
@@ -220,15 +223,48 @@ func TestEdgeRemapQueue_ImportingReleaseBQueuesEachEdgeWithItsClass(t *testing.T
 		}
 	}
 
-	// A re-run queues nothing new.
-	counts, err := scfimport.QueueEdgeRemapProposals(context.Background(), admin)
+	// #2315: R-01's edge was carried to TRM-01 in B, a copy of the legacy
+	// edge recorded as the import's decision.
+	r01 := legacyEdge(t, admin, "R-01")
+	carried, ok := readEdge(t, admin, "framework_requirement_id = $1 AND scf_anchor_id = $2",
+		r01.RequirementID, anchorID(t, admin, edgeReleaseB, "TRM-01"))
+	if !ok {
+		t.Fatalf("R-01 was not carried to TRM-01 in %s", edgeReleaseB)
+	}
+	if carried.Relationship != r01.Relationship || carried.Strength != r01.Strength ||
+		carried.Rationale != r01.Rationale || carried.SourceAttribution != r01.SourceAttribution ||
+		carried.MappingTier != r01.MappingTier || carried.RetiredAt != nil {
+		t.Fatalf("carried edge %+v differs from legacy %+v", carried, r01)
+	}
+	var decidedBy string
+	var bulk bool
+	if err := admin.QueryRow(context.Background(), `
+		SELECT decided_by, bulk FROM scf_edge_remap_decisions
+		WHERE proposal_id = $1 AND decision = 'approved' AND new_edge_id = $2`,
+		got["R-01"].id, carried.ID).Scan(&decidedBy, &bulk); err != nil {
+		t.Fatalf("carry decision: %v", err)
+	}
+	if decidedBy != scfimport.CarryForwardDecider || !bulk {
+		t.Fatalf("carry decision decided_by=%q bulk=%v; want %q true", decidedBy, bulk, scfimport.CarryForwardDecider)
+	}
+
+	// A re-run queues and carries nothing new.
+	report, err := scfimport.QueueEdgeRemapProposals(context.Background(), admin)
 	if err != nil {
 		t.Fatalf("re-run: %v", err)
 	}
-	for class, n := range counts {
+	for class, n := range report.Queued {
 		if n != 0 {
 			t.Errorf("re-run queued %d %s proposals; want 0", n, class)
 		}
+	}
+	if report.Carried != 0 {
+		t.Errorf("re-run carried %d edges; want 0", report.Carried)
+	}
+	var n int
+	if err := admin.QueryRow(context.Background(), `SELECT count(*) FROM fw_to_scf_edges WHERE framework_requirement_id = $1`,
+		r01.RequirementID).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("R-01 has %d edges after the re-run (err %v); want the legacy one and one carried", n, err)
 	}
 }
 
@@ -395,17 +431,25 @@ func TestEdgeRemapDecide_BulkApprovesUnchangedOnly(t *testing.T) {
 	admin, app := setupEdgeRemap(t, nil)
 	ctx := context.Background()
 	store := crosswalkremap.NewStore(app)
+	// The import already carried R-01 (#2315). An unchanged proposal it
+	// leaves open is one whose successor has the same title under another
+	// code; the fixture has none, so R-02's single-successor proposal
+	// stands in for one.
+	if _, err := admin.Exec(ctx, `UPDATE scf_edge_remap_proposals SET class = 'unchanged' WHERE id = $1`,
+		edgeProposals(t, admin)["R-02"].id); err != nil {
+		t.Fatalf("reclass R-02: %v", err)
+	}
 	res, err := store.BulkApproveUnchanged(ctx, uuid.NewString())
 	if err != nil {
 		t.Fatalf("bulk: %v", err)
 	}
 	props := edgeProposals(t, admin)
-	if res.ApprovedCount != 1 || res.Approved[0].ProposalID != props["R-01"].id || !res.Approved[0].Bulk {
-		t.Fatalf("bulk approved %+v; want only R-01's unchanged proposal", res)
+	if res.ApprovedCount != 1 || res.Approved[0].ProposalID != props["R-02"].id || !res.Approved[0].Bulk {
+		t.Fatalf("bulk approved %+v; want only R-02's unchanged proposal", res)
 	}
 	for code, p := range props {
 		want := "open"
-		if code == "R-01" {
+		if code == "R-01" || code == "R-02" {
 			want = "approved"
 		}
 		if p.status != want {
@@ -413,8 +457,8 @@ func TestEdgeRemapDecide_BulkApprovesUnchangedOnly(t *testing.T) {
 		}
 	}
 	if _, ok := readEdge(t, admin, "framework_requirement_id = $1 AND scf_anchor_id = $2",
-		requirementID(t, admin, "R-01"), anchorID(t, admin, edgeReleaseB, "TRM-01")); !ok {
-		t.Fatalf("bulk approval created no edge on TRM-01 in B")
+		requirementID(t, admin, "R-02"), anchorID(t, admin, edgeReleaseB, "TRM-20")); !ok {
+		t.Fatalf("bulk approval created no edge on TRM-20 in B")
 	}
 	again, err := store.BulkApproveUnchanged(ctx, uuid.NewString())
 	if err != nil || again.ApprovedCount != 0 {
@@ -452,7 +496,7 @@ func TestEdgeRemap_AppRoleCannotWriteAroundTheDecideFunction(t *testing.T) {
 func TestEdgeRemap_FunctionsRefuseATenantContext(t *testing.T) {
 	admin, app := setupEdgeRemap(t, nil)
 	ctx := context.Background()
-	id := edgeProposals(t, admin)["R-01"].id
+	id := edgeProposals(t, admin)["R-02"].id
 	for name, call := range map[string]string{
 		"scf_edge_remap_decide":              `SELECT 1 FROM scf_edge_remap_decide($1::uuid, 'approved', '', '', 'someone', false)`,
 		"scf_edge_remap_lock_open_unchanged": `SELECT 1 FROM scf_edge_remap_lock_open_unchanged() WHERE $1::uuid IS NOT NULL`,
@@ -470,7 +514,7 @@ func TestEdgeRemap_FunctionsRefuseATenantContext(t *testing.T) {
 			t.Errorf("%s under a tenant context: err=%v; want a refusal", name, err)
 		}
 	}
-	if p := edgeProposals(t, admin)["R-01"]; p.status != "open" {
+	if p := edgeProposals(t, admin)["R-02"]; p.status != "open" {
 		t.Fatalf("proposal status = %s after the refused calls; want open", p.status)
 	}
 	// Without a tenant context the same call goes through.
@@ -541,8 +585,9 @@ func TestEdgeRemapAPI_TenantAdminForbiddenSuperAdminSucceeds(t *testing.T) {
 		}
 	}
 	for code, p := range edgeProposals(t, admin) {
-		if p.status != "open" {
-			t.Fatalf("after tenant-admin calls %s is %s; want open", code, p.status)
+		// R-01 was carried at import (#2315).
+		if want := map[bool]string{true: "approved", false: "open"}[code == "R-01"]; p.status != want {
+			t.Fatalf("after tenant-admin calls %s is %s; want %s", code, p.status, want)
 		}
 	}
 
@@ -556,8 +601,8 @@ func TestEdgeRemapAPI_TenantAdminForbiddenSuperAdminSucceeds(t *testing.T) {
 	if err := json.Unmarshal(body, &list); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if n := len(slices.DeleteFunc(list.Proposals, func(p crosswalkremap.Proposal) bool { return p.FrameworkSlug != edgeFwSlug })); n != 5 {
-		t.Fatalf("super-admin lists %d open proposals of the fixture; want 5", n)
+	if n := len(slices.DeleteFunc(list.Proposals, func(p crosswalkremap.Proposal) bool { return p.FrameworkSlug != edgeFwSlug })); n != 4 {
+		t.Fatalf("super-admin lists %d open proposals of the fixture; want 4", n)
 	}
 	for _, w := range writes {
 		if code, body := do(t, ts, http.MethodPost, w.path, superBearer, w.body); code != http.StatusOK {

@@ -60,14 +60,16 @@
     {
       "id": "verified",
       "name": "Verified",
-      "short": "The last step of an action plan: someone has checked that the completed work closed the gap. A verified plan is final.",
-      "long": "Action plans move from draft to in progress, possibly through blocked, to completed and then verified. Verification is a separate check after the work is marked complete. If it finds the gap isn't closed, the plan goes back to in progress rather than to verified. To restart a verified plan, create a new one."
+      "short": "The last step of an action plan: the completed work is shown to have closed the gap.",
+      "long": "A plan with linked controls is verified by the platform, once every linked control passes its latest evaluation, and goes back to completed by itself if one stops passing. Excepted is not a pass. A plan with no linked controls is verified by hand by an admin, never by the plan's owner. If the work turns out not to have closed the gap, a completed plan is reopened to in progress.",
+      "glossary": "GLOSSARY.md#action-plan-completed-and-verified-2108-2109"
     },
     {
       "id": "completed",
       "name": "Completed",
       "short": "An action plan whose work is done but not yet checked. The next step is verifying that the work closed the gap.",
-      "long": "Completed means the plan's owner reports the work as finished. It isn't the end of the lifecycle: a completed plan is either verified, or reopened to in progress if verification shows the gap is still there."
+      "long": "Completed means the plan's owner reports the work as finished. It isn't the end of the lifecycle: a completed plan is either verified, or reopened to in progress if verification shows the gap is still there.",
+      "glossary": "GLOSSARY.md#action-plan-completed-and-verified-2108-2109"
     },
     {
       "id": "self-approved",
@@ -311,6 +313,38 @@
       "name": "Implementation checklist",
       "short": "A to-do list, per team, of the work needed to put your in-scope controls in place. It is an AI-assisted draft until each team's section is approved.",
       "long": "Each control goes to a team (infrastructure, engineering or security) by its owner role, by a fixed rule rather than by the AI. The AI writes the tasks and cites the control behind each one. Controls that match no team are listed separately, so none drop out. Only approved sections can be exported."
+    },
+    {
+      "id": "action-plan",
+      "name": "Action plan",
+      "short": "A commitment to fix a gap: the work, its owner and its due date, linked to the risks it reduces and the controls it puts right.",
+      "long": "A plan moves from draft to in progress, possibly through blocked, to completed and then verified. Completed means the owner says the work is done; verified means it is shown to have closed the gap. A risk treated by mitigation can point to an action plan instead of a control."
+    },
+    {
+      "id": "fair",
+      "name": "FAIR",
+      "short": "A way of scoring a risk as the loss you can expect in dollars a year, instead of on the 5×5 grid. FAIR values are never put into Low, Medium or High bands.",
+      "long": "FAIR (Factor Analysis of Information Risk) estimates how often a loss is likely and how large it would be, and combines them into an annualised loss exposure. The register shows FAIR risks in dollars and, when sorted by severity, lists them after the 5×5 risks. A FAIR risk cannot be linked under a roll-up, which needs a 5×5 score."
+    },
+    {
+      "id": "org-unit",
+      "name": "Org unit",
+      "short": "A part of your organisation, such as a business unit, department or team. Org units form a tree, and each risk can belong to one.",
+      "long": "Org units let you see risk the way your organisation is built: which teams carry which risks, and where the same problem appears in several places. They are separate from scope, which describes the systems and data a control applies to."
+    },
+    {
+      "id": "theme",
+      "name": "Theme",
+      "short": "A tag on a risk, such as access control or tech debt, that cuts across categories and org units. A risk can carry several.",
+      "long": "Ten built-in themes are shared by every organisation and cannot be renamed or deleted. You can add your own beside them. The same theme turning up in several teams is often a sign of one larger risk, which you can record as a roll-up.",
+      "glossary": "GLOSSARY.md#theme-1811"
+    },
+    {
+      "id": "decision",
+      "name": "Decision",
+      "short": "A record of a trade-off someone made, such as deferring a piece of work, with who decided, why, and when to look at it again.",
+      "long": "A decision is broader than an exception: an exception waives one control for a time, while a decision records the reasoning behind a choice. Decisions are always made and recorded by a person. Once a decision's revisit date passes, it is marked overdue until someone acts on it.",
+      "glossary": "GLOSSARY.md#decision-log-slice-055"
     }
   ]
 }

@@ -116,6 +116,9 @@ nav:
       - Evidence: help/evidence.md
       - Exceptions: help/exceptions.md
       - Implementation checklist: help/controls-checklist.md
+      - Risk register: help/risks.md
+      - Risk hierarchy: help/risks-hierarchy.md
+      - Action plans: help/action-plans.md
       - Settings: help/settings.md
       - Admin: help/admin.md
       - Users: help/admin-users.md
