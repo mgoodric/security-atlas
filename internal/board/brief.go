@@ -36,9 +36,14 @@ package board
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // ErrBadPeriodEnd is returned (wrapped) when a period_end string is not a
@@ -197,9 +202,13 @@ type RiskAging struct {
 	CategoryName string `json:"category_name,omitempty"`
 	// Treatment is the current treatment status.
 	Treatment string `json:"treatment"`
-	// ResidualSeverity is the residual-severity scalar used for ranking.
-	// Extracted from the risk's residual_score JSONB (falling back to
-	// inherent_score) — see generator.go.
+	// Methodology is the risk's scoring methodology (#2185). It says what
+	// ResidualSeverity is: a 1..25 severity, or for "fair" a dollar amount.
+	// Briefs and packs stored before it existed lack it and read as 5x5.
+	Methodology string `json:"methodology,omitempty"`
+	// ResidualSeverity is the residual scalar used for ranking, read from
+	// the risk's residual_score JSONB (falling back to inherent_score) —
+	// see generator.go. On a Monetary risk it is dollars, not 1..25.
 	ResidualSeverity float64 `json:"residual_severity"`
 	// AgeDays is the age-since-treatment proxy: now - updated_at, in days
 	// (decisions log D4 — risks have no treatment-applied timestamp).
@@ -214,6 +223,54 @@ func (r RiskAging) CategoryLabel() string {
 		return r.CategoryName
 	}
 	return r.Category
+}
+
+// Monetary reports whether ResidualSeverity is a dollar amount (a FAIR
+// risk) rather than a 1..25 severity (#2185).
+func (r RiskAging) Monetary() bool {
+	return risk.Monetary(dbx.RiskMethodology(r.Methodology))
+}
+
+// Band is the residual's Low/Medium/High band, or "" for a Monetary risk:
+// a dollar exposure has no 5x5 band.
+func (r RiskAging) Band() string {
+	if r.Monetary() {
+		return ""
+	}
+	return risk.SeverityBand(r.ResidualSeverity)
+}
+
+// ResidualLabel is the residual as the PDF and narrative print it: a FAIR
+// risk in whole dollars ("$250,000"), anything else as its 1..25 severity
+// and band ("12.0 Medium"). Matches the web board-pack table.
+func (r RiskAging) ResidualLabel() string {
+	if r.Monetary() {
+		return formatDollars(r.ResidualSeverity)
+	}
+	return fmt.Sprintf("%.1f %s", r.ResidualSeverity, r.Band())
+}
+
+// formatDollars renders a dollar amount rounded to whole dollars with
+// thousands separators, as the web's formatDollars does ("$1,250,000",
+// "-$40").
+func formatDollars(v float64) string {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return "n/a"
+	}
+	n := int64(math.Round(v))
+	sign := ""
+	if n < 0 {
+		sign, n = "-", -n
+	}
+	digits := strconv.FormatInt(n, 10)
+	out := make([]byte, 0, len(digits)+len(digits)/3)
+	for i := range len(digits) {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, digits[i])
+	}
+	return sign + "$" + string(out)
 }
 
 // StoredBrief is a frozen brief as it lives in the `board_briefs` table —
