@@ -94,6 +94,7 @@ func TestResolve(t *testing.T) {
 		{"/v1/me", "settings_admin", ""},
 		{"/v1/people", "settings_admin", ""},
 		{"/v1/approvals", "dashboard", ""},
+		{"/v1/needs-attention", "dashboard", ""},
 		{"/v1/me/acknowledgments", "policies", ""},
 		{"/v1/admin/vendors/export", "third_party_risk", ""},
 		{"/v1/admin/features/risk.enabled", "settings_admin", ""},

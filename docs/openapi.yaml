@@ -4804,6 +4804,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/needs-attention:
+    get:
+      summary: GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134)
+      tags: [dashboard]
+      operationId: get-v1-needs-attention
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/org_units:
     get:
       summary: GET /v1/org_units
