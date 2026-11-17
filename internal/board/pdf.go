@@ -116,12 +116,12 @@ th { background: #f5f5f5; font-weight: 600; }
 		w.WriteString(`<div class="drift">No open risks in the register.</div>`)
 	} else {
 		w.WriteString(`<table><thead><tr><th>#</th><th>Risk</th><th>Category</th>` +
-			`<th>Treatment</th><th>Residual severity</th><th>Age (days)</th></tr></thead><tbody>`)
+			`<th>Treatment</th><th>Residual</th><th>Age (days)</th></tr></thead><tbody>`)
 		for i, r := range b.TopRisks {
 			fmt.Fprintf(&w,
-				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%.1f</td><td>%d</td></tr>`,
+				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td></tr>`,
 				i+1, html.EscapeString(r.Title), html.EscapeString(r.CategoryLabel()),
-				html.EscapeString(r.Treatment), r.ResidualSeverity, r.AgeDays)
+				html.EscapeString(r.Treatment), html.EscapeString(r.ResidualLabel()), r.AgeDays)
 		}
 		w.WriteString(`</tbody></table>`)
 	}

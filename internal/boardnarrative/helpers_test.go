@@ -347,3 +347,24 @@ func TestRiskRollupFromBrief(t *testing.T) {
 		t.Fatalf("risk rollup wrong: %+v", r)
 	}
 }
+
+// A FAIR risk's dollar residual never becomes the worst residual severity
+// (#2185); its age still counts.
+func TestRiskRollupFromBrief_FAIRDollarsAreNotASeverity(t *testing.T) {
+	t.Parallel()
+	b := board.Brief{
+		PeriodEnd:  "2026-05-31",
+		Frameworks: []board.FrameworkPosture{{Name: "SOC 2"}},
+		TopRisks: []board.RiskAging{
+			{ResidualSeverity: 9, AgeDays: 20},
+			{Methodology: "fair", ResidualSeverity: 250000, AgeDays: 90},
+		},
+	}
+	r, err := riskRollupFromBrief(b, nil)
+	if err != nil {
+		t.Fatalf("riskRollupFromBrief: %v", err)
+	}
+	if r.RiskCount != 2 || r.WorstResidualSeverity != 9 || r.OldestRiskAgeDays != 90 {
+		t.Fatalf("risk rollup wrong: %+v", r)
+	}
+}

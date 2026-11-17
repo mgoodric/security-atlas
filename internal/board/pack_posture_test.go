@@ -295,7 +295,7 @@ func TestPackPostures_CoveredByExceptionIsReportedSeparately(t *testing.T) {
 }
 
 // Top-risk residuals in the pack are the register's: the same field order
-// (score, then severity, then likelihood x impact — risk.residualMagnitude
+// (score, then severity, then likelihood x impact — risk.ScoreValue
 // and web/app/(authed)/risks/filters.ts residualSeverity), on the 1..25
 // scale with no division, and the register's band labels.
 func TestTopRisks_ResidualMatchesRegisterScaleAndBand(t *testing.T) {
@@ -317,7 +317,7 @@ func TestTopRisks_ResidualMatchesRegisterScaleAndBand(t *testing.T) {
 		if got.ResidualSeverity != c.want {
 			t.Errorf("%s: residual = %v, want %v (the register's 1..25 value)", c.name, got.ResidualSeverity, c.want)
 		}
-		if band := severityBandLabel(got.ResidualSeverity); band != c.band {
+		if band := got.Band(); band != c.band {
 			t.Errorf("%s: band = %q, want %q", c.name, band, c.band)
 		}
 		sec := newSection(SectionTopRisks, SectionData{TopRisks: []RiskAging{got}})
@@ -331,13 +331,55 @@ func TestTopRisks_ResidualMatchesRegisterScaleAndBand(t *testing.T) {
 	}
 }
 
-// Band boundaries match the register's: High from 15, Medium from 8, Low
-// from 1.
-func TestSeverityBandLabel(t *testing.T) {
+// A FAIR top risk is printed in dollars with no band in the pack
+// narrative, the pack PDF and the brief PDF; a 5x5 one carries its band in
+// all three (#2185). Titles are still HTML-escaped in the PDFs.
+func TestTopRisks_FAIRInDollarsAndBandInEveryRender(t *testing.T) {
 	t.Parallel()
-	for sev, want := range map[float64]string{25: "High", 15: "High", 14.9: "Medium", 8: "Medium", 7.9: "Low", 1: "Low", 0.8: "None", 0: "None"} {
-		if got := severityBandLabel(sev); got != want {
-			t.Errorf("severityBandLabel(%v) = %q, want %q", sev, got, want)
+	risks := []RiskAging{
+		{ID: "a", Title: "Patch <lag>", Category: "ops", Treatment: "mitigate", ResidualSeverity: 12, AgeDays: 3},
+		{ID: "b", Title: "Wire fraud", Category: "fin", Treatment: "mitigate", Methodology: "fair", ResidualSeverity: 1250000, AgeDays: 9},
+	}
+	sec := newSection(SectionTopRisks, SectionData{TopRisks: risks})
+	text, err := renderSectionNarrative(sec, "2026-09-30")
+	if err != nil {
+		t.Fatalf("renderSectionNarrative: %v", err)
+	}
+	for _, want := range []string{"residual severity 12.0 of 25, Medium", "FAIR residual annualized loss exposure $1,250,000"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("pack narrative missing %q: %q", want, text)
+		}
+	}
+	if strings.Contains(text, "1250000.0") {
+		t.Errorf("pack narrative prints the FAIR dollars as a severity: %q", text)
+	}
+
+	var w strings.Builder
+	writeSectionData(&w, SectionTopRisks, SectionData{TopRisks: risks})
+	pdf := w.String()
+	for _, want := range []string{"<td>12.0 Medium</td>", "<td>$1,250,000</td>", "Patch &lt;lag&gt;"} {
+		if !strings.Contains(pdf, want) {
+			t.Errorf("pack PDF missing %q: %s", want, pdf)
+		}
+	}
+
+	brief := buildBriefHTML(StoredBrief{PeriodEnd: "2026-09-30", Content: Brief{TopRisks: risks}})
+	for _, want := range []string{"<td>12.0 Medium</td>", "<td>$1,250,000</td>", "Patch &lt;lag&gt;"} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("brief PDF missing %q", want)
+		}
+	}
+	if strings.Contains(brief, "Patch <lag>") {
+		t.Error("brief PDF does not escape the risk title")
+	}
+
+	md, err := RenderNarrative(Brief{TopRisks: risks})
+	if err != nil {
+		t.Fatalf("RenderNarrative: %v", err)
+	}
+	for _, want := range []string{"residual severity 12.0 (Medium)", "FAIR residual annualized loss exposure $1,250,000"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("brief narrative missing %q: %q", want, md)
 		}
 	}
 }
