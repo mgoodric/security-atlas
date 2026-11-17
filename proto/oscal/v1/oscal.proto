@@ -297,6 +297,37 @@ message AuditNote {
   string created_at = 6;
 }
 
+// AcceptedException is the exception that waived a control in a scope cell
+// (#2269). The AR carries it as a back-matter resource the excepted cell's
+// observation links to.
+message AcceptedException {
+  string id = 1;
+  // RFC-3339 instant the exception stops applying.
+  string expires_at = 2;
+  // The person who approved the exception (exceptions.approved_by).
+  string approved_by = 3;
+  // RFC-3339 approval instant; empty when not recorded.
+  string approved_at = 4;
+  string justification = 5;
+  // The exception's status at export time: active | expired | revoked.
+  string status = 6;
+}
+
+// ExceptedCell is the latest evaluation of a (control, scope cell) as of
+// the frozen horizon whose result is `excepted` (#2112). The AR emits it as
+// a risk-accepted observation, never a finding (#2269).
+message ExceptedCell {
+  string evaluation_id = 1;
+  string control_id = 2;
+  // Empty for the whole-tenant row (the control resolved to no cells).
+  string scope_cell_id = 3;
+  // RFC-3339 instant of the evaluation.
+  string evaluated_at = 4;
+  // The exceptions in force for this cell at evaluated_at. Empty only when
+  // the exception can no longer be resolved; the observation says so.
+  repeated AcceptedException exceptions = 5;
+}
+
 message AssessmentInput {
   Metadata metadata = 1;
   string tenant_id = 2;
@@ -305,6 +336,7 @@ message AssessmentInput {
   repeated SamplePopulation populations = 5;
   repeated Walkthrough walkthroughs = 6;
   repeated AuditNote audit_notes = 7;
+  repeated ExceptedCell excepted_cells = 8;
 }
 
 message SerializeAssessmentRequest {

@@ -200,11 +200,36 @@ type AuditEntry struct {
 // applies the tenant GUC, and runs queries inside that transaction.
 type Store struct {
 	pool *pgxpool.Pool
+	// reevaluate, when set, re-evaluates a control after one of its
+	// exceptions is activated or revoked (#2269). See WithReevaluate.
+	reevaluate Reevaluator
 }
+
+// Reevaluator re-evaluates one control in one tenant. eval builds it
+// (eval.ExceptionChangeReevaluator); this package only calls it, so it does
+// not import the engine.
+type Reevaluator func(ctx context.Context, tenantID, controlID uuid.UUID)
 
 // NewStore constructs a Store over an existing pgx pool. The pool must be
 // connected as `atlas_app` (NOSUPERUSER NOBYPASSRLS) for RLS to fire.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithReevaluate makes Activate and Revoke re-evaluate the exception's
+// control once the state change has committed (#2269). The call runs in
+// its own goroutine, detached from the request: the response does not wait
+// for the evaluation and a client that hangs up does not cancel it.
+func (s *Store) WithReevaluate(r Reevaluator) *Store {
+	s.reevaluate = r
+	return s
+}
+
+// afterStateChange runs the reevaluator for a committed transition.
+func (s *Store) afterStateChange(ctx context.Context, x Exception) {
+	if s.reevaluate == nil {
+		return
+	}
+	go s.reevaluate(context.WithoutCancel(ctx), x.TenantID, x.ControlID)
+}
 
 // CreateInput is the API shape for POST /v1/exceptions. The store
 // re-validates every rule the handler should have validated already;
@@ -391,7 +416,10 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, activator string, ef
 	if effectiveFrom.IsZero() {
 		effectiveFrom = time.Now().UTC()
 	}
-	return s.transition(ctx, id, transitionParams{
+	// #2269: an effective_from in the future applies only from then; this
+	// run records the control as it stands now, and the scheduled run picks
+	// the exception up once it is in force.
+	out, err := s.transition(ctx, id, transitionParams{
 		expectedPrior: StateApproved,
 		newState:      StateActive,
 		actor:         activator,
@@ -405,6 +433,11 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, activator string, ef
 			})
 		},
 	})
+	if err != nil {
+		return out, err
+	}
+	s.afterStateChange(ctx, out)
+	return out, nil
 }
 
 // Revoke transitions active -> revoked (terminal, #2113). An approver
@@ -424,7 +457,7 @@ func (s *Store) Revoke(ctx context.Context, id uuid.UUID, revoker, reason string
 	if reason == "" {
 		return Exception{}, ErrReasonRequired
 	}
-	return s.transition(ctx, id, transitionParams{
+	out, err := s.transition(ctx, id, transitionParams{
 		expectedPrior: StateActive,
 		newState:      StateRevoked,
 		actor:         revoker,
@@ -438,6 +471,12 @@ func (s *Store) Revoke(ctx context.Context, id uuid.UUID, revoker, reason string
 			})
 		},
 	})
+	if err != nil {
+		return out, err
+	}
+	// #2269: the control is no longer waived; re-evaluate it now.
+	s.afterStateChange(ctx, out)
+	return out, nil
 }
 
 // Get returns a single exception by id. ErrNotFound when absent.
