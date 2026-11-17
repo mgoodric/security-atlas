@@ -18,16 +18,26 @@
 //     The column chooser adds methodology, level, org unit, themes and
 //     created (`?cols=`).
 //   - Rows open the risk.
+//   - Saved views (#2133): the filters, sort, roll-ups toggle and columns,
+//     saved per user under the `risks` surface of `/v1/saved-views` and
+//     applied by putting them back on the URL.
 //
 // Constitutional invariants honored:
 //   - Invariant 6 (tenant isolation): the BFF forwards the bearer cookie;
 //     the platform enforces tenant isolation with RLS and an explicit
 //     tenant_id. The UI never passes a tenant.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, type MouseEvent } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent,
+} from "react";
 
 import {
   EmptyState,
@@ -44,6 +54,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { Person, usePeopleDirectory } from "@/components/ui/person";
 import { resolvePerson } from "@/lib/person";
+import { APIError } from "@/lib/api/base";
+import {
+  createSavedView,
+  deleteSavedView,
+  listSavedViews,
+  type ServerSavedView,
+} from "@/lib/api/saved-views";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
   fetchRegisterPage,
@@ -62,6 +79,7 @@ import {
 import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
 import { pageTitle } from "@/lib/page-titles";
 
+import { SavedViewsBar } from "../controls/controls-toolbar";
 import { risksCountLabel } from "./count-label";
 import {
   categoryDisplay,
@@ -99,6 +117,12 @@ import {
   type OptionalColumn,
   type RegisterFilters,
 } from "./server-query";
+import {
+  ROLLUPS_PARAM,
+  SORT_PARAM,
+  searchFromView,
+  viewFromSearch,
+} from "./saved-views";
 import { SeverityPill } from "./severity-pill";
 import {
   ariaSort,
@@ -115,8 +139,6 @@ const RISKS_PAGE_SIZE = 50;
 // URL keys beside the filters: the 1-indexed page, the sort, and the
 // roll-ups (#2060) and archived-categories (#1817) toggles.
 const PAGE_PARAM = "page";
-const SORT_PARAM = "sort";
-const ROLLUPS_PARAM = "rollups";
 const ARCHIVED_PARAM = "archived";
 
 const RESIDUAL_HEADER_TOOLTIP =
@@ -223,6 +245,70 @@ function RisksPageInner() {
       if (next) sp.set(COLUMNS_PARAM, next);
       else sp.delete(COLUMNS_PARAM);
     }, false);
+
+  // #2133 — saved views. The query key is the surface's own, apart from
+  // the controls list's.
+  const queryClient = useQueryClient();
+  const [activeViewId, setActiveViewId] = useState("");
+  const savedViewsQ = useQuery<ServerSavedView[]>({
+    queryKey: ["saved-views", "risks"],
+    queryFn: () => listSavedViews("risks"),
+  });
+  const savedViews = useMemo(() => savedViewsQ.data ?? [], [savedViewsQ.data]);
+  const currentView = useMemo(() => viewFromSearch(search), [search]);
+
+  const saveViewMutation = useMutation({
+    mutationFn: (name: string) => createSavedView(name, currentView, "risks"),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["saved-views", "risks"],
+      });
+      setActiveViewId(created.id);
+    },
+  });
+  const deleteViewMutation = useMutation({
+    mutationFn: (id: string) => deleteSavedView(id),
+    onSuccess: (_void, id) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["saved-views", "risks"],
+      });
+      if (activeViewId === id) setActiveViewId("");
+    },
+  });
+
+  const onLoadView = useCallback(
+    (id: string) => {
+      setActiveViewId(id);
+      const saved = savedViews.find((v) => v.id === id);
+      const qs = saved ? searchFromView(saved.filters) : "";
+      router.replace(qs ? `/risks?${qs}` : "/risks");
+    },
+    [savedViews, router],
+  );
+
+  const onSaveView = useCallback(
+    async (
+      name: string,
+    ): Promise<{ ok: true } | { ok: false; message: string }> => {
+      const trimmed = name.trim();
+      if (trimmed.length === 0) {
+        return { ok: false, message: "Enter a name for this view." };
+      }
+      try {
+        await saveViewMutation.mutateAsync(trimmed);
+        return { ok: true };
+      } catch (err) {
+        const message =
+          err instanceof APIError && err.status === 409
+            ? "A view with that name already exists."
+            : err instanceof APIError && err.status === 422
+              ? "Saved-view limit reached — delete one before saving another."
+              : "Could not save the view. Try again.";
+        return { ok: false, message };
+      }
+    },
+    [saveViewMutation],
+  );
 
   const goToPage = (page: number) =>
     replace((sp) => {
@@ -807,11 +893,22 @@ function RisksPageInner() {
   );
 
   const filterRow = (
-    <FilterPills
-      pills={pills}
-      onChange={(id, v) => updateFilter(id as FilterKey, v)}
-      meta={meta}
-    />
+    <>
+      <SavedViewsBar
+        views={savedViews}
+        activeViewId={activeViewId}
+        canSave={Object.keys(currentView).length > 0}
+        onLoadView={onLoadView}
+        onSaveView={onSaveView}
+        onDeleteView={(id) => deleteViewMutation.mutate(id)}
+        testIdPrefix="risks"
+      />
+      <FilterPills
+        pills={pills}
+        onChange={(id, v) => updateFilter(id as FilterKey, v)}
+        meta={meta}
+      />
+    </>
   );
 
   if (risksQ.isLoading) {

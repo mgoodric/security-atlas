@@ -97,4 +97,24 @@ describe("saved-views BFF route — no-store cache header (slice 746)", () => {
     const body = (await res.json()) as { id: string };
     expect(body.id).toBe("v2");
   });
+
+  test("GET forwards ?surface= to the upstream (#2133)", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    let capturedURL = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL) => {
+        capturedURL = String(input);
+        return new Response(JSON.stringify({ views: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    );
+
+    const req = new Request("http://bff/api/saved-views?surface=risks");
+    const res = await GET(req as never);
+
+    expect(res.status).toBe(200);
+    expect(capturedURL).toBe("http://atlas:8080/v1/saved-views?surface=risks");
+  });
 });
