@@ -9,10 +9,22 @@ This file is created lazily as terms are resolved during design work. Most of th
 The output of the **evaluation stage** (canvas §4.3) — the read-only engine that consumes the append-only evidence ledger and computes per-control state. Lives in `internal/eval`. Always:
 
 - **Writes `control_evaluations`, never `evidence_records`.** The table is named `control_evaluations` (the issue spec's literal `control_state` is superseded). It is an **append-only evaluation ledger** — one row per evaluation run per `(control_id, scope_cell_id)`, latest-row-by-`evaluated_at` wins. Append-only is what makes point-in-time replay meaningful (an upsert "current state" table would destroy prior computed state) and matches the `evidence_audit_log` / `aggregation_rule_evaluations` precedent. Slice 016 (freshness read-model) and slice 020 (risk residual) consume this table by that name.
-- **`result`** is the slice-002 `evidence_result` enum (`pass` / `fail` / `na` / `inconclusive`). Zero in-window evidence → `inconclusive`, never `fail` (absence of evidence is not evidence of failure). Any in-window `fail` → `fail`; any in-window `pass` (no fail) → `pass`.
+- **`result`** is the slice-002 `evidence_result` enum (`pass` / `fail` / `na` / `inconclusive`). Zero in-window evidence → `inconclusive`, never `fail` (absence of evidence is not evidence of failure). Any in-window `fail` → `fail`; any in-window `pass` (no fail) → `pass`. Manual attestations are the exception: only the latest one in the window counts (see **Attestation** below).
 - **`freshness_status`** (`fresh` / `stale` / `no_evidence`) is orthogonal to `result`. Computed inline from raw `observed_at` + the control's `freshness_class` max-age (canvas §2.3) — the materialized freshness read-model is slice 016, which depends on 012. Out-of-window evidence never reaches the `result` computation.
 - **Idempotent + replayable.** The computed columns are a deterministic function of the ledger slice; wall clock enters only as the freshness-window cutoff and the `evaluated_at` stamp, never the result. Deleting every `control_evaluations` row and re-running `Replay` reproduces identical computed state.
 - **Live vs period-bounded.** `GET /v1/controls/{id}/state` is the slice-012 **live** entrypoint (per the AuditPeriod note below); `GET /v1/audit-periods/{id}/control-state` is slice 028's period-bounded entrypoint. The two share no SQL.
+
+## Attestation (#2111)
+
+A person's signed statement that a manually operated control did or did not work, recorded as one `manual.attestation.v1` evidence record. Made from the control page's **Attest** button, which shows on `manual_attested` and `manual_periodic` controls. Always:
+
+- **Pass or fail.** Schema 1.2.0 carries `result` (`pass` / `fail`) and `fail_reason`, which a fail must have. A record with no `result` (every 1.0.0 and 1.1.0 attestation) is a pass. The record's ledger `result` is the attested one.
+- **The latest attestation wins.** In the freshness window, only the latest attestation speaks for the attestation outcome: a later pass clears an earlier fail, and a later fail overrides an earlier pass. "Latest" is the greatest `observed_at`, then `ingested_at`, then record id, so equal timestamps resolve the same way every time. Automated evidence keeps "any fail in the window fails", so an automated fail still fails the control whatever the last attestation said.
+- **Who attests.** A credential holding the control's **Owner role**, or a tenant admin. This is not the same check as Evaluate now, which takes the control's assigned **Owner** or an admin.
+- **Evaluated at once.** The attest handler writes the ledger directly, not through the message bus, so it evaluates the control itself as soon as the record lands. The control page shows "Evaluating…" until that state arrives, for at most 30 seconds.
+- **Human only.** `actor_type` is always `human`; the handler never takes it from the request (AI-assist boundary).
+
+Not a **Policy acknowledgment** (below), which records that a person read a policy version.
 
 ## Evidence freshness + drift (slice 016)
 
