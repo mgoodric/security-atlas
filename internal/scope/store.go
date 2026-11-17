@@ -326,6 +326,11 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 // decoded (corruption) the cell is returned with a nil map rather than
 // panicking — callers must tolerate that, but in practice it never happens
 // because writes go through Canonicalize.
+// CellFromRow converts a scope_cells row into a Cell, decoding its
+// canonical dimensions. Readers outside this package that already hold the
+// rows (the OSCAL export, #2269) use it rather than re-reading the cells.
+func CellFromRow(r dbx.ScopeCell) Cell { return rowToCell(r) }
+
 func rowToCell(r dbx.ScopeCell) Cell {
 	c := Cell{
 		ID:       uuid.UUID(r.ID.Bytes),

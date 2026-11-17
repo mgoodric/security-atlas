@@ -167,20 +167,31 @@ covered_then AS (
     JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
     WHERE cpt.passed_then
 ),
+control_latest_run AS (
+    -- #2269: each control's latest evaluation run. One run writes one row
+    -- per scope cell the control's applicability_expr resolves to at that
+    -- moment, so the run's rows are the cells that currently apply. A cell
+    -- that stopped applying has no row in it.
+    SELECT DISTINCT ON (ce.control_id)
+        ce.control_id,
+        ce.eval_run_id
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $1
+    ORDER BY ce.control_id, ce.evaluated_at DESC, ce.created_at DESC
+),
 control_excepted_now AS (
     -- #2112: covering controls whose coverage rests on an exception today:
-    -- the latest evaluation of at least one of their scope cells is
-    -- `excepted`. DISTINCT ON picks the latest row per (control, cell).
-    SELECT DISTINCT le.control_id
-    FROM (
-        SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
-            ce.control_id,
-            ce.result
-        FROM control_evaluations ce
-        WHERE ce.tenant_id = $1
-        ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
-    ) le
-    WHERE le.result = 'excepted'
+    -- at least one of their scope cells is `excepted` in the control's
+    -- latest run. #2269: only that run counts, so a cell excepted in an
+    -- earlier run that no longer applies does not keep the control
+    -- excepted.
+    SELECT DISTINCT ce.control_id
+    FROM control_evaluations ce
+    JOIN control_latest_run lr
+      ON lr.control_id = ce.control_id
+     AND lr.eval_run_id = ce.eval_run_id
+    WHERE ce.tenant_id = $1
+      AND ce.result = 'excepted'
 ),
 covered_by_exception AS (
     -- Requirements covered today only by exception: every covering control
@@ -191,6 +202,40 @@ covered_by_exception AS (
     LEFT JOIN control_excepted_now cen ON cen.control_id = cc.control_id
     GROUP BY cc.framework_version_id, cc.requirement_id
     HAVING BOOL_AND(cen.control_id IS NOT NULL)
+),
+control_latest_run_then AS (
+    -- #2269: each control's latest evaluation run on/before the cutoff, the
+    -- 90-day counterpart of control_latest_run.
+    SELECT DISTINCT ON (ce.control_id)
+        ce.control_id,
+        ce.eval_run_id
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $1
+      AND ce.evaluated_at <= $2
+    ORDER BY ce.control_id, ce.evaluated_at DESC, ce.created_at DESC
+),
+control_excepted_then AS (
+    -- #2269: controls resting on an exception at the cutoff: a scope cell is
+    -- `excepted` in their latest run on/before it.
+    SELECT DISTINCT ce.control_id
+    FROM control_evaluations ce
+    JOIN control_latest_run_then lr
+      ON lr.control_id = ce.control_id
+     AND lr.eval_run_id = ce.eval_run_id
+    WHERE ce.tenant_id = $1
+      AND ce.result = 'excepted'
+),
+covered_by_exception_then AS (
+    -- #2269: requirements covered at the cutoff only by exception: every
+    -- covering control that counted toward coverage then rested on an
+    -- exception then. The baseline's share of covered_by_exception.
+    SELECT cc.framework_version_id, cc.requirement_id
+    FROM covering_control cc
+    JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
+    LEFT JOIN control_excepted_then cet ON cet.control_id = cc.control_id
+    WHERE cpt.passed_then
+    GROUP BY cc.framework_version_id, cc.requirement_id
+    HAVING BOOL_AND(cet.control_id IS NOT NULL)
 ),
 history_versions AS (
     -- Framework versions with at least one covering control evaluated on or
@@ -240,6 +285,14 @@ SELECT
              100.0 * COUNT(DISTINCT cbe.requirement_id)
                    / COUNT(DISTINCT vr.requirement_id), 2)
     END::float8 AS covered_by_exception_pct,
+    -- covered_by_exception_then_pct (#2269): the same share at the 90-day
+    -- cutoff, so a baseline derived from trend_delta_90d can say how much of
+    -- it rested on exceptions. A subset of the coverage then.
+    CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
+         ELSE ROUND(
+             100.0 * COUNT(DISTINCT cbet.requirement_id)
+                   / COUNT(DISTINCT vr.requirement_id), 2)
+    END::float8 AS covered_by_exception_then_pct,
     -- freshness_composite: fresh covering controls / all covering controls,
     -- 0..100. 0 when the version has no covering controls.
     CASE WHEN COUNT(DISTINCT cf.control_id) = 0 THEN 0.0
@@ -265,6 +318,8 @@ LEFT JOIN covered_then     ct ON ct.framework_version_id = vr.framework_version_
                               AND ct.requirement_id      = vr.requirement_id
 LEFT JOIN covered_by_exception cbe ON cbe.framework_version_id = vr.framework_version_id
                                   AND cbe.requirement_id      = vr.requirement_id
+LEFT JOIN covered_by_exception_then cbet ON cbet.framework_version_id = vr.framework_version_id
+                                        AND cbet.requirement_id      = vr.requirement_id
 LEFT JOIN control_freshness cf ON cf.framework_version_id = vr.framework_version_id
 LEFT JOIN scoped_versions  sv ON sv.framework_version_id = vr.framework_version_id
 LEFT JOIN history_versions hv ON hv.framework_version_id = vr.framework_version_id

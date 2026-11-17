@@ -50,25 +50,31 @@ func exceptedIn(exceptions []activeException, cell *scope.Cell, now time.Time) (
 		if !x.inForce(now) {
 			continue
 		}
-		if cell == nil {
-			all, err := matchesEveryCell(x.predicate)
-			if err != nil {
-				return false, err
-			}
-			if all {
-				return true, nil
-			}
-			continue
-		}
-		hits, err := scope.Evaluate(x.predicate, []scope.Cell{*cell})
+		covered, err := ExceptionCovers(x.predicate, cell)
 		if err != nil {
-			return false, fmt.Errorf("exception scope predicate: %w", err)
+			return false, err
 		}
-		if len(hits) == 1 {
+		if covered {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// ExceptionCovers reports whether an exception's scope_cell_predicate covers
+// a cell, by the rule the engine applies when it records `excepted`. A nil
+// cell is the whole-tenant row and is covered only by an always-true
+// predicate. The OSCAL export (#2269) uses it to name the exception behind
+// an excepted cell.
+func ExceptionCovers(predicate []byte, cell *scope.Cell) (bool, error) {
+	if cell == nil {
+		return matchesEveryCell(predicate)
+	}
+	hits, err := scope.Evaluate(predicate, []scope.Cell{*cell})
+	if err != nil {
+		return false, fmt.Errorf("exception scope predicate: %w", err)
+	}
+	return len(hits) == 1, nil
 }
 
 // matchesEveryCell reports whether a predicate is the always-true form: empty,

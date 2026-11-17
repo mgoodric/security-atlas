@@ -305,6 +305,83 @@ def test_serialize_assessment_marks_demo_seed_sampled_evidence():
     assert valid, errors
 
 
+def test_serialize_assessment_emits_excepted_cells_as_risk_accepted_observations():
+    # #2269: an excepted cell is a risk-accepted observation linked to the
+    # exception (id, expiry, approver) in back-matter, never a finding.
+    exc_id = "6f1c2a8e-3b7d-4e2f-9a10-5c4d3e2b1a00"
+    inp = oscal_pb2.AssessmentInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        audit_period_name="SOC 2 2026 Q2",
+        excepted_cells=[
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-1",
+                control_id="ctrl-1",
+                scope_cell_id="cell-a",
+                evaluated_at="2026-05-01T00:00:00+00:00",
+                exceptions=[
+                    oscal_pb2.AcceptedException(
+                        id=exc_id,
+                        expires_at="2026-09-01T00:00:00+00:00",
+                        approved_by="user-approver",
+                        approved_at="2026-04-01T00:00:00+00:00",
+                        justification="Legacy host retires in Q3.",
+                        status="active",
+                    )
+                ],
+            ),
+            # The same exception covering a second cell appears once in
+            # back-matter.
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-2",
+                control_id="ctrl-1",
+                scope_cell_id="cell-b",
+                evaluated_at="2026-05-01T00:00:00+00:00",
+                exceptions=[
+                    oscal_pb2.AcceptedException(id=exc_id, expires_at="2026-09-01T00:00:00+00:00")
+                ],
+            ),
+            # An exception that can no longer be resolved still yields an
+            # observation, with no link.
+            oscal_pb2.ExceptedCell(
+                evaluation_id="eval-3",
+                control_id="ctrl-2",
+                evaluated_at="2026-05-01T00:00:00+00:00",
+            ),
+        ],
+    )
+    _, ar_json = serialize_assessment(inp)
+    doc = json.loads(ar_json)["assessment-results"]
+    result = doc["results"][0]
+    assert "findings" not in result
+    obs = result["observations"]
+    assert len(obs) == 3
+    for o in obs:
+        props = {p["name"]: p["value"] for p in o["props"]}
+        assert props["observation-source"] == "exception"
+        assert props["risk-accepted"] == "true"
+        assert props["evaluation-result"] == "excepted"
+
+    first = obs[0]
+    assert first["links"] == [
+        {"href": f"#{exc_id}", "rel": "related", "text": "Accepting exception"}
+    ]
+    assert first["expires"].startswith("2026-09-01")
+    assert "links" not in obs[2]
+
+    resources = doc["back-matter"]["resources"]
+    assert len(resources) == 1
+    res = resources[0]
+    assert res["uuid"] == exc_id
+    res_props = {p["name"]: p["value"] for p in res["props"]}
+    assert res_props["expires-at"] == "2026-09-01T00:00:00+00:00"
+    assert res_props["approved-by"] == "user-approver"
+
+    valid, errors = round_trip_validate("assessment-results", ar_json)
+    assert valid, errors
+
+
 def test_serialize_assessment_emits_valid_ap_and_ar():
     inp = oscal_pb2.AssessmentInput(
         metadata=_metadata(),

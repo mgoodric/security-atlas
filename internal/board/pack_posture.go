@@ -67,6 +67,10 @@ type PackFrameworkPosture struct {
 	// (#2112). Omitted when zero, so packs generated before #2112 decode
 	// unchanged.
 	CoveredByExceptionPct float64 `json:"covered_by_exception_pct,omitempty"`
+	// BaselineCoveredByExceptionPct is the part of BaselinePct that rested
+	// only on exceptions at the start of the 90-day trend (#2269). Zero when
+	// there is no baseline; omitted when zero.
+	BaselineCoveredByExceptionPct float64 `json:"baseline_covered_by_exception_pct,omitempty"`
 	// FreshnessPct is the dashboard's freshness_composite [0,100].
 	FreshnessPct float64 `json:"freshness_pct"`
 	// BaselinePct is the coverage at the start of the 90-day trend:
@@ -88,17 +92,20 @@ type PackFrameworkPosture struct {
 // frameworkPostureRow is one row of the dashboard posture query joined to
 // its framework's slug and name.
 type frameworkPostureRow struct {
-	FrameworkID    uuid.UUID
-	VersionID      uuid.UUID
-	Slug           string
-	Name           string
-	Version        string
-	CoveragePct    float64
-	ExceptionPct   float64
-	FreshnessPct   float64
-	TrendDelta90d  float64
-	ScopeActivated bool
-	TrendHistory   bool
+	FrameworkID  uuid.UUID
+	VersionID    uuid.UUID
+	Slug         string
+	Name         string
+	Version      string
+	CoveragePct  float64
+	ExceptionPct float64
+	// ExceptionThenPct is the covered-by-exception share at the trend
+	// cutoff (#2269).
+	ExceptionThenPct float64
+	FreshnessPct     float64
+	TrendDelta90d    float64
+	ScopeActivated   bool
+	TrendHistory     bool
 }
 
 // FrameworkPosture runs the dashboard's per-framework posture query for the
@@ -158,17 +165,18 @@ func readFrameworkPosture(ctx context.Context, q *dbx.Queries, tenantID uuid.UUI
 				"framework_id", id.String(), "framework_version", r.FrameworkVersion)
 		}
 		out = append(out, frameworkPostureRow{
-			FrameworkID:    id,
-			VersionID:      uuid.UUID(r.FrameworkVersionID.Bytes),
-			Slug:           fw.Slug,
-			Name:           fw.Name,
-			Version:        r.FrameworkVersion,
-			CoveragePct:    r.CoveragePct,
-			ExceptionPct:   r.CoveredByExceptionPct,
-			FreshnessPct:   r.FreshnessComposite,
-			TrendDelta90d:  r.TrendDelta90d,
-			ScopeActivated: r.ScopeActivated,
-			TrendHistory:   r.TrendHistory,
+			FrameworkID:      id,
+			VersionID:        uuid.UUID(r.FrameworkVersionID.Bytes),
+			Slug:             fw.Slug,
+			Name:             fw.Name,
+			Version:          r.FrameworkVersion,
+			CoveragePct:      r.CoveragePct,
+			ExceptionPct:     r.CoveredByExceptionPct,
+			ExceptionThenPct: r.CoveredByExceptionThenPct,
+			FreshnessPct:     r.FreshnessComposite,
+			TrendDelta90d:    r.TrendDelta90d,
+			ScopeActivated:   r.ScopeActivated,
+			TrendHistory:     r.TrendHistory,
 		})
 	}
 	return out, nil
@@ -202,6 +210,7 @@ func packPostures(rows []frameworkPostureRow) []PackFrameworkPosture {
 		if r.TrendHistory {
 			p.Delta = r.TrendDelta90d
 			p.BaselinePct = round2(r.CoveragePct - r.TrendDelta90d)
+			p.BaselineCoveredByExceptionPct = r.ExceptionThenPct
 			p.TrendArrow = trendFromPoints(r.TrendDelta90d)
 		} else {
 			// No evaluation before the cutoff: the query's delta equals the
@@ -246,6 +255,27 @@ func coverageTrend(postures []PackFrameworkPosture) (coverage, baseline float64,
 		return round2(sumNow / float64(scoped)), 0, scoped, false
 	}
 	return round2(sumNow / float64(scoped)), round2(sumThen / float64(scoped)), scoped, true
+}
+
+// exceptionTrend is coverageTrend's companion for the covered-by-exception
+// share (#2269): the unweighted mean, over the same scoped frameworks, of
+// the share now and at the start of the 90-day trend. The baseline mean is
+// meaningful only when coverageTrend reports a baseline.
+func exceptionTrend(postures []PackFrameworkPosture) (now, then float64) {
+	var sumNow, sumThen float64
+	scoped := 0
+	for _, p := range postures {
+		if p.ScopeNotSet {
+			continue
+		}
+		scoped++
+		sumNow += p.CoveredByExceptionPct
+		sumThen += p.BaselineCoveredByExceptionPct
+	}
+	if scoped == 0 {
+		return 0, 0
+	}
+	return round2(sumNow / float64(scoped)), round2(sumThen / float64(scoped))
 }
 
 // noBaselineText is what every renderer shows in place of a baseline the

@@ -20,8 +20,8 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 //   - inconclusive: no evidence is current (none yet, or it aged out of the
 //     window), or it is all inconclusive;
 //   - excepted: an active exception in force covers the cell, whatever the
-//     evidence says. It is never a pass; when the exception ends, the next
-//     evaluation is the evidence's result again.
+//     evidence says. It is never a pass; when the exception ends, the control
+//     is re-evaluated at once (#2269) and shows the evidence's result again.
 //
 // lifecycle_test.go drives computeRow through every pair.
 var Lifecycle = lifecycle.Table{
@@ -51,7 +51,7 @@ var resultCauses = map[string]struct{ action, note string }{
 	ResultInconclusive: {"no_current_evidence",
 		"No evidence is in the freshness window (none yet, or it aged out), or all of it is inconclusive. Absence of evidence is not a failure."},
 	ResultExcepted: {"exception_in_force",
-		"An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."},
+		"An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception is revoked or expires, the control is re-evaluated at once (#2269) and shows the evidence's result again."},
 }
 
 func resultEntries() []lifecycle.Entry {
