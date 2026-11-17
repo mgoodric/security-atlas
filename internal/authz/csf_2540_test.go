@@ -3,7 +3,7 @@ package authz_test
 // #2540 — OPA admits the /v1/csf/* routes: every role with a live tenant
 // role reads the Tier, the gap view and a profile; grc_engineer and admin
 // write. Whether the caller holds grc_engineer is checked again by the
-// handler (authz.HasOwnerRole, #2530); this pins the role layer, and that
+// handler (authz.IsTenantApprover, #2540 D3); this pins the role layer, and that
 // the csf rules open nothing else.
 
 import (
@@ -33,9 +33,17 @@ func decideCSF2540(t *testing.T, e *authz.Engine, roles []authz.Role, method, pa
 	return d.Allow
 }
 
-// csfConcretePath fills a route template's parameters.
-func csfConcretePath(tmpl string) string {
-	return strings.NewReplacer("{kind}", "target", "{requirement_id}", csf2540Req).Replace(tmpl)
+// csfConcretePaths fills a route template's parameters, once per profile
+// kind when the route takes one.
+func csfConcretePaths(tmpl string) []string {
+	if !strings.Contains(tmpl, "{kind}") {
+		return []string{strings.ReplaceAll(tmpl, "{requirement_id}", csf2540Req)}
+	}
+	var out []string
+	for _, kind := range []string{"current", "target"} {
+		out = append(out, strings.NewReplacer("{kind}", kind, "{requirement_id}", csf2540Req).Replace(tmpl))
+	}
+	return out
 }
 
 func TestDecide2540_CSFRoleMatrix(t *testing.T) {
@@ -53,21 +61,22 @@ func TestDecide2540_CSFRoleMatrix(t *testing.T) {
 			continue
 		}
 		n++
-		path := csfConcretePath(r.Path)
 		want := writers
 		if r.Method == "GET" {
 			want = readers
 		}
-		for _, role := range []authz.Role{
-			authz.RoleAdmin, authz.RoleGRCEngineer, authz.RoleControlOwner,
-			authz.RoleAuditor, authz.RoleViewer,
-		} {
-			if got := decideCSF2540(t, e, []authz.Role{role}, r.Method, path); got != want[role] {
-				t.Errorf("%s %s as %s: allow = %v; want %v", r.Method, path, role, got, want[role])
+		for _, path := range csfConcretePaths(r.Path) {
+			for _, role := range []authz.Role{
+				authz.RoleAdmin, authz.RoleGRCEngineer, authz.RoleControlOwner,
+				authz.RoleAuditor, authz.RoleViewer,
+			} {
+				if got := decideCSF2540(t, e, []authz.Role{role}, r.Method, path); got != want[role] {
+					t.Errorf("%s %s as %s: allow = %v; want %v", r.Method, path, role, got, want[role])
+				}
 			}
-		}
-		if decideCSF2540(t, e, nil, r.Method, path) {
-			t.Errorf("%s %s with no role: allowed; want default-deny", r.Method, path)
+			if decideCSF2540(t, e, nil, r.Method, path) {
+				t.Errorf("%s %s with no role: allowed; want default-deny", r.Method, path)
+			}
 		}
 	}
 	if n != 7 {

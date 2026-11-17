@@ -356,9 +356,11 @@ func csfRoutes(q, reqID string) []csfRoute {
 	return []csfRoute{
 		{http.MethodGet, "/v1/csf/tier" + q, "", false},
 		{http.MethodGet, "/v1/csf/profiles/target" + q, "", false},
+		{http.MethodGet, "/v1/csf/profiles/current" + q, "", false},
 		{http.MethodGet, "/v1/csf/gap" + q, "", false},
 		{http.MethodPut, "/v1/csf/tier" + q, `{"tier":"tier2_risk_informed"}`, true},
 		{http.MethodPut, "/v1/csf/profiles/target" + q, "", true},
+		{http.MethodPut, "/v1/csf/profiles/current" + q, "", true},
 		{http.MethodPut, "/v1/csf/profiles/target/selections" + q, sel, true},
 		{http.MethodDelete, "/v1/csf/profiles/target/selections/" + reqID + q, "", true},
 	}

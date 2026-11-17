@@ -8,7 +8,7 @@
 #     with a live role.
 #   - writes (PUT tier, PUT profiles/{kind}, PUT and DELETE selections):
 #     grc_engineer. admin is admitted by admin.rego. The handler checks
-#     authz.HasOwnerRole(cred, "grc_engineer") again (#2530).
+#     the same cut again with authz.IsTenantApprover (#2540 D3).
 #
 # Each rule names its exact routes; any other method or sub-path under
 # /v1/csf stays denied. Default-deny still applies to a roleless
