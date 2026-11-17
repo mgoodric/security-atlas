@@ -453,6 +453,68 @@ export function thresholdBadgeColor(
   return "red";
 }
 
+/**
+ * canSetMetricTarget mirrors the platform's guard on
+ * PUT /v1/metrics/{id}/target (`authz.IsTenantAdmin`): only an admin may
+ * set a metric target. It reads what `/v1/me` echoes of the credential,
+ * `is_admin` and the tenant role list in `owner_roles`, as
+ * `canSetPostureTarget` does. Anything unknown is view-only.
+ */
+export function canSetMetricTarget(
+  me: { is_admin?: boolean; owner_roles?: readonly string[] } | undefined,
+): boolean {
+  if (!me) return false;
+  if (me.is_admin === true) return true;
+  return (me.owner_roles ?? []).includes("admin");
+}
+
+/**
+ * metricTargetError checks a metric target before it is sent: three
+ * finite numbers, ordered the way the direction says, the same order the
+ * posture targets enforce and `thresholdBadgeColor` assumes:
+ *
+ *   higher_is_better   critical <= warning <= target
+ *   lower_is_better    target <= warning <= critical
+ *   target_is_better   |warning - target| <= |critical - target|
+ *
+ * A metric's unit varies (percent, count, days), so there is no range.
+ * Returns the first problem, or null.
+ */
+export function metricTargetError(input: {
+  target_value: number;
+  warning_threshold: number;
+  critical_threshold: number;
+  direction: string;
+}): string | null {
+  const values: [string, number][] = [
+    ["Target", input.target_value],
+    ["Warning", input.warning_threshold],
+    ["Critical", input.critical_threshold],
+  ];
+  for (const [name, v] of values) {
+    if (!Number.isFinite(v)) return `${name} must be a number.`;
+  }
+  const t = input.target_value;
+  const w = input.warning_threshold;
+  const c = input.critical_threshold;
+  switch (input.direction) {
+    case "higher_is_better":
+      return c <= w && w <= t
+        ? null
+        : "Higher is better needs critical ≤ warning ≤ target.";
+    case "lower_is_better":
+      return t <= w && w <= c
+        ? null
+        : "Lower is better needs target ≤ warning ≤ critical.";
+    case "target_is_better":
+      return Math.abs(w - t) <= Math.abs(c - t)
+        ? null
+        : "Closer to target needs the warning band inside the critical band.";
+    default:
+      return "Choose a direction.";
+  }
+}
+
 // neutralBadgeLabel disambiguates the two `neutral` cases (slice 677 /
 // ATLAS-023) so the muted badge tells the operator WHY it is neutral:
 //

@@ -22,8 +22,10 @@ import { describe, expect, test } from "vitest";
 
 import {
   type CascadeNode,
+  canSetMetricTarget,
   DEFAULT_NO_DATA_REASON,
   measuredObservations,
+  metricTargetError,
   neutralBadgeLabel,
   noDataReason,
   reassembleCascade,
@@ -304,5 +306,62 @@ describe("noDataReason — the evaluators' empty marker (#2064)", () => {
     const real = { id: "a", dimensions: { total_controls: "4" } };
     const empty = { id: "b", dimensions: { sample: "empty" } };
     expect(measuredObservations([empty, real, empty])).toEqual([real]);
+  });
+});
+
+// #2341 — the metric-target dialog's guard and client-side check.
+describe("canSetMetricTarget", () => {
+  test.each([
+    [{ is_admin: true }, true],
+    [{ owner_roles: ["admin"] }, true],
+    [{ owner_roles: ["grc_engineer"] }, false],
+    [{ owner_roles: ["viewer"] }, false],
+    [{ owner_roles: ["auditor"] }, false],
+    [{}, false],
+    [undefined, false],
+  ])("%j -> %s", (me, want) => {
+    expect(canSetMetricTarget(me)).toBe(want);
+  });
+});
+
+describe("metricTargetError", () => {
+  const check = (
+    direction: string,
+    target_value: number,
+    warning_threshold: number,
+    critical_threshold: number,
+  ) =>
+    metricTargetError({
+      direction,
+      target_value,
+      warning_threshold,
+      critical_threshold,
+    });
+
+  test("ordered thresholds pass for each direction", () => {
+    expect(check("higher_is_better", 95, 85, 70)).toBeNull();
+    expect(check("higher_is_better", 90, 90, 90)).toBeNull();
+    expect(check("lower_is_better", 7, 14, 30)).toBeNull();
+    expect(check("target_is_better", 50, 45, 30)).toBeNull();
+  });
+
+  test("misordered thresholds are refused", () => {
+    expect(check("higher_is_better", 80, 90, 70)).toContain(
+      "critical ≤ warning ≤ target",
+    );
+    expect(check("lower_is_better", 30, 14, 7)).toContain(
+      "target ≤ warning ≤ critical",
+    );
+    expect(check("target_is_better", 50, 30, 45)).toContain("critical band");
+  });
+
+  test("a value that is not a number, or no direction, is refused", () => {
+    expect(check("higher_is_better", Number.NaN, 1, 0)).toBe(
+      "Target must be a number.",
+    );
+    expect(check("higher_is_better", 2, 1, Number.NaN)).toBe(
+      "Critical must be a number.",
+    );
+    expect(check("", 2, 1, 0)).toBe("Choose a direction.");
   });
 });
