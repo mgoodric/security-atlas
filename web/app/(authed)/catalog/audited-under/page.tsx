@@ -55,6 +55,7 @@ import {
   type GroupBy,
 } from "@/lib/api/audited-under";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 import { anchorFitLabel } from "../../controls/filters";
 
@@ -90,7 +91,13 @@ export default function AuditedUnderPage() {
   return (
     <PageShell
       title={pageTitle("/catalog/audited-under")}
-      subtitle="Criteria your controls were tested under that their SCF anchor does not reach. Add an overlay edge to record the mapping your audit relied on."
+      subtitle={
+        <>
+          Criteria your controls were tested under that their SCF{" "}
+          <Term id="anchor">anchor</Term> does not reach. Add an overlay edge to
+          record the <Term id="org-mapping">mapping</Term> your audit relied on.
+        </>
+      }
       data-testid="audited-under-page"
       actions={
         <a

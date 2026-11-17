@@ -1,7 +1,7 @@
 // Issue #1832 — the sidebar badge and the /controls page count active
 // controls from one source.
 //
-// The badge (`fetchMyControlsTotal`) and the page (`fetchMyControls`)
+// The badge (`fetchMyControlsTotal`) and the page (`fetchMyControlsPage`)
 // both read `total` off `/api/controls-list?include=state` through
 // `activeControlsTotal`. The fake BFF below pages a tenant the way the
 // platform does; if either side moves to a different endpoint or a
@@ -9,16 +9,13 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { applyFilters } from "@/app/(authed)/controls/filters";
-import { rowsFromAnchors } from "@/app/(authed)/controls/view";
-
 import {
   activeControlsTotal,
   ANCHORS_MAX_PAGES,
   ANCHORS_PAGE_LIMIT,
   fetchCatalogCounts,
   fetchControlsCatalog,
-  fetchMyControls,
+  fetchMyControlsPage,
   fetchMyControlsTotal,
 } from "./controls-list";
 
@@ -80,10 +77,11 @@ describe("active control count (issue 1832)", () => {
     async (n) => {
       const { seen } = stubControlsListBFF(n);
       const badge = await fetchMyControlsTotal();
-      const page = await fetchMyControls();
+      // #2131: the page reads one server page; its total is the badge's.
+      const page = await fetchMyControlsPage({ limit: "50", offset: "0" });
       expect(badge).toBe(n);
-      expect(page.total).toBe(badge);
-      expect(page.controls).toHaveLength(badge);
+      expect(activeControlsTotal(page)).toBe(badge);
+      expect(page.controls).toHaveLength(Math.min(n, 50));
       // Parse rather than string-match, so the assertion does not depend
       // on the order the client appends query parameters in.
       const urls = seen.map((u) => new URL(u, "http://localhost"));
@@ -177,7 +175,7 @@ function stubCatalogBFF(catalogSize: number, reportedTotal = catalogSize) {
 }
 
 describe("fetchControlsCatalog (issue 1740)", () => {
-  test("walks past the first page, so the family filter sees every anchor", async () => {
+  test("walks past the first page, so the catalog search sees every anchor", async () => {
     const { seen } = stubCatalogBFF(1200);
     const got = await fetchControlsCatalog();
 
@@ -193,16 +191,7 @@ describe("fetchControlsCatalog (issue 1740)", () => {
         (u) => u.searchParams.get("limit") === String(ANCHORS_PAGE_LIMIT),
       ),
     ).toBe(true);
-
-    const late = applyFilters(rowsFromAnchors(got.anchors), {
-      framework: "all",
-      family: "Late",
-      result: "all",
-      freshness: "all",
-      scope: "all",
-      anchor_fit: "all",
-    });
-    expect(late).toHaveLength(200);
+    expect(got.anchors.filter((a) => a.family === "Late")).toHaveLength(200);
   });
 
   test("stops on a full last page when the total is reached", async () => {
@@ -260,5 +249,51 @@ describe("fetchControlsCatalog (issue 1740)", () => {
       new Response(JSON.stringify({ error: "boom" }), { status: 502 }),
     );
     await expect(fetchControlsCatalog()).rejects.toThrow("boom");
+  });
+});
+
+// #2131 — the /controls page sends its filters and sort through the BFF
+// and renders the one page it gets back.
+describe("fetchMyControlsPage (issue 2131)", () => {
+  test("sends the filters, sort and page, and returns the families", async () => {
+    const seen: URL[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      seen.push(new URL(String(input), "http://test.local"));
+      return new Response(
+        JSON.stringify({
+          controls: [],
+          count: 0,
+          total: 0,
+          families: ["IAC"],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+    const page = await fetchMyControlsPage({
+      result: "fail",
+      sort: "-last_observed_at",
+      limit: "50",
+      offset: "50",
+    });
+    expect(page.families).toEqual(["IAC"]);
+    expect(seen).toHaveLength(1);
+    const q = seen[0].searchParams;
+    expect(seen[0].pathname).toBe("/api/controls-list");
+    expect(q.get("include")).toBe("state");
+    expect(q.get("result")).toBe("fail");
+    expect(q.get("sort")).toBe("-last_observed_at");
+    expect(q.get("limit")).toBe("50");
+    expect(q.get("offset")).toBe("50");
+  });
+
+  test("surfaces the platform's 400 message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "sort must be one of" }), {
+        status: 400,
+      }),
+    );
+    await expect(fetchMyControlsPage({ sort: "title" })).rejects.toThrow(
+      "sort must be one of",
+    );
   });
 });

@@ -195,6 +195,40 @@ says where the concept went, for example
 edit its bundle's `scf_anchor_id` and re-upload it, or re-anchor it in the
 app.
 
+**Bundled crosswalks converge on boot.** On every bring-up the bootstrap
+re-imports the bundled SOC 2 crosswalk, then every other bundled crosswalk
+under `data/crosswalks/` (HIPAA, ISO 27001, PCI DSS, NIST CSF) whose framework
+this install already imported. A framework you never imported is skipped, so
+boot never adds one you did not choose. Each re-import is the same
+`catalog import-crosswalk` you would run by hand. A frozen framework version
+keeps its stored requirement text, and an edge the bundled file no longer
+lists is retired, which is how edges move off a retired SCF anchor after a
+remap. Boot prints one line per framework and one line per retired edge:
+
+```sh
+$COMPOSE logs atlas-bootstrap | grep -e 'converge framework=' -e 'warning: converge'
+```
+
+A crosswalk that fails to converge prints a warning and boot carries on. Fix
+the cause, then re-run `catalog import-crosswalk` on that file.
+
+The re-import keeps edges another source wrote: approved SCF remaps, a
+crosswalk imported from a file with a different name, workbook imports, and
+every tenant's overlay edges. Two kinds of hand-made edge are retired when the
+bundled file does not list them:
+
+- **Edges written before #1971**, which recorded no source. They include the
+  stale bundled anchors this convergence exists to move. They also include
+  edges from your own crosswalk if you imported it before that release.
+- **Edges from a bundled file you edited in place**, such as a changed
+  `data/crosswalks/iso27001-2022.yaml`. Its edges share the bundled file's
+  source, so the shipped file replaces them on the next boot.
+
+Import your custom crosswalk under its own filename (for example
+`data/crosswalks/iso27001-2022-acme.yaml`, or a path outside that directory)
+so boot never retires its edges. A retired edge keeps its row and its tier
+history, and re-importing your file restores it.
+
 If `/health` reports `db` not-ok, or the version is wrong, or a verify
 fails, treat the upgrade as failed and roll back.
 

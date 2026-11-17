@@ -3041,6 +3041,7 @@ type Policy struct {
 	ImportedBy                  *string            `json:"imported_by"`
 	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
 	SelfApproved                bool               `json:"self_approved"`
+	DraftEditors                []string           `json:"draft_editors"`
 }
 
 type PolicyAcknowledgment struct {
@@ -3073,6 +3074,8 @@ type PolicyAuditLog struct {
 	PolicyVersion          *string            `json:"policy_version"`
 	PreviousState          *string            `json:"previous_state"`
 	NewState               *string            `json:"new_state"`
+	BodySha256             *string            `json:"body_sha256"`
+	Editors                []string           `json:"editors"`
 }
 
 type Population struct {

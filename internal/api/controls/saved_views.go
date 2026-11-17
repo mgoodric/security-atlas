@@ -66,8 +66,10 @@ const (
 // controlFilterKeys is the slice-224 controls-filter allow-list. A persisted
 // view's filter payload is narrowed to EXACTLY these keys (threat-model T).
 // MUST stay in sync with web/app/(authed)/controls/filters.ts ControlFilters.
-// anchor_fit is issue #1736.
-var controlFilterKeys = []string{"framework", "family", "result", "freshness", "scope", "anchor_fit"}
+// anchor_fit is issue #1736; owner and sort are #2131 (the sort rides with
+// the filters so a saved view keeps its order). Each key is also a
+// `GET /v1/controls?include=state` parameter of the same name.
+var controlFilterKeys = []string{"framework", "family", "result", "freshness", "scope", "anchor_fit", "owner", "sort"}
 
 // SavedViewsHandler binds the saved-views routes. pool may be nil in
 // unit-only servers (the route gates return 503).

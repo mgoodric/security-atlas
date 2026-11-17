@@ -414,8 +414,18 @@ ORDER BY c.tenant_id, c.bundle_id, c.id;
 -- never borrow each other's state.
 --
 -- Paged server-side (row_limit / row_offset); CountActiveControls is the
--- matching total. The optional scope_cell_id narrows the rollup exactly as
--- slice 224 does on the anchor list.
+-- matching total and takes the same filters. The optional scope_cell_id
+-- narrows the rollup exactly as slice 224 does on the anchor list.
+--
+-- #2131: filters on state, freshness, family, framework, anchor fit and
+-- owner (a person, or unowned), and an allow-listed sort. sort_key is one
+-- of the fixed keys in the ORDER BY; the handler refuses any other value
+-- before it gets here, and a key this query does not name falls through
+-- to the tiebreakers. The default order is failing first (worst state
+-- rank), then the stalest evidence (never observed first, then the oldest
+-- last_observed_at). Every order ends on c.id, so offset paging has no
+-- duplicates or gaps. Text keys sort lower-cased under COLLATE "C", so the
+-- order is the same on every deployment whatever its default collation.
 --
 -- RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
 -- belt-and-suspenders alongside the GUC-driven RLS on `controls` and
@@ -433,42 +443,53 @@ WITH latest_eval AS (
     WHERE ce.tenant_id = sqlc.arg(tenant_id)
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
-worst_per_control AS (
+ranked_per_control AS (
     SELECT
         le.control_id,
-        CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 5
-                    WHEN 'inconclusive' THEN 4
-                    -- #2112: excepted is never a pass. A control with one
-                    -- excepted cell and the rest passing rolls up excepted.
-                    WHEN 'excepted'     THEN 3
-                    WHEN 'pass'         THEN 2
-                    WHEN 'na'           THEN 1
-                    ELSE 0
-                 END)
+        MAX(CASE le.result
+                WHEN 'fail'         THEN 5
+                WHEN 'inconclusive' THEN 4
+                -- #2112: excepted is never a pass. A control with one
+                -- excepted cell and the rest passing rolls up excepted.
+                WHEN 'excepted'     THEN 3
+                WHEN 'pass'         THEN 2
+                WHEN 'na'           THEN 1
+                ELSE 0
+             END) AS result_rank,
+        MAX(CASE le.freshness_status
+                WHEN 'expired'     THEN 4
+                WHEN 'stale'       THEN 3
+                WHEN 'no_evidence' THEN 2
+                WHEN 'fresh'       THEN 1
+                ELSE 0
+             END) AS freshness_rank,
+        MAX(le.last_observed_at) AS last_observed_at,
+        MAX(le.evaluated_at)     AS evaluated_at
+    FROM latest_eval le
+    WHERE (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
+    GROUP BY le.control_id
+),
+worst_per_control AS (
+    SELECT
+        rpc.control_id,
+        rpc.result_rank,
+        rpc.freshness_rank,
+        CASE rpc.result_rank
             WHEN 5 THEN 'fail'
             WHEN 4 THEN 'inconclusive'
             WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
-        (CASE MAX(CASE le.freshness_status
-                    WHEN 'expired'     THEN 4
-                    WHEN 'stale'       THEN 3
-                    WHEN 'no_evidence' THEN 2
-                    WHEN 'fresh'       THEN 1
-                    ELSE 0
-                 END)
+        (CASE rpc.freshness_rank
             WHEN 4 THEN 'expired'
             WHEN 3 THEN 'stale'
             WHEN 2 THEN 'no_evidence'
             WHEN 1 THEN 'fresh'
         END)::text AS freshness_status,
-        MAX(le.last_observed_at) AS last_observed_at,
-        MAX(le.evaluated_at)     AS evaluated_at
-    FROM latest_eval le
-    WHERE (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
-    GROUP BY le.control_id
+        rpc.last_observed_at,
+        rpc.evaluated_at
+    FROM ranked_per_control rpc
 ),
 anchor_frameworks AS (
     SELECT
@@ -499,23 +520,128 @@ LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
 -- #2128: the person-owner "assign owner" writes (slice 468).
 LEFT JOIN control_owner_assignments coa
        ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
+-- #2131: the owner's name, read by the owner sort only.
+LEFT JOIN users ou
+       ON ou.tenant_id = c.tenant_id AND ou.id = coa.owner_user_id
 WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
   AND (sqlc.narg('anchor_fit')::text IS NULL OR c.anchor_fit = sqlc.narg('anchor_fit')::text)
   AND (sqlc.narg('owner_user_id')::uuid IS NULL OR coa.owner_user_id = sqlc.narg('owner_user_id')::uuid)
-ORDER BY c.scf_id NULLS LAST, c.bundle_id
+  AND (NOT sqlc.arg(unowned)::bool OR coa.owner_user_id IS NULL)
+  AND (sqlc.narg('result')::text IS NULL OR wpc.result::text = sqlc.narg('result')::text)
+  AND (sqlc.narg('freshness')::text IS NULL OR wpc.freshness_status = sqlc.narg('freshness')::text)
+  AND (sqlc.narg('family')::text IS NULL OR lower(c.control_family) = lower(sqlc.narg('family')::text))
+  AND (sqlc.narg('framework')::text IS NULL OR sqlc.narg('framework')::text = ANY(af.framework_slugs))
+ORDER BY
+    -- default: failing first, then the stalest evidence.
+    CASE WHEN sqlc.arg(sort_key)::text = 'default' THEN COALESCE(wpc.result_rank, 0) END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'default' THEN wpc.last_observed_at END ASC NULLS FIRST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'scf_id' AND NOT sqlc.arg(sort_desc)::bool THEN c.scf_id COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'scf_id' AND sqlc.arg(sort_desc)::bool THEN c.scf_id COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'name' AND NOT sqlc.arg(sort_desc)::bool THEN lower(c.title) COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'name' AND sqlc.arg(sort_desc)::bool THEN lower(c.title) COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'family' AND NOT sqlc.arg(sort_desc)::bool THEN lower(c.control_family) COLLATE "C" END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'family' AND sqlc.arg(sort_desc)::bool THEN lower(c.control_family) COLLATE "C" END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'state' AND NOT sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.result_rank, 0) END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'state' AND sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.result_rank, 0) END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'freshness' AND NOT sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.freshness_rank, 0) END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'freshness' AND sqlc.arg(sort_desc)::bool THEN COALESCE(wpc.freshness_rank, 0) END DESC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'last_observed_at' AND NOT sqlc.arg(sort_desc)::bool THEN wpc.last_observed_at END ASC NULLS FIRST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'last_observed_at' AND sqlc.arg(sort_desc)::bool THEN wpc.last_observed_at END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'owner' AND NOT sqlc.arg(sort_desc)::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'owner' AND sqlc.arg(sort_desc)::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_key)::text = 'frameworks' AND NOT sqlc.arg(sort_desc)::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END ASC,
+    CASE WHEN sqlc.arg(sort_key)::text = 'frameworks' AND sqlc.arg(sort_desc)::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END DESC,
+    c.scf_id NULLS LAST,
+    c.id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: CountActiveControls :one
 -- Issue #1741 — total for the paged ListActiveControlsWithState read.
--- The optional anchor_fit (issue #1736) and owner_user_id (#2128) filters
--- match the list's.
+-- Takes every filter the list does (#1736 anchor_fit, #2128 owner, #2131
+-- unowned / state / freshness / family / framework), so the total counts
+-- exactly what the filtered list pages over. The rollup CTEs repeat the
+-- list's.
+WITH latest_eval AS (
+    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
+        ce.control_id,
+        ce.scope_cell_id,
+        ce.result,
+        ce.freshness_status
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = sqlc.arg(tenant_id)
+    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+),
+worst_per_control AS (
+    SELECT
+        le.control_id,
+        CASE MAX(CASE le.result
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    WHEN 'excepted'     THEN 3
+                    WHEN 'pass'         THEN 2
+                    WHEN 'na'           THEN 1
+                    ELSE 0
+                 END)
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::text AS result,
+        (CASE MAX(CASE le.freshness_status
+                    WHEN 'expired'     THEN 4
+                    WHEN 'stale'       THEN 3
+                    WHEN 'no_evidence' THEN 2
+                    WHEN 'fresh'       THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END)::text AS freshness_status
+    FROM latest_eval le
+    WHERE (sqlc.narg('scope_cell_id')::uuid IS NULL OR le.scope_cell_id = sqlc.narg('scope_cell_id')::uuid)
+    GROUP BY le.control_id
+),
+anchor_frameworks AS (
+    SELECT
+        e.scf_anchor_id AS anchor_id,
+        array_agg(DISTINCT af.slug) AS framework_slugs
+    FROM effective_fw_to_scf_edges e
+    JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
+    JOIN framework_versions afv    ON afv.id = ar.framework_version_id
+    JOIN frameworks af             ON af.id = afv.framework_id
+    WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
+      AND af.tenant_id IS NULL
+      AND af.slug <> 'scf'
+    GROUP BY e.scf_anchor_id
+)
 SELECT count(*)::bigint AS total
 FROM controls c
+LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
+LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
 LEFT JOIN control_owner_assignments coa
        ON coa.tenant_id = c.tenant_id AND coa.control_id = c.id
 WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
   AND (sqlc.narg('anchor_fit')::text IS NULL OR c.anchor_fit = sqlc.narg('anchor_fit')::text)
-  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR coa.owner_user_id = sqlc.narg('owner_user_id')::uuid);
+  AND (sqlc.narg('owner_user_id')::uuid IS NULL OR coa.owner_user_id = sqlc.narg('owner_user_id')::uuid)
+  AND (NOT sqlc.arg(unowned)::bool OR coa.owner_user_id IS NULL)
+  AND (sqlc.narg('result')::text IS NULL OR wpc.result = sqlc.narg('result')::text)
+  AND (sqlc.narg('freshness')::text IS NULL OR wpc.freshness_status = sqlc.narg('freshness')::text)
+  AND (sqlc.narg('family')::text IS NULL OR lower(c.control_family) = lower(sqlc.narg('family')::text))
+  AND (sqlc.narg('framework')::text IS NULL OR sqlc.narg('framework')::text = ANY(af.framework_slugs));
+
+-- name: ListActiveControlFamilies :many
+-- #2131: the distinct families of the active tenant's active controls. The
+-- /controls Family filter reads it, since the page now holds one page of
+-- rows rather than every control.
+SELECT DISTINCT c.control_family
+FROM controls c
+WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+  AND c.control_family <> ''
+ORDER BY c.control_family;
 
 -- name: InsertSCFRemapProposal :execrows
 -- Issue #1775: queue one remap proposal for a control on a legacy SCF

@@ -33,6 +33,7 @@ import {
   VendorSpendRollupRow,
 } from "@/lib/api/vendors";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 // Slice 024 — vendor lite list view. The filters are query-param-driven so
 // a deep link survives reload and the user can bookmark "high + overdue".
@@ -113,7 +114,13 @@ export default function VendorsPage() {
   return (
     <PageShell
       title={pageTitle("/vendors")}
-      subtitle="Third-party register: contract dates, DPA, review cadence and criticality."
+      subtitle={
+        <>
+          Third-party register: contract dates, <Term id="dpa">DPA</Term>,{" "}
+          <Term id="review-cadence">review cadence</Term> and{" "}
+          <Term id="vendor-criticality">criticality</Term>.
+        </>
+      }
       actions={
         <>
           {/* Slice 139 — vendor data export (csv|json|xlsx). The

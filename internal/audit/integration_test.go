@@ -315,6 +315,117 @@ func TestAnnotateSample_RecordsResultPerRecord(t *testing.T) {
 	}
 }
 
+// An annotation may only name a record the sampler drew into the sample
+// (security-atlas#2425). A record elsewhere in the tenant is refused and
+// writes nothing.
+func TestAnnotateSample_RejectsRecordNotInSample(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrlID := seedControl(t, admin, tenant)
+	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	all := seedEvidence(t, admin, tenant, ctrlID, 10, windowStart)
+
+	store := audit.NewStore(app)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
+		ControlID:       ctrlID,
+		TimeWindowStart: windowStart,
+		TimeWindowEnd:   windowStart.Add(24 * time.Hour),
+		CreatedBy:       "key_test_2425",
+	})
+	if err != nil {
+		t.Fatalf("CreatePopulation: %v", err)
+	}
+	s, err := store.DrawSample(ctx, audit.DrawSampleInput{
+		PopulationID: pop.ID,
+		N:            3,
+		Seed:         "seed-2425",
+		CreatedBy:    "key_test_2425",
+	})
+	if err != nil {
+		t.Fatalf("DrawSample: %v", err)
+	}
+
+	drawn := make(map[uuid.UUID]bool, len(s.EvidenceRecordIDs))
+	for _, id := range s.EvidenceRecordIDs {
+		drawn[id] = true
+	}
+	var outside uuid.UUID
+	for _, id := range all {
+		if !drawn[id] {
+			outside = id
+			break
+		}
+	}
+	if outside == uuid.Nil {
+		t.Fatal("every seeded record was drawn; need one outside the sample")
+	}
+
+	// Another sample's record: a second sample drawn in full from the same
+	// population holds records the first sample did not draw.
+	s2, err := store.DrawSample(ctx, audit.DrawSampleInput{
+		PopulationID: pop.ID,
+		N:            len(all),
+		Seed:         "seed-2425-b",
+		CreatedBy:    "key_test_2425",
+	})
+	if err != nil {
+		t.Fatalf("DrawSample 2: %v", err)
+	}
+	var otherSampleRec uuid.UUID
+	for _, id := range s2.EvidenceRecordIDs {
+		if !drawn[id] {
+			otherSampleRec = id
+			break
+		}
+	}
+	if otherSampleRec == uuid.Nil {
+		t.Fatal("second sample has no record outside the first")
+	}
+
+	// Another tenant's record.
+	tenantB := freshTenant(t, admin)
+	foreign := seedEvidence(t, admin, tenantB, seedControl(t, admin, tenantB), 1, windowStart)
+
+	for _, tc := range []struct {
+		name string
+		rec  uuid.UUID
+	}{
+		{"tenant record not drawn", outside},
+		{"another sample's record", otherSampleRec},
+		{"another tenant's record", foreign[0]},
+	} {
+		_, err = store.AnnotateSample(ctx, audit.AnnotateSampleInput{
+			SampleID:         s.ID,
+			EvidenceRecordID: tc.rec,
+			Result:           "passed",
+			AnnotatedBy:      "key_auditor",
+		})
+		if !errors.Is(err, audit.ErrRecordNotInSample) {
+			t.Fatalf("%s: got %v; want ErrRecordNotInSample", tc.name, err)
+		}
+	}
+	anns, err := store.ListAnnotations(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("ListAnnotations: %v", err)
+	}
+	if len(anns) != 0 {
+		t.Fatalf("refused annotation wrote %d rows; want 0", len(anns))
+	}
+
+	// A drawn record still annotates.
+	if _, err := store.AnnotateSample(ctx, audit.AnnotateSampleInput{
+		SampleID:         s.ID,
+		EvidenceRecordID: s.EvidenceRecordIDs[0],
+		Result:           "passed",
+		AnnotatedBy:      "key_auditor",
+	}); err != nil {
+		t.Fatalf("annotate a drawn record: %v", err)
+	}
+}
+
 // ===== AC-5: forward-compat audit-period freezing (no-op until slice 028) =====
 
 func TestPopulation_FrozenAtIsForwardCompat(t *testing.T) {

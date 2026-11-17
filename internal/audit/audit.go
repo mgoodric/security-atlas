@@ -64,6 +64,11 @@ var ErrEmptyPopulation = errors.New("audit: population is empty")
 // line of defense).
 var ErrInvalidAnnotation = errors.New("audit: invalid annotation result")
 
+// ErrRecordNotInSample is returned when an annotation names an evidence
+// record that was not drawn into the sample. An auditor annotates the
+// records the sampler selected, never an arbitrary record in the tenant.
+var ErrRecordNotInSample = errors.New("audit: evidence record is not in the sample")
+
 // AnnotationResults enumerates the valid result values for an annotation.
 // Mirrors the DB CHECK constraint on sample_annotations.result.
 var AnnotationResults = map[string]struct{}{
@@ -377,6 +382,26 @@ func (s *Store) AnnotateSample(ctx context.Context, in AnnotateSampleInput) (Ann
 				return ErrNotFound
 			}
 			return fmt.Errorf("annotate get sample: %w", err)
+		}
+
+		// The record must be one the sampler drew into this sample. A
+		// sample holds n rows, so listing them is cheap.
+		members, err := q.ListSampleEvidence(ctx, dbx.ListSampleEvidenceParams{
+			TenantID: pgUUID(tenantID),
+			SampleID: pgUUID(in.SampleID),
+		})
+		if err != nil {
+			return fmt.Errorf("annotate list sample evidence: %w", err)
+		}
+		inSample := false
+		for _, m := range members {
+			if uuid.UUID(m.EvidenceRecordID.Bytes) == in.EvidenceRecordID {
+				inSample = true
+				break
+			}
+		}
+		if !inSample {
+			return ErrRecordNotInSample
 		}
 
 		row, err := q.UpsertSampleAnnotation(ctx, dbx.UpsertSampleAnnotationParams{
