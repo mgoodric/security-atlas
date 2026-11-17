@@ -48,24 +48,100 @@
 // header sub-line, freshness clock and KPIs move together. Who may
 // evaluate (owner or admin) and upload (admin) is the platform's check;
 // a refusal shows inline rather than hiding the button.
+//
+// #2111: manually attested controls get an Attest link, and the header
+// shows the control's rolled-up result. Back from an attestation
+// (`?attested=<ingested_at>`), the result reads "Evaluating…" and the
+// state is re-read every second until an evaluation at or after that
+// instant lands. After 30 seconds it stops and says so instead; it never
+// spins forever.
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   bundleDownloadHref,
   evaluateControl,
   uploadControlBundle,
 } from "@/lib/api/control-actions";
-import type {
-  ControlStateResponse,
-  ControlStateEntry,
+import {
+  fetchControlState,
+  type ControlStateResponse,
+  type ControlStateEntry,
 } from "@/lib/api/control-detail";
+import {
+  ATTEST_EVALUATION_POLL_MS,
+  ATTEST_EVALUATION_TIMEOUT_MS,
+  ATTESTED_PARAM,
+  evaluationLanded,
+  isManualImplementation,
+  rollupResult,
+} from "@/lib/attest-evaluation";
 import { relativeTimeOrNever } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
+
+// RESULT_VARIANT maps a rolled-up result to its badge tone.
+const RESULT_VARIANT: Record<
+  string,
+  "pass" | "destructive" | "info" | "warning" | "outline"
+> = {
+  pass: "pass",
+  fail: "destructive",
+  excepted: "info",
+  inconclusive: "warning",
+  na: "outline",
+};
+
+// useAttestationEvaluation waits for the evaluation an attestation
+// triggered. `attestedAt` is the record's ingested_at from the URL, or
+// null when the page was not reached from the attest form. While waiting
+// it re-reads the control state every ATTEST_EVALUATION_POLL_MS; once the
+// new state lands it drops the parameter from the URL, and after
+// ATTEST_EVALUATION_TIMEOUT_MS it stops polling and reports timedOut.
+function useAttestationEvaluation(
+  controlID: string,
+  attestedAt: string | null,
+  state: ControlStateResponse | undefined,
+): { waiting: boolean; timedOut: boolean } {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [timedOut, setTimedOut] = useState(false);
+
+  const landed =
+    attestedAt === null || evaluationLanded(state?.states, attestedAt);
+  const waiting = !landed && !timedOut;
+
+  useQuery({
+    queryKey: ["control", controlID, "state"],
+    queryFn: () => fetchControlState(controlID),
+    enabled: waiting,
+    refetchInterval: waiting ? ATTEST_EVALUATION_POLL_MS : false,
+  });
+
+  useEffect(() => {
+    if (attestedAt === null || landed) return;
+    const id = setTimeout(
+      () => setTimedOut(true),
+      ATTEST_EVALUATION_TIMEOUT_MS,
+    );
+    return () => clearTimeout(id);
+  }, [attestedAt, landed]);
+
+  useEffect(() => {
+    if (attestedAt === null || !landed) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete(ATTESTED_PARAM);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [attestedAt, landed, pathname, router, searchParams]);
+
+  return { waiting, timedOut: attestedAt !== null && !landed && timedOut };
+}
 
 // mostRecentObservedAt picks the freshest `last_observed_at` across all
 // scope-cell entries — the same reduce-to-newest rule the freshness
@@ -132,14 +208,21 @@ export interface ControlHeaderActionsProps {
   // it errored. The header sub-line renders "—" in that case rather
   // than a flash of "never".
   state: ControlStateResponse | undefined;
+  // The control's implementation_type; manual controls get Attest (#2111).
+  implementationType?: string;
 }
 
 export function ControlHeaderActions({
   controlID,
   state,
+  implementationType,
 }: ControlHeaderActionsProps) {
   const now = useNow();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const attestedAt = searchParams.get(ATTESTED_PARAM);
+  const attestation = useAttestationEvaluation(controlID, attestedAt, state);
+  const result = rollupResult(state?.states);
   const queryClient = useQueryClient();
   const fileInputID = useId();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -192,6 +275,15 @@ export function ControlHeaderActions({
         className="flex items-center gap-2"
         data-testid="control-header-action-buttons"
       >
+        {isManualImplementation(implementationType) && (
+          <Link
+            href={`/controls/${encodeURIComponent(controlID)}/attest`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            data-testid="control-action-attest"
+          >
+            Attest
+          </Link>
+        )}
         <Button
           type="button"
           variant="outline"
@@ -276,6 +368,51 @@ export function ControlHeaderActions({
           data-testid="control-upload-error"
         >
           {upload.error.message}
+        </p>
+      )}
+
+      <div
+        className="flex items-center gap-1.5 text-xs"
+        data-testid="control-state-result"
+        aria-live="polite"
+      >
+        <span className="text-muted-foreground">Result</span>
+        {attestation.waiting ? (
+          <Badge
+            variant="outline"
+            aria-busy="true"
+            data-testid="control-state-result-value"
+            data-result="evaluating"
+          >
+            Evaluating…
+          </Badge>
+        ) : result ? (
+          <Badge
+            variant={RESULT_VARIANT[result] ?? "outline"}
+            data-testid="control-state-result-value"
+            data-result={result}
+          >
+            {result}
+          </Badge>
+        ) : (
+          <span
+            className="font-mono text-foreground"
+            data-testid="control-state-result-value"
+            data-result="none"
+          >
+            —
+          </span>
+        )}
+      </div>
+      {attestation.timedOut && (
+        <p
+          role="alert"
+          className="text-xs text-destructive"
+          data-testid="control-attest-evaluation-timeout"
+        >
+          The attestation is recorded, but its evaluation has not landed after
+          30 seconds. Use Evaluate now, or check back after the next scheduled
+          run.
         </p>
       )}
 

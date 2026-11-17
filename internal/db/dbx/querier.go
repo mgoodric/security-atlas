@@ -2246,7 +2246,10 @@ type Querier interface {
 	// The evaluation engine's read of the evidence ledger for one control,
 	// bounded by the point-in-time horizon `as_of` (AC-1's `?as-of=` and AC-7's
 	// replay both pass an explicit horizon; live evaluation passes 'infinity').
-	// Ordered observed_at DESC so the engine sees the freshest record first.
+	// Ordered observed_at DESC so the engine sees the freshest record first,
+	// then ingested_at DESC and id DESC so records sharing an observed_at come
+	// back in one fixed order (#2111: the latest attestation wins, and equal
+	// timestamps must not make that choice depend on the plan).
 	// This is a pure SELECT — the engine never mutates the ledger.
 	ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error)
 	// Slice 064 — control-detail backend read endpoints.
