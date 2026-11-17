@@ -127,6 +127,56 @@ func TestAttestSubmit_RejectsMissingFields(t *testing.T) {
 	}
 }
 
+// #2111: a fail needs a fail_reason, and result is pass or fail only. Both
+// are refused before the control is read.
+func TestAttestSubmit_RejectsBadResult(t *testing.T) {
+	t.Parallel()
+	cases := map[string]map[string]any{
+		"fail without reason":    {"statement": "s", "result": "fail"},
+		"fail with blank reason": {"statement": "s", "result": "fail", "fail_reason": "   "},
+		"unknown result":         {"statement": "s", "result": "na"},
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := NewAttestHandler(nil, nil, nil)
+			rr := httptest.NewRecorder()
+			body, _ := json.Marshal(payload)
+			req := httptest.NewRequest(http.MethodPost,
+				"/v1/controls/00000000-0000-0000-0000-000000000010/attestations",
+				bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			ctx := authctx.WithCredential(req.Context(), ownerCred("control_owner"))
+			h.Submit(rr, withChiID(req.WithContext(ctx), "00000000-0000-0000-0000-000000000010"))
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400; got %d body=%s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestAttestResult(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		result, reason         string
+		wantResult, wantReason string
+		wantErr                bool
+	}{
+		{"", "", "pass", "", false},
+		{"pass", "", "pass", "", false},
+		{"pass", "ignored", "pass", "", false},
+		{"fail", " broken ", "fail", "broken", false},
+		{"fail", "", "", "", true},
+		{"FAIL", "x", "", "", true},
+	}
+	for _, tc := range cases {
+		gotResult, gotReason, err := attestResult(tc.result, tc.reason)
+		if (err != nil) != tc.wantErr || gotResult != tc.wantResult || gotReason != tc.wantReason {
+			t.Errorf("attestResult(%q, %q) = (%q, %q, %v)", tc.result, tc.reason, gotResult, gotReason, err)
+		}
+	}
+}
+
 func TestCredential_HasOwnerRole(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

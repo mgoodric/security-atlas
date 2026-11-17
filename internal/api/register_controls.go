@@ -9,7 +9,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/controlimport"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/llm"
+	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
 // registerControls registers its domain's routes onto the shared root
@@ -101,7 +103,12 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// evidence records via that service). When the artifact store is
 	// also wired, attestations may cite an uploaded artifact_id.
 	if s.ingestService != nil {
+		// #2111: the handler evaluates the control after each attestation
+		// with the same engine Evaluate now uses.
 		attestH := controlsapi.NewAttestHandler(s.dbPool, s.ingestService, attestUploader(s.artifactStore))
+		if s.dbPool != nil {
+			attestH.WithEvaluator(eval.NewEngine(eval.NewStore(s.dbPool), scope.NewStore(s.dbPool)))
+		}
 		root.Get("/v1/controls/{id}/attest-form", attestH.AttestForm)
 		root.Post("/v1/controls/{id}/attestations", attestH.Submit)
 	}
