@@ -155,7 +155,11 @@ func TestHasProgramRead(t *testing.T) {
 	}{
 		{"admin", credstore.Credential{IsAdmin: true}, true},
 		{"approver", credstore.Credential{IsApprover: true}, true},
-		{"owner roles", credstore.Credential{OwnerRoles: []string{"control_owner"}}, true},
+		// #2556: the roles OPA admits on `decisions` reads, by live role.
+		{"live viewer", credstore.Credential{ID: "jwt:v", UserID: "u", TenantRoles: []string{"viewer"}}, true},
+		{"live grc_engineer", credstore.Credential{ID: "jwt:g", UserID: "u", TenantRoles: []string{"grc_engineer"}}, true},
+		{"live control_owner", credstore.Credential{ID: "jwt:c", UserID: "u", TenantRoles: []string{"control_owner"}}, false},
+		{"viewer claim, no live role", credstore.Credential{ID: "jwt:x", UserID: "u", OwnerRoles: []string{"viewer"}}, false},
 		{"bare push credential", credstore.Credential{ID: "k", TenantID: "t"}, false},
 		{"empty", credstore.Credential{}, false},
 	}
