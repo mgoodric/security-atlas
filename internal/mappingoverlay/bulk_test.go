@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -242,7 +243,8 @@ func TestExportRow_MatchesColumns(t *testing.T) {
 		Strength: 0.75, Rationale: "r", SourceRef: "s", Status: StatusRetired, RetirementReason: "withdrawn",
 		CreatedBy: "cred-1", CreatedAt: created, RetiredBy: "cred-2", RetiredAt: &retired,
 	}
-	row := ExportRow(e)
+	name := func(a string) string { return "name of " + a }
+	row := ExportRow(e, name)
 	if len(row) != len(ExportColumns) {
 		t.Fatalf("row has %d cells; header has %d", len(row), len(ExportColumns))
 	}
@@ -252,15 +254,20 @@ func TestExportRow_MatchesColumns(t *testing.T) {
 	}
 	for k, v := range map[string]string{
 		"id": "11111111-1111-1111-1111-111111111111", "strength": "0.75", "status": "retired",
-		"retirement_reason": "withdrawn", "created_by": "cred-1", "created_at": "2026-11-01T09:00:00Z",
-		"retired_by": "cred-2", "retired_at": "2026-11-01T10:00:00Z",
+		"retirement_reason": "withdrawn", "created_by": "name of cred-1", "created_by_id": "cred-1",
+		"created_at": "2026-11-01T09:00:00Z", "retired_by": "name of cred-2", "retired_by_id": "cred-2",
+		"retired_at": "2026-11-01T10:00:00Z",
 	} {
 		if got[k] != v {
 			t.Errorf("%s = %q; want %q", k, got[k], v)
 		}
 	}
-	e.RetiredAt = nil
-	if r := ExportRow(e); r[len(r)-1] != "" {
+	e.RetiredAt, e.RetiredBy = nil, ""
+	r := ExportRow(e, name)
+	if r[len(r)-1] != "" {
 		t.Errorf("retired_at of an active edge = %q", r[len(r)-1])
+	}
+	if by := r[slices.Index(ExportColumns, "retired_by")]; by != "" {
+		t.Errorf("retired_by of an active edge = %q", by)
 	}
 }

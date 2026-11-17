@@ -18,8 +18,8 @@
 --
 -- Every INSERT is ON CONFLICT DO NOTHING, so a re-run is a no-op. The
 -- overlay row is inserted directly rather than through POST
--- /v1/mapping-overlays: its created_by is then a fixed value the spec can
--- assert, and the create API's own behaviour is covered by
+-- /v1/mapping-overlays: its created_by is then a fixed user whose name the
+-- spec can assert, and the create API's own behaviour is covered by
 -- internal/api/mappingoverlays' integration tests.
 
 \set ON_ERROR_STOP on
@@ -106,6 +106,21 @@ VALUES
      'e2e18000-0000-0000-0000-00000000a001', 'equal', 1.0, 'community_draft', '')
 ON CONFLICT (id) DO NOTHING;
 
+-- The overlay edge's author: a demo-tenant user, so the page shows a name
+-- rather than the recorded id (#2286).
+INSERT INTO users (id, tenant_id, email, display_name, status, idp_issuer, idp_subject)
+VALUES (
+    'e2e18000-0000-0000-0000-00000000c001',
+    '00000000-0000-0000-0000-00000000d3a0',
+    'org-mapping-e2e-author@example.invalid',
+    'Org Mapping Author',
+    'active',
+    '',
+    ''
+)
+ON CONFLICT (id) DO UPDATE
+    SET status = 'active', display_name = 'Org Mapping Author';
+
 INSERT INTO fw_to_scf_overlay_edges
     (id, tenant_id, framework_requirement_id, scf_anchor_id, relationship_type, strength,
      rationale, source_ref, created_by, created_at)
@@ -115,7 +130,7 @@ VALUES
      'intersects_with', 0.8,
      'Auditor tested the NDA control under OM-01',
      'FY25 SOC 2 report, section 4, OM-01',
-     'org-mapping-e2e-author', '2026-11-01T12:00:00Z')
+     'e2e18000-0000-0000-0000-00000000c001', '2026-11-01T12:00:00Z')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO controls (

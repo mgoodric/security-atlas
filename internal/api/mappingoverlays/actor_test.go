@@ -67,3 +67,32 @@ func TestActorFrom(t *testing.T) {
 		t.Fatalf("actorFrom wrote status %d on success", w.Code)
 	}
 }
+
+// TestActorFrom_SessionRecordsThePerson covers #2286: a JWT session is
+// recorded as its user's bare users(id), not the per-token "jwt:" id; a key
+// owned by a user stays its own "key_" id; a JWT naming no user keeps its
+// credential id.
+func TestActorFrom_SessionRecordsThePerson(t *testing.T) {
+	t.Parallel()
+	const user = "6f1c2a3e-1111-4a5b-9c8d-0123456789ab"
+	cases := []struct {
+		name string
+		cred credstore.Credential
+		want string
+	}{
+		{"jwt session", credstore.Credential{ID: "jwt:abc", UserID: "user:" + user}, user},
+		{"user-owned key", credstore.Credential{ID: "key_0b9e8d7c-5555-4a5b-9c8d-00000000beef", UserID: user}, "key_0b9e8d7c-5555-4a5b-9c8d-00000000beef"},
+		{"jwt without a user", credstore.Credential{ID: "jwt:def", UserID: "oauth_client:x"}, "jwt:def"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := httptest.NewRequest(http.MethodPost, "/", nil)
+			r = r.WithContext(authctx.WithCredential(r.Context(), tc.cred))
+			actor, ok := actorFrom(httptest.NewRecorder(), r)
+			if !ok || actor != tc.want {
+				t.Fatalf("actorFrom = %q, %v; want %q, true", actor, ok, tc.want)
+			}
+		})
+	}
+}
