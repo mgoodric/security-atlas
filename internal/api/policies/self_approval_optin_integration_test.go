@@ -74,6 +74,18 @@ func TestApprove_SelfApprovalOptIn(t *testing.T) {
 	if action != "self_approved" || actor != s.adminUser.String() {
 		t.Fatalf("audit row: action %q actor %q, want self_approved by %s", action, actor, s.adminUser)
 	}
+	// One approval is one row (#2200 D4): the self-approval writes no
+	// 'approved' row beside its 'self_approved' one.
+	var approvedRows, selfApprovedRows int
+	if err := s.admin.QueryRow(context.Background(),
+		`SELECT count(*) FILTER (WHERE action = 'approved'), count(*) FILTER (WHERE action = 'self_approved')
+		   FROM policy_audit_log WHERE tenant_id = $1 AND policy_id = $2`,
+		s.tenant, id).Scan(&approvedRows, &selfApprovedRows); err != nil {
+		t.Fatalf("count policy_audit_log approval rows: %v", err)
+	}
+	if approvedRows != 0 || selfApprovedRows != 1 {
+		t.Fatalf("approval audit rows: %d approved, %d self_approved; want 0 and 1", approvedRows, selfApprovedRows)
+	}
 
 	// A second person's approval is not flagged.
 	other := createDraftPolicy(t, s, "Second Approver Policy", "1.0", nil)
