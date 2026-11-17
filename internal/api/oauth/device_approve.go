@@ -55,6 +55,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // DeviceApprovalEndpoint owns the dependencies for the approve and
@@ -200,7 +201,14 @@ func (e *DeviceApprovalEndpoint) liveRoles(r *http.Request, tenantID, userID str
 	if e.roles == nil {
 		return out, nil
 	}
-	roles, err := e.roles.RolesFor(r.Context(), tenantID, userID)
+	// The route is outside tenancymw, and user_roles is RLS-scoped: the
+	// resolver applies the tenant GUC from ctx, so set it from the
+	// credential's tenant.
+	ctx, err := tenancy.WithTenant(r.Context(), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	roles, err := e.roles.RolesFor(ctx, tenantID, userID)
 	if err != nil {
 		return nil, err
 	}
