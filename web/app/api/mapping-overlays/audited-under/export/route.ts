@@ -17,6 +17,10 @@ const PASSTHROUGH_HEADERS = [
   "content-disposition",
   "content-length",
   "x-content-type-options",
+  // #2324: whether the rows were cut at the cap, and how many tested-under
+  // references the report could not resolve.
+  "x-atlas-truncated",
+  "x-atlas-unresolved-references",
 ];
 
 export async function GET(req: Request): Promise<Response> {
