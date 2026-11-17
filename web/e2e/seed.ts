@@ -166,7 +166,10 @@ export type FixtureName =
   // #2174 — a tenant with a control linked to a policy and one
   // grc_engineer member without Policies access, for
   // module-links.spec.ts.
-  | "module-links";
+  | "module-links"
+  // #2494 — a tenant with one member whose roles are cleared each run,
+  // for no-tenant-role.spec.ts.
+  | "no-tenant-role";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
