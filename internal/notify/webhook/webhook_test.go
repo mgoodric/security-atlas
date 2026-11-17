@@ -239,6 +239,89 @@ func TestHTTPTransport_Post_ErrorScrubsSecret(t *testing.T) {
 	}
 }
 
+// DNS rebinding (#2304): the host resolves public at validation, then to
+// loopback when the client dials. The dial-time check must refuse it, and
+// the loopback server must receive nothing.
+func TestHTTPTransport_Post_DNSRebindingRefusedAtDial(t *testing.T) {
+	t.Parallel()
+	hit := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit <- struct{}{}
+	}))
+	defer srv.Close()
+	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+
+	// Validation sees a public address; the real dial resolves "localhost"
+	// to 127.0.0.1 / ::1, which is what an attacker's rebinding DNS does.
+	policy := notify.SSRFPolicy{AllowHTTP: true}.WithResolver(func(string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+	tr, err := NewHTTPTransport(Config{URL: "http://localhost:" + port + "/hook", Timeout: DefaultTimeout}, policy)
+	if err != nil {
+		t.Fatalf("validation should pass on the public resolution: %v", err)
+	}
+	err = tr.Post(context.Background(), []byte(`{}`))
+	if err == nil {
+		t.Fatal("post to a host that rebinds to loopback must be refused at dial")
+	}
+	if !strings.Contains(err.Error(), "ssrf guard") || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("expected the dial-time SSRF refusal, got %v", err)
+	}
+	select {
+	case <-hit:
+		t.Fatal("loopback server received the POST")
+	default:
+	}
+}
+
+// Redirects are never followed (#2304): a 307 from a permitted endpoint
+// would otherwise re-send the body and its HMAC signature to an internal
+// address. The redirect target must receive nothing and Post must fail
+// with the 3xx status.
+func TestHTTPTransport_Post_RedirectNotFollowed(t *testing.T) {
+	t.Parallel()
+	hit := make(chan struct{}, 1)
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit <- struct{}{}
+	}))
+	defer internal.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, internal.URL+"/steal", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	cfg := Config{URL: srv.URL + "/hook", HMACSecret: notify.Secret("test-hmac-secret"), Timeout: DefaultTimeout}
+	tr, err := NewHTTPTransport(cfg, notify.SSRFPolicy{AllowHTTP: true, AllowLoopback: true})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	err = tr.Post(context.Background(), []byte(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "307") || !strings.Contains(err.Error(), "redirect not followed") {
+		t.Fatalf("expected a 307 redirect-not-followed failure, got %v", err)
+	}
+	select {
+	case <-hit:
+		t.Fatal("redirect target received the POST")
+	default:
+	}
+}
+
+// A directly built Config{Timeout: 0} still gets a backstop client timeout
+// so a stalled receiver cannot hang the caller (#2304).
+func TestNewHTTPTransport_BackstopTimeout(t *testing.T) {
+	t.Parallel()
+	tr, err := NewHTTPTransport(Config{URL: "https://93.184.216.34/hook"}, notify.SSRFPolicy{})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	if tr.client.Timeout != DefaultTimeout {
+		t.Fatalf("client.Timeout = %s, want %s", tr.client.Timeout, DefaultTimeout)
+	}
+}
+
 func readAll(r *http.Request) ([]byte, error) {
 	defer func() { _ = r.Body.Close() }()
 	buf := make([]byte, 0, 256)

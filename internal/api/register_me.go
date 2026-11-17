@@ -109,7 +109,7 @@ func (s *Server) registerMe(root *chi.Mux) {
 	// SSRF-validated at construction (P0-543-2). These are SINKS only
 	// (P0-543-4) — the toggle just records the per-user opt-in.
 	slackCfg := slack.ConfigFromEnv()
-	slackCh := slack.NewChannel(s.dbPool, slack.NewHTTPTransport(slackCfg), slackCfg.BaseURL)
+	slackCh := slack.NewChannel(s.dbPool, slack.NewHTTPTransport(slackCfg, slack.SSRFPolicy()), slackCfg.BaseURL)
 	// Slice 585: slackCfg.Enabled() reports whether the operator-configured
 	// Slack webhook URL env is present (presence only — the URL/token never
 	// reaches the wire, P0-585 / P0-543-2). Drives the disabled toggle state.
