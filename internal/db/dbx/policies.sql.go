@@ -83,6 +83,7 @@ SELECT count(*)::bigint AS n
 FROM controls
 WHERE tenant_id = $1
   AND id = ANY($2::uuid[])
+  AND lifecycle_state <> 'retired'
 `
 
 type CountTenantControlsParams struct {
@@ -92,6 +93,9 @@ type CountTenantControlsParams struct {
 
 // #2446 — how many of the given control ids exist in the tenant. A policy's
 // linked_control_ids must all resolve here on create and draft edit.
+// A retired control is not counted (#2459): it no longer governs anything,
+// so it cannot keep a policy from being an orphan. Controls are never
+// soft-deleted; every other lifecycle state counts.
 func (q *Queries) CountTenantControls(ctx context.Context, arg CountTenantControlsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countTenantControls, arg.TenantID, arg.Ids)
 	var n int64

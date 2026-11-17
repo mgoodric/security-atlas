@@ -913,6 +913,7 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
 	case errors.Is(err, policy.ErrSelfApproval),
 		errors.Is(err, policy.ErrEditorApproval),
+		errors.Is(err, policy.ErrEditorNotPerson),
 		errors.Is(err, policy.ErrApproverNotPerson):
 		httpresp.WriteError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, policy.ErrSubmitterUnknown):

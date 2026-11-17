@@ -350,7 +350,11 @@ RETURNING *;
 -- name: CountTenantControls :one
 -- #2446 — how many of the given control ids exist in the tenant. A policy's
 -- linked_control_ids must all resolve here on create and draft edit.
+-- A retired control is not counted (#2459): it no longer governs anything,
+-- so it cannot keep a policy from being an orphan. Controls are never
+-- soft-deleted; every other lifecycle state counts.
 SELECT count(*)::bigint AS n
 FROM controls
 WHERE tenant_id = sqlc.arg('tenant_id')
-  AND id = ANY(sqlc.arg('ids')::uuid[]);
+  AND id = ANY(sqlc.arg('ids')::uuid[])
+  AND lifecycle_state <> 'retired';
