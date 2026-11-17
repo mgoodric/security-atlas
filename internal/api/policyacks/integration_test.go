@@ -34,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/policy"
@@ -130,9 +131,9 @@ func bootRegistry(t *testing.T, admin *pgxpool.Pool) *schemaregistry.Service {
 		t.Fatalf("acquire admin conn: %v", err)
 	}
 	defer conn.Release()
-	_, _ = conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781141)")
+	_ = advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyPolicyAcks)
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781141)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyPolicyAcks)
 	}()
 	platform, err := schemaregistry.LoadPlatformSchemas(schemaregistry.PlatformSchemasFS())
 	if err != nil {

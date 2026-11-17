@@ -56,6 +56,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
@@ -836,7 +837,7 @@ func TestCreate_GateSerialisedByInstallLock(t *testing.T) {
 		t.Fatalf("begin holder tx: %v", err)
 	}
 	t.Cleanup(func() { _ = holder.Rollback(ctx) })
-	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(0x201520152015)); err != nil {
+	if err := advisorylock.Lock(ctx, holder, advisorylock.TenantCreateInstall, 0); err != nil {
 		t.Fatalf("hold install lock: %v", err)
 	}
 

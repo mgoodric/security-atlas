@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/password"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -50,12 +51,6 @@ const BootstrapGrantVia = "bootstrap_first_install"
 // race per P0-198-3) — the loser retries the count check and falls
 // through to the established-install path.
 const pgUniqueViolation = "23505"
-
-// bootstrapAdvisoryLockKey is the fixed pg_advisory_xact_lock(BIGINT) key
-// that serializes OIDC first-installers (#1759). Fixed and documented, like
-// slice 142's 0x142142142142 super-admin lock: 0x198 names slice 198, which
-// introduced this bootstrap path. Do not reuse it for another lock.
-const bootstrapAdvisoryLockKey int64 = 0x198198198198
 
 // ErrNotFound is the sentinel for "no such user under this tenant."
 var ErrNotFound = errors.New("users: not found")
@@ -449,7 +444,8 @@ func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (Bootst
 	// Serialize concurrent first-installers. When the bootstrap tenant
 	// already exists (seeded by bootstrap.sh) no tenants INSERT happens,
 	// so the partial UNIQUE index cannot do it; the advisory lock does.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, bootstrapAdvisoryLockKey); err != nil {
+	// The lock is advisorylock.BootstrapFirstInstall (#1759, #2273).
+	if err := advisorylock.Lock(ctx, tx, advisorylock.BootstrapFirstInstall, 0); err != nil {
 		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap lock: %w", err)
 	}
 

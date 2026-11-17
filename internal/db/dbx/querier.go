@@ -3282,8 +3282,9 @@ type Querier interface {
 	// risk writes, or a risk write racing evaluate-now, can both miss the read
 	// and both create. Transaction-scoped, so it releases on commit/rollback.
 	// Under READ COMMITTED the reads issued after the lock see the winner's
-	// committed meta-risk. hashtextextended maps the hex key to the BIGINT
-	// lock space; a hash collision only over-serializes, never under-.
+	// committed meta-risk. Namespace 7 is advisorylock.AggregationKey (#2273);
+	// hashtext maps the hex key into it, and a hash collision only
+	// over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
 	// The applicability carry-over's target (#2179): a draft or review revision
 	// of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
@@ -3305,7 +3306,7 @@ type Querier interface {
 	// check on a snapshot that lacks the other. Transaction-scoped and
 	// re-entrant within a session. Callers take it before any meta-risk key
 	// lock (LockAggregationKey) so the two locks are always acquired in the
-	// same order.
+	// same order. Namespace 6 is advisorylock.RiskHierarchy (#2273).
 	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
 	// #2261: serialises every change that can remove a tenant's admin. It takes
 	// the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
@@ -3321,7 +3322,8 @@ type Querier interface {
 	// one tenant. Rename and delete take it exclusively before anything else;
 	// an assignment takes the shared form (LockThemeVocabularyShared) before it
 	// validates, so it can never write a name a concurrent rename or delete has
-	// just removed. Transaction-scoped.
+	// just removed. Transaction-scoped. Namespace 5 is
+	// advisorylock.ThemeVocabulary (#2273).
 	LockThemeVocabulary(ctx context.Context, tenantID pgtype.UUID) error
 	LockThemeVocabularyShared(ctx context.Context, tenantID pgtype.UUID) error
 	// Append a row to the access log. Action is enforced by CHECK
@@ -3374,6 +3376,11 @@ type Querier interface {
 	// a request whose `from` is the last hour of a frozen period's last
 	// day still counts as overlapping.
 	MinFrozenAtOverlappingWindow(ctx context.Context, arg MinFrozenAtOverlappingWindowParams) (pgtype.Timestamptz, error)
+	// #2273: notify every active super-admin that a SCIM deprovision left the
+	// tenant with no active admin. The SECURITY DEFINER function refuses any
+	// tenant but the caller's RLS tenant, does nothing while the tenant still has
+	// an active admin, and returns how many notifications it wrote.
+	NotifySuperAdminsLastAdminDeprovisioned(ctx context.Context, arg NotifySuperAdminsLastAdminDeprovisionedParams) (int32, error)
 	// #1944: true when this IdP principal has no row yet but another same-tenant
 	// row holds the email (case-insensitive). UpsertOIDC asks only after
 	// LinkUserIdpByEmail declined, so that row is bound to another principal or

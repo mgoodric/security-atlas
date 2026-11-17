@@ -249,10 +249,11 @@ func TestTenantGates2428_MiddlewareStampsLiveRoles(t *testing.T) {
 	}{
 		{"live admin", staticResolver{authz.RoleAdmin}, credstore.Credential{ID: "jwt:a"}, []string{"admin"}},
 		{"live grc_engineer", staticResolver{authz.RoleGRCEngineer}, credstore.Credential{ID: "jwt:g"}, []string{"grc_engineer"}},
-		// Claim says admin, user_roles has nothing: the claim is not a live role.
-		{"revoked admin", nil, credstore.Credential{ID: "jwt:r", OwnerRoles: []string{"admin"}}, nil},
+		// Claim says admin, user_roles has viewer: the claim is not a live
+		// role. (With no live role at all the session is denied, #2496.)
+		{"claim admin, live viewer", staticResolver{authz.RoleViewer}, credstore.Credential{ID: "jwt:r", OwnerRoles: []string{"admin"}}, []string{"viewer"}},
 		// A value set before authzmw never survives it.
-		{"forged TenantRoles", nil, credstore.Credential{ID: "jwt:f", OwnerRoles: []string{"control_owner"}, TenantRoles: []string{"admin"}}, nil},
+		{"forged TenantRoles", staticResolver{authz.RoleViewer}, credstore.Credential{ID: "jwt:f", OwnerRoles: []string{"control_owner"}, TenantRoles: []string{"admin"}}, []string{"viewer"}},
 		// The admin flag derives admin for OPA but is not a live role.
 		{"admin flag", nil, credstore.Credential{ID: "key_x", IsAdmin: true}, nil},
 	} {

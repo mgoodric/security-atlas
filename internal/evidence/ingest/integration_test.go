@@ -31,6 +31,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -63,11 +64,11 @@ func boot(t *testing.T) (*ingest.Service, *pgxpool.Pool, *schemaregistry.Service
 		t.Fatalf("acquire admin conn: %v", err)
 	}
 	defer conn.Release()
-	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock(6502261335191781139)"); err != nil {
+	if err := advisorylock.SessionLock(ctx, conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyEvidenceIngest); err != nil {
 		t.Fatalf("advisory lock: %v", err)
 	}
 	defer func() {
-		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock(6502261335191781139)")
+		_ = advisorylock.SessionUnlock(context.Background(), conn, advisorylock.IntegrationTestSeed, advisorylock.TestKeyEvidenceIngest)
 	}()
 
 	// Defensive step: slice 014's TestMigration_RoundTrip can leave

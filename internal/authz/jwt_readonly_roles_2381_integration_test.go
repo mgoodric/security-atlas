@@ -10,7 +10,10 @@
 // The matrix runs every principal kind x role against the real RLS pool,
 // once with the pre-#2381 derivation (control_owner for any non-empty
 // OwnerRoles) and once with the shipped one. The only change it allows is a
-// viewer or auditor JWT losing a decision that control_owner alone granted.
+// user JWT losing a decision that control_owner alone granted. #2496 widened
+// that from viewer and auditor claims to every claim: a user session derives
+// nothing from its claim, so a stale admin or grc_engineer claim loses its
+// control_owner too.
 //
 // Run with:  go test -tags=integration -race -run 2381 ./internal/authz/...
 
@@ -99,12 +102,14 @@ func TestDecide2381_RoleMatrixPerPrincipalKind(t *testing.T) {
 	}
 
 	type principal struct {
-		name    string
-		cred    credstore.Credential
-		narrows bool // a viewer/auditor JWT: may lose control_owner-only grants
+		name     string
+		cred     credstore.Credential
+		narrows  bool // a user JWT: may lose control_owner-only grants
+		mustLose bool // its live roles do not cover control_owner
 	}
 	var principals []principal
 	for _, r := range authz.CanonicalRoles() {
+		// Live viewer or auditor does not cover control_owner.
 		ro := r == authz.RoleViewer || r == authz.RoleAuditor
 		granted := seedUser("active", r)
 		revoked := seedUser("active", "")
@@ -112,19 +117,19 @@ func TestDecide2381_RoleMatrixPerPrincipalKind(t *testing.T) {
 		// API keys moved to their own matrix when #2402 narrowed them:
 		// apikey_readonly_roles_2402_integration_test.go.
 		principals = append(principals,
-			principal{"JWT " + string(r) + ", granted", credstore.Credential{ID: "jwt:" + jti, TenantID: tenant, UserID: "user:" + granted.String(), OwnerRoles: []string{string(r)}}, ro},
-			principal{"JWT " + string(r) + ", grant revoked", credstore.Credential{ID: "jwt:r" + jti, TenantID: tenant, UserID: "user:" + revoked.String(), OwnerRoles: []string{string(r)}}, ro},
+			principal{"JWT " + string(r) + ", granted", credstore.Credential{ID: "jwt:" + jti, TenantID: tenant, UserID: "user:" + granted.String(), OwnerRoles: []string{string(r)}}, true, ro},
+			principal{"JWT " + string(r) + ", grant revoked", credstore.Credential{ID: "jwt:r" + jti, TenantID: tenant, UserID: "user:" + revoked.String(), OwnerRoles: []string{string(r)}}, true, true},
 		)
 	}
 	both := seedUser("active", authz.RoleAuditor)
 	principals = append(principals,
-		principal{"JWT viewer+auditor", credstore.Credential{ID: "jwt:va", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"viewer", "auditor"}}, true},
-		principal{"JWT auditor+control_owner", credstore.Credential{ID: "jwt:ac", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"auditor", "control_owner"}}, false},
-		principal{"JWT viewer+owner label", credstore.Credential{ID: "jwt:vl", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"viewer", "platform-eng"}}, false},
+		principal{"JWT viewer+auditor", credstore.Credential{ID: "jwt:va", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"viewer", "auditor"}}, true, true},
+		principal{"JWT auditor+control_owner", credstore.Credential{ID: "jwt:ac", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"auditor", "control_owner"}}, true, true},
+		principal{"JWT viewer+owner label", credstore.Credential{ID: "jwt:vl", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"viewer", "platform-eng"}}, true, true},
 		// The empty-claim JWT moved to its own matrix when #2401 narrowed it:
 		// jwt_empty_claim_2401_integration_test.go.
-		principal{"JWT super_admin viewer", credstore.Credential{ID: "jwt:s", TenantID: tenant, UserID: "user:" + uuid.NewString(), IsAdmin: true, IsApprover: true, OwnerRoles: []string{"viewer"}}, false},
-		principal{"OAuth client", credstore.Credential{ID: "jwt:o", TenantID: tenant, UserID: "oauth_client:ci2381"}, false},
+		principal{"JWT super_admin viewer", credstore.Credential{ID: "jwt:s", TenantID: tenant, UserID: "user:" + uuid.NewString(), IsAdmin: true, IsApprover: true, OwnerRoles: []string{"viewer"}}, false, false},
+		principal{"OAuth client", credstore.Credential{ID: "jwt:o", TenantID: tenant, UserID: "oauth_client:ci2381"}, false, false},
 	)
 
 	for _, p := range principals {
@@ -148,7 +153,7 @@ func TestDecide2381_RoleMatrixPerPrincipalKind(t *testing.T) {
 				t.Logf("%s: %s %s before=true after=false", p.name, rt.method, rt.path)
 			}
 		}
-		if p.narrows {
+		if p.mustLose {
 			if lost == 0 {
 				t.Errorf("%s: lost nothing; the JWT still derives control_owner", p.name)
 			}
