@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -345,7 +346,7 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	filter, msg := parsePageFilter(r)
+	filter, msg := parsePageFilter(r.URL.Query())
 	if msg != "" {
 		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
@@ -391,8 +392,7 @@ const ownerUnowned = "none"
 // parsePageFilter reads GET /v1/risks's filters, sort and paging (#2132).
 // Every value is checked against an allow-list or parsed as a UUID or
 // date; the returned string is the 400 message.
-func parsePageFilter(r *http.Request) (risk.PageFilter, string) {
-	q := r.URL.Query()
+func parsePageFilter(q url.Values) (risk.PageFilter, string) {
 	f := risk.PageFilter{
 		Status:     dbx.RiskStatusOpen,
 		Categories: categoryRefs(q["category"]),
