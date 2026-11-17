@@ -412,7 +412,22 @@ func assertResidualOrder(t *testing.T, rows []pageRow, desc bool) {
 // order the API returned.
 func TestListRisksPage_ResidualOrderMatchesRanksAbove(t *testing.T) {
 	fx := seedPageFixture(t)
+	// #2482: a residual whose score is a numeric string. Go (risk.ScoreValue)
+	// and the SQL sort both read JSON numbers only, so both treat it as
+	// unscored and it sorts with "not yet scored", below every scored risk.
+	if _, err := dbtest.NewMigratePool(t).Exec(context.Background(), `
+		INSERT INTO risks (id, tenant_id, title, category_id, methodology, treatment,
+		                   inherent_score, residual_score)
+		VALUES ($1, $2, $3, risk_category_id($2, 'operational'), 'nist_800_30', 'untreated',
+		        '{"likelihood":5,"impact":5}', '{"score":"25"}')
+	`, uuid.New(), fx.A.ID, fx.A.RiskTitlePrefix+"string score"); err != nil {
+		t.Fatalf("insert string-score risk: %v", err)
+	}
 	rows, _ := listPage(t, fx.env, "status=all&include_rollups=true")
+	got := titles(fx, rows)
+	if i := slices.Index(got, "string score"); i < 0 || i < slices.Index(got, "roll-up child") {
+		t.Fatalf("string score ranks among scored risks: %v", got)
+	}
 	want := slices.Clone(rows)
 	slices.SortStableFunc(want, func(a, b pageRow) int {
 		av, aok, amon := residualOf(t, a)
@@ -435,7 +450,7 @@ func TestListRisksPage_ResidualOrderMatchesRanksAbove(t *testing.T) {
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	if got, exp := titles(fx, rows), titles(fx, want); !slices.Equal(got, exp) {
+	if exp := titles(fx, want); !slices.Equal(got, exp) {
 		t.Fatalf("SQL residual order differs from risk.RanksAbove:\n got %v\nwant %v", got, exp)
 	}
 }

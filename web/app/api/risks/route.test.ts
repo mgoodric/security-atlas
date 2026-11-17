@@ -112,6 +112,11 @@ describe("GET /api/risks", () => {
   test.each([
     [LIST_URL, "/v1/risks"],
     [`${LIST_URL}?include_rollups=true`, "/v1/risks?include_rollups=true"],
+    // #2482: every value of a repeated filter reaches the platform.
+    [
+      `${LIST_URL}?category=ops&category=vendor&owner=none`,
+      "/v1/risks?owner=none&category=ops&category=vendor",
+    ],
   ])("%s asks upstream for %s", async (url, upstreamPath) => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-100" });
     const fetchSpy = vi

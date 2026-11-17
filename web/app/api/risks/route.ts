@@ -41,11 +41,13 @@ export async function GET(req: Request): Promise<Response> {
     // #2132: the filter, sort and page parameters on the allow-list pass
     // through verbatim; the platform validates each value. Without any,
     // the platform's default page (open risks, no roll-ups, #2060 #2107).
+    // Every value of a repeated key is kept (#2482): ?category= takes
+    // several.
     const params = new URL(req.url).searchParams;
-    const passThrough: Partial<Record<RiskListParam, string>> = {};
+    const passThrough: Partial<Record<RiskListParam, string[]>> = {};
     for (const key of RISK_LIST_PARAMS) {
-      const v = params.get(key);
-      if (v) passThrough[key] = v;
+      const vs = params.getAll(key).filter(Boolean);
+      if (vs.length) passThrough[key] = vs;
     }
     return NextResponse.json(await listRisks(bearer, passThrough));
   } catch (err) {
