@@ -198,6 +198,9 @@ func fullReseedSCF(ctx context.Context, pool *pgxpool.Pool) error {
 	stmts := []string{
 		`TRUNCATE controls RESTART IDENTITY CASCADE`,
 		`DELETE FROM fw_to_scf_edges`,
+		// An active overlay edge refuses its requirement's or anchor's
+		// delete (#2240); a reseed wipes them with the catalog.
+		`DELETE FROM fw_to_scf_overlay_edges`,
 		`DELETE FROM framework_requirements`,
 		`DELETE FROM scf_anchors`,
 		`DELETE FROM framework_versions WHERE framework_id IN (

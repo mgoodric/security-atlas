@@ -228,8 +228,10 @@ func (f coverageFixture) assertOverlayCounted(t *testing.T, v coverageViews, edg
 			t.Errorf("%s C2 row = %v; want origin overlay, edge %s", name, row, edgeID)
 		}
 		assertOverlayProvenance(t, name, row)
+		assertNoMappingTier(t, name, row)
 	}
 	assertOverlayProvenance(t, "requirement coverage", anchor)
+	assertNoMappingTier(t, "requirement coverage", anchor)
 
 	// The catalog path is still marked catalog, with no overlay provenance.
 	c1 := pathTo(decode(t, v.control)["requirements"], "requirement_id", f.requirement["C1"].String())
@@ -238,6 +240,19 @@ func (f coverageFixture) assertOverlayCounted(t *testing.T, v coverageViews, edg
 	}
 	if _, ok := c1["overlay"]; ok {
 		t.Errorf("control coverage C1 catalog row carries overlay provenance: %v", c1)
+	}
+	if c1["mapping_tier"] != "verified" {
+		t.Errorf("control coverage C1 catalog row mapping_tier = %v; want verified", c1["mapping_tier"])
+	}
+}
+
+// assertNoMappingTier checks an overlay row reports no mapping_tier: ADR
+// 0018's tiers do not apply to an org mapping (#1797), and the view's
+// synthetic 'verified' is not reported (#2240).
+func assertNoMappingTier(t *testing.T, name string, row map[string]any) {
+	t.Helper()
+	if tier, ok := row["mapping_tier"]; ok {
+		t.Errorf("%s overlay row reports mapping_tier %v; want none", name, tier)
 	}
 }
 

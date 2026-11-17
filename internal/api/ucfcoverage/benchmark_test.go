@@ -150,6 +150,7 @@ func seedLargeFixture(b *testing.B, pool *pgxpool.Pool) {
 	for _, stmt := range []string{
 		`DELETE FROM fw_to_scf_edges`,
 		`DELETE FROM controls`,
+		`DELETE FROM fw_to_scf_overlay_edges`,
 		`DELETE FROM framework_requirements`,
 		`DELETE FROM scf_anchors`,
 		`DELETE FROM framework_versions WHERE framework_id IN (SELECT id FROM frameworks WHERE slug IN ('scf','soc2') AND tenant_id IS NULL)`,
