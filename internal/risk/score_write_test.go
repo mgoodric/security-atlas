@@ -2,6 +2,7 @@ package risk
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -78,6 +79,53 @@ func TestSeverityBandRangeMatchesSeverityBand(t *testing.T) {
 	}
 	if _, _, ok := SeverityBandRange("critical"); ok {
 		t.Fatal("SeverityBandRange(critical) ok, want refused")
+	}
+}
+
+// #2502: a refused score field names its JSON type; the value itself, of
+// any size, is never echoed back.
+func TestValidateScoreNumbers_NamesTypeNotValue(t *testing.T) {
+	t.Parallel()
+	huge := strings.Repeat("9", 4096)
+	cases := []struct{ value, want string }{
+		{`"` + huge + `"`, "got a string"},
+		{`{"a":"` + huge + `"}`, "got an object"},
+		{`["` + huge + `"]`, "got an array"},
+		{`true`, "got a boolean"},
+		{`null`, "got null"},
+	}
+	for _, tc := range cases {
+		err := ValidateScoreNumbers(dbx.RiskMethodologyCisRam, []byte(`{"likelihood":2,"impact":3,"severity":`+tc.value+`}`), nil)
+		if !errors.Is(err, ErrScoreNotNumeric) || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%.20s: err = %v, want %q", tc.value, err, tc.want)
+		}
+		if strings.Contains(err.Error(), huge) {
+			t.Fatalf("%.20s: error echoes the value", tc.value)
+		}
+	}
+}
+
+// #2502: PrepareCreateScores is the create rule Store.Create and the MCP
+// create_risk applier share. FAIR is normalised and its empty residual
+// takes the inherent score; a non-FAIR residual is left as given.
+func TestPrepareCreateScores(t *testing.T) {
+	t.Parallel()
+	inh, res, err := PrepareCreateScores(dbx.RiskMethodologyFair, []byte(`{"lef":2,"lm":1000}`), nil)
+	if err != nil || string(inh) != string(res) || !strings.Contains(string(inh), `"loss_event_frequency":2`) {
+		t.Fatalf("fair: %s / %s / %v", inh, res, err)
+	}
+	if _, _, err := PrepareCreateScores(dbx.RiskMethodologyFair, []byte(`{"lef":2,"lm":1000}`), []byte(`{"lef":"x"}`)); !errors.Is(err, ErrInherentScoreInvalid) {
+		t.Fatalf("fair bad residual: %v", err)
+	}
+	inh, res, err = PrepareCreateScores(dbx.RiskMethodologyNist80030, []byte(`{"likelihood":4,"impact":5}`), nil)
+	if err != nil || string(inh) != `{"likelihood":4,"impact":5}` || res != nil {
+		t.Fatalf("nist: %s / %s / %v", inh, res, err)
+	}
+	if _, _, err := PrepareCreateScores(dbx.RiskMethodologyNist80030, []byte(`{"likelihood":4,"impact":5,"score":"20"}`), nil); !errors.Is(err, ErrScoreNotNumeric) {
+		t.Fatalf("nist string score: %v", err)
+	}
+	if _, _, err := PrepareCreateScores(dbx.RiskMethodologyNist80030, nil, nil); !errors.Is(err, ErrInherentScoreInvalid) {
+		t.Fatalf("nist empty: %v", err)
 	}
 }
 

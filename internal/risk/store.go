@@ -266,28 +266,11 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	if in.Treatment == "" {
 		in.Treatment = dbx.RiskTreatmentUntreated
 	}
-	if err := ValidateInherentScore(in.Methodology, in.InherentScore); err != nil {
+	inherent, residual, err := PrepareCreateScores(in.Methodology, in.InherentScore, in.ResidualScore)
+	if err != nil {
 		return Risk{}, err
 	}
-	if in.Methodology == dbx.RiskMethodologyFair {
-		normalized, err := NormalizeFairScoreJSON(in.InherentScore)
-		if err != nil {
-			return Risk{}, fmt.Errorf("%w: %v", ErrInherentScoreInvalid, err)
-		}
-		in.InherentScore = normalized
-		if len(in.ResidualScore) == 0 {
-			in.ResidualScore = normalized
-		} else {
-			normalizedResidual, err := NormalizeFairScoreJSON(in.ResidualScore)
-			if err != nil {
-				return Risk{}, fmt.Errorf("%w: residual_score: %v", ErrInherentScoreInvalid, err)
-			}
-			in.ResidualScore = normalizedResidual
-		}
-	}
-	if err := ValidateScoreNumbers(in.Methodology, in.InherentScore, in.ResidualScore); err != nil {
-		return Risk{}, err
-	}
+	in.InherentScore, in.ResidualScore = inherent, residual
 	if err := ValidateCreateAcceptance(in.AcceptanceStatus, in.Accepter, in.AcceptedUntil != nil); err != nil {
 		return Risk{}, err
 	}
@@ -316,7 +299,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	}
 
 	var out Risk
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		if err := checkOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
 			return err
 		}

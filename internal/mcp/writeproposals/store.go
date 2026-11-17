@@ -242,6 +242,9 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Proposal, error) {
 	if !json.Valid(in.ToolInput) {
 		return Proposal{}, fmt.Errorf("%w: tool_input is not valid JSON", ErrInvalidInput)
 	}
+	if err := validateToolInput(in.ToolName, in.ToolInput); err != nil {
+		return Proposal{}, err
+	}
 
 	var out Proposal
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantUUID uuid.UUID) error {
