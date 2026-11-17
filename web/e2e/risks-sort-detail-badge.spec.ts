@@ -145,7 +145,9 @@ test.describe("/risks sortable columns (slice 681 AC-1, server-side since #2132)
     const sorts: (string | null)[] = [];
     authedPage.on("request", (req) => {
       const url = new URL(req.url());
-      if (url.pathname === "/api/risks" && url.searchParams.has("limit")) {
+      // Only the register page sends offset; the sidebar badge and the
+      // "N of M" size send limit=1 without it (#2490).
+      if (url.pathname === "/api/risks" && url.searchParams.has("offset")) {
         sorts.push(url.searchParams.get("sort"));
       }
     });
