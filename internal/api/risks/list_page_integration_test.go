@@ -292,7 +292,10 @@ func sortValue(fx pageFixture, key string, r pageRow) (string, bool) {
 	case "treatment":
 		return r.Treatment, true
 	case "review_due":
-		return r.ReviewDue, r.ReviewDue != ""
+		if r.ReviewDue == "" {
+			return "", false
+		}
+		return orderedTime(r.ReviewDue), true
 	case "status":
 		return r.Status, true
 	case "methodology":
@@ -304,7 +307,7 @@ func sortValue(fx pageFixture, key string, r pageRow) (string, bool) {
 	case "themes":
 		return strings.Join(r.Themes, ","), true
 	case "created_at":
-		return r.Created, true
+		return orderedTime(r.Created), true
 	case "id":
 		return r.ID, true
 	}
