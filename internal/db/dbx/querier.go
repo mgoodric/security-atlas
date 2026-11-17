@@ -1625,6 +1625,12 @@ type Querier interface {
 	// period's frozen_at horizon are included in the period's snapshot. Live
 	// state continues independently; this read is the frozen view.
 	ListActionPlansSnapshot(ctx context.Context, arg ListActionPlansSnapshotParams) ([]ActionPlan, error)
+	// #2269: every exception that was ever activated, with what the export
+	// needs to decide whether it was in force at an evaluation's instant
+	// (activated_at, effective_from, expires_at, revoked_at) and whether its
+	// predicate covers the cell. The evaluation row does not record which
+	// exception excepted it (#2112 D3), so the aggregator reconstructs it.
+	ListActivatedExceptionsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListActivatedExceptionsForExportRow, error)
 	// The engine's hot path: every 'active' rule for the tenant. Runs on every
 	// risk write. Hits idx_aggregation_rules_tenant_status.
 	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
@@ -2367,6 +2373,12 @@ type Querier interface {
 	// (frozen_at NULL) falls through to live state, but the slice-749 surface only
 	// summarizes FROZEN periods, so in practice the horizon is always set.
 	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
+	// #2269: the AR's risk-accepted observations. The latest evaluation per
+	// (control, scope_cell) as of the frozen horizon whose result is
+	// 'excepted' (#2112), the same DISTINCT ON as ListFailingEvaluationsAsOf.
+	// An excepted cell is never a finding: the export links it to the
+	// exception that accepted the risk instead.
+	ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExceptedEvaluationsAsOfParams) ([]ListExceptedEvaluationsAsOfRow, error)
 	ListExceptionAuditLog(ctx context.Context, arg ListExceptionAuditLogParams) ([]ExceptionAuditLog, error)
 	// Returns every exception for the tenant, newest first. The handler applies
 	// status filter in-memory because the cardinality is small (canvas §1.4
@@ -2910,11 +2922,11 @@ type Querier interface {
 	//
 	// sort_key is one of the fixed keys in the ORDER BY; the handler refuses
 	// any other value before it gets here. Residual follows #2185's
-	// risk.RanksAbove: every non-FAIR (5x5) risk ranks above every FAIR risk,
-	// in either direction, so a dollar figure never ranks against a 1..25
-	// score. The value is risk.ScoreValue's: score, then severity, then
-	// likelihood x impact. A risk with no residual value sorts after the
-	// scored ones of its group in both directions. Every order ends on r.id,
+	// risk.RanksAbove and risk.Rank.Tier: scored 5x5 risks, then scored FAIR
+	// risks, then unscored risks of any methodology (#2516), in either
+	// direction, so a dollar figure never ranks against a 1..25 score. The
+	// value is risk.ScoreValue's: score, then severity, then likelihood x
+	// impact; a risk with no such value is unscored. Every order ends on r.id,
 	// so offset paging has no duplicates or gaps. Text keys sort lower-cased
 	// under COLLATE "C", so the order is the same on every deployment.
 	//

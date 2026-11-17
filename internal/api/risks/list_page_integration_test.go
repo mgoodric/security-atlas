@@ -170,7 +170,7 @@ func TestListRisksPage_DefaultIsOpenNonRollupByResidual(t *testing.T) {
 	rows, total := listPage(t, fx.env, "")
 	assertTenantA(t, fx, rows)
 	got := titles(fx, rows)
-	// Residual descending, 5x5 above FAIR, no residual last in its group.
+	// Residual descending: 5x5, then FAIR, then no residual (#2516).
 	// The four fixture risks tie on 2x3 = 6 and break on id. The roll-up
 	// child (1x2) is open, so it is listed; its parent is not.
 	if len(got) != 8 || total != 8 {
@@ -184,8 +184,8 @@ func TestListRisksPage_DefaultIsOpenNonRollupByResidual(t *testing.T) {
 	if want := []string{"overdue review", "review due soon", "review later", "unowned"}; !slices.Equal(tied, want) {
 		t.Errorf("rows 2-5 = %v; want the four fixture risks", got[1:5])
 	}
-	if got[5] != "roll-up child" || got[6] != "not yet scored" || got[7] != "fair dollars" {
-		t.Errorf("tail = %v; want roll-up child, not yet scored, fair dollars", got[5:])
+	if got[5] != "roll-up child" || got[6] != "fair dollars" || got[7] != "not yet scored" {
+		t.Errorf("tail = %v; want roll-up child, fair dollars, not yet scored", got[5:])
 	}
 	for _, r := range rows {
 		if r.Status != "open" {
@@ -269,14 +269,14 @@ func TestListRisksPage_RefusesUnknownValues(t *testing.T) {
 
 // residualOf reads a row's residual with #2185's risk.ScoreValue, and
 // whether its methodology is risk.Monetary (FAIR dollars).
-func residualOf(t *testing.T, r pageRow) (value float64, scored, monetary bool) {
+func residualOf(t *testing.T, r pageRow) risk.Rank {
 	t.Helper()
 	raw, err := json.Marshal(r.Residual)
 	if err != nil {
 		t.Fatalf("marshal residual: %v", err)
 	}
-	value, scored = risk.ScoreValue(raw)
-	return value, scored, risk.Monetary(dbx.RiskMethodology(r.Methodology))
+	value, scored := risk.ScoreValue(raw)
+	return risk.Rank{Unscored: !scored, Monetary: risk.Monetary(dbx.RiskMethodology(r.Methodology)), Value: value}
 }
 
 // sortValue is what a key orders on, read from the wire, and whether the
@@ -378,74 +378,67 @@ func assertOrdered(t *testing.T, fx pageFixture, key string, desc bool, rows []p
 	}
 }
 
-// assertResidualOrder checks risk.RanksAbove's order (#2185): every 5x5
-// risk above every FAIR risk in both directions, then the value in the
-// requested direction, unscored last within each group.
+// assertResidualOrder checks risk.RanksAbove's order (#2185, #2516): scored
+// 5x5, then scored FAIR, then unscored, in both directions, then the value
+// in the requested direction within a scored tier.
 func assertResidualOrder(t *testing.T, rows []pageRow, desc bool) {
 	t.Helper()
 	for i := 1; i < len(rows); i++ {
 		a, b := rows[i-1], rows[i]
-		av, aok, amon := residualOf(t, a)
-		bv, bok, bmon := residualOf(t, b)
+		ar, br := residualOf(t, a), residualOf(t, b)
 		switch {
-		case amon != bmon:
-			// The groups never flip with the direction.
-			if risk.RanksAbove(bmon, 0, amon, 0) {
-				t.Fatalf("FAIR %q ranks above 5x5 %q", a.Title, b.Title)
+		case ar.Tier() != br.Tier():
+			// The tiers never flip with the direction.
+			if ar.Tier() > br.Tier() {
+				t.Fatalf("%q (tier %d) ranks above %q (tier %d)", a.Title, ar.Tier(), b.Title, br.Tier())
 			}
-		case aok != bok:
-			if !aok {
-				t.Fatalf("unscored %q ranks above scored %q", a.Title, b.Title)
-			}
-		case !aok:
-		case desc && risk.RanksAbove(bmon, bv, amon, av):
-			t.Fatalf("desc: %q (%v) before %q (%v), which RanksAbove it", a.Title, av, b.Title, bv)
-		case !desc && av > bv:
-			t.Fatalf("asc: %q (%v) before %q (%v)", a.Title, av, b.Title, bv)
+		case ar.Unscored:
+		case desc && risk.RanksAbove(br, ar):
+			t.Fatalf("desc: %q (%v) before %q (%v), which RanksAbove it", a.Title, ar.Value, b.Title, br.Value)
+		case !desc && ar.Value > br.Value:
+			t.Fatalf("asc: %q (%v) before %q (%v)", a.Title, ar.Value, b.Title, br.Value)
 		}
 	}
 }
 
 // TestListRisksPage_ResidualOrderMatchesRanksAbove: the SQL default order
-// is exactly the Go order #2185 defines. Sorting the same rows in Go with
-// risk.RanksAbove (unscored last within each group, id on a tie) gives the
-// order the API returned.
+// is exactly the Go order #2185 and #2516 define. Sorting the same rows in
+// Go with risk.RanksAbove (id on a tie) gives the order the API returned.
 func TestListRisksPage_ResidualOrderMatchesRanksAbove(t *testing.T) {
 	fx := seedPageFixture(t)
+	insert := func(title, methodology, inherent, residual string) {
+		t.Helper()
+		if _, err := dbtest.NewMigratePool(t).Exec(context.Background(), `
+			INSERT INTO risks (id, tenant_id, title, category_id, methodology, treatment,
+			                   inherent_score, residual_score)
+			VALUES ($1, $2, $3, risk_category_id($2, 'operational'), $4, 'untreated', $5, $6)
+		`, uuid.New(), fx.A.ID, fx.A.RiskTitlePrefix+title, methodology, inherent, residual); err != nil {
+			t.Fatalf("insert %s: %v", title, err)
+		}
+	}
 	// #2482: a residual whose score is a numeric string. Go (risk.ScoreValue)
 	// and the SQL sort both read JSON numbers only, so both treat it as
 	// unscored and it sorts with "not yet scored", below every scored risk.
-	if _, err := dbtest.NewMigratePool(t).Exec(context.Background(), `
-		INSERT INTO risks (id, tenant_id, title, category_id, methodology, treatment,
-		                   inherent_score, residual_score)
-		VALUES ($1, $2, $3, risk_category_id($2, 'operational'), 'nist_800_30', 'untreated',
-		        '{"likelihood":5,"impact":5}', '{"score":"25"}')
-	`, uuid.New(), fx.A.ID, fx.A.RiskTitlePrefix+"string score"); err != nil {
-		t.Fatalf("insert string-score risk: %v", err)
-	}
+	insert("string score", "nist_800_30", `{"likelihood":5,"impact":5}`, `{"score":"25"}`)
+	// #2516: unscored FAIR and unscored 5x5 share one tier after every
+	// scored FAIR risk, rather than each sorting last in its own group.
+	insert("fair unscored", "fair", `{}`, `{}`)
+	insert("5x5 unscored", "qualitative_5x5", `{}`, `{}`)
 	rows, _ := listPage(t, fx.env, "status=all&include_rollups=true")
 	got := titles(fx, rows)
-	if i := slices.Index(got, "string score"); i < 0 || i < slices.Index(got, "roll-up child") {
-		t.Fatalf("string score ranks among scored risks: %v", got)
+	fair := slices.Index(got, "fair dollars")
+	for _, u := range []string{"string score", "fair unscored", "5x5 unscored", "not yet scored"} {
+		if i := slices.Index(got, u); i < 0 || i < fair {
+			t.Fatalf("unscored %q ranks above scored FAIR: %v", u, got)
+		}
 	}
 	want := slices.Clone(rows)
 	slices.SortStableFunc(want, func(a, b pageRow) int {
-		av, aok, amon := residualOf(t, a)
-		bv, bok, bmon := residualOf(t, b)
+		ar, br := residualOf(t, a), residualOf(t, b)
 		switch {
-		case amon != bmon:
-			if risk.RanksAbove(amon, 0, bmon, 0) {
-				return -1
-			}
-			return 1
-		case aok != bok:
-			if aok {
-				return -1
-			}
-			return 1
-		case aok && risk.RanksAbove(amon, av, bmon, bv):
+		case risk.RanksAbove(ar, br):
 			return -1
-		case aok && risk.RanksAbove(bmon, bv, amon, av):
+		case risk.RanksAbove(br, ar):
 			return 1
 		}
 		return strings.Compare(a.ID, b.ID)

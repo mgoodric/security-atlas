@@ -48,7 +48,7 @@ var Lifecycle = lifecycle.Table{
 		{
 			From: StateActive, To: StateExpired, Action: "expire",
 			Actor: lifecycle.ActorSystem,
-			Note:  "The expiry sweep (daily by default) expires an active exception once its expires_at has passed.",
+			Note:  "The expiry sweep (daily by default) expires an active exception once its expires_at has passed, then re-evaluates its control (#2269).",
 		},
 		{
 			From: StateActive, To: StateRevoked, Action: "revoke",
@@ -56,7 +56,7 @@ var Lifecycle = lifecycle.Table{
 			Routes:           []string{"PATCH /v1/exceptions/{id}/revoke"},
 			Roles:            []string{"admin", "grc_engineer"},
 			RequiresApprover: true,
-			Note:             "An approver ends an active exception before it expires, with a reason (#2113). The control returns to normal evaluation on its next evaluation.",
+			Note:             "An approver ends an active exception before it expires, with a reason (#2113). The control is re-evaluated as soon as the revocation commits (#2269).",
 		},
 	},
 }

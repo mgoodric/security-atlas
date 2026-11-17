@@ -547,7 +547,8 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 // (the riskiest first), then by created_at ascending (the oldest in
 // treatment first). The magnitude is read by ScoreValue and compared by
 // RanksAbove, so FAIR risks (a dollar residual) rank after every 5x5 risk,
-// by dollars among themselves (#2185). It is a stable sort so risks tied on both keys keep the
+// by dollars among themselves (#2185), and a risk with no readable residual
+// ranks after both (#2516). It is a stable sort so risks tied on both keys keep the
 // underlying ListRisks order. Slice 066 AC-3.
 //
 // Decorate-sort-undecorate: each risk is paired with its magnitude once
@@ -556,23 +557,22 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 // sorted, then the risks are written back in order.
 func sortByResidualThenAge(risks []Risk) {
 	type scored struct {
-		risk     Risk
-		mag      float64
-		monetary bool
+		risk Risk
+		rank Rank
 	}
 	decorated := make([]scored, len(risks))
 	for i, r := range risks {
-		// A residual with no readable shape ranks as 0, below every
-		// properly-scored risk in its group, rather than erroring the list.
-		mag, _ := ScoreValue(r.ResidualScore)
-		decorated[i] = scored{risk: r, mag: mag, monetary: Monetary(r.Methodology)}
+		// A residual with no readable shape is Unscored and ranks after
+		// every scored risk, FAIR included, rather than erroring the list.
+		mag, ok := ScoreValue(r.ResidualScore)
+		decorated[i] = scored{risk: r, rank: Rank{Unscored: !ok, Monetary: Monetary(r.Methodology), Value: mag}}
 	}
 	sort.SliceStable(decorated, func(i, j int) bool {
 		a, b := decorated[i], decorated[j]
-		if RanksAbove(a.monetary, a.mag, b.monetary, b.mag) {
-			return true // higher residual ranks first; FAIR dollars after every 5x5 severity
+		if RanksAbove(a.rank, b.rank) {
+			return true // higher residual first; FAIR dollars after every 5x5 severity; unscored last
 		}
-		if RanksAbove(b.monetary, b.mag, a.monetary, a.mag) {
+		if RanksAbove(b.rank, a.rank) {
 			return false
 		}
 		return decorated[i].risk.CreatedAt.Before(decorated[j].risk.CreatedAt) // older ranks first

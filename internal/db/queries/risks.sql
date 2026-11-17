@@ -346,11 +346,11 @@ RETURNING *;
 --
 -- sort_key is one of the fixed keys in the ORDER BY; the handler refuses
 -- any other value before it gets here. Residual follows #2185's
--- risk.RanksAbove: every non-FAIR (5x5) risk ranks above every FAIR risk,
--- in either direction, so a dollar figure never ranks against a 1..25
--- score. The value is risk.ScoreValue's: score, then severity, then
--- likelihood x impact. A risk with no residual value sorts after the
--- scored ones of its group in both directions. Every order ends on r.id,
+-- risk.RanksAbove and risk.Rank.Tier: scored 5x5 risks, then scored FAIR
+-- risks, then unscored risks of any methodology (#2516), in either
+-- direction, so a dollar figure never ranks against a 1..25 score. The
+-- value is risk.ScoreValue's: score, then severity, then likelihood x
+-- impact; a risk with no such value is unscored. Every order ends on r.id,
 -- so offset paging has no duplicates or gaps. Text keys sort lower-cased
 -- under COLLATE "C", so the order is the same on every deployment.
 --
@@ -418,8 +418,11 @@ WHERE r.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg('severity_min')::int IS NULL OR (r.methodology <> 'fair' AND sev.assessed >= sqlc.narg('severity_min')::int))
   AND (sqlc.narg('severity_max')::int IS NULL OR sev.assessed <= sqlc.narg('severity_max')::int)
 ORDER BY
-    -- residual (the default, descending): 5x5 above FAIR in both directions.
-    CASE WHEN sqlc.arg(sort_key)::text IN ('residual', 'residual_age') THEN k.fair_group END ASC,
+    -- residual (the default, descending): 5x5, then FAIR, then unscored,
+    -- in both directions (risk.Rank.Tier).
+    CASE WHEN sqlc.arg(sort_key)::text IN ('residual', 'residual_age') THEN
+        CASE WHEN k.residual IS NULL THEN 2 ELSE k.fair_group END
+    END ASC,
     CASE WHEN sqlc.arg(sort_key)::text = 'residual' AND NOT sqlc.arg(sort_desc)::bool THEN k.residual END ASC NULLS LAST,
     CASE WHEN (sqlc.arg(sort_key)::text = 'residual' AND sqlc.arg(sort_desc)::bool) OR sqlc.arg(sort_key)::text = 'residual_age' THEN k.residual END DESC NULLS LAST,
     -- residual_age (the dashboard's residual,age): oldest first on a tie.

@@ -10,6 +10,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	"github.com/mgoodric/security-atlas/internal/decision"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/incident"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
@@ -31,7 +32,10 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	// routes (/expiring) are declared before /{id} so chi's
 	// declaration-order match keeps the calendar route ahead of the
 	// generic UUID-id route.
-	exceptionsH := exceptionsapi.New(exception.NewStore(s.dbPool))
+	// #2269: activating or revoking an exception re-evaluates its control
+	// once the change commits, so the control's state follows at once.
+	exceptionsH := exceptionsapi.New(exception.NewStore(s.dbPool).WithReevaluate(
+		eval.ExceptionChangeReevaluator(eval.NewEngineFactory(s.dbPool), s.installLogger())))
 	root.Post("/v1/exceptions", exceptionsH.CreateException)
 	root.Get("/v1/exceptions", exceptionsH.ListExceptions)
 	root.Get("/v1/exceptions/expiring", exceptionsH.Expiring)

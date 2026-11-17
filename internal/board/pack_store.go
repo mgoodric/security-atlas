@@ -463,6 +463,9 @@ func applyInputs(sec *Section, in *SectionInputs) {
 	if in.BaselineCoveragePct != nil {
 		d.BaselineCoveragePct = float64(*in.BaselineCoveragePct)
 		d.NoBaseline = false
+		// #2269: an operator's baseline carries no exception share.
+		d.BaselineExceptionKnown = false
+		d.BaselineCoveredByExceptionPct = 0
 	}
 	sec.Data = d
 }

@@ -111,7 +111,7 @@
       "id": "excepted",
       "name": "Excepted",
       "short": "A control result meaning an active exception waives the control where it applies. It is never a pass.",
-      "long": "While an approved exception is active, every part of your scope it covers shows the control as Excepted, whatever the evidence says. When the exception expires, the next evaluation shows the normal result again. Excepted is never shown or counted as a pass. In a framework's posture an excepted control still counts as covered, and the share of requirements covered only by exception is shown separately, so a waiver never reads as a control that has proved itself.",
+      "long": "While an approved exception is active, every part of your scope it covers shows the control as Excepted, whatever the evidence says. When the exception ends, by expiry or revocation, the control is re-evaluated and shows its normal result again. Excepted is never shown or counted as a pass. In a framework's posture an excepted control still counts as covered, and the share of requirements covered only by exception is shown separately, so a waiver never reads as a control that has proved itself.",
       "glossary": "GLOSSARY.md#exception-slice-021"
     },
     {
