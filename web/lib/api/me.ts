@@ -26,6 +26,9 @@ export type MeProfile = {
   // bit that gates /admin.
   is_tenant_admin: boolean;
   is_approver: boolean;
+  // #2494: false for a signed-in user with no live role in this tenant who
+  // is not a super-admin. The (authed) layout shows the no-role page then.
+  has_tenant_role: boolean;
   owner_roles: string[];
   // Slice 130 (extended by slice 154): canonical `user_roles` list.
   // Always present on the wire — empty array, never omitted — so

@@ -185,6 +185,74 @@ export async function fetchAdminMe(bearer: string): Promise<AdminMe> {
 }
 
 /**
+ * TenantRoleState is what the `(authed)` layout needs from `GET /v1/me`
+ * (#2494): whether the caller holds a role in its current tenant.
+ * `"unknown"` covers a failed read and a body without the field; it is
+ * neither role-less nor having a role, so the layout renders the page as
+ * usual and the page shows its own error state.
+ */
+export type TenantRoleState = "has_role" | "no_role" | "unknown";
+
+/** tenantRoleStateFrom reads `has_tenant_role` off a `/v1/me` body. */
+export function tenantRoleStateFrom(parsed: unknown): TenantRoleState {
+  if (parsed === null || typeof parsed !== "object") {
+    return "unknown";
+  }
+  const v = (parsed as { has_tenant_role?: unknown }).has_tenant_role;
+  if (v === true) return "has_role";
+  if (v === false) return "no_role";
+  return "unknown";
+}
+
+/**
+ * fetchTenantRoleState reads `has_tenant_role` from `GET /v1/me`. A
+ * role-less user may read that route (defaults.rego, #2494).
+ */
+export async function fetchTenantRoleState(
+  bearer: string,
+): Promise<TenantRoleState> {
+  return tenantRoleStateFrom(await fetchPlatformJSON("/v1/me", bearer));
+}
+
+/**
+ * TenantsSummary is what the no-role page needs from `GET /v1/me/tenants`:
+ * the current tenant's name (`null` when unknown) and how many tenants
+ * the caller belongs to (0 when the read failed).
+ */
+export type TenantsSummary = { currentName: string | null; count: number };
+
+/** tenantsSummaryFrom reads a `GET /v1/me/tenants` body. */
+export function tenantsSummaryFrom(parsed: unknown): TenantsSummary {
+  const empty = { currentName: null, count: 0 };
+  if (parsed === null || typeof parsed !== "object") {
+    return empty;
+  }
+  const list = (parsed as { tenants?: unknown }).tenants;
+  if (!Array.isArray(list)) {
+    return empty;
+  }
+  let currentName: string | null = null;
+  for (const t of list) {
+    if (t === null || typeof t !== "object") continue;
+    const { current, name } = t as { current?: unknown; name?: unknown };
+    if (current === true && typeof name === "string" && name !== "") {
+      currentName = name;
+    }
+  }
+  return { currentName, count: list.length };
+}
+
+/**
+ * fetchTenantsSummary reads the caller's tenants from `GET /v1/me/tenants`,
+ * which a role-less user may read (defaults.rego, #2494).
+ */
+export async function fetchTenantsSummary(
+  bearer: string,
+): Promise<TenantsSummary> {
+  return tenantsSummaryFrom(await fetchPlatformJSON("/v1/me/tenants", bearer));
+}
+
+/**
  * SelfProfile is the subset of `GET /v1/me` the topbar avatar renders.
  * Kept `unknown`-typed so the caller's existing `asString` narrowing
  * stays the single validation point.

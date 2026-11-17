@@ -121,7 +121,9 @@ func TestDecide2401_EmptyClaimRoleMatrix(t *testing.T) {
 				t.Errorf("%s: %s %s gained access; #2401 only narrows", p.name, rt.method, rt.path)
 			}
 			// Exactly the live grant, nothing derived from the credential.
-			want := false
+			// #2494: a roleless user still reads its own profile, for the
+			// no-role page.
+			want := rt.method == http.MethodGet && rolelessSelfReadPaths[rt.path]
 			if len(p.grant) > 0 {
 				want = decide2239(t, ctx, expect, p.cred, rt, p.grant)
 			}
