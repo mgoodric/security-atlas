@@ -55,6 +55,10 @@ and orders by `observed_at DESC, ingested_at DESC, id DESC`, so the ledger
 read is stable too, but correctness does not depend on it: the unit tests
 feed records in both orders.
 
+Superseded in part by #2509: step 1 is now `min(observed_at, ingested_at)`,
+and the handler refuses an `observed_at` more than 5 minutes ahead. See
+`2509-attestation-follow-ups-decisions.md`.
+
 Clock skew: an attester may set `observed_at` (the handler accepts it, as
 before). The attestation claiming the later moment wins even if it was
 ingested earlier, which is the honest reading of "the latest attestation".
@@ -96,6 +100,12 @@ publisher is the only ledger path when wired.
 
 If #2479 changes `EvaluateControl` (rate limiting, `triggered_by`), this call
 site is the second caller after the Evaluate-now handler to update.
+
+Added by #2509: attest-triggered evaluations are not rate-limited. #2479's
+per-principal limit sits on the Evaluate-now handler, not on
+`EvaluateControl`, so a caller attesting in a loop evaluates the control once
+per accepted attestation. #2497's limiting must cover this call site too. A
+replayed (deduplicated) attestation no longer evaluates at all (#2509).
 
 ## D5 — who can attest is unchanged
 

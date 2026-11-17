@@ -34,6 +34,8 @@ export type Risk = {
   // clients; read the owner from the two fields above.
   owner_user_id?: string | null;
   owner_unlinked?: string;
+  // #2174: present and true when the owner can no longer work in Risk.
+  owner_lacks_access?: boolean;
   treatment_owner: string;
   residual_score: unknown;
   review_due_at?: string;

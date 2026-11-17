@@ -12,6 +12,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { EntityPicker } from "@/components/ui/entity-picker";
+import { OwnerAccessFlag } from "@/components/ui/owner-access-flag";
 import { Person } from "@/components/ui/person";
 import { useToast } from "@/components/ui/toast";
 import { type Risk, updateRisk } from "@/lib/api/risks";
@@ -37,7 +38,15 @@ export function RiskOwner({ risk }: { risk: Risk }) {
   });
 
   if (risk.owner_user_id) {
-    return <Person id={risk.owner_user_id} testId="risk-detail-owner" />;
+    return (
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <Person id={risk.owner_user_id} testId="risk-detail-owner" />
+        <OwnerAccessFlag
+          lacksAccess={risk.owner_lacks_access}
+          testId="risk-detail-owner-no-access"
+        />
+      </span>
+    );
   }
 
   const unlinked = (risk.owner_unlinked ?? "").trim();
@@ -58,6 +67,7 @@ export function RiskOwner({ risk }: { risk: Risk }) {
           <span className="w-64">
             <EntityPicker
               kinds={["user"]}
+              module="risk"
               id="risk-detail-owner-pick"
               value={picked}
               onChange={setPicked}

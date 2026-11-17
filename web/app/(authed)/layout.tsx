@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { ModulesProvider } from "@/components/modules-context";
 import { AppShell } from "@/components/shell/app-shell";
 import { NoTenantRole } from "@/components/shell/no-tenant-role";
 import { ToastProvider } from "@/components/ui/toast";
@@ -9,6 +10,7 @@ import {
   fetchTenantsSummary,
 } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { fetchEffectiveModules } from "@/lib/feature-nav.server";
 
 export default async function AuthedLayout({
   children,
@@ -43,9 +45,16 @@ export default async function AuthedLayout({
   //
   // #2089: the toast provider lives in this persistent layout, so a toast
   // raised before router.push shows on the landing page.
+  //
+  // #2174: the caller's effective modules reach client pages through
+  // `<ModulesProvider>`, so a record hides its link sections into a
+  // module the caller cannot see.
+  const modules = await fetchEffectiveModules();
   return (
     <AppShell>
-      <ToastProvider>{children}</ToastProvider>
+      <ModulesProvider modules={modules}>
+        <ToastProvider>{children}</ToastProvider>
+      </ModulesProvider>
     </AppShell>
   );
 }

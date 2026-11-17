@@ -53,6 +53,22 @@ describe("GET /api/people", () => {
     expect(body.users[0].display_name).toBe("Alice");
   });
 
+  // #2174: an assignee picker asks for the members of one module.
+  test("forwards ?module= and nothing else", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response('{"users":[],"api_keys":[]}', { status: 200 }),
+      );
+    await GET(
+      new Request("http://web/api/people?module=third_party_risk&other=x"),
+    );
+    expect(String(fetchSpy.mock.calls[0][0])).toBe(
+      "http://atlas:8080/v1/people?module=third_party_risk",
+    );
+  });
+
   test("passes an upstream 403 through", async () => {
     cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

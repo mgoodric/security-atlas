@@ -11,6 +11,7 @@ import {
   moduleForPage,
   owningModuleName,
   resolveFeatureGate,
+  seesPage,
 } from "@/lib/feature-nav";
 
 type Item = { href: string; label: string };
@@ -249,5 +250,26 @@ describe("module features (#2171)", () => {
       gateNavItems(items, tpr("on", "switched_off")).map((i) => i.href),
     ).toEqual(["/vendors", "/controls"]);
     expect(gateNavItems(items, tpr("on", "on"))).toEqual(items);
+  });
+});
+
+// #2174 — link sections follow the caller's effective modules.
+describe("seesPage", () => {
+  const policies = (s: EffectiveModule["state"]) =>
+    mod("policies", "/policies", s);
+
+  test("shows a module's links only when the module is on", () => {
+    expect(seesPage([policies("on")], "/policies")).toBe(true);
+    expect(seesPage([policies("no_access")], "/policies")).toBe(false);
+    expect(seesPage([policies("switched_off")], "/policies")).toBe(false);
+  });
+
+  test("a page no module owns is core and always seen", () => {
+    expect(seesPage([policies("no_access")], "/controls")).toBe(true);
+  });
+
+  test("fails closed when the read failed, open when nothing was provided", () => {
+    expect(seesPage(null, "/policies")).toBe(false);
+    expect(seesPage(undefined, "/policies")).toBe(true);
   });
 });

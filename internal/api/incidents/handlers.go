@@ -18,14 +18,50 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/incident"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 type Handler struct {
 	store *incident.Store
+	views *moduleaccess.Views
 }
 
 func New(store *incident.Store) *Handler { return &Handler{store: store} }
+
+// WithModules wires the module views that strip links into hidden modules
+// (#2174). Without them (a unit-test server) every link is shown.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// writeDetail writes one incident with its links, leaving out the links
+// into a module the caller cannot see (#2174): a switched-off module, or
+// one outside their module access. The links stay stored; an empty list
+// says nothing about how many were left out. A failed access read fails
+// closed (500).
+func (h *Handler) writeDetail(w http.ResponseWriter, r *http.Request, status int, d incident.Detail) {
+	viewer, err := h.views.For(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "incident link modules", err)
+		return
+	}
+	for path, ids := range map[string]*[]uuid.UUID{
+		"/v1/risks":   &d.Links.RiskIDs,
+		"/v1/vendors": &d.Links.VendorIDs,
+	} {
+		sees, err := viewer.Sees(path)
+		if err != nil {
+			httperr.WriteInternal(w, r, "incident link modules", err)
+			return
+		}
+		if !sees {
+			*ids = []uuid.UUID{}
+		}
+	}
+	httpresp.WriteJSON(w, status, map[string]any{"incident": detailWireFrom(d)})
+}
 
 type createReq struct {
 	Title              string          `json:"title"`
@@ -86,7 +122,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeErr(w, r, "create incident", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"incident": detailWireFrom(detail)})
+	h.writeDetail(w, r, http.StatusCreated, detail)
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +158,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		h.writeErr(w, r, "get incident", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"incident": detailWireFrom(detail)})
+	h.writeDetail(w, r, http.StatusOK, detail)
 }
 
 func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +212,7 @@ func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 		h.writeErr(w, r, "close incident", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"incident": detailWireFrom(detail)})
+	h.writeDetail(w, r, http.StatusOK, detail)
 }
 
 func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, op string, err error) {

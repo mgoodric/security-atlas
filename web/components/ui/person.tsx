@@ -32,20 +32,30 @@ interface PeopleResponse {
   api_keys?: DirectoryApiKey[];
 }
 
-async function fetchPeopleDirectory(): Promise<PersonDirectory | null> {
-  const res = await fetch("/api/people", { cache: "no-store" });
+async function fetchPeopleDirectory(
+  module?: string,
+): Promise<PersonDirectory | null> {
+  const qs = module ? `?module=${encodeURIComponent(module)}` : "";
+  const res = await fetch(`/api/people${qs}`, { cache: "no-store" });
   if (!res.ok) return null;
   const body = (await res.json()) as PeopleResponse;
   return buildDirectory(body.users ?? [], body.api_keys ?? []);
 }
 
-export function usePeopleDirectory() {
+/**
+ * The tenant's people directory. With `module` (#2174), only the members
+ * who can work in that optional module: the platform filters, so an
+ * assignee picker never offers someone who could not open the record.
+ * The module-filtered list is cached under its own key, below the shared
+ * one, so a tenant switch drops it too.
+ */
+export function usePeopleDirectory(module?: string) {
   const qc = useQueryClient();
   // A tenant switch in any tab drops the directory (lib/people-cache.ts).
   useEffect(() => forgetPeopleOnTenantSwitch(qc), [qc]);
   return useQuery({
-    queryKey: PEOPLE_QUERY_KEY,
-    queryFn: fetchPeopleDirectory,
+    queryKey: module ? [...PEOPLE_QUERY_KEY, { module }] : PEOPLE_QUERY_KEY,
+    queryFn: () => fetchPeopleDirectory(module),
     staleTime: PEOPLE_STALE_MS,
     retry: false,
   });

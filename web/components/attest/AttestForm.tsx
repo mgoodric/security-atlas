@@ -117,6 +117,16 @@ function coerceValue(prop: FormProperty, raw: string): unknown {
   }
 }
 
+// A fresh idempotency key per submission. getRandomValues works outside a
+// secure context, unlike randomUUID.
+function newAttestIdempotencyKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return (
+    "attest-web-" +
+    Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+  );
+}
+
 export function AttestForm({
   form,
   uploadEndpoint = "/api/artifacts/upload",
@@ -226,6 +236,11 @@ export function AttestForm({
         statement,
         attestation_data: attestationData,
         result,
+        // #2509: each submission is a new attestation, even with the same
+        // text as an earlier one (attesting pass again after a fail). The
+        // server's default key would dedupe an identical body sent inside
+        // its retry window.
+        idempotency_key: newAttestIdempotencyKey(),
       };
       if (result === "fail") body.fail_reason = failReason.trim();
       if (artifactID) body.artifact_id = artifactID;
