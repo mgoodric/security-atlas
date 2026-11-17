@@ -6,6 +6,10 @@
 -- uses. The e2e JWT carries the admin role, which satisfies any
 -- owner_role.
 --
+-- applicability_expr is the scope engine's JSON form ({"op":"true"}):
+-- this spec evaluates the control for real, and the engine refuses an
+-- expression it cannot parse.
+--
 -- manual_evidence_schema is left NULL: the form then renders only the
 -- platform fields (result, fail reason, statement).
 
@@ -26,7 +30,7 @@ VALUES (
     'manual_attested',
     'security-engineering',
     'active',
-    'env == "prod"',
+    '{"op":"true"}',
     'demo-access-attest-result',
     'quarterly'
 )

@@ -18,6 +18,12 @@ import { seedFromFixture } from "./seed";
 
 const CONTROL_ID = "33333333-3333-3333-3333-33333333a111";
 
+// The attest handler derives its idempotency key from the request body, so
+// re-sending an identical statement later (a Playwright retry, a second
+// local run) is refused as an idempotency mismatch. A per-run suffix keeps
+// each attestation distinct.
+const RUN = Date.now().toString(36);
+
 async function attest(
   page: Page,
   result: "pass" | "fail",
@@ -33,7 +39,7 @@ async function attest(
   if (failReason !== undefined) {
     await page.getByTestId("attest-fail-reason").fill(failReason);
   }
-  await page.getByTestId("attest-statement").fill(statement);
+  await page.getByTestId("attest-statement").fill(`${statement} (run ${RUN})`);
   await page.getByTestId("attest-submit").click();
   await expect(page).toHaveURL(new RegExp(`/controls/${CONTROL_ID}(\\?|$)`), {
     timeout: 30_000,
