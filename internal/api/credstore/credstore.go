@@ -32,6 +32,18 @@ import (
 // is not present, has been revoked, or is past its rotation grace.
 var ErrUnknownKey = errors.New("credstore: unknown key")
 
+// KindCalendarRead is the AllowedKinds entry of an ICS feed token: a
+// credential minted by POST /v1/calendar/subscription that may only fetch
+// the feed (slice 094 decision D3).
+const KindCalendarRead = "calendar.read.v1"
+
+// CalendarOnly reports whether c is an ICS feed token: its kinds are
+// exactly {KindCalendarRead}. A key whose kinds include KindCalendarRead
+// among others is a general key and is not one.
+func (c Credential) CalendarOnly() bool {
+	return len(c.Kinds) == 1 && c.Kinds[0] == KindCalendarRead
+}
+
 // Credential is the metadata view of an API key. Never includes the bearer
 // token plaintext.
 type Credential struct {

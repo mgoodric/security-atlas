@@ -23,6 +23,29 @@ func TestKindModuleRoute_OptionalModules(t *testing.T) {
 	}
 }
 
+// #2477: a decision is placed by its recorded request path; only a row
+// with no recorded path falls back to "/v1/"+target_type.
+func TestDecisionRoute(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		e    unifiedlog.Entry
+		want string
+	}{
+		{"me route", unifiedlog.Entry{TargetType: "me", PayloadJSON: []byte(`{"request_path":"/v1/me/acknowledgments"}`)}, "/v1/me/acknowledgments"},
+		{"nested route", unifiedlog.Entry{TargetType: "controls", PayloadJSON: []byte(`{"request_path":"/v1/controls/c1/policies"}`)}, "/v1/controls/c1/policies"},
+		{"path wins over type", unifiedlog.Entry{TargetType: "policies", PayloadJSON: []byte(`{"request_path":"/v1/controls/c1"}`)}, "/v1/controls/c1"},
+		{"legacy empty path", unifiedlog.Entry{TargetType: "policies", PayloadJSON: []byte(`{"request_path":""}`)}, "/v1/policies"},
+		{"legacy no payload", unifiedlog.Entry{TargetType: "policies"}, "/v1/policies"},
+		{"nothing to place", unifiedlog.Entry{}, ""},
+	}
+	for _, c := range cases {
+		if got := decisionRoute(c.e); got != c.want {
+			t.Errorf("%s: decisionRoute = %q; want %q", c.name, got, c.want)
+		}
+	}
+}
+
 // With nothing hidden, every row stays, in order.
 func TestVisibleEntries_NothingHidden(t *testing.T) {
 	t.Parallel()

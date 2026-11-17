@@ -116,43 +116,68 @@ func (v Viewer) Sees(path string) (bool, error) {
 // Modules resolves the viewer's answer for every optional module at once,
 // for a view that filters many rows inside a transaction: ModuleSet.Sees
 // reads no flag and no access row, so it never asks the pool for a second
-// connection while the transaction holds one. It answers per module; a
-// feature's own switch is not consulted.
+// connection while the transaction holds one. It answers what Sees
+// answers: a module switched off or outside the viewer's access hides its
+// routes, and a feature switched off hides the routes it owns, in a core
+// module too (#2477).
 func (v Viewer) Modules() (ModuleSet, error) {
 	if v.all {
 		return ModuleSet{}, nil
 	}
 	hidden := map[string]bool{}
-	for _, m := range featureflag.OptionalModules() {
-		if !v.access.Has(m.Key) {
-			hidden[m.Key] = true
-			continue
+	features := map[string]bool{}
+	for _, m := range featureflag.Modules {
+		if !m.Core {
+			if !v.access.Has(m.Key) {
+				hidden[m.Key] = true
+				continue
+			}
+			on, err := featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
+			if err != nil {
+				return ModuleSet{}, err
+			}
+			if !on {
+				hidden[m.Key] = true
+				continue
+			}
 		}
-		on, err := featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
-		if err != nil {
-			return ModuleSet{}, err
-		}
-		if !on {
-			hidden[m.Key] = true
+		for _, f := range m.Features {
+			// A feature with no routes owns nothing Resolve can place.
+			if len(f.Routes) == 0 {
+				continue
+			}
+			on, err := featureflag.Enabled(v.r.Context(), v.flags, f.FlagKey)
+			if err != nil {
+				return ModuleSet{}, err
+			}
+			if !on {
+				features[f.Key] = true
+			}
 		}
 	}
-	return ModuleSet{hidden: hidden}, nil
+	return ModuleSet{hidden: hidden, features: features}, nil
 }
 
-// ModuleSet is a Viewer's answer resolved for every optional module.
+// ModuleSet is a Viewer's answer resolved for every optional module and
+// every feature that owns routes.
 type ModuleSet struct {
-	hidden map[string]bool
+	hidden   map[string]bool
+	features map[string]bool
 }
 
-// Sees reports whether an item owned by the module the registry places
-// path under may be shown. Core modules, and paths the registry cannot
-// place, are shown.
+// Sees reports whether an item owned by the module (and feature) the
+// registry places path under may be shown. Paths the registry cannot
+// place are shown; a core module's paths are shown unless a feature
+// switched off owns them.
 func (m ModuleSet) Sees(path string) bool {
 	o, err := featureflag.Resolve(path)
-	if err != nil || o.Module.Core {
+	if err != nil {
 		return true
 	}
-	return !m.hidden[o.Module.Key]
+	if !o.Module.Core && m.hidden[o.Module.Key] {
+		return false
+	}
+	return o.Feature == nil || !m.features[o.Feature.Key]
 }
 
 // Hidden returns the keys of routes whose items the viewer may not see.
