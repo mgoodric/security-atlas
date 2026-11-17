@@ -50,6 +50,12 @@ import {
 // the target's direction. The arrow, the band label and the aria-label
 // carry the meaning; colour is never the only cue.
 
+// #2269: the rule behind covered_by_exception_pct (#2112 D11), stated where
+// the number is shown. One excepted scope cell is enough for a control to
+// count as resting on an exception.
+const COVERED_BY_EXCEPTION_TOOLTIP =
+  "Requirements whose every covering control rests on an exception. A control counts as resting on an exception when even one of its scope cells is excepted.";
+
 function trendLabel(delta: number): string {
   if (delta > 0) return `+${delta.toFixed(1)}`;
   if (delta < 0) return delta.toFixed(1);
@@ -165,6 +171,7 @@ function PostureTile({
         <div
           className="mt-1 text-xs text-muted-foreground"
           data-testid="framework-tile-exception"
+          title={COVERED_BY_EXCEPTION_TOOLTIP}
         >
           {row.covered_by_exception_pct.toFixed(1)}% covered by exception
         </div>

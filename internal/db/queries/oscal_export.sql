@@ -65,6 +65,38 @@ SELECT * FROM (
 WHERE latest.result = 'fail'
 ORDER BY latest.control_id ASC, latest.scope_cell_id ASC;
 
+-- name: ListExceptedEvaluationsAsOf :many
+-- #2269: the AR's risk-accepted observations. The latest evaluation per
+-- (control, scope_cell) as of the frozen horizon whose result is
+-- 'excepted' (#2112), the same DISTINCT ON as ListFailingEvaluationsAsOf.
+-- An excepted cell is never a finding: the export links it to the
+-- exception that accepted the risk instead.
+SELECT * FROM (
+    SELECT DISTINCT ON (control_id, scope_cell_id)
+        id, tenant_id, control_id, scope_cell_id, eval_run_id,
+        evaluated_at, result
+    FROM control_evaluations
+    WHERE tenant_id = $1
+      AND evaluated_at <= $2
+    ORDER BY control_id, scope_cell_id, evaluated_at DESC, created_at DESC
+) latest
+WHERE latest.result = 'excepted'
+ORDER BY latest.control_id ASC, latest.scope_cell_id ASC;
+
+-- name: ListActivatedExceptionsForExport :many
+-- #2269: every exception that was ever activated, with what the export
+-- needs to decide whether it was in force at an evaluation's instant
+-- (activated_at, effective_from, expires_at, revoked_at) and whether its
+-- predicate covers the cell. The evaluation row does not record which
+-- exception excepted it (#2112 D3), so the aggregator reconstructs it.
+SELECT id, control_id, scope_cell_predicate, justification,
+       approved_by, approved_at, activated_at, effective_from,
+       expires_at, revoked_at, status
+FROM exceptions
+WHERE tenant_id = $1
+  AND activated_at IS NOT NULL
+ORDER BY control_id ASC, activated_at ASC, id ASC;
+
 -- name: ListSampledEvidenceForPeriod :many
 -- Slice 494 (AC-1/AC-2): the DRAWN sample evidence ids for every population
 -- pinned to one audit period. Joins populations -> samples -> sample_evidence.
