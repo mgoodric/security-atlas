@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 )
 
@@ -51,27 +52,50 @@ func TestStateFromCoverage(t *testing.T) {
 	}
 }
 
-// extractSeverity pulls a ranking scalar from the methodology-dependent
-// score JSONB shapes.
-func TestExtractSeverity(t *testing.T) {
-	cases := []struct {
-		name string
-		blob string
-		want float64
-	}{
-		{"residual score field", `{"score": 12.5, "warning": ""}`, 12.5},
-		{"aggregated severity field", `{"severity": 20, "child_count": 3}`, 20},
-		{"likelihood times impact", `{"likelihood": 4, "impact": 5}`, 20},
-		{"empty blob", ``, 0},
-		{"unrecognized shape", `{"foo": "bar"}`, 0},
-		{"malformed json", `{not json`, 0},
-	}
-	for _, c := range cases {
-		got := extractSeverity([]byte(c.blob))
-		if got != c.want {
-			t.Errorf("%s: extractSeverity(%q) = %v, want %v", c.name, c.blob, got, c.want)
+// rankTopRisks keeps FAIR (dollar) residuals out of the 5x5 ranking
+// (#2185): every 5x5 risk ranks above every FAIR risk, so a $250,000 FAIR
+// residual never outranks a residual severity of 2 by raw number. Among
+// FAIR risks the larger exposure ranks first.
+func TestRankTopRisks_FAIRNeverOutranks5x5(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 0, 0, 0, 0, time.UTC)
+	mk := func(title string, m dbx.RiskMethodology, residual string) riskRow {
+		return riskRow{
+			ID: uuid.New(), Title: title, Methodology: m,
+			ResidualScore: []byte(residual), UpdatedAt: now,
 		}
 	}
+	rows := []riskRow{
+		mk("fair big", dbx.RiskMethodologyFair, `{"score": 250000}`),
+		mk("5x5 low", dbx.RiskMethodologyNist80030, `{"score": 2}`),
+		mk("fair small", dbx.RiskMethodologyFair, `{"score": 900}`),
+		mk("5x5 high", dbx.RiskMethodologyQualitative5x5, `{"likelihood": 4, "impact": 5}`),
+	}
+	top := rankTopRisks(rows, now, 4)
+	want := []string{"5x5 high", "5x5 low", "fair big", "fair small"}
+	for i, w := range want {
+		if top[i].Title != w {
+			t.Fatalf("top[%d] = %q, want %q (order %v)", i, top[i].Title, w, titles(top))
+		}
+	}
+	if top[2].Methodology != "fair" || !top[2].Monetary() || top[2].Band() != "" {
+		t.Errorf("FAIR row: methodology=%q monetary=%v band=%q, want fair/true/\"\"",
+			top[2].Methodology, top[2].Monetary(), top[2].Band())
+	}
+	if got := top[2].ResidualLabel(); got != "$250,000" {
+		t.Errorf("FAIR ResidualLabel = %q, want $250,000", got)
+	}
+	if got := top[0].ResidualLabel(); got != "20.0 High" {
+		t.Errorf("5x5 ResidualLabel = %q, want \"20.0 High\"", got)
+	}
+}
+
+func titles(rs []RiskAging) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.Title
+	}
+	return out
 }
 
 // rankTopRisks: ranks by residual severity DESC, then age DESC, and keeps

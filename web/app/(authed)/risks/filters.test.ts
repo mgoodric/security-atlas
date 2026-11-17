@@ -88,6 +88,9 @@ describe("categoryOptions / categoryDisplay (#1817)", () => {
 describe("severityBand", () => {
   test("0 is the 'none' band (no numeric score)", () => {
     expect(severityBand(0)).toBe("none");
+    // #2185: any value above 0 is low, so a small residual is not "none".
+    expect(severityBand(0.4)).toBe("low");
+    expect(severityBand(0.01)).toBe("low");
   });
 
   test("1..7 is the 'low' band", () => {

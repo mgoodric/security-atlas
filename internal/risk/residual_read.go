@@ -1,0 +1,83 @@
+package risk
+
+import (
+	"encoding/json"
+
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+)
+
+// ScoreValue is the one reader for the scalar in a risk's residual_score or
+// inherent_score JSONB (#2185). The blob is methodology-dependent and the
+// platform writes three shapes, read in this order:
+//
+//   - the residual deriver's `score` (residualBlob, slice 020);
+//   - a precomputed `severity` (slice 053 aggregated parents);
+//   - a 5x5 {likelihood, impact}, whose scalar is their product
+//     (canvas §2.2).
+//
+// ok is false when no shape carries a number: a malformed or empty blob.
+// {score: 0} (fully effective controls) is ok with value 0.
+//
+// The value's unit depends on the methodology: on a FAIR risk the deriver's
+// `score` is a dollar amount, not a 1..25 severity. Read the methodology
+// with Monetary before comparing or banding the value.
+func ScoreValue(raw []byte) (value float64, ok bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return 0, false
+	}
+	if v, ok := numField(m, "score"); ok {
+		return v, true
+	}
+	if v, ok := numField(m, "severity"); ok {
+		return v, true
+	}
+	l, lok := numField(m, "likelihood")
+	i, iok := numField(m, "impact")
+	if lok && iok {
+		return l * i, true
+	}
+	return 0, false
+}
+
+// Monetary reports whether a methodology's score scalar is a dollar amount
+// rather than a 1..25 severity. Only FAIR is: its residual is an annualized
+// loss exposure, which has no Low/Medium/High band and is not comparable
+// with a 5x5 severity (OPENENGINE-596: FAIR is not normalized into the 5x5
+// rollup).
+func Monetary(m dbx.RiskMethodology) bool {
+	return m == dbx.RiskMethodologyFair
+}
+
+// SeverityBand is the qualitative band of a 1..25 severity: Low up to 7,
+// Medium 8-14, High 15-25. Any value above 0 is at least Low, so a residual
+// of 0.4 (strong controls on a low inherent) is Low, not None. Zero or less
+// is None. Never band a Monetary value.
+func SeverityBand(severity float64) string {
+	switch {
+	case severity >= 15:
+		return "High"
+	case severity >= 8:
+		return "Medium"
+	case severity > 0:
+		return "Low"
+	default:
+		return "None"
+	}
+}
+
+// RanksAbove orders two scored risks for a "top risks" list, highest first.
+// 5x5 severities and FAIR dollar amounts are ranked separately, not on one
+// scale: every severity-scored risk ranks above every Monetary one, and
+// within each group the higher value ranks first. So a FAIR risk's dollar
+// figure never outranks a 1..25 severity by raw number. It returns false
+// when the two are tied, so callers apply their own tiebreak.
+func RanksAbove(aMonetary bool, a float64, bMonetary bool, b float64) bool {
+	if aMonetary != bMonetary {
+		return !aMonetary
+	}
+	return a > b
+}

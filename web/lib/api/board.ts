@@ -38,6 +38,7 @@ export type BoardPackSectionData = {
     category: string;
     category_name?: string;
     treatment: string;
+    methodology?: string;
     residual_severity: number;
     age_days: number;
   }[];
