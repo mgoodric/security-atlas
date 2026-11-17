@@ -155,7 +155,7 @@ sql:
       # #2129: risk and vendor owners are users (owner_user_id).
       - "migrations/sql/20261226000000_risk_vendor_owner_users.sql"
       # #2172: module access for each member, and its audit log.
-      - "migrations/sql/20261227000000_member_module_access.sql"
+      - "migrations/sql/20261230000000_member_module_access.sql"
     queries: "internal/db/queries"
     gen:
       go:
