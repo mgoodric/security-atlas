@@ -4,11 +4,12 @@ package authz_test
 // authzmw with the real OPA bundle and a resolver standing in for
 // user_roles, then a handler applying the route's gate from routes2428:
 //   - a user who is admin in tenant A and viewer in tenant B, acting in B,
-//     is refused every gate;
+//     gets what a viewer gets: refused every gate but the #2556 risk-read
+//     gate;
 //   - an API key bound to a user (#2402 D2) gets its owner's live roles, so
 //     a key owned by a tenant admin passes every gate whatever its label
 //     says. That is today's behaviour; #2431 is to cap it at the label;
-//   - an unbound key labelled viewer is refused every gate.
+//   - an unbound key labelled viewer gets what a viewer gets.
 
 import (
 	"context"
@@ -33,6 +34,14 @@ type tenantResolver map[[2]string][]authz.Role
 
 func (m tenantResolver) RolesFor(_ context.Context, tenant, user string) ([]authz.Role, error) {
 	return m[[2]string{tenant, user}], nil
+}
+
+// viewerStatus2447 is the status a viewer gets from rt's gate.
+func viewerStatus2447(rt route2428) int {
+	if wantAdmit2428(rt.gate, authz.RoleViewer) {
+		return http.StatusNoContent
+	}
+	return http.StatusForbidden
 }
 
 // gateStatus2447 sends one request as cred through authzmw and a handler
@@ -67,8 +76,8 @@ func TestTenantGates2447_AdminInAViewerInB(t *testing.T) {
 	inB := credstore.Credential{ID: "jwt:b", TenantID: tenantB2447, UserID: user2447, OwnerRoles: []string{"viewer"}}
 	inA := credstore.Credential{ID: "jwt:a", TenantID: tenantA2447, UserID: user2447, OwnerRoles: []string{"admin"}}
 	for _, rt := range routes2428 {
-		if got := gateStatus2447(t, e, inB, rt); got != http.StatusForbidden {
-			t.Errorf("admin in A, viewer in B, tenant-B token: %s %s = %d, want 403", rt.method, rt.path, got)
+		if got, want := gateStatus2447(t, e, inB, rt), viewerStatus2447(rt); got != want {
+			t.Errorf("admin in A, viewer in B, tenant-B token: %s %s = %d, want %d", rt.method, rt.path, got, want)
 		}
 		// The same person in A passes, so the refusal above is B's role.
 		if got := gateStatus2447(t, e, inA, rt); got != http.StatusNoContent {
@@ -95,8 +104,8 @@ func TestTenantGates2447_APIKeyRows(t *testing.T) {
 		if got := gateStatus2447(t, e, bound, rt); got != http.StatusNoContent {
 			t.Errorf("key bound to a tenant admin (#2402 D2, until #2431): %s %s = %d, want 204", rt.method, rt.path, got)
 		}
-		if got := gateStatus2447(t, e, unbound, rt); got != http.StatusForbidden {
-			t.Errorf("unbound viewer key: %s %s = %d, want 403", rt.method, rt.path, got)
+		if got, want := gateStatus2447(t, e, unbound, rt), viewerStatus2447(rt); got != want {
+			t.Errorf("unbound viewer key: %s %s = %d, want %d", rt.method, rt.path, got, want)
 		}
 	}
 }

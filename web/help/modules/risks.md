@@ -93,6 +93,10 @@ and themes.
 
 ## Who can do what
 
+- **Read** the register, a risk's page and history, the hierarchy and
+  the decision log, and **export** the list: admins, GRC engineers and
+  viewers. A viewer only reads; every change below is refused. Control
+  owners and auditors do not see the register.
 - **Create, edit, treat, close and reopen** a risk, and **propose** an
   acceptance: admins and GRC engineers.
 - **Approve, reject or revoke** an acceptance: approvers, which means

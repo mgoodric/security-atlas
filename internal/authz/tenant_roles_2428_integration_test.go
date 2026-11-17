@@ -8,7 +8,8 @@
 // who signed in normally gets:
 //   - a tenant admin passes every switched gate;
 //   - a grc_engineer passes the approver gates and nothing admin-only;
-//   - control_owner, auditor and viewer pass none;
+//   - control_owner and auditor pass none; viewer passes only the #2556
+//     risk-read gate;
 //   - a revoked grant is refused while the token that carried it is live.
 //
 // Run with:  go test -tags=integration -race -run 2428 ./internal/authz/...
