@@ -7,10 +7,11 @@
 // pool, so a super-admin sees only the tenant it is signed in to. The
 // admin-only /v1/admin/users and /v1/admin/credentials are unchanged.
 //
-// ?module=<key> (#2174) lists only the users who can work in that optional
-// module: an assignee picker on a record offers no one who could not open
-// it. The filter runs here, on the server, from each person's live roles
-// and module access (moduleaccess.Views.MembersWith).
+// ?module=<key> (#2174) leaves out the users who cannot work in that
+// optional module: an assignee picker on a record offers no one an admin
+// has narrowed out of it. The filter runs here, on the server, from each
+// person's stored module access and live roles
+// (moduleaccess.Views.MembersWithout).
 //
 // It returns no email address, token, prefix or last4: a user's
 // display_name falls back to the email's local-part here, on the server.
@@ -96,12 +97,12 @@ func knownModule(key string) bool {
 	return false
 }
 
-// withAccess keeps the users members names (user_roles keys, which for a
+// without drops the users excluded names (user_roles keys, which for a
 // user are its id).
-func withAccess(users []User, members map[string]bool) []User {
+func without(users []User, excluded map[string]bool) []User {
 	out := make([]User, 0, len(users))
 	for _, u := range users {
-		if members[u.ID] {
+		if !excluded[u.ID] {
 			out = append(out, u)
 		}
 	}
@@ -152,14 +153,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if module != "" {
 		// A failed access read fails closed: 500, never everyone.
-		members, filter, err := h.views.MembersWith(r.Context(), tenantID, module)
+		excluded, err := h.views.MembersWithout(r.Context(), tenantID, module)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list people with module access", err)
 			return
 		}
-		if filter {
-			out.Users = withAccess(out.Users, members)
-		}
+		out.Users = without(out.Users, excluded)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

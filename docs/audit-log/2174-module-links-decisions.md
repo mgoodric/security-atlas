@@ -6,7 +6,12 @@ Issue: mgoodric/security-atlas#2174 (spec #2166, ADR 0025). After #2171
 
 ## Detection-tier classification
 
-- **detection_tier_actual:** none. No product bug surfaced. With the
+- **detection_tier_actual:** playwright. The first cut treated a user
+  with no `user_roles` row as having no optional module, which emptied
+  the risk and action-plan owner pickers in the e2e tenant (D2). The
+  same run showed four specs mocking `/api/people` by exact path, which
+  the new `?module=` query fell past; their route patterns now accept a
+  query string, as `activity.spec.ts`'s already did. With the
   server wiring removed (`WithModules` dropped from the people, vendors
   and incidents registrars), three of the four `TestModuleLinks_*`
   integration tests fail: the vendor flag stays false, the assignee
@@ -58,10 +63,15 @@ owner's live `user_roles` and `member_module_access` at read time
 `OwnerCheck`), so narrowing or restoring access changes the flag without
 touching the record. Nothing is stored and the assignment is unchanged.
 
-The owner's access follows the rule `Gate` applies to a caller: admin and
-auditor are exempt, no stored row is "all", and a person with no live
-role (removed, deactivated) has no optional module, so they are flagged
-too: they can no longer open the record either. Whether the module is
+An owner lacks the module only when an admin narrowed their module
+access to leave it out and their live `user_roles` hold neither admin
+nor auditor (both exempt, as in `Gate`); no stored row is "all". A
+person with no `user_roles` row is not flagged: roles carried only in a
+credential (the e2e test token, an IdP claim) cannot be read for someone
+who is not the caller, and the first CI run of this PR showed the e2e
+tenant's users have no role rows, so treating "no row" as "no access"
+emptied every owner picker. The flag and picker are advisory; `Gate`
+still refuses the person on their own requests. Whether the module is
 switched on is not asked: a switched-off module's records reach no one.
 
 The flag is present only when true (`omitempty`), so the risks list
@@ -73,9 +83,10 @@ no user-id owner field on the wire today.
 
 ### D3 — assignee pickers filter on the server
 
-`GET /v1/people?module=<key>` lists only users who can work in that
-optional module (`Views.MembersWith`: one read of live roles, one of
-stored access). A core key filters no one; an unknown key is a 400. API
+`GET /v1/people?module=<key>` leaves out the users who cannot work in
+that optional module by D2's rule (`Views.MembersWithout`: one read of
+stored access, and of live roles only when someone is narrowed out). A
+core key filters no one; an unknown key is a 400. API
 keys are listed unchanged: they are not assignees. The web owner pickers
 on vendors (`third_party_risk`), risks, the risk owner panel and action
 plans (`risk`) pass the module through `EntityPicker`'s `module` prop and

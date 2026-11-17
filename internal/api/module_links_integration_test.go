@@ -224,6 +224,13 @@ func TestModuleLinks_AssigneeOptionsLeaveOutMembersWithoutAccess(t *testing.T) {
 	if got[without.String()] {
 		t.Errorf("assignee options list %s, who has no Third-party risk access", without)
 	}
+	// A user with no user_roles row has no stored narrowing: their roles
+	// may come from their credential, which cannot be read for someone
+	// else, so they are offered as before.
+	roleless := seedPeriodUser(t, e.migrate, e.tenant, "active")
+	if !got[roleless.String()] && !e.peopleIDs(t, e.admin, "?module=third_party_risk")[roleless.String()] {
+		t.Errorf("assignee options leave out %s, who has no role row and no narrowing", roleless)
+	}
 	if all := e.peopleIDs(t, e.admin, ""); !all[without.String()] {
 		t.Errorf("the unfiltered directory leaves out %s; it should list everyone", without)
 	}

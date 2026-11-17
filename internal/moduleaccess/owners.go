@@ -19,40 +19,47 @@ import (
 // live user_roles and stored module access at the time of the read, so a
 // narrowing or a role change shows up without touching the record.
 //
-// A person's access follows the same rule Gate applies to a caller: admin
-// and auditor are exempt, a member with no stored row has "all", and a
-// person with no live role in the tenant (removed or deactivated) has no
-// optional module. Whether the module is switched on is not asked: a
-// switched-off module's records are not shown to anyone.
+// A person lacks a module only when an admin narrowed their module access
+// to leave it out and their live user_roles hold neither admin nor
+// auditor (both exempt, as in Gate). A person with no stored narrowing
+// has "all". Roles held only in a credential (a test token, an IdP claim)
+// cannot be read for someone who is not the caller, so the absence of a
+// user_roles row is not taken as lost access: the flag and the picker are
+// advisory, and Gate still refuses the person on their own requests.
+// Whether the module is switched on is not asked: a switched-off module's
+// records are not shown to anyone.
 
 // UserHas reports whether userID (a users.id or user_roles key) can work
 // in the optional module key. A core module, or a key the registry does
 // not list, answers true. A nil Views (a unit-test server with no
 // database) answers true.
 func (v *Views) UserHas(ctx context.Context, tenantID uuid.UUID, userID, key string) (bool, error) {
-	if v == nil || v.access == nil || !optional(key) {
+	if v == nil || v.access == nil || !optional(key) || userID == "" {
 		return true, nil
-	}
-	if userID == "" {
-		return false, nil
-	}
-	roles, err := v.access.roles.RolesFor(ctx, tenantID.String(), userID)
-	if err != nil {
-		return false, fmt.Errorf("moduleaccess: owner roles: %w", err)
-	}
-	if len(roles) == 0 {
-		return false, nil
-	}
-	for _, role := range roles {
-		if role == authz.RoleAdmin || role == authz.RoleAuditor {
-			return true, nil
-		}
 	}
 	modules, err := v.access.Get(ctx, tenantID, identity.RolesKey(userID))
 	if err != nil {
 		return false, err
 	}
-	return Access{Modules: modules}.Has(key), nil
+	if (Access{Modules: modules}).Has(key) {
+		return true, nil
+	}
+	roles, err := v.access.roles.RolesFor(ctx, tenantID.String(), userID)
+	if err != nil {
+		return false, fmt.Errorf("moduleaccess: owner roles: %w", err)
+	}
+	return exemptRole(roles), nil
+}
+
+// exemptRole reports whether roles hold admin or auditor, whom module
+// access does not apply to.
+func exemptRole(roles []authz.Role) bool {
+	for _, role := range roles {
+		if role == authz.RoleAdmin || role == authz.RoleAuditor {
+			return true
+		}
+	}
+	return false
 }
 
 // OwnerCheck answers the "owner can't access this module" flag for the
@@ -96,33 +103,39 @@ func (o *OwnerCheck) Lacks(owner string) (bool, error) {
 	return !has, nil
 }
 
-// MembersWith returns the user_roles keys of the tenant's active members
-// who can work in the optional module key. ok is false when there is no
-// filter to apply: a core module, an unlisted key, or a nil Views.
-func (v *Views) MembersWith(ctx context.Context, tenantID uuid.UUID, key string) (members map[string]bool, ok bool, err error) {
+// MembersWithout returns the user_roles keys of the tenant's members who
+// cannot work in the optional module key: narrowed to leave it out, and
+// holding neither admin nor auditor live. A core module, an unlisted key,
+// or a nil Views returns none.
+func (v *Views) MembersWithout(ctx context.Context, tenantID uuid.UUID, key string) (map[string]bool, error) {
+	out := map[string]bool{}
 	if v == nil || v.access == nil || !optional(key) {
-		return nil, false, nil
+		return out, nil
 	}
 	stored, err := v.access.List(ctx, tenantID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
+	}
+	narrowedOut := false
+	for user, modules := range stored {
+		if !(Access{Modules: modules}).Has(key) {
+			out[user] = true
+			narrowedOut = true
+		}
+	}
+	if !narrowedOut {
+		return out, nil
 	}
 	roles, err := v.access.liveRoles(ctx, tenantID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	out := map[string]bool{}
-	for user, held := range roles {
-		has := false
-		for _, role := range held {
-			has = has || role == authz.RoleAdmin || role == authz.RoleAuditor
-		}
-		modules, narrowed := stored[user]
-		if has || !narrowed || (Access{Modules: modules}).Has(key) {
-			out[user] = true
+	for user := range out {
+		if exemptRole(roles[user]) {
+			delete(out, user)
 		}
 	}
-	return out, true, nil
+	return out, nil
 }
 
 // liveRoles returns every live role in the tenant keyed by user_roles key,
