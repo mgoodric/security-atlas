@@ -57,7 +57,9 @@ test.describe("attest returns to the control (#2089)", () => {
     await expect(err).toHaveCount(0);
     await page.getByTestId("attest-submit").click();
 
-    await expect(page).toHaveURL(new RegExp(`/controls/${CONTROL_ID}$`), {
+    // #2111: the form returns with `?attested=<ingested_at>` so the control
+    // page can wait for the evaluation that attestation triggered.
+    await expect(page).toHaveURL(new RegExp(`/controls/${CONTROL_ID}(\\?|$)`), {
       timeout: 30_000,
     });
     await expect(page.getByTestId("toast")).toHaveText(/Attestation recorded/, {

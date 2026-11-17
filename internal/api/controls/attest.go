@@ -28,6 +28,12 @@
 //     which is set only at credential issue time.
 //   - Audit (AC-6): the ingest.Service.Process call writes one
 //     evidence_audit_log row per attempt, keyed by credential id.
+//
+// #2111: an attestation carries a result, pass or fail, and a fail needs a
+// fail_reason. The record's result is the submitted one, not a hard-coded
+// pass. After the record lands the handler evaluates the control at once,
+// because this path writes the ledger directly and never crosses the
+// message bus the ingest subscriber listens on.
 package controls
 
 import (
@@ -38,7 +44,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -53,16 +61,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/control/attestation"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // AttestationKind is the platform evidence_kind used for manual
-// attestations. Slice 014 ships the schema at this id at boot
-// (`manual.attestation/1.1.0.json`).
+// attestations. Slice 014 ships the schema at this id at boot; #2111's
+// `manual.attestation/1.2.0.json` adds result + fail_reason.
 const (
-	AttestationKind    = "manual.attestation.v1"
-	AttestationVersion = "1.1.0"
+	AttestationKind    = attestation.Kind
+	AttestationVersion = "1.2.0"
 	// IngestionPath is the ledger-row tag identifying records that flow
 	// through this handler. Canvas §4.7 enumerates the allowed values
 	// (push/pull/subscribe/webhook/manual_upload); slice 002's
@@ -92,6 +101,10 @@ type AttestHandler struct {
 	// `go test ./...` unit surface with no Postgres pool (ADR-0007 /
 	// P0-409-1). NewAttestHandler's signature is unchanged (P0-409-2).
 	reader controlByIDReader
+
+	// evaluator, when set, evaluates the control right after an
+	// attestation lands (#2111). Nil leaves evaluation to the scheduler.
+	evaluator controlEvaluator
 
 	// maxBodyBytes caps the JSON request body. Attestation payloads are
 	// schema-validated and small; the cap is just a belt against a
@@ -144,6 +157,25 @@ func (p poolControlReader) ControlByID(ctx context.Context, tenantID string, id 
 		return nil
 	})
 	return out, err
+}
+
+// controlEvaluator is the slice-012 engine call the handler runs after an
+// attestation: the same EvaluateControl the ingest subscriber, scheduler
+// and Evaluate now run.
+type controlEvaluator interface {
+	EvaluateControl(ctx context.Context, controlID uuid.UUID, trigger string, asOf time.Time) (int, error)
+}
+
+// attestEvaluateTimeout bounds the post-attestation evaluation. It matches
+// Evaluate now's bound (#2110); a slower evaluation leaves the record in
+// place and the next scheduled run picks the control up.
+const attestEvaluateTimeout = 30 * time.Second
+
+// WithEvaluator makes the handler evaluate the control after each
+// attestation it records (#2111).
+func (h *AttestHandler) WithEvaluator(e controlEvaluator) *AttestHandler {
+	h.evaluator = e
+	return h
 }
 
 // ArtifactUploader is the slice-036 surface this handler depends on. The
@@ -222,6 +254,11 @@ type attestSubmitRequest struct {
 	ArtifactID      string         `json:"artifact_id,omitempty"`
 	IdempotencyKey  string         `json:"idempotency_key,omitempty"`
 	ObservedAt      string         `json:"observed_at,omitempty"`
+	// Result is "pass" or "fail" (#2111). Absent means pass, which is what
+	// every attestation before 1.2.0 was.
+	Result string `json:"result,omitempty"`
+	// FailReason is required when Result is "fail" and ignored otherwise.
+	FailReason string `json:"fail_reason,omitempty"`
 }
 
 type attestSubmitResponse struct {
@@ -231,6 +268,12 @@ type attestSubmitResponse struct {
 	CredentialID string `json:"credential_id"`
 	Deduplicated bool   `json:"deduplicated"`
 	PayloadURI   string `json:"payload_uri,omitempty"`
+	// Result is the outcome recorded, pass or fail (#2111).
+	Result string `json:"result"`
+	// Evaluated reports whether the control was evaluated after the record
+	// landed. False means the evaluation failed or is not wired; the
+	// scheduled run will pick the control up.
+	Evaluated bool `json:"evaluated"`
 }
 
 type attestErrorBody struct {
@@ -328,6 +371,11 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Statement == "" {
 		writeAttestError(w, http.StatusBadRequest, "statement is required")
+		return
+	}
+	result, failReason, rerr := attestResult(req.Result, req.FailReason)
+	if rerr != nil {
+		writeAttestError(w, http.StatusBadRequest, rerr.Error())
 		return
 	}
 
@@ -428,6 +476,10 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	payload := map[string]any{
 		"attestor":  cred.UserID,
 		"statement": req.Statement,
+		"result":    result,
+	}
+	if failReason != "" {
+		payload["fail_reason"] = failReason
 	}
 	if req.SupportingURI != "" {
 		payload["supporting_uri"] = req.SupportingURI
@@ -451,7 +503,7 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 			Values: []string{row.OwnerRole},
 		}},
 		ObservedAt: timestamppb.New(observed),
-		Result:     evidencev1.Result_RESULT_PASS,
+		Result:     attestResultProto(result),
 		Payload:    payloadStruct,
 		SourceAttribution: &evidencev1.SourceAttribution{
 			ActorType: "human",
@@ -481,6 +533,8 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		CredentialID: receipt.CredentialID,
 		Deduplicated: receipt.Deduplicated,
 		PayloadURI:   payloadURI,
+		Result:       result,
+		Evaluated:    h.evaluateAfterAttest(r.Context(), id),
 	}
 	status := http.StatusCreated
 	if receipt.Deduplicated {
@@ -490,6 +544,50 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----- helpers -----
+
+// attestResult normalises the submitted result (#2111). An empty result is
+// a pass. A fail needs a non-blank fail_reason; a pass drops any reason
+// sent with it. The 1.2.0 schema enforces the same rule on the ledger
+// side; checking here gives the caller a plain 400 before anything is read.
+func attestResult(result, failReason string) (string, string, error) {
+	switch result {
+	case "", eval.ResultPass:
+		return eval.ResultPass, "", nil
+	case eval.ResultFail:
+		reason := strings.TrimSpace(failReason)
+		if reason == "" {
+			return "", "", errors.New("fail_reason is required when result is fail")
+		}
+		return eval.ResultFail, reason, nil
+	}
+	return "", "", fmt.Errorf("result must be %q or %q", eval.ResultPass, eval.ResultFail)
+}
+
+func attestResultProto(result string) evidencev1.Result {
+	if result == eval.ResultFail {
+		return evidencev1.Result_RESULT_FAIL
+	}
+	return evidencev1.Result_RESULT_PASS
+}
+
+// evaluateAfterAttest evaluates the control once the attestation is on the
+// ledger, so the control page shows the new state without waiting for the
+// scheduled run. The attestation is already recorded, so a failed
+// evaluation is logged and reported as evaluated=false, never as an error.
+// It runs detached from the request's cancellation, bounded by
+// attestEvaluateTimeout.
+func (h *AttestHandler) evaluateAfterAttest(ctx context.Context, controlID uuid.UUID) bool {
+	if h.evaluator == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), attestEvaluateTimeout)
+	defer cancel()
+	if _, err := h.evaluator.EvaluateControl(ctx, controlID, eval.TriggerIngest, eval.FarFuture); err != nil {
+		slog.WarnContext(ctx, "evaluate control after attestation", "control_id", controlID.String(), "error", err)
+		return false
+	}
+	return true
+}
 
 // isManualImplementation returns true for manual_attested / manual_periodic.
 // Bundles declaring automated / semi_automated cannot be attested via this

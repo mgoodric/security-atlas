@@ -120,6 +120,9 @@ export type FixtureName =
   // #2089 — one manual_attested control so attest.spec.ts can load the
   // real attest form (the base control is automated).
   | "attest"
+  // #2111 — a second manual_attested control that attest-result.spec.ts
+  // attests for real (pass and fail), kept apart from attest.spec.ts's.
+  | "attest-result"
   // #2081 — a dedicated tenant with `board.reporting` + `vendor.claims`
   // on, for the sidebar's flag-on case (sidebar-nav.spec.ts).
   | "sidebar-nav"

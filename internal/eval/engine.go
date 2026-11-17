@@ -185,7 +185,9 @@ func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, re
 	inWindow := inWindowRecords(records, meta.freshnessClass, now)
 	freshness := computeFreshness(records, meta.freshnessClass, now)
 
-	result, err := e.evalQueries(ctx, tx, meta, inWindow)
+	// #2111: only the latest attestation in the window speaks for the
+	// attestation outcome; automated evidence keeps "any fail fails".
+	result, err := e.evalQueries(ctx, tx, meta, latestAttestationWins(inWindow))
 	if err != nil {
 		return evaluationRow{}, err
 	}
