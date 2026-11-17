@@ -95,6 +95,17 @@ allow if {
     count(input.user.roles) > 0
 }
 
+# #2134 — GET /v1/needs-attention, the dashboard's ranked list of what
+# needs attention. Mirrors internal/authz/rego_bundle/defaults.rego (#2410).
+# Every signed-in role reads it; for=all is refused in the handler to
+# anyone but an admin or GRC lead (authz.IsTenantApprover). Exact path.
+allow if {
+    is_read
+    input.resource.type == "needs-attention"
+    input.request.path == "/v1/needs-attention"
+    count(input.user.roles) > 0
+}
+
 me_self_read_paths := {
     "/v1/me",
     "/v1/me/tenancy",
