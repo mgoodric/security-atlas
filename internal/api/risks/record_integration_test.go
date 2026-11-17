@@ -193,7 +193,7 @@ func TestRecord_AuditTrail(t *testing.T) {
 		if e["actor"] == "" || e["created_at"] == "" {
 			t.Fatalf("entry %d missing actor or time: %v", i, e)
 		}
-		if i > 0 && e["created_at"].(string) > entries[i-1]["created_at"].(string) {
+		if i > 0 && orderedTime(e["created_at"].(string)) > orderedTime(entries[i-1]["created_at"].(string)) {
 			t.Fatalf("entries out of order: %v", entries)
 		}
 	}
