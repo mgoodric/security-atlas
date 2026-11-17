@@ -118,9 +118,18 @@ func allowedInts(text string, allowed map[int]bool) bool {
 // decimalPattern matches a decimal number token ("41.9", "-0.5").
 var decimalPattern = regexp.MustCompile(`-?\d+\.\d+`)
 
-// percentPattern matches an integer written as a percentage ("42%", "42 %").
-// Decimals are removed before it runs, so its digits are a whole token.
-var percentPattern = regexp.MustCompile(`-?\d+\s*%`)
+// percentPattern matches an integer written as a percentage: "42%", "42 %",
+// "42 percent" or "42 per cent" (#2338). "42 percentage points" is not a
+// percentage. Decimals are removed before it runs, so its digits are a whole
+// token.
+var percentPattern = regexp.MustCompile(`(?i)-?\d+(?:\s*%|\s*per\s*cent\b)`)
+
+// itemPercentPattern is percentPattern with an optional decimal part, for the
+// per-item check, which runs before decimals are removed.
+var itemPercentPattern = regexp.MustCompile(`(?i)-?\d+(?:\.\d+)?(?:\s*%|\s*per\s*cent\b)`)
+
+// leadingNumberPattern is the number at the start of a percentage token.
+var leadingNumberPattern = regexp.MustCompile(`^-?\d+(?:\.\d+)?`)
 
 // verifyCoverageNumbers is guardrail 5 for the coverage section (#2210). The
 // coverage figure is the board pack's, which the pack prints to one decimal,
@@ -145,12 +154,66 @@ func verifyCoverageNumbers(text string, r Rollup) bool {
 	stripped = decimalPattern.ReplaceAllString(stripped, " ")
 	percents := r.allowedPercents()
 	for _, p := range percentPattern.FindAllString(stripped, -1) {
-		n, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(p, "%")))
+		n, err := strconv.Atoi(leadingNumberPattern.FindString(p))
 		if err != nil || !percents[n] {
 			return false
 		}
 	}
+	if !coveragePercentsInPlace(text, r) {
+		return false
+	}
 	return allowedInts(stripped, r.AllowedNumbers())
+}
+
+// coveragePercentsInPlace checks each percentage field sits in its own item
+// of the coverage template (#2338). The value checks above cannot tell the
+// freshness rate written into the coverage item from the coverage figure, so
+// the gate checks by position: item 1 may state only the coverage figure as a
+// percentage (none at all when nothing is scoped), and item 2 only the
+// evidence freshness rate. When the two figures render identically the
+// position carries no signal and the check is skipped.
+//
+// A draft without the template's items is left to the shape gate (G6).
+func coveragePercentsInPlace(text string, r Rollup) bool {
+	items := numberedItems(text)
+	if len(items) != expectedItems {
+		return true
+	}
+	freshness := itoa(r.FreshnessPct)
+	coverage := ""
+	if r.ScopedFrameworkCount > 0 {
+		coverage = r.coverageText()
+		if coverage == freshness {
+			return true
+		}
+	}
+	return onlyPercent(items[0], coverage, r.PeriodEnd) && onlyPercent(items[1], freshness, r.PeriodEnd)
+}
+
+// onlyPercent reports whether every percentage in item is want, rendered
+// exactly. An empty want admits no percentage.
+func onlyPercent(item, want, periodEnd string) bool {
+	for _, p := range itemPercentPattern.FindAllString(stripNonClaims(item, periodEnd), -1) {
+		if leadingNumberPattern.FindString(p) != want {
+			return false
+		}
+	}
+	return true
+}
+
+// numberedItems splits a draft into the text of its numbered items, in
+// order. Whatever precedes item 1 (the heading) is dropped.
+func numberedItems(text string) []string {
+	locs := numberedItemPattern.FindAllStringIndex(text, -1)
+	out := make([]string, 0, len(locs))
+	for i, loc := range locs {
+		end := len(text)
+		if i+1 < len(locs) {
+			end = locs[i+1][0]
+		}
+		out = append(out, text[loc[0]:end])
+	}
+	return out
 }
 
 // verifyNumbers runs guardrail 5 for the rollup's own section.

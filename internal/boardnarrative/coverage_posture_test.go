@@ -159,3 +159,76 @@ func TestRollupFromBrief_LegacyBriefHasNoCoverage(t *testing.T) {
 		t.Fatalf("RollupFromBrief(legacy) err = %v, want ErrNoBriefData", err)
 	}
 }
+
+// #2338: the freshness rate written into the coverage item, and called
+// coverage, is rejected by position even though 67 is an allowed percentage.
+func TestCoverageGate_PositionKeepsFreshnessOutOfCoverage(t *testing.T) {
+	t.Parallel()
+	cov := "Requirement coverage averages 41.9% across the 2 frameworks with an activated scope."
+	fresh := "The tenant-wide evidence freshness rate is 67%."
+	scoped, ctrlID := postureRollup(t, &board.CoverageSummary{CoveragePct: 41.93, ScopedFrameworkCount: 2, EvidenceFreshnessRatePct: 67})
+	unscoped, _ := postureRollup(t, &board.CoverageSummary{EvidenceFreshnessRatePct: 67})
+	cases := []struct {
+		name  string
+		r     Rollup
+		item1 string
+		item2 string
+		want  bool
+	}{
+		{"valid-passes", scoped, cov, fresh, true},
+		{"freshness-labelled-coverage-rejects", scoped, "Control coverage stands at 67%.", fresh, false},
+		{"freshness-beside-coverage-rejects", scoped, "Requirement coverage averages 41.9%, and 67% of controls are covered.", fresh, false},
+		{"coverage-in-freshness-item-rejects", scoped, cov, "The evidence freshness rate is 41.9%.", false},
+		{"items-swapped-rejects", scoped, fresh, cov, false},
+		{"spelled-percent-labelled-coverage-rejects", scoped, "Control coverage stands at 67 percent.", fresh, false},
+		// The narrative rollup carries no exception share, so the clause can
+		// only be worded; it must not trip the position check.
+		{"worded-exception-clause-passes", scoped, "Requirement coverage averages 41.9% across the 2 frameworks with an activated scope, part of it resting only on exceptions.", fresh, true},
+		{"unscoped-words-pass", unscoped, "No framework has an activated scope, so no coverage figure is reported.", fresh, true},
+		{"unscoped-freshness-as-coverage-rejects", unscoped, "Coverage is 67%.", fresh, false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.r.verifyDraftNumbers(coverageDraft(tc.item1, tc.item2, ctrlID)); got != tc.want {
+				t.Fatalf("verifyDraftNumbers = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// When coverage and freshness render the same, position carries no signal
+// and the check is skipped: either item may state the shared value.
+func TestCoverageGate_PositionSkippedWhenValuesEqual(t *testing.T) {
+	t.Parallel()
+	r, ctrlID := postureRollup(t, &board.CoverageSummary{CoveragePct: 67, ScopedFrameworkCount: 2, EvidenceFreshnessRatePct: 67})
+	if !r.verifyDraftNumbers(coverageDraft("Control coverage stands at 67%.", "The evidence freshness rate is 67%.", ctrlID)) {
+		t.Fatal("equal coverage and freshness values were rejected")
+	}
+	if !coveragePercentsInPlace(coverageDraft("The evidence freshness rate is 67%.", "Coverage is 67%.", ctrlID), r) {
+		t.Fatal("position check ran although the two values are equal")
+	}
+}
+
+// percentPattern reads a spelled-out percentage as one (#2338).
+func TestPercentPattern_SpelledOut(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"42%", "42 %", "42 percent", "42 Percent", "42 per cent", "42percent"} {
+		if percentPattern.FindString(s) == "" {
+			t.Errorf("percentPattern does not match %q", s)
+		}
+	}
+	for _, s := range []string{"42 percentage points", "42 persons", "42"} {
+		if got := percentPattern.FindString(s); got != "" {
+			t.Errorf("percentPattern matches %q in %q", got, s)
+		}
+	}
+	r, ctrlID := postureRollup(t, &board.CoverageSummary{CoveragePct: 41.93, ScopedFrameworkCount: 2, EvidenceFreshnessRatePct: 67})
+	if !r.verifyDraftNumbers(coverageDraft("Requirement coverage averages 41.9 per cent across the 2 frameworks with an activated scope.", "The evidence freshness rate is 67 percent.", ctrlID)) {
+		t.Fatal("a spelled-out percentage draft was rejected")
+	}
+	if r.verifyDraftNumbers(coverageDraft("Requirement coverage averages 41.9% across 2 percent of frameworks.", "The evidence freshness rate is 67%.", ctrlID)) {
+		t.Fatal("a count written as a spelled-out percentage passed")
+	}
+}
