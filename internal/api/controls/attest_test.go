@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -150,6 +151,42 @@ func TestAttestSubmit_RejectsBadResult(t *testing.T) {
 			h.Submit(rr, withChiID(req.WithContext(ctx), "00000000-0000-0000-0000-000000000010"))
 			if rr.Code != http.StatusBadRequest {
 				t.Fatalf("expected 400; got %d body=%s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// #2509: observed_at more than attestMaxFutureSkew ahead is refused with a
+// 422 before the control is read. A small skew passes this check (and
+// reaches the nil reader's 503).
+func TestAttestSubmit_RejectsFutureObservedAt(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		ahead time.Duration
+		want  int
+	}{
+		"a day ahead":     {24 * time.Hour, http.StatusUnprocessableEntity},
+		"six minutes":     {6 * time.Minute, http.StatusUnprocessableEntity},
+		"four minutes":    {4 * time.Minute, http.StatusServiceUnavailable},
+		"an hour earlier": {-time.Hour, http.StatusServiceUnavailable},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := NewAttestHandler(nil, nil, nil)
+			rr := httptest.NewRecorder()
+			body, _ := json.Marshal(map[string]any{
+				"statement":   "s",
+				"observed_at": time.Now().UTC().Add(tc.ahead).Format(time.RFC3339Nano),
+			})
+			req := httptest.NewRequest(http.MethodPost,
+				"/v1/controls/00000000-0000-0000-0000-000000000010/attestations",
+				bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			ctx := authctx.WithCredential(req.Context(), ownerCred("control_owner"))
+			h.Submit(rr, withChiID(req.WithContext(ctx), "00000000-0000-0000-0000-000000000010"))
+			if rr.Code != tc.want {
+				t.Fatalf("expected %d; got %d body=%s", tc.want, rr.Code, rr.Body.String())
 			}
 		})
 	}
