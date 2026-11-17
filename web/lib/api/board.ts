@@ -40,6 +40,8 @@ export type BoardPackSectionData = {
     treatment: string;
     methodology?: string;
     residual_severity: number;
+    // #2511: no score yet; ranked last.
+    unscored?: boolean;
     age_days: number;
   }[];
   // coverage_trend

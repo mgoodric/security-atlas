@@ -69,6 +69,7 @@ import {
   formatResidualScore,
   fairScore,
   formatDollars,
+  isUnscored,
   patternNoLongerMet,
   residualClass,
   residualSeverity,
@@ -76,6 +77,7 @@ import {
   reviewDuePending,
   severityBand,
   severityClasses,
+  UNSCORED_LABEL,
 } from "../filters";
 import { enumLabel } from "@/lib/labels/enum-labels";
 import { SeverityPill } from "../severity-pill";
@@ -183,10 +185,14 @@ export default function RiskDetailPage({
   // not-yet-evaluated residual renders as the same honest "Pending
   // evaluation" affordance the list cell uses (slice 680). A 5x5
   // residual shows on the inherent card's 1..25 scale and bands.
+  // #2511: a risk logged without a score is Unscored on both axes.
+  const unscored = isUnscored(risk.inherent_score);
   const residualPending = residualState(risk.residual_score) !== "scored";
-  const residualText = residualPending
-    ? "Pending evaluation"
-    : formatResidualScore(risk.residual_score, risk.methodology);
+  const residualText = unscored
+    ? UNSCORED_LABEL
+    : residualPending
+      ? "Pending evaluation"
+      : formatResidualScore(risk.residual_score, risk.methodology);
   const residualN = isFair ? null : residualSeverity(risk.residual_score);
 
   const base = `/risks/${encodeURIComponent(id)}`;
@@ -368,7 +374,22 @@ export default function RiskDetailPage({
       <div className="grid gap-4 sm:grid-cols-2">
         <Card size="sm" data-testid="risk-detail-severity-card">
           <CardContent>
-            {fairInherent ? (
+            {unscored ? (
+              <>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Inherent severity
+                </div>
+                <div
+                  className="mt-1 text-2xl font-semibold text-muted-foreground"
+                  data-testid="risk-detail-unscored"
+                >
+                  {UNSCORED_LABEL}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Logged before it was assessed. Edit the risk to score it.
+                </div>
+              </>
+            ) : fairInherent ? (
               <>
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
                   Inherent annualized exposure

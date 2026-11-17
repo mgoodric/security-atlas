@@ -13,11 +13,12 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 // lifecycle_integration_test.go proves the table agrees with the store
 // and with that trigger, pair by pair.
 var Lifecycle = lifecycle.Table{
-	Name:   "framework_scope",
-	Title:  "Framework scope",
-	Entity: "framework_scopes",
-	Column: "state",
-	States: []string{StateDraft, StateReview, StateApproved, StateActivated, StateSuperseded},
+	Name:        "framework_scope",
+	Title:       "Framework scope",
+	Entity:      "framework_scopes",
+	Column:      "state",
+	Enforcement: lifecycle.EnforcedByDatabase,
+	States:      []string{StateDraft, StateReview, StateApproved, StateActivated, StateSuperseded},
 	Initial: []lifecycle.Entry{{
 		State:  StateDraft,
 		Action: "create",

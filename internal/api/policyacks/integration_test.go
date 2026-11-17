@@ -34,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/advisorylock"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -362,6 +363,13 @@ func setup(t *testing.T) setupResult {
 		IngestService:  ingester,
 	})
 	apiServer.AttachDB(app)
+	// #2505: OPA and authzmw run as in production, so a session's roles
+	// are its user's live user_roles (cred.TenantRoles), not its claim.
+	engine, err := authz.NewEngine(context.Background(), authz.NewDBRolesResolver(app))
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	apiServer.AttachAuthz(engine, authz.NewAuditWriter(app))
 
 	// Slice 197: JWT bearer via slice 190 path. Subject = the seeded
 	// users row id, matching the policy_acknowledgments FK target.
@@ -390,7 +398,9 @@ func setup(t *testing.T) setupResult {
 		adminBear:    adminBearer,
 		approverBear: approverBearer,
 		adminUser:    adminUser,
-		requiredRole: "employee",
+		// A live tenant role, so a session can hold it (#2505). OPA admits
+		// grc_engineer to acknowledge (a policies write).
+		requiredRole: "grc_engineer",
 	}
 }
 
@@ -416,6 +426,7 @@ func (s *setupResult) makeUserAndBearer(t *testing.T, email string, roles []stri
 	t.Helper()
 	user := seedUser(t, s.admin, s.tenant, email)
 	seedAPIKeyForUser(t, s.admin, s.tenant, user, isAdmin, false, roles)
+	seedLiveRoles(t, s.admin, s.tenant, user, roles)
 	tenantUUID := uuid.MustParse(s.tenant)
 	var claims = testjwt.OwnerFor(tenantUUID, roles)
 	if isAdmin {
@@ -423,6 +434,21 @@ func (s *setupResult) makeUserAndBearer(t *testing.T, email string, roles []stri
 	}
 	claims.Subject = user.String()
 	return user, s.apiServer.IssueTestJWT(t, claims)
+}
+
+// seedLiveRoles grants user the given roles in tenant as user_roles rows,
+// the live roles authzmw resolves for its session (#2505). A role already
+// granted is left as it is.
+func seedLiveRoles(t *testing.T, admin *pgxpool.Pool, tenant string, user uuid.UUID, roles []string) {
+	t.Helper()
+	for _, role := range roles {
+		if _, err := admin.Exec(context.Background(),
+			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-2505')
+			 ON CONFLICT DO NOTHING`,
+			tenant, user.String(), role); err != nil {
+			t.Fatalf("seed user_roles %q: %v", role, err)
+		}
+	}
 }
 
 // ----- helpers for evidence verification (AC-2) -----
@@ -510,7 +536,7 @@ func TestPendingForUser_NoRoleMatch_AC3(t *testing.T) {
 	s := setup(t)
 	createAndPublishPolicy(t, s, "AC-3 Policy", "1", []string{s.requiredRole}, s.controlID)
 
-	_, bearer := s.makeUserAndBearer(t, "user3@test", []string{"some_other_role"}, false)
+	_, bearer := s.makeUserAndBearer(t, "user3@test", []string{"viewer"}, false)
 	raw := s.getJSON(t, "/v1/me/acknowledgments", bearer, http.StatusOK)
 	var resp struct {
 		Count int `json:"count"`
@@ -667,6 +693,7 @@ func (s *setupResult) makeUserAndBearerWithUser(t *testing.T, email string, role
 	// an api_keys row for that user so the rate denominator query
 	// counts them.
 	seedAPIKeyForUser(t, s.admin, s.tenant, existingUser, isAdmin, false, roles)
+	seedLiveRoles(t, s.admin, s.tenant, existingUser, roles)
 	tenantUUID := uuid.MustParse(s.tenant)
 	var claims = testjwt.OwnerFor(tenantUUID, roles)
 	if isAdmin {
@@ -826,6 +853,7 @@ func TestAcknowledge_UserPrefixedSubject(t *testing.T) {
 	policyID := createAndPublishPolicy(t, s, "2183 Policy", "1", []string{s.requiredRole}, s.controlID)
 	user := seedUser(t, s.admin, s.tenant, "user2183@test")
 	seedAPIKeyForUser(t, s.admin, s.tenant, user, false, false, []string{s.requiredRole})
+	seedLiveRoles(t, s.admin, s.tenant, user, []string{s.requiredRole})
 	claims := testjwt.OwnerFor(uuid.MustParse(s.tenant), []string{s.requiredRole})
 	claims.Subject = "user:" + user.String()
 	bearer := s.apiServer.IssueTestJWT(t, claims)

@@ -124,6 +124,23 @@ export function residualSeverity(score: unknown): number | null {
 }
 
 /**
+ * #2511 — whether a risk was logged without a score ("Score later", or an
+ * MCP create_risk with no inherent_score). The platform stores its
+ * inherent_score as `{}`; absent or null reads the same. Such a risk is
+ * shown as Unscored, not as a severity of 0, and sits in no band.
+ */
+export function isUnscored(inherentScore: unknown): boolean {
+  if (inherentScore == null) return true;
+  return (
+    typeof inherentScore === "object" &&
+    !Array.isArray(inherentScore) &&
+    Object.keys(inherentScore).length === 0
+  );
+}
+
+export const UNSCORED_LABEL = "Unscored";
+
+/**
  * Format a 1..25 severity scalar: whole numbers as-is, a fractional
  * residual (inherent × (1 − effectiveness)) to one decimal.
  */

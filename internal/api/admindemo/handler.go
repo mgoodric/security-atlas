@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/api/ratekey"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -431,9 +432,9 @@ func (h *Handler) requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool
 //
 //  1. cred.IsAdmin == true (slice 187+: claims.SuperAdmin set OR
 //     legacy bearer-token API key with IsAdmin flag).
-//  2. cred.OwnerRoles carries "admin" (slice 192+: per-tenant role
-//     grant — the JWT carries Roles[currentTenant] = ["admin"]
-//     which jwtmw maps into cred.OwnerRoles).
+//  2. authz.TenantRoleLabels counts "admin": the caller's live tenant
+//     admin role, or an unbound key's own label. A JWT session's role
+//     claim does not count; it outlives a revoke (#2505).
 //
 // On failure: 403 with a JSON error. On missing credential: 401.
 func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
@@ -445,7 +446,7 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if cred.IsAdmin {
 		return true
 	}
-	for _, role := range cred.OwnerRoles {
+	for _, role := range authz.TenantRoleLabels(cred) {
 		if role == "admin" {
 			return true
 		}

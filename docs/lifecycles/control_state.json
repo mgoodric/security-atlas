@@ -1,0 +1,264 @@
+{
+  "name": "control_state",
+  "title": "Control state",
+  "entity": "control_evaluations",
+  "column": "result",
+  "enforcement": "derived",
+  "states": [
+    "inconclusive",
+    "pass",
+    "fail",
+    "na",
+    "excepted"
+  ],
+  "initial": [
+    {
+      "state": "inconclusive",
+      "action": "first_evaluation",
+      "roles": []
+    },
+    {
+      "state": "pass",
+      "action": "first_evaluation",
+      "roles": []
+    },
+    {
+      "state": "fail",
+      "action": "first_evaluation",
+      "roles": []
+    },
+    {
+      "state": "na",
+      "action": "first_evaluation",
+      "roles": []
+    },
+    {
+      "state": "excepted",
+      "action": "first_evaluation",
+      "roles": []
+    }
+  ],
+  "terminal": [],
+  "transitions": [
+    {
+      "from": "inconclusive",
+      "to": "pass",
+      "action": "evidence_passes",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Current evidence passes. Only the latest attestation counts, so a passing attestation supersedes an earlier failing one."
+    },
+    {
+      "from": "inconclusive",
+      "to": "fail",
+      "action": "evidence_fails",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Any current automated evidence fails, or the latest attestation fails."
+    },
+    {
+      "from": "inconclusive",
+      "to": "na",
+      "action": "evidence_not_applicable",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Every current evidence record is not applicable."
+    },
+    {
+      "from": "inconclusive",
+      "to": "excepted",
+      "action": "exception_in_force",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+    },
+    {
+      "from": "pass",
+      "to": "inconclusive",
+      "action": "no_current_evidence",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "No evidence is in the freshness window (none yet, or it aged out), or all of it is inconclusive. Absence of evidence is not a failure."
+    },
+    {
+      "from": "pass",
+      "to": "fail",
+      "action": "evidence_fails",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Any current automated evidence fails, or the latest attestation fails."
+    },
+    {
+      "from": "pass",
+      "to": "na",
+      "action": "evidence_not_applicable",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Every current evidence record is not applicable."
+    },
+    {
+      "from": "pass",
+      "to": "excepted",
+      "action": "exception_in_force",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+    },
+    {
+      "from": "fail",
+      "to": "inconclusive",
+      "action": "no_current_evidence",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "No evidence is in the freshness window (none yet, or it aged out), or all of it is inconclusive. Absence of evidence is not a failure."
+    },
+    {
+      "from": "fail",
+      "to": "pass",
+      "action": "evidence_passes",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Current evidence passes. Only the latest attestation counts, so a passing attestation supersedes an earlier failing one."
+    },
+    {
+      "from": "fail",
+      "to": "na",
+      "action": "evidence_not_applicable",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Every current evidence record is not applicable."
+    },
+    {
+      "from": "fail",
+      "to": "excepted",
+      "action": "exception_in_force",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+    },
+    {
+      "from": "na",
+      "to": "inconclusive",
+      "action": "no_current_evidence",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "No evidence is in the freshness window (none yet, or it aged out), or all of it is inconclusive. Absence of evidence is not a failure."
+    },
+    {
+      "from": "na",
+      "to": "pass",
+      "action": "evidence_passes",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Current evidence passes. Only the latest attestation counts, so a passing attestation supersedes an earlier failing one."
+    },
+    {
+      "from": "na",
+      "to": "fail",
+      "action": "evidence_fails",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Any current automated evidence fails, or the latest attestation fails."
+    },
+    {
+      "from": "na",
+      "to": "excepted",
+      "action": "exception_in_force",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+    },
+    {
+      "from": "excepted",
+      "to": "inconclusive",
+      "action": "no_current_evidence",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "No evidence is in the freshness window (none yet, or it aged out), or all of it is inconclusive. Absence of evidence is not a failure."
+    },
+    {
+      "from": "excepted",
+      "to": "pass",
+      "action": "evidence_passes",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Current evidence passes. Only the latest attestation counts, so a passing attestation supersedes an earlier failing one."
+    },
+    {
+      "from": "excepted",
+      "to": "fail",
+      "action": "evidence_fails",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Any current automated evidence fails, or the latest attestation fails."
+    },
+    {
+      "from": "excepted",
+      "to": "na",
+      "action": "evidence_not_applicable",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Every current evidence record is not applicable."
+    }
+  ]
+}

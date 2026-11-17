@@ -51,11 +51,13 @@ var requiredColumns = []string{
 // tenantColumns are refused outright: the tenant comes from the credential.
 var tenantColumns = map[string]bool{"tenant": true, "tenant_id": true}
 
-// ExportColumns are the export's CSV header.
+// ExportColumns are the export's CSV header. created_by and retired_by are
+// the actor's readable name; created_by_id and retired_by_id keep the
+// recorded id for audit (#2286).
 var ExportColumns = []string{
 	"id", "framework", "framework_version", "requirement_code", "scf_release", "anchor_code",
 	"relationship_type", "strength", "rationale", "source_ref", "status", "retirement_reason",
-	"created_by", "created_at", "retired_by", "retired_at",
+	"created_by", "created_by_id", "created_at", "retired_by", "retired_by_id", "retired_at",
 }
 
 // FileError refuses an import file as a whole: an unreadable file, a
@@ -384,16 +386,20 @@ func Classify(err error) (code, reason string, ok bool) {
 }
 
 // ExportRow renders an edge as the export's CSV cells, in ExportColumns
-// order.
-func ExportRow(e Edge) []string {
-	retiredAt := ""
+// order. name turns a recorded actor into its readable name; an edge never
+// retired has an empty retired_by.
+func ExportRow(e Edge, name func(actor string) string) []string {
+	retiredAt, retiredBy := "", ""
 	if e.RetiredAt != nil {
 		retiredAt = e.RetiredAt.UTC().Format(time.RFC3339)
+	}
+	if e.RetiredBy != "" {
+		retiredBy = name(e.RetiredBy)
 	}
 	return []string{
 		e.ID.String(), e.Framework, e.FrameworkVersion, e.RequirementCode, e.SCFRelease, e.AnchorCode,
 		e.RelationshipType, strconv.FormatFloat(e.Strength, 'f', -1, 64), e.Rationale, e.SourceRef,
-		e.Status, e.RetirementReason, e.CreatedBy, e.CreatedAt.UTC().Format(time.RFC3339),
-		e.RetiredBy, retiredAt,
+		e.Status, e.RetirementReason, name(e.CreatedBy), e.CreatedBy, e.CreatedAt.UTC().Format(time.RFC3339),
+		retiredBy, e.RetiredBy, retiredAt,
 	}
 }

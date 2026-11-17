@@ -12,11 +12,12 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 // than moving it, so it is not a transition. A new version of a published
 // policy is a new row, created in draft with predecessor_id set.
 var Lifecycle = lifecycle.Table{
-	Name:   "policy",
-	Title:  "Policy",
-	Entity: "policies",
-	Column: "status",
-	States: []string{StateDraft, StateUnderReview, StateApproved, StatePublished, StateSuperseded},
+	Name:        "policy",
+	Title:       "Policy",
+	Entity:      "policies",
+	Column:      "status",
+	Enforcement: lifecycle.EnforcedByStore,
+	States:      []string{StateDraft, StateUnderReview, StateApproved, StatePublished, StateSuperseded},
 	Initial: []lifecycle.Entry{
 		{
 			State:  StateDraft,
