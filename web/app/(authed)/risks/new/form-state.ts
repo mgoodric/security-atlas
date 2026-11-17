@@ -10,6 +10,8 @@
 
 import type { Risk, RiskPatchInput } from "@/lib/api/risks";
 
+import { isUnscored } from "../filters";
+
 import { DEFAULT_TREATMENT, type RiskTreatment } from "./validate";
 
 export type FormState = {
@@ -26,6 +28,10 @@ export type FormState = {
   // the form shows it with a prompt to pick the user it names, and the
   // platform clears it once one is picked.
   treatment_owner: string;
+  // #2511: "Score later". The risk is logged with no inherent score and
+  // reads as Unscored until one is added. In edit mode it opens checked
+  // on an unscored risk; unchecking it sends the score.
+  score_later: boolean;
   likelihood: number;
   impact: number;
   loss_event_frequency: string;
@@ -54,6 +60,7 @@ export function initialState(): FormState {
     treatment: DEFAULT_TREATMENT,
     owner_user_id: "",
     treatment_owner: "",
+    score_later: false,
     likelihood: 3,
     impact: 3,
     loss_event_frequency: "1",
@@ -113,6 +120,7 @@ export function riskToFormState(risk: Risk): FormState {
   s.instrument_reference = risk.instrument_reference;
   s.linked_control_ids = risk.linked_control_ids;
   s.review_due = utcDay(risk.review_due_at);
+  s.score_later = isUnscored(risk.inherent_score);
   if (risk.methodology === "fair") {
     const lef = num(score.loss_event_frequency) ?? num(score.lef);
     const lm = num(score.loss_magnitude) ?? num(score.lm);
@@ -147,8 +155,12 @@ export function toPatchInput(initial: FormState, s: FormState): RiskPatchInput {
   }
   const methodologyChanged = s.methodology !== initial.methodology;
   if (methodologyChanged) body.methodology = s.methodology;
+  // #2511: a risk still left to score later sends no score (a PATCH cannot
+  // clear one); scoring an unscored risk sends it whatever its values.
+  if (s.score_later) return body;
   const score = inherentScoreOf(s);
   if (
+    initial.score_later ||
     methodologyChanged ||
     JSON.stringify(score) !== JSON.stringify(inherentScoreOf(initial))
   ) {

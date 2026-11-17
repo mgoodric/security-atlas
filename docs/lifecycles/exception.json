@@ -3,6 +3,7 @@
   "title": "Exception",
   "entity": "exceptions",
   "column": "status",
+  "enforcement": "store",
   "states": [
     "requested",
     "approved",

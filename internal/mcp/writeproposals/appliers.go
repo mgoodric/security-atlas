@@ -35,7 +35,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -158,23 +157,12 @@ func createRiskMethodology(in CreateRiskInput) dbx.RiskMethodology {
 
 // createRiskScores returns the inherent and residual scores a create_risk
 // proposal persists, through risk.PrepareCreateScores: the rule
-// POST /v1/risks applies, so MCP refuses what REST refuses (#2502). It runs
-// when the proposal is filed (ValidateToolInput) and again when it is
-// confirmed.
-//
-// An omitted inherent_score is the one difference from REST, which
-// requires the score: create_risk files an unscored risk (`{}`), as it
-// always has, so an assistant can propose a risk it cannot yet score. The
-// methodology is still checked.
+// POST /v1/risks applies, so MCP and REST store the same row and refuse
+// the same input (#2502). An omitted inherent_score is an unscored risk on
+// both paths (#2511). It runs when the proposal is filed
+// (validateToolInput) and again when it is confirmed.
 func createRiskScores(in CreateRiskInput) ([]byte, []byte, error) {
-	methodology := createRiskMethodology(in)
-	if len(in.InherentScore) == 0 {
-		if !slices.Contains(risk.AllowedMethodologies(), methodology) {
-			return nil, nil, fmt.Errorf("%w: %q", risk.ErrInvalidMethodology, methodology)
-		}
-		return []byte(`{}`), []byte(`{}`), nil
-	}
-	inherent, residual, err := risk.PrepareCreateScores(methodology, in.InherentScore, nil)
+	inherent, residual, err := risk.PrepareCreateScores(createRiskMethodology(in), in.InherentScore, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -185,17 +173,17 @@ func createRiskScores(in CreateRiskInput) ([]byte, []byte, error) {
 }
 
 // validateToolInput refuses, when a proposal is filed, a tool_input its
-// applier would refuse on a rule the REST path also applies, so the MCP
-// tool call gets the error rather than the person who confirms it later.
-// Today that is create_risk's scores (#2502). A tool_input that does not
-// decode is left to the applier, which refuses it on confirm.
+// applier would refuse, so the MCP tool call gets the error rather than
+// the person who confirms it later. Today that is create_risk: a
+// tool_input that does not decode (ErrInvalidInput, a 400) and its scores
+// (#2502).
 func validateToolInput(tool string, input json.RawMessage) error {
 	if tool != ToolCreateRisk {
 		return nil
 	}
 	var in CreateRiskInput
 	if err := json.Unmarshal(input, &in); err != nil {
-		return nil
+		return fmt.Errorf("%w: create_risk tool_input: %v", ErrInvalidInput, err)
 	}
 	_, _, err := createRiskScores(in)
 	return err

@@ -65,7 +65,7 @@ func (s *Server) registerGraph(root *chi.Mux) {
 	// #1797: tenant overlay edges, an organisation's own requirement -> SCF
 	// anchor edges (#1735). Tenant-scoped under RLS; the catalog edges
 	// stay read-only.
-	overlaysH := mappingoverlays.New(mappingoverlay.NewStore(s.dbPool))
+	overlaysH := mappingoverlays.New(mappingoverlay.NewStore(s.dbPool)).WithPeople(s.dbPool)
 	root.Post("/v1/mapping-overlays", overlaysH.Create)
 	root.Get("/v1/mapping-overlays", overlaysH.List)
 	root.Post("/v1/mapping-overlays/{id}/retire", overlaysH.Retire)

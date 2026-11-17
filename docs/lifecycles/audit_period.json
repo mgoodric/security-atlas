@@ -3,6 +3,7 @@
   "title": "Audit period",
   "entity": "audit_periods",
   "column": "status",
+  "enforcement": "store",
   "states": [
     "open",
     "frozen"

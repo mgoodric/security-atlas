@@ -7,6 +7,10 @@
 export type OverlayProvenance = {
   source_ref: string;
   created_by: string;
+  // The author's name, resolved on the server (#2286): a user's name,
+  // "API key …<last4>", "System" or "Unknown". created_by stays the
+  // recorded id, for the tooltip.
+  created_by_name: string;
   created_at: string;
 };
 

@@ -134,7 +134,16 @@ func (h *Handler) listRequirementsForAnchor(ctx context.Context, anchorID pgtype
 		out = mapCurrentVersionRequirements(got)
 		return err
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	var overlays []*overlayWire
+	for _, x := range out {
+		if x.Overlay != nil {
+			overlays = append(overlays, x.Overlay)
+		}
+	}
+	return out, h.nameOverlays(ctx, overlays)
 }
 
 // mapCurrentVersionRequirements maps the slice-484 default (current-version-only)

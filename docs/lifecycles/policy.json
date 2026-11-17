@@ -3,6 +3,7 @@
   "title": "Policy",
   "entity": "policies",
   "column": "status",
+  "enforcement": "store",
   "states": [
     "draft",
     "under_review",

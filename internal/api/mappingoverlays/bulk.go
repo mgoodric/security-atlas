@@ -17,6 +17,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
 )
@@ -86,7 +87,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		var res mappingoverlay.ImportResult
 		res, err = h.store.Import(r.Context(), rows, partial, actor)
 		if err == nil {
-			writeImportResult(w, res, partial)
+			writeImportResult(w, res, partial, h.writtenDirectory(r))
 			return
 		}
 	}
@@ -98,10 +99,10 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	httperr.WriteInternal(w, r, "import overlay edges", err)
 }
 
-func writeImportResult(w http.ResponseWriter, res mappingoverlay.ImportResult, partial bool) {
+func writeImportResult(w http.ResponseWriter, res mappingoverlay.ImportResult, partial bool, dir *people.Directory) {
 	created := make([]importedWire, len(res.Created))
 	for i, c := range res.Created {
-		created[i] = importedWire{Row: c.Row, OverlayEdge: wireFrom(c.Edge)}
+		created[i] = importedWire{Row: c.Row, OverlayEdge: wireFrom(c.Edge, dir)}
 	}
 	rejected := make([]rejectedWire, len(res.Rejected))
 	for i, rj := range res.Rejected {
@@ -138,9 +139,11 @@ func importFormat(r *http.Request) (string, bool) {
 }
 
 // Export handles GET /v1/mapping-overlays/export: the tenant's overlay
-// edges, every status unless ?status= narrows it, as CSV. Rationale and
-// source are organisation-entered text, so the cells go through the shared
-// encoder's formula neutralisation.
+// edges, every status unless ?status= narrows it, as CSV. Rationale,
+// source and author names are organisation-entered text, so the cells go
+// through the shared encoder's formula neutralisation. created_by and
+// retired_by are the authors' names; created_by_id and retired_by_id keep
+// the recorded ids (#2286).
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	if !requireTenant(w, r) {
 		return
@@ -161,11 +164,16 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("export exceeds %d rows; narrow it with framework, requirement, anchor or status", maxExportRows))
 		return
 	}
+	dir, err := h.directory(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "name overlay authors", err)
+		return
+	}
 	enc := export.NewCSVExporter()
 	var buf bytes.Buffer
 	rows := func(yield func([]string) bool) {
 		for _, e := range edges {
-			if !yield(mappingoverlay.ExportRow(e)) {
+			if !yield(mappingoverlay.ExportRow(e, dir.Name)) {
 				return
 			}
 		}

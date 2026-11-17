@@ -20,6 +20,7 @@ import {
   formatDollars,
   patternNoLongerMet,
   formatResidualScore,
+  isUnscored,
   residualClass,
   residualSeverity,
   residualState,
@@ -362,5 +363,21 @@ describe("patternNoLongerMet (#1867)", () => {
     expect(patternNoLongerMet({ child_count: 0 })).toBe(false);
     expect(patternNoLongerMet(null)).toBe(false);
     expect(patternNoLongerMet("x")).toBe(false);
+  });
+});
+
+describe("isUnscored (#2511)", () => {
+  test("an absent, null or empty score is unscored", () => {
+    expect(isUnscored(undefined)).toBe(true);
+    expect(isUnscored(null)).toBe(true);
+    expect(isUnscored({})).toBe(true);
+  });
+  test("any score with a field is scored, even an unreadable one", () => {
+    expect(isUnscored({ likelihood: 1, impact: 1 })).toBe(false);
+    expect(isUnscored({ loss_event_frequency: 1, loss_magnitude: 10 })).toBe(
+      false,
+    );
+    expect(isUnscored({ note: "high" })).toBe(false);
+    expect(isUnscored([])).toBe(false);
   });
 });
