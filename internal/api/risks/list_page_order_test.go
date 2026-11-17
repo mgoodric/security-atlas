@@ -22,7 +22,7 @@ func TestOrderedTime_WholeMillisecondSortsBeforeLaterInstant(t *testing.T) {
 	t.Parallel()
 	whole := "2026-11-17T21:30:40.743Z"
 	sub := "2026-11-17T21:30:40.743964Z"
-	if !(orderedTime(whole) < orderedTime(sub)) {
+	if orderedTime(whole) >= orderedTime(sub) {
 		t.Fatalf("orderedTime(%q) = %q does not sort before orderedTime(%q) = %q",
 			whole, orderedTime(whole), sub, orderedTime(sub))
 	}
