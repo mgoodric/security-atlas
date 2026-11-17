@@ -213,29 +213,3 @@ func TestAttestResult(t *testing.T) {
 		}
 	}
 }
-
-func TestCredential_HasOwnerRole(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		cred credstore.Credential
-		role string
-		want bool
-	}{
-		{"owner with matching role", ownerCred("control_owner"), "control_owner", true},
-		{"owner without matching role", ownerCred("other_role"), "control_owner", false},
-		{"plain credential", plainCred(), "control_owner", false},
-		{"admin is wildcard", credstore.Credential{IsAdmin: true}, "control_owner", true},
-		{"empty role rejects non-admin", ownerCred("control_owner"), "", false},
-		{"empty role accepts admin", credstore.Credential{IsAdmin: true}, "", true},
-	}
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := tc.cred.HasOwnerRole(tc.role); got != tc.want {
-				t.Fatalf("HasOwnerRole(%q) = %v; want %v", tc.role, got, tc.want)
-			}
-		})
-	}
-}

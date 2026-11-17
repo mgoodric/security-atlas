@@ -57,9 +57,17 @@ func newServer(t *testing.T, app *pgxpool.Pool, claims jwt.AtlasClaims) testEnv 
 	return testEnv{server: ts, bearer: bearer}
 }
 
-// engineerServer mints a grc_engineer credential (the edit role).
+// engineerServer mints a grc_engineer credential (the edit role): a
+// client_credentials token, whose role claim is its grant.
+//
+// #2523: a user's session counts only the live user_roles the authz
+// middleware resolves, and this server runs without it, because OPA has no
+// rule admitting any role to the csf resource. Wiring the middleware here
+// would refuse every call; that is a separate policy gap.
 func engineerServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
-	return newServer(t, app, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"grc_engineer"}))
+	claims := testjwt.OwnerFor(uuid.MustParse(tenant), []string{"grc_engineer"})
+	claims.Subject = "oauth_client:csf-test-engineer"
+	return newServer(t, app, claims)
 }
 
 // viewerServer mints a baseline viewer credential (no edit role).
@@ -328,6 +336,14 @@ func TestRoleCut_ViewerCannotEdit_EngineerAndAdminCan(t *testing.T) {
 		t.Fatalf("viewer GET tier = %d, want 200", resp.StatusCode)
 	}
 
+	// #2523: a user's session whose grc_engineer role claim has no live
+	// user_roles row behind it cannot edit.
+	stale := newServer(t, app, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"grc_engineer"}))
+	resp, _ = do(t, stale, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier2_risk_informed"}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("session with a grc_engineer claim and no live role PUT tier = %d, want 403", resp.StatusCode)
+	}
+
 	// grc_engineer can edit.
 	eng := engineerServer(t, app, tenant)
 	resp, _ = do(t, eng, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier2_risk_informed"}`)
@@ -335,7 +351,7 @@ func TestRoleCut_ViewerCannotEdit_EngineerAndAdminCan(t *testing.T) {
 		t.Fatalf("engineer PUT tier = %d, want 200", resp.StatusCode)
 	}
 
-	// admin can edit (the admin wildcard inside HasOwnerRole).
+	// admin can edit (the admin wildcard inside authz.HasOwnerRole).
 	adm := adminServer(t, app, tenant)
 	resp, _ = do(t, adm, http.MethodPut, "/v1/csf/tier"+q, `{"tier":"tier4_adaptive"}`)
 	if resp.StatusCode != http.StatusOK {
