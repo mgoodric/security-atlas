@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,8 +56,8 @@ import (
 // fields the LLM can reasonably propose (title, description, category,
 // methodology defaults, treatment defaulting to untreated). Score blocks are
 // JSON-RawMessage so the LLM can supply a 5x5 matrix or a NIST 800-30
-// envelope; defense-in-depth CHECK constraints on the risks table
-// catch malformed inputs.
+// envelope; createRiskScores holds them to the rule POST /v1/risks
+// applies (#2502).
 type CreateRiskInput struct {
 	Title         string          `json:"title"`
 	Description   string          `json:"description"`
@@ -83,9 +84,9 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	if in.Category == "" {
 		return "", fmt.Errorf("apply create_risk: category is required")
 	}
-	methodology := in.Methodology
-	if methodology == "" {
-		methodology = "nist_800_30"
+	inherent, residual, err := createRiskScores(in)
+	if err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
 	// An omitted treatment is untreated: the applier never records a
 	// treatment decision the proposal did not make (#1746).
@@ -104,11 +105,6 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	}); err != nil {
 		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
-	inherent := in.InherentScore
-	if len(inherent) == 0 {
-		inherent = json.RawMessage(`{}`)
-	}
-
 	// #1810: resolve the category here, as the risk API does, so an
 	// unknown, archived or deleted category is a client error naming the
 	// problem rather than a foreign-key violation.
@@ -141,14 +137,68 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 			accepted_until, accepter, instrument_reference, acceptance_status,
 			acceptance_proposed_by, acceptance_proposed_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NULL, '', '', $10, $11, $12)
-	`, id, p.TenantID, in.Title, in.Description, category.ID, methodology,
-		[]byte(inherent), treatment, in.TreatmentOwner, risk.NullAcceptanceStatus(status),
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, '', '', $11, $12, $13)
+	`, id, p.TenantID, in.Title, in.Description, category.ID, createRiskMethodology(in),
+		inherent, treatment, in.TreatmentOwner, residual, risk.NullAcceptanceStatus(status),
 		proposedBy, proposedAt)
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)
 	}
 	return id.String(), nil
+}
+
+// createRiskMethodology is the proposal's methodology, defaulting as
+// POST /v1/risks does.
+func createRiskMethodology(in CreateRiskInput) dbx.RiskMethodology {
+	if in.Methodology == "" {
+		return risk.DefaultMethodology
+	}
+	return dbx.RiskMethodology(in.Methodology)
+}
+
+// createRiskScores returns the inherent and residual scores a create_risk
+// proposal persists, through risk.PrepareCreateScores: the rule
+// POST /v1/risks applies, so MCP refuses what REST refuses (#2502). It runs
+// when the proposal is filed (ValidateToolInput) and again when it is
+// confirmed.
+//
+// An omitted inherent_score is the one difference from REST, which
+// requires the score: create_risk files an unscored risk (`{}`), as it
+// always has, so an assistant can propose a risk it cannot yet score. The
+// methodology is still checked.
+func createRiskScores(in CreateRiskInput) ([]byte, []byte, error) {
+	methodology := createRiskMethodology(in)
+	if len(in.InherentScore) == 0 {
+		if !slices.Contains(risk.AllowedMethodologies(), methodology) {
+			return nil, nil, fmt.Errorf("%w: %q", risk.ErrInvalidMethodology, methodology)
+		}
+		return []byte(`{}`), []byte(`{}`), nil
+	}
+	inherent, residual, err := risk.PrepareCreateScores(methodology, in.InherentScore, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(residual) == 0 {
+		residual = []byte(`{}`)
+	}
+	return inherent, residual, nil
+}
+
+// validateToolInput refuses, when a proposal is filed, a tool_input its
+// applier would refuse on a rule the REST path also applies, so the MCP
+// tool call gets the error rather than the person who confirms it later.
+// Today that is create_risk's scores (#2502). A tool_input that does not
+// decode is left to the applier, which refuses it on confirm.
+func validateToolInput(tool string, input json.RawMessage) error {
+	if tool != ToolCreateRisk {
+		return nil
+	}
+	var in CreateRiskInput
+	if err := json.Unmarshal(input, &in); err != nil {
+		return nil
+	}
+	_, _, err := createRiskScores(in)
+	return err
 }
 
 // EvidenceProcessor is the ingestion stage the evidence appliers hand

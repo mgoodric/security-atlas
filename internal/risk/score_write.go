@@ -60,6 +60,64 @@ func ValidateScoreNumbers(methodology dbx.RiskMethodology, inherent, residual []
 	return nil
 }
 
+// PrepareCreateScores validates and normalises a new risk's inherent and
+// residual scores. It is the one score rule for every create path:
+// POST /v1/risks (Store.Create) and the MCP create_risk applier (#2502).
+//
+// The inherent score must pass its methodology's schema. A FAIR score is
+// normalised to its canonical shape, and an empty FAIR residual takes the
+// normalised inherent. A non-FAIR score's fields must then be JSON numbers
+// in range (ValidateScoreNumbers). The returned blobs are what to persist.
+func PrepareCreateScores(methodology dbx.RiskMethodology, inherent, residual []byte) ([]byte, []byte, error) {
+	if err := ValidateInherentScore(methodology, inherent); err != nil {
+		return nil, nil, err
+	}
+	if methodology == dbx.RiskMethodologyFair {
+		normalized, err := NormalizeFairScoreJSON(inherent)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: %v", ErrInherentScoreInvalid, err)
+		}
+		inherent = normalized
+		if len(residual) == 0 {
+			residual = normalized
+		} else {
+			normalizedResidual, err := NormalizeFairScoreJSON(residual)
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: residual_score: %v", ErrInherentScoreInvalid, err)
+			}
+			residual = normalizedResidual
+		}
+	}
+	if err := ValidateScoreNumbers(methodology, inherent, residual); err != nil {
+		return nil, nil, err
+	}
+	return inherent, residual, nil
+}
+
+// jsonKind names the JSON type of a score field that is not a number in
+// range, so a refusal says what was sent without echoing a value of any
+// size back to the caller (#2502).
+func jsonKind(v json.RawMessage) string {
+	t := bytes.TrimSpace(v)
+	if len(t) == 0 {
+		return "nothing"
+	}
+	switch t[0] {
+	case '"':
+		return "a string"
+	case '{':
+		return "an object"
+	case '[':
+		return "an array"
+	case 't', 'f':
+		return "a boolean"
+	case 'n':
+		return "null"
+	default:
+		return "a malformed number"
+	}
+}
+
 func unscoredResidual(raw []byte) bool {
 	t := bytes.TrimSpace(raw)
 	return len(t) == 0 || bytes.Equal(t, []byte("null")) || bytes.Equal(t, []byte("{}"))
@@ -83,7 +141,7 @@ func checkScoreFields(name string, raw []byte) error {
 		}
 		var n float64
 		if err := json.Unmarshal(v, &n); err != nil || bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
-			return fmt.Errorf("%w: %s.%s must be a JSON number, got %s", ErrScoreNotNumeric, name, f.key, v)
+			return fmt.Errorf("%w: %s.%s must be a JSON number, got %s", ErrScoreNotNumeric, name, f.key, jsonKind(v))
 		}
 		if n < f.lo || n > f.hi {
 			return fmt.Errorf("%w: %s.%s must be between %g and %g, got %g", ErrScoreNotNumeric, name, f.key, f.lo, f.hi, n)

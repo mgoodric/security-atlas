@@ -404,6 +404,31 @@ func TestWriteCreateErr_PendingCapExceeded(t *testing.T) {
 	}
 }
 
+// #2502: a create_risk score refused when the proposal is filed takes the
+// status POST /v1/risks gives it, and the refusal's message.
+func TestWriteCreateErr_ScoreRefusals(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err    error
+		status int
+	}{
+		{risk.ErrScoreNotNumeric, http.StatusUnprocessableEntity},
+		{risk.ErrInherentScoreInvalid, http.StatusBadRequest},
+		{risk.ErrInvalidMethodology, http.StatusBadRequest},
+	}
+	h := New(nil)
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		h.writeCreateErr(w, httptest.NewRequest(http.MethodPost, "/", nil), fmt.Errorf("%w: inherent_score.impact", tc.err))
+		if w.Code != tc.status {
+			t.Fatalf("%v: status = %d, want %d", tc.err, w.Code, tc.status)
+		}
+		if !strings.Contains(w.Body.String(), "score_validation_failed") || !strings.Contains(w.Body.String(), "inherent_score.impact") {
+			t.Fatalf("%v: body = %s, want the code and the refusal", tc.err, w.Body.String())
+		}
+	}
+}
+
 func TestWriteCreateErr_Fallthrough500(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
@@ -436,6 +461,9 @@ func TestWriteTransitionErr_ApplierRefusals(t *testing.T) {
 		{writeproposals.ErrInvalidInput, http.StatusBadRequest, "invalid_input"},
 		{writeproposals.ErrIngestUnavailable, http.StatusServiceUnavailable, "ingest_unavailable"},
 		{risk.ErrTreatmentValidation, http.StatusBadRequest, "treatment_validation_failed"},
+		{risk.ErrScoreNotNumeric, http.StatusUnprocessableEntity, "score_validation_failed"},
+		{risk.ErrInherentScoreInvalid, http.StatusBadRequest, "score_validation_failed"},
+		{risk.ErrInvalidMethodology, http.StatusBadRequest, "score_validation_failed"},
 	}
 	h := New(nil)
 	for _, tc := range cases {
