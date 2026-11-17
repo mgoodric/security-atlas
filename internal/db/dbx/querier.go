@@ -294,6 +294,9 @@ type Querier interface {
 	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
 	// #2446 — how many of the given control ids exist in the tenant. A policy's
 	// linked_control_ids must all resolve here on create and draft edit.
+	// A retired control is not counted (#2459): it no longer governs anything,
+	// so it cannot keep a policy from being an orphan. Controls are never
+	// soft-deleted; every other lifecycle state counts.
 	CountTenantControls(ctx context.Context, arg CountTenantControlsParams) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
