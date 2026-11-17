@@ -167,6 +167,7 @@ GET /v1/metrics/cascade 10
 GET /v1/metrics/{id} 10
 GET /v1/metrics/{id}/observations 10
 GET /v1/metrics/{id}/target 10
+GET /v1/needs-attention 10
 GET /v1/org_units 10
 GET /v1/org_units/{id} 10
 GET /v1/oscal/component-definitions 10
