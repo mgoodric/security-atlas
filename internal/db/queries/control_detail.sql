@@ -121,7 +121,7 @@ ORDER BY created_at DESC, id ASC;
 -- JSONB, passed through. The risk register is small per canvas v1 scope,
 -- so this endpoint is not paginated. Newest-link-first; risk id ASC
 -- tiebreaks.
-SELECT r.id, r.title, r.inherent_score, r.residual_score,
+SELECT r.id, r.title, r.methodology, r.inherent_score, r.residual_score,
        l.design_score, l.created_at
 FROM risk_control_links l
 JOIN risks r

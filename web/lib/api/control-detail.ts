@@ -190,6 +190,9 @@ export type ControlLinkedPoliciesResponse = {
 export type ControlLinkedRisk = {
   risk_id: string;
   title: string;
+  // #2185: tells the page how to read the scores. On "fair" the residual
+  // is a dollar amount with no band.
+  methodology: string;
   inherent_score: unknown;
   residual_score: unknown;
   link_weight: number | null;
