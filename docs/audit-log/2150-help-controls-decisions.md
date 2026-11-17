@@ -4,7 +4,7 @@
 **Shape:** three new module help files under `web/help/modules/` (`evidence`,
 `exceptions`, `controls-checklist`) and a rewrite of `controls`, registered in
 `web/lib/help/modules.ts`, `userprefs.HintModules` and migration
-`20261244000000`, published on the docs site. Four new user terms
+`20261247000000`, published on the docs site. Four new user terms
 (`evaluation`, `evidence-ledger`, `exception`, `implementation-checklist`);
 `attestation` reused and extended. Follows #2462 (#2154).
 
@@ -56,9 +56,10 @@ Each "who can" line was taken from the handler gates and rego:
 - Checklist: generate/approve need `IsTenantApprover`; read/export also any
   credential with owner roles.
 
-Re-evaluation on an exception change (#2498) is not on `main`, so the
-Exceptions help says the control's state follows "at its evaluation", which is
-true both before and after it lands.
+Re-evaluation on an exception change (#2498) landed on `main` while this was
+in review. The Exceptions help says the control's state follows "at its
+evaluation", which was true before it landed and stays true now that the
+change itself triggers that evaluation.
 
 ## D5 — finding: a control_owner may be refused by OPA when attesting
 

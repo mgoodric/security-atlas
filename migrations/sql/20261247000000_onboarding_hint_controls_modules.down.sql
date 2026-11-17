@@ -1,4 +1,4 @@
--- Reverses 20261244000000_onboarding_hint_controls_modules.sql (#2150).
+-- Reverses 20261247000000_onboarding_hint_controls_modules.sql (#2150).
 -- Dismissals for the Controls modules are deleted first, because the narrower
 -- CHECK would reject them; those hints show again.
 
