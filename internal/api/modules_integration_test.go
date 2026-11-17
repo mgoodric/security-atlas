@@ -55,10 +55,12 @@ func newModulesEnv(t *testing.T, exporter func(app *pgxpool.Pool) *oscal.Exporte
 	tid := uuid.MustParse(tenant)
 
 	adminClaims := testjwt.AdminFor(tid)
-	viewerClaims := testjwt.ViewerFor(tid)
+	// A non-admin. The harness token carries an empty role claim, which
+	// derives nothing since #2401, so the role is granted explicitly here.
+	memberClaims := testjwt.ViewerFor(tid)
 	engine, err := authz.NewEngine(context.Background(), noteSubjectRoles{
 		adminClaims.Subject:  {authz.RoleAdmin},
-		viewerClaims.Subject: {authz.RoleViewer},
+		memberClaims.Subject: {authz.RoleGRCEngineer},
 	})
 	if err != nil {
 		t.Fatalf("authz.NewEngine: %v", err)
@@ -71,7 +73,7 @@ func newModulesEnv(t *testing.T, exporter func(app *pgxpool.Pool) *oscal.Exporte
 	}
 	f := &moduleGateFixture{
 		admin:  srv.IssueTestJWT(t, adminClaims),
-		viewer: srv.IssueTestJWT(t, viewerClaims),
+		member: srv.IssueTestJWT(t, memberClaims),
 	}
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
@@ -118,7 +120,7 @@ func TestModules_EachOptionalModuleSwitchesOff(t *testing.T) {
 				baseline[p] = got.status
 			}
 			e.setSwitch(t, c.key, false)
-			for _, bearer := range []string{e.admin, e.viewer} {
+			for _, bearer := range []string{e.admin, e.member} {
 				for _, p := range c.routes {
 					if got := e.do(t, http.MethodGet, p, bearer, nil); !isMarker(got, c.key) {
 						t.Fatalf("off: GET %s: status %d marker %q body %q; want the %s marker", p, got.status, got.marker, got.body, c.key)
