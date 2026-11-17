@@ -13,6 +13,12 @@
 // When someone else saved the risk in between, the platform refuses it
 // (412) and the page offers to reload; reloading reopens the form on the
 // latest version (the form is keyed by updated_at), dropping these edits.
+//
+// #2544: the version the form opened on is pinned in state, so a
+// background refetch of ["risk", id] (window focus after staleTime, an
+// invalidation elsewhere) never remounts the form or swaps the If-Match.
+// Only Reload moves the form to a newer version; the 412 is the one path
+// by which another editor's save reaches an open form.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -25,7 +31,12 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { APIError } from "@/lib/api/base";
-import { fetchRiskDetail, riskIfMatch, updateRisk } from "@/lib/api/risks";
+import {
+  fetchRiskDetail,
+  riskIfMatch,
+  updateRisk,
+  type Risk,
+} from "@/lib/api/risks";
 
 import { RiskForm } from "../../new/risk-form";
 
@@ -40,10 +51,13 @@ export default function RiskEditPage({
   const { toast } = useToast();
   const detailHref = `/risks/${encodeURIComponent(id)}`;
   const [stale, setStale] = useState(false);
+  // The version the form opened on (#2544). Set from the first load and
+  // replaced only by Reload.
+  const [opened, setOpened] = useState<Risk | null>(null);
 
   // Shares the detail page's ["risk", id] key, so the form opens on the
   // risk the operator was just reading.
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["risk", id],
     queryFn: () => fetchRiskDetail(id),
     retry: (count, err) =>
@@ -52,6 +66,10 @@ export default function RiskEditPage({
         (err.status === 404 || err.status === 401)
       ) && count < 2,
   });
+
+  if (data && opened === null) {
+    setOpened(data.risk);
+  }
 
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
@@ -101,8 +119,11 @@ export default function RiskEditPage({
               className="mt-2"
               data-testid="risk-edit-stale-reload"
               onClick={async () => {
-                await qc.refetchQueries({ queryKey: ["risk", id] });
-                setStale(false);
+                const res = await refetch();
+                if (res.data) {
+                  setOpened(res.data.risk);
+                  setStale(false);
+                }
               }}
             >
               Reload
@@ -110,10 +131,10 @@ export default function RiskEditPage({
           </AlertDescription>
         </Alert>
       ) : null}
-      {data ? (
+      {opened ? (
         <RiskForm
-          key={data.risk.updated_at}
-          initial={data.risk}
+          key={opened.updated_at}
+          initial={opened}
           onCancelHref={detailHref}
           onSave={async (body) => {
             if (Object.keys(body).length === 0) {
@@ -122,7 +143,7 @@ export default function RiskEditPage({
               return;
             }
             try {
-              await updateRisk(id, body, { ifMatch: riskIfMatch(data.risk) });
+              await updateRisk(id, body, { ifMatch: riskIfMatch(opened) });
             } catch (err) {
               if (err instanceof APIError && err.status === 412) {
                 setStale(true);

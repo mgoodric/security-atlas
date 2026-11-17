@@ -605,7 +605,6 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wire := riskWireFrom(rk)
-	w.Header().Set("ETag", riskETag(rk.UpdatedAt))
 	_, rollUp, err := h.store.ListChildren(ctx, id)
 	if err != nil {
 		if errors.Is(err, risk.ErrNotFound) {
@@ -638,6 +637,8 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 		}
 		body["residual"] = residualWireFrom(res)
 	}
+	// #2544: the ETag goes on the 200 only, not on an error response.
+	w.Header().Set("ETag", riskETag(rk.UpdatedAt))
 	httpresp.WriteJSON(w, http.StatusOK, body)
 }
 
@@ -761,19 +762,20 @@ func riskETag(updatedAt time.Time) string {
 
 // parseIfMatch reads PATCH /v1/risks/{id}'s optional If-Match header
 // (#2311). Absent, or "*", it returns nil: the write is unconditional.
-// Otherwise it must be one ETag, an RFC 3339 updated_at in quotes (a W/
-// prefix is tolerated); anything else is the 400 message returned.
+// Otherwise it must be one strong ETag, an RFC 3339 updated_at in quotes;
+// anything else is the 400 message returned. A weak ETag (W/) is refused:
+// If-Match uses the strong comparison (RFC 9110 §13.1.1), so a weak tag
+// can never match, and riskETag never issues one (#2544).
 func parseIfMatch(h string) (*time.Time, string) {
 	h = strings.TrimSpace(h)
 	if h == "" || h == "*" {
 		return nil, ""
 	}
-	const want = `If-Match must be one ETag: the risk's updated_at in double quotes`
-	tag := strings.TrimPrefix(h, "W/")
-	if len(tag) < 2 || tag[0] != '"' || tag[len(tag)-1] != '"' {
+	const want = `If-Match must be one strong ETag: the risk's updated_at in double quotes, without W/`
+	if len(h) < 2 || h[0] != '"' || h[len(h)-1] != '"' {
 		return nil, want
 	}
-	t, err := time.Parse(time.RFC3339Nano, tag[1:len(tag)-1])
+	t, err := time.Parse(time.RFC3339Nano, h[1:len(h)-1])
 	if err != nil {
 		return nil, want
 	}
