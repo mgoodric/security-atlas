@@ -41,8 +41,9 @@ test.describe("/risks/new risk-create form", () => {
     authedPage: page,
   }) => {
     // True-zero ledger so the "Add first risk" CTA renders (not the
-    // filter-empty "Clear filters" CTA).
-    await page.route("**/api/risks", async (route, req) => {
+    // filter-empty "Clear filters" CTA). The register sends its page as a
+    // query string (#2132), so the route matches one.
+    await page.route(/\/api\/risks(\?.*)?$/, async (route, req) => {
       if (req.method() !== "GET") {
         await route.fallback();
         return;

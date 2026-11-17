@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,6 +21,14 @@ func TestUserID(t *testing.T) {
 		"user:" + uuid.Nil.String():     false,
 		"user:":                         false,
 		"":                              false,
+		// #2478: only the canonical form names a user.
+		strings.ReplaceAll(u.String(), "-", ""):           false,
+		"{" + u.String() + "}":                            false,
+		"urn:uuid:" + u.String():                          false,
+		strings.ToUpper(u.String()):                       false,
+		"user:" + strings.ReplaceAll(u.String(), "-", ""): false,
+		"user:{" + u.String() + "}":                       false,
+		"user:urn:uuid:" + u.String():                     false,
 	} {
 		got, ok := UserID(in)
 		if ok != want || (ok && got != u) {
@@ -44,6 +53,26 @@ func TestRolesKey(t *testing.T) {
 	} {
 		if got := RolesKey(in); got != want {
 			t.Errorf("RolesKey(%q) = %q; want %q", in, got, want)
+		}
+	}
+}
+
+func TestIsBareUserID(t *testing.T) {
+	t.Parallel()
+	u := uuid.New()
+	for in, want := range map[string]bool{
+		u.String():                              true,
+		"user:" + u.String():                    false,
+		strings.ReplaceAll(u.String(), "-", ""): false,
+		"{" + u.String() + "}":                  false,
+		"urn:uuid:" + u.String():                false,
+		strings.ToUpper(u.String()):             false,
+		uuid.Nil.String():                       false,
+		"key_abc":                               false,
+		"":                                      false,
+	} {
+		if got := IsBareUserID(in); got != want {
+			t.Errorf("IsBareUserID(%q) = %v; want %v", in, got, want)
 		}
 	}
 }

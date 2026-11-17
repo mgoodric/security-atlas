@@ -55,7 +55,11 @@ export function SortableHeader({
   // active column). Plain glyphs so no icon dependency is added.
   const caret = dir === "asc" ? "▲" : dir === "desc" ? "▼" : "↕";
 
-  const name = term ? `${term.text} ${ariaText(label)}` : ariaText(label);
+  // #2132: a term with an empty label (the Residual column) reads as the
+  // term alone, with no stray space.
+  const name = term
+    ? [term.text, ariaText(label)].filter(Boolean).join(" ")
+    : ariaText(label);
   const ariaLabel = isActive
     ? `${name}, sorted ${
         dir === "asc" ? "ascending" : "descending"

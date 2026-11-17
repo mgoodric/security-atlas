@@ -52,6 +52,71 @@ func (q *Queries) CountRiskControlLinks(ctx context.Context, arg CountRiskContro
 	return column_1, err
 }
 
+const countRisksPage = `-- name: CountRisksPage :one
+SELECT count(*)::bigint AS total
+FROM risks r
+LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS child_count
+    FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND c.status = 'open'
+) kids ON true
+WHERE r.tenant_id = $1
+  AND ($2::text IS NULL OR r.status::text = $2::text)
+  AND ($3::bool OR kids.child_count = 0)
+  AND ($4::text IS NULL OR r.treatment::text = $4::text)
+  AND ($5::text IS NULL OR r.methodology::text = $5::text)
+  AND ($6::text IS NULL OR r.level::text = $6::text)
+  AND ($7::text IS NULL OR $7::text = ANY(r.themes))
+  AND ($8::uuid IS NULL OR r.org_unit_id = $8::uuid)
+  AND ($9::uuid[] IS NULL OR r.category_id = ANY($9::uuid[]))
+  AND ($10::uuid IS NULL OR r.owner_user_id = $10::uuid)
+  AND (NOT $11::bool OR r.owner_user_id IS NULL)
+  AND ($12::timestamptz IS NULL OR r.review_due_at >= $12::timestamptz)
+  AND ($13::timestamptz IS NULL OR r.review_due_at < $13::timestamptz)
+`
+
+type CountRisksPageParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Status         *string            `json:"status"`
+	IncludeRollups bool               `json:"include_rollups"`
+	Treatment      *string            `json:"treatment"`
+	Methodology    *string            `json:"methodology"`
+	Level          *string            `json:"level"`
+	Theme          *string            `json:"theme"`
+	OrgUnitID      pgtype.UUID        `json:"org_unit_id"`
+	CategoryIds    []pgtype.UUID      `json:"category_ids"`
+	OwnerUserID    pgtype.UUID        `json:"owner_user_id"`
+	Unowned        bool               `json:"unowned"`
+	DueFrom        pgtype.Timestamptz `json:"due_from"`
+	DueBefore      pgtype.Timestamptz `json:"due_before"`
+}
+
+// #2132: the total for ListRisksPage. It takes every filter the list does,
+// so the total counts exactly the set the register pages over.
+func (q *Queries) CountRisksPage(ctx context.Context, arg CountRisksPageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRisksPage,
+		arg.TenantID,
+		arg.Status,
+		arg.IncludeRollups,
+		arg.Treatment,
+		arg.Methodology,
+		arg.Level,
+		arg.Theme,
+		arg.OrgUnitID,
+		arg.CategoryIds,
+		arg.OwnerUserID,
+		arg.Unowned,
+		arg.DueFrom,
+		arg.DueBefore,
+	)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const createAggregateRisk = `-- name: CreateAggregateRisk :one
 INSERT INTO risks (
     id, tenant_id, title, description, category_id, methodology,
@@ -864,6 +929,210 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 			&i.ClosedAt,
 			&i.ClosedBy,
 			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRisksPage = `-- name: ListRisksPage :many
+SELECT
+    r.id, r.tenant_id, r.title, r.description, r.methodology, r.inherent_score, r.treatment, r.treatment_owner, r.residual_score, r.review_due_at, r.created_at, r.updated_at, r.accepted_until, r.accepter, r.instrument_reference, r.level, r.org_unit_id, r.themes, r.acceptance_status, r.category_id, r.acceptance_justification, r.acceptance_proposed_until, r.acceptance_proposed_by, r.acceptance_proposed_at, r.acceptance_approved_at, r.self_approved, r.status, r.closure_reason, r.closure_note, r.closed_at, r.closed_by, r.owner_user_id,
+    kids.child_count::int AS child_count
+FROM risks r
+LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS child_count
+    FROM risk_aggregations ra
+    JOIN risks c ON c.tenant_id = ra.tenant_id AND c.id = ra.child_risk_id
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND c.status = 'open'
+) kids ON true
+LEFT JOIN org_risk_categories cat
+       ON cat.tenant_id = r.tenant_id AND cat.id = r.category_id
+LEFT JOIN users ou
+       ON ou.tenant_id = r.tenant_id AND ou.id = r.owner_user_id
+LEFT JOIN org_units unit
+       ON unit.tenant_id = r.tenant_id AND unit.id = r.org_unit_id
+LEFT JOIN LATERAL (
+    SELECT CASE WHEN r.methodology = 'fair' THEN 1 ELSE 0 END AS fair_group,
+           CASE
+               WHEN jsonb_typeof(r.residual_score -> 'score') = 'number'
+                   THEN (r.residual_score ->> 'score')::float8
+               WHEN jsonb_typeof(r.residual_score -> 'severity') = 'number'
+                   THEN (r.residual_score ->> 'severity')::float8
+               WHEN jsonb_typeof(r.residual_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.residual_score -> 'impact') = 'number'
+                   THEN (r.residual_score ->> 'likelihood')::float8 * (r.residual_score ->> 'impact')::float8
+           END AS residual,
+           lower(COALESCE(NULLIF(ou.display_name, ''), NULLIF(ou.email, ''), NULLIF(btrim(r.treatment_owner), ''))) AS owner_name
+) k ON true
+WHERE r.tenant_id = $1
+  AND ($2::text IS NULL OR r.status::text = $2::text)
+  AND ($3::bool OR kids.child_count = 0)
+  AND ($4::text IS NULL OR r.treatment::text = $4::text)
+  AND ($5::text IS NULL OR r.methodology::text = $5::text)
+  AND ($6::text IS NULL OR r.level::text = $6::text)
+  AND ($7::text IS NULL OR $7::text = ANY(r.themes))
+  AND ($8::uuid IS NULL OR r.org_unit_id = $8::uuid)
+  AND ($9::uuid[] IS NULL OR r.category_id = ANY($9::uuid[]))
+  AND ($10::uuid IS NULL OR r.owner_user_id = $10::uuid)
+  AND (NOT $11::bool OR r.owner_user_id IS NULL)
+  AND ($12::timestamptz IS NULL OR r.review_due_at >= $12::timestamptz)
+  AND ($13::timestamptz IS NULL OR r.review_due_at < $13::timestamptz)
+ORDER BY
+    -- residual (the default, descending): 5x5 above FAIR in both directions.
+    CASE WHEN $14::text IN ('residual', 'residual_age') THEN k.fair_group END ASC,
+    CASE WHEN $14::text = 'residual' AND NOT $15::bool THEN k.residual END ASC NULLS LAST,
+    CASE WHEN ($14::text = 'residual' AND $15::bool) OR $14::text = 'residual_age' THEN k.residual END DESC NULLS LAST,
+    -- residual_age (the dashboard's residual,age): oldest first on a tie.
+    CASE WHEN $14::text = 'residual_age' THEN r.created_at END ASC,
+    CASE WHEN $14::text = 'title' AND NOT $15::bool THEN lower(r.title) COLLATE "C" END ASC,
+    CASE WHEN $14::text = 'title' AND $15::bool THEN lower(r.title) COLLATE "C" END DESC,
+    CASE WHEN $14::text = 'category' AND NOT $15::bool THEN lower(cat.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $14::text = 'category' AND $15::bool THEN lower(cat.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $14::text = 'owner' AND NOT $15::bool THEN k.owner_name COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $14::text = 'owner' AND $15::bool THEN k.owner_name COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $14::text = 'treatment' AND NOT $15::bool THEN r.treatment::text COLLATE "C" END ASC,
+    CASE WHEN $14::text = 'treatment' AND $15::bool THEN r.treatment::text COLLATE "C" END DESC,
+    CASE WHEN $14::text = 'review_due' AND NOT $15::bool THEN r.review_due_at END ASC NULLS LAST,
+    CASE WHEN $14::text = 'review_due' AND $15::bool THEN r.review_due_at END DESC NULLS LAST,
+    CASE WHEN $14::text = 'status' AND NOT $15::bool THEN r.status::text COLLATE "C" END ASC,
+    CASE WHEN $14::text = 'status' AND $15::bool THEN r.status::text COLLATE "C" END DESC,
+    CASE WHEN $14::text = 'methodology' AND NOT $15::bool THEN r.methodology::text COLLATE "C" END ASC,
+    CASE WHEN $14::text = 'methodology' AND $15::bool THEN r.methodology::text COLLATE "C" END DESC,
+    CASE WHEN $14::text = 'level' AND NOT $15::bool THEN r.level END ASC,
+    CASE WHEN $14::text = 'level' AND $15::bool THEN r.level END DESC,
+    CASE WHEN $14::text = 'org_unit' AND NOT $15::bool THEN lower(unit.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $14::text = 'org_unit' AND $15::bool THEN lower(unit.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $14::text = 'themes' AND NOT $15::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END ASC,
+    CASE WHEN $14::text = 'themes' AND $15::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END DESC,
+    CASE WHEN $14::text = 'created_at' AND NOT $15::bool THEN r.created_at END ASC,
+    CASE WHEN $14::text = 'created_at' AND $15::bool THEN r.created_at END DESC,
+    CASE WHEN $14::text = 'id' AND $15::bool THEN r.id END DESC,
+    r.id
+LIMIT $17 OFFSET $16
+`
+
+type ListRisksPageParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Status         *string            `json:"status"`
+	IncludeRollups bool               `json:"include_rollups"`
+	Treatment      *string            `json:"treatment"`
+	Methodology    *string            `json:"methodology"`
+	Level          *string            `json:"level"`
+	Theme          *string            `json:"theme"`
+	OrgUnitID      pgtype.UUID        `json:"org_unit_id"`
+	CategoryIds    []pgtype.UUID      `json:"category_ids"`
+	OwnerUserID    pgtype.UUID        `json:"owner_user_id"`
+	Unowned        bool               `json:"unowned"`
+	DueFrom        pgtype.Timestamptz `json:"due_from"`
+	DueBefore      pgtype.Timestamptz `json:"due_before"`
+	SortKey        string             `json:"sort_key"`
+	SortDesc       bool               `json:"sort_desc"`
+	RowOffset      int32              `json:"row_offset"`
+	RowLimit       int32              `json:"row_limit"`
+}
+
+type ListRisksPageRow struct {
+	Risk       Risk  `json:"risk"`
+	ChildCount int32 `json:"child_count"`
+}
+
+// #2132: the risk register, filtered, sorted and paged on the server.
+//
+// Filters (each optional; NULL / false leaves it off):
+//
+//	status            open | closed. NULL keeps both.
+//	include_rollups   false leaves out a roll-up: a risk with at least one
+//	                  open child (#2060, the #2107 open-children rule).
+//	treatment, methodology, level, theme, org_unit_id: exact match.
+//	category_ids      any of these organisation categories (#1745); the
+//	                  store resolves slugs to ids first.
+//	owner_user_id     that person's risks (#2129); unowned keeps the risks
+//	                  with no owner user.
+//	due_from, due_before  review_due_at in [due_from, due_before). The
+//	                  store turns overdue, due-soon and a date range into
+//	                  these two UTC-day bounds (the duedate rule).
+//
+// sort_key is one of the fixed keys in the ORDER BY; the handler refuses
+// any other value before it gets here. Residual follows #2185's
+// risk.RanksAbove: every non-FAIR (5x5) risk ranks above every FAIR risk,
+// in either direction, so a dollar figure never ranks against a 1..25
+// score. The value is risk.ScoreValue's: score, then severity, then
+// likelihood x impact. A risk with no residual value sorts after the
+// scored ones of its group in both directions. Every order ends on r.id,
+// so offset paging has no duplicates or gaps. Text keys sort lower-cased
+// under COLLATE "C", so the order is the same on every deployment.
+//
+// RLS posture: the explicit tenant_id predicates sit alongside the
+// GUC-driven RLS on every table read here.
+func (q *Queries) ListRisksPage(ctx context.Context, arg ListRisksPageParams) ([]ListRisksPageRow, error) {
+	rows, err := q.db.Query(ctx, listRisksPage,
+		arg.TenantID,
+		arg.Status,
+		arg.IncludeRollups,
+		arg.Treatment,
+		arg.Methodology,
+		arg.Level,
+		arg.Theme,
+		arg.OrgUnitID,
+		arg.CategoryIds,
+		arg.OwnerUserID,
+		arg.Unowned,
+		arg.DueFrom,
+		arg.DueBefore,
+		arg.SortKey,
+		arg.SortDesc,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRisksPageRow
+	for rows.Next() {
+		var i ListRisksPageRow
+		if err := rows.Scan(
+			&i.Risk.ID,
+			&i.Risk.TenantID,
+			&i.Risk.Title,
+			&i.Risk.Description,
+			&i.Risk.Methodology,
+			&i.Risk.InherentScore,
+			&i.Risk.Treatment,
+			&i.Risk.TreatmentOwner,
+			&i.Risk.ResidualScore,
+			&i.Risk.ReviewDueAt,
+			&i.Risk.CreatedAt,
+			&i.Risk.UpdatedAt,
+			&i.Risk.AcceptedUntil,
+			&i.Risk.Accepter,
+			&i.Risk.InstrumentReference,
+			&i.Risk.Level,
+			&i.Risk.OrgUnitID,
+			&i.Risk.Themes,
+			&i.Risk.AcceptanceStatus,
+			&i.Risk.CategoryID,
+			&i.Risk.AcceptanceJustification,
+			&i.Risk.AcceptanceProposedUntil,
+			&i.Risk.AcceptanceProposedBy,
+			&i.Risk.AcceptanceProposedAt,
+			&i.Risk.AcceptanceApprovedAt,
+			&i.Risk.SelfApproved,
+			&i.Risk.Status,
+			&i.Risk.ClosureReason,
+			&i.Risk.ClosureNote,
+			&i.Risk.ClosedAt,
+			&i.Risk.ClosedBy,
+			&i.Risk.OwnerUserID,
+			&i.ChildCount,
 		); err != nil {
 			return nil, err
 		}

@@ -1,24 +1,11 @@
-// Slice 100 — pure filter + formatter logic for the /risks list view.
+// Slice 100 — pure formatter logic for the /risks register, plus the
+// Category pill's options.
 //
-// All filter-related calculations + per-row formatting live here as
-// pure functions so they can be vitest-unit-tested without spinning up
-// React. The page imports these and applies them to the fetched
-// `riskWire` rows.
-//
-// Constitutional commitment: this module knows nothing about React,
-// useSearchParams, or the BFF. It is data-in, data-out.
-//
-// Slice 100 shipped 3 pills (treatment + severity band + owner). Slice
-// 244 extended this to 6 pills by adding category + methodology +
-// org_unit — the three mockup pills slice 100 deferred (see the
-// "future extension" note that lived here before this slice). The data
-// for all three was already on `riskWire` (slice 019 carried category +
-// methodology; slice 067 carried org_unit_id), so the cost was purely
-// UI plumbing.
-//
-// Constitutional anti-criterion P0-A3 (slice 100) honored: only fields
-// that exist on `riskWire` (slice 019 + slice 067 additions) are
-// referenced — no invented columns.
+// #2132: the register filters, sorts and pages on the server, so the
+// client-side narrowing that lived here (applyFilters, the owner and
+// severity buckets, the filter state helpers) is gone. What stays is
+// per-row formatting and the category options, as pure functions so they
+// are vitest-unit-tested without React.
 
 import type { Risk, RiskCategory } from "@/lib/api/risks";
 
@@ -55,119 +42,6 @@ export function severityBand(severity: number): SeverityBand {
   if (severity >= 8) return "medium";
   if (severity > 0) return "low";
   return "none";
-}
-
-export type RiskFilters = {
-  treatment: string;
-  severity: string;
-  owner: string;
-  // Slice 244 additions.
-  category: string;
-  methodology: string;
-  org_unit: string;
-};
-
-export const DEFAULT_FILTERS: RiskFilters = {
-  treatment: ALL,
-  severity: ALL,
-  owner: ALL,
-  // Slice 244 additions — all default to ALL so the pill row starts
-  // unfiltered and only narrows when the user picks a specific value.
-  category: ALL,
-  methodology: ALL,
-  org_unit: ALL,
-};
-
-/**
- * True when no filter is narrowing the result set.
- */
-export function isDefault(filters: RiskFilters): boolean {
-  return (
-    filters.treatment === ALL &&
-    filters.severity === ALL &&
-    filters.owner === ALL &&
-    filters.category === ALL &&
-    filters.methodology === ALL &&
-    filters.org_unit === ALL
-  );
-}
-
-/**
- * Narrow a risk list against the active filter set. The treatment +
- * owner + category + methodology + org_unit filters compare the exact
- * string from `riskWire`; the severity filter buckets the numeric
- * `severity` scalar into the four bands above.
- *
- * The owner filter matches `ownerKey(row)` (#2129): the owner's user id,
- * else the "Owner (unlinked)" free text, else the "unassigned" sentinel
- * the mockup uses.
- *
- * Slice 244 — three new branches:
- *   - category: exact match against the category slug on the wire
- *     (an organisation category, #1745; the risk_category enum is retired).
- *   - methodology: exact match against the wire enum
- *     (`risk_methodology`).
- *   - org_unit: exact match against the row's `org_unit_id` (UUID).
- *     Rows with no `org_unit_id` never match a specific filter value —
- *     a row with `org_unit_id = undefined` only passes when the filter
- *     is `ALL` (i.e., disabled). This is the same shape as how the
- *     other identity-bearing pills (owner) treat unset values.
- */
-export function applyFilters(rows: Risk[], filters: RiskFilters): Risk[] {
-  return rows.filter((row) => {
-    if (filters.treatment !== ALL && row.treatment !== filters.treatment) {
-      return false;
-    }
-    if (filters.severity !== ALL) {
-      if (severityBand(row.severity) !== filters.severity) return false;
-    }
-    if (filters.owner !== ALL) {
-      if (ownerKey(row) !== filters.owner) return false;
-    }
-    if (filters.category !== ALL && row.category !== filters.category) {
-      return false;
-    }
-    if (
-      filters.methodology !== ALL &&
-      row.methodology !== filters.methodology
-    ) {
-      return false;
-    }
-    if (filters.org_unit !== ALL && row.org_unit_id !== filters.org_unit) {
-      return false;
-    }
-    return true;
-  });
-}
-
-/**
- * The owner a register row filters on (#2129): its owner's user id; else
- * the free-text owner no user matched ("Owner (unlinked)"); else
- * "unassigned".
- */
-export function ownerKey(row: Risk): string {
-  if (row.owner_user_id) return row.owner_user_id;
-  return (row.owner_unlinked ?? "").trim() || "unassigned";
-}
-
-/**
- * Extract the unique owner set from a row list. Used to drive the
- * "Owner" pill options. Sorted alphabetically with the "unassigned"
- * sentinel pinned last so it stays visually distinct from real names.
- */
-export function uniqueOwners(rows: Risk[]): string[] {
-  const seen = new Set<string>();
-  let hasUnassigned = false;
-  for (const r of rows) {
-    const norm = ownerKey(r);
-    if (norm === "unassigned") {
-      hasUnassigned = true;
-    } else {
-      seen.add(norm);
-    }
-  }
-  const named = Array.from(seen).sort();
-  return hasUnassigned ? [...named, "unassigned"] : named;
 }
 
 /**
@@ -208,24 +82,6 @@ export function categoryDisplay(
     name: row.category_name || cat?.name || row.category,
     archived: cat?.archived ?? false,
   };
-}
-
-/**
- * Merge a partial filter update onto the existing filter set.
- */
-export function setFilter(
-  filters: RiskFilters,
-  key: keyof RiskFilters,
-  value: string,
-): RiskFilters {
-  return { ...filters, [key]: value };
-}
-
-/**
- * Clear all filters back to the default.
- */
-export function clearFilters(): RiskFilters {
-  return { ...DEFAULT_FILTERS };
 }
 
 // ----- formatters -----

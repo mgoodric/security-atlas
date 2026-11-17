@@ -50,6 +50,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/identity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -115,6 +116,11 @@ var (
 	// ErrOrphanPublish is returned when publish is attempted on a policy
 	// with empty linked_control_ids (AC-7 + anti-criterion P0).
 	ErrOrphanPublish = errors.New("policy: cannot publish orphan policy (no linked controls)")
+	// ErrNoLiveLinkedControl is returned when publish is attempted on a
+	// policy whose linked_control_ids are all retired or gone from the
+	// tenant (#2478): the links were valid when last edited, but the policy
+	// would now govern no live control. HTTP 422.
+	ErrNoLiveLinkedControl = errors.New("policy: cannot publish a policy none of whose linked controls is live; every linked control is retired or no longer in this tenant")
 	// ErrTitleRequired / ErrVersionRequired / ErrBodyRequired /
 	// ErrOwnerRoleRequired / ErrApproverRoleRequired / ErrCreatedByRequired
 	// surface 400 from the create path.
@@ -321,6 +327,22 @@ func checkLinkedControls(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID
 	return nil
 }
 
+// countLiveLinkedControls counts the distinct ids in ids that are
+// non-retired controls in the tenant (CountTenantControls).
+func countLiveLinkedControls(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ids []pgtype.UUID) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	n, err := q.CountTenantControls(ctx, dbx.CountTenantControlsParams{
+		TenantID: pgUUID(tenantID),
+		Ids:      ids,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count live linked controls: %w", err)
+	}
+	return n, nil
+}
+
 // bodySHA256 is the hex sha256 of a policy body, recorded in
 // policy_audit_log in place of the body itself (#2446).
 func bodySHA256(body string) string {
@@ -429,6 +451,15 @@ func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string)
 			})
 			if err != nil {
 				return dbx.Policy{}, err
+			}
+			// Submit re-runs the create / draft-edit link check (#2478): a
+			// control retired since the last edit is refused here, so the
+			// author drops or replaces it while the policy is still
+			// editable. An orphan stays submittable; publish blocks it.
+			if prior.Status == StateDraft {
+				if err := checkLinkedControls(ctx, q, tenantID, uuidsFromPg(prior.LinkedControlIds)); err != nil {
+					return dbx.Policy{}, err
+				}
 			}
 			row, err := q.SubmitPolicyForReview(ctx, dbx.SubmitPolicyForReviewParams{
 				TenantID:    pgUUID(tenantID),
@@ -605,10 +636,11 @@ func CheckApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool,
 }
 
 // isPersonPrincipal reports whether principal (credstore.PrincipalOf) names
-// a person: a bare users(id) uuid. Every other shape names a credential.
+// a person: a bare users(id) uuid in its canonical 36-character form
+// (identity.IsBareUserID, #2478). Every other shape names a credential,
+// including the 32-hex, "{...}" and "urn:uuid:" forms uuid.Parse accepts.
 func isPersonPrincipal(principal string) bool {
-	_, err := uuid.Parse(principal)
-	return err == nil
+	return identity.IsBareUserID(principal)
 }
 
 // checkSubmitter is the submitter half of CheckApprover.
@@ -688,9 +720,18 @@ func (s *Store) Publish(ctx context.Context, approvedID uuid.UUID, in PublishInp
 		if approved.Status != StateApproved {
 			return ErrWrongState
 		}
-		// AC-7 orphan block.
+		// AC-7 orphan block. A link to a control retired since the last
+		// edit does not count (#2478): the policy must govern at least one
+		// live control in the tenant when it is published.
 		if len(approved.LinkedControlIds) == 0 {
 			return ErrOrphanPublish
+		}
+		live, err := countLiveLinkedControls(ctx, q, tenantID, approved.LinkedControlIds)
+		if err != nil {
+			return err
+		}
+		if live == 0 {
+			return ErrNoLiveLinkedControl
 		}
 		if in.NewVersion == "" {
 			return ErrInvalidVersion

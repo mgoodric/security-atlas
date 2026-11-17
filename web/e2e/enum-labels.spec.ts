@@ -197,8 +197,14 @@ test.describe("enum display labels (#2083)", () => {
     await expect(page.getByTestId("risks-row-treatment").nth(1)).toHaveText(
       "Accept (proposed)",
     );
-    // No hash-prefix ID column beside the titles.
-    await expect(page.getByTestId("risks-row-id")).toHaveCount(0);
+    // No hash prefix under or beside a title (#2083). The register's ID
+    // is its own column since #2132, never part of the title cell.
+    const table = page.getByTestId("list-table-wrap");
+    for (const text of await table
+      .getByTestId("list-cell-title")
+      .allInnerTexts()) {
+      expect(text, `title cell shows ${text}`).not.toMatch(/#|[0-9a-f]{8}/);
+    }
     await expectNoRawValues(page);
   });
 

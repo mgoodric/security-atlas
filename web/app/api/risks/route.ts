@@ -24,7 +24,11 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { listRisks } from "@/lib/api/risks";
+import {
+  listRisks,
+  RISK_LIST_PARAMS,
+  type RiskListParam,
+} from "@/lib/api/risks";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function GET(req: Request): Promise<Response> {
@@ -34,13 +38,16 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   try {
-    // #2060: roll-ups stay out unless the register's toggle asks for them.
-    // #2107: closed risks likewise, unless "Show closed" asks for them.
+    // #2132: the filter, sort and page parameters on the allow-list pass
+    // through verbatim; the platform validates each value. Without any,
+    // the platform's default page (open risks, no roll-ups, #2060 #2107).
     const params = new URL(req.url).searchParams;
-    const includeRollups = params.get("include_rollups") === "true";
-    const includeClosed = params.get("include_closed") === "true";
-    const risks = await listRisks(bearer, includeRollups, includeClosed);
-    return NextResponse.json({ risks });
+    const passThrough: Partial<Record<RiskListParam, string>> = {};
+    for (const key of RISK_LIST_PARAMS) {
+      const v = params.get(key);
+      if (v) passThrough[key] = v;
+    }
+    return NextResponse.json(await listRisks(bearer, passThrough));
   } catch (err) {
     const e = err as { status?: number; message?: string };
     return NextResponse.json(
