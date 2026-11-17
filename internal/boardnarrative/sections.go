@@ -216,12 +216,17 @@ func riskRollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
 		riskSeverity: true,
 	}
 	for _, rk := range b.TopRisks {
+		if rk.AgeDays > r.OldestRiskAgeDays {
+			r.OldestRiskAgeDays = rk.AgeDays
+		}
+		// A FAIR residual is dollars, not a 1..25 severity (#2185): it
+		// never sets the worst severity.
+		if rk.Monetary() {
+			continue
+		}
 		sev := roundToInt(rk.ResidualSeverity)
 		if sev > r.WorstResidualSeverity {
 			r.WorstResidualSeverity = sev
-		}
-		if rk.AgeDays > r.OldestRiskAgeDays {
-			r.OldestRiskAgeDays = rk.AgeDays
 		}
 	}
 	return r, nil

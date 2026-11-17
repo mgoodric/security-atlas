@@ -559,7 +559,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 
 // sortByResidualThenAge orders risks by residual-score magnitude descending
 // (the riskiest first), then by created_at ascending (the oldest in
-// treatment first). It is a stable sort so risks tied on both keys keep the
+// treatment first). The magnitude is read by ScoreValue and compared by
+// RanksAbove, so FAIR risks (a dollar residual) rank after every 5x5 risk,
+// by dollars among themselves (#2185). It is a stable sort so risks tied on both keys keep the
 // underlying ListRisks order. Slice 066 AC-3.
 //
 // Decorate-sort-undecorate: each risk is paired with its magnitude once
@@ -568,55 +570,30 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 // sorted, then the risks are written back in order.
 func sortByResidualThenAge(risks []Risk) {
 	type scored struct {
-		risk Risk
-		mag  float64
+		risk     Risk
+		mag      float64
+		monetary bool
 	}
 	decorated := make([]scored, len(risks))
 	for i, r := range risks {
-		decorated[i] = scored{risk: r, mag: residualMagnitude(r.ResidualScore)}
+		// A residual with no readable shape ranks as 0, below every
+		// properly-scored risk in its group, rather than erroring the list.
+		mag, _ := ScoreValue(r.ResidualScore)
+		decorated[i] = scored{risk: r, mag: mag, monetary: Monetary(r.Methodology)}
 	}
 	sort.SliceStable(decorated, func(i, j int) bool {
-		if decorated[i].mag != decorated[j].mag {
-			return decorated[i].mag > decorated[j].mag // higher residual ranks first
+		a, b := decorated[i], decorated[j]
+		if RanksAbove(a.monetary, a.mag, b.monetary, b.mag) {
+			return true // higher residual ranks first; FAIR dollars after every 5x5 severity
+		}
+		if RanksAbove(b.monetary, b.mag, a.monetary, a.mag) {
+			return false
 		}
 		return decorated[i].risk.CreatedAt.Before(decorated[j].risk.CreatedAt) // older ranks first
 	})
 	for i, d := range decorated {
 		risks[i] = d.risk
 	}
-}
-
-// residualMagnitude extracts a sortable scalar from the opaque
-// residual_score JSONB. It reads every shape the platform writes, in the
-// board generator's order (internal/board extractSeverity): the residual
-// deriver's `score` (residualBlob), a precomputed `severity`, then a 5x5
-// {likelihood, impact} whose magnitude is their product (canvas §2.2).
-// Before #2058 only the last shape counted, so every derived residual
-// ranked as 0. A score with none of them yields 0 — a malformed or empty
-// score ranks below every properly-scored risk rather than erroring the
-// whole list.
-func residualMagnitude(raw []byte) float64 {
-	if len(raw) == 0 {
-		return 0
-	}
-	var score struct {
-		Score      *float64 `json:"score"`
-		Severity   *float64 `json:"severity"`
-		Likelihood *float64 `json:"likelihood"`
-		Impact     *float64 `json:"impact"`
-	}
-	if err := json.Unmarshal(raw, &score); err != nil {
-		return 0
-	}
-	switch {
-	case score.Score != nil:
-		return *score.Score
-	case score.Severity != nil:
-		return *score.Severity
-	case score.Likelihood != nil && score.Impact != nil:
-		return *score.Likelihood * *score.Impact
-	}
-	return 0
 }
 
 // HeatmapCell is one (likelihood, impact) bucket in the 5x5 grid.
