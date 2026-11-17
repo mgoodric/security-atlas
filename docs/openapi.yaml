@@ -6042,7 +6042,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — edit a risk's record fields and placement; body {title?, description?, category?, methodology?, inherent_score?, treatment_owner?, owner_user_id?, review_due_at?, instrument_reference?, level?, org_unit_id?}; category is a slug, id or display name, refused when unknown, ambiguous or archived; owner_user_id is a user id or null, refused (422) unless an active user of the tenant; a non-FAIR inherent_score field that is not a JSON number in range is refused (422); treatment and acceptance fields are refused (400); a body over 1 MiB is refused (413); an optional If-Match with the ETag from GET (the quoted updated_at) makes the write conditional, refused (412) when the risk changed since; each change is audit-logged
+      summary: PATCH /v1/risks/{id} — edit a risk's record fields and placement; body {title?, description?, category?, methodology?, inherent_score?, treatment_owner?, owner_user_id?, review_due_at?, instrument_reference?, level?, org_unit_id?}; category is a slug, id or display name, refused when unknown, ambiguous or archived; owner_user_id is a user id or null, refused (422) unless an active user of the tenant; a non-FAIR inherent_score field that is not a JSON number in range is refused (422); treatment and acceptance fields are refused (400); a body over 1 MiB is refused (413); an optional If-Match with the strong ETag from GET (the quoted updated_at; a weak W/ tag is refused, 400) makes the write conditional, refused (412) when the risk changed since; each change is audit-logged
       tags: [risks]
       operationId: patch-v1-risks-id
       security:

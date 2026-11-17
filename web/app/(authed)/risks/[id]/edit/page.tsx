@@ -13,6 +13,12 @@
 // When someone else saved the risk in between, the platform refuses it
 // (412) and the page offers to reload; reloading reopens the form on the
 // latest version (the form is keyed by updated_at), dropping these edits.
+//
+// #2544: the version the form opened on is pinned in state, so a
+// background refetch of ["risk", id] (window focus after staleTime, an
+// invalidation elsewhere) never remounts the form or swaps the If-Match.
+// Only Reload moves the form to a newer version; the 412 is the one path
+// by which another editor's save reaches an open form.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -25,7 +31,12 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { APIError } from "@/lib/api/base";
-import { fetchRiskDetail, riskIfMatch, updateRisk } from "@/lib/api/risks";
+import {
+  fetchRiskDetail,
+  riskIfMatch,
+  updateRisk,
+  type Risk,
+} from "@/lib/api/risks";
 
 import { RiskForm } from "../../new/risk-form";
 
@@ -40,18 +51,28 @@ export default function RiskEditPage({
   const { toast } = useToast();
   const detailHref = `/risks/${encodeURIComponent(id)}`;
   const [stale, setStale] = useState(false);
+  // The version the form opened on (#2544). Set from the first load and
+  // replaced only by Reload.
+  const [opened, setOpened] = useState<Risk | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
 
-  // Shares the detail page's ["risk", id] key, so the form opens on the
-  // risk the operator was just reading.
-  const { data, isLoading, error } = useQuery({
+  // Shares the detail page's ["risk", id] key, so the page can paint the
+  // cached risk at once; refetchOnMount "always" fetches the current one,
+  // and the form opens on that (#2544), never on a cached copy.
+  const { data, error, isFetchedAfterMount, isFetching, refetch } = useQuery({
     queryKey: ["risk", id],
     queryFn: () => fetchRiskDetail(id),
+    refetchOnMount: "always",
     retry: (count, err) =>
       !(
         err instanceof APIError &&
         (err.status === 404 || err.status === 401)
       ) && count < 2,
   });
+
+  if (opened === null && data && isFetchedAfterMount && !isFetching) {
+    setOpened(data.risk);
+  }
 
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
@@ -79,8 +100,12 @@ export default function RiskEditPage({
         </Link>
       }
     >
-      {isLoading ? <Skeleton className="h-96 w-full" /> : null}
-      {error && !(error instanceof APIError && error.status === 401) ? (
+      {!opened && !error ? <Skeleton className="h-96 w-full" /> : null}
+      {/* Once the form is open, a failed refetch does not replace it; a
+          failed Reload says so in the stale prompt instead. */}
+      {!opened &&
+      error &&
+      !(error instanceof APIError && error.status === 401) ? (
         <Alert variant="destructive">
           <AlertTitle>Could not load risk</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
@@ -94,14 +119,32 @@ export default function RiskEditPage({
               Someone else saved it first, so your edits were not saved. Reload
               to see the latest version, then make your changes again.
             </p>
+            {reloadError ? (
+              <p className="mt-2" data-testid="risk-edit-stale-reload-error">
+                Could not reload the risk: {reloadError}
+              </p>
+            ) : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="mt-2"
               data-testid="risk-edit-stale-reload"
+              disabled={isFetching}
               onClick={async () => {
-                await qc.refetchQueries({ queryKey: ["risk", id] });
+                setReloadError(null);
+                const res = await refetch();
+                // A failed refetch keeps the previous data; re-pinning it
+                // would clear the prompt on the version that was refused.
+                if (res.status !== "success") {
+                  setReloadError(
+                    res.error instanceof Error
+                      ? res.error.message
+                      : "the request failed",
+                  );
+                  return;
+                }
+                setOpened(res.data.risk);
                 setStale(false);
               }}
             >
@@ -110,10 +153,10 @@ export default function RiskEditPage({
           </AlertDescription>
         </Alert>
       ) : null}
-      {data ? (
+      {opened ? (
         <RiskForm
-          key={data.risk.updated_at}
-          initial={data.risk}
+          key={opened.updated_at}
+          initial={opened}
           onCancelHref={detailHref}
           onSave={async (body) => {
             if (Object.keys(body).length === 0) {
@@ -122,7 +165,7 @@ export default function RiskEditPage({
               return;
             }
             try {
-              await updateRisk(id, body, { ifMatch: riskIfMatch(data.risk) });
+              await updateRisk(id, body, { ifMatch: riskIfMatch(opened) });
             } catch (err) {
               if (err instanceof APIError && err.status === 412) {
                 setStale(true);

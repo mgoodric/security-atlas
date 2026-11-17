@@ -88,6 +88,11 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/mapping-overlays/remap-proposals/" + id2428 + "/approve", tenantApproverGate},
 	{http.MethodPost, "/v1/mapping-overlays/remap-proposals/" + id2428 + "/reject", tenantApproverGate},
 	{http.MethodPost, "/v1/mapping-overlays/remap-proposals/" + id2428 + "/keep-legacy", tenantApproverGate},
+	// #2540: the CSF assessment edit gate.
+	{http.MethodPut, "/v1/csf/tier", tenantApproverGate},
+	{http.MethodPut, "/v1/csf/profiles/target", tenantApproverGate},
+	{http.MethodPut, "/v1/csf/profiles/target/selections", tenantApproverGate},
+	{http.MethodDelete, "/v1/csf/profiles/target/selections/" + id2428, tenantApproverGate},
 
 	// Approve gates on resources OPA admits for admin only.
 	{http.MethodPost, "/v1/oscal/component-claims/" + id2428 + ":accept", tenantAdminGate},
