@@ -31,7 +31,9 @@ func TestBuildInput2381_DerivedRoles(t *testing.T) {
 		{"JWT grc_engineer", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"grc_engineer"}}, []authz.Role{authz.RoleControlOwner}},
 		{"JWT admin", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"admin"}}, []authz.Role{authz.RoleControlOwner}},
 		{"JWT auditor+control_owner", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u", OwnerRoles: []string{"auditor", "control_owner"}}, []authz.Role{authz.RoleControlOwner}},
-		{"JWT empty claim", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:u"}, []authz.Role{authz.RoleGRCEngineer}},
+		// An empty claim derives nothing for a user (#2401); every principal
+		// kind is in jwt_empty_claim_2401_test.go.
+		{"JWT empty claim", credstore.Credential{ID: "jwt:1", TenantID: "t", UserID: "user:6f1c2a9e-1d2b-4c3d-8e4f-5a6b7c8d9e0f"}, nil},
 		{"unbound key viewer", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"viewer"}}, []authz.Role{authz.RoleViewer}},
 		{"unbound key auditor", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"auditor"}}, []authz.Role{authz.RoleAuditor}},
 		{"unbound key auditor+viewer", credstore.Credential{ID: "key_1", TenantID: "t", UserID: "key_1", OwnerRoles: []string{"auditor", "viewer", "viewer"}}, []authz.Role{authz.RoleViewer, authz.RoleAuditor}},
