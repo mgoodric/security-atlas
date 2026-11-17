@@ -79,8 +79,21 @@ const OTHER: AuditedUnderRow = {
   candidate_anchors: [],
 };
 
-function report(rows: AuditedUnderRow[]): AuditedUnderReport {
-  return { rows, count: rows.length, candidate_scf_release: "test-2026.3" };
+function report(
+  rows: AuditedUnderRow[],
+  extra: Partial<AuditedUnderReport> = {},
+): AuditedUnderReport {
+  return {
+    rows,
+    count: rows.length,
+    total: rows.length,
+    limit: 5000,
+    truncated: false,
+    unresolved_references: [],
+    unresolved_count: 0,
+    candidate_scf_release: "test-2026.3",
+    ...extra,
+  };
 }
 
 // mockReport serves the report; once `closed` holds the gap's key, later
@@ -221,6 +234,62 @@ test.describe("Audited under report", () => {
     await expect(page.getByTestId("audited-under-count")).toContainText(
       "candidates from SCF test-2026.3",
     );
+  });
+
+  test("unresolved references show as a data-quality note; a cut report says so", async ({
+    authedPage: page,
+  }) => {
+    await page.route(REPORT, async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          report([GAP], {
+            total: 3,
+            limit: 1,
+            truncated: true,
+            unresolved_count: 2,
+            unresolved_references: [
+              {
+                control_id: GAP.control_id,
+                control_bundle_id: GAP.control_bundle_id,
+                control_title: GAP.control_title,
+                system: "soc2",
+                code: "CC9.9",
+                tested_under_note: "FY25 import",
+              },
+            ],
+          }),
+        ),
+      });
+    });
+
+    await page.goto("/catalog/audited-under");
+    await expect(page.getByTestId("audited-under-row")).toHaveCount(1);
+    await expect(page.getByTestId("audited-under-truncated")).toContainText(
+      "Showing the first 1 of 3 gaps",
+    );
+    const note = page.getByTestId("audited-under-unresolved");
+    await expect(note).toContainText(
+      "2 tested-under references do not resolve",
+    );
+    await note.getByText("Show the first 1").click();
+    const ref = note.getByTestId("audited-under-unresolved-ref");
+    await expect(ref).toContainText("soc2 CC9.9");
+    await expect(ref).toContainText("(FY25 import)");
+    await expect(
+      ref.getByRole("link", { name: GAP.control_title }),
+    ).toHaveAttribute("href", `/controls/${GAP.control_id}`);
+  });
+
+  test("a clean report shows no note and no truncation", async ({
+    authedPage: page,
+  }) => {
+    await mockReport(page, new Set());
+    await page.goto("/catalog/audited-under");
+    await expect(page.getByTestId("audited-under-row")).toHaveCount(2);
+    await expect(page.getByTestId("audited-under-unresolved")).toHaveCount(0);
+    await expect(page.getByTestId("audited-under-truncated")).toHaveCount(0);
   });
 
   test("filters by framework, and the CSV export downloads", async ({

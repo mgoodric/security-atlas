@@ -55,26 +55,79 @@ type Gap struct {
 	Candidates      []GapCandidate
 }
 
-// AuditedUnderReport is the report: its rows and the SCF release the
-// candidate anchors were drawn from (empty when no SCF release is current,
-// in which case candidates come from every release).
+// UnresolvedRef is a tested-under reference that names no requirement in
+// its framework's current version (#2324): a typo, a withdrawn code, or a
+// framework the catalog does not hold. The report cannot place it, so it
+// lists it for the organisation to fix.
+type UnresolvedRef struct {
+	ControlID       uuid.UUID
+	ControlBundleID string
+	ControlTitle    string
+	System          string
+	Code            string
+	TestedUnderNote string
+}
+
+// AuditedUnderRowCap is the most rows the report returns, and the most
+// unresolved references it lists (#2324). A tenant past it gets the first
+// rows in report order and Truncated set.
+const AuditedUnderRowCap = 5000
+
+// AuditedUnderReport is the report: its rows, the SCF release the candidate
+// anchors were drawn from (empty when no SCF release is current, in which
+// case candidates come from every release), and the tested-under references
+// it could not resolve. GapTotal and UnresolvedTotal count every row before
+// the cap; Truncated is set when either list was cut.
 type AuditedUnderReport struct {
-	SCFRelease string
-	Gaps       []Gap
+	SCFRelease      string
+	Gaps            []Gap
+	GapTotal        int
+	Unresolved      []UnresolvedRef
+	UnresolvedTotal int
+	Truncated       bool
 }
 
 // AuditedUnder builds the report for the caller's tenant. framework, when
-// set, keeps only that framework's criteria.
-func (s *Store) AuditedUnder(ctx context.Context, framework string) (AuditedUnderReport, error) {
+// set, keeps only that framework's criteria. limit caps each list; a value
+// outside 1..AuditedUnderRowCap means AuditedUnderRowCap.
+func (s *Store) AuditedUnder(ctx context.Context, framework string, limit int) (AuditedUnderReport, error) {
+	if limit < 1 || limit > AuditedUnderRowCap {
+		limit = AuditedUnderRowCap
+	}
 	var out AuditedUnderReport
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		rows, err := q.ListAuditedUnderGaps(ctx, dbx.ListAuditedUnderGapsParams{
 			TenantID:      pgUUID(tenantID),
 			FrameworkSlug: optional(framework),
+			RowLimit:      int32(limit), // #nosec G115 -- bounded by AuditedUnderRowCap above.
 		})
 		if err != nil {
 			return fmt.Errorf("mapping overlay: audited-under gaps: %w", err)
 		}
+		if len(rows) > 0 {
+			out.GapTotal = int(rows[0].Total)
+		}
+		unresolved, err := q.ListUnresolvedTestedUnderRefs(ctx, dbx.ListUnresolvedTestedUnderRefsParams{
+			TenantID:      pgUUID(tenantID),
+			FrameworkSlug: optional(framework),
+			RowLimit:      int32(limit), // #nosec G115 -- bounded by AuditedUnderRowCap above.
+		})
+		if err != nil {
+			return fmt.Errorf("mapping overlay: unresolved tested-under references: %w", err)
+		}
+		out.Unresolved = make([]UnresolvedRef, len(unresolved))
+		for i, u := range unresolved {
+			out.Unresolved[i] = UnresolvedRef{
+				ControlID:       uuid.UUID(u.ControlID.Bytes),
+				ControlBundleID: u.ControlBundleID,
+				ControlTitle:    u.ControlTitle,
+				System:          u.RefSystem,
+				Code:            u.RefCode,
+				TestedUnderNote: u.TestedUnderNote,
+			}
+			out.UnresolvedTotal = int(u.Total)
+		}
+		out.Truncated = out.GapTotal > len(rows) || out.UnresolvedTotal > len(unresolved)
 		// Candidates are drawn from the current SCF release, the release
 		// coverage reads by default (#2203). An empty catalog has none.
 		var releaseID pgtype.UUID

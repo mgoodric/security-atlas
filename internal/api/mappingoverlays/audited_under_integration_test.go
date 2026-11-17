@@ -321,3 +321,129 @@ func TestAuditedUnder_CSVNeutralisesFormulas(t *testing.T) {
 		t.Errorf("control_title cell %q starts with '='; want it neutralised", got)
 	}
 }
+
+// addRefs appends tested-under references to a control.
+func addRefs(t *testing.T, f auditedUnderFixture, control uuid.UUID, refs string) {
+	t.Helper()
+	if _, err := f.admin.Exec(context.Background(),
+		`UPDATE controls SET external_refs = external_refs || $2::jsonb WHERE id = $1`, control, refs); err != nil {
+		t.Fatalf("add refs: %v", err)
+	}
+}
+
+// reportCSVHeader fetches the export and returns its response headers.
+func reportCSVHeader(t *testing.T, e env, query string) http.Header {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, e.url+"/v1/mapping-overlays/audited-under/export"+query, nil)
+	req.Header.Set("Authorization", "Bearer "+e.admin)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("export%s: status %d", query, resp.StatusCode)
+	}
+	return resp.Header
+}
+
+// #2324: two references to one criterion on one control are one row, with
+// their distinct notes merged in a fixed order.
+func TestAuditedUnder_FoldsDuplicateReferences(t *testing.T) {
+	f := newAuditedUnderFixture(t)
+	addRefs(t, f, f.controlA, `[`+
+		`{"system":"`+f.framework+`","kind":"tested_under","id":"C2","note":"FY24 walkthrough"},`+
+		`{"system":"`+f.framework+`","kind":"tested_under","id":"C2","note":"FY25 report s4"},`+
+		`{"system":"`+f.framework+`","kind":"tested_under","id":"C2"}]`)
+
+	body, rows := reportRows(t, f.tenantA, f.tenantA.admin, "")
+	if len(rows) != 1 || body["total"] != float64(1) {
+		t.Fatalf("rows = %v, total = %v; want one folded C2 row", rows, body["total"])
+	}
+	if got := rows[0]["tested_under_note"]; got != "FY24 walkthrough; FY25 report s4" {
+		t.Errorf("tested_under_note = %q; want the distinct notes, sorted, joined with '; '", got)
+	}
+	recs := reportCSV(t, f.tenantA, "")
+	if len(recs) != 2 {
+		t.Fatalf("CSV = %v; want header + one row", recs)
+	}
+	if got := recs[1][columnIndex(t, recs[0])["tested_under_note"]]; got != "FY24 walkthrough; FY25 report s4" {
+		t.Errorf("CSV tested_under_note = %q", got)
+	}
+}
+
+// #2324: a reference that names no requirement in the framework's current
+// version, or no framework at all, is listed instead of dropped.
+func TestAuditedUnder_ListsUnresolvedReferences(t *testing.T) {
+	f := newAuditedUnderFixture(t)
+	addRefs(t, f, f.controlA, `[`+
+		`{"system":"`+f.framework+`","kind":"tested_under","id":"C9","note":"typo in FY25 import"},`+
+		`{"system":"`+f.framework+`","kind":"tested_under","id":"C9"},`+
+		`{"system":"no-such-framework","kind":"tested_under","id":"X1"},`+
+		`{"system":"no-such-framework","kind":"mapped_to","id":"X2"}]`)
+
+	body, rows := reportRows(t, f.tenantA, f.tenantA.admin, "")
+	if len(rows) != 1 {
+		t.Errorf("rows = %v; want the C2 gap only", rows)
+	}
+	if body["unresolved_count"] != float64(2) {
+		t.Fatalf("unresolved_count = %v; want 2 (C9 folded, X1; the mapped_to ref is not tested-under)", body["unresolved_count"])
+	}
+	got := map[string]map[string]any{}
+	for _, u := range body["unresolved_references"].([]any) {
+		m := u.(map[string]any)
+		got[m["system"].(string)+":"+m["code"].(string)] = m
+	}
+	c9 := got[f.framework+":C9"]
+	if c9 == nil || c9["control_id"] != f.controlA.String() || c9["tested_under_note"] != "typo in FY25 import" {
+		t.Errorf("C9 = %v; want tenant A's control with its note", c9)
+	}
+	if got["no-such-framework:X1"] == nil {
+		t.Errorf("unresolved = %v; want no-such-framework:X1", got)
+	}
+
+	// The framework filter applies to the reference's system.
+	body, _ = reportRows(t, f.tenantA, f.tenantA.admin, "?framework="+f.framework)
+	if body["unresolved_count"] != float64(1) {
+		t.Errorf("?framework=%s: unresolved_count = %v; want 1", f.framework, body["unresolved_count"])
+	}
+	// Tenant B sees none of A's.
+	if body, _ := reportRows(t, f.tenantB, f.tenantB.admin, ""); body["unresolved_count"] != float64(0) {
+		t.Errorf("tenant B unresolved_count = %v; want 0", body["unresolved_count"])
+	}
+	if h := reportCSVHeader(t, f.tenantA, ""); h.Get("X-Atlas-Unresolved-References") != "2" {
+		t.Errorf("X-Atlas-Unresolved-References = %q; want 2", h.Get("X-Atlas-Unresolved-References"))
+	}
+}
+
+// #2324: ?limit= caps the rows; total and truncated say what was cut.
+func TestAuditedUnder_CapsAndFlagsTruncation(t *testing.T) {
+	f := newAuditedUnderFixture(t)
+	// Unanchored, A's control lists C1 and C2.
+	if _, err := f.admin.Exec(context.Background(),
+		`UPDATE controls SET scf_anchor_id = NULL, anchor_fit = 'none', anchor_fit_note = 'no SCF equivalent' WHERE id = $1`, f.controlA); err != nil {
+		t.Fatal(err)
+	}
+	body, rows := reportRows(t, f.tenantA, f.tenantA.admin, "")
+	if len(rows) != 2 || body["total"] != float64(2) || body["truncated"] != false || body["limit"] != float64(5000) {
+		t.Fatalf("uncapped: %d rows, total=%v truncated=%v limit=%v", len(rows), body["total"], body["truncated"], body["limit"])
+	}
+	body, rows = reportRows(t, f.tenantA, f.tenantA.admin, "?limit=1")
+	if len(rows) != 1 || rows[0]["requirement_code"] != "C1" || body["total"] != float64(2) || body["truncated"] != true {
+		t.Fatalf("limit=1: rows=%v total=%v truncated=%v; want C1 of 2, truncated", rows, body["total"], body["truncated"])
+	}
+	if recs := reportCSV(t, f.tenantA, "?limit=1"); len(recs) != 2 {
+		t.Errorf("CSV limit=1 = %v; want header + one row", recs)
+	}
+	if h := reportCSVHeader(t, f.tenantA, "?limit=1"); h.Get("X-Atlas-Truncated") != "true" {
+		t.Errorf("X-Atlas-Truncated = %q; want true", h.Get("X-Atlas-Truncated"))
+	}
+	if h := reportCSVHeader(t, f.tenantA, ""); h.Get("X-Atlas-Truncated") != "false" {
+		t.Errorf("uncapped X-Atlas-Truncated = %q; want false", h.Get("X-Atlas-Truncated"))
+	}
+	for _, q := range []string{"?limit=0", "?limit=5001", "?limit=abc"} {
+		if status, _ := call(t, f.tenantA, http.MethodGet, "/v1/mapping-overlays/audited-under"+q, f.tenantA.admin, nil); status != http.StatusBadRequest {
+			t.Errorf("%s: status %d; want 400", q, status)
+		}
+	}
+}

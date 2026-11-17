@@ -164,6 +164,19 @@ export default function AuditedUnderPage() {
             </span>
           </div>
 
+          {q.data.truncated ? (
+            <Alert data-testid="audited-under-truncated">
+              <AlertTitle>Report truncated</AlertTitle>
+              <AlertDescription>
+                Showing the first {q.data.count} of {q.data.total} gaps: the
+                report returns at most {q.data.limit} rows per read. Close
+                these, or export one framework at a time, to see the rest.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          <UnresolvedNote report={q.data} />
+
           {rows.length === 0 ? (
             <p
               className="text-sm text-muted-foreground"
@@ -402,6 +415,7 @@ function AddEdgeForm({
               ...prev,
               rows: prev.rows.filter((r) => rowKey(r) !== rowKey(row)),
               count: prev.count - 1,
+              total: prev.total - 1,
             }
           : prev,
       );
@@ -518,5 +532,59 @@ function AddEdgeForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+// UnresolvedNote is the data-quality note for tested-under references the
+// report cannot place (#2324): each names a requirement code the
+// framework's current version does not hold, or a framework the catalog
+// does not hold. They are not gaps, so they get no row action; the fix is
+// the control's reference.
+function UnresolvedNote({ report }: { report: AuditedUnderReport }) {
+  const n = report.unresolved_count;
+  if (n === 0) return null;
+  const refs = report.unresolved_references;
+  return (
+    <Alert data-testid="audited-under-unresolved">
+      <AlertTitle>
+        {n === 1
+          ? "1 tested-under reference does not resolve"
+          : `${n} tested-under references do not resolve`}
+      </AlertTitle>
+      <AlertDescription>
+        <p>
+          Each names a criterion the framework&apos;s current version does not
+          hold, so the report cannot check it. Correct the reference on the
+          control.
+        </p>
+        <details className="mt-2">
+          <summary className="cursor-pointer text-sm font-medium">
+            {refs.length < n
+              ? `Show the first ${refs.length}`
+              : "Show the references"}
+          </summary>
+          <ul className="mt-2 space-y-1 text-sm">
+            {refs.map((u) => (
+              <li
+                key={`${u.control_id}:${u.system}:${u.code}`}
+                data-testid="audited-under-unresolved-ref"
+              >
+                <span className="font-mono">
+                  {u.system} {u.code}
+                </span>{" "}
+                on{" "}
+                <Link
+                  href={`/controls/${encodeURIComponent(u.control_id)}`}
+                  className="underline underline-offset-3"
+                >
+                  {u.control_title}
+                </Link>
+                {u.tested_under_note ? ` (${u.tested_under_note})` : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      </AlertDescription>
+    </Alert>
   );
 }

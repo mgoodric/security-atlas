@@ -4142,7 +4142,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/mapping-overlays/audited-under:
     get:
-      summary: GET /v1/mapping-overlays/audited-under — controls whose anchor, through catalog and overlay edges, does not reach a criterion they were tested under, with candidate anchors from the current SCF release; ?framework
+      summary: GET /v1/mapping-overlays/audited-under — controls whose anchor, through catalog and overlay edges, does not reach a criterion they were tested under, with candidate anchors from the current SCF release, unresolved tested-under references, and a total/truncated pair; ?framework, ?limit (1-5000, default 5000)
       tags: [mapping-overlays]
       operationId: get-v1-mapping-overlays-audited-under
       security:
@@ -4156,7 +4156,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/mapping-overlays/audited-under/export:
     get:
-      summary: GET /v1/mapping-overlays/audited-under/export — the audited-under report as CSV; ?framework
+      summary: GET /v1/mapping-overlays/audited-under/export — the audited-under report as CSV, streamed; X-Atlas-Truncated and X-Atlas-Unresolved-References headers; ?framework, ?limit
       tags: [mapping-overlays]
       operationId: get-v1-mapping-overlays-audited-under-export
       security:
