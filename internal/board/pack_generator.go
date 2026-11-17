@@ -27,7 +27,12 @@ package board
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // VendorBurndownReader is the narrow view of the slice-122 high-criticality
@@ -69,9 +74,56 @@ type VendorBurndownReadout struct {
 // append), the slice-273 vendor-burndown reader, and a wall-clock source
 // (overridable in tests for determinism).
 type PackGenerator struct {
-	store   *PackStore
-	vendors VendorBurndownReader
-	now     func() time.Time
+	store    *PackStore
+	vendors  VendorBurndownReader
+	now      func() time.Time
+	switches Switches
+}
+
+// Switches answers whether a module is switched on for a tenant.
+// moduleaccess.Views satisfies it.
+type Switches interface {
+	SwitchedOn(ctx context.Context, tenantID uuid.UUID, key string) (bool, error)
+}
+
+// WithSwitches makes Generate leave out the sections of a module that is
+// switched off for the tenant (#2175): vendor_burndown follows Third-party
+// risk and top_risks follows Risk. nil (the default) generates every
+// section.
+func (g *PackGenerator) WithSwitches(sw Switches) *PackGenerator {
+	g.switches = sw
+	return g
+}
+
+// omitted returns the sections whose module is switched off for ctx's
+// tenant, in SectionKeys order.
+func (g *PackGenerator) omitted(ctx context.Context) ([]string, error) {
+	if g.switches == nil {
+		return nil, nil
+	}
+	raw, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenantID, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("board: tenant id: %w", err)
+	}
+	var out []string
+	for _, key := range SectionKeys {
+		module, ok := sectionModule[key]
+		if !ok {
+			continue
+		}
+		on, err := g.switches.SwitchedOn(ctx, tenantID, module)
+		if err != nil {
+			return nil, fmt.Errorf("board: module switch: %w", err)
+		}
+		if !on {
+			out = append(out, key)
+		}
+	}
+	return out, nil
 }
 
 // NewPackGenerator wires a PackGenerator. The pack Store handles the
@@ -129,6 +181,11 @@ func (g *PackGenerator) Generate(ctx context.Context, periodEnd string) (StoredP
 // read, no write. Split out from Generate so the assembly is testable in
 // isolation from the append.
 func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt time.Time) (Pack, error) {
+	omitted, err := g.omitted(ctx)
+	if err != nil {
+		return Pack{}, err
+	}
+
 	// --- posture: the dashboard's per-framework posture, trend measured
 	//     over the 90 days before generation (#2056) ---
 	postureRows, err := g.store.FrameworkPosture(ctx, generatedAt.Add(-PostureTrendWindow))
@@ -163,7 +220,7 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	//     scalars — the honest read for a deployment without the vendor
 	//     module attached. ---
 	var vendorBD VendorBurndownReadout
-	if g.vendors != nil {
+	if g.vendors != nil && !slices.Contains(omitted, SectionVendorBurndown) {
 		vendorBD, err = g.vendors.ReadHighCriticalityBurndown(ctx, periodEnd)
 		if err != nil {
 			return Pack{}, fmt.Errorf("board: vendor burndown read: %w", err)
@@ -175,6 +232,7 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 		GeneratedAt: generatedAt.Format(time.RFC3339),
 		Status:      PackStatusDraft,
 		Sections:    make(map[string]Section, len(SectionKeys)),
+		Omitted:     omitted,
 	}
 
 	// Generated sections.
@@ -225,6 +283,11 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	// The coverage delta, its mirror on investment, and the cost per point
 	// are derived the same way here as on every operator edit.
 	recomputeDerived(pack.Sections)
+
+	// Sections of a switched-off module are left out (#2175).
+	for _, key := range omitted {
+		delete(pack.Sections, key)
+	}
 
 	// Render each section's templated narrative. Pure text/template, NO LLM.
 	for key, sec := range pack.Sections {

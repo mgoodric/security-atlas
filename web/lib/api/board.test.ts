@@ -12,6 +12,7 @@ import { describe, expect, test } from "vitest";
 import {
   BOARD_PACK_SECTION_KEYS,
   BoardPackSection,
+  packSectionKeys,
   SECTION_TITLES,
   sectionLabel,
 } from "./board";
@@ -145,5 +146,33 @@ describe("publish blocker labels", () => {
     for (const label of labels) {
       expect(label).not.toMatch(/^[a-z_]+$/);
     }
+  });
+});
+
+// #2175: a pack generated while a module was switched off lists the
+// sections it left out; the page shows the rest, in canonical order, and
+// a pack with nothing omitted keeps every fixed key.
+describe("packSectionKeys", () => {
+  const content = (omitted?: string[]) => ({
+    period_end: "2026-09-30",
+    generated_at: "2026-10-01T00:00:00Z",
+    status: "draft",
+    sections: {},
+    omitted_sections: omitted,
+  });
+
+  test("no omitted sections keeps every fixed key", () => {
+    expect(packSectionKeys(content())).toEqual(BOARD_PACK_SECTION_KEYS);
+  });
+
+  test("omitted sections are left out, order kept", () => {
+    expect(packSectionKeys(content(["top_risks", "vendor_burndown"]))).toEqual([
+      "posture",
+      "coverage_trend",
+      "open_findings",
+      "operational_metrics",
+      "investment",
+      "asks",
+    ]);
   });
 });
