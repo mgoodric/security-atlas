@@ -32,15 +32,19 @@ RETURNING *;
 -- The evaluation engine's read of the evidence ledger for one control,
 -- bounded by the point-in-time horizon `as_of` (AC-1's `?as-of=` and AC-7's
 -- replay both pass an explicit horizon; live evaluation passes 'infinity').
--- Ordered observed_at DESC so the engine sees the freshest record first.
+-- Ordered observed_at DESC so the engine sees the freshest record first,
+-- then ingested_at DESC and id DESC so records sharing an observed_at come
+-- back in one fixed order (#2111: the latest attestation wins, and equal
+-- timestamps must not make that choice depend on the plan).
 -- This is a pure SELECT — the engine never mutates the ledger.
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, result, freshness_class, hash, payload
+       observed_at, result, freshness_class, hash, payload,
+       evidence_kind, ingested_at
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)
   AND observed_at <= $4
-ORDER BY observed_at DESC;
+ORDER BY observed_at DESC, ingested_at DESC, id DESC;
 
 -- name: ListLatestControlEvaluations :many
 -- Every (control, scope_cell)'s latest state for one control. DISTINCT ON

@@ -135,7 +135,7 @@ func EvaluateFixture(ctx context.Context, freshnessClass string, queries []Fixtu
 	inWindow := inWindowRecords(all, freshnessClass, now)
 	freshness := computeFreshness(all, freshnessClass, now)
 
-	result, err := evalFixtureQueries(ctx, queries, inWindow, tx)
+	result, err := evalFixtureQueries(ctx, queries, latestAttestationWins(inWindow), tx)
 	if err != nil {
 		return FixtureResult{}, err
 	}

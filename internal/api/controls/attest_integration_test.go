@@ -51,6 +51,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
 		"evidence_audit_log",
+		"control_evaluations",
 		"evidence_records",
 		"controls",
 	)
@@ -158,8 +159,10 @@ func bootRegistry(t *testing.T, admin *pgxpool.Pool) *schemaregistry.Service {
 	if err := reg.LoadFromDB(ctx); err != nil {
 		t.Fatalf("LoadFromDB: %v", err)
 	}
-	if !reg.IsRegistered("manual.attestation.v1", "1.1.0") {
-		t.Fatalf("boot: manual.attestation.v1/1.1.0 missing from cache")
+	for _, v := range []string{"1.1.0", "1.2.0"} {
+		if !reg.IsRegistered("manual.attestation.v1", v) {
+			t.Fatalf("boot: manual.attestation.v1/%s missing from cache", v)
+		}
 	}
 	return reg
 }
@@ -706,5 +709,187 @@ func TestAttest_Rejects_MissingRequiredAttestationData(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "reviewer") {
 		t.Fatalf("error must mention reviewer; got %s", raw)
+	}
+}
+
+// ----- #2111: attestation pass / fail -----
+
+// attestWire is the slice of the submit response the #2111 tests read.
+type attestWire struct {
+	RecordID  string `json:"record_id"`
+	Result    string `json:"result"`
+	Evaluated bool   `json:"evaluated"`
+}
+
+func attestBody(statement string, extra map[string]any) map[string]any {
+	body := map[string]any{
+		"statement":        statement,
+		"attestation_data": map[string]any{"reviewer": "sample-user@example.com"},
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+	return body
+}
+
+// ledgerResult reads one record's result column, payload.result and
+// schema_version.
+func ledgerResult(t *testing.T, recordID string) (column string, payloadResult *string, schemaVersion string) {
+	t.Helper()
+	admin := dbtest.NewMigratePool(t)
+	if err := admin.QueryRow(context.Background(), `
+		SELECT result::text, payload->>'result', schema_version
+		FROM evidence_records WHERE id = $1
+	`, recordID).Scan(&column, &payloadResult, &schemaVersion); err != nil {
+		t.Fatalf("read ledger row: %v", err)
+	}
+	return column, payloadResult, schemaVersion
+}
+
+// latestControlResult reads the control's most recent evaluation result.
+func latestControlResult(t *testing.T, controlID string) string {
+	t.Helper()
+	admin := dbtest.NewMigratePool(t)
+	var result string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT result::text FROM control_evaluations
+		WHERE control_id = $1
+		ORDER BY evaluated_at DESC, created_at DESC
+		LIMIT 1
+	`, controlID).Scan(&result); err != nil {
+		t.Fatalf("read control evaluation: %v", err)
+	}
+	return result
+}
+
+// A 1.2.0 fail without a fail_reason is refused, and nothing is written.
+func TestAttest_FailWithoutReason_Refused(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_fail_no_reason")
+	for _, extra := range []map[string]any{
+		{"result": "fail"},
+		{"result": "fail", "fail_reason": "  "},
+	} {
+		status, raw := httpJSON(t, s, http.MethodPost,
+			"/v1/controls/"+controlID+"/attestations", s.ownerBear, attestBody("Review found a gap.", extra))
+		if status != http.StatusBadRequest {
+			t.Fatalf("%v: expected 400; got %d body=%s", extra, status, raw)
+		}
+		if !strings.Contains(string(raw), "fail_reason") {
+			t.Fatalf("error must mention fail_reason; got %s", raw)
+		}
+	}
+	admin := dbtest.NewMigratePool(t)
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE control_id = $1`, controlID).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("refused attestation wrote %d ledger rows", n)
+	}
+}
+
+// The schema refuses the same payload on the ledger side, so a pusher that
+// skips the attest handler cannot record a fail without a reason.
+func TestAttestSchema_120_FailWithoutReason_Refused(t *testing.T) {
+	s := setupHTTP(t)
+	bad := []byte(`{"attestor":"u","statement":"s","result":"fail"}`)
+	if err := s.registry.ValidatePayload(context.Background(), s.tenant, "manual.attestation.v1", "1.2.0", bad); err == nil {
+		t.Fatalf("1.2.0 fail without fail_reason validated")
+	}
+	ok := []byte(`{"attestor":"u","statement":"s","result":"fail","fail_reason":"r"}`)
+	if err := s.registry.ValidatePayload(context.Background(), s.tenant, "manual.attestation.v1", "1.2.0", ok); err != nil {
+		t.Fatalf("1.2.0 fail with fail_reason: %v", err)
+	}
+}
+
+// A 1.1.0 payload (no result) still validates, and the attest handler
+// records a body without result as a pass.
+func TestAttest_Payload110_AcceptedAsPass(t *testing.T) {
+	s := setupHTTP(t)
+	v110 := []byte(`{"attestor":"u","statement":"s","attestation_data":{"reviewer":"r"}}`)
+	if err := s.registry.ValidatePayload(context.Background(), s.tenant, "manual.attestation.v1", "1.1.0", v110); err != nil {
+		t.Fatalf("1.1.0 payload: %v", err)
+	}
+
+	controlID := uploadBundle(t, s, "attest_110_pass")
+	status, raw := httpJSON(t, s, http.MethodPost,
+		"/v1/controls/"+controlID+"/attestations", s.ownerBear, attestBody("Review complete.", nil))
+	if status != http.StatusCreated {
+		t.Fatalf("expected 201; got %d body=%s", status, raw)
+	}
+	var resp attestWire
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	if resp.Result != "pass" {
+		t.Fatalf("response result: got %q want pass", resp.Result)
+	}
+	column, payloadResult, version := ledgerResult(t, resp.RecordID)
+	if column != "pass" || payloadResult == nil || *payloadResult != "pass" {
+		t.Fatalf("ledger: result=%q payload.result=%v; want pass", column, payloadResult)
+	}
+	if version != "1.2.0" {
+		t.Fatalf("schema_version: got %q want 1.2.0", version)
+	}
+}
+
+// Fail then pass then fail: the record carries the submitted result, the
+// control is evaluated right after each attestation, and the latest one
+// decides.
+func TestAttest_LatestAttestationDecidesControlState(t *testing.T) {
+	s := setupHTTP(t)
+	controlID := uploadBundle(t, s, "attest_latest_decides")
+	base := time.Now().UTC().Add(-time.Hour)
+
+	post := func(statement string, extra map[string]any) attestWire {
+		t.Helper()
+		status, raw := httpJSON(t, s, http.MethodPost,
+			"/v1/controls/"+controlID+"/attestations", s.ownerBear, attestBody(statement, extra))
+		if status != http.StatusCreated {
+			t.Fatalf("expected 201; got %d body=%s", status, raw)
+		}
+		var resp attestWire
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("decode: %v body=%s", err, raw)
+		}
+		if !resp.Evaluated {
+			t.Fatalf("control was not evaluated after the attestation: %s", raw)
+		}
+		return resp
+	}
+
+	failed := post("Review found two stale accounts.", map[string]any{
+		"result":      "fail",
+		"fail_reason": "two leavers still had console access",
+		"observed_at": base.Format(time.RFC3339Nano),
+	})
+	if failed.Result != "fail" {
+		t.Fatalf("response result: got %q want fail", failed.Result)
+	}
+	column, payloadResult, _ := ledgerResult(t, failed.RecordID)
+	if column != "fail" || payloadResult == nil || *payloadResult != "fail" {
+		t.Fatalf("ledger: result=%q payload.result=%v; want fail", column, payloadResult)
+	}
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("after fail: control result %q, want fail", got)
+	}
+
+	post("Stale accounts removed; review clean.", map[string]any{
+		"result":      "pass",
+		"observed_at": base.Add(30 * time.Minute).Format(time.RFC3339Nano),
+	})
+	if got := latestControlResult(t, controlID); got != "pass" {
+		t.Fatalf("fail then pass: control result %q, want pass", got)
+	}
+
+	post("Re-check found a new gap.", map[string]any{
+		"result":      "fail",
+		"fail_reason": "a contractor account was re-enabled",
+		"observed_at": base.Add(45 * time.Minute).Format(time.RFC3339Nano),
+	})
+	if got := latestControlResult(t, controlID); got != "fail" {
+		t.Fatalf("pass then fail: control result %q, want fail", got)
 	}
 }

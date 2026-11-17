@@ -19,6 +19,11 @@
 // "Attestation recorded" toast, so it is never left filled. Required
 // fields are checked here and reported inline beside each field (the
 // form is noValidate, so the browser shows no native bubble).
+//
+// #2111: the form asks for the result, pass or fail, and a fail needs a
+// reason. On success it returns to the control with `?attested=<the
+// record's ingested_at>`, and the control page shows "Evaluating…" until
+// the evaluation that attestation triggered has landed.
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -28,8 +33,11 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import {
   AttestForm as AttestFormShape,
+  AttestResult,
   AttestSubmitRequest,
+  AttestSubmitResponse,
 } from "@/lib/api/attest";
+import { ATTESTED_PARAM } from "@/lib/attest-evaluation";
 
 type FormProperty = {
   name: string;
@@ -80,6 +88,8 @@ function extractProperties(
 // Key for the platform-required statement in the inline-error map. Not a
 // valid JSON-Schema property name, so it cannot collide with one.
 const STATEMENT_FIELD = "$statement";
+// Key for the fail reason, on the same terms.
+const FAIL_REASON_FIELD = "$fail_reason";
 
 function isLongString(prop: FormProperty): boolean {
   // Heuristic: descriptions or anything with maxLength > 200 → textarea.
@@ -121,6 +131,8 @@ export function AttestForm({
     [form.manual_evidence_schema],
   );
   const [statement, setStatement] = useState("");
+  const [result, setResult] = useState<AttestResult>("pass");
+  const [failReason, setFailReason] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -138,6 +150,8 @@ export function AttestForm({
     const errs: Record<string, string> = {};
     if (statement.trim() === "")
       errs[STATEMENT_FIELD] = "Statement is required.";
+    if (result === "fail" && failReason.trim() === "")
+      errs[FAIL_REASON_FIELD] = "A reason is required for a fail.";
     for (const prop of properties) {
       if (prop.required && prop.type !== "boolean" && !values[prop.name]) {
         errs[prop.name] = `${prop.title ?? prop.name} is required.`;
@@ -211,7 +225,9 @@ export function AttestForm({
       const body: AttestSubmitRequest = {
         statement,
         attestation_data: attestationData,
+        result,
       };
+      if (result === "fail") body.fail_reason = failReason.trim();
       if (artifactID) body.artifact_id = artifactID;
       const res = await fetch(targetSubmit, {
         method: "POST",
@@ -222,8 +238,16 @@ export function AttestForm({
         const txt = await res.text();
         throw new Error(`${res.status}: ${txt}`);
       }
+      const recorded = (await res.json()) as AttestSubmitResponse;
       toast("Attestation recorded");
-      router.push(`/controls/${encodeURIComponent(form.control_id)}`);
+      const back = `/controls/${encodeURIComponent(form.control_id)}`;
+      router.push(
+        recorded.ingested_at
+          ? `${back}?${ATTESTED_PARAM}=${encodeURIComponent(
+              recorded.ingested_at,
+            )}`
+          : back,
+      );
     } catch (err) {
       setError((err as Error).message);
       setBusy(false);
@@ -246,6 +270,57 @@ export function AttestForm({
           Your account does not hold owner_role{" "}
           <code className="font-mono">{form.owner_role}</code>; the submit
           button will be rejected.
+        </div>
+      ) : null}
+
+      <fieldset data-testid="attest-result">
+        <legend className="block text-sm font-medium">
+          Result <span className="text-red-600">*</span>
+        </legend>
+        <div className="mt-1 flex gap-4 text-sm">
+          {(["pass", "fail"] as const).map((r) => (
+            <label key={r} className="flex items-center gap-1.5">
+              <input
+                type="radio"
+                name="attest-result"
+                value={r}
+                checked={result === r}
+                onChange={() => {
+                  setResult(r);
+                  setFieldErrors((errs) => ({
+                    ...errs,
+                    [FAIL_REASON_FIELD]: "",
+                  }));
+                }}
+                data-testid={`attest-result-${r}`}
+              />
+              {r === "pass" ? "Pass" : "Fail"}
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          The latest attestation decides the control&apos;s attested outcome.
+        </p>
+      </fieldset>
+
+      {result === "fail" ? (
+        <div>
+          <label className="block text-sm font-medium" htmlFor="fail-reason">
+            Reason for the fail <span className="text-red-600">*</span>
+          </label>
+          <textarea
+            id="fail-reason"
+            rows={2}
+            value={failReason}
+            onChange={(e) => {
+              setFailReason(e.target.value);
+              setFieldErrors((errs) => ({ ...errs, [FAIL_REASON_FIELD]: "" }));
+            }}
+            className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 font-sans text-sm"
+            data-testid="attest-fail-reason"
+            {...errorProps(FAIL_REASON_FIELD)}
+          />
+          {fieldError(FAIL_REASON_FIELD)}
         </div>
       ) : null}
 
