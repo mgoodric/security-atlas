@@ -177,6 +177,7 @@ func TestContract_ControlRisks(t *testing.T) {
 		{
 			ID:            pgID(contractRiskID),
 			Title:         "Unpatched perimeter dependency",
+			Methodology:   dbx.RiskMethodologyNist80030,
 			InherentScore: []byte(`{"likelihood":4,"impact":5,"severity":20}`),
 			ResidualScore: []byte(`{"likelihood":2,"impact":4,"severity":8}`),
 			DesignScore:   mustNumeric("0.750"),
@@ -185,6 +186,7 @@ func TestContract_ControlRisks(t *testing.T) {
 		{
 			ID:            pgID(contractScopeID),
 			Title:         "Vendor SOC 2 report pending renewal",
+			Methodology:   dbx.RiskMethodologyFair,
 			InherentScore: nil,
 			ResidualScore: nil,
 			DesignScore:   pgtype.Numeric{Valid: false},

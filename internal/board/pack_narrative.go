@@ -32,7 +32,6 @@ var packSectionFuncs = template.FuncMap{
 	"signed":     signedInt,
 	"pts":        signedPts,
 	"pct":        formatPct,
-	"band":       severityBandLabel,
 	"noBaseline": func() string { return noBaselineText },
 	"add1":       func(i int) int { return i + 1 },
 	"pluralize": func(n int, singular, plural string) string {
@@ -88,7 +87,7 @@ var sectionSources = map[string]string{
 		`{{ else }}No frameworks are registered yet — register a framework to populate per-framework posture.{{ end }}`,
 
 	SectionTopRisks: `{{ if .Data.TopRisks }}The {{ len .Data.TopRisks }} highest-severity open {{ pluralize (len .Data.TopRisks) "risk" "risks" }} aging in the register: ` +
-		`{{ range $i, $r := .Data.TopRisks }}{{ add1 $i }}) {{ $r.Title }} ({{ $r.CategoryLabel }}, treatment: {{ $r.Treatment }}, residual severity {{ printf "%.1f" $r.ResidualSeverity }} of 25, {{ band $r.ResidualSeverity }}, open {{ $r.AgeDays }} {{ pluralize $r.AgeDays "day" "days" }}){{ end }}.` +
+		`{{ range $i, $r := .Data.TopRisks }}{{ add1 $i }}) {{ $r.Title }} ({{ $r.CategoryLabel }}, treatment: {{ $r.Treatment }}, {{ if $r.Monetary }}FAIR residual annualized loss exposure {{ $r.ResidualLabel }}{{ else }}residual severity {{ printf "%.1f" $r.ResidualSeverity }} of 25, {{ $r.Band }}{{ end }}, open {{ $r.AgeDays }} {{ pluralize $r.AgeDays "day" "days" }}){{ end }}.` +
 		`{{ else }}No open risks in the register.{{ end }}`,
 
 	// A pack stored before #2056 has no scoped-framework count; its figures

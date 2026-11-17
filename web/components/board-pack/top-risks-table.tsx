@@ -4,6 +4,7 @@
 // residual severity, and aging days. Data only — no fabrication.
 
 import {
+  formatDollars,
   formatSeverity,
   severityBand,
   severityBandLabel,
@@ -20,6 +21,10 @@ export type RiskAgingRow = {
   // stored before it was frozen in, which show the slug instead.
   category_name?: string;
   treatment: string;
+  // #2185: the risk's methodology. On "fair" residual_severity is a dollar
+  // amount (annualized loss exposure), not a 1..25 severity. Absent on packs
+  // stored before it was frozen in, which read as 5x5.
+  methodology?: string;
   residual_severity: number;
   age_days: number;
 };
@@ -81,17 +86,27 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
               </span>
             </td>
             <td className="py-3 pr-3 text-right font-mono text-foreground">
-              {/* #2058: the board generator's residual_severity is on the
-                  1..25 scale; show it with the register's band label. */}
-              <span data-testid="top-risks-residual">
-                {formatSeverity(risk.residual_severity)}
-              </span>{" "}
-              <span
-                className="text-[11px] text-muted-foreground"
-                data-testid="top-risks-residual-band"
-              >
-                {severityBandLabel(severityBand(risk.residual_severity))}
-              </span>
+              {risk.methodology === "fair" ? (
+                // #2185: a FAIR residual is dollars, with no 5x5 band. The
+                // generator ranks FAIR risks after every 5x5 risk.
+                <span data-testid="top-risks-residual">
+                  {formatDollars(risk.residual_severity)}
+                </span>
+              ) : (
+                <>
+                  {/* #2058: the board generator's residual_severity is on
+                      the 1..25 scale; show it with the register's band. */}
+                  <span data-testid="top-risks-residual">
+                    {formatSeverity(risk.residual_severity)}
+                  </span>{" "}
+                  <span
+                    className="text-[11px] text-muted-foreground"
+                    data-testid="top-risks-residual-band"
+                  >
+                    {severityBandLabel(severityBand(risk.residual_severity))}
+                  </span>
+                </>
+              )}
             </td>
             <td className="py-3 text-right font-mono text-muted-foreground">
               {risk.age_days} d

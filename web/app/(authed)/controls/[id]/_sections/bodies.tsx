@@ -265,7 +265,7 @@ export function RisksBody({
                 {r.title}
               </Link>
               <span className="font-mono text-xs text-muted-foreground">
-                {formatResidualScore(r.residual_score)} residual
+                {formatResidualScore(r.residual_score, r.methodology)} residual
               </span>
             </div>
             {typeof r.link_weight === "number" ? (
