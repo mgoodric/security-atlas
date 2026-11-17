@@ -6,7 +6,9 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   canBeChildOf,
-  fetchRisksList,
+  FETCH_ALL_RISKS_MAX_PAGES,
+  fetchHighSeverityRiskTotal,
+  fetchRiskRegisterTotal,
   fetchRisksListWithRollUps,
   listRisks,
 } from "./risks";
@@ -52,13 +54,64 @@ describe("risk list fetchers and roll-ups", () => {
     expect(String(spy.mock.calls[0]?.[0]).endsWith("/v1/risks")).toBe(true);
   });
 
-  test.each([
-    [fetchRisksList, "/api/risks"],
-    [fetchRisksListWithRollUps, "/api/risks?include_rollups=true"],
-  ])("%o reads the BFF at %s", async (fetcher, url) => {
+  test("fetchRisksListWithRollUps reads the BFF with roll-ups kept", async () => {
     const spy = stubFetch({ risks: [] });
-    await expect(fetcher()).resolves.toEqual({ risks: [], count: 0, total: 0 });
-    expect(spy.mock.calls[0]?.[0]).toBe(url);
+    await expect(fetchRisksListWithRollUps()).resolves.toEqual({
+      risks: [],
+      count: 0,
+      total: 0,
+    });
+    expect(spy.mock.calls[0]?.[0]).toBe("/api/risks?include_rollups=true");
+  });
+
+  test("listRisks forwards severity_band (#2490)", async () => {
+    const spy = stubFetch({ risks: [], total: 2 });
+    await listRisks("test-bearer-2490", { severity_band: "high", limit: "1" });
+    expect(
+      String(spy.mock.calls[0]?.[0]).endsWith(
+        "/v1/risks?severity_band=high&limit=1",
+      ),
+    ).toBe(true);
+  });
+
+  // #2490: the badge and the register's "N of M" read the platform's total
+  // off a one-row page, not the whole register.
+  test("fetchHighSeverityRiskTotal reads total off one high-band row", async () => {
+    const spy = stubFetch({ risks: [{ id: "r1" }], total: 7 });
+    await expect(fetchHighSeverityRiskTotal()).resolves.toBe(7);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe(
+      "/api/risks?severity_band=high&limit=1",
+    );
+  });
+
+  test("fetchHighSeverityRiskTotal refuses a response with no total", async () => {
+    stubFetch({ risks: [{ id: "r1" }] });
+    await expect(fetchHighSeverityRiskTotal()).rejects.toThrow("no total");
+  });
+
+  test("fetchRiskRegisterTotal reads total off one row", async () => {
+    const spy = stubFetch({ risks: [{ id: "r1" }], total: 640 });
+    await expect(fetchRiskRegisterTotal()).resolves.toBe(640);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBe("/api/risks?limit=1");
+  });
+
+  // #2490: an upstream whose pages never reach total stops at the cap and
+  // returns what it read, flagged partial, instead of looping or throwing.
+  test("fetchAllRisks stops at the page cap and flags partial", async () => {
+    let n = 0;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      n++;
+      return new Response(
+        JSON.stringify({ risks: [{ id: `r${n}` }], total: 1_000_000 }),
+      );
+    });
+    const all = await fetchRisksListWithRollUps();
+    expect(spy).toHaveBeenCalledTimes(FETCH_ALL_RISKS_MAX_PAGES);
+    expect(all.risks).toHaveLength(FETCH_ALL_RISKS_MAX_PAGES);
+    expect(all.partial).toBe(true);
+    expect(all.total).toBe(1_000_000);
   });
 
   // #2482: the platform returns at most 500 rows a call, so the whole-list
@@ -92,8 +145,9 @@ describe("risk list fetchers and roll-ups", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ risks: [], total: 5 })),
       );
-    const all = await fetchRisksList();
+    const all = await fetchRisksListWithRollUps();
     expect(all.risks).toHaveLength(1);
+    expect(all.partial).toBeUndefined();
     expect(spy).toHaveBeenCalledTimes(2);
   });
 

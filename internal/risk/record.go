@@ -126,6 +126,11 @@ func applyRecordFields(current Risk, in RecordFields) (Risk, recordDiff, recordD
 		if err := ValidateInherentScore(next.Methodology, next.InherentScore); err != nil {
 			return Risk{}, nil, nil, err
 		}
+		// PATCH never writes residual_score (patchRefusedFields), so only
+		// the inherent score is checked; a stored residual is left alone.
+		if err := ValidateScoreNumbers(next.Methodology, next.InherentScore, nil); err != nil {
+			return Risk{}, nil, nil, err
+		}
 		if next.Methodology == dbx.RiskMethodologyFair {
 			normalized, err := NormalizeFairScoreJSON(next.InherentScore)
 			if err != nil {
