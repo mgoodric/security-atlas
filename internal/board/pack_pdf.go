@@ -152,13 +152,12 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 			return
 		}
 		w.WriteString(`<table><thead><tr><th>#</th><th>Risk</th><th>Category</th>` +
-			`<th>Treatment</th><th>Residual severity (1-25)</th><th>Age (days)</th></tr></thead><tbody>`)
+			`<th>Treatment</th><th>Residual (1-25, FAIR in $)</th><th>Age (days)</th></tr></thead><tbody>`)
 		for i, r := range d.TopRisks {
 			fmt.Fprintf(w,
-				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%.1f %s</td><td>%d</td></tr>`,
+				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td></tr>`,
 				i+1, html.EscapeString(r.Title), html.EscapeString(r.CategoryLabel()),
-				html.EscapeString(r.Treatment), r.ResidualSeverity,
-				severityBandLabel(r.ResidualSeverity), r.AgeDays)
+				html.EscapeString(r.Treatment), html.EscapeString(r.ResidualLabel()), r.AgeDays)
 		}
 		w.WriteString(`</tbody></table>`)
 

@@ -36,8 +36,12 @@ export const ALL = "all" as const;
  *
  *   high   = severity >= 15   (rose)
  *   medium = 8..14            (amber)
- *   low    = 1..7             (emerald)
+ *   low    = above 0, under 8 (emerald)
  *   none   = 0                (no numeric score on inherent_score)
+ *
+ * Any value above 0 is at least low (#2185): a residual of 0.4 (strong
+ * controls on a low inherent) is low, not none. Same bands as the Go
+ * `risk.SeverityBand`. Never band a FAIR (dollar) value.
  *
  * `none` is bucketed separately so a risk with a malformed score (or a
  * FAIR risk with no L×I component) is not silently lumped into "low".
@@ -49,7 +53,7 @@ export type SeverityBand = "high" | "medium" | "low" | "none";
 export function severityBand(severity: number): SeverityBand {
   if (severity >= 15) return "high";
   if (severity >= 8) return "medium";
-  if (severity >= 1) return "low";
+  if (severity > 0) return "low";
   return "none";
 }
 
