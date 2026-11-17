@@ -47,7 +47,7 @@ vi.mock("@/lib/api/needs-attention", async (importOriginal) => ({
 import * as api from "@/lib/api/dashboard";
 import * as na from "@/lib/api/needs-attention";
 
-const mocked = {
+const mocked: Record<string, ReturnType<typeof vi.fn>> = {
   ...(api as unknown as Record<string, ReturnType<typeof vi.fn>>),
   getNeedsAttention: na.getNeedsAttention as unknown as ReturnType<
     typeof vi.fn
