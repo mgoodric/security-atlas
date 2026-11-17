@@ -32,6 +32,22 @@ export const CONTROL_TABS = [
 
 export type TabKey = (typeof CONTROL_TABS)[number]["key"];
 
+/**
+ * visibleControlTabs drops the link tabs into a module the caller cannot
+ * see (#2174): Policies with the Policies module, Risks with Risk. The
+ * tab is gone entirely, with no count of what it would have held.
+ */
+export function visibleControlTabs(sees: {
+  policies: boolean;
+  risks: boolean;
+}): (typeof CONTROL_TABS)[number][] {
+  return CONTROL_TABS.filter(
+    (t) =>
+      (t.key !== "policies" || sees.policies) &&
+      (t.key !== "risks" || sees.risks),
+  );
+}
+
 const TAB_KEY_SET = new Set<string>(CONTROL_TABS.map((t) => t.key));
 
 /**

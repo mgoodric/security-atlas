@@ -49,16 +49,41 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Handler bundles the slice-384 routes over a single actionplan.Store.
 type Handler struct {
 	store *actionplan.Store
+	views *moduleaccess.Views
 }
 
 // New constructs a Handler.
 func New(store *actionplan.Store) *Handler { return &Handler{store: store} }
+
+// WithModules wires the module views the owner_lacks_access flag reads
+// (#2174). Without them (a unit-test server) no owner is flagged.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// flagOwners sets owner_lacks_access on each plan from its owner's live
+// module access (action plans belong to Risk). An error fails the read
+// rather than drop the flag.
+func (h *Handler) flagOwners(r *http.Request, out []planWire) error {
+	check, err := h.views.Owners(r, "risk")
+	if err != nil {
+		return err
+	}
+	for i := range out {
+		if out[i].OwnerLacksAccess, err = check.Lacks(out[i].OwnerID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // ----- wire shapes -----
 
@@ -93,14 +118,17 @@ type linkageWire struct {
 }
 
 type planWire struct {
-	ID              string  `json:"id"`
-	Title           string  `json:"title"`
-	Description     string  `json:"description"`
-	TriggeringEvent string  `json:"triggering_event"`
-	OwnerID         string  `json:"owner_id"`
-	DueDate         *string `json:"due_date,omitempty"`
-	Status          string  `json:"status"`
-	AuditPeriodID   *string `json:"audit_period_id,omitempty"`
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	TriggeringEvent string `json:"triggering_event"`
+	OwnerID         string `json:"owner_id"`
+	// OwnerLacksAccess (#2174), computed at read time and present only
+	// when true: the owner can no longer work in Risk. The owner is kept.
+	OwnerLacksAccess bool    `json:"owner_lacks_access,omitempty"`
+	DueDate          *string `json:"due_date,omitempty"`
+	Status           string  `json:"status"`
+	AuditPeriodID    *string `json:"audit_period_id,omitempty"`
 	// ControlsFailing: completed, and the linked controls do not all pass
 	// their latest evaluation (#2109). Set on the single-plan read.
 	ControlsFailing bool      `json:"controls_failing"`
@@ -203,6 +231,10 @@ func (h *Handler) ListActionPlans(w http.ResponseWriter, r *http.Request) {
 	for i, p := range rows {
 		out[i] = planWireFrom(p)
 	}
+	if err := h.flagOwners(r, out); err != nil {
+		httperr.WriteInternal(w, r, "action plan owner access", err)
+		return
+	}
 	body := map[string]any{"action_plans": out, "count": len(out)}
 	// Emit a next-cursor when the page is full (more rows may exist).
 	if len(rows) == actionplan.ClampLimit(filter.Limit) && len(rows) > 0 {
@@ -233,8 +265,13 @@ func (h *Handler) GetActionPlan(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "get action plan", err)
 		return
 	}
+	plan := []planWire{planWireFrom(p)}
+	if err := h.flagOwners(r, plan); err != nil {
+		httperr.WriteInternal(w, r, "action plan owner access", err)
+		return
+	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
-		"action_plan": planWireFrom(p),
+		"action_plan": plan[0],
 		"linkage":     linkageWireFrom(lk),
 	})
 }

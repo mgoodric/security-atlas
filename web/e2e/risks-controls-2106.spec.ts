@@ -150,7 +150,7 @@ async function mockAll(page: Page, store: Store) {
       }),
     ),
   );
-  await page.route("**/api/people", (route: Route) =>
+  await page.route(/\/api\/people(\?.*)?$/, (route: Route) =>
     route.fulfill(
       json({
         users: [

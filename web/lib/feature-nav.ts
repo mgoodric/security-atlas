@@ -94,6 +94,26 @@ export function gateNavItems<T extends { href: string }>(
   });
 }
 
+/**
+ * seesPage reports whether the caller may see links into the module that
+ * owns `page` (#2174): a record's link section for another module (linked
+ * policies on a control) renders only when this is true.
+ *
+ * - `undefined`: no modules were provided (a component rendered outside
+ *   the authed shell), so nothing is hidden. The API still refuses.
+ * - `null`: the read failed. Fail closed, as FeatureGate does: hidden.
+ * - A page no module owns is core and always seen.
+ */
+export function seesPage(
+  modules: EffectiveModules | undefined,
+  page: string,
+): boolean {
+  if (modules === undefined) return true;
+  if (modules === null) return false;
+  const owner = moduleForPage(modules, page);
+  return owner === undefined || owner.state === "on";
+}
+
 // FEATURE_DISABLED_MESSAGE is the error string the platform's module gate
 // returns ({"error":"feature disabled"}) with a 404 when a module is
 // switched off. The gated FE pages match on it to render a clean "module
