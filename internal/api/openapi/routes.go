@@ -406,6 +406,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/walkthroughs/{id}/attachments", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}/attachments"},
 	{Method: "POST", Path: "/v1/walkthroughs/{id}:finalize", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}:finalize"},
 	{Method: "PUT", Path: "/v1/admin/llm-routing", Tag: "admin-llm-routing", Tier: "adminBearer", Internal: false, Summary: "PUT /v1/admin/llm-routing — set/replace cloud-LLM provider + (encrypted, write-only) key (slice 499)"},
+	{Method: "PUT", Path: "/v1/admin/users/{id}/module-access", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "PUT /v1/admin/users/{id}/module-access — set a member's module access and write an access audit-log row (#2172)"},
 	{Method: "PUT", Path: "/v1/board-packs/{id}/sections/{key}", Tag: "board", Tier: "bearer", Internal: false, Summary: "PUT /v1/board-packs/{id}/sections/{key}"},
 	{Method: "PUT", Path: "/v1/controls/imports/settings", Tag: "controls", Tier: "bearer", Internal: false, Summary: "PUT /v1/controls/imports/settings — opt the tenant in or out of reranking import candidates on local Ollama (tenant-admin; #2079)"},
 	{Method: "PUT", Path: "/v1/csf/profiles/{kind}", Tag: "csf", Tier: "bearer", Internal: false, Summary: "PUT /v1/csf/profiles/{kind} — ensure a CSF Current or Target profile"},

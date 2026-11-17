@@ -195,6 +195,9 @@ export const KIND_TEMPLATES: Record<AuditLogKind, Template | typeof GENERIC> = {
   // #2136: the one action is `set`; the target is the framework version.
   posture_target: (row) =>
     sentence(row, "set the posture target for", "framework version"),
+  // #2172: the one action is `set`; the target is the member.
+  module_access: (row) =>
+    sentence(row, "changed the module access of", "member"),
 };
 
 function isKnownKind(kind: string): kind is AuditLogKind {
