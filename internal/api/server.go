@@ -453,6 +453,11 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 // resolves it against the credential store, and attaches the credential to
 // context. Missing/empty/malformed/revoked tokens return Unauthenticated.
 // AdminCredentials.Issue is allowed under a bootstrap path (mock).
+//
+// An ICS feed token (credstore.Credential.CalendarOnly) is refused as
+// Unauthenticated on every RPC (#2477): it may only fetch the feed, so it
+// is no bearer for ConnectorRegistry, evidence ingest or the admin
+// services, whatever an RPC's own kind check would say.
 func authInterceptor(store *credstore.Store) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		token, err := extractBearer(ctx)
@@ -465,6 +470,9 @@ func authInterceptor(store *credstore.Store) grpc.UnaryServerInterceptor {
 				return nil, status.Error(codes.Unauthenticated, "invalid or revoked bearer token")
 			}
 			return nil, status.Errorf(codes.Internal, "authenticate: %v", err)
+		}
+		if cred.CalendarOnly() {
+			return nil, status.Error(codes.Unauthenticated, "calendar feed tokens cannot call the API")
 		}
 		ctx = authctx.WithCredential(ctx, cred)
 		return handler(ctx, req)
