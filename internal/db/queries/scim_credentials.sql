@@ -52,6 +52,16 @@ VALUES (
     $1, $2, $3, $4, $5
 );
 
+-- name: NotifySuperAdminsLastAdminDeprovisioned :one
+-- #2273: notify every active super-admin that a SCIM deprovision left the
+-- tenant with no active admin. The SECURITY DEFINER function refuses any
+-- tenant but the caller's RLS tenant, does nothing while the tenant still has
+-- an active admin, and returns how many notifications it wrote.
+SELECT notify_super_admins_last_admin_deprovisioned(
+    sqlc.arg(tenant_id)::uuid,
+    sqlc.arg(deprovisioned_user_id)::uuid
+)::int AS notified;
+
 -- name: ListSCIMAuditLogByTenant :many
 -- Read-only: SCIM audit rows for a tenant, newest first. Backs integration
 -- assertions (AC-5) and any future admin surface.

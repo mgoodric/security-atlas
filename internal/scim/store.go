@@ -30,6 +30,10 @@ const (
 	ActionDeprovision = "user.deprovision"
 	ActionReprovision = "user.reprovision"
 	ActionDelete      = "user.delete"
+	// ActionLastAdminDeprovisioned records that a deprovision left the
+	// tenant with no active admin (#2273). It is written in addition to the
+	// deprovision's own row.
+	ActionLastAdminDeprovisioned = "tenant_last_admin_deprovisioned"
 )
 
 // ErrUserNotFound is returned when no user matches under the tenant.
@@ -262,6 +266,10 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 			}
 			return gErr
 		}
+		watch, wErr := s.watchAdmins(ctx, q, tIDU, prev.Active && !in.Active)
+		if wErr != nil {
+			return wErr
+		}
 		row, rErr := q.ReplaceSCIMUser(ctx, dbx.ReplaceSCIMUserParams{
 			TenantID:    tIDU,
 			ID:          pgtype.UUID{Bytes: id, Valid: true},
@@ -283,9 +291,12 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 		} else if !prev.Active && in.Active {
 			action = ActionReprovision
 		}
-		return s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
+		if aErr := s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
 			"active": in.Active,
-		})
+		}); aErr != nil {
+			return aErr
+		}
+		return s.alertIfLastAdmin(ctx, q, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return DomainUser{}, err
@@ -322,6 +333,10 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 			}
 			return gErr
 		}
+		watch, wErr := s.watchAdmins(ctx, q, tIDU, prev.Active && intent.setActive && !intent.active)
+		if wErr != nil {
+			return wErr
+		}
 		row := prev
 		if intent.setDisplayName {
 			row, gErr = q.PatchSCIMUserDisplayName(ctx, dbx.PatchSCIMUserDisplayNameParams{
@@ -350,11 +365,14 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 			}
 		}
 		out = domainUserFromRow(row)
-		return s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
+		if aErr := s.writeAudit(ctx, q, tIDU, actorCredentialID, id, action, map[string]any{
 			"set_active":       intent.setActive,
 			"active":           intent.active,
 			"set_display_name": intent.setDisplayName,
-		})
+		}); aErr != nil {
+			return aErr
+		}
+		return s.alertIfLastAdmin(ctx, q, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return DomainUser{}, err
@@ -375,13 +393,18 @@ func (s *Store) Delete(ctx context.Context, actorCredentialID uuid.UUID, tenantI
 		return err
 	}
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
-		if _, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
+		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
-		}); gErr != nil {
+		})
+		if gErr != nil {
 			if errors.Is(gErr, pgx.ErrNoRows) {
 				return ErrUserNotFound
 			}
 			return gErr
+		}
+		watch, wErr := s.watchAdmins(ctx, q, tIDU, prev.Active)
+		if wErr != nil {
+			return wErr
 		}
 		if _, sErr := q.SetSCIMUserActive(ctx, dbx.SetSCIMUserActiveParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}, Active: false,
@@ -391,9 +414,12 @@ func (s *Store) Delete(ctx context.Context, actorCredentialID uuid.UUID, tenantI
 		if rErr := s.revokeAccess(ctx, q, tIDU, id); rErr != nil {
 			return rErr
 		}
-		return s.writeAudit(ctx, q, tIDU, actorCredentialID, id, ActionDelete, map[string]any{
+		if aErr := s.writeAudit(ctx, q, tIDU, actorCredentialID, id, ActionDelete, map[string]any{
 			"soft_disabled": true,
-		})
+		}); aErr != nil {
+			return aErr
+		}
+		return s.alertIfLastAdmin(ctx, q, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return err
@@ -482,6 +508,59 @@ func (s *Store) revokeAccess(ctx context.Context, q *dbx.Queries, tenantID pgtyp
 		return fmt.Errorf("scim: %w", err)
 	}
 	return nil
+}
+
+// adminWatch carries the tenant's admin-roster lock and pre-change admin
+// count through a deprovision (#2273). The zero value watches nothing.
+type adminWatch struct {
+	guard  users.AdminGuard
+	active bool
+}
+
+// watchAdmins takes the tenant's admin-roster lock and counts its active
+// admins when deprovisioning is true. It runs before the deprovision's
+// writes, so the count is the tenant's state before them, and holding the
+// same lock as the admin API means two concurrent deprovisions of the last
+// two admins cannot both see the other still active. The deprovision is
+// never refused (#2261 decisions D5); alertIfLastAdmin only reports.
+func (s *Store) watchAdmins(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, deprovisioning bool) (adminWatch, error) {
+	if !deprovisioning {
+		return adminWatch{}, nil
+	}
+	g, err := users.LockAdmins(ctx, q, uuid.UUID(tenantID.Bytes))
+	if err != nil {
+		return adminWatch{}, fmt.Errorf("scim: %w", err)
+	}
+	return adminWatch{guard: g, active: true}, nil
+}
+
+// alertIfLastAdmin recounts the tenant's active admins after a deprovision.
+// When the count went from one or more to zero it notifies every active
+// super-admin and writes a tenant_last_admin_deprovisioned audit row, in the
+// deprovision's transaction (#2273).
+func (s *Store) alertIfLastAdmin(ctx context.Context, q *dbx.Queries, w adminWatch, tenantID pgtype.UUID, actorCredentialID, targetUserID uuid.UUID) error {
+	if !w.active {
+		return nil
+	}
+	err := w.guard.Check(ctx, q)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, users.ErrLastAdmin) {
+		return fmt.Errorf("scim: %w", err)
+	}
+	notified, err := q.NotifySuperAdminsLastAdminDeprovisioned(ctx, dbx.NotifySuperAdminsLastAdminDeprovisionedParams{
+		TenantID:            tenantID,
+		DeprovisionedUserID: pgtype.UUID{Bytes: targetUserID, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("scim: notify super-admins: %w", err)
+	}
+	return s.writeAudit(ctx, q, tenantID, actorCredentialID, targetUserID, ActionLastAdminDeprovisioned, map[string]any{
+		"active_admins_before":  w.guard.Before(),
+		"active_admins_after":   0,
+		"super_admins_notified": notified,
+	})
 }
 
 // forgetCredentials is the after-commit half of revokeAccess: drop the
