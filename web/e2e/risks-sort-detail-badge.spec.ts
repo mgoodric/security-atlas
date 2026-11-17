@@ -95,6 +95,18 @@ async function mockListRoutes(page: import("@playwright/test").Page) {
   // anchor this pattern to the list shape (`/api/risks` optionally with a
   // query string, but NOT a trailing `/id`).
   await page.route(/\/api\/risks(\?.*)?$/, async (route) => {
+    // #2490: the sidebar badge asks the platform for the high band's
+    // total; the mock answers as the platform would.
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("severity_band") === "high") {
+      const high = mockRisks().filter((r) => r.severity >= 15);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risks: high.slice(0, 1), total: high.length }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",

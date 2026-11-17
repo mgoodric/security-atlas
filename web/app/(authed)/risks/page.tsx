@@ -48,7 +48,7 @@ import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
   fetchRegisterPage,
   fetchRiskCategories,
-  fetchRisksList,
+  fetchRiskRegisterTotal,
   treatmentLabel,
   type Risk,
   type RiskCategory,
@@ -266,11 +266,12 @@ function RisksPageInner() {
     placeholderData: (prev) => prev,
   });
 
-  // The register's unfiltered size, for "N of M": the sidebar badge's read
-  // (open risks, no roll-ups), shared under its query key.
-  const registerSizeQ = useQuery<RisksListResponse>({
-    queryKey: ["sidebar", "risks-count"],
-    queryFn: fetchRisksList,
+  // The register's unfiltered size, for "N of M": the platform's total for
+  // the default register (open risks, no roll-ups), off a one-row page
+  // (#2490). Its own key: the sidebar badge counts something else.
+  const registerSizeQ = useQuery<number>({
+    queryKey: ["risks", "register-size"],
+    queryFn: fetchRiskRegisterTotal,
     staleTime: 60_000,
     retry: false,
   });
@@ -369,9 +370,7 @@ function RisksPageInner() {
     !isDefaultFilters(filters) ||
     showRollUps ||
     filters.status !== DEFAULT_STATUS;
-  const registerSize = registerSizeQ.data
-    ? registerSizeQ.data.total ?? registerSizeQ.data.risks.length
-    : null;
+  const registerSize = registerSizeQ.data ?? null;
   const countLabel =
     filtered && registerSize !== null && total <= registerSize
       ? risksCountLabel(total, registerSize)

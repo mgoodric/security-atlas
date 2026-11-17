@@ -2882,6 +2882,15 @@ type Querier interface {
 	//   treatment, methodology, level, theme, org_unit_id: exact match.
 	//   category_ids      any of these organisation categories (#1745); the
 	//                     store resolves slugs to ids first.
+	//   severity_min, severity_max  the assessed severity in that inclusive
+	//                     range (#2490), FAIR left out. The value is
+	//                     risk.AssessedSeverity's, the wire `severity`: the
+	//                     inherent score's `severity`, else likelihood x
+	//                     impact, each truncated to a whole number, and 0 when
+	//                     the score is not an object or any of the three keys
+	//                     is not a number (Go's json.Unmarshal into *float64
+	//                     fails on the whole object then). The store sets the
+	//                     bounds from risk.SeverityBandRange.
 	//   owner_user_id     that person's risks (#2129); unowned keeps the risks
 	//                     with no owner user.
 	//   due_from, due_before  review_due_at in [due_from, due_before). The

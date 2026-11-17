@@ -52,15 +52,42 @@ func Monetary(m dbx.RiskMethodology) bool {
 	return m == dbx.RiskMethodologyFair
 }
 
+// SeverityHighMin and SeverityMediumMin are the lowest severities of the
+// High and Medium bands. SeverityBand and the register's ?severity_band=
+// filter (SeverityBandRange) both read them, so the sidebar's
+// high-severity count and the band a risk shows cannot disagree (#2490).
+const (
+	SeverityHighMin   = 15
+	SeverityMediumMin = 8
+)
+
+// SeverityBandRange is the inclusive severity range of a band named by the
+// register's ?severity_band= (high, medium or low); hi is nil for High,
+// which has no top, as SeverityBand has none. ok is false for any other
+// name. Low starts at 1: the filtered severity is AssessedSeverity, a whole
+// number, and 0 is None.
+func SeverityBandRange(band string) (lo int, hi *int, ok bool) {
+	top := func(n int) *int { return &n }
+	switch band {
+	case "high":
+		return SeverityHighMin, nil, true
+	case "medium":
+		return SeverityMediumMin, top(SeverityHighMin - 1), true
+	case "low":
+		return 1, top(SeverityMediumMin - 1), true
+	}
+	return 0, nil, false
+}
+
 // SeverityBand is the qualitative band of a 1..25 severity: Low up to 7,
 // Medium 8-14, High 15-25. Any value above 0 is at least Low, so a residual
 // of 0.4 (strong controls on a low inherent) is Low, not None. Zero or less
 // is None. Never band a Monetary value.
 func SeverityBand(severity float64) string {
 	switch {
-	case severity >= 15:
+	case severity >= SeverityHighMin:
 		return "High"
-	case severity >= 8:
+	case severity >= SeverityMediumMin:
 		return "Medium"
 	case severity > 0:
 		return "Low"

@@ -63,6 +63,22 @@ LEFT JOIN LATERAL (
       AND ra.parent_risk_id = r.id
       AND c.status = 'open'
 ) kids ON true
+LEFT JOIN LATERAL (
+    -- The same expression as ListRisksPage's sev lateral; keep them equal.
+    SELECT CASE
+               WHEN jsonb_typeof(r.inherent_score) <> 'object'
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'severity'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'likelihood'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'impact'), 'null') NOT IN ('number', 'null')
+                   THEN 0
+               WHEN jsonb_typeof(r.inherent_score -> 'severity') = 'number'
+                   THEN trunc((r.inherent_score ->> 'severity')::numeric)
+               WHEN jsonb_typeof(r.inherent_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.inherent_score -> 'impact') = 'number'
+                   THEN trunc((r.inherent_score ->> 'likelihood')::numeric) * trunc((r.inherent_score ->> 'impact')::numeric)
+               ELSE 0
+           END AS assessed
+) sev ON true
 WHERE r.tenant_id = $1
   AND ($2::text IS NULL OR r.status::text = $2::text)
   AND ($3::bool OR kids.child_count = 0)
@@ -76,6 +92,8 @@ WHERE r.tenant_id = $1
   AND (NOT $11::bool OR r.owner_user_id IS NULL)
   AND ($12::timestamptz IS NULL OR r.review_due_at >= $12::timestamptz)
   AND ($13::timestamptz IS NULL OR r.review_due_at < $13::timestamptz)
+  AND ($14::int IS NULL OR (r.methodology <> 'fair' AND sev.assessed >= $14::int))
+  AND ($15::int IS NULL OR sev.assessed <= $15::int)
 `
 
 type CountRisksPageParams struct {
@@ -92,6 +110,8 @@ type CountRisksPageParams struct {
 	Unowned        bool               `json:"unowned"`
 	DueFrom        pgtype.Timestamptz `json:"due_from"`
 	DueBefore      pgtype.Timestamptz `json:"due_before"`
+	SeverityMin    *int32             `json:"severity_min"`
+	SeverityMax    *int32             `json:"severity_max"`
 }
 
 // #2132: the total for ListRisksPage. It takes every filter the list does,
@@ -111,6 +131,8 @@ func (q *Queries) CountRisksPage(ctx context.Context, arg CountRisksPageParams) 
 		arg.Unowned,
 		arg.DueFrom,
 		arg.DueBefore,
+		arg.SeverityMin,
+		arg.SeverityMax,
 	)
 	var total int64
 	err := row.Scan(&total)
@@ -972,6 +994,21 @@ LEFT JOIN LATERAL (
            END AS residual,
            lower(COALESCE(NULLIF(ou.display_name, ''), NULLIF(ou.email, ''), NULLIF(btrim(r.treatment_owner), ''))) AS owner_name
 ) k ON true
+LEFT JOIN LATERAL (
+    SELECT CASE
+               WHEN jsonb_typeof(r.inherent_score) <> 'object'
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'severity'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'likelihood'), 'null') NOT IN ('number', 'null')
+                 OR COALESCE(jsonb_typeof(r.inherent_score -> 'impact'), 'null') NOT IN ('number', 'null')
+                   THEN 0
+               WHEN jsonb_typeof(r.inherent_score -> 'severity') = 'number'
+                   THEN trunc((r.inherent_score ->> 'severity')::numeric)
+               WHEN jsonb_typeof(r.inherent_score -> 'likelihood') = 'number'
+                AND jsonb_typeof(r.inherent_score -> 'impact') = 'number'
+                   THEN trunc((r.inherent_score ->> 'likelihood')::numeric) * trunc((r.inherent_score ->> 'impact')::numeric)
+               ELSE 0
+           END AS assessed
+) sev ON true
 WHERE r.tenant_id = $1
   AND ($2::text IS NULL OR r.status::text = $2::text)
   AND ($3::bool OR kids.child_count = 0)
@@ -985,38 +1022,40 @@ WHERE r.tenant_id = $1
   AND (NOT $11::bool OR r.owner_user_id IS NULL)
   AND ($12::timestamptz IS NULL OR r.review_due_at >= $12::timestamptz)
   AND ($13::timestamptz IS NULL OR r.review_due_at < $13::timestamptz)
+  AND ($14::int IS NULL OR (r.methodology <> 'fair' AND sev.assessed >= $14::int))
+  AND ($15::int IS NULL OR sev.assessed <= $15::int)
 ORDER BY
     -- residual (the default, descending): 5x5 above FAIR in both directions.
-    CASE WHEN $14::text IN ('residual', 'residual_age') THEN k.fair_group END ASC,
-    CASE WHEN $14::text = 'residual' AND NOT $15::bool THEN k.residual END ASC NULLS LAST,
-    CASE WHEN ($14::text = 'residual' AND $15::bool) OR $14::text = 'residual_age' THEN k.residual END DESC NULLS LAST,
+    CASE WHEN $16::text IN ('residual', 'residual_age') THEN k.fair_group END ASC,
+    CASE WHEN $16::text = 'residual' AND NOT $17::bool THEN k.residual END ASC NULLS LAST,
+    CASE WHEN ($16::text = 'residual' AND $17::bool) OR $16::text = 'residual_age' THEN k.residual END DESC NULLS LAST,
     -- residual_age (the dashboard's residual,age): oldest first on a tie.
-    CASE WHEN $14::text = 'residual_age' THEN r.created_at END ASC,
-    CASE WHEN $14::text = 'title' AND NOT $15::bool THEN lower(r.title) COLLATE "C" END ASC,
-    CASE WHEN $14::text = 'title' AND $15::bool THEN lower(r.title) COLLATE "C" END DESC,
-    CASE WHEN $14::text = 'category' AND NOT $15::bool THEN lower(cat.name) COLLATE "C" END ASC NULLS LAST,
-    CASE WHEN $14::text = 'category' AND $15::bool THEN lower(cat.name) COLLATE "C" END DESC NULLS LAST,
-    CASE WHEN $14::text = 'owner' AND NOT $15::bool THEN k.owner_name COLLATE "C" END ASC NULLS LAST,
-    CASE WHEN $14::text = 'owner' AND $15::bool THEN k.owner_name COLLATE "C" END DESC NULLS LAST,
-    CASE WHEN $14::text = 'treatment' AND NOT $15::bool THEN r.treatment::text COLLATE "C" END ASC,
-    CASE WHEN $14::text = 'treatment' AND $15::bool THEN r.treatment::text COLLATE "C" END DESC,
-    CASE WHEN $14::text = 'review_due' AND NOT $15::bool THEN r.review_due_at END ASC NULLS LAST,
-    CASE WHEN $14::text = 'review_due' AND $15::bool THEN r.review_due_at END DESC NULLS LAST,
-    CASE WHEN $14::text = 'status' AND NOT $15::bool THEN r.status::text COLLATE "C" END ASC,
-    CASE WHEN $14::text = 'status' AND $15::bool THEN r.status::text COLLATE "C" END DESC,
-    CASE WHEN $14::text = 'methodology' AND NOT $15::bool THEN r.methodology::text COLLATE "C" END ASC,
-    CASE WHEN $14::text = 'methodology' AND $15::bool THEN r.methodology::text COLLATE "C" END DESC,
-    CASE WHEN $14::text = 'level' AND NOT $15::bool THEN r.level END ASC,
-    CASE WHEN $14::text = 'level' AND $15::bool THEN r.level END DESC,
-    CASE WHEN $14::text = 'org_unit' AND NOT $15::bool THEN lower(unit.name) COLLATE "C" END ASC NULLS LAST,
-    CASE WHEN $14::text = 'org_unit' AND $15::bool THEN lower(unit.name) COLLATE "C" END DESC NULLS LAST,
-    CASE WHEN $14::text = 'themes' AND NOT $15::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END ASC,
-    CASE WHEN $14::text = 'themes' AND $15::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END DESC,
-    CASE WHEN $14::text = 'created_at' AND NOT $15::bool THEN r.created_at END ASC,
-    CASE WHEN $14::text = 'created_at' AND $15::bool THEN r.created_at END DESC,
-    CASE WHEN $14::text = 'id' AND $15::bool THEN r.id END DESC,
+    CASE WHEN $16::text = 'residual_age' THEN r.created_at END ASC,
+    CASE WHEN $16::text = 'title' AND NOT $17::bool THEN lower(r.title) COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'title' AND $17::bool THEN lower(r.title) COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'category' AND NOT $17::bool THEN lower(cat.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $16::text = 'category' AND $17::bool THEN lower(cat.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $16::text = 'owner' AND NOT $17::bool THEN k.owner_name COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $16::text = 'owner' AND $17::bool THEN k.owner_name COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $16::text = 'treatment' AND NOT $17::bool THEN r.treatment::text COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'treatment' AND $17::bool THEN r.treatment::text COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'review_due' AND NOT $17::bool THEN r.review_due_at END ASC NULLS LAST,
+    CASE WHEN $16::text = 'review_due' AND $17::bool THEN r.review_due_at END DESC NULLS LAST,
+    CASE WHEN $16::text = 'status' AND NOT $17::bool THEN r.status::text COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'status' AND $17::bool THEN r.status::text COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'methodology' AND NOT $17::bool THEN r.methodology::text COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'methodology' AND $17::bool THEN r.methodology::text COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'level' AND NOT $17::bool THEN r.level END ASC,
+    CASE WHEN $16::text = 'level' AND $17::bool THEN r.level END DESC,
+    CASE WHEN $16::text = 'org_unit' AND NOT $17::bool THEN lower(unit.name) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $16::text = 'org_unit' AND $17::bool THEN lower(unit.name) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $16::text = 'themes' AND NOT $17::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END ASC,
+    CASE WHEN $16::text = 'themes' AND $17::bool THEN lower(array_to_string(r.themes, ',')) COLLATE "C" END DESC,
+    CASE WHEN $16::text = 'created_at' AND NOT $17::bool THEN r.created_at END ASC,
+    CASE WHEN $16::text = 'created_at' AND $17::bool THEN r.created_at END DESC,
+    CASE WHEN $16::text = 'id' AND $17::bool THEN r.id END DESC,
     r.id
-LIMIT $17 OFFSET $16
+LIMIT $19 OFFSET $18
 `
 
 type ListRisksPageParams struct {
@@ -1033,6 +1072,8 @@ type ListRisksPageParams struct {
 	Unowned        bool               `json:"unowned"`
 	DueFrom        pgtype.Timestamptz `json:"due_from"`
 	DueBefore      pgtype.Timestamptz `json:"due_before"`
+	SeverityMin    *int32             `json:"severity_min"`
+	SeverityMax    *int32             `json:"severity_max"`
 	SortKey        string             `json:"sort_key"`
 	SortDesc       bool               `json:"sort_desc"`
 	RowOffset      int32              `json:"row_offset"`
@@ -1054,6 +1095,15 @@ type ListRisksPageRow struct {
 //	treatment, methodology, level, theme, org_unit_id: exact match.
 //	category_ids      any of these organisation categories (#1745); the
 //	                  store resolves slugs to ids first.
+//	severity_min, severity_max  the assessed severity in that inclusive
+//	                  range (#2490), FAIR left out. The value is
+//	                  risk.AssessedSeverity's, the wire `severity`: the
+//	                  inherent score's `severity`, else likelihood x
+//	                  impact, each truncated to a whole number, and 0 when
+//	                  the score is not an object or any of the three keys
+//	                  is not a number (Go's json.Unmarshal into *float64
+//	                  fails on the whole object then). The store sets the
+//	                  bounds from risk.SeverityBandRange.
 //	owner_user_id     that person's risks (#2129); unowned keeps the risks
 //	                  with no owner user.
 //	due_from, due_before  review_due_at in [due_from, due_before). The
@@ -1087,6 +1137,8 @@ func (q *Queries) ListRisksPage(ctx context.Context, arg ListRisksPageParams) ([
 		arg.Unowned,
 		arg.DueFrom,
 		arg.DueBefore,
+		arg.SeverityMin,
+		arg.SeverityMax,
 		arg.SortKey,
 		arg.SortDesc,
 		arg.RowOffset,

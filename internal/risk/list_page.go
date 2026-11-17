@@ -114,9 +114,13 @@ type PageFilter struct {
 	ReviewDue ReviewDue
 	DueFrom   *time.Time
 	DueTo     *time.Time
-	Sort      PageSort
-	Limit     int32
-	Offset    int32
+	// SeverityBand keeps the non-FAIR risks whose assessed severity (the
+	// wire `severity`, AssessedSeverity) is in that band: high, medium or
+	// low (SeverityBandRange, #2490). Empty is off.
+	SeverityBand string
+	Sort         PageSort
+	Limit        int32
+	Offset       int32
 	// Now is the instant overdue and due-soon are measured from; zero is
 	// the current time.
 	Now time.Time
@@ -166,6 +170,29 @@ func (f PageFilter) dueBounds(now time.Time) (from, before pgtype.Timestamptz) {
 	return from, before
 }
 
+// ErrInvalidSeverityBand is returned for a PageFilter.SeverityBand outside
+// SeverityBandRange. The HTTP layer maps it to 400.
+var ErrInvalidSeverityBand = errors.New("risk: severity_band must be one of high|medium|low")
+
+// severityBounds turns SeverityBand into the query's inclusive bounds; both
+// are nil when the band is off.
+func (f PageFilter) severityBounds() (lo, hi *int32, err error) {
+	if f.SeverityBand == "" {
+		return nil, nil, nil
+	}
+	bandLo, bandHi, ok := SeverityBandRange(f.SeverityBand)
+	if !ok {
+		return nil, nil, ErrInvalidSeverityBand
+	}
+	l := int32(bandLo)
+	lo = &l
+	if bandHi != nil {
+		h := int32(*bandHi)
+		hi = &h
+	}
+	return lo, hi, nil
+}
+
 func optText[T ~string](v T) *string {
 	if v == "" {
 		return nil
@@ -210,6 +237,10 @@ func (s *Store) ListPage(ctx context.Context, filter PageFilter) ([]Risk, int64,
 			categoryIDs = append(categoryIDs, pgUUID(id))
 		}
 		dueFrom, dueBefore := filter.dueBounds(filter.now())
+		sevMin, sevMax, err := filter.severityBounds()
+		if err != nil {
+			return err
+		}
 		count := dbx.CountRisksPageParams{
 			TenantID:       pgUUID(tenantID),
 			Status:         optText(filter.Status),
@@ -224,6 +255,8 @@ func (s *Store) ListPage(ctx context.Context, filter PageFilter) ([]Risk, int64,
 			Unowned:        filter.Unowned,
 			DueFrom:        dueFrom,
 			DueBefore:      dueBefore,
+			SeverityMin:    sevMin,
+			SeverityMax:    sevMax,
 		}
 		total, err = q.CountRisksPage(ctx, count)
 		if err != nil {
@@ -243,6 +276,8 @@ func (s *Store) ListPage(ctx context.Context, filter PageFilter) ([]Risk, int64,
 			Unowned:        count.Unowned,
 			DueFrom:        count.DueFrom,
 			DueBefore:      count.DueBefore,
+			SeverityMin:    count.SeverityMin,
+			SeverityMax:    count.SeverityMax,
 			SortKey:        string(filter.Sort.Key),
 			SortDesc:       filter.Sort.Desc,
 			RowLimit:       filter.Limit,
