@@ -69,7 +69,13 @@ func newStack2428(t *testing.T, appPool *pgxpool.Pool) stack2428 {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*reached = true
 		cred, ok := authctx.CredentialFromContext(r.Context())
-		g, known := gates[r.Method+" "+r.URL.Path]
+		// A row may name a query (#2134: GET /v1/needs-attention?for=all,
+		// whose view is a query parameter), so the key keeps it.
+		key := r.Method + " " + r.URL.Path
+		if r.URL.RawQuery != "" {
+			key += "?" + r.URL.RawQuery
+		}
+		g, known := gates[key]
 		if !ok || !known || !g.fn(cred) {
 			w.WriteHeader(http.StatusForbidden)
 			return
