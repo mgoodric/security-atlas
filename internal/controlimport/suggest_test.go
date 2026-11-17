@@ -303,12 +303,21 @@ func (s *sweepingStore) CrosswalkAnchors(ctx context.Context, v string, ids []st
 	return s.fakeBatchStore.CrosswalkAnchors(ctx, v, ids)
 }
 
-func TestSuggestionRunsShareOneConcurrencyCap(t *testing.T) {
+// #2329: a run that cannot get a slot, because another tenant's runs hold
+// them all, is deferred to the background and completes once a slot frees;
+// the batch is never failed for it.
+func TestBusyTenantDefersAnotherTenantsBatch(t *testing.T) {
 	t.Parallel()
 	store := suggestStore()
 	s := NewStager(store).WithRunLimit(1)
-	// Hold the only slot, as a long background run would.
-	s.runs <- struct{}{}
+	done := make(chan error, 1)
+	s.background = func(_ string, err error) { done <- err }
+	// Another tenant holds the only slot, as a long rerank would.
+	release, ok := s.runs.acquire(context.Background(), "22222222-2222-2222-2222-222222222222", 0)
+	if !ok {
+		t.Fatal("could not take the only slot")
+	}
+	// The request's deadline ends before any slot frees.
 	ctx, cancel := context.WithTimeout(tenantCtx(t, batchTenant), 50*time.Millisecond)
 	defer cancel()
 	b, err := s.Stage(ctx, StageInput{
@@ -317,17 +326,32 @@ func TestSuggestionRunsShareOneConcurrencyCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
-	if b.SuggestionsStatus != SuggestionsFailed || len(store.keywordVersions) != 0 {
-		t.Errorf("status %q after %d retrievals, want failed with none (no slot free)", b.SuggestionsStatus, len(store.keywordVersions))
+	if b.SuggestionsStatus != SuggestionsPending {
+		t.Errorf("returned status = %q, want pending (deferred, not failed)", b.SuggestionsStatus)
 	}
-	if store.status != SuggestionsFailed {
-		t.Errorf("stored status = %q, want failed so the batch does not stay pending", store.status)
+	select {
+	case err := <-done:
+		t.Fatalf("background run finished (%v) while the other tenant held the slot", err)
+	case <-time.After(100 * time.Millisecond):
 	}
-	<-s.runs
-	b2, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
-		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
-	})
-	if err != nil || b2.SuggestionsStatus != SuggestionsReady {
-		t.Errorf("with the slot free: status %q err %v", b2.SuggestionsStatus, err)
+	store.mu.Lock()
+	if store.status != SuggestionsPending || len(store.keywordVersions) != 0 {
+		t.Errorf("stored status %q after %d retrievals, want pending with none while waiting", store.status, len(store.keywordVersions))
+	}
+	store.mu.Unlock()
+
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("background suggest: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("deferred run never finished after the slot freed")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.status != SuggestionsReady {
+		t.Errorf("stored status = %q, want ready", store.status)
 	}
 }

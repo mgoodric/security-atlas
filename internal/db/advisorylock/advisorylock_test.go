@@ -53,9 +53,10 @@ type lockSite struct {
 // sqlSites are the SQL queries that take a registered lock with a literal
 // namespace, and the namespace each must use.
 var sqlSites = map[string]Namespace{
-	"internal/db/queries/org_themes.sql":        ThemeVocabulary,
-	"internal/db/queries/risk_aggregations.sql": RiskHierarchy,
-	"internal/db/queries/aggregation_rules.sql": AggregationKey,
+	"internal/db/queries/org_themes.sql":         ThemeVocabulary,
+	"internal/db/queries/risk_aggregations.sql":  RiskHierarchy,
+	"internal/db/queries/aggregation_rules.sql":  AggregationKey,
+	"internal/db/queries/tenant_llm_routing.sql": TenantLLMRouting,
 }
 
 // TestNoUnregisteredAdvisoryLocks scans the tree for advisory lock calls.

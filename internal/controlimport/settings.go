@@ -65,8 +65,9 @@ const AuditActionSettingsUpdate = "control_import_settings_update"
 // transaction, writes one me_audit_log row naming actor and the before and
 // after values (#2224). The setting decides whether tenant text is sent to an
 // LLM, so its history is audit evidence. actor is uuid.Nil for a caller that
-// is not a user (a bootstrap key).
-func (s *Store) SetSettings(ctx context.Context, in Settings, updatedBy string, actor uuid.UUID) (Settings, error) {
+// is not a user (a bootstrap key); principal is the acting credential's
+// credstore.PrincipalOf, which names it either way (#2329).
+func (s *Store) SetSettings(ctx context.Context, in Settings, updatedBy string, actor uuid.UUID, principal string) (Settings, error) {
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID string) error {
 		var before Settings
 		err := tx.QueryRow(ctx, `SELECT llm_rerank_local FROM control_import_settings FOR UPDATE`).Scan(&before.LLMRerankLocal)
@@ -96,11 +97,12 @@ func (s *Store) SetSettings(ctx context.Context, in Settings, updatedBy string, 
 			return fmt.Errorf("controlimport: parse tenant id: %w", err)
 		}
 		if err := dbx.New(tx).InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-			TenantID: pgtype.UUID{Bytes: tenant, Valid: true},
-			UserID:   pgtype.UUID{Bytes: actor, Valid: true},
-			Action:   AuditActionSettingsUpdate,
-			Before:   beforeBlob,
-			After:    afterBlob,
+			TenantID:       pgtype.UUID{Bytes: tenant, Valid: true},
+			UserID:         pgtype.UUID{Bytes: actor, Valid: true},
+			Action:         AuditActionSettingsUpdate,
+			Before:         beforeBlob,
+			After:          afterBlob,
+			ActorPrincipal: nullable(principal),
 		}); err != nil {
 			return fmt.Errorf("controlimport: audit settings: %w", err)
 		}

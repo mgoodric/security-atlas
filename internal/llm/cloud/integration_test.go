@@ -129,7 +129,7 @@ func TestStore_SetCloud_MaskedRead_KeyNeverReturned(t *testing.T) {
 	crypter := testCrypter(t)
 	store := cloud.NewStore(app, crypter)
 
-	mc, err := store.Set(ctx, cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil)
+	mc, err := store.Set(ctx, cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil, "")
 	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
@@ -181,10 +181,10 @@ func TestStore_ClearRevertsToLocal(t *testing.T) {
 	ctx := tenantCtx(t, tenant)
 	store := cloud.NewStore(app, testCrypter(t))
 
-	if _, err := store.Set(ctx, cloud.ProviderOpenAI, cloud.Secret(fakeProviderKeyA), uuid.Nil); err != nil {
+	if _, err := store.Set(ctx, cloud.ProviderOpenAI, cloud.Secret(fakeProviderKeyA), uuid.Nil, ""); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	removed, err := store.Clear(ctx, uuid.Nil)
+	removed, err := store.Clear(ctx, uuid.Nil, "")
 	if err != nil || !removed {
 		t.Fatalf("Clear = (%v,%v)", removed, err)
 	}
@@ -204,10 +204,10 @@ func TestStore_LocalProviderRejectsKey_CloudRequiresKey(t *testing.T) {
 	ctx := tenantCtx(t, tenant)
 	store := cloud.NewStore(app, testCrypter(t))
 
-	if _, err := store.Set(ctx, cloud.ProviderLocalOllama, cloud.Secret("unexpected"), uuid.Nil); !errors.Is(err, cloud.ErrLocalProviderNoKey) {
+	if _, err := store.Set(ctx, cloud.ProviderLocalOllama, cloud.Secret("unexpected"), uuid.Nil, ""); !errors.Is(err, cloud.ErrLocalProviderNoKey) {
 		t.Fatalf("local+key = %v, want ErrLocalProviderNoKey", err)
 	}
-	if _, err := store.Set(ctx, cloud.ProviderBedrock, cloud.Secret(""), uuid.Nil); !errors.Is(err, cloud.ErrCloudKeyRequired) {
+	if _, err := store.Set(ctx, cloud.ProviderBedrock, cloud.Secret(""), uuid.Nil, ""); !errors.Is(err, cloud.ErrCloudKeyRequired) {
 		t.Fatalf("cloud+nokey = %v, want ErrCloudKeyRequired", err)
 	}
 }
@@ -219,7 +219,7 @@ func TestStore_NoCrypter_CloudOptInRejected(t *testing.T) {
 	ctx := tenantCtx(t, tenant)
 	store := cloud.NewStore(app, nil) // deployment with no cloud key
 
-	if _, err := store.Set(ctx, cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil); !errors.Is(err, cloud.ErrCrypterUnconfigured) {
+	if _, err := store.Set(ctx, cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil, ""); !errors.Is(err, cloud.ErrCrypterUnconfigured) {
 		t.Fatalf("cloud opt-in with no crypter = %v, want ErrCrypterUnconfigured", err)
 	}
 }
@@ -257,7 +257,7 @@ func TestRouter_CloudTenantUsesAdapterAndRecordsProvider(t *testing.T) {
 	ctx := tenantCtx(t, tenant)
 	store := cloud.NewStore(app, testCrypter(t))
 
-	if _, err := store.Set(ctx, cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil); err != nil {
+	if _, err := store.Set(ctx, cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil, ""); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 
@@ -298,10 +298,10 @@ func TestCrossTenantIsolation_ConfigAndKey(t *testing.T) {
 	store := cloud.NewStore(app, crypter)
 
 	// A opts into anthropic with A's key; B opts into openai with B's key.
-	if _, err := store.Set(tenantCtx(t, tenantA), cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil); err != nil {
+	if _, err := store.Set(tenantCtx(t, tenantA), cloud.ProviderAnthropic, cloud.Secret(fakeProviderKeyA), uuid.Nil, ""); err != nil {
 		t.Fatalf("A set: %v", err)
 	}
-	if _, err := store.Set(tenantCtx(t, tenantB), cloud.ProviderOpenAI, cloud.Secret(fakeProviderKeyB), uuid.Nil); err != nil {
+	if _, err := store.Set(tenantCtx(t, tenantB), cloud.ProviderOpenAI, cloud.Secret(fakeProviderKeyB), uuid.Nil, ""); err != nil {
 		t.Fatalf("B set: %v", err)
 	}
 

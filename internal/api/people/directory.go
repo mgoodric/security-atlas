@@ -73,12 +73,13 @@ func Load(ctx context.Context, pool *pgxpool.Pool) (*Directory, error) {
 //   - an API key of this tenant ("key_<uuid>"): "API key …" and the last
 //     four characters of the key's id. The id is not secret; the token,
 //     its prefix and its last four are never used;
-//   - "system": "System";
+//   - "system", or "system:<process>" (the SCF import's carry-forward
+//     records "system:scf-import", #2554): "System";
 //   - anything else, including another tenant's user or key, a per-token
 //     "jwt:" id, and a nil Directory: "Unknown".
 func (d *Directory) Name(actor string) string {
 	actor = strings.TrimSpace(actor)
-	if actor == "system" {
+	if actor == "system" || strings.HasPrefix(actor, "system:") {
 		return NameSystem
 	}
 	if d == nil {
