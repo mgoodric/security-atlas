@@ -42,6 +42,8 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 	unifiedlog.KindRisk: "risks",
 	// Posture targets are set and read under /v1/framework-scopes.
 	unifiedlog.KindPostureTarget: "framework-scopes",
+	// Module access (#2172) is set at /v1/admin/users/{id}/module-access.
+	unifiedlog.KindModuleAccess: "admin",
 }
 
 // payloadGate decides, per row, whether the caller sees payload_json. It

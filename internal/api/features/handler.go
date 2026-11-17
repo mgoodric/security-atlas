@@ -28,15 +28,24 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
 // Handler bundles the HTTP routes.
 type Handler struct {
-	store *featureflag.Store
+	store  *featureflag.Store
+	access *moduleaccess.Store
 }
 
 // New constructs a Handler.
 func New(store *featureflag.Store) *Handler { return &Handler{store: store} }
+
+// WithModuleAccess wires the caller's module access (#2172) into
+// GET /v1/me/modules. Without it every switched-on module reads on.
+func (h *Handler) WithModuleAccess(access *moduleaccess.Store) *Handler {
+	h.access = access
+	return h
+}
 
 // ListItem is one entry in the GET /v1/admin/features response.
 type ListItem struct {
@@ -173,6 +182,10 @@ const (
 	// routes answer 404 with the switched-off marker, and the web app
 	// hides it.
 	ModuleSwitchedOff = "switched_off"
+	// ModuleNoAccess means the module is switched on but outside the
+	// caller's module access (#2172): its routes answer 403 naming the
+	// module, and the web app hides it and shows the no-access message.
+	ModuleNoAccess = "no_access"
 )
 
 // EffectiveModule is one optional module in the GET /v1/me/modules
@@ -212,6 +225,15 @@ func (h *Handler) Modules(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
+	access := moduleaccess.Access{Exempt: true}
+	if h.access != nil {
+		a, err := h.access.ForCaller(r)
+		if err != nil {
+			httperr.WriteInternal(w, r, "module access read failed", err)
+			return
+		}
+		access = a
+	}
 	optional := featureflag.OptionalModules()
 	out := make([]EffectiveModule, 0, len(optional))
 	for _, m := range optional {
@@ -222,14 +244,24 @@ func (h *Handler) Modules(w http.ResponseWriter, r *http.Request) {
 			httperr.WriteInternal(w, r, "feature flag read failed", err)
 			return
 		}
-		em := EffectiveModule{Key: m.Key, Name: m.Name, State: stateOf(on), Pages: nonNil(m.Pages), Features: []EffectiveFeature{}}
+		// Switched off wins over no access: a module off for the tenant is
+		// off for every caller (ADR 0025 decision 3).
+		state := stateOf(on)
+		if on && !access.Has(m.Key) {
+			state = ModuleNoAccess
+		}
+		em := EffectiveModule{Key: m.Key, Name: m.Name, State: state, Pages: nonNil(m.Pages), Features: []EffectiveFeature{}}
 		for _, f := range m.Features {
 			fon, err := featureflag.Enabled(r.Context(), h.store, f.FlagKey)
 			if err != nil {
 				httperr.WriteInternal(w, r, "feature flag read failed", err)
 				return
 			}
-			em.Features = append(em.Features, EffectiveFeature{Key: f.Key, Name: f.Name, State: stateOf(on && fon), Pages: nonNil(f.Pages)})
+			fstate := stateOf(on && fon)
+			if fstate == ModuleOn && state == ModuleNoAccess {
+				fstate = ModuleNoAccess
+			}
+			em.Features = append(em.Features, EffectiveFeature{Key: f.Key, Name: f.Name, State: fstate, Pages: nonNil(f.Pages)})
 		}
 		out = append(out, em)
 	}
