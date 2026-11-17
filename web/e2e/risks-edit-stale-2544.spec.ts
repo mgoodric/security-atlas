@@ -63,6 +63,8 @@ async function json(
 async function mockRisk(page: Page) {
   const risk = storedRisk();
   const patches: { ifMatch: string | undefined; status: number }[] = [];
+  // The next `failGets` GETs of the risk answer 500.
+  const control = { failGets: 0 };
 
   await page.route("**/api/risks/categories**", (route) =>
     json(route, 200, {
@@ -95,10 +97,15 @@ async function mockRisk(page: Page) {
       await json(route, 200, { risk }, { ETag: `"${risk.updated_at}"` });
       return;
     }
+    if (control.failGets > 0) {
+      control.failGets--;
+      await json(route, 500, { error: "test outage" });
+      return;
+    }
     await json(route, 200, { risk }, { ETag: etag });
   });
 
-  return { risk, patches };
+  return { risk, patches, control };
 }
 
 test.describe("/risks/[id]/edit keeps its opening version (#2544)", () => {
@@ -108,7 +115,7 @@ test.describe("/risks/[id]/edit keeps its opening version (#2544)", () => {
     // A fake clock lets the test move past the query's 60s staleTime, so
     // a window focus really refetches the risk.
     await page.clock.install();
-    const { risk, patches } = await mockRisk(page);
+    const { risk, patches, control } = await mockRisk(page);
 
     await page.goto(`/risks/${RISK_ID}/edit`);
     const title = page.getByTestId("risks-create-title");
@@ -149,6 +156,18 @@ test.describe("/risks/[id]/edit keeps its opening version (#2544)", () => {
       { ifMatch: '"2026-01-01T00:00:00Z"', status: 412 },
     ]);
     expect(risk.title).toBe("Test risk saved elsewhere");
+
+    // A Reload that fails (the query's three attempts all 500) keeps the
+    // prompt and the form, and says why.
+    control.failGets = 3;
+    await page.getByTestId("risk-edit-stale-reload").click();
+    // Past the query's retry delays (1s, then 2s).
+    await page.clock.fastForward(5_000);
+    await expect(
+      page.getByTestId("risk-edit-stale-reload-error"),
+    ).toContainText("test outage", { timeout: 30_000 });
+    await expect(page.getByTestId("risk-edit-stale")).toBeVisible();
+    await expect(title).toHaveValue("Test risk with my edit");
 
     await page.getByTestId("risk-edit-stale-reload").click();
     await expect(page.getByTestId("risk-edit-stale")).toHaveCount(0);

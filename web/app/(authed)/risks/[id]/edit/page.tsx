@@ -54,12 +54,15 @@ export default function RiskEditPage({
   // The version the form opened on (#2544). Set from the first load and
   // replaced only by Reload.
   const [opened, setOpened] = useState<Risk | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
 
-  // Shares the detail page's ["risk", id] key, so the form opens on the
-  // risk the operator was just reading.
-  const { data, isLoading, error, refetch } = useQuery({
+  // Shares the detail page's ["risk", id] key, so the page can paint the
+  // cached risk at once; refetchOnMount "always" fetches the current one,
+  // and the form opens on that (#2544), never on a cached copy.
+  const { data, error, isFetchedAfterMount, isFetching, refetch } = useQuery({
     queryKey: ["risk", id],
     queryFn: () => fetchRiskDetail(id),
+    refetchOnMount: "always",
     retry: (count, err) =>
       !(
         err instanceof APIError &&
@@ -67,7 +70,7 @@ export default function RiskEditPage({
       ) && count < 2,
   });
 
-  if (data && opened === null) {
+  if (opened === null && data && isFetchedAfterMount && !isFetching) {
     setOpened(data.risk);
   }
 
@@ -97,8 +100,12 @@ export default function RiskEditPage({
         </Link>
       }
     >
-      {isLoading ? <Skeleton className="h-96 w-full" /> : null}
-      {error && !(error instanceof APIError && error.status === 401) ? (
+      {!opened && !error ? <Skeleton className="h-96 w-full" /> : null}
+      {/* Once the form is open, a failed refetch does not replace it; a
+          failed Reload says so in the stale prompt instead. */}
+      {!opened &&
+      error &&
+      !(error instanceof APIError && error.status === 401) ? (
         <Alert variant="destructive">
           <AlertTitle>Could not load risk</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
@@ -112,18 +119,33 @@ export default function RiskEditPage({
               Someone else saved it first, so your edits were not saved. Reload
               to see the latest version, then make your changes again.
             </p>
+            {reloadError ? (
+              <p className="mt-2" data-testid="risk-edit-stale-reload-error">
+                Could not reload the risk: {reloadError}
+              </p>
+            ) : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="mt-2"
               data-testid="risk-edit-stale-reload"
+              disabled={isFetching}
               onClick={async () => {
+                setReloadError(null);
                 const res = await refetch();
-                if (res.data) {
-                  setOpened(res.data.risk);
-                  setStale(false);
+                // A failed refetch keeps the previous data; re-pinning it
+                // would clear the prompt on the version that was refused.
+                if (res.status !== "success") {
+                  setReloadError(
+                    res.error instanceof Error
+                      ? res.error.message
+                      : "the request failed",
+                  );
+                  return;
                 }
+                setOpened(res.data.risk);
+                setStale(false);
               }}
             >
               Reload
