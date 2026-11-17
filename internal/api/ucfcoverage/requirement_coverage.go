@@ -425,13 +425,22 @@ func (h *Handler) listControlsForAnchors(ctx context.Context, anchorIDs []pgtype
 // Absent, it pins the read to the current SCF release (#2203, the contract
 // step of #1770 D1). The boot-time re-bind (#1971) and the crosswalk
 // re-import move controls and edges onto the current release's anchors, so
-// on an upgraded install this matches the unpinned read. An edge left on a
-// legacy release on purpose (a crosswalk declaring an old scf_release)
-// drops out of the default read; ?scf_release=<old> still reads it. See
+// on an upgraded install this matches the unpinned read. An edge a
+// crosswalk declared on an older release is carried onto the current one
+// when its anchor kept its code and title (#2315); one that did not waits
+// on a remap decision and drops out of the default read meanwhile, and
+// ?scf_release=<old> still reads it. See
 // docs/audit-log/2203-coverage-default-release-decisions.md. With no
 // current release at all (an empty catalog) the read stays unpinned.
 func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) (*scfrelease.Release, error) {
-	rel, err := scfrelease.Lookup(ctx, h.q, r.URL.Query().Get("scf_release"))
+	return pinSCFRelease(ctx, h.q, r.URL.Query().Get("scf_release"))
+}
+
+// pinSCFRelease is resolveSCFRelease over any release reader, so the
+// empty-catalog fallback is testable without Postgres. A nil release means
+// the read is unpinned.
+func pinSCFRelease(ctx context.Context, q scfrelease.Querier, label string) (*scfrelease.Release, error) {
+	rel, err := scfrelease.Lookup(ctx, q, label)
 	if errors.Is(err, scfrelease.ErrNoCurrentRelease) {
 		return nil, nil
 	}

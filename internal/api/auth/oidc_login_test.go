@@ -12,10 +12,15 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 // testStateKey signs the OIDC flow state in tests (#2177).
 var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
+// loopbackIdP lets an Authenticator reach an httptest fake IdP on
+// 127.0.0.1, which the strict issuer policy denies (#2534).
+var loopbackIdP = oidc.WithIssuerPolicy(netguard.Policy{AllowLoopback: true})
 
 type oidcLoginTestResolver struct {
 	cfg oidc.IdpConfig
@@ -46,7 +51,7 @@ func TestOIDCLoginProviderUnavailableReturnsDesign503(t *testing.T) {
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
-	}}, testStateKey, 25*time.Millisecond)
+	}}, testStateKey, 25*time.Millisecond, loopbackIdP)
 	handler := New(authenticator, nil, nil, false, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/login?tenant_id="+tenantID.String()+"&idp=primary", nil)

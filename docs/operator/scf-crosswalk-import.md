@@ -194,12 +194,36 @@ A crosswalk that declares no release still binds in the current SCF release and
 prints a deprecation warning. The declaration becomes required in a later
 release.
 
+**After a new SCF release import (#2315).** A crosswalk that declares a release
+keeps its edges on that release's anchors. Requirement coverage reads the
+current release by default (#2203), so without help those edges would drop out
+of default coverage as soon as `catalog import-scf` makes a newer release
+current. The import carries them forward instead:
+
+- An edge whose anchor has the **same code and the same title** in the new
+  release is copied onto that anchor in the same step. Default coverage for it
+  does not change. This is the rule that re-binds controls (#1971).
+- Every other edge (title changed, code gone, split, code reused) stays on the
+  old release with an open remap proposal for a super-admin (below). It is
+  flagged, never moved silently and never dropped. Until it is decided, default
+  coverage does not count it; `?scf_release=<old>` still does.
+- The original edge is never changed, so a read pinned to the old release is
+  the same as before.
+
+The import prints `crosswalk_edges carried_forward=<n>`. Re-running it carries
+nothing twice. Re-importing a crosswalk that still declares the old release
+leaves the carried edges alone, so you do not need to re-import each crosswalk
+after an SCF upgrade.
+
 ### Edges left on an older release (#1777)
 
 `atlas-cli catalog import-scf` queues every live edge still on an anchor of an
 older SCF release for review, and prints the counts as
 `edge_remap_proposals unchanged=… renamed=… split=… reused_id=… no_successor=…`.
-The classes are the same as for controls. Queueing changes no edge.
+The classes are the same as for controls. Queueing changes no existing edge.
+In the same transaction, each proposal whose anchor kept its code and title
+is approved by the import itself (`decided_by` `system:scf-import`; see "SCF
+release" above). That leaves the rest open.
 
 Edges are global, so only a super-admin reviews them, through
 `/v1/admin/crosswalk-edge-remap-proposals`:

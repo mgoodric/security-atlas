@@ -150,6 +150,14 @@ func TestSSRFPolicy_DeniesInternal(t *testing.T) {
 		"ftp://hooks.public.test/hook",             // non-http scheme
 		"https://rebind.test/hook",                 // mixed public+private
 		"",                                         // empty
+		// Shared netguard ranges (#2534): this-network, broadcast,
+		// benchmarking, reserved, and NAT64 / 6to4 wrapping internal v4.
+		"https://0.1.2.3/hook",
+		"https://255.255.255.255/hook",
+		"https://198.18.0.1/hook",
+		"https://240.0.0.1/hook",
+		"https://[64:ff9b::a9fe:a9fe]/hook",
+		"https://[2002:a00:1::1]/hook",
 	}
 	for _, raw := range denied {
 		if _, err := p.ValidateWebhookURL(raw); err == nil {

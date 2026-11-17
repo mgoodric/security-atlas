@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 // SSRF guard for the generic-webhook channel (slice 543 / threat-model S /
@@ -104,33 +106,15 @@ func (p SSRFPolicy) resolve(host string) ([]net.IP, error) {
 
 // denyReason returns a non-empty reason string when ip is in a denied
 // (internal / non-routable) range, honoring the policy's test allowances.
+// The deny list itself is netguard's, shared with the OIDC client (#2534).
 func (p SSRFPolicy) denyReason(ip net.IP) string {
-	switch {
-	case ip.IsLoopback():
-		if p.AllowLoopback {
-			return ""
-		}
-		return "loopback"
-	case ip.IsUnspecified():
-		return "unspecified"
-	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
-		// Covers 169.254.0.0/16 incl. the 169.254.169.254 cloud metadata IP
-		// and fe80::/10.
-		return "link-local"
-	case ip.IsPrivate():
-		// RFC1918 (10/8, 172.16/12, 192.168/16) + ULA fc00::/7.
-		return "private"
-	case ip.IsMulticast():
-		return "multicast"
-	case ip.IsInterfaceLocalMulticast():
-		return "interface-local-multicast"
-	}
-	// Carrier-grade NAT 100.64.0.0/10 is not flagged by the stdlib helpers;
-	// deny it explicitly (it is not a legitimate public webhook target).
-	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
-		return "cgnat"
-	}
-	return ""
+	return p.guard().DenyReason(ip)
+}
+
+// guard is the netguard policy this notify policy maps to. Notify targets
+// never get the private-network opt-in.
+func (p SSRFPolicy) guard() netguard.Policy {
+	return netguard.Policy{AllowLoopback: p.AllowLoopback}
 }
 
 // WithResolver returns a copy of the policy whose config-time check
@@ -146,52 +130,14 @@ func (p SSRFPolicy) WithResolver(f func(host string) ([]net.IP, error)) SSRFPoli
 // resolved address being dialled (#2304). ValidateWebhookURL checks the
 // host once, at config time; every later dial resolves the name again, so
 // a hostname whose DNS an attacker controls could rebind to an internal
-// address after validation. Control runs after resolution and before
-// connect, once per address tried (every Happy-Eyeballs attempt included),
-// so it sees exactly what is connected to. An address that does not parse
-// as ip:port is refused: fail closed.
-func (p SSRFPolicy) DialControl(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return fmt.Errorf("ssrf guard: dial address %q unparseable: %w", address, err)
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return fmt.Errorf("ssrf guard: dial address %q is not an IP", address)
-	}
-	if reason := p.denyReason(ip); reason != "" {
-		return fmt.Errorf("ssrf guard: dial to %s refused (%s); internal targets are denied", ip, reason)
-	}
-	return nil
+// address after validation. See netguard.Policy.DialControl.
+func (p SSRFPolicy) DialControl(network, address string, c syscall.RawConn) error {
+	return p.guard().DialControl(network, address, c)
 }
 
 // NewHTTPClient returns an *http.Client for an operator-configured
-// outbound target, hardened against SSRF (#2304):
-//
-//   - its own *http.Transport, not http.DefaultTransport (#2202);
-//   - Proxy nil: an environment proxy (HTTPS_PROXY) would make the client
-//     dial the proxy, and the proxy dial the target, past DialControl;
-//   - net.Dialer.Control = DialControl, so every dialled IP is re-checked
-//     (DNS rebinding);
-//   - redirects are never followed: CheckRedirect returns
-//     http.ErrUseLastResponse, so a 3xx comes back as the response and the
-//     body and its auth/signature headers go nowhere else;
-//   - timeout as a whole-request backstop for a caller that sets no
-//     deadline.
+// outbound target, hardened against SSRF (#2304): dial-time IP checks, no
+// proxy, no redirects, timeout backstop. See netguard.Policy.NewHTTPClient.
 func (p SSRFPolicy) NewHTTPClient(timeout time.Duration) *http.Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.Proxy = nil
-	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-		Control:   p.DialControl,
-	}
-	tr.DialContext = dialer.DialContext
-	return &http.Client{
-		Transport: tr,
-		Timeout:   timeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	return p.guard().NewHTTPClient(timeout)
 }

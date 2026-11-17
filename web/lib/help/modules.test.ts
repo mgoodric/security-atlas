@@ -167,7 +167,7 @@ describe("the real help files", () => {
 
   it("covers Controls, and leaves an unmapped page without help", () => {
     expect(helpModuleForPath("/controls")?.id).toBe("controls");
-    expect(helpModuleForPath("/risks")).toBeUndefined();
+    expect(helpModuleForPath("/calendar")).toBeUndefined();
     expect(helpDocsHref("controls")).toBe(
       "https://mgoodric.github.io/security-atlas/help/controls/",
     );
@@ -267,6 +267,36 @@ describe("the real help files", () => {
   ])("embeds the %s lifecycle diagram", (id, lifecycle) => {
     const mod = HELP_MODULES.find((m) => m.id === id);
     expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual([lifecycle]);
+  });
+
+  // #2151 — every Risks page resolves to its own module; the hierarchy
+  // claims its deeper route from the register, and the taxonomy and each
+  // risk's pages stay on the register.
+  it.each([
+    ["/risks", "risks"],
+    ["/risks/new", "risks"],
+    ["/risks/taxonomy", "risks"],
+    ["/risks/abc", "risks"],
+    ["/risks/abc/treatment", "risks"],
+    ["/risks/abc/acceptance/approve", "risks"],
+    ["/risks/abc/close", "risks"],
+    ["/risks/hierarchy", "risks-hierarchy"],
+    ["/action-plans", "action-plans"],
+    ["/action-plans/new", "action-plans"],
+    ["/action-plans/abc", "action-plans"],
+    ["/action-plans/abc/edit", "action-plans"],
+  ])("covers %s with the %s help", (route, id) => {
+    expect(helpModuleForPath(route)?.id).toBe(id);
+  });
+
+  // #2151 — the register shows both risk lifecycles; action plans its own.
+  it.each([
+    ["risks", ["risk_treatment", "risk_status"]],
+    ["risks-hierarchy", []],
+    ["action-plans", ["action_plan"]],
+  ])("embeds the %s lifecycle diagrams", (id, lifecycles) => {
+    const mod = HELP_MODULES.find((m) => m.id === id);
+    expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual(lifecycles);
   });
 
   // #2145 — a module's hint dismissal is refused unless its id is in

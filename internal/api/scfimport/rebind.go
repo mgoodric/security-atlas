@@ -101,7 +101,16 @@ const unparseableNote = "stored control.yaml does not parse, so its SCF release 
 // current release's anchor without changing what it is anchored to: the
 // same code must exist with the same title.
 func Rebindable(r dbx.ListControlsOnLegacySCFAnchorsRow) bool {
-	return r.CurrentAnchorID.Valid && r.CurrentAnchorTitle != nil && *r.CurrentAnchorTitle == r.LegacyAnchorTitle
+	return SameCodeAndTitle(r.CurrentAnchorID.Valid, r.CurrentAnchorTitle, r.LegacyAnchorTitle)
+}
+
+// SameCodeAndTitle is the D3 rule (#1971) on its own: the current release
+// has an anchor with the legacy code (hasCurrent) and its title is the
+// legacy title, so the anchor's meaning did not change. Controls
+// (Rebindable) and catalog crosswalk edges (QueueEdgeRemapProposals, #2315)
+// both move on it and on nothing looser.
+func SameCodeAndTitle(hasCurrent bool, currentTitle *string, legacyTitle string) bool {
+	return hasCurrent && currentTitle != nil && *currentTitle == legacyTitle
 }
 
 // IsStockManifest reports whether a stored control.yaml is one the platform

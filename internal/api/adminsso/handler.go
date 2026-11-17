@@ -58,6 +58,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -81,8 +82,10 @@ type PreflightOptions struct {
 	// MaxBodyBytes caps the response body size. Default: 64 KiB.
 	MaxBodyBytes int64
 	// AllowPrivateIPs, when true, permits the fetch to target loopback
-	// and RFC1918 addresses. Defaults to false in production; tests set
-	// true so a local fake IdP can be reached via 127.0.0.1.
+	// and private (RFC1918 / ULA / CGNAT) addresses; link-local stays
+	// denied. Off by default; the deployment sets it through
+	// oidc.AllowPrivateIssuersEnv (#2534), and tests set it so a local
+	// fake IdP can be reached via 127.0.0.1.
 	AllowPrivateIPs bool
 	// HTTPClient overrides the default transport so tests can supply a
 	// roundtripper that records calls.
@@ -363,7 +366,10 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 	}
 	client := h.preflightOpts.HTTPClient
 	if client == nil {
-		client = h.newSafeHTTPClient()
+		// Re-checks every dialled IP (closing the DNS-rebinding window
+		// after guardSSRF), ignores proxies and refuses redirects:
+		// discovery documents have no legitimate reason to redirect.
+		client = h.guard().NewHTTPClient(h.preflightOpts.Timeout)
 	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -443,85 +449,23 @@ func (h *Handler) guardSSRF(ctx context.Context, host string) error {
 		return fmt.Errorf("dns lookup failed for %s: %w", hostname, err)
 	}
 	for _, ip := range ips {
-		if isUnsafeIP(ip) {
-			return fmt.Errorf("issuer_url host resolves to non-routable address %s", ip)
+		if reason := h.guard().DenyReason(ip); reason != "" {
+			return fmt.Errorf("issuer_url host resolves to non-routable address %s (%s)", ip, reason)
 		}
 	}
 	return nil
 }
 
-// newSafeHTTPClient returns an HTTP client whose Transport re-validates
-// the destination IP at connect-time (closing the TOCTOU window between
-// guardSSRF's pre-check and the actual dial — DNS rebinding) and which
-// refuses to follow HTTP redirects (a redirect to an internal address
-// would otherwise bypass guardSSRF entirely). The handler-level
-// guardSSRF remains as a first line of defense; this Transport is the
-// second.
-//
-// CodeQL `go/request-forgery` flags `client.Do` on a URL that came from
-// user input even when the URL passed a prior check, because Go's
-// default Transport re-resolves the host at dial time using whatever
-// the resolver returns at that moment. This implementation moves the
-// safety check inside DialContext so it fires on every concrete IP
-// returned by the resolver, then dials the validated IP directly.
-func (h *Handler) newSafeHTTPClient() *http.Client {
-	lookup := h.preflightOpts.LookupHost
-	if lookup == nil {
-		lookup = func(ctx context.Context, host string) ([]net.IP, error) {
-			return net.DefaultResolver.LookupIP(ctx, "ip", host)
-		}
+// guard is the shared SSRF policy (internal/netguard, #2534) the preflight
+// applies. AllowPrivateIPs is the deployment opt-in for a self-hosted IdP
+// on a private network (oidc.AllowPrivateIssuersEnv); it permits loopback
+// and private ranges but never link-local, so cloud metadata stays denied.
+// The sign-in path builds the same policy, so preflight and runtime agree.
+func (h *Handler) guard() netguard.Policy {
+	return netguard.Policy{
+		AllowLoopback: h.preflightOpts.AllowPrivateIPs,
+		AllowPrivate:  h.preflightOpts.AllowPrivateIPs,
 	}
-	dialer := &net.Dialer{Timeout: h.preflightOpts.Timeout}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, fmt.Errorf("split host port: %w", err)
-			}
-			if h.preflightOpts.AllowPrivateIPs {
-				return dialer.DialContext(ctx, network, addr)
-			}
-			ips, err := lookup(ctx, host)
-			if err != nil {
-				return nil, fmt.Errorf("dial-time dns lookup failed: %w", err)
-			}
-			if len(ips) == 0 {
-				return nil, errors.New("dial-time dns lookup returned no addresses")
-			}
-			for _, ip := range ips {
-				if isUnsafeIP(ip) {
-					return nil, fmt.Errorf("connection to %s blocked: resolves to non-routable address %s", host, ip)
-				}
-			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
-		},
-	}
-	return &http.Client{
-		Transport: transport,
-		Timeout:   h.preflightOpts.Timeout,
-		// Refuse to follow redirects — a redirect to an internal host
-		// would otherwise bypass the DialContext check by hopping out
-		// of our Transport on the second request. Discovery documents
-		// have no legitimate reason to redirect.
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-}
-
-// isUnsafeIP reports whether ip is in loopback, link-local, RFC1918,
-// RFC4193, multicast, or unspecified space. Public IPs return false.
-func isUnsafeIP(ip net.IP) bool {
-	if ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() ||
-		ip.IsMulticast() ||
-		ip.IsPrivate() ||
-		ip.IsUnspecified() {
-		return true
-	}
-	return false
 }
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
