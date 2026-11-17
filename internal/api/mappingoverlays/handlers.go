@@ -16,25 +16,63 @@ package mappingoverlays
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Handler serves the overlay edge routes.
-type Handler struct{ store *mappingoverlay.Store }
+type Handler struct {
+	store *mappingoverlay.Store
+	// peoplePool is the app pool the author names are read on (#2286).
+	// Without it (a unit-test handler) every author reads "Unknown".
+	peoplePool *pgxpool.Pool
+}
 
 // New constructs a Handler.
 func New(store *mappingoverlay.Store) *Handler { return &Handler{store: store} }
+
+// WithPeople wires the pool the overlay authors are named from (#2286).
+func (h *Handler) WithPeople(pool *pgxpool.Pool) *Handler {
+	h.peoplePool = pool
+	return h
+}
+
+// directory is the caller tenant's people, read under its RLS tenant, so
+// an author from another tenant never resolves. With no pool it is nil,
+// which names every actor but "system" as "Unknown".
+func (h *Handler) directory(r *http.Request) (*people.Directory, error) {
+	if h.peoplePool == nil {
+		return nil, nil
+	}
+	return people.Load(r.Context(), h.peoplePool)
+}
+
+// writtenDirectory names the authors on a write's response. The write has
+// already committed, so a failed read is logged and the names read
+// "Unknown" rather than the request failing.
+func (h *Handler) writtenDirectory(r *http.Request) *people.Directory {
+	dir, err := h.directory(r)
+	if err != nil {
+		slog.WarnContext(r.Context(), "mapping overlays: name authors", "err", err)
+		return nil
+	}
+	return dir
+}
 
 // edgeWire is an overlay edge on the wire.
 type edgeWire struct {
@@ -53,12 +91,20 @@ type edgeWire struct {
 	Status                 string     `json:"status"`
 	RetirementReason       string     `json:"retirement_reason,omitempty"`
 	CreatedBy              string     `json:"created_by"`
+	CreatedByName          string     `json:"created_by_name"`
 	CreatedAt              time.Time  `json:"created_at"`
 	RetiredBy              string     `json:"retired_by,omitempty"`
+	RetiredByName          string     `json:"retired_by_name,omitempty"`
 	RetiredAt              *time.Time `json:"retired_at,omitempty"`
 }
 
-func wireFrom(e mappingoverlay.Edge) edgeWire {
+// wireFrom renders e, naming its authors from dir (#2286). created_by and
+// retired_by stay the recorded ids.
+func wireFrom(e mappingoverlay.Edge, dir *people.Directory) edgeWire {
+	retiredByName := ""
+	if e.RetiredBy != "" {
+		retiredByName = dir.Name(e.RetiredBy)
+	}
 	return edgeWire{
 		ID:                     e.ID.String(),
 		Framework:              e.Framework,
@@ -75,8 +121,10 @@ func wireFrom(e mappingoverlay.Edge) edgeWire {
 		Status:                 e.Status,
 		RetirementReason:       e.RetirementReason,
 		CreatedBy:              e.CreatedBy,
+		CreatedByName:          dir.Name(e.CreatedBy),
 		CreatedAt:              e.CreatedAt,
 		RetiredBy:              e.RetiredBy,
+		RetiredByName:          retiredByName,
 		RetiredAt:              e.RetiredAt,
 	}
 }
@@ -125,7 +173,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, "create overlay edge", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"overlay_edge": wireFrom(edge)})
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"overlay_edge": wireFrom(edge, h.writtenDirectory(r))})
 }
 
 // List handles GET /v1/mapping-overlays.
@@ -144,9 +192,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, "list overlay edges", err)
 		return
 	}
+	dir, err := h.directory(r)
+	if err != nil {
+		httperr.WriteInternal(w, r, "name overlay authors", err)
+		return
+	}
 	out := make([]edgeWire, len(edges))
 	for i, e := range edges {
-		out[i] = wireFrom(e)
+		out[i] = wireFrom(e, dir)
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"overlay_edges": out, "count": len(out)})
 }
@@ -178,7 +231,7 @@ func (h *Handler) Retire(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, "retire overlay edge", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"overlay_edge": wireFrom(edge)})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"overlay_edge": wireFrom(edge, h.writtenDirectory(r))})
 }
 
 // writeErr maps the store's errors. Each refusal carries a `code` so a
@@ -238,11 +291,20 @@ func requireTenant(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// actorFrom names the caller on the audit row: the credential's id. With
-// no credential (or one without an id) in context it writes a 401 and
-// returns false, so a write is never recorded without an actor (#2375).
+// actorFrom names the caller on the audit row. A signed-in person (a JWT
+// session) is recorded as their users(id) (#2286): the session's own
+// credential id is per token ("jwt:<jti>") and names no one a reader could
+// resolve. Every other caller is recorded as its credential id, so an API
+// key stays "key_<uuid>" even when a user owns it. With no credential (or
+// one without an id) in context it writes a 401 and returns false, so a
+// write is never recorded without an actor (#2375).
 func actorFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if cred, ok := authctx.CredentialFromContext(r.Context()); ok && cred.ID != "" {
+		if strings.HasPrefix(cred.ID, "jwt:") {
+			if u, ok := credstore.CallerUserID(cred); ok {
+				return u.String(), true
+			}
+		}
 		return cred.ID, true
 	}
 	httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")

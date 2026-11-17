@@ -8,6 +8,7 @@ import {
   formatSeverity,
   severityBand,
   severityBandLabel,
+  UNSCORED_LABEL,
 } from "@/app/(authed)/risks/filters";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,9 @@ export type RiskAgingRow = {
   // stored before it was frozen in, which read as 5x5.
   methodology?: string;
   residual_severity: number;
+  // #2511: the risk has no score yet; the generator ranks it last. Absent
+  // on packs stored before it existed.
+  unscored?: boolean;
   age_days: number;
 };
 
@@ -86,7 +90,14 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
               </span>
             </td>
             <td className="py-3 pr-3 text-right font-mono text-foreground">
-              {risk.methodology === "fair" ? (
+              {risk.unscored ? (
+                <span
+                  className="text-muted-foreground"
+                  data-testid="top-risks-residual"
+                >
+                  {UNSCORED_LABEL}
+                </span>
+              ) : risk.methodology === "fair" ? (
                 // #2185: a FAIR residual is dollars, with no 5x5 band. The
                 // generator ranks FAIR risks after every 5x5 risk.
                 <span data-testid="top-risks-residual">

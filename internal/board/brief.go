@@ -210,6 +210,11 @@ type RiskAging struct {
 	// the risk's residual_score JSONB (falling back to inherent_score) —
 	// see generator.go. On a Monetary risk it is dollars, not 1..25.
 	ResidualSeverity float64 `json:"residual_severity"`
+	// Unscored marks a risk with neither a residual nor an inherent score,
+	// logged before it is assessed (#2511). It ranks last and prints as
+	// "Unscored", not as a severity of 0. Briefs and packs stored before it
+	// existed lack it.
+	Unscored bool `json:"unscored,omitempty"`
 	// AgeDays is the age-since-treatment proxy: now - updated_at, in days
 	// (decisions log D4 — risks have no treatment-applied timestamp).
 	AgeDays int `json:"age_days"`
@@ -231,19 +236,23 @@ func (r RiskAging) Monetary() bool {
 	return risk.Monetary(dbx.RiskMethodology(r.Methodology))
 }
 
-// Band is the residual's Low/Medium/High band, or "" for a Monetary risk:
-// a dollar exposure has no 5x5 band.
+// Band is the residual's Low/Medium/High band, or "" for a Monetary or
+// Unscored risk: neither has a 5x5 band.
 func (r RiskAging) Band() string {
-	if r.Monetary() {
+	if r.Monetary() || r.Unscored {
 		return ""
 	}
 	return risk.SeverityBand(r.ResidualSeverity)
 }
 
-// ResidualLabel is the residual as the PDF and narrative print it: a FAIR
-// risk in whole dollars ("$250,000"), anything else as its 1..25 severity
-// and band ("12.0 Medium"). Matches the web board-pack table.
+// ResidualLabel is the residual as the PDF and narrative print it: an
+// unscored risk as "Unscored", a FAIR risk in whole dollars ("$250,000"),
+// anything else as its 1..25 severity and band ("12.0 Medium"). Matches
+// the web board-pack table.
 func (r RiskAging) ResidualLabel() string {
+	if r.Unscored {
+		return "Unscored"
+	}
 	if r.Monetary() {
 		return formatDollars(r.ResidualSeverity)
 	}

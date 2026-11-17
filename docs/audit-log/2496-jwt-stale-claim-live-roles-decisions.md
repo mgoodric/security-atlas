@@ -71,16 +71,26 @@ out of scope here.
 
 ### D4 — handler gates that still read `OwnerRoles`
 
-Several handler-level checks behind OPA still read `cred.OwnerRoles`
-directly (for example `adminvendors.callerAllowedExport`,
+Several handler-level checks still read `cred.OwnerRoles` directly (for
+example `policyacks`' ack caller, `adminvendors.callerAllowedExport`,
 `admindemo.requireAdmin`, and the `IsAdmin || IsApprover ||
-len(OwnerRoles) > 0` read gates). They run only after OPA admits, so a
-session with no live role never reaches them. A session whose live role is
+len(OwnerRoles) > 0` read gates), and `oauth/device_approve.go` copies it
+into a device token. A gate behind OPA runs only after OPA admits, so a
+session with no live role never reaches it. A session whose live role is
 narrower than its stale claim (claim `grc_engineer`, live `viewer`) reaches
-them on routes OPA admits for viewer, and a claim-reading gate can then
-admit more than the live role would. Changing those gates is outside this
-ticket's acceptance criteria; it is reported as a follow-up rather than
-widened here.
+it on routes OPA admits for viewer, and a claim-reading gate can then admit
+more than the live role would. For example, a viewer may read
+`GET /v1/me/acknowledgments`, where the stale claim still matches a policy
+whose `acknowledgment_required_roles` names `grc_engineer`. Device approval sits outside
+authzmw entirely: a revoked `admin` claim is copied into the approved
+token's roles and re-minted with a fresh expiry. Changing those sites is
+outside this ticket's acceptance criteria; it is reported as a follow-up
+(#2505) rather than widened here.
+
+_Corrected by #2505._ This entry first gave the vendor export as the
+example. That case cannot happen: `/v1/admin/vendors` is resource `admin`,
+which OPA does not admit for viewer, so a narrower live role never reaches
+`callerAllowedExport`.
 
 ## Fixtures updated
 

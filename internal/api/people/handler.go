@@ -146,7 +146,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "people list unavailable: no database")
 		return
 	}
-	out, err := h.list(r.Context(), tenantID)
+	out, err := list(r.Context(), h.pool, tenantID)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list people", err)
 		return
@@ -164,9 +164,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(out)
 }
 
-func (h *Handler) list(ctx context.Context, tenantID uuid.UUID) (Response, error) {
+// list reads tenantID's users and API keys under its RLS tenant. It is the
+// one people lookup: GET /v1/people and the server-side Directory both
+// read through it.
+func list(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID) (Response, error) {
 	out := Response{Users: []User{}, APIKeys: []APIKey{}}
-	tx, err := h.pool.Begin(ctx)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return out, fmt.Errorf("begin: %w", err)
 	}

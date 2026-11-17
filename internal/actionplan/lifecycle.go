@@ -11,11 +11,12 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 // /v1/action-plans/{id}; verify has its own route (#2108). unverify is the
 // system's alone, made after a control evaluation (#2109).
 var Lifecycle = lifecycle.Table{
-	Name:   "action_plan",
-	Title:  "Action plan",
-	Entity: "action_plans",
-	Column: "status",
-	States: []string{StatusDraft, StatusInProgress, StatusBlocked, StatusCompleted, StatusVerified},
+	Name:        "action_plan",
+	Title:       "Action plan",
+	Entity:      "action_plans",
+	Column:      "status",
+	Enforcement: lifecycle.EnforcedByDatabase,
+	States:      []string{StatusDraft, StatusInProgress, StatusBlocked, StatusCompleted, StatusVerified},
 	Initial: []lifecycle.Entry{{
 		State:  StatusDraft,
 		Action: "create",

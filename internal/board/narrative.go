@@ -72,7 +72,7 @@ Over {{ .Drift.Since }} to {{ .Drift.Through }}, the net change in passing contr
 
 {{ if .TopRisks -}}
 {{ range $i, $r := .TopRisks -}}
-{{ add1 $i }}. **{{ $r.Title }}** ({{ $r.CategoryLabel }}, treatment: {{ $r.Treatment }}) — {{ if $r.Monetary }}FAIR residual annualized loss exposure {{ $r.ResidualLabel }}{{ else }}residual severity {{ printf "%.1f" $r.ResidualSeverity }} ({{ $r.Band }}){{ end }}, open {{ $r.AgeDays }} day(s).
+{{ add1 $i }}. **{{ $r.Title }}** ({{ $r.CategoryLabel }}, treatment: {{ $r.Treatment }}) — {{ if $r.Unscored }}unscored{{ else if $r.Monetary }}FAIR residual annualized loss exposure {{ $r.ResidualLabel }}{{ else }}residual severity {{ printf "%.1f" $r.ResidualSeverity }} ({{ $r.Band }}){{ end }}, open {{ $r.AgeDays }} day(s).
 {{ end -}}
 {{ else -}}
 No open risks in the register.

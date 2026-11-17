@@ -102,3 +102,32 @@ describe("risk edit form state (#2104)", () => {
     });
   });
 });
+
+// #2511: a risk logged with "Score later" opens with the box checked, and
+// the edit sends no score until it is unchecked; then it sends the score
+// even at the form's default values.
+describe("score later (#2511)", () => {
+  const UNSCORED: Risk = { ...RISK, inherent_score: {}, severity: 0 };
+
+  test("a fresh form scores by default; an unscored risk opens on Score later", () => {
+    expect(riskToFormState(RISK).score_later).toBe(false);
+    expect(riskToFormState(UNSCORED).score_later).toBe(true);
+    expect(riskToFormState({ ...RISK, inherent_score: null }).score_later).toBe(
+      true,
+    );
+  });
+
+  test("an unscored risk left unscored sends no score", () => {
+    const opening = riskToFormState(UNSCORED);
+    expect(toPatchInput(opening, { ...opening, title: "New" })).toEqual({
+      title: "New",
+    });
+  });
+
+  test("scoring an unscored risk sends the score at its default values", () => {
+    const opening = riskToFormState(UNSCORED);
+    expect(toPatchInput(opening, { ...opening, score_later: false })).toEqual({
+      inherent_score: { likelihood: 3, impact: 3 },
+    });
+  });
+});

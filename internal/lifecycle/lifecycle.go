@@ -25,6 +25,21 @@ const (
 	ActorSystem = "system"
 )
 
+// Enforcement kinds: what refuses a move the table does not list (#2147).
+const (
+	// EnforcedByDatabase: a database trigger refuses moves out of the
+	// states Trigger covers, on top of the stores' own checks.
+	EnforcedByDatabase = "database"
+	// EnforcedByStore: only the Go store refuses a move, through its
+	// state checks and guarded UPDATEs. No trigger guards the column.
+	EnforcedByStore = "store"
+	// EnforcedByDerivation: nothing refuses a move row by row. The state
+	// is recomputed from its inputs (evidence, exceptions) each time, so
+	// the table says which inputs produce which state, and every move is
+	// the system's.
+	EnforcedByDerivation = "derived"
+)
+
 // Table is one lifecycle's declared transition table.
 type Table struct {
 	// Name is the lifecycle id, also the export's file name
@@ -35,6 +50,9 @@ type Table struct {
 	// Entity is the database table and Column the state column on it.
 	Entity string `json:"entity"`
 	Column string `json:"column"`
+	// Enforcement is EnforcedByDatabase, EnforcedByStore or
+	// EnforcedByDerivation.
+	Enforcement string `json:"enforcement"`
 	// States lists every value the state column may hold, in lifecycle
 	// order.
 	States []string `json:"states"`
@@ -133,6 +151,18 @@ func (t Table) Validate() error {
 		return fmt.Errorf("lifecycle %q: name and states are required", t.Name)
 	}
 	known := func(s string) bool { return slices.Contains(t.States, s) }
+	switch t.Enforcement {
+	case EnforcedByDatabase:
+		if t.Trigger == nil {
+			return fmt.Errorf("lifecycle %s: enforced by the database but names no trigger", t.Name)
+		}
+	case EnforcedByStore, EnforcedByDerivation:
+		if t.Trigger != nil {
+			return fmt.Errorf("lifecycle %s: names trigger %s but is enforced by %s", t.Name, t.Trigger.Name, t.Enforcement)
+		}
+	default:
+		return fmt.Errorf("lifecycle %s: enforcement %q", t.Name, t.Enforcement)
+	}
 	if len(t.Initial) == 0 {
 		return fmt.Errorf("lifecycle %s: no initial state", t.Name)
 	}
@@ -167,6 +197,9 @@ func (t Table) Validate() error {
 		}
 		if tr.Actor != ActorPerson && tr.Actor != ActorSystem {
 			return fmt.Errorf("lifecycle %s: %s -> %s has actor %q", t.Name, tr.From, tr.To, tr.Actor)
+		}
+		if t.Enforcement == EnforcedByDerivation && tr.Actor != ActorSystem {
+			return fmt.Errorf("lifecycle %s: derived move %s -> %s is not the system's", t.Name, tr.From, tr.To)
 		}
 		if tr.Actor == ActorPerson && len(tr.Roles) == 0 {
 			return fmt.Errorf("lifecycle %s: person move %s -> %s names no role", t.Name, tr.From, tr.To)

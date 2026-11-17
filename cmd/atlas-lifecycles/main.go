@@ -26,10 +26,12 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/actionplan"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/lifecycle"
 	"github.com/mgoodric/security-atlas/internal/policy"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // tables lists every declared lifecycle. A new table is added here.
@@ -40,6 +42,9 @@ func tables() []lifecycle.Table {
 		policy.Lifecycle,
 		frameworkscope.Lifecycle,
 		period.Lifecycle,
+		risk.TreatmentLifecycle,
+		risk.StatusLifecycle,
+		eval.Lifecycle,
 	}
 }
 

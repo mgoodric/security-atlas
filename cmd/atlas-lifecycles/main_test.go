@@ -82,8 +82,8 @@ func TestExport_DocumentMatchesTable(t *testing.T) {
 func TestTables_Valid(t *testing.T) {
 	t.Parallel()
 	ts := tables()
-	if len(ts) != 5 {
-		t.Fatalf("want 5 lifecycles, got %d", len(ts))
+	if len(ts) != 8 {
+		t.Fatalf("want 8 lifecycles, got %d", len(ts))
 	}
 	for _, tab := range ts {
 		if err := tab.Validate(); err != nil {
