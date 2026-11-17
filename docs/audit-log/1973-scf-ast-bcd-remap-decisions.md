@@ -31,6 +31,8 @@ Hand edits on top:
 
 ISO A.5.9 Inventory of information and other associated assets was anchored on `AST-09` Asset Disposal because the sample had nothing closer. It now sits on `AST-22`. The sample now carries `AST-04` Asset Inventories, which is the better anchor, but moving the edge would change the mapping and not just the code. That is a crosswalk change, outside a permutation ticket. Left for #2301; the rationale now says the edge covers the asset lifecycle and doesn't claim `AST-22` is the nearest anchor.
 
+**Resolved by #2301:** A.5.9 now maps to `AST-04` (`intersects_with` 0.8), and boot convergence retires the old `AST-22` edge on upgrade. See `2301-iso-a59-ast04-decisions.md`.
+
 ## D4 — Upgrade effect
 
 Five stock SOC 2 controls change their anchor code, so on the next boot they are superseded, not re-bound: `soc2_a1_2_backup_processes` (`BCD-09`→`BCD-24`), `soc2_a1_3_backup_testing` (`BCD-11`→`BCD-32`), `soc2_c1_2_confidential_disposal` and `soc2_cc6_5_asset_disposal` (`AST-09`→`AST-22`), and `soc2_cc9_1_business_continuity` (`BCD-02`→`BCD-04`). A tenant control on any of the five old anchors in `test-2026.1` is flagged and not re-bound, because `RebindControls` moves only same code and same title, and none of the five old codes is in the `test-2026.3` sample. The control's note names the new code from `remaps.json`. The `endpoint.software_inventory` evidence kind's default anchors change from `VPM-04`, `AST-03` to `VPM-04`, `AST-04`.

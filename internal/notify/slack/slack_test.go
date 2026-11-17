@@ -11,6 +11,36 @@ import (
 	"github.com/mgoodric/security-atlas/internal/notify"
 )
 
+// testPolicy relaxes the strict policy just enough to reach an httptest
+// server on loopback.
+var testPolicy = notify.SSRFPolicy{AllowHTTP: true, AllowLoopback: true}
+
+// A Slack endpoint answering 307 must not move the POST (and the token in
+// the URL path) to another host (#2304).
+func TestHTTPTransport_Post_RedirectNotFollowed(t *testing.T) {
+	t.Parallel()
+	hit := make(chan struct{}, 1)
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit <- struct{}{}
+	}))
+	defer internal.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, internal.URL+"/steal", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	tr := NewHTTPTransport(Config{WebhookURL: notify.Secret(srv.URL), Timeout: DefaultTimeout}, testPolicy)
+	err := tr.Post(context.Background(), []byte(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("expected a 307 delivery failure, got %v", err)
+	}
+	select {
+	case <-hit:
+		t.Fatal("redirect target received the POST")
+	default:
+	}
+}
+
 func TestConfig_Redacted_NeverLeaksURL(t *testing.T) {
 	t.Parallel()
 	cfg := Config{WebhookURL: notify.Secret("https://hooks.slack.com/services/T000/B000/test-slack-token")}
@@ -136,7 +166,7 @@ func TestHTTPTransport_Post_OK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := NewHTTPTransport(Config{WebhookURL: notify.Secret(srv.URL), Timeout: DefaultTimeout})
+	tr := NewHTTPTransport(Config{WebhookURL: notify.Secret(srv.URL), Timeout: DefaultTimeout}, testPolicy)
 	if err := tr.Post(context.Background(), []byte(`{"text":"hi"}`)); err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -154,7 +184,7 @@ func TestHTTPTransport_Post_ErrorScrubsSecret(t *testing.T) {
 	defer srv.Close()
 
 	secretURL := srv.URL + "/services/test-slack-token"
-	tr := NewHTTPTransport(Config{WebhookURL: notify.Secret(secretURL), Timeout: DefaultTimeout})
+	tr := NewHTTPTransport(Config{WebhookURL: notify.Secret(secretURL), Timeout: DefaultTimeout}, testPolicy)
 	err := tr.Post(context.Background(), []byte(`{}`))
 	if err == nil {
 		t.Fatalf("expected non-2xx error")
@@ -166,7 +196,7 @@ func TestHTTPTransport_Post_ErrorScrubsSecret(t *testing.T) {
 
 func TestHTTPTransport_Inert(t *testing.T) {
 	t.Parallel()
-	tr := NewHTTPTransport(Config{})
+	tr := NewHTTPTransport(Config{}, SSRFPolicy())
 	if err := tr.Post(context.Background(), []byte(`{}`)); err != ErrNotConfigured {
 		t.Fatalf("inert transport should return ErrNotConfigured, got %v", err)
 	}

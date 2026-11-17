@@ -74,6 +74,16 @@ import {
 } from "./filters";
 import { statusPillClass } from "./lifecycle";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+
+// #2150 — the header names the page's key term, so its definition is one
+// hover away.
+const EXCEPTIONS_SUBTITLE = (
+  <>
+    Time-bounded <Term id="exception">waivers</Term> from active controls ·
+    approved deviations live here
+  </>
+);
 
 const FILTER_KEYS: (keyof ExceptionFilters)[] = ["status", "control_id"];
 
@@ -390,7 +400,7 @@ function ExceptionsPageInner() {
     return (
       <ListPage
         title={pageTitle("/exceptions")}
-        subtitle="Time-bounded waivers from active controls · approved deviations live here"
+        subtitle={EXCEPTIONS_SUBTITLE}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -405,7 +415,7 @@ function ExceptionsPageInner() {
     return (
       <ListPage
         title={pageTitle("/exceptions")}
-        subtitle="Time-bounded waivers from active controls · approved deviations live here"
+        subtitle={EXCEPTIONS_SUBTITLE}
         actions={actions}
       >
         <Alert variant="destructive" data-testid="exceptions-load-error">
@@ -421,7 +431,7 @@ function ExceptionsPageInner() {
   return (
     <ListPage
       title={pageTitle("/exceptions")}
-      subtitle="Time-bounded waivers from active controls · approved deviations live here"
+      subtitle={EXCEPTIONS_SUBTITLE}
       actions={actions}
       filterRow={
         <FilterPills
