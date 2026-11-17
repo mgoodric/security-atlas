@@ -36,6 +36,10 @@ type postureFramework struct {
 	coveredThen int
 	activate    bool
 	newHistory  bool
+	// exceptedNow / exceptedThen (#2269): the first N covered requirements'
+	// controls record `excepted` today / 120 days ago instead of `pass`.
+	exceptedNow  int
+	exceptedThen int
 }
 
 // seedPostureFramework seeds a global framework with a current version, its
@@ -82,11 +86,18 @@ func seedPostureFramework(t *testing.T, admin *pgxpool.Pool, tenant string, f po
 		then := "fail"
 		if i < f.coveredThen {
 			then = "pass"
+			if i < f.exceptedThen {
+				then = "excepted"
+			}
+		}
+		nowResult := "pass"
+		if i < f.exceptedNow {
+			nowResult = "excepted"
 		}
 		evals := []struct {
 			result string
 			at     time.Time
-		}{{then, old}, {"pass", time.Now().UTC()}}
+		}{{then, old}, {nowResult, time.Now().UTC()}}
 		if f.newHistory {
 			evals = evals[1:]
 		}
@@ -239,5 +250,43 @@ func TestPackGenerator_NoEvaluationHistoryHasNoBaseline(t *testing.T) {
 	}
 	if inv := stored.Content.Sections[board.SectionInvestment].Data; !inv.NoBaseline || inv.CoverageDelta != 0 {
 		t.Errorf("investment = %+v, want n/a cost and no delta", inv)
+	}
+}
+
+// #2269: the coverage_trend sentence carries the covered-by-exception share
+// into both the quarter-end figure and the generated baseline.
+func TestPackGenerator_CoverageTrendDisclosesExceptionShare(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	// 4 requirements, all covered now (2 by exception); 2 covered 120 days
+	// ago (1 by exception). Now 100% (50% by exception); then 50% (25%).
+	seedPostureFramework(t, admin, tenant, postureFramework{
+		name: "Framework E (#2269)", reqs: 4, coveredNow: 4, coveredThen: 2,
+		exceptedNow: 2, exceptedThen: 1, activate: true,
+	})
+
+	now := time.Now().UTC()
+	stored, err := board.NewPackGenerator(board.NewPackStore(app), nil).
+		WithClock(func() time.Time { return now }).
+		Generate(ctx, now.Format("2006-01-02"))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	trend := stored.Content.Sections[board.SectionCoverageTrend]
+	d := trend.Data
+	if d.CoveragePct != 100 || d.BaselineCoveragePct != 50 || d.CoveredByExceptionPct != 50 ||
+		d.BaselineCoveredByExceptionPct != 25 || !d.BaselineExceptionKnown {
+		t.Fatalf("coverage_trend = %+v, want 100%% (50%% by exception) from 50%% (25%% by exception)", d)
+	}
+	for _, want := range []string{
+		"Control coverage averages 100% (50% of requirements covered only by exception)",
+		"against a baseline of 50% (25% by exception)",
+	} {
+		if !strings.Contains(trend.TemplatedText, want) {
+			t.Errorf("coverage_trend narrative = %q, want it to contain %q", trend.TemplatedText, want)
+		}
 	}
 }

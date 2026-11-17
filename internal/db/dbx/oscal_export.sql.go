@@ -103,6 +103,67 @@ func (q *Queries) ListAcceptedVendorClaimsForExport(ctx context.Context, tenantI
 	return items, nil
 }
 
+const listActivatedExceptionsForExport = `-- name: ListActivatedExceptionsForExport :many
+SELECT id, control_id, scope_cell_predicate, justification,
+       approved_by, approved_at, activated_at, effective_from,
+       expires_at, revoked_at, status
+FROM exceptions
+WHERE tenant_id = $1
+  AND activated_at IS NOT NULL
+ORDER BY control_id ASC, activated_at ASC, id ASC
+`
+
+type ListActivatedExceptionsForExportRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ControlID          pgtype.UUID        `json:"control_id"`
+	ScopeCellPredicate []byte             `json:"scope_cell_predicate"`
+	Justification      string             `json:"justification"`
+	ApprovedBy         *string            `json:"approved_by"`
+	ApprovedAt         pgtype.Timestamptz `json:"approved_at"`
+	ActivatedAt        pgtype.Timestamptz `json:"activated_at"`
+	EffectiveFrom      pgtype.Timestamptz `json:"effective_from"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
+	Status             string             `json:"status"`
+}
+
+// #2269: every exception that was ever activated, with what the export
+// needs to decide whether it was in force at an evaluation's instant
+// (activated_at, effective_from, expires_at, revoked_at) and whether its
+// predicate covers the cell. The evaluation row does not record which
+// exception excepted it (#2112 D3), so the aggregator reconstructs it.
+func (q *Queries) ListActivatedExceptionsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListActivatedExceptionsForExportRow, error) {
+	rows, err := q.db.Query(ctx, listActivatedExceptionsForExport, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActivatedExceptionsForExportRow
+	for rows.Next() {
+		var i ListActivatedExceptionsForExportRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ControlID,
+			&i.ScopeCellPredicate,
+			&i.Justification,
+			&i.ApprovedBy,
+			&i.ApprovedAt,
+			&i.ActivatedAt,
+			&i.EffectiveFrom,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditNotesForPeriod = `-- name: ListAuditNotesForPeriod :many
 SELECT id, tenant_id, audit_period_id, author_user_id, scope_type,
        scope_id, body, visibility, created_at
@@ -153,6 +214,68 @@ func (q *Queries) ListAuditNotesForPeriod(ctx context.Context, arg ListAuditNote
 			&i.Body,
 			&i.Visibility,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExceptedEvaluationsAsOf = `-- name: ListExceptedEvaluationsAsOf :many
+SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result FROM (
+    SELECT DISTINCT ON (control_id, scope_cell_id)
+        id, tenant_id, control_id, scope_cell_id, eval_run_id,
+        evaluated_at, result
+    FROM control_evaluations
+    WHERE tenant_id = $1
+      AND evaluated_at <= $2
+    ORDER BY control_id, scope_cell_id, evaluated_at DESC, created_at DESC
+) latest
+WHERE latest.result = 'excepted'
+ORDER BY latest.control_id ASC, latest.scope_cell_id ASC
+`
+
+type ListExceptedEvaluationsAsOfParams struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	EvaluatedAt pgtype.Timestamptz `json:"evaluated_at"`
+}
+
+type ListExceptedEvaluationsAsOfRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	ControlID   pgtype.UUID        `json:"control_id"`
+	ScopeCellID pgtype.UUID        `json:"scope_cell_id"`
+	EvalRunID   pgtype.UUID        `json:"eval_run_id"`
+	EvaluatedAt pgtype.Timestamptz `json:"evaluated_at"`
+	Result      EvidenceResult     `json:"result"`
+}
+
+// #2269: the AR's risk-accepted observations. The latest evaluation per
+// (control, scope_cell) as of the frozen horizon whose result is
+// 'excepted' (#2112), the same DISTINCT ON as ListFailingEvaluationsAsOf.
+// An excepted cell is never a finding: the export links it to the
+// exception that accepted the risk instead.
+func (q *Queries) ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExceptedEvaluationsAsOfParams) ([]ListExceptedEvaluationsAsOfRow, error) {
+	rows, err := q.db.Query(ctx, listExceptedEvaluationsAsOf, arg.TenantID, arg.EvaluatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExceptedEvaluationsAsOfRow
+	for rows.Next() {
+		var i ListExceptedEvaluationsAsOfRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ScopeCellID,
+			&i.EvalRunID,
+			&i.EvaluatedAt,
+			&i.Result,
 		); err != nil {
 			return nil, err
 		}
