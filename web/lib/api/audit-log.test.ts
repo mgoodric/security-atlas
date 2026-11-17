@@ -102,6 +102,7 @@ describe("AUDIT_LOG_KINDS", () => {
       "control_import",
       "risk",
       "posture_target",
+      "module_access",
     ]);
   });
 });

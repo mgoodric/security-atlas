@@ -108,6 +108,8 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/mcp/write-proposals/" + id2428 + "/confirm", tenantAdminGate},
 	{http.MethodPost, "/v1/mcp/write-proposals/" + id2428 + "/reject", tenantAdminGate},
 	{http.MethodPost, "/v1/action-plans/" + id2428 + "/verify", tenantAdminGate},
+	// #2172: a member's module access, set by a tenant admin.
+	{http.MethodPut, "/v1/admin/users/" + id2428 + "/module-access", tenantAdminGate},
 
 	// Tenant-admin gates.
 	{http.MethodPost, "/v1/audit-periods", tenantAdminGate},

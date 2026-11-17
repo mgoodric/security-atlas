@@ -153,6 +153,9 @@ export type FixtureName =
   | "framework-scope-wizard"
   // #2116 — an admin approver user, for policy-lifecycle.spec.ts.
   | "policy-lifecycle"
+  // #2172 — a tenant with one grc_engineer member whose module access
+  // is reset to "all" each run, for module-access.spec.ts.
+  | "module-access"
   // #2110 — a tenant of its own, so control-actions-2110.spec.ts's
   // uploads never change the demo tenant's controls.
   | "control-actions";
