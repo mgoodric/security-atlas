@@ -77,7 +77,7 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 		driftStore,
 		calendarapi.NewStore(s.dbPool),
 	)
-	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource).WithAuthz(s.authzEngine)
+	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource).WithAuthz(s.authzEngine).WithModules(s.moduleViews)
 	root.Get("/v1/dashboard/export", dashboardExportH.ExportDashboard)
 	// Slice 268: unified cross-domain search (`/v1/search`). Aggregates
 	// lexical ILIKE matches across controls, risks, and evidence into a
@@ -87,6 +87,6 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	// reads tenant-scoped (constitutional invariant #6); no new schema
 	// migration ships with this slice (P0-A1). Closes the slice-228
 	// dashboard ⌘K bar's prerequisite gap.
-	searchH := searchapi.New(s.dbPool, s.authzEngine)
+	searchH := searchapi.New(s.dbPool, s.authzEngine).WithModules(s.moduleViews)
 	root.Get("/v1/search", searchH.Handle)
 }

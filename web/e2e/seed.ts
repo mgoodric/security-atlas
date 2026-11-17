@@ -155,7 +155,11 @@ export type FixtureName =
   | "policy-lifecycle"
   // #2172 — a tenant with one grc_engineer member whose module access
   // is reset to "all" each run, for module-access.spec.ts.
-  | "module-access";
+  | "module-access"
+  // #2173 — a tenant with a policy, a risk and a vendor review due soon
+  // and one grc_engineer member limited to Policies, for
+  // combined-views-modules.spec.ts.
+  | "combined-views-modules";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

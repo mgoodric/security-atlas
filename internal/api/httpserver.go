@@ -206,6 +206,10 @@ func (s *Server) buildRouter() *chi.Mux {
 	// through. After the module gate, so switched off (404) wins.
 	moduleAccessStore := moduleaccess.NewStore(s.dbPool)
 	root.Use(moduleaccess.Gate(moduleAccessStore))
+	// #2173: the combined views (Upcoming, Calendar and ICS, Activity,
+	// search, the dashboard export, Metrics, Approvals) show only the
+	// modules the viewer may see, from the same two stores the gates read.
+	s.moduleViews = moduleaccess.NewViews(moduleAccessStore, featureFlagStore)
 	// Slice 035: RBAC + ABAC via embedded OPA. Every non-exempt
 	// request reaches authz.Decide; every decision (allow or deny)
 	// writes one row to decision_audit_log. Attaches AFTER tenancymw

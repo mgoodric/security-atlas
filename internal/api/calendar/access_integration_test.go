@@ -24,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/dbtest/attention"
@@ -157,9 +158,23 @@ func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 	now := time.Now().UTC()
 	fx := attention.Seed(t, admin, now)
 	env := testServer(t, app, fx.A.ID)
+	// #2173: the feed shows what its subscriber may see, read from their
+	// live roles at fetch time, so the subscriber is a real member: the
+	// fixture's Owner, holding control_owner.
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, 'control_owner', 'test-2173')`,
+		fx.A.ID, fx.A.Owner.String()); err != nil {
+		t.Fatalf("seed user_role: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`, fx.A.ID, fx.A.Owner.String())
+	})
+	claims := testjwt.OwnerFor(uuid.MustParse(fx.A.ID), []string{"control_owner"})
+	claims.Subject = "user:" + fx.A.Owner.String()
+	subscriber := env.srv.IssueTestJWT(t, claims)
 
 	subReq, _ := http.NewRequest(http.MethodPost, env.server.URL+"/v1/calendar/subscription", nil)
-	subReq.Header.Set("Authorization", "Bearer "+env.bearer)
+	subReq.Header.Set("Authorization", "Bearer "+subscriber)
 	subResp, err := http.DefaultClient.Do(subReq)
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)

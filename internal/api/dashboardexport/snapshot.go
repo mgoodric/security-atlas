@@ -277,12 +277,16 @@ func (s *LivePanelSource) Snapshot(ctx context.Context, upcoming UpcomingTypes) 
 
 	// 2. Risks — same filter the dashboard's risks panel uses
 	//    (treatment=mitigate, sort=residual,age).
-	risks, err := s.riskStore.List(ctx, risk.ListFilter{
-		Treatment: dbx.RiskTreatmentMitigate,
-		Sort:      risk.SortResidualAge,
-	})
-	if err != nil {
-		return out, fmt.Errorf("risks panel: %w", err)
+	//    Empty when the caller may not see the Risk module (#2173).
+	var risks []risk.Risk
+	if !upcoming.HideRisks {
+		risks, err = s.riskStore.List(ctx, risk.ListFilter{
+			Treatment: dbx.RiskTreatmentMitigate,
+			Sort:      risk.SortResidualAge,
+		})
+		if err != nil {
+			return out, fmt.Errorf("risks panel: %w", err)
+		}
 	}
 	out.Panels.Risks = make([]RiskPanelRow, len(risks))
 	for i, rk := range risks {

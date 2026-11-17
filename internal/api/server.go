@@ -39,6 +39,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/scim"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -48,6 +49,9 @@ import (
 // unexported; callers reach them through purposeful methods (e.g.
 // IssueBootstrapCredential) so the surface stays small as more services land.
 type Server struct {
+	// moduleViews filters the combined views by module (#2173). Set by
+	// httpHandler before the registrars run.
+	moduleViews       *moduleaccess.Views
 	GRPC              *grpc.Server
 	credStore         *credstore.Store
 	registry          schemaregistry.Registry
