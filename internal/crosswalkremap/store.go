@@ -12,6 +12,10 @@
 //     approved or kept legacy later.
 //   - keep legacy is the same, final.
 //
+// The import itself approves the proposals whose anchor kept its code and
+// title (scfimport.QueueEdgeRemapProposals, #2315), recorded with
+// decided_by scfimport.CarryForwardDecider; a person decides the rest.
+//
 // The edges are global catalog rows shared by every tenant, so the store
 // sets no tenant context. The super-admin gate is the caller's
 // (internal/api/admincrosswalkremap and policies/authz). In the database the

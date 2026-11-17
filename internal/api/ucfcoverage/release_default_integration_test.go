@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
@@ -79,6 +80,49 @@ func removeReleaseFramework(t *testing.T, admin *pgxpool.Pool, slug string) {
 	}
 }
 
+// linkedReader returns a read of each requirement's coverage that reports
+// which requirements are linked to their control, and the release every
+// read echoed.
+func linkedReader(t *testing.T, ts *httptest.Server, bearer, slug string, controlOf map[string]uuid.UUID) func(query string) (map[string]bool, string) {
+	return func(query string) (map[string]bool, string) {
+		t.Helper()
+		out := map[string]bool{}
+		echoed := map[string]bool{}
+		for code, cid := range controlOf {
+			resp, body := get(t, ts, "/v1/requirements/"+slug+":2026:"+code+"/coverage"+query, bearer)
+			if resp.StatusCode != 200 {
+				t.Fatalf("%s status = %d; body=%s", code, resp.StatusCode, body)
+			}
+			var got struct {
+				Controls []struct {
+					ID string `json:"id"`
+				} `json:"controls"`
+				SCFRelease *string `json:"scf_release"`
+			}
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			rel := "<null>"
+			if got.SCFRelease != nil {
+				rel = *got.SCFRelease
+			}
+			echoed[rel] = true
+			for _, c := range got.Controls {
+				if c.ID == cid.String() {
+					out[code] = true
+				}
+			}
+		}
+		if len(echoed) != 1 {
+			t.Fatalf("reads %q echoed different releases: %v", query, echoed)
+		}
+		for rel := range echoed {
+			return out, rel
+		}
+		return out, ""
+	}
+}
+
 // TestRequirementCoverage_DefaultPinAcrossReleaseUpgrade pins #2203: a
 // crosswalk imported while SCF release A was current, then release B is
 // imported, controls re-bound (#1971) and the crosswalk re-imported.
@@ -131,45 +175,7 @@ func TestRequirementCoverage_DefaultPinAcrossReleaseUpgrade(t *testing.T) {
 			ts, bearer := setupHTTPServer(t, tenantA)
 
 			controlOf := map[string]uuid.UUID{"R-SAME": same, "R-RENAMED": renamed}
-			// linked reads each requirement's coverage and reports which are
-			// linked to their control, and the release every read echoed.
-			linked := func(query string) (map[string]bool, string) {
-				t.Helper()
-				out := map[string]bool{}
-				echoed := map[string]bool{}
-				for code, cid := range controlOf {
-					resp, body := get(t, ts, "/v1/requirements/"+slug+":2026:"+code+"/coverage"+query, bearer)
-					if resp.StatusCode != 200 {
-						t.Fatalf("%s status = %d; body=%s", code, resp.StatusCode, body)
-					}
-					var got struct {
-						Controls []struct {
-							ID string `json:"id"`
-						} `json:"controls"`
-						SCFRelease *string `json:"scf_release"`
-					}
-					if err := json.Unmarshal(body, &got); err != nil {
-						t.Fatalf("unmarshal: %v", err)
-					}
-					rel := "<null>"
-					if got.SCFRelease != nil {
-						rel = *got.SCFRelease
-					}
-					echoed[rel] = true
-					for _, c := range got.Controls {
-						if c.ID == cid.String() {
-							out[code] = true
-						}
-					}
-				}
-				if len(echoed) != 1 {
-					t.Fatalf("reads %q echoed different releases: %v", query, echoed)
-				}
-				for rel := range echoed {
-					return out, rel
-				}
-				return out, ""
-			}
+			linked := linkedReader(t, ts, bearer, slug, controlOf)
 			// unpinned is the pre-#2203 default: every release's anchors.
 			unpinned := func() map[string]bool {
 				t.Helper()
@@ -244,5 +250,139 @@ func TestRequirementCoverage_DefaultPinAcrossReleaseUpgrade(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRequirementCoverage_DeclaredCrosswalkCarriedAcrossReleaseImport pins
+// #2315: a crosswalk declares SCF release A, release B is imported and made
+// current, and the import's own steps run (RebindControls, then
+// QueueEdgeRemapProposals, as `catalog import-scf` does). Nobody re-imports
+// the crosswalk.
+//
+// The edge on IAC-06, which keeps its code and title in B, is carried to
+// B's IAC-06, so the default read covers R-SAME exactly as the read of A
+// did before the upgrade. The edge on GOV-01, retitled in B, is not
+// carried: it stays on A, still readable with ?scf_release=A, with an open
+// remap proposal for a person, and its control is flagged for
+// re-anchoring. A re-run carries nothing twice, and re-importing the
+// crosswalk with its A declaration does not retire the carried edge.
+func TestRequirementCoverage_DeclaredCrosswalkCarriedAcrossReleaseImport(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantControls(t)
+	admin := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	scfreleasetest.LoadAB(t, admin)
+	slug := "rel2315-" + uuid.NewString()[:8]
+	t.Cleanup(func() { removeReleaseFramework(t, admin, slug) })
+
+	if _, err := soc2import.Import(ctx, admin, releaseCrosswalk(slug, scfreleasetest.ReleaseA)); err != nil {
+		t.Fatalf("import crosswalk declaring A: %v", err)
+	}
+	same := seedControl(t, tenantA, "IAC-06", "test-2315-same", "same-title control")
+	renamed := seedControl(t, tenantA, "GOV-01", "test-2315-renamed", "renamed-anchor control")
+	for id, code := range map[uuid.UUID]string{same: "IAC-06", renamed: "GOV-01"} {
+		if _, err := admin.Exec(ctx, `UPDATE controls SET scf_anchor_id = $2 WHERE id = $1`,
+			id, anchorIn(t, admin, scfreleasetest.ReleaseA, code)); err != nil {
+			t.Fatalf("bind control to A: %v", err)
+		}
+	}
+	ts, bearer := setupHTTPServer(t, tenantA)
+	linked := linkedReader(t, ts, bearer, slug, map[string]uuid.UUID{"R-SAME": same, "R-RENAMED": renamed})
+
+	// Before the upgrade the default read was the read of A.
+	before, _ := linked("?scf_release=" + scfreleasetest.ReleaseA)
+	if want := map[string]bool{"R-SAME": true, "R-RENAMED": true}; !maps.Equal(before, want) {
+		t.Fatalf("before the upgrade, read of A: linked=%v; want %v", before, want)
+	}
+
+	rebind, err := scfimport.RebindControls(ctx, admin)
+	if err != nil {
+		t.Fatalf("RebindControls: %v", err)
+	}
+	flagged := false
+	for _, c := range rebind.NeedsReanchoring {
+		flagged = flagged || c.ControlID == renamed
+	}
+	if !flagged {
+		t.Fatalf("the control on GOV-01 was not flagged for re-anchoring: %+v", rebind)
+	}
+	report, err := scfimport.QueueEdgeRemapProposals(ctx, admin)
+	if err != nil {
+		t.Fatalf("QueueEdgeRemapProposals: %v", err)
+	}
+	if report.Carried < 1 {
+		t.Fatalf("carried %d edges; want at least R-SAME's", report.Carried)
+	}
+
+	// Default coverage for the unchanged anchor is what it was.
+	def, rel := linked("")
+	if rel != scfreleasetest.ReleaseB {
+		t.Fatalf("default read echoed %q; want the current release %q", rel, scfreleasetest.ReleaseB)
+	}
+	if !def["R-SAME"] {
+		t.Errorf("default read lost R-SAME across the release import: %v (before %v)", def, before)
+	}
+	if def["R-RENAMED"] {
+		t.Errorf("default read covers R-RENAMED through a retitled anchor; it must wait for a person")
+	}
+
+	// The renamed anchor is flagged, not dropped: its edge is live on A,
+	// still read with ?scf_release=A, and an open proposal names it.
+	edges := func(code string) (live, onB int) {
+		t.Helper()
+		if err := admin.QueryRow(ctx, `
+			SELECT count(*) FILTER (WHERE e.retired_at IS NULL),
+			       count(*) FILTER (WHERE fv.version = $3)
+			FROM fw_to_scf_edges e
+			JOIN framework_requirements r ON r.id = e.framework_requirement_id
+			JOIN framework_versions rv ON rv.id = r.framework_version_id
+			JOIN frameworks f ON f.id = rv.framework_id
+			JOIN scf_anchors a ON a.id = e.scf_anchor_id
+			JOIN framework_versions fv ON fv.id = a.framework_version_id
+			WHERE f.slug = $1 AND r.code = $2`, slug, code, scfreleasetest.ReleaseB).Scan(&live, &onB); err != nil {
+			t.Fatalf("count edges of %s: %v", code, err)
+		}
+		return live, onB
+	}
+	if live, onB := edges("R-RENAMED"); live != 1 || onB != 0 {
+		t.Errorf("R-RENAMED has %d live edges, %d on B; want its one A edge and none carried", live, onB)
+	}
+	var class, status string
+	if err := admin.QueryRow(ctx, `
+		SELECT p.class, p.status FROM scf_edge_remap_proposals p
+		JOIN fw_to_scf_edges e ON e.id = p.edge_id
+		JOIN framework_requirements r ON r.id = e.framework_requirement_id
+		JOIN framework_versions rv ON rv.id = r.framework_version_id
+		JOIN frameworks f ON f.id = rv.framework_id
+		WHERE f.slug = $1 AND r.code = 'R-RENAMED'`, slug).Scan(&class, &status); err != nil {
+		t.Fatalf("R-RENAMED's remap proposal: %v", err)
+	}
+	if class != string(scfimport.RemapRenamed) || status != "open" {
+		t.Errorf("R-RENAMED's proposal is %s/%s; want renamed/open", class, status)
+	}
+	if legacy, _ := linked("?scf_release=" + scfreleasetest.ReleaseA); !legacy["R-RENAMED"] {
+		t.Errorf("?scf_release=A no longer reads R-RENAMED: %v", legacy)
+	}
+
+	// Idempotent: a second run carries nothing and adds no edge.
+	again, err := scfimport.QueueEdgeRemapProposals(ctx, admin)
+	if err != nil {
+		t.Fatalf("re-run: %v", err)
+	}
+	if again.Carried != 0 {
+		t.Errorf("re-run carried %d edges; want 0", again.Carried)
+	}
+	if live, onB := edges("R-SAME"); live != 2 || onB != 1 {
+		t.Errorf("R-SAME has %d live edges, %d on B; want the A edge and one carried copy", live, onB)
+	}
+
+	// Re-importing the crosswalk with its A declaration keeps the carried
+	// edge: the carry is recorded under the remap's source, not the
+	// crosswalk's, so the crosswalk does not own it to retire.
+	if _, err := soc2import.Import(ctx, admin, releaseCrosswalk(slug, scfreleasetest.ReleaseA)); err != nil {
+		t.Fatalf("re-import crosswalk declaring A: %v", err)
+	}
+	if after, _ := linked(""); !after["R-SAME"] {
+		t.Errorf("re-importing the A-declared crosswalk dropped the carried R-SAME edge: %v", after)
 	}
 }
