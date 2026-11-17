@@ -13,6 +13,7 @@ import (
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/demoprov"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -37,7 +38,11 @@ type aggregate struct {
 	walkthroughs []dbx.Walkthrough
 	auditNotes   []dbx.ListAuditNotesForPeriodRow
 	failingEvals []dbx.ListFailingEvaluationsAsOfRow
-	in           ExportInput
+	// exceptedEvals and activatedExceptions feed the AR's risk-accepted
+	// observations (#2269); see excepted.go.
+	exceptedEvals       []dbx.ListExceptedEvaluationsAsOfRow
+	activatedExceptions []dbx.ListActivatedExceptionsForExportRow
+	in                  ExportInput
 	// controlOwner maps control_id -> owner_role, used to populate POA&M
 	// item owners (decision D3).
 	controlOwner map[uuid.UUID]string
@@ -284,6 +289,24 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 		return nil, fmt.Errorf("oscal: list failing evaluations: %w", err)
 	}
 	agg.failingEvals = failing
+
+	// 9. Excepted cells as of the frozen horizon, and the exceptions that
+	//    may have accepted them (#2269, AR risk-accepted observations).
+	excepted, err := q.ListExceptedEvaluationsAsOf(ctx, dbx.ListExceptedEvaluationsAsOfParams{
+		TenantID:    pgUUID(tenantID),
+		EvaluatedAt: period.FrozenAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("oscal: list excepted evaluations: %w", err)
+	}
+	agg.exceptedEvals = excepted
+	if len(excepted) > 0 {
+		activated, err := q.ListActivatedExceptionsForExport(ctx, pgUUID(tenantID))
+		if err != nil {
+			return nil, fmt.Errorf("oscal: list activated exceptions: %w", err)
+		}
+		agg.activatedExceptions = activated
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("oscal: commit: %w", err)
@@ -535,7 +558,19 @@ func (a *aggregate) assessmentInput() *oscalv1.AssessmentInput {
 		Populations:     pops,
 		Walkthroughs:    wts,
 		AuditNotes:      notes,
+		ExceptedCells:   exceptedCells(a.exceptedEvals, a.activatedExceptions, a.cellsByID()),
 	}
+}
+
+// cellsByID indexes the tenant's scope cells for the excepted-cell
+// coverage check (#2269).
+func (a *aggregate) cellsByID() map[uuid.UUID]scope.Cell {
+	out := make(map[uuid.UUID]scope.Cell, len(a.scopeCells))
+	for _, sc := range a.scopeCells {
+		c := scope.CellFromRow(sc)
+		out[c.ID] = c
+	}
+	return out
 }
 
 // maxAttachmentRefsPerWalkthrough caps the attachment references the AR

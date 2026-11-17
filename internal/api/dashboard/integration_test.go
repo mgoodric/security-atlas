@@ -509,6 +509,76 @@ func TestFrameworkPosture_ExceptedCountsAsCoveredAndIsReportedSeparately(t *test
 	t.Fatal("framework posture row missing")
 }
 
+// #2269: a scope cell that stops applying while excepted no longer counts.
+// Only the cells in a control's latest evaluation run are the cells that
+// currently apply.
+
+func TestFrameworkPosture_ExceptedCellThatStopsApplyingDoesNotCount(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	fw, anchors := seedFramework(t, admin, "fwstalecell", "2024", 1)
+	cellA := uuid.New()
+	cellB := uuid.New()
+	for _, c := range []uuid.UUID{cellA, cellB} {
+		if _, err := admin.Exec(context.Background(), `
+			INSERT INTO scope_cells (id, tenant_id, label, dimensions, dimensions_hash)
+			VALUES ($1, $2, $3, '{"environment":"prod"}'::jsonb, $4)
+		`, c, tenant, "cell-"+c.String()[:8], "hash-"+c.String()[:8]); err != nil {
+			t.Fatalf("seed cell: %v", err)
+		}
+	}
+	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
+
+	// Run 1: the control applies to cells A and B; A is excepted.
+	// Run 2: cell A no longer applies; the run covers B only, passing.
+	run1, run2 := uuid.New(), uuid.New()
+	earlier := time.Now().UTC().Add(-2 * time.Hour)
+	later := time.Now().UTC().Add(-time.Hour)
+	seedRunRow(t, admin, tenant, ctrl, run1, cellA, "excepted", earlier)
+	seedRunRow(t, admin, tenant, ctrl, run1, cellB, "pass", earlier)
+
+	exceptionPct := func() float64 {
+		t.Helper()
+		_, body := get(t, env, "/v1/frameworks/posture")
+		rows, _ := body["frameworks"].([]any)
+		for _, r := range rows {
+			m := r.(map[string]any)
+			if m["framework_id"].(string) == fw.frameworkID.String() {
+				return m["covered_by_exception_pct"].(float64)
+			}
+		}
+		t.Fatal("framework posture row missing")
+		return 0
+	}
+
+	if got := exceptionPct(); got != 100.0 {
+		t.Fatalf("after run 1: covered_by_exception_pct = %v, want 100.0 (cell A excepted)", got)
+	}
+	seedRunRow(t, admin, tenant, ctrl, run2, cellB, "pass", later)
+	if got := exceptionPct(); got != 0.0 {
+		t.Fatalf("after run 2: covered_by_exception_pct = %v, want 0.0 (cell A no longer applies)", got)
+	}
+}
+
+// seedRunRow inserts one control_evaluations row for a scope cell under a
+// caller-chosen eval_run_id, so a test can lay down a whole run.
+func seedRunRow(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID, runID, cellID uuid.UUID, result string, evaluatedAt time.Time) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO control_evaluations (
+			id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at,
+			result, freshness_status, evidence_count_in_window, trigger
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'fresh', 1, 'manual')
+	`, uuid.New(), tenant, ctrlID, cellID, runID, evaluatedAt, result); err != nil {
+		t.Fatalf("seed control_evaluation: %v", err)
+	}
+}
+
 // #1755: an edge a reviewer marked mapping_tier='rejected' (ADR 0018) earns no
 // framework credit, now or in the 90-day trend; restoring the tier brings the
 // credit back.

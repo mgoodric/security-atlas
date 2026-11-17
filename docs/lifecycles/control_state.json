@@ -82,7 +82,7 @@
       "people_only": false,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception is revoked or expires, the control is re-evaluated at once (#2269) and shows the evidence's result again."
     },
     {
       "from": "pass",
@@ -126,7 +126,7 @@
       "people_only": false,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception is revoked or expires, the control is re-evaluated at once (#2269) and shows the evidence's result again."
     },
     {
       "from": "fail",
@@ -170,7 +170,7 @@
       "people_only": false,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception is revoked or expires, the control is re-evaluated at once (#2269) and shows the evidence's result again."
     },
     {
       "from": "na",
@@ -214,7 +214,7 @@
       "people_only": false,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception ends, the next evaluation is the evidence's result again."
+      "note": "An active exception covers the scope cell, whatever the evidence says. Never a pass; when the exception is revoked or expires, the control is re-evaluated at once (#2269) and shows the evidence's result again."
     },
     {
       "from": "excepted",

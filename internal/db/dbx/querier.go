@@ -618,6 +618,14 @@ type Querier interface {
 	// disposition is metadata on the claim, not a control satisfaction
 	// (invariant #2). RLS rides the slice-512 tenant_update policy.
 	DispositionImportedComponentClaim(ctx context.Context, arg DispositionImportedComponentClaimParams) (ImportedComponentClaim, error)
+	// #2520: is there an attestation for the control later than the given one,
+	// under the evaluation engine's latest-attestation order (internal/eval
+	// latestAttestationWins): min(observed_at, ingested_at), then ingested_at,
+	// then id compared bytewise? The attest handler asks this on a dedupe hit
+	// for a server-derived key, so a repeat of an older attestation is recorded
+	// when a newer one would otherwise stand. Control resolution mirrors
+	// ListEvidenceForControlAsOf.
+	ExistsAttestationAfter(ctx context.Context, arg ExistsAttestationAfterParams) (bool, error)
 	// AC-5 auto-expiry: marks active rows whose expires_at < threshold as
 	// expired. Returns the affected rows so the cron can write one
 	// exception_audit_log row per expired exception (anti-criterion P0: no
@@ -1617,6 +1625,12 @@ type Querier interface {
 	// period's frozen_at horizon are included in the period's snapshot. Live
 	// state continues independently; this read is the frozen view.
 	ListActionPlansSnapshot(ctx context.Context, arg ListActionPlansSnapshotParams) ([]ActionPlan, error)
+	// #2269: every exception that was ever activated, with what the export
+	// needs to decide whether it was in force at an evaluation's instant
+	// (activated_at, effective_from, expires_at, revoked_at) and whether its
+	// predicate covers the cell. The evaluation row does not record which
+	// exception excepted it (#2112 D3), so the aggregator reconstructs it.
+	ListActivatedExceptionsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListActivatedExceptionsForExportRow, error)
 	// The engine's hot path: every 'active' rule for the tenant. Runs on every
 	// risk write. Hits idx_aggregation_rules_tenant_status.
 	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
@@ -2359,6 +2373,12 @@ type Querier interface {
 	// (frozen_at NULL) falls through to live state, but the slice-749 surface only
 	// summarizes FROZEN periods, so in practice the horizon is always set.
 	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
+	// #2269: the AR's risk-accepted observations. The latest evaluation per
+	// (control, scope_cell) as of the frozen horizon whose result is
+	// 'excepted' (#2112), the same DISTINCT ON as ListFailingEvaluationsAsOf.
+	// An excepted cell is never a finding: the export links it to the
+	// exception that accepted the risk instead.
+	ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExceptedEvaluationsAsOfParams) ([]ListExceptedEvaluationsAsOfRow, error)
 	ListExceptionAuditLog(ctx context.Context, arg ListExceptionAuditLogParams) ([]ExceptionAuditLog, error)
 	// Returns every exception for the tenant, newest first. The handler applies
 	// status filter in-memory because the cardinality is small (canvas §1.4

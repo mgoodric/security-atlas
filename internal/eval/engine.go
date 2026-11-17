@@ -35,6 +35,9 @@ const (
 	TriggerScheduled = "scheduled"
 	TriggerManual    = "manual"
 	TriggerReplay    = "replay"
+	// TriggerExceptionChange: an exception on the control was activated,
+	// revoked or expired (#2269).
+	TriggerExceptionChange = "exception_change"
 )
 
 // cellResolver is the slice-017 hook the engine uses to enumerate the scope
