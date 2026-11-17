@@ -258,6 +258,10 @@ func (s *PackStore) UpdateSection(ctx context.Context, id uuid.UUID, edit Sectio
 		if err != nil {
 			return err
 		}
+		// A section left out at generation (#2175) is not part of the pack.
+		if current.Content.isOmitted(edit.SectionKey) {
+			return fmt.Errorf("%w: %q", ErrUnknownSection, edit.SectionKey)
+		}
 		mutated := applySectionEdit(current.Content, edit)
 
 		narrativeMd, err := RenderPackNarrative(mutated)

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/notify"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -37,6 +38,9 @@ type Channel struct {
 	provider Provider
 	baseURL  string
 	now      func() time.Time
+	// modules hides the kinds of a switched-off module, or one outside
+	// the recipient's access (#2175). nil hides nothing.
+	modules notify.Reacher
 }
 
 // NewChannel wires the channel. baseURL is the public app base URL for the
@@ -48,6 +52,13 @@ func NewChannel(pool *pgxpool.Pool, provider Provider, baseURL string) *Channel 
 		baseURL:  baseURL,
 		now:      time.Now,
 	}
+}
+
+// WithModules makes the digest leave out notification kinds whose module
+// is switched off or outside the recipient's module access (#2175).
+func (c *Channel) WithModules(r notify.Reacher) *Channel {
+	c.modules = r
+	return c
 }
 
 // SetEmailOptIn sets the caller's email-channel master opt-in (AC-9).
@@ -120,6 +131,13 @@ func (c *Channel) DeliverDigest(ctx context.Context, userID uuid.UUID, recipient
 		return DeliveryResult{Skipped: true, Reason: "user opted out"}, nil
 	}
 
+	// Module switches and access (#2175), read before the digest tx: a
+	// failed read sends nothing.
+	hidden, err := notify.HiddenKinds(ctx, c.modules, tenantID, recipientUserID)
+	if err != nil {
+		return DeliveryResult{}, fmt.Errorf("email: module access: %w", err)
+	}
+
 	digestKey := DigestKeyForDay(c.now())
 
 	var result DeliveryResult
@@ -162,7 +180,8 @@ func (c *Channel) DeliverDigest(ctx context.Context, userID uuid.UUID, recipient
 		}
 		emailChannelByEvent := emailChannelPrefMap(prefs)
 		var unread int
-		counts, unread = filterCountsByEmailPref(counts, emailChannelByEvent)
+		counts, _ = filterCountsByEmailPref(counts, emailChannelByEvent)
+		counts, unread = notify.DropKinds(counts, hidden)
 		if unread == 0 {
 			result = DeliveryResult{Skipped: true, Reason: "no unread notifications"}
 			return nil
