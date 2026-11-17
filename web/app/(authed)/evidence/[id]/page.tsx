@@ -10,8 +10,9 @@
 //
 // The payload arrives redacted from the platform and renders as served.
 // A manual attestation also shows its attestor, statement and supporting
-// link. Every value renders as text; the supporting link is an <a> only
-// when it is absolute http(s).
+// link. The statement renders through the shared Markdown component
+// (#2094, #2316); every other value renders as text, and the supporting
+// link is an <a> only when it is absolute http(s).
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -19,6 +20,7 @@ import { notFound, useRouter } from "next/navigation";
 import { use, useEffect, type ReactNode } from "react";
 
 import { DemoBadge } from "@/components/demo-badge";
+import { Markdown } from "@/components/markdown";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -153,7 +155,7 @@ function AttestationCard({ evidence }: { evidence: EvidenceDetail }) {
             {a.attestor ?? "—"}
           </Field>
           <Field label="Statement" testId="evidence-detail-statement">
-            <span className="whitespace-pre-wrap">{a.statement ?? "—"}</span>
+            {a.statement ? <Markdown source={a.statement} /> : "—"}
           </Field>
           <Field label="Supporting link" testId="evidence-detail-supporting">
             {href ? (
