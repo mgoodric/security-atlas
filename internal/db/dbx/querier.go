@@ -1975,6 +1975,11 @@ type Querier interface {
 	// to the control's own anchor, not no_relationship, not rejected. A control
 	// with no anchor reaches nothing, so every criterion it was tested under is
 	// a row. Superseded control versions are left out, as in coverage.
+	//
+	// Two references to the same criterion on one control fold into one row
+	// (#2324); their distinct non-empty notes join with "; ". row_limit caps
+	// the rows; total counts every row before the cap, so the caller knows
+	// whether the report was truncated.
 	ListAuditedUnderGaps(ctx context.Context, arg ListAuditedUnderGapsParams) ([]ListAuditedUnderGapsRow, error)
 	// Returns every assignment the user holds in the current tenant, joined with
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
@@ -3254,6 +3259,14 @@ type Querier interface {
 	// (the wire shape tolerates null — bootstrap-key + credential-only callers
 	// have no users row).
 	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
+	// The tested-under references ListAuditedUnderGaps cannot resolve (#2324):
+	// the system names no global framework with a current version, or the id
+	// names no requirement in that version. Typos and withdrawn codes land
+	// here, so an auditor sees the broken reference rather than a silently
+	// shorter report. One row per (control, system, id); notes fold as in the
+	// gaps query, and so do row_limit and total. framework_slug filters on
+	// the reference's system.
+	ListUnresolvedTestedUnderRefs(ctx context.Context, arg ListUnresolvedTestedUnderRefsParams) ([]ListUnresolvedTestedUnderRefsRow, error)
 	// Slice 108 — /v1/me/* preferences + audit-log queries.
 	//
 	// Queries land in their own file (not appended to users.sql or sessions.sql) so the
