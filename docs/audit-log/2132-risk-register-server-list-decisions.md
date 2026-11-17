@@ -39,9 +39,10 @@ sorts last within its group in both directions. The value is #2185's
 ordered list of both is meaningless (dispatcher's brief, and #2185's
 `RanksAbove`). Putting FAIR last in both directions, rather than flipping
 the groups on ascending, keeps the 1..25 scale at the top of the register
-where the bands mean something. The integration test asserts this order on
-a mixed fixture (`assertResidualOrder`); it does not call `RanksAbove`
-directly because #2185 had not landed on `main` when this was written.
+where the bands mean something. The integration test
+`TestListRisksPage_ResidualOrderMatchesRanksAbove` sorts the same rows in
+Go with `risk.RanksAbove` and `risk.ScoreValue` (#2185) and checks the SQL
+returned that order on a mixed 5x5, FAIR and unscored fixture.
 
 The dashboard's `residual,age` gets the same grouping. Before, its in-Go
 sort ranked a FAIR dollar figure against 5x5 scores.
