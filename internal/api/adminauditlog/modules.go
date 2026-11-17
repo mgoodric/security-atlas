@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
@@ -53,14 +54,17 @@ func visibleEntries(entries []unifiedlog.Entry, set moduleaccess.ModuleSet) []un
 // request path the decision log recorded (#2477), so a decision on a
 // nested or /v1/me route (/v1/controls/{id}/policies,
 // /v1/me/acknowledgments) belongs to the module that owns that route.
-// Only a legacy row with no recorded path falls back to its target_type,
-// the OPA resource type, which names the module's list route.
+// A legacy row with no recorded path, or a path the module registry
+// cannot place, falls back to its target_type, the OPA resource type,
+// which names the module's list route.
 func decisionRoute(e unifiedlog.Entry) string {
 	var p struct {
 		RequestPath string `json:"request_path"`
 	}
 	if len(e.PayloadJSON) > 0 && json.Unmarshal(e.PayloadJSON, &p) == nil && p.RequestPath != "" {
-		return p.RequestPath
+		if _, err := featureflag.Resolve(p.RequestPath); err == nil {
+			return p.RequestPath
+		}
 	}
 	if e.TargetType == "" {
 		return ""

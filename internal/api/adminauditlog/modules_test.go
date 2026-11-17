@@ -37,6 +37,7 @@ func TestDecisionRoute(t *testing.T) {
 		{"path wins over type", unifiedlog.Entry{TargetType: "policies", PayloadJSON: []byte(`{"request_path":"/v1/controls/c1"}`)}, "/v1/controls/c1"},
 		{"legacy empty path", unifiedlog.Entry{TargetType: "policies", PayloadJSON: []byte(`{"request_path":""}`)}, "/v1/policies"},
 		{"legacy no payload", unifiedlog.Entry{TargetType: "policies"}, "/v1/policies"},
+		{"unplaceable path", unifiedlog.Entry{TargetType: "policies", PayloadJSON: []byte(`{"request_path":"/not-v1/x"}`)}, "/v1/policies"},
 		{"nothing to place", unifiedlog.Entry{}, ""},
 	}
 	for _, c := range cases {

@@ -38,10 +38,19 @@ var ErrUnknownKey = errors.New("credstore: unknown key")
 const KindCalendarRead = "calendar.read.v1"
 
 // CalendarOnly reports whether c is an ICS feed token: its kinds are
-// exactly {KindCalendarRead}. A key whose kinds include KindCalendarRead
-// among others is a general key and is not one.
+// the set {KindCalendarRead} (a repeated entry is still that set). A key
+// whose kinds include KindCalendarRead among others is a general key and
+// is not one.
 func (c Credential) CalendarOnly() bool {
-	return len(c.Kinds) == 1 && c.Kinds[0] == KindCalendarRead
+	if len(c.Kinds) == 0 {
+		return false
+	}
+	for _, k := range c.Kinds {
+		if k != KindCalendarRead {
+			return false
+		}
+	}
+	return true
 }
 
 // Credential is the metadata view of an API key. Never includes the bearer

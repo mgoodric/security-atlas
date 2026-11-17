@@ -43,6 +43,10 @@ func registerReq() *connectorsv1.RegisterRequest {
 // #2477: an ICS feed token, a key whose kinds are exactly
 // {calendar.read.v1}, is no gRPC bearer: ConnectorRegistry Register and
 // List, evidence ingest and the admin service all answer Unauthenticated.
+// Register and List were the real gap. In production, ingest already
+// refuses the token's records by kind; this harness has no ingester (the
+// slice-003 in-memory fallback), so the Push assertion is defence in
+// depth.
 func TestGRPC_CalendarOnlyTokenRejected(t *testing.T) {
 	h := newHarness(t)
 	ics := h.issueKinds(t, credstore.KindCalendarRead)
@@ -90,6 +94,7 @@ func TestCredential_CalendarOnly(t *testing.T) {
 		want  bool
 	}{
 		{[]string{credstore.KindCalendarRead}, true},
+		{[]string{credstore.KindCalendarRead, credstore.KindCalendarRead}, true},
 		{[]string{credstore.KindCalendarRead, "sast.scan_result.v1"}, false},
 		{[]string{"sast.scan_result.v1"}, false},
 		{nil, false},

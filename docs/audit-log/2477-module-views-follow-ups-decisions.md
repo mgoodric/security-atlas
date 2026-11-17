@@ -8,7 +8,10 @@ Issue: mgoodric/security-atlas#2477, from the review of #2476 (#2173).
   gaps. With each fix disabled, the new tests fail. Activity lists a
   `/v1/me/acknowledgments` decision and a `/v1/controls/{id}/policies`
   decision while Policies is hidden. An ICS token can call
-  ConnectorRegistry Register and List and evidence Push.
+  ConnectorRegistry Register and List. (It also reaches Push in the unit
+  harness, but only through the slice-003 in-memory fallback. In
+  production, `ingest.Service.Process` step 6 refuses a kind outside
+  `cred.Kinds`, so the token could never land evidence.)
 - **detection_tier_target:** integration. Activity and the metric
   sub-routes run against real Postgres under RLS. The gRPC check runs
   in-process over bufconn.
@@ -20,9 +23,9 @@ Issue: mgoodric/security-atlas#2477, from the review of #2476 (#2173).
 `decision_audit_log.request_path` (`r.URL.Path`, recorded by `authzmw`)
 reaches Activity in the row's payload. `decisionRoute` reads it, and the
 module registry places it, so `/v1/me/acknowledgments` and
-`/v1/controls/{id}/policies` resolve to Policies. Only a row with no
-recorded path (an empty or absent `request_path`) falls back to
-`"/v1/"+target_type`. A row that has a path never uses its type. A
+`/v1/controls/{id}/policies` resolve to Policies. A row falls back to
+`"/v1/"+target_type` only when it has no recorded path (an empty or
+absent `request_path`) or when the registry cannot place the path. A row that has a path never uses its type. A
 decision with `target_type=policies` on `/v1/controls/{id}` stays shown
 while Policies is hidden. Both the unit test and the integration test pin
 that case.
@@ -55,10 +58,18 @@ returns an error fails the whole answer (500), as before.
 
 ### D5: gRPC refuses exactly-calendar credentials
 
-`credstore.Credential.CalendarOnly()` is true when a credential's kinds
-are exactly `{calendar.read.v1}`. `IssueOwned` sets no other marker on an
-ICS token. `authInterceptor` refuses such a credential as Unauthenticated
-on every unary RPC. A key whose kinds include `calendar.read.v1` among
+`credstore.Credential.CalendarOnly()` is true when a credential's kinds,
+as a set, are exactly `{calendar.read.v1}`. A repeated entry still counts
+as that set. `IssueOwned` sets no other marker on an ICS token.
+`authInterceptor` refuses such a credential as Unauthenticated on every
+unary RPC.
+
+The real gap was ConnectorRegistry Register and List, which check no
+kind. Evidence ingest already refused an ICS token's records, because
+`ingest.Service.Process` step 6 rejects any kind outside `cred.Kinds`.
+The Push assertion in the test stays as defence in depth. It passes
+through the interceptor, not through ingest, because the bufconn harness
+has no ingester and uses the slice-003 in-memory fallback. A key whose kinds include `calendar.read.v1` among
 others is a general key and still authenticates. A test pins this. The
 constant moved to `credstore.KindCalendarRead`, and the calendar package
 reads it from there, so both checks share one definition.
