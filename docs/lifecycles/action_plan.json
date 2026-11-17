@@ -3,6 +3,7 @@
   "title": "Action plan",
   "entity": "action_plans",
   "column": "status",
+  "enforcement": "database",
   "states": [
     "draft",
     "in_progress",

@@ -8,11 +8,12 @@ import "github.com/mgoodric/security-atlas/internal/lifecycle"
 // lifecycle_integration_test.go proves the two agree pair by pair. No
 // trigger guards exceptions.status.
 var Lifecycle = lifecycle.Table{
-	Name:   "exception",
-	Title:  "Exception",
-	Entity: "exceptions",
-	Column: "status",
-	States: []string{StateRequested, StateApproved, StateDenied, StateActive, StateExpired, StateRevoked},
+	Name:        "exception",
+	Title:       "Exception",
+	Entity:      "exceptions",
+	Column:      "status",
+	Enforcement: lifecycle.EnforcedByStore,
+	States:      []string{StateRequested, StateApproved, StateDenied, StateActive, StateExpired, StateRevoked},
 	Initial: []lifecycle.Entry{{
 		State:  StateRequested,
 		Action: "request",

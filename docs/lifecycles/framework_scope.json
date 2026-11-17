@@ -3,6 +3,7 @@
   "title": "Framework scope",
   "entity": "framework_scopes",
   "column": "state",
+  "enforcement": "database",
   "states": [
     "draft",
     "review",

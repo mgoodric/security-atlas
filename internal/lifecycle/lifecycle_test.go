@@ -9,10 +9,11 @@ import (
 
 func sample() Table {
 	return Table{
-		Name:     "sample",
-		States:   []string{"a", "b", "c"},
-		Initial:  []Entry{{State: "a", Action: "create", Roles: []string{"admin"}}},
-		Terminal: []string{"c"},
+		Name:        "sample",
+		Enforcement: EnforcedByDatabase,
+		States:      []string{"a", "b", "c"},
+		Initial:     []Entry{{State: "a", Action: "create", Roles: []string{"admin"}}},
+		Terminal:    []string{"c"},
 		Transitions: []Transition{
 			{From: "a", To: "b", Action: "go", Actor: ActorPerson, Roles: []string{"admin"}},
 			{From: "b", To: "c", Action: "go", Actor: ActorSystem},
@@ -64,9 +65,13 @@ func TestTable_Validate(t *testing.T) {
 		"action twice": {func(t *Table) {
 			t.Transitions = append(t.Transitions, Transition{From: "a", To: "c", Action: "go", Actor: ActorSystem})
 		}, "listed twice"},
-		"unreachable":      {func(t *Table) { t.States = append(t.States, "d") }, "unreachable"},
-		"trigger unknown":  {func(t *Table) { t.Trigger.From = []string{"z"} }, "trigger"},
-		"no states at all": {func(t *Table) { t.States = nil }, "required"},
+		"unreachable":          {func(t *Table) { t.States = append(t.States, "d") }, "unreachable"},
+		"trigger unknown":      {func(t *Table) { t.Trigger.From = []string{"z"} }, "trigger"},
+		"no states at all":     {func(t *Table) { t.States = nil }, "required"},
+		"no enforcement":       {func(t *Table) { t.Enforcement = "" }, "enforcement"},
+		"database, no trigger": {func(t *Table) { t.Trigger = nil }, "no trigger"},
+		"store with trigger":   {func(t *Table) { t.Enforcement = EnforcedByStore }, "names trigger"},
+		"derived person move":  {func(t *Table) { t.Enforcement = EnforcedByDerivation; t.Trigger = nil }, "not the system"},
 	}
 	for name, c := range cases {
 		tab := sample()
