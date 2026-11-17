@@ -124,8 +124,29 @@ func TestPrepareCreateScores(t *testing.T) {
 	if _, _, err := PrepareCreateScores(dbx.RiskMethodologyNist80030, []byte(`{"likelihood":4,"impact":5,"score":"20"}`), nil); !errors.Is(err, ErrScoreNotNumeric) {
 		t.Fatalf("nist string score: %v", err)
 	}
-	if _, _, err := PrepareCreateScores(dbx.RiskMethodologyNist80030, nil, nil); !errors.Is(err, ErrInherentScoreInvalid) {
-		t.Fatalf("nist empty: %v", err)
+}
+
+// #2511: an omitted inherent score is an unscored risk, stored as {} / {}
+// on every create path. The methodology is still checked, and a residual
+// without an inherent score is refused.
+func TestPrepareCreateScores_Unscored(t *testing.T) {
+	t.Parallel()
+	for _, m := range []dbx.RiskMethodology{dbx.RiskMethodologyNist80030, dbx.RiskMethodologyFair} {
+		for _, omitted := range []string{"", "null", "{}", " {} "} {
+			inh, res, err := PrepareCreateScores(m, []byte(omitted), nil)
+			if err != nil || string(inh) != `{}` || string(res) != `{}` {
+				t.Fatalf("%s %q: %s / %s / %v; want {} / {} / nil", m, omitted, inh, res, err)
+			}
+			if _, _, err := PrepareCreateScores(m, []byte(omitted), []byte(`{}`)); err != nil {
+				t.Fatalf("%s %q with {} residual: %v", m, omitted, err)
+			}
+		}
+	}
+	if _, _, err := PrepareCreateScores("octave", nil, nil); !errors.Is(err, ErrInvalidMethodology) {
+		t.Fatalf("unknown methodology: %v", err)
+	}
+	if _, _, err := PrepareCreateScores(dbx.RiskMethodologyNist80030, nil, []byte(`{"score":12}`)); !errors.Is(err, ErrInherentScoreInvalid) {
+		t.Fatalf("residual without inherent: %v", err)
 	}
 }
 

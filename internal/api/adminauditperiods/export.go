@@ -86,6 +86,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -440,7 +441,8 @@ func callerAllowedExport(cred credstore.Credential) bool {
 	if cred.IsAdmin {
 		return true
 	}
-	for _, role := range cred.OwnerRoles {
+	// #2505: live tenant roles, not the session's role claim.
+	for _, role := range authz.TenantRoleLabels(cred) {
 		if role == "auditor" || role == "grc_engineer" {
 			return true
 		}

@@ -103,7 +103,7 @@ const createRiskInputSchema = `{
     },
     "inherent_score": {
       "type": "object",
-      "description": "Methodology-shaped scoring envelope; structure depends on methodology."
+      "description": "Optional methodology-shaped scoring envelope; structure depends on methodology. Omit it to file an unscored risk, as the app's Score later does."
     },
     "treatment": {
       "type": "string",

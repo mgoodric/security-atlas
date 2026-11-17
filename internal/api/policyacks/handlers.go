@@ -44,6 +44,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -371,8 +372,10 @@ func ackCallerFromCred(c credstore.Credential) policy.AckCaller {
 		userID = u.String()
 	}
 	return policy.AckCaller{
-		UserID:     userID,
-		OwnerRoles: append([]string(nil), c.OwnerRoles...),
+		UserID: userID,
+		// #2505: live tenant roles plus a key's own label, never a JWT
+		// session's role claim.
+		OwnerRoles: authz.AckRoleLabels(c),
 		IsAdmin:    c.IsAdmin,
 	}
 }

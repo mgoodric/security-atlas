@@ -93,6 +93,79 @@ func HasTenantRole(cred credstore.Credential, liveRoles []string) bool {
 	return len(derivedRolesFor(cred)) > 0
 }
 
+// TenantRoleLabels returns the tenant roles a handler gate counts for cred
+// (#2505). Gates that admit a named role (an export, a role-targeted policy
+// ack) read it rather than cred.OwnerRoles.
+//
+// It is the live user_roles authzmw resolved (cred.TenantRoles), plus the
+// credential's own role label only when the credential names no user: an
+// unbound API key, a client_credentials token, or an in-memory credential.
+// Those have no user_roles to resolve, so the label is their grant. A user's
+// session and a key bound to a user count their live roles alone: the
+// session's role claim outlives a revoke until the token expires (#2381),
+// and a bound key's label is a copy taken when the key was minted (#2427).
+func TenantRoleLabels(cred credstore.Credential) []string {
+	out := append([]string(nil), cred.TenantRoles...)
+	if !roleLabelIsGrant(cred) {
+		return out
+	}
+	for _, l := range cred.OwnerRoles {
+		if !containsLabel(out, l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// AckRoleLabels returns the roles a policy acknowledgment matches against a
+// policy's acknowledgment_required_roles (#2505): the live user_roles authzmw
+// resolved, plus the credential's OwnerRoles unless it is a user's JWT
+// session. A session's OwnerRoles is its role claim, which outlives a revoke.
+//
+// It differs from TenantRoleLabels for a key bound to a user. Required roles
+// are free text ("employee", "security-engineering"), and the only place a
+// user holds one is an api_keys.owner_roles label: the ack roster counts its
+// denominator from that column. Dropping a bound key's label would leave a
+// user on the roster who can never acknowledge. The label is set by an admin
+// when the key is minted and goes when the key is revoked; it is not a copy
+// of a revocable tenant role, and an ack grants nothing.
+func AckRoleLabels(cred credstore.Credential) []string {
+	out := append([]string(nil), cred.TenantRoles...)
+	if jwtSession(cred) && !machineJWT(cred) {
+		return out
+	}
+	for _, l := range cred.OwnerRoles {
+		if !containsLabel(out, l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// roleLabelIsGrant reports whether cred's OwnerRoles is its own grant rather
+// than a copy of a user's roles: true unless cred is a user's JWT session or
+// an API key bound to a user (issued_by set, so UserID is the owner, not the
+// key id).
+func roleLabelIsGrant(cred credstore.Credential) bool {
+	switch {
+	case jwtSession(cred):
+		return machineJWT(cred)
+	case apiKey(cred):
+		return cred.UserID == cred.ID
+	default:
+		return true
+	}
+}
+
+func containsLabel(labels []string, l string) bool {
+	for _, x := range labels {
+		if x == l {
+			return true
+		}
+	}
+	return false
+}
+
 func hasLabel(labels []string, role Role) bool {
 	for _, l := range labels {
 		if l == string(role) {
