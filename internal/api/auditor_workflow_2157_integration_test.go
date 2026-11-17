@@ -232,6 +232,10 @@ func TestAuditorWorkflow2157_AssignedPeriodThroughAuthzmw(t *testing.T) {
 		map[string]any{"evidence_record_id": s.inScope.String(), "result": "passed"}); st != http.StatusCreated {
 		t.Fatalf("auditor annotates own sample: %d %v; want 201", st, out)
 	}
+	if st, out := asAuditor.do(http.MethodPost, "/v1/samples/"+sample+"/annotations",
+		map[string]any{"evidence_record_id": s.other.String(), "result": "passed"}); st != http.StatusBadRequest {
+		t.Fatalf("auditor annotates own sample with a record it did not draw: %d %v; want 400", st, out)
+	}
 	if st, out := asAuditor.do(http.MethodPost, "/v1/samples/"+otherSample+"/annotations",
 		map[string]any{"evidence_record_id": s.other.String(), "result": "passed"}); st != http.StatusForbidden {
 		t.Fatalf("auditor annotates the unassigned period's sample: %d %v; want 403", st, out)
