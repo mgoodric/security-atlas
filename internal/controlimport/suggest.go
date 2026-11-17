@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Candidate sources (#1780). Crosswalk candidates come from the framework's
@@ -186,19 +188,27 @@ func buildCandidates(row BatchControl, edges []CrosswalkEdge, keyword []AnchorCa
 // candidates within that wall-clock budget; its failure leaves the
 // deterministic candidates as computed. Zero means no rerank.
 //
+// It waits for a slot as long as ctx lasts; the background caller's never
+// ends, and the slots are shared fairly between tenants (#2329), so another
+// tenant's load delays the run but cannot fail it.
+//
 // Every error path marks the batch failed (best effort), so a run that ends
 // never leaves it pending. A run that never ends (the process stops) is the
 // sweeper's to fail. Failed is final: a run whose batch the sweeper failed,
 // before the run started or before it saved, is dropped with
 // ErrSuggestionsNoLongerPending and writes nothing.
 func (s *Stager) suggest(ctx context.Context, b Batch, rerankBudget time.Duration) ([]RowSuggestions, error) {
-	select {
-	case s.runs <- struct{}{}:
-	case <-ctx.Done():
+	tenant, _ := tenancy.TenantFromContext(ctx)
+	release, ok := s.runs.acquire(ctx, tenant, 0)
+	if !ok {
 		return nil, s.markFailed(ctx, b.ID, fmt.Errorf("controlimport: waiting for a suggestion slot: %w", ctx.Err()))
 	}
-	defer func() { <-s.runs }()
+	defer release()
+	return s.suggestHeld(ctx, b, rerankBudget)
+}
 
+// suggestHeld is suggest's run, for a caller that already holds a slot.
+func (s *Stager) suggestHeld(ctx context.Context, b Batch, rerankBudget time.Duration) ([]RowSuggestions, error) {
 	// The wait for a slot can outlast the sweeper's cutoff.
 	cur, err := s.store.GetBatch(ctx, b.ID)
 	if err != nil {

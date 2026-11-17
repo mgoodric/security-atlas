@@ -173,20 +173,22 @@ func TestOverlayRemapQueue_ImportingReleaseBQueuesEachTenantsActiveEdgesWithThei
 	f := setupOverlayRemap(t)
 
 	got := overlayProposals(t, f.admin, f.a)
+	// #2554: TRM-01 keeps its code and title in B, so the import carried
+	// tenant A's edge on it; every other edge waits for a writer.
 	want := map[string]overlayProposal{
-		"TRM-01": {class: "unchanged", successors: []string{"TRM-01"}},
-		"TRM-02": {class: "renamed", successors: []string{"TRM-20"}},
-		"TRM-03": {class: "split", successors: []string{"TRM-30", "TRM-31"}},
-		"TRM-04": {class: "reused_id", successors: []string{"TRM-41"}},
-		"TRM-05": {class: "no_successor", successors: []string{}},
+		"TRM-01": {class: "unchanged", status: "approved", successors: []string{"TRM-01"}},
+		"TRM-02": {class: "renamed", status: "open", successors: []string{"TRM-20"}},
+		"TRM-03": {class: "split", status: "open", successors: []string{"TRM-30", "TRM-31"}},
+		"TRM-04": {class: "reused_id", status: "open", successors: []string{"TRM-41"}},
+		"TRM-05": {class: "no_successor", status: "open", successors: []string{}},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("tenant A has %d proposals; want %d (the retired edge is not queued): %+v", len(got), len(want), got)
 	}
 	for code, w := range want {
 		g := got[code]
-		if g.class != w.class || g.status != "open" || !slices.Equal(g.successors, w.successors) {
-			t.Errorf("%s: class=%s status=%s successors=%v; want %s open %v", code, g.class, g.status, g.successors, w.class, w.successors)
+		if g.class != w.class || g.status != w.status || !slices.Equal(g.successors, w.successors) {
+			t.Errorf("%s: class=%s status=%s successors=%v; want %s %s %v", code, g.class, g.status, g.successors, w.class, w.status, w.successors)
 		}
 		if g.edgeID != f.aEdges[code].ID.String() {
 			t.Errorf("%s: proposal names edge %s; want tenant A's %s", code, g.edgeID, f.aEdges[code].ID)
@@ -197,25 +199,91 @@ func TestOverlayRemapQueue_ImportingReleaseBQueuesEachTenantsActiveEdgesWithThei
 		t.Fatalf("tenant B queue = %+v; want its one renamed TRM-02 edge", b)
 	}
 
-	// Queueing moves nothing.
+	// Queueing moves nothing, and the carry keeps the legacy edge: every
+	// legacy edge is still active on its release-A anchor.
 	for code, e := range f.aEdges {
 		if o := readOverlay(t, f.admin, e.ID); o.Status != "active" || o.Anchor != e.SCFAnchorID {
 			t.Errorf("%s: overlay changed by queueing: %+v", code, o)
 		}
 	}
-	// A re-run of the import queues nothing new.
-	counts, err := scfimport.QueueOverlayRemapProposals(context.Background(), f.admin)
+	carried := carriedOverlay(t, f.admin, f.a, overlayProposals(t, f.admin, f.a)["TRM-01"].id)
+	legacy := readOverlay(t, f.admin, f.aEdges["TRM-01"].ID)
+	if carried.Tenant != f.a || carried.Requirement != legacy.Requirement ||
+		carried.Anchor != anchorID(t, f.admin, edgeReleaseB, "TRM-01") || carried.Status != "active" ||
+		carried.Relationship != legacy.Relationship || carried.Strength != legacy.Strength ||
+		carried.Rationale != legacy.Rationale || carried.SourceRef != legacy.SourceRef {
+		t.Errorf("carried overlay = %+v; want a copy of %+v on B's TRM-01", carried, legacy)
+	}
+	before := overlayCount(t, f.admin, f.a)
+	if before != len(f.aEdges)+2 {
+		t.Fatalf("tenant A holds %d overlay edges; want its %d, the retired one and the carried one", before, len(f.aEdges))
+	}
+	// A re-run of the import queues and carries nothing new.
+	report, err := scfimport.QueueOverlayRemapProposals(context.Background(), f.admin)
 	if err != nil {
 		t.Fatalf("re-run: %v", err)
 	}
-	for class, n := range counts {
+	for class, n := range report.Queued {
 		if n != 0 {
 			t.Errorf("re-run queued %d %s proposals; want 0", n, class)
 		}
 	}
+	if report.Carried != 0 || report.Closed != 0 {
+		t.Errorf("re-run carried %d and closed %d; want 0 and 0", report.Carried, report.Closed)
+	}
 	if n := len(overlayProposals(t, f.admin, f.a)); n != 5 {
 		t.Fatalf("after the re-run tenant A has %d proposals; want 5", n)
 	}
+	if n := overlayCount(t, f.admin, f.a); n != before {
+		t.Fatalf("after the re-run tenant A holds %d overlay edges; want %d", n, before)
+	}
+}
+
+// carriedOverlay reads the overlay edge an approved proposal created, and
+// checks the import recorded it: the edge, its audit row and the decision
+// all name the import, all in the proposal's own tenant.
+func carriedOverlay(t *testing.T, pool *pgxpool.Pool, tenant uuid.UUID, proposalID string) overlayRow {
+	t.Helper()
+	ctx := context.Background()
+	var newEdge uuid.UUID
+	var status, decidedBy, decision string
+	var decisionTenant uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT p.status, p.new_overlay_edge_id, d.decision, d.decided_by, d.tenant_id
+		FROM scf_overlay_remap_proposals p
+		JOIN scf_overlay_remap_decisions d ON d.proposal_id = p.id
+		WHERE p.id = $1 AND p.tenant_id = $2`, proposalID, tenant).Scan(
+		&status, &newEdge, &decision, &decidedBy, &decisionTenant); err != nil {
+		t.Fatalf("read carried proposal %s: %v", proposalID, err)
+	}
+	if status != "approved" || decision != "approved" || decidedBy != mappingoverlay.RemapCarryActor || decisionTenant != tenant {
+		t.Errorf("proposal %s: status=%s decision=%s decided_by=%s tenant=%s; want approved by %s in %s",
+			proposalID, status, decision, decidedBy, decisionTenant, mappingoverlay.RemapCarryActor, tenant)
+	}
+	var createdBy string
+	if err := pool.QueryRow(ctx, `SELECT created_by FROM fw_to_scf_overlay_edges WHERE id = $1`, newEdge).Scan(&createdBy); err != nil {
+		t.Fatalf("read carried edge: %v", err)
+	}
+	if createdBy != mappingoverlay.RemapCarryActor {
+		t.Errorf("carried edge created_by = %s; want %s", createdBy, mappingoverlay.RemapCarryActor)
+	}
+	var audit []string
+	rows, err := pool.Query(ctx, `
+		SELECT action || ':' || actor || ':' || tenant_id::text FROM fw_to_scf_overlay_edge_audit_log
+		WHERE overlay_edge_id = $1 ORDER BY occurred_at, id`, newEdge)
+	if err != nil {
+		t.Fatalf("read carried edge audit: %v", err)
+	}
+	for rows.Next() {
+		var s string
+		_ = rows.Scan(&s)
+		audit = append(audit, s)
+	}
+	rows.Close()
+	if want := []string{"create:" + mappingoverlay.RemapCarryActor + ":" + tenant.String()}; !slices.Equal(audit, want) {
+		t.Errorf("carried edge audit = %v; want %v", audit, want)
+	}
+	return readOverlay(t, pool, newEdge)
 }
 
 func TestOverlayRemapDecide_ApproveCreatesTheEdgeOnTheSuccessorAndRetiresTheLegacyOne(t *testing.T) {
@@ -351,14 +419,14 @@ func TestOverlayRemapDecide_SplitNeedsAnAnchorAndStaleOrDuplicateTargetsAreRefus
 		t.Fatalf("approve onto a catalog pair: err=%v; want CatalogEdgeExistsError", err)
 	}
 	// A legacy edge retired since it was queued makes its proposal stale.
-	if _, err := mappingoverlay.NewStore(f.app).Retire(ctx, f.aEdges["TRM-01"].ID, "withdrawn by hand", "jwt:w"); err != nil {
+	if _, err := mappingoverlay.NewStore(f.app).Retire(ctx, f.aEdges["TRM-02"].ID, "withdrawn by hand", "jwt:w"); err != nil {
 		t.Fatalf("retire: %v", err)
 	}
-	if _, err := approve("TRM-01", ""); !errors.Is(err, mappingoverlay.ErrRemapEdgeChanged) {
+	if _, err := approve("TRM-02", ""); !errors.Is(err, mappingoverlay.ErrRemapEdgeChanged) {
 		t.Fatalf("approve a retired edge's proposal: err=%v; want ErrRemapEdgeChanged", err)
 	}
 	// Every refusal left its proposal open.
-	for _, code := range []string{"TRM-01", "TRM-04", "TRM-05"} {
+	for _, code := range []string{"TRM-02", "TRM-04", "TRM-05"} {
 		if p := overlayProposals(t, f.admin, f.a)[code]; p.status != "open" {
 			t.Errorf("%s: status %s after a refused approval; want open", code, p.status)
 		}
@@ -542,8 +610,8 @@ func TestOverlayRemapAPI_TenantBCannotSeeOrDecideTenantAsProposals(t *testing.T)
 		}
 	}
 	for code, p := range overlayProposals(t, f.admin, f.a) {
-		if p.status != "open" {
-			t.Fatalf("after tenant B's calls A's %s is %s; want open", code, p.status)
+		if p.status != aProps[code].status {
+			t.Fatalf("after tenant B's calls A's %s is %s; want %s", code, p.status, aProps[code].status)
 		}
 	}
 	if n := overlayCount(t, f.admin, f.b); n != 1 {
@@ -573,8 +641,9 @@ func TestOverlayRemapAPI_TenantBCannotSeeOrDecideTenantAsProposals(t *testing.T)
 			n++
 		}
 	}
-	if n != 1 {
-		t.Fatalf("tenant A has %d approved proposals; want 1", n)
+	// TRM-02 by the writer, TRM-01 by the import (#2554).
+	if n != 2 {
+		t.Fatalf("tenant A has %d approved proposals; want 2", n)
 	}
 	// B's own proposal on the same legacy code is still open.
 	if p := overlayProposals(t, f.admin, f.b)["TRM-02"]; p.status != "open" {
@@ -583,9 +652,9 @@ func TestOverlayRemapAPI_TenantBCannotSeeOrDecideTenantAsProposals(t *testing.T)
 }
 
 // For a same-meaning successor (an unchanged anchor), requirement coverage
-// is the same before the release bump and after the overlay remap is
-// approved. Between the two, the default read (pinned to the current
-// release) has lost the path: the approval is what restores it.
+// is the same before and after the release bump. Before #2554 the default
+// read (pinned to the current release) lost the path until a writer
+// approved the overlay remap; the import's carry-forward now keeps it.
 func TestOverlayRemapCoverage_SameBeforeAndAfterForAnUnchangedSuccessor(t *testing.T) {
 	var tenant uuid.UUID
 	var ts *httptest.Server
@@ -641,25 +710,29 @@ implementation_type: manual_attested
 	if !slices.Equal(before, []string{"overlay_1804_inventory"}) {
 		t.Fatalf("before the upgrade R-05 is covered by %v; want overlay_1804_inventory", before)
 	}
-	if _, err := scfimport.QueueOverlayRemapProposals(context.Background(), admin); err != nil {
+	// #2554: the import rebinds the unchanged control onto TRM-01 in B and
+	// carries the overlay there too, so no writer has to act for the path
+	// to survive the release import.
+	report, err := scfimport.QueueOverlayRemapProposals(context.Background(), admin)
+	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	// The import rebinds the unchanged control onto TRM-01 in B; the overlay
-	// is still on A's TRM-01, so the path is gone until the remap.
-	if mid := read(); len(mid) != 0 {
-		t.Fatalf("before the overlay remap R-05 is covered by %v; want nothing", mid)
-	}
-	prop := overlayProposals(t, admin, tenant)["TRM-01"]
-	if prop.class != "unchanged" {
-		t.Fatalf("overlay proposal class %s; want unchanged", prop.class)
-	}
-	if code, body := do(t, ts, http.MethodPost, "/v1/mapping-overlays/remap-proposals/"+prop.id+"/approve", bearer, `{}`); code != http.StatusOK {
-		t.Fatalf("approve overlay remap: %d %s", code, body)
+	if report.Carried != 1 {
+		t.Fatalf("carried %d overlay edges; want 1", report.Carried)
 	}
 	if after := read(); !slices.Equal(after, before) {
-		t.Fatalf("coverage changed across the remap: before %v, after %v", before, after)
+		t.Fatalf("coverage changed across the release import: before %v, after %v", before, after)
 	}
-	if o := readOverlay(t, admin, overlay.ID); o.Status != "retired" || *o.RetirementReason != "remapped" {
-		t.Fatalf("legacy overlay = %+v; want retired as remapped", o)
+	prop := overlayProposals(t, admin, tenant)["TRM-01"]
+	if prop.class != "unchanged" || prop.status != "approved" {
+		t.Fatalf("overlay proposal %s/%s; want unchanged/approved", prop.class, prop.status)
+	}
+	// The carried proposal is decided: a writer cannot approve it twice.
+	if code, body := do(t, ts, http.MethodPost, "/v1/mapping-overlays/remap-proposals/"+prop.id+"/approve", bearer, `{}`); code == http.StatusOK {
+		t.Fatalf("approve a carried proposal: %d %s; want a refusal", code, body)
+	}
+	// The legacy edge stays, as a catalog carry leaves its legacy edge.
+	if o := readOverlay(t, admin, overlay.ID); o.Status != "active" {
+		t.Fatalf("legacy overlay = %+v; want active", o)
 	}
 }

@@ -176,30 +176,37 @@ type Stager struct {
 	// nil discards it after logging. Tests set it to observe completion.
 	background func(batchID string, err error)
 	// runs caps concurrent suggestion runs, inline and background alike
-	// (#2038). A run takes a slot for its whole computation, LLM rerank
-	// included, so anything bounding import LLM calls shares this cap.
-	runs chan struct{}
+	// (#2038), and shares the slots fairly between tenants (#2329). A run
+	// takes a slot for its whole computation, LLM rerank included, so
+	// anything bounding import LLM calls shares this cap.
+	runs *runSlots
+	// inlineSlotWait bounds how long an inline run waits for a slot before
+	// it is deferred to the background (#2329).
+	inlineSlotWait time.Duration
 }
 
 // MaxConcurrentSuggestionRuns is the default cap on suggestion runs in
 // flight in one process.
 const MaxConcurrentSuggestionRuns = 4
 
+// InlineSlotWait is how long an inline suggestion run waits for a slot.
+// When none frees in time the run moves to the background and the batch is
+// returned pending, so a busy process delays a batch but never fails it.
+const InlineSlotWait = 2 * time.Second
+
 func NewStager(store BatchStore) *Stager {
 	return &Stager{
 		store:          store,
 		asyncThreshold: AsyncSuggestThreshold,
-		runs:           make(chan struct{}, MaxConcurrentSuggestionRuns),
+		runs:           newRunSlots(MaxConcurrentSuggestionRuns),
+		inlineSlotWait: InlineSlotWait,
 	}
 }
 
 // WithRunLimit replaces the cap on concurrent suggestion runs. Call it
 // before the stager is used.
 func (s *Stager) WithRunLimit(n int) *Stager {
-	if n < 1 {
-		n = 1
-	}
-	s.runs = make(chan struct{}, n)
+	s.runs = newRunSlots(n)
 	return s
 }
 
@@ -207,7 +214,8 @@ func (s *Stager) WithRunLimit(n int) *Stager {
 // framework's current version, and persists the batch. A row with an unknown
 // code becomes a rejected row; nothing is dropped.
 func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
-	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+	tenant, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
 		return Batch{}, err
 	}
 	slug := strings.TrimSpace(in.FrameworkSlug)
@@ -291,7 +299,17 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		go s.suggestInBackground(context.WithoutCancel(ctx), created, rerankBudget(rerank, rerankBackgroundBudget))
 		return created, nil
 	}
-	rows, err := s.suggest(ctx, created, rerankBudget(rerank, rerankInlineBudget))
+	// The inline run waits a short while for a slot. When the process is
+	// busy (another tenant's reranks, or this tenant's own backlog) it is
+	// deferred to the background rather than failed (#2329).
+	releaseSlot, ok := s.runs.acquire(ctx, tenant, s.inlineSlotWait)
+	if !ok {
+		slog.InfoContext(ctx, "controlimport: no suggestion slot free; suggesting in background", "batch_id", created.ID)
+		go s.suggestInBackground(context.WithoutCancel(ctx), created, rerankBudget(rerank, rerankBackgroundBudget))
+		return created, nil
+	}
+	rows, err := s.suggestHeld(ctx, created, rerankBudget(rerank, rerankInlineBudget))
+	releaseSlot()
 	if err != nil {
 		// The batch and its rows are committed; only the candidates failed.
 		slog.ErrorContext(ctx, "controlimport: suggest candidates", "batch_id", created.ID, "error", err)

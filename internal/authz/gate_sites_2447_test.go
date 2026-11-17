@@ -6,7 +6,8 @@ package authz_test
 // gate, without the table (and so the OPA agreement check) noticing.
 //
 // This test parses every non-test Go file under internal/api and records,
-// per function, the authz.IsTenantAdmin / authz.IsTenantApprover calls in
+// per function, the authz.IsTenantAdmin / IsTenantApprover /
+// IsTenantRiskReader (#2556) calls in
 // it. That inventory must equal gateSites2447 exactly: each site names the
 // gate it calls and the routes2428 rows it guards, or why it guards no
 // route. A changed, added or removed call fails here until the site table
@@ -45,8 +46,9 @@ type gateSite2447 struct {
 func r2447(method, path string) string { return method + " " + path }
 
 const (
-	admin2447    = "IsTenantAdmin"
-	approver2447 = "IsTenantApprover"
+	admin2447      = "IsTenantAdmin"
+	approver2447   = "IsTenantApprover"
+	riskReader2447 = "IsTenantRiskReader"
 )
 
 // gateSites2447 is keyed by "<dir under internal/api>/<file> <func>", with
@@ -55,6 +57,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 	const id = id2428
 	adm := []string{admin2447}
 	apr := []string{approver2447}
+	rdr := []string{riskReader2447}
 	get, post, patch, put, del := http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete
 	site := func(calls []string, routes ...string) gateSite2447 {
 		return gateSite2447{calls: calls, routes: routes}
@@ -146,6 +149,14 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			r2447(post, "/v1/themes"),
 			r2447(patch, "/v1/themes/t1"),
 			r2447(del, "/v1/themes/t1")),
+		// #2556: the risk-module read gates. risks' hasProgramRead guards
+		// the list and theme heatmap (requireProgramRead) and the export.
+		"risks/authz.go hasProgramRead": site(rdr,
+			r2447(get, "/v1/risks"),
+			r2447(get, "/v1/risks/theme-heatmap"),
+			r2447(get, "/v1/risks/export")),
+		"decisions/authz.go hasProgramRead":    site(rdr, r2447(get, "/v1/decisions")),
+		"orgunits/authz.go hasProgramRead":     site(rdr, r2447(get, "/v1/org_units")),
 		"risks/handlers.go Handler.DeleteRisk": site(adm, r2447(del, "/v1/risks/"+id)),
 		"risks/transitions.go Handler.runTransition": site(apr,
 			r2447(patch, "/v1/risks/"+id+"/acceptance/approve"),
@@ -203,7 +214,7 @@ func scanGateSites2447(t *testing.T) map[string][]string {
 					return true
 				}
 				pkg, ok := sel.X.(*ast.Ident)
-				if ok && pkg.Name == "authz" && (sel.Sel.Name == admin2447 || sel.Sel.Name == approver2447) {
+				if ok && pkg.Name == "authz" && (sel.Sel.Name == admin2447 || sel.Sel.Name == approver2447 || sel.Sel.Name == riskReader2447) {
 					calls = append(calls, sel.Sel.Name)
 				}
 				return true
