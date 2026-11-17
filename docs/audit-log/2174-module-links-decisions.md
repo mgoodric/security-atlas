@@ -63,6 +63,10 @@ owner's live `user_roles` and `member_module_access` at read time
 `OwnerCheck`), so narrowing or restoring access changes the flag without
 touching the record. Nothing is stored and the assignment is unchanged.
 
+(Superseded in part by D5, #2501: a person with no live role is now
+flagged and left out of pickers. The paragraph below records the #2174
+call as made.)
+
 An owner lacks the module only when an admin narrowed their module
 access to leave it out and their live `user_roles` hold neither admin
 nor auditor (both exempt, as in `Gate`); no stored row is "all". A
@@ -109,3 +113,61 @@ refuses.
 On the control page, a hidden module's tab, overview card and count are
 not rendered and its query is not issued; `?tab=policies` without access
 falls back to the overview.
+
+## #2501 follow-ups (review of #2488)
+
+- **detection_tier_actual:** manual_review (the #2488 review). With the
+  #2501 server change reverted, four integration tests fail: the
+  role-less owner is not flagged, the picker lists the role-less user,
+  a narrowed caller gets 200 from `?module=`, and incident create
+  answers 201 for an existing hidden vendor but 400 "linked target does
+  not exist" for a missing one, the existence oracle.
+- **detection_tier_target:** integration.
+
+### D5 — no live role lacks every optional module
+
+D2's "no row is not flagged" rested on roles that live only in a
+credential. Since #2487/#2496 a user session decides on live
+`user_roles` alone, so a person with no live role cannot use any
+module on their own requests; offering them as an owner hands a record
+to someone who cannot open it. `moduleaccess.memberLacks` is now the one
+rule for the flag and the picker: a super-admin (the `super_admins`
+grant on an active user of the tenant, exempt as in `ForCaller`) or a
+live admin/auditor has the module; anyone else with no live role lacks
+it; anyone else with a live role follows their stored access.
+`MembersWithout` now walks the tenant's `users` rows rather than the
+stored narrowings, so a role-less user who was never narrowed is left
+out too.
+
+The e2e fixtures that seed the shared e2e user
+(`44444444-…-0001`: `dashboard.sql`, `audits-header.sql`,
+`controls-list.sql`) now also seed its admin and grc_engineer rows, as
+`settings.sql` already did, and `person-names.sql` gives its plan owner
+a grc_engineer row. The integration-fixture sweep is #2507's.
+
+### D6 — incident create refuses links into a hidden module
+
+`POST /v1/incidents` answers 403 `risk_ids: links into a module you
+cannot use` (or `vendor_ids: …`) when the caller cannot see Risk or
+Third-party risk and the list is non-empty. Refuse rather than ignore:
+silently dropping links a caller sent would create an incident that is
+not what they asked for, and nothing in the answer would say so. The
+check runs before the store and names only the field, so an id that
+exists and one that does not get byte-identical answers; the store's
+"linked target does not exist" 400 is reached only by callers who can
+see the module. The same `Viewer.Sees` route check the read path uses
+decides it, so read and write cannot disagree.
+
+### D7 — `?module=` is limited to callers who can work in the module
+
+Any signed-in role could compare `/v1/people` with `/v1/people?module=X`
+and learn who had been narrowed out of X. Restricted, not accepted:
+`?module=X` now answers 403 unless the caller can work in X
+(`Viewer.SeesModule`: in their access and switched on; core modules
+always answer). That set is exactly the people who already see
+`owner_lacks_access` on X's records, so the picker discloses nothing
+those pages do not. Limiting by role (admin, grc_engineer) was
+considered and not taken: which roles assign owners differs per module
+and lives in Rego, and a second copy of it here would drift. The
+residual, accepted: a member of X can still learn who else cannot use
+X, which they need to assign owners at all.

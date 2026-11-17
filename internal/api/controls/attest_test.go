@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // withChiID injects {id} into chi's route context so handlers calling
@@ -189,6 +191,54 @@ func TestAttestSubmit_RejectsFutureObservedAt(t *testing.T) {
 				t.Fatalf("expected %d; got %d body=%s", tc.want, rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+// supersededKeyReader is a control reader whose idempotency lookup finds a
+// record under every key, each overtaken by a newer attestation, so a
+// keyless request walks the whole key chain (#2520).
+type supersededKeyReader struct {
+	stubControlReader
+	lookups int
+}
+
+func (s *supersededKeyReader) AttestationByIdempotencyKey(_ context.Context, _ string, _ uuid.UUID, _ string) (priorAttestation, bool, error) {
+	s.lookups++
+	return priorAttestation{observedAt: time.Now().UTC(), superseded: true}, true, nil
+}
+
+// #2520: a keyless caller that exhausts the key chain gets a 409 telling it
+// to send an idempotency_key, not a 500.
+func TestAttestSubmit_KeyChainExhausted_Conflict(t *testing.T) {
+	t.Parallel()
+	reader := &supersededKeyReader{stubControlReader: stubControlReader{row: manualControlRow()}}
+	h := newAttestHandlerWithReader(reader)
+	body, _ := json.Marshal(map[string]any{
+		"statement": "Quarterly review complete.",
+		"attestation_data": map[string]any{
+			"reviewer":     "sample-user@example.com",
+			"completed_on": "2026-11-01",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost,
+		"/v1/controls/"+attestControlID+"/attestations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := authctx.WithCredential(req.Context(), ownerCred(attestOwnerRole))
+	ctx, err := tenancy.WithTenant(ctx, attestTenantID)
+	if err != nil {
+		t.Fatalf("with tenant: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	h.Submit(rr, withChiID(req.WithContext(ctx), attestControlID))
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409; got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "send an idempotency_key") {
+		t.Fatalf("409 must tell the caller to send an idempotency_key; body=%s", rr.Body.String())
+	}
+	if reader.lookups != attestMaxKeyGenerations {
+		t.Fatalf("expected %d key lookups; got %d", attestMaxKeyGenerations, reader.lookups)
 	}
 }
 
