@@ -158,9 +158,9 @@ States (canvas §6.3):
 - `approved` — governance approval recorded. `approved_by` populated. **Approval is not the same as activation** — the effect doesn't take hold until `active`.
 - `denied` — terminal. To revisit, file a new exception.
 - `active` — the effect is in force from `effective_from` until `expires_at`. The evaluation engine records the result `excepted` for every control × scope cell the predicate covers, whatever the evidence says (#2112). The whole-tenant evaluation (a control that resolves to no scope cells) is covered only by a predicate that matches every cell.
-- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. The engine stops honouring an exception at `expires_at` without waiting for the job, so the next evaluation is the normal result.
+- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. The engine stops honouring an exception at `expires_at` without waiting for the job, so the next evaluation is the normal result; the sweep also re-evaluates the control once it commits (#2269).
 
-**`excepted`** is a control evaluation result beside `pass`, `fail`, `na` and `inconclusive`. It is never a pass: it is not displayed as one (the controls list reads "Excepted") and it is not counted as one in drift, effectiveness, residual risk or any pass count. In a worst-state rollup across cells or controls it ranks below `fail` and `inconclusive` and above `pass`. Framework posture counts an excepted control as covered (now and in the 90-day baseline) and reports the share of requirements covered only by exception separately, as `covered_by_exception_pct`. Evidence can never carry it (`evidence_records_result_not_excepted`).
+**`excepted`** is a control evaluation result beside `pass`, `fail`, `na` and `inconclusive`. It is never a pass: it is not displayed as one (the controls list reads "Excepted") and it is not counted as one in drift, effectiveness, residual risk or any pass count. In a worst-state rollup across cells or controls it ranks below `fail` and `inconclusive` and above `pass`. Framework posture counts an excepted control as covered (now and in the 90-day baseline) and reports the share of requirements covered only by exception separately, as `covered_by_exception_pct`. A control counts as resting on an exception when one of its scope cells is `excepted` in its latest evaluation run, so a cell that no longer applies stops counting (#2269). Activating, revoking or expiring an exception re-evaluates its control under trigger `exception_change`. The OSCAL assessment results carry an excepted cell as a risk-accepted observation linked to the exception, never as a finding. Evidence can never carry it (`evidence_records_result_not_excepted`).
 
 Allowed transitions:
 
@@ -174,7 +174,7 @@ active    → revoked    (approver-role required; a reason is required; #2113)
 
 No other transitions. `denied`, `expired` and `revoked` are terminal.
 
-- `revoked` — terminal. An approver ended the active exception before `expires_at`, with a reason recorded on its audit row (`revoked_by`, `revoked_at` on the exception). `expires_at` keeps the window that was granted. The engine reads only `active` exceptions, so the control returns to its normal result on its next evaluation.
+- `revoked` — terminal. An approver ended the active exception before `expires_at`, with a reason recorded on its audit row (`revoked_by`, `revoked_at` on the exception). `expires_at` keeps the window that was granted. The engine reads only `active` exceptions, so the control returns to its normal result; revoking re-evaluates it as soon as the change commits (#2269).
 
 In the app, an exception is requested from its control (`/exceptions/new?control_id=…`) and carried through its life on `/exceptions/{id}`. The request's scope is never a null predicate: the scope picker's null means an unfinished choice, and the API refuses it, because a stored null would match every cell. The whole control is `{"op":"true"}`.
 

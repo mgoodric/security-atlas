@@ -160,7 +160,7 @@ export const ACTION_COPY: Record<
     submit: "Revoke",
     busy: "Revoking…",
     done: "Exception revoked",
-    help: "Revoking ends the exception now. The control returns to normal evaluation on its next evaluation. Revoked is final.",
+    help: "Revoking ends the exception now. The control is re-evaluated straight away and shows its own result again. Revoked is final.",
     onlyFrom: "Only an active exception can be revoked.",
   },
 };

@@ -91,7 +91,7 @@
       "people_only": false,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "The expiry sweep (daily by default) expires an active exception once its expires_at has passed."
+      "note": "The expiry sweep (daily by default) expires an active exception once its expires_at has passed, then re-evaluates its control (#2269)."
     },
     {
       "from": "active",
@@ -109,7 +109,7 @@
       "people_only": false,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "An approver ends an active exception before it expires, with a reason (#2113). The control returns to normal evaluation on its next evaluation."
+      "note": "An approver ends an active exception before it expires, with a reason (#2113). The control is re-evaluated as soon as the revocation commits (#2269)."
     }
   ]
 }
