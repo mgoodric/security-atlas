@@ -76,7 +76,11 @@ demo `framework_version`, so the global catalog is never written or mutated.
   synthesized anchors use **real SCF control codes** (IAC-06, CRY-05, BCD-11,
   TDA-09, TPM-03, MON-01, VPM-02, IRO-04 — drawn verbatim from the SCF
   catalog), so the demo anchors to real SCF controls, never a parallel
-  taxonomy (invariant #7). They are `scf_anchors` rows pointing at the demo
+  taxonomy (invariant #7). (Those were legacy SCF codes. Against SCF 2026.3
+  most named a different control, so the set is now IAC-37, CRY-07, BCD-24,
+  TDA-05, TPM-04, MON-02, VPM-06, IRO-06, each with its verbatim 2026.3 title,
+  and `TestDemoSCFAnchors_MatchPinnedRelease` holds every pair to the pin.
+  See `2302-demo-scf-anchor-titles-decisions.md`.) They are `scf_anchors` rows pointing at the demo
   framework_version, distinguished from official catalog rows by the
   `fw_to_scf_edges.source_attribution = 'org_internal'` mark.
 - **(c) Hybrid: adopt-when-present, synthesize-when-absent.** Adopted ON TOP of
