@@ -31,6 +31,11 @@ describe("risk list fetchers and roll-ups", () => {
       { sort: "-title", owner: "none", status: "all", limit: "50" },
       "/v1/risks?status=all&owner=none&sort=-title&limit=50",
     ],
+    // #2482: a list repeats the key.
+    [
+      { category: ["ops", "vendor"], status: "all" },
+      "/v1/risks?status=all&category=ops&category=vendor",
+    ],
   ])("listRisks(%o) asks upstream for %s", async (params, path) => {
     const spy = stubFetch({ risks: [{ id: "r1" }], count: 1, total: 7 });
     const page = await listRisks("test-bearer-2060", params);
@@ -52,8 +57,44 @@ describe("risk list fetchers and roll-ups", () => {
     [fetchRisksListWithRollUps, "/api/risks?include_rollups=true"],
   ])("%o reads the BFF at %s", async (fetcher, url) => {
     const spy = stubFetch({ risks: [] });
-    await expect(fetcher()).resolves.toEqual({ risks: [] });
+    await expect(fetcher()).resolves.toEqual({ risks: [], count: 0, total: 0 });
     expect(spy.mock.calls[0]?.[0]).toBe(url);
+  });
+
+  // #2482: the platform returns at most 500 rows a call, so the whole-list
+  // fetchers walk every page until they hold the total.
+  test("fetchRisksListWithRollUps reads every page", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ risks: [{ id: "r1" }, { id: "r2" }], total: 3 }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ risks: [{ id: "r3" }], total: 3 })),
+      );
+    const all = await fetchRisksListWithRollUps();
+    expect(all.risks.map((r) => r.id)).toEqual(["r1", "r2", "r3"]);
+    expect(all.total).toBe(3);
+    expect(spy.mock.calls.map((c) => c[0])).toEqual([
+      "/api/risks?include_rollups=true",
+      "/api/risks?include_rollups=true&offset=2",
+    ]);
+  });
+
+  test("an empty page ends the walk", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ risks: [{ id: "r1" }], total: 5 })),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ risks: [], total: 5 })),
+      );
+    const all = await fetchRisksList();
+    expect(all.risks).toHaveLength(1);
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
   test("a BFF error surfaces its message", async () => {
