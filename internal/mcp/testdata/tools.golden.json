@@ -271,7 +271,7 @@
             "type": "string"
           },
           "inherent_score": {
-            "description": "Methodology-shaped scoring envelope; structure depends on methodology.",
+            "description": "Optional methodology-shaped scoring envelope; structure depends on methodology. Omit it to file an unscored risk, as the app's Score later does.",
             "type": "object"
           },
           "methodology": {

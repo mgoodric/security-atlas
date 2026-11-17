@@ -249,12 +249,16 @@ func stateFromCoverage(coveragePct int) string {
 // no linked controls — slice 020 AC-7 — has residual == inherent anyway).
 // FAIR risks carry a dollar residual, so risk.RanksAbove ranks them after
 // every 5x5 risk rather than comparing dollars with severities (#2185).
+// A risk with neither score readable is Unscored and ranks after every
+// scored risk (#2511).
 func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 	aging := make([]RiskAging, 0, len(rows))
 	for _, r := range rows {
-		severity, _ := risk.ScoreValue(r.ResidualScore)
+		severity, scored := risk.ScoreValue(r.ResidualScore)
 		if severity == 0 {
-			severity, _ = risk.ScoreValue(r.InherentScore)
+			var inherentScored bool
+			severity, inherentScored = risk.ScoreValue(r.InherentScore)
+			scored = scored || inherentScored
 		}
 		ageDays := 0
 		if !r.UpdatedAt.IsZero() {
@@ -271,11 +275,15 @@ func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 			Treatment:        r.Treatment,
 			Methodology:      string(r.Methodology),
 			ResidualSeverity: severity,
+			Unscored:         !scored,
 			AgeDays:          ageDays,
 		})
 	}
 	sort.SliceStable(aging, func(i, j int) bool {
 		a, b := aging[i], aging[j]
+		if a.Unscored != b.Unscored {
+			return b.Unscored
+		}
 		if risk.RanksAbove(a.Monetary(), a.ResidualSeverity, b.Monetary(), b.ResidualSeverity) {
 			return true
 		}

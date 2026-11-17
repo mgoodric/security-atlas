@@ -308,4 +308,82 @@ test.describe("/risks/new risk-create form", () => {
     await expect(page).toHaveURL(/\/risks\/new$/);
     expect(postFired).toBe(false);
   });
+
+  test("#2511: Score later posts no inherent score and the risk reads as Unscored", async ({
+    authedPage: page,
+  }) => {
+    const unscored = {
+      id: CREATED_RISK_ID,
+      title: NEW_RISK_TITLE,
+      category: "operational",
+      treatment: "untreated",
+      treatment_owner: "e2e-owner",
+      methodology: "nist_800_30",
+      inherent_score: {},
+      residual_score: {},
+      severity: 0,
+      status: "open",
+      linked_control_ids: [],
+      themes: [],
+    };
+    let posted: Record<string, unknown> | undefined;
+    await page.route("**/api/risks", async (route, req) => {
+      if (req.method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      posted = JSON.parse(req.postData() ?? "{}") as Record<string, unknown>;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ risk: unscored }),
+      });
+    });
+    await page.route(`**/api/risks/${CREATED_RISK_ID}`, async (route, req) => {
+      if (req.method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risk: unscored }),
+      });
+    });
+
+    await page.goto("/risks/new");
+    await expect(page.getByTestId("risks-create-form")).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
+    await pickFirstUser(page, "risks-create-owner");
+
+    await page.getByTestId("risks-create-score-later").check();
+    await expect(page.getByTestId("risks-create-inherent-score")).toHaveCount(
+      0,
+    );
+
+    const createResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/risks") &&
+        r.request().method() === "POST" &&
+        r.status() === 201,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("risks-create-submit").click();
+    await createResp;
+    expect(posted).toBeDefined();
+    expect(posted).not.toHaveProperty("inherent_score");
+
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("risk-detail-unscored")).toHaveText(
+      "Unscored",
+      { timeout: 30_000 },
+    );
+    await expect(page.getByTestId("risk-detail-residual")).toHaveText(
+      "Unscored",
+    );
+  });
 });

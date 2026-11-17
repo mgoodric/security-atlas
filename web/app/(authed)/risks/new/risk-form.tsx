@@ -118,7 +118,6 @@ function toCreateInput(
   s: FormState,
   reviewDueDefault: string,
 ): RiskCreateInput {
-  const inherentScore = inherentScoreOf(s);
   const body: RiskCreateInput = {
     title: s.title.trim(),
     description: s.description.trim(),
@@ -126,8 +125,12 @@ function toCreateInput(
     methodology: s.methodology,
     treatment: s.treatment,
     owner_user_id: s.owner_user_id,
-    inherent_score: inherentScore,
   };
+  // #2511: "Score later" omits the score; the platform logs the risk
+  // unscored.
+  if (!s.score_later) {
+    body.inherent_score = inherentScoreOf(s);
+  }
   if (s.treatment === "accept") {
     body.acceptance_status = "proposed";
   }
@@ -549,7 +552,26 @@ export function RiskForm(props: Props) {
         />
       )}
 
-      {state.methodology === "fair" ? (
+      {/* #2511: a risk may be logged before it is assessed. Offered on
+          create, and on edit only while the risk is still unscored (a
+          PATCH cannot clear a score). */}
+      {!opening || opening.score_later ? (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={state.score_later}
+            onChange={(e) => update("score_later", e.target.checked)}
+            data-testid="risks-create-score-later"
+          />
+          Score later
+          <span className="text-xs text-muted-foreground">
+            The risk is logged as Unscored, outside the severity bands, until it
+            is scored.
+          </span>
+        </label>
+      ) : null}
+
+      {state.score_later ? null : state.methodology === "fair" ? (
         <fieldset
           className="rounded-md border border-input p-4"
           data-testid="risks-create-inherent-score"
