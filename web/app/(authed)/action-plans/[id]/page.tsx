@@ -24,6 +24,7 @@ import { DetailHeader } from "@/components/detail/detail-header";
 import { Markdown } from "@/components/markdown";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { OwnerAccessFlag } from "@/components/ui/owner-access-flag";
 import { Person } from "@/components/ui/person";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { useToast } from "@/components/ui/toast";
@@ -196,11 +197,17 @@ export default function ActionPlanDetailPage() {
         <div>
           <dt className="text-xs text-muted-foreground">Owner</dt>
           <dd className="text-sm">
-            <Person
-              id={plan.owner_id}
-              avatar
-              testId="action-plan-detail-owner"
-            />
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <Person
+                id={plan.owner_id}
+                avatar
+                testId="action-plan-detail-owner"
+              />
+              <OwnerAccessFlag
+                lacksAccess={plan.owner_lacks_access}
+                testId="action-plan-detail-owner-no-access"
+              />
+            </span>
           </dd>
         </div>
         <Field label="Created" value={dateLabel(plan.created_at)} />

@@ -65,7 +65,7 @@ test.describe("/risks/[id] unlinked owner (#2129)", () => {
     const risk = storedRisk();
     let patched: Record<string, unknown> | undefined;
 
-    await page.route("**/api/people", (route) =>
+    await page.route(/\/api\/people(\?.*)?$/, (route) =>
       json(route, 200, {
         users: [{ id: USER_ID, display_name: USER_NAME, status: "active" }],
         api_keys: [],

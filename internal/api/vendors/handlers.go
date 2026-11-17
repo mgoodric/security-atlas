@@ -30,6 +30,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
@@ -40,7 +41,38 @@ import (
 type Handler struct {
 	store *vendor.Store
 	now   func() time.Time // injected for tests; defaults to time.Now in production
+	views *moduleaccess.Views
 }
+
+// WithModules wires the module views the owner_lacks_access flag reads
+// (#2174). Without them (a unit-test server) no owner is flagged.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// flagOwners sets owner_lacks_access on each vendor from its owner's live
+// module access. It fails closed: an error is returned, not a vendor list
+// that silently omits the flag.
+func (h *Handler) flagOwners(r *http.Request, out []vendorWire) error {
+	check, err := h.views.Owners(r, thirdPartyRisk)
+	if err != nil {
+		return err
+	}
+	for i := range out {
+		if out[i].OwnerUserID == nil {
+			continue
+		}
+		if out[i].OwnerLacksAccess, err = check.Lacks(*out[i].OwnerUserID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// thirdPartyRisk is the module key vendors belong to
+// (featureflag.Modules).
+const thirdPartyRisk = "third_party_risk"
 
 // New constructs a Handler over a vendor.Store. now defaults to time.Now;
 // tests can override via NewWithClock.
@@ -76,23 +108,27 @@ type vendorWire struct {
 	// OwnerUnlinked is the free-text owner no user matched, shown as
 	// "Owner (unlinked)"; it is empty whenever OwnerUserID is set.
 	// OwnerUser is the stored free text, kept for older clients.
-	OwnerUserID    *string   `json:"owner_user_id"`
-	OwnerUnlinked  string    `json:"owner_unlinked"`
-	OwnerUser      string    `json:"owner_user"`
-	LinkedSOWURI   *string   `json:"linked_sow_uri,omitempty"`
-	Notes          string    `json:"notes"`
-	AnnualCost     *float64  `json:"annual_cost,omitempty"`
-	Currency       *string   `json:"currency,omitempty"`
-	RenewalDate    *string   `json:"renewal_date,omitempty"`
-	AutoRenew      bool      `json:"auto_renew"`
-	LicenseCount   *int32    `json:"license_count,omitempty"`
-	ToolCategory   *string   `json:"tool_category,omitempty"`
-	CostOwner      string    `json:"cost_owner"`
-	Status         string    `json:"status"`
-	BillingCadence *string   `json:"billing_cadence,omitempty"`
-	ScopeCellIDs   []string  `json:"scope_cell_ids"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	OwnerUserID   *string `json:"owner_user_id"`
+	OwnerUnlinked string  `json:"owner_unlinked"`
+	OwnerUser     string  `json:"owner_user"`
+	// OwnerLacksAccess (#2174) is computed at read time: the owner can no
+	// longer work in Third-party risk (narrowed module access, or no live
+	// role). The owner itself is kept.
+	OwnerLacksAccess bool      `json:"owner_lacks_access,omitempty"`
+	LinkedSOWURI     *string   `json:"linked_sow_uri,omitempty"`
+	Notes            string    `json:"notes"`
+	AnnualCost       *float64  `json:"annual_cost,omitempty"`
+	Currency         *string   `json:"currency,omitempty"`
+	RenewalDate      *string   `json:"renewal_date,omitempty"`
+	AutoRenew        bool      `json:"auto_renew"`
+	LicenseCount     *int32    `json:"license_count,omitempty"`
+	ToolCategory     *string   `json:"tool_category,omitempty"`
+	CostOwner        string    `json:"cost_owner"`
+	Status           string    `json:"status"`
+	BillingCadence   *string   `json:"billing_cadence,omitempty"`
+	ScopeCellIDs     []string  `json:"scope_cell_ids"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type writeReq struct {
@@ -235,6 +271,10 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 	for _, v := range rows {
 		out = append(out, h.toWire(v))
 	}
+	if err := h.flagOwners(r, out); err != nil {
+		httperr.WriteInternal(w, r, "vendor owner access", err)
+		return
+	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendors": out})
 }
 
@@ -302,7 +342,12 @@ func (h *Handler) GetVendor(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "get vendor", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor": h.toWire(v)})
+	out := []vendorWire{h.toWire(v)}
+	if err := h.flagOwners(r, out); err != nil {
+		httperr.WriteInternal(w, r, "vendor owner access", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor": out[0]})
 }
 
 // UpdateVendor handles PATCH /v1/vendors/{id}. Replace semantics; see package

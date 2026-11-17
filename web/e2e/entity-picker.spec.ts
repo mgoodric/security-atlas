@@ -61,7 +61,7 @@ async function mockDirectories(page: Page) {
         ],
       }),
   );
-  await page.route("**/api/people", (route) =>
+  await page.route(/\/api\/people(\?.*)?$/, (route) =>
     json(route, 200, {
       users: [
         { id: USER_ALICE, display_name: "Alice Picker", status: "active" },

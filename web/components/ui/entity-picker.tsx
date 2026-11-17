@@ -69,7 +69,7 @@ function isUnavailable(err: unknown): boolean {
   return err instanceof APIError && (err.status === 403 || err.status === 404);
 }
 
-function useEntityOptions(kinds: readonly EntityKind[]) {
+function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
   const wantsFrameworks = kinds.includes("framework");
   const wantsPeople = kinds.includes("user") || kinds.includes("credential");
   const wantsControls = kinds.includes("control");
@@ -81,7 +81,7 @@ function useEntityOptions(kinds: readonly EntityKind[]) {
     staleTime: 60_000,
     enabled: wantsFrameworks,
   });
-  const people = usePeopleDirectory();
+  const people = usePeopleDirectory(module);
   // Refused lists are not retried: a 403 or 404 will not change.
   const retry = (n: number, err: unknown) => !isUnavailable(err) && n < 2;
   const controls = useQuery({
@@ -169,6 +169,7 @@ export function EntityPicker({
   placeholder,
   extraOptions,
   describedBy,
+  module,
 }: {
   // What the picker lists and which pasted IDs it accepts.
   kinds: readonly EntityKind[];
@@ -185,8 +186,12 @@ export function EntityPicker({
   extraOptions?: readonly EntityOption[];
   // Help text the input also points at.
   describedBy?: string;
+  // #2174: the optional module the record belongs to. A people picker
+  // then lists only the members who can work in it (the platform
+  // filters `/v1/people?module=`).
+  module?: string;
 }) {
-  const fetched = useEntityOptions(kinds);
+  const fetched = useEntityOptions(kinds, module);
   const options = useMemo(
     () => [...(extraOptions ?? []), ...fetched.options],
     [extraOptions, fetched.options],

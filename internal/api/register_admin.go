@@ -123,7 +123,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// of an ID. Every signed-in role reads it (defaults.rego). App pool
 	// under the caller's RLS tenant, never authPool: a super-admin sees
 	// only the tenant it is signed in to.
-	root.Get("/v1/people", people.New(s.dbPool).List)
+	root.Get("/v1/people", people.New(s.dbPool).WithModules(s.moduleViews).List)
 	// #2119: what is waiting for the caller's approval across exceptions,
 	// risk acceptances, policies and framework scopes, under each type's
 	// own approve gate. Every signed-in role reads it (defaults.rego); a

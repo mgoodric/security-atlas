@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -63,6 +64,9 @@ type DomainUser struct {
 type Store struct {
 	pool  *pgxpool.Pool
 	creds CredentialRevoker
+	// notify replaces the super-admin notifier when set; nil calls the SQL
+	// function. Only tests set it, to inject a notify failure (#2504).
+	notify func(context.Context, dbx.DBTX, dbx.NotifySuperAdminsLastAdminDeprovisionedParams) (int32, error)
 }
 
 // CredentialRevoker drops a user's API keys from the in-memory credstore.
@@ -256,7 +260,7 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 	}
 	var out DomainUser
 	deprovisioned := false
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+	err = s.inTxWith(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries) error {
 		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
 		})
@@ -296,7 +300,7 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 		}); aErr != nil {
 			return aErr
 		}
-		return s.alertIfLastAdmin(ctx, q, watch, tIDU, actorCredentialID, id)
+		return s.alertIfLastAdmin(ctx, tx, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return DomainUser{}, err
@@ -323,7 +327,7 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 	}
 	var out DomainUser
 	deprovisioned := false
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+	err = s.inTxWith(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries) error {
 		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
 		})
@@ -372,7 +376,7 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 		}); aErr != nil {
 			return aErr
 		}
-		return s.alertIfLastAdmin(ctx, q, watch, tIDU, actorCredentialID, id)
+		return s.alertIfLastAdmin(ctx, tx, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return DomainUser{}, err
@@ -392,7 +396,7 @@ func (s *Store) Delete(ctx context.Context, actorCredentialID uuid.UUID, tenantI
 	if err != nil {
 		return err
 	}
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+	err = s.inTxWith(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries) error {
 		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
 		})
@@ -419,7 +423,7 @@ func (s *Store) Delete(ctx context.Context, actorCredentialID uuid.UUID, tenantI
 		}); aErr != nil {
 			return aErr
 		}
-		return s.alertIfLastAdmin(ctx, q, watch, tIDU, actorCredentialID, id)
+		return s.alertIfLastAdmin(ctx, tx, watch, tIDU, actorCredentialID, id)
 	})
 	if err != nil {
 		return err
@@ -538,29 +542,82 @@ func (s *Store) watchAdmins(ctx context.Context, q *dbx.Queries, tenantID pgtype
 // When the count went from one or more to zero it notifies every active
 // super-admin and writes a tenant_last_admin_deprovisioned audit row, in the
 // deprovision's transaction (#2273).
-func (s *Store) alertIfLastAdmin(ctx context.Context, q *dbx.Queries, w adminWatch, tenantID pgtype.UUID, actorCredentialID, targetUserID uuid.UUID) error {
+//
+// The alert is best-effort (#2504). The notify call and the audit write each
+// run under a SAVEPOINT, so an error in either rolls back only that step and
+// is logged at ERROR; the deprovision still commits, because a departed
+// person must not keep access while the IdP retries. A notify failure is
+// recorded on the audit row as notify_error. If rolling back to a savepoint
+// itself fails, the transaction is aborted and the commit reports it.
+func (s *Store) alertIfLastAdmin(ctx context.Context, tx pgx.Tx, w adminWatch, tenantID pgtype.UUID, actorCredentialID, targetUserID uuid.UUID) error {
 	if !w.active {
 		return nil
 	}
-	err := w.guard.Check(ctx, q)
+	err := w.guard.Check(ctx, dbx.New(tx))
 	if err == nil {
 		return nil
 	}
 	if !errors.Is(err, users.ErrLastAdmin) {
 		return fmt.Errorf("scim: %w", err)
 	}
-	notified, err := q.NotifySuperAdminsLastAdminDeprovisioned(ctx, dbx.NotifySuperAdminsLastAdminDeprovisionedParams{
-		TenantID:            tenantID,
-		DeprovisionedUserID: pgtype.UUID{Bytes: targetUserID, Valid: true},
-	})
-	if err != nil {
-		return fmt.Errorf("scim: notify super-admins: %w", err)
+	detail := map[string]any{
+		"active_admins_before": w.guard.Before(),
+		"active_admins_after":  0,
 	}
-	return s.writeAudit(ctx, q, tenantID, actorCredentialID, targetUserID, ActionLastAdminDeprovisioned, map[string]any{
-		"active_admins_before":  w.guard.Before(),
-		"active_admins_after":   0,
-		"super_admins_notified": notified,
-	})
+	var notified int32
+	if err := savepoint(ctx, tx, func(db dbx.DBTX) error {
+		var nErr error
+		notified, nErr = s.notifySuperAdmins(ctx, db, dbx.NotifySuperAdminsLastAdminDeprovisionedParams{
+			TenantID:            tenantID,
+			DeprovisionedUserID: pgtype.UUID{Bytes: targetUserID, Valid: true},
+		})
+		return nErr
+	}); err != nil {
+		slog.ErrorContext(ctx, "scim: last-admin alert: notify super-admins failed; deprovision proceeds",
+			"tenant_id", uuid.UUID(tenantID.Bytes), "user_id", targetUserID, "error", err)
+		detail["notify_error"] = err.Error()
+	} else {
+		detail["super_admins_notified"] = notified
+	}
+	if err := savepoint(ctx, tx, func(db dbx.DBTX) error {
+		return s.writeAudit(ctx, dbx.New(db), tenantID, actorCredentialID, targetUserID, ActionLastAdminDeprovisioned, detail)
+	}); err != nil {
+		slog.ErrorContext(ctx, "scim: last-admin alert: audit write failed; deprovision proceeds",
+			"tenant_id", uuid.UUID(tenantID.Bytes), "user_id", targetUserID, "error", err)
+	}
+	return nil
+}
+
+// notifySuperAdmins calls the SECURITY DEFINER notifier, or the test hook
+// when one is set.
+func (s *Store) notifySuperAdmins(ctx context.Context, db dbx.DBTX, arg dbx.NotifySuperAdminsLastAdminDeprovisionedParams) (int32, error) {
+	if s.notify != nil {
+		return s.notify(ctx, db, arg)
+	}
+	n, err := dbx.New(db).NotifySuperAdminsLastAdminDeprovisioned(ctx, arg)
+	if err != nil {
+		return 0, fmt.Errorf("scim: notify super-admins: %w", err)
+	}
+	return n, nil
+}
+
+// savepoint runs fn under a SAVEPOINT of tx. An error from fn rolls back to
+// the savepoint and is returned, leaving tx usable.
+func savepoint(ctx context.Context, tx pgx.Tx, fn func(dbx.DBTX) error) error {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("scim: savepoint: %w", err)
+	}
+	if err := fn(sp); err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil {
+			return fmt.Errorf("scim: rollback to savepoint: %w (after %w)", rbErr, err)
+		}
+		return err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return fmt.Errorf("scim: release savepoint: %w", err)
+	}
+	return nil
 }
 
 // forgetCredentials is the after-commit half of revokeAccess: drop the
@@ -589,6 +646,12 @@ func (s *Store) writeAudit(ctx context.Context, q *dbx.Queries, tenantID pgtype.
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries) error) error {
+	return s.inTxWith(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries) error { return fn(ctx, q) })
+}
+
+// inTxWith is inTx that also hands fn the transaction, for a step that needs
+// a SAVEPOINT (#2504).
+func (s *Store) inTxWith(ctx context.Context, fn func(context.Context, pgx.Tx, *dbx.Queries) error) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -597,7 +660,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries)
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	if err := fn(ctx, dbx.New(tx)); err != nil {
+	if err := fn(ctx, tx, dbx.New(tx)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

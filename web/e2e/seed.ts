@@ -166,6 +166,10 @@ export type FixtureName =
   // #2110 — a tenant of its own, so control-actions-2110.spec.ts's
   // uploads never change the demo tenant's controls.
   | "control-actions"
+  // #2174 — a tenant with a control linked to a policy and one
+  // grc_engineer member without Policies access, for
+  // module-links.spec.ts.
+  | "module-links"
   // #2494 — a tenant with one member whose roles are cleared each run,
   // for no-tenant-role.spec.ts.
   | "no-tenant-role";
