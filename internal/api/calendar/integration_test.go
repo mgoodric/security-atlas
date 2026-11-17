@@ -201,6 +201,7 @@ type testEnv struct {
 	// token returns 403.
 	calendarToken string
 	tenant        string
+	srv           *api.Server
 }
 
 func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
@@ -223,7 +224,7 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return testEnv{server: ts, bearer: bearer, calendarToken: calendarToken, tenant: tenant}
+	return testEnv{server: ts, bearer: bearer, calendarToken: calendarToken, tenant: tenant, srv: srv}
 }
 
 func get(t *testing.T, env testEnv, path string) (*http.Response, []byte) {

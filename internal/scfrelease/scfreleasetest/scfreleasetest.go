@@ -111,6 +111,12 @@ func removeAB(t *testing.T, admin *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 	for _, stmt := range []string{
+		// An active overlay edge refuses its anchor's delete (#2240), so the
+		// fixture's overlay edges go first.
+		`DELETE FROM fw_to_scf_overlay_edges WHERE scf_anchor_id IN (
+			SELECT a.id FROM scf_anchors a
+			JOIN framework_versions fv ON fv.id = a.framework_version_id
+			WHERE fv.tenant_id IS NULL AND fv.version IN ($1, $2))`,
 		`DELETE FROM controls WHERE scf_anchor_id IN (
 			SELECT a.id FROM scf_anchors a
 			JOIN framework_versions fv ON fv.id = a.framework_version_id

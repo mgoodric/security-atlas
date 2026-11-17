@@ -113,6 +113,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -170,9 +171,36 @@ type PanelSource interface {
 // OPA narrowing GET /v1/calendar applies (#2234). Filter is a normalized
 // CSV ("" is every type); None means the caller may read no type, so the
 // panel is empty.
+//
+// HideRisks leaves the risks panel empty: the caller may not see the Risk
+// module, because it is switched off or outside their module access
+// (#2173). It rides on the same value so the source keeps one seam.
 type UpcomingTypes struct {
-	Filter string
-	None   bool
+	Filter    string
+	None      bool
+	HideRisks bool
+}
+
+// risksRoute is a route of the module that owns the risks panel's rows.
+const risksRoute = "/v1/risks"
+
+// withModules narrows u to the modules the viewer may see (#2173): the
+// upcoming panel drops event types from hidden modules, as the calendar
+// does, and the risks panel is hidden with the Risk module.
+func withModules(u UpcomingTypes, v moduleaccess.Viewer) (UpcomingTypes, error) {
+	if !u.None {
+		filter, left, err := calendar.VisibleTypes(v, u.Filter)
+		if err != nil {
+			return u, err
+		}
+		u.Filter, u.None = filter, !left
+	}
+	seesRisks, err := v.Sees(risksRoute)
+	if err != nil {
+		return u, err
+	}
+	u.HideRisks = !seesRisks
+	return u, nil
 }
 
 // UpcomingTypesFor is the upcoming panel's type filter for the caller of
@@ -190,6 +218,14 @@ type Handler struct {
 	source PanelSource
 	pool   *pgxpool.Pool
 	engine *authz.Engine
+	views  *moduleaccess.Views
+}
+
+// WithModules wires the module views (#2173) that leave a hidden module's
+// rows out of the export. With none every module is shown.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
 }
 
 // NewHandler constructs a Handler. `source` MUST be non-nil for
@@ -275,7 +311,16 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 	// handler.
 	// #2234: the upcoming panel shows the event types the caller may read
 	// on the calendar, from the same function, not the flag gate above.
-	snapshot, snapErr := h.source.Snapshot(ctx, UpcomingTypesFor(r, h.engine))
+	// #2173: and only the modules the caller may see.
+	viewer, snapErr := h.views.For(r)
+	var filter UpcomingTypes
+	if snapErr == nil {
+		filter, snapErr = withModules(UpcomingTypesFor(r, h.engine), viewer)
+	}
+	var snapshot Snapshot
+	if snapErr == nil {
+		snapshot, snapErr = h.source.Snapshot(ctx, filter)
+	}
 	if snapErr != nil {
 		h.writeMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format),

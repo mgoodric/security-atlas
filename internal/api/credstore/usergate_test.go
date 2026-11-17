@@ -278,6 +278,45 @@ func TestIssueMinted_RecordsMinterWithoutOwnership(t *testing.T) {
 	}
 }
 
+// #2173: IssueOwned mints a key that belongs to the person, so the user
+// gate refuses it once they are deactivated. With no user it is an
+// ordinary machine key.
+func TestIssueOwned_BelongsToTheUser(t *testing.T) {
+	s := New(time.Hour)
+	p := newFakePersister()
+	if _, err := s.AttachPersistence(p); err != nil {
+		t.Fatalf("AttachPersistence: %v", err)
+	}
+	gate := &fakeGate{allowed: map[string]bool{gateUser: true}}
+	s.SetUserGate(gate)
+
+	cred, token, err := s.IssueOwned(gateTenant, []string{"calendar.read.v1"}, time.Hour, gateUser)
+	if err != nil {
+		t.Fatalf("IssueOwned: %v", err)
+	}
+	if cred.UserID != gateUser || !OwnedByUser(cred) || cred.MintedBy != "" {
+		t.Fatalf("cred UserID=%q MintedBy=%q; want owned by %q", cred.UserID, cred.MintedBy, gateUser)
+	}
+	if got := p.inserted[cred.ID].Cred.UserID; got != gateUser {
+		t.Fatalf("persisted UserID = %q; want %q", got, gateUser)
+	}
+	if _, err := s.Authenticate(token); err != nil {
+		t.Fatalf("Authenticate with owner allowed = %v; want nil", err)
+	}
+	gate.allowed[gateUser] = false
+	if _, err := s.Authenticate(token); err == nil {
+		t.Fatalf("Authenticate with owner deactivated = nil; want refused")
+	}
+
+	machine, _, err := s.IssueOwned(gateTenant, nil, 0, "")
+	if err != nil {
+		t.Fatalf("IssueOwned (no user): %v", err)
+	}
+	if machine.UserID != machine.ID {
+		t.Fatalf("no-user key UserID = %q; want its own id %q", machine.UserID, machine.ID)
+	}
+}
+
 func TestOwnedByUser(t *testing.T) {
 	cases := map[string]struct {
 		c    Credential

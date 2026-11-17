@@ -62,6 +62,16 @@ func IsTenantApprover(cred credstore.Credential) bool {
 	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
 }
 
+// IsTenantControlOwner reports whether cred holds the live tenant
+// control_owner role, or, for an API key, the control_owner owner_roles
+// label. As in IsTenantAdmin, a JWT role claim does not count.
+func IsTenantControlOwner(cred credstore.Credential) bool {
+	if hasLabel(cred.TenantRoles, RoleControlOwner) {
+		return true
+	}
+	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleControlOwner)
+}
+
 func hasLabel(labels []string, role Role) bool {
 	for _, l := range labels {
 		if l == string(role) {

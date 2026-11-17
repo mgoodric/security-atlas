@@ -219,6 +219,11 @@ type Querier interface {
 	// DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
 	// start of the next day (exclusive).
 	CountDecisionsByDecidedDate(ctx context.Context, arg CountDecisionsByDecidedDateParams) (int64, error)
+	// #2470: the `total` of GET /v1/evidence?control_id=. Counts the rows
+	// ListEvidenceForControlPaged pages through, before the cursor: the same
+	// control resolution (id_only included) and [since, until] window. The
+	// per-control list ignores scope_cell_id, so the count does too.
+	CountEvidenceForControlWindow(ctx context.Context, arg CountEvidenceForControlWindowParams) (int64, error)
 	// Slice 502: total CURRENT LIVE evidence count for one control, used by the
 	// evidence-summary surface to render a "showing N of M" bound (the summary is
 	// over the bounded top-N, never the full history — P0-502-8). Resolution
@@ -2270,6 +2275,11 @@ type Querier interface {
 	// Slice 106: the SELECT projects `result` so the wire shape `evidenceWire`
 	// can surface it (the column has always been on evidence_records; the slice
 	// 064 wire shape simply omitted it).
+	//
+	// #2470: id_only drops the control_ref leg, so the rows are exactly the
+	// control_id = $2 set the auditor hydrator (audit.Store.ControlPeriods) and
+	// the population draw resolve. The handler sets it for a period-scoped
+	// caller; every other caller keeps the slice-012 OR resolution.
 	ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error)
 	// AC-3: control-state read for a period. Returns evidence records for one
 	// control bounded by the period's frozen_at horizon (or live when the
@@ -2914,10 +2924,11 @@ type Querier interface {
 	//      tenant-instantiated control that satisfies one anchor:
 	//        result rank: fail (4) > inconclusive (3) > pass (2) > na (1)
 	//        freshness  : expired (4) > stale (3) > no_evidence (2) > fresh (1)
-	//   3. `anchor_frameworks` aggregates the global crosswalk: for each
-	//      anchor, the DISTINCT set of framework slugs reached via
-	//      fw_to_scf_edges → framework_requirements → framework_versions
-	//      → frameworks. Excludes the SCF spine itself (the column is
+	//   3. `anchor_frameworks` aggregates the effective crosswalk (catalog
+	//      edges plus the caller tenant's active overlay edges, #1798): for
+	//      each anchor, the DISTINCT set of framework slugs reached via
+	//      effective_fw_to_scf_edges → framework_requirements →
+	//      framework_versions → frameworks. Excludes the SCF spine itself (the column is
 	//      "what frameworks DOES this anchor satisfy?", not "is it an SCF
 	//      anchor?" — the answer to that is always yes). Excludes
 	//      `no_relationship` edges (those are explicit non-mappings, not
@@ -2935,8 +2946,9 @@ type Querier interface {
 	//      filters those rows, and each `controls` read also carries an
 	//      explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
 	//      #1832, belt-and-suspenders as in ListActiveControlsWithState);
-	//      the global `scf_anchors` rows + the catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
-	//      visible to every tenant by design.
+	//      the global `scf_anchors` rows + catalog `fw_to_scf_edges` are
+	//      visible to every tenant by design; the overlay arm of
+	//      effective_fw_to_scf_edges shows only the caller tenant's own.
 	//   #2 Engine is sole writer of control_evaluations: this is a pure read
 	//      over the engine's output table, never a parallel computation.
 	//

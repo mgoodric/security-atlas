@@ -152,6 +152,22 @@ func TestClamp01(t *testing.T) {
 
 // TestOverlayFrom covers the #1800 overlay provenance mapper: only an
 // overlay row with a joined source gets provenance; a catalog row never does.
+// #2240: an overlay row reports no mapping_tier; a catalog row reports its own.
+func TestTierFor(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ origin, tier, want string }{
+		{"overlay", "verified", ""},
+		{"catalog", "verified", "verified"},
+		{"catalog", "draft", "draft"},
+		{"", "under_review", "under_review"},
+	}
+	for _, tc := range tests {
+		if got := tierFor(tc.origin, tc.tier); got != tc.want {
+			t.Errorf("tierFor(%q, %q) = %q; want %q", tc.origin, tc.tier, got, tc.want)
+		}
+	}
+}
+
 func TestOverlayFrom(t *testing.T) {
 	t.Parallel()
 	src, by := "FY25 SOC 2 report, section 4", "user-1"

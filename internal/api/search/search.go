@@ -80,6 +80,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -133,12 +134,43 @@ var allTypes = []string{TypeControls, TypeRisks, TypePolicies, TypeEvidence, Typ
 type Handler struct {
 	pool   *pgxpool.Pool
 	engine *authz.Engine
+	views  *moduleaccess.Views
 }
 
 // New constructs a Handler. The OPA engine is optional; pass nil for
 // unit-test servers that don't wire authz.
 func New(pool *pgxpool.Pool, engine *authz.Engine) *Handler {
 	return &Handler{pool: pool, engine: engine}
+}
+
+// WithModules wires the module views (#2173): a type whose module is
+// switched off, or outside the caller's module access, is not searched.
+// With none every module is searched.
+func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
+	h.views = v
+	return h
+}
+
+// visibleTypes drops the types whose module the caller may not see
+// (#2173). Each type is named by its list route, which the module
+// registry places. A dropped type is left out silently, not reported in
+// partial_types: a hidden module is not "results hidden, request access".
+func (h *Handler) visibleTypes(r *http.Request, types []string) ([]string, error) {
+	viewer, err := h.views.For(r)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(types))
+	for _, t := range types {
+		ok, err := viewer.Sees("/v1/" + t)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 // ----- wire shapes -----
@@ -216,6 +248,11 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	// where Decide returns Allow=false are dropped from the query
 	// set and surfaced in partial_types (AC-5) so the FE can render
 	// "Risks results hidden — request access" hints.
+	requestedTypes, err = h.visibleTypes(r, requestedTypes)
+	if err != nil {
+		httperr.WriteInternal(w, r, "search module access", err)
+		return
+	}
 	admitted, partial := h.partitionByAdmit(r, requestedTypes)
 
 	// Run the per-type queries against the tenant-gated pool. Each
