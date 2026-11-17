@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 // testStateKey signs the OIDC flow state in tests (#2177).
@@ -61,7 +63,7 @@ func TestBeginLoginRefreshesExpiredProviderCacheAndRecovers(t *testing.T) {
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
-	}}, testStateKey)
+	}}, testStateKey, WithIssuerPolicy(netguard.Policy{AllowLoopback: true}))
 	now := time.Unix(1783200000, 0)
 	a.now = func() time.Time { return now }
 	a.providerCacheTTL = time.Second
