@@ -140,6 +140,18 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		// the live user_roles rows the resolver merges in Decide. Not the
 		// claim itself, which outlives a revoke until the token expires.
 		return nil
+	case jwtSession(cred) && len(cred.OwnerRoles) == 0 && !machineJWT(cred):
+		// #2401: a user's session carries an empty claim when the user has
+		// no user_roles row in the current tenant (never granted, last role
+		// revoked, or a member of another tenant only), and every login
+		// path mints one rather than refusing. The default below handed
+		// that session grc_engineer, so revoking a user's only role lasted
+		// until their next login. Such a session derives nothing; its roles
+		// are the live user_roles rows alone. This is an allow-list: only a
+		// client_credentials machine token keeps the default, because it
+		// names no user and its claim is always empty. Every other subject
+		// shape, known or not, derives nothing.
+		return nil
 	case apiKey(cred) && readOnlyRoleClaim(cred.OwnerRoles):
 		// #2402: an API key whose owner_roles names only viewer and/or
 		// auditor used to derive control_owner below, so a "viewer" key
@@ -172,6 +184,12 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 // atlas JWT. jwtmw stamps the credential ID "jwt:" + jti.
 func jwtSession(cred credstore.Credential) bool {
 	return strings.HasPrefix(cred.ID, "jwt:")
+}
+
+// machineJWT reports whether cred is a client_credentials JWT: the token
+// endpoint stamps its subject oauth.MachineSubjectPrefix + client_id.
+func machineJWT(cred credstore.Credential) bool {
+	return strings.HasPrefix(cred.UserID, "oauth_client:")
 }
 
 // apiKey reports whether cred is a slice-014/034 api_keys credential.

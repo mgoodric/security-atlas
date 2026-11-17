@@ -30,7 +30,7 @@ import (
 
 type moduleGateFixture struct {
 	url           string
-	admin, viewer string
+	admin, member string
 }
 
 func newModuleGateFixture(t *testing.T) *moduleGateFixture {
@@ -43,10 +43,13 @@ func newModuleGateFixture(t *testing.T) *moduleGateFixture {
 	tid := uuid.MustParse(tenant)
 
 	adminClaims := testjwt.AdminFor(tid)
-	viewerClaims := testjwt.ViewerFor(tid)
+	// A non-admin who reads questionnaires. The harness token carries an
+	// empty role claim, which derives nothing since #2401, so the role is
+	// granted explicitly here.
+	memberClaims := testjwt.ViewerFor(tid)
 	engine, err := authz.NewEngine(context.Background(), noteSubjectRoles{
 		adminClaims.Subject:  {authz.RoleAdmin},
-		viewerClaims.Subject: {authz.RoleViewer},
+		memberClaims.Subject: {authz.RoleGRCEngineer},
 	})
 	if err != nil {
 		t.Fatalf("authz.NewEngine: %v", err)
@@ -56,7 +59,7 @@ func newModuleGateFixture(t *testing.T) *moduleGateFixture {
 	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
 	f := &moduleGateFixture{
 		admin:  srv.IssueTestJWT(t, adminClaims),
-		viewer: srv.IssueTestJWT(t, viewerClaims),
+		member: srv.IssueTestJWT(t, memberClaims),
 	}
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
@@ -152,7 +155,7 @@ func TestModuleGate_QuestionnairesSwitchedOff(t *testing.T) {
 	routes := []string{"/v1/questionnaires", "/v1/questionnaires/" + id, "/v1/questionnaires/" + id + "/suggestions"}
 
 	// Switched on (the default): the routes behave as today.
-	for _, bearer := range []string{f.admin, f.viewer} {
+	for _, bearer := range []string{f.admin, f.member} {
 		for _, path := range routes[:2] {
 			if got := f.do(t, http.MethodGet, path, bearer, nil); got.status != http.StatusOK || got.marker != "" {
 				t.Fatalf("on: GET %s: status %d marker %q body=%s; want 200, no marker", path, got.status, got.marker, got.body)
@@ -162,7 +165,7 @@ func TestModuleGate_QuestionnairesSwitchedOff(t *testing.T) {
 	before := f.do(t, http.MethodGet, "/v1/questionnaires/"+id, f.admin, nil).body
 
 	f.setSwitch(t, "questionnaires.enabled", false)
-	for _, bearer := range []string{f.admin, f.viewer} {
+	for _, bearer := range []string{f.admin, f.member} {
 		for _, path := range routes {
 			got := f.do(t, http.MethodGet, path, bearer, nil)
 			if got.status != http.StatusNotFound || got.marker != "questionnaires.enabled" {
@@ -178,7 +181,7 @@ func TestModuleGate_QuestionnairesSwitchedOff(t *testing.T) {
 		t.Fatalf("off: POST /v1/questionnaires: status %d marker %q; want 404 with marker", got.status, got.marker)
 	}
 	// Core routes are unaffected.
-	if got := f.do(t, http.MethodGet, "/v1/me", f.viewer, nil); got.status != http.StatusOK {
+	if got := f.do(t, http.MethodGet, "/v1/me", f.member, nil); got.status != http.StatusOK {
 		t.Fatalf("off: GET /v1/me: status %d; a core route must not be gated", got.status)
 	}
 
@@ -191,7 +194,7 @@ func TestModuleGate_QuestionnairesSwitchedOff(t *testing.T) {
 	if after.body != before {
 		t.Fatalf("questionnaire changed across off/on:\nbefore=%s\nafter =%s", before, after.body)
 	}
-	list := f.do(t, http.MethodGet, "/v1/questionnaires", f.viewer, nil)
+	list := f.do(t, http.MethodGet, "/v1/questionnaires", f.member, nil)
 	if list.status != http.StatusOK || !bytes.Contains([]byte(list.body), []byte(id)) {
 		t.Fatalf("on again: list status %d does not include %s: %s", list.status, id, list.body)
 	}
@@ -206,7 +209,7 @@ func TestModuleGate_EffectiveModules(t *testing.T) {
 		"risk": "on", "third_party_risk": "on", "policies": "on", "questionnaires": "on",
 		"personnel_security": "on", "exceptions": "on", "board_reporting": "switched_off",
 	}
-	for name, bearer := range map[string]string{"admin": f.admin, "viewer": f.viewer} {
+	for name, bearer := range map[string]string{"admin": f.admin, "member": f.member} {
 		if got := f.modules(t, bearer); !equalStates(got, want) {
 			t.Fatalf("defaults, %s: %v; want %v", name, got, want)
 		}
@@ -216,7 +219,7 @@ func TestModuleGate_EffectiveModules(t *testing.T) {
 	f.setSwitch(t, "board.reporting", true)
 	f.setSwitch(t, "vendor.claims", true)
 	want["questionnaires"], want["board_reporting"] = "switched_off", "on"
-	for name, bearer := range map[string]string{"admin": f.admin, "viewer": f.viewer} {
+	for name, bearer := range map[string]string{"admin": f.admin, "member": f.member} {
 		if got := f.modules(t, bearer); !equalStates(got, want) {
 			t.Fatalf("flipped, %s: %v; want %v", name, got, want)
 		}

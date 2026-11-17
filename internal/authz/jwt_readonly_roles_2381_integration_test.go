@@ -121,7 +121,8 @@ func TestDecide2381_RoleMatrixPerPrincipalKind(t *testing.T) {
 		principal{"JWT viewer+auditor", credstore.Credential{ID: "jwt:va", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"viewer", "auditor"}}, true},
 		principal{"JWT auditor+control_owner", credstore.Credential{ID: "jwt:ac", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"auditor", "control_owner"}}, false},
 		principal{"JWT viewer+owner label", credstore.Credential{ID: "jwt:vl", TenantID: tenant, UserID: "user:" + both.String(), OwnerRoles: []string{"viewer", "platform-eng"}}, false},
-		principal{"JWT, empty claim", credstore.Credential{ID: "jwt:e", TenantID: tenant, UserID: "user:" + uuid.NewString()}, false},
+		// The empty-claim JWT moved to its own matrix when #2401 narrowed it:
+		// jwt_empty_claim_2401_integration_test.go.
 		principal{"JWT super_admin viewer", credstore.Credential{ID: "jwt:s", TenantID: tenant, UserID: "user:" + uuid.NewString(), IsAdmin: true, IsApprover: true, OwnerRoles: []string{"viewer"}}, false},
 		principal{"OAuth client", credstore.Credential{ID: "jwt:o", TenantID: tenant, UserID: "oauth_client:ci2381"}, false},
 	)
