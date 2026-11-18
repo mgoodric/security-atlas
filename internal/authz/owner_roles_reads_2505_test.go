@@ -60,17 +60,14 @@ var ownerRolesReads2505 = map[string]string{
 	"internal/api/controldetail/authz.go hasControlRead":         readGate2507,
 	"internal/api/controls/export.go controlsHasProgramRead":     readGate2507,
 	"internal/api/dashboard/authz.go hasProgramRead":             readGate2507,
-	"internal/api/decisions/authz.go hasProgramRead":             readGate2507,
 	"internal/api/evidence/export.go evidenceHasProgramRead":     readGate2507,
 	"internal/api/evidencesummary/handler.go hasControlRead":     readGate2507,
 	"internal/api/exceptions/export.go exceptionsHasProgramRead": readGate2507,
 	"internal/api/gapexplain/handler.go hasControlRead":          readGate2507,
-	"internal/api/orgunits/authz.go hasProgramRead":              readGate2507,
 	"internal/api/oscalcomponents/handler.go hasOscalRead":       readGate2507,
 	"internal/api/oscalprovenance/handler.go hasOscalRead":       readGate2507,
 	"internal/api/personnelsecurity/authz.go hasProgramRead":     readGate2507,
 	"internal/api/policies/export.go policiesHasProgramRead":     readGate2507,
-	"internal/api/risks/authz.go hasProgramRead":                 readGate2507,
 }
 
 // readGate2507 is the reason on a read gate left on OwnerRoles until #2507.

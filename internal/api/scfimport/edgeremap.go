@@ -95,6 +95,10 @@ SELECT EXISTS (
 const carryEdgeSQL = `
 SELECT new_edge_id FROM scf_edge_remap_decide($1, 'approved', $2, $3, $4, true)`
 
+// closeEdgeSQL keeps one proposal legacy, recorded like any decision.
+const closeEdgeSQL = `
+SELECT 1 FROM scf_edge_remap_decide($1, 'kept_legacy', NULL, $2, $3, true)`
+
 // CarryForwardDecider is the decided_by of a carry-forward approval in
 // scf_edge_remap_decisions: the import, not a person.
 const CarryForwardDecider = "system:scf-import"
@@ -106,6 +110,10 @@ type EdgeRemapReport struct {
 	// Carried counts the edges this run approved onto the current release's
 	// anchor with the same code and title (#2315).
 	Carried int
+	// Closed counts the open proposals this run kept legacy because the
+	// requirement already maps to that anchor, so no approval could succeed
+	// (#2554).
+	Closed int
 }
 
 // QueueEdgeRemapProposals queues one proposal per live catalog edge on an
@@ -169,12 +177,16 @@ func QueueEdgeRemapProposals(ctx context.Context, db DBTX) (EdgeRemapReport, err
 		if !SameCodeAndTitle(r.lineage.HasCurrentAnchor, r.lineage.CurrentAnchorTitle, r.lineage.LegacyAnchorTitle) {
 			continue
 		}
-		carried, err := carryEdge(ctx, tx, r.edgeID, r.targetVersionID, r.lineage.LegacySCFID, r.targetRelease)
+		outcome, err := carryEdge(ctx, tx, r.edgeID, r.targetVersionID, r.lineage.LegacySCFID, r.targetRelease)
 		if err != nil {
 			return EdgeRemapReport{}, err
 		}
-		if carried {
+		switch outcome {
+		case carryCarried:
 			report.Carried++
+		case carryClosed:
+			report.Closed++
+		case carrySkipped:
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -185,28 +197,45 @@ func QueueEdgeRemapProposals(ctx context.Context, db DBTX) (EdgeRemapReport, err
 
 // carryEdge approves the edge's open proposal onto the anchor with the same
 // code in the target release. It carries nothing when a person already
-// decided the proposal (a rejection stands until a person changes it) or
-// when the requirement already maps to that anchor.
-func carryEdge(ctx context.Context, tx pgx.Tx, edgeID, targetVersionID uuid.UUID, scfID, targetRelease string) (bool, error) {
+// decided the proposal (a rejection stands until a person changes it). When
+// the requirement already maps to that anchor it closes the proposal as
+// kept_legacy, with the reason, instead of leaving it open.
+func carryEdge(ctx context.Context, tx pgx.Tx, edgeID, targetVersionID uuid.UUID, scfID, targetRelease string) (edgeCarryOutcome, error) {
 	var proposalID uuid.UUID
 	var status string
 	if err := tx.QueryRow(ctx, edgeProposalSQL, edgeID, targetVersionID).Scan(&proposalID, &status); err != nil {
-		return false, fmt.Errorf("scfimport: read edge proposal for %s: %w", scfID, err)
+		return carrySkipped, fmt.Errorf("scfimport: read edge proposal for %s: %w", scfID, err)
 	}
 	if status != "open" {
-		return false, nil
+		return carrySkipped, nil
 	}
 	var exists bool
 	if err := tx.QueryRow(ctx, targetEdgeExistsSQL, edgeID, targetVersionID, scfID).Scan(&exists); err != nil {
-		return false, fmt.Errorf("scfimport: check carried edge for %s: %w", scfID, err)
+		return carrySkipped, fmt.Errorf("scfimport: check carried edge for %s: %w", scfID, err)
 	}
 	if exists {
-		return false, nil
+		// scf_edge_remap_decide would refuse the approval for good, so the
+		// proposal is closed rather than left open for a person who could
+		// never approve it (#2554, from the review of #2552).
+		reason := fmt.Sprintf("closed by the SCF import: the requirement already maps to %s in %s", scfID, targetRelease)
+		if _, err := tx.Exec(ctx, closeEdgeSQL, proposalID, reason, CarryForwardDecider); err != nil {
+			return carrySkipped, fmt.Errorf("scfimport: close edge proposal on %s: %w", scfID, err)
+		}
+		return carryClosed, nil
 	}
 	reason := fmt.Sprintf("carried forward: %s has the same code and title in %s", scfID, targetRelease)
 	var newEdge uuid.UUID
 	if err := tx.QueryRow(ctx, carryEdgeSQL, proposalID, scfID, reason, CarryForwardDecider).Scan(&newEdge); err != nil {
-		return false, fmt.Errorf("scfimport: carry edge on %s forward: %w", scfID, err)
+		return carrySkipped, fmt.Errorf("scfimport: carry edge on %s forward: %w", scfID, err)
 	}
-	return true, nil
+	return carryCarried, nil
 }
+
+// edgeCarryOutcome is what carryEdge did with one proposal.
+type edgeCarryOutcome int
+
+const (
+	carrySkipped edgeCarryOutcome = iota
+	carryCarried
+	carryClosed
+)

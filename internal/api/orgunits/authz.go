@@ -11,6 +11,9 @@
 // this guard is its defense-in-depth twin and the testable enforcement
 // point (the OPA engine is nil in api.New(api.Config{}) test servers).
 //
+// #2556: the gate is now authz.IsTenantRiskReader — admin, grc_engineer
+// and viewer by live tenant role, the set OPA admits on `org_units` reads.
+//
 // SCOPE: this guard is applied ONLY to GET /v1/org_units (the list, which
 // slice 067 extends). It is NOT retrofitted onto the slice-053 org_unit
 // write/read-one endpoints (Create, Get, Patch, Delete) — retrofitting
@@ -23,14 +26,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
-// hasProgramRead reports whether the credential carries an explicit
-// program-read role signal (IsAdmin / IsApprover / a non-empty
-// OwnerRoles). Deliberately stricter than authz.derivedRolesFor — a bare
-// push credential has no business reading the slice-056 org tree.
+// hasProgramRead reports whether the credential may read the org tree the
+// risk hierarchy draws: authz.IsTenantRiskReader, which counts the live
+// tenant role authzmw resolved, never a session's role claim (#2556). It
+// admits admin, grc_engineer and viewer, the roles OPA admits on
+// `org_units` reads. Deliberately stricter than authz.derivedRolesFor — a
+// bare push credential has no business reading the slice-056 org tree.
 func hasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.IsTenantRiskReader(c)
 }
 
 // requireProgramRead is the guard List calls FIRST — before resolving the

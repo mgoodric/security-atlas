@@ -1168,6 +1168,9 @@ type Querier interface {
 	// Fetch the current routing config for the tenant. Returns no rows when the
 	// tenant has never opted in (=> the router treats that as local-ollama).
 	GetTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) (TenantLlmRouting, error)
+	// #2329: the before value of a routing audit row, read with a row lock in the
+	// write's own transaction (taken after LockTenantLLMRouting).
+	GetTenantLLMRoutingForUpdate(ctx context.Context, tenantID pgtype.UUID) (TenantLlmRouting, error)
 	// #2061: the caller-tenant's vendor initial-review window in days. RLS scopes
 	// the row to the current tenant. Returns ErrNoRows when no tenants row exists
 	// (bare-UUID tenant); the vendor store maps that to the 30-day default, the
@@ -1435,6 +1438,10 @@ type Querier interface {
 	//
 	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 	// the DB layer; explicit-is-clearer per AC-5).
+	//
+	// #2329: actor_principal is the acting credential's principal
+	// (credstore.PrincipalOf), so a change made with a key that is not a user's
+	// still names its credential. NULL for a writer with no caller.
 	InsertMeAuditLog(ctx context.Context, arg InsertMeAuditLogParams) error
 	InsertMemberModuleAccessAudit(ctx context.Context, arg InsertMemberModuleAccessAuditParams) error
 	// Append one manual entry. The fn_metric_inputs_replicate trigger fires
@@ -3374,6 +3381,12 @@ type Querier interface {
 	// the row so a caller that cannot see it (wrong id, RLS) fails closed rather
 	// than proceeding unlocked.
 	LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
+	// #2329: serialize every routing write in one tenant (Set and Clear), so the
+	// before value an audit row records is the state the write replaced. A row
+	// lock alone cannot do this: while the tenant has no row, FOR UPDATE locks
+	// nothing, and two first PUTs would each record the default as their before.
+	// Transaction-scoped. Namespace 9 is advisorylock.TenantLLMRouting.
+	LockTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) error
 	LockTenantTheme(ctx context.Context, arg LockTenantThemeParams) (OrgTheme, error)
 	// ===== #1811: organisation theme management =====
 	// #1811: serialize a theme rename or delete with every theme assignment in

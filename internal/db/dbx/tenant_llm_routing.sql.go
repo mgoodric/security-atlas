@@ -58,6 +58,42 @@ func (q *Queries) GetTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID)
 	return i, err
 }
 
+const getTenantLLMRoutingForUpdate = `-- name: GetTenantLLMRoutingForUpdate :one
+SELECT tenant_id, provider, api_key_ciphertext, created_at, updated_at
+FROM tenant_llm_routing
+WHERE tenant_id = $1
+FOR UPDATE
+`
+
+// #2329: the before value of a routing audit row, read with a row lock in the
+// write's own transaction (taken after LockTenantLLMRouting).
+func (q *Queries) GetTenantLLMRoutingForUpdate(ctx context.Context, tenantID pgtype.UUID) (TenantLlmRouting, error) {
+	row := q.db.QueryRow(ctx, getTenantLLMRoutingForUpdate, tenantID)
+	var i TenantLlmRouting
+	err := row.Scan(
+		&i.TenantID,
+		&i.Provider,
+		&i.ApiKeyCiphertext,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockTenantLLMRouting = `-- name: LockTenantLLMRouting :exec
+SELECT pg_advisory_xact_lock(9, hashtext($1::uuid::text))
+`
+
+// #2329: serialize every routing write in one tenant (Set and Clear), so the
+// before value an audit row records is the state the write replaced. A row
+// lock alone cannot do this: while the tenant has no row, FOR UPDATE locks
+// nothing, and two first PUTs would each record the default as their before.
+// Transaction-scoped. Namespace 9 is advisorylock.TenantLLMRouting.
+func (q *Queries) LockTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockTenantLLMRouting, tenantID)
+	return err
+}
+
 const upsertTenantLLMRouting = `-- name: UpsertTenantLLMRouting :one
 INSERT INTO tenant_llm_routing (
     tenant_id,

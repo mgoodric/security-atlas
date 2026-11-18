@@ -41,3 +41,19 @@ RETURNING *;
 -- can distinguish "cleared" from "was already absent".
 DELETE FROM tenant_llm_routing
 WHERE tenant_id = $1;
+
+-- name: LockTenantLLMRouting :exec
+-- #2329: serialize every routing write in one tenant (Set and Clear), so the
+-- before value an audit row records is the state the write replaced. A row
+-- lock alone cannot do this: while the tenant has no row, FOR UPDATE locks
+-- nothing, and two first PUTs would each record the default as their before.
+-- Transaction-scoped. Namespace 9 is advisorylock.TenantLLMRouting.
+SELECT pg_advisory_xact_lock(9, hashtext(sqlc.arg(tenant_id)::uuid::text));
+
+-- name: GetTenantLLMRoutingForUpdate :one
+-- #2329: the before value of a routing audit row, read with a row lock in the
+-- write's own transaction (taken after LockTenantLLMRouting).
+SELECT *
+FROM tenant_llm_routing
+WHERE tenant_id = $1
+FOR UPDATE;

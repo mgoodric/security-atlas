@@ -39,13 +39,13 @@ id back to a user, and the update guard forbids rewriting `created_by`.
 
 ### D3 — formats
 
-| Actor recorded                        | Name                       |
-| ------------------------------------- | -------------------------- |
-| a users(id) of this tenant (active)   | display name               |
-| a users(id) of this tenant (disabled) | "Former user" (as #2085)   |
-| `key_<uuid>` of this tenant           | "API key …" + last 4 of id |
-| `system`                              | "System"                   |
-| anything else                         | "Unknown"                  |
+| Actor recorded                          | Name                       |
+| --------------------------------------- | -------------------------- |
+| a users(id) of this tenant (active)     | display name               |
+| a users(id) of this tenant (disabled)   | "Former user" (as #2085)   |
+| `key_<uuid>` of this tenant             | "API key …" + last 4 of id |
+| `system`, or `system:<process>` (#2554) | "System"                   |
+| anything else                           | "Unknown"                  |
 
 The last four are of the key's id, never its token: `api_keys.last4` is
 the token's and is not read. Uuids must be canonical (`identity.UserID`,

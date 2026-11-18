@@ -23,7 +23,7 @@ type memSettings struct {
 
 func (m *memSettings) GetSettings(context.Context) (controlimport.Settings, error) { return m.s, nil }
 
-func (m *memSettings) SetSettings(_ context.Context, in controlimport.Settings, by string, _ uuid.UUID) (controlimport.Settings, error) {
+func (m *memSettings) SetSettings(_ context.Context, in controlimport.Settings, by string, _ uuid.UUID, _ string) (controlimport.Settings, error) {
 	m.s, m.by = in, by
 	return in, nil
 }

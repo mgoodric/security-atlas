@@ -53,6 +53,10 @@ const (
 	// they wipe and reseed shared fixtures, so test binaries sharing one
 	// database serialise. Keys are the TestKey* constants below.
 	IntegrationTestSeed Namespace = 8
+	// TenantLLMRouting serialises routing writes in one tenant, so each
+	// audit row's before value is the state its write replaced (#2329,
+	// LockTenantLLMRouting). Key: hashtext(tenant uuid text).
+	TenantLLMRouting Namespace = 9
 )
 
 // Keys within IntegrationTestSeed. Distinct values; never reuse one.
@@ -82,6 +86,7 @@ func All() []Entry {
 		{RiskHierarchy, "risk_hierarchy"},
 		{AggregationKey, "aggregation_key"},
 		{IntegrationTestSeed, "integration_test_seed"},
+		{TenantLLMRouting, "tenant_llm_routing"},
 	}
 }
 
