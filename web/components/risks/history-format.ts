@@ -5,11 +5,32 @@
 // before/after objects already hold only the changed fields; placement
 // and category entries carry their whole small state, so unchanged keys
 // (and the category id behind the slug) are dropped.
+//
+// #2138: a field whose value is an id (a person, a control, an org unit)
+// carries `ref`, and its before/after stay the ids (or "none"); the
+// section resolves them to a name or title, so no id is ever shown.
 
 import type { RiskAuditEntry } from "@/lib/api/risks";
-import { enumLabel } from "@/lib/labels/enum-labels";
+import { enumLabel, humanizeEnum } from "@/lib/labels/enum-labels";
 
-export type HistoryChange = { field: string; before: string; after: string };
+export type HistoryRef = "person" | "control" | "org_unit";
+
+export type HistoryChange = {
+  field: string;
+  before: string;
+  after: string;
+  ref?: HistoryRef;
+};
+
+// The fields whose values are ids, and what they name.
+const REF_FIELDS: Record<string, HistoryRef> = {
+  owner_user_id: "person",
+  proposed_by: "person",
+  accepter: "person",
+  closed_by: "person",
+  control_id: "control",
+  org_unit_id: "org_unit",
+};
 
 const FIELD_LABELS: Record<string, string> = {
   title: "Title",
@@ -74,7 +95,7 @@ export function historyActionLabel(action: string): string {
     case "control_unlinked":
       return "Control unlinked";
     default:
-      return action;
+      return humanizeEnum(action);
   }
 }
 
@@ -135,7 +156,13 @@ export function historyChanges(entry: RiskAuditEntry): HistoryChange[] {
     const b = formatHistoryValue(k, before[k]);
     const a = formatHistoryValue(k, after[k]);
     if (a === b) continue;
-    out.push({ field: FIELD_LABELS[k] ?? k, before: b, after: a });
+    const field = FIELD_LABELS[k] ?? humanizeEnum(k);
+    const ref = REF_FIELDS[k];
+    out.push(
+      ref
+        ? { field, before: b, after: a, ref }
+        : { field, before: b, after: a },
+    );
   }
   return out;
 }
