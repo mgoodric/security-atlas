@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -317,8 +316,13 @@ func TestDeprovision_NotifyFailureStillCommits_2504(t *testing.T) {
 				tenant, scim.ActionLastAdminDeprovisioned).Scan(&notifyErr); err != nil {
 				t.Fatalf("read alert audit row: %v (actions %v)", err, auditActions(t, tenant))
 			}
-			if notifyErr == nil || !strings.Contains(*notifyErr, "division by zero") {
-				t.Fatalf("notify_error = %v, want the division-by-zero error", notifyErr)
+			// #2514: tenant admins can read this row, so it carries the
+			// SQLSTATE only; the full error goes to the log.
+			if notifyErr == nil {
+				t.Fatal("notify_error is missing from the alert audit row")
+			}
+			if *notifyErr != "SQLSTATE 22012" {
+				t.Fatalf("notify_error = %q, want %q", *notifyErr, "SQLSTATE 22012")
 			}
 			if got := alertsFor(t, home, sa, tenant); got != 0 {
 				t.Fatalf("alerts = %d, want 0", got)

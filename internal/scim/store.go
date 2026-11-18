@@ -547,7 +547,8 @@ func (s *Store) watchAdmins(ctx context.Context, q *dbx.Queries, tenantID pgtype
 // run under a SAVEPOINT, so an error in either rolls back only that step and
 // is logged at ERROR; the deprovision still commits, because a departed
 // person must not keep access while the IdP retries. A notify failure is
-// recorded on the audit row as notify_error. If rolling back to a savepoint
+// recorded on the audit row as notify_error (see notifyErrorDetail), with the
+// full error in the log line. If rolling back to a savepoint
 // itself fails, the transaction is aborted and the commit reports it.
 func (s *Store) alertIfLastAdmin(ctx context.Context, tx pgx.Tx, w adminWatch, tenantID pgtype.UUID, actorCredentialID, targetUserID uuid.UUID) error {
 	if !w.active {
@@ -575,7 +576,7 @@ func (s *Store) alertIfLastAdmin(ctx context.Context, tx pgx.Tx, w adminWatch, t
 	}); err != nil {
 		slog.ErrorContext(ctx, "scim: last-admin alert: notify super-admins failed; deprovision proceeds",
 			"tenant_id", uuid.UUID(tenantID.Bytes), "user_id", targetUserID, "error", err)
-		detail["notify_error"] = err.Error()
+		detail["notify_error"] = notifyErrorDetail(err)
 	} else {
 		detail["super_admins_notified"] = notified
 	}
@@ -586,6 +587,23 @@ func (s *Store) alertIfLastAdmin(ctx context.Context, tx pgx.Tx, w adminWatch, t
 			"tenant_id", uuid.UUID(tenantID.Bytes), "user_id", targetUserID, "error", err)
 	}
 	return nil
+}
+
+// notifyErrorOther is the notify_error text for a failure that is not a
+// Postgres error.
+const notifyErrorOther = "notify failed (not a database error); see the server log"
+
+// notifyErrorDetail is the notify_error value for the last-admin audit row.
+// Tenant admins can read that row, so it never carries err.Error(): a
+// connection failure or timeout can name hosts, ports and pool settings
+// (#2514). A Postgres error is recorded by its SQLSTATE; anything else gets
+// a fixed text. The full error goes to the slog line beside it.
+func notifyErrorDetail(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return "SQLSTATE " + pgErr.Code
+	}
+	return notifyErrorOther
 }
 
 // notifySuperAdmins calls the SECURITY DEFINER notifier, or the test hook
