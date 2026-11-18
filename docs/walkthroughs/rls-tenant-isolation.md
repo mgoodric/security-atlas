@@ -203,7 +203,7 @@ ROLLBACK
 What stops a buggy caller — context set to one tenant but the row body claims another — from writing into the wrong tenant? The `tenant_write` policy uses `WITH CHECK (current_tenant_matches(tenant_id))`. The `INSERT` itself fails:
 
 ```bash
-docker exec security-atlas-pg-030 psql -U atlas_app -d security_atlas -c "BEGIN; SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0'; INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, bundle_id) VALUES ('99999999-9999-9999-9999-999999999999', '00000000-0000-0000-0000-00000000a17e', 'CRY-05', 'cross-tenant smuggling attempt', 'Cryptography', 'automated', 'demo-cross-tenant'); ROLLBACK;" 2>&1
+docker exec security-atlas-pg-030 psql -U atlas_app -d security_atlas -c "BEGIN; SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0'; INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, bundle_id) VALUES ('99999999-9999-9999-9999-999999999999', '00000000-0000-0000-0000-00000000a17e', 'CRY-07', 'cross-tenant smuggling attempt', 'Cryptography', 'automated', 'demo-cross-tenant'); ROLLBACK;" 2>&1
 ```
 
 ```output
