@@ -77,6 +77,8 @@ test.describe("/risks/new risk-create form", () => {
     // List GET: empty before create, holds the new row after.
     let created = false;
     let postedAcceptanceStatus: string | undefined;
+    let postedJustification: string | undefined;
+    let postedProposedUntil: string | undefined;
     await page.route("**/api/risks", async (route, req) => {
       if (req.method() === "GET") {
         const risks = created
@@ -102,9 +104,14 @@ test.describe("/risks/new risk-create form", () => {
       }
       // POST = create. The BFF returns { risk } on 201 (slice 105
       // contract — see web/app/(authed)/risks/new/actions.ts).
-      postedAcceptanceStatus = (
-        JSON.parse(req.postData() ?? "{}") as { acceptance_status?: string }
-      ).acceptance_status;
+      const posted = JSON.parse(req.postData() ?? "{}") as {
+        acceptance_status?: string;
+        justification?: string;
+        proposed_until?: string;
+      };
+      postedAcceptanceStatus = posted.acceptance_status;
+      postedJustification = posted.justification;
+      postedProposedUntil = posted.proposed_until;
       created = true;
       await route.fulfill({
         status: 201,
@@ -133,8 +140,13 @@ test.describe("/risks/new risk-create form", () => {
     await pickFirstUser(page, "risks-create-owner");
     // treatment=accept avoids the mitigate-requires-linked-control
     // client-side validation rule (validateRiskForm). The form has no
-    // accepter / expiry inputs, so it posts a proposed acceptance (#1746).
+    // accepter / expiry inputs, so it posts a proposed acceptance (#1746),
+    // with the proposal's justification and proposed expiry (#2391).
     await page.getByTestId("risks-create-treatment").selectOption("accept");
+    await page
+      .getByTestId("risks-create-justification")
+      .fill("Compensated by the edge filter.");
+    await page.getByTestId("risks-create-proposed-until").fill("2099-03-31");
 
     const createResp = page.waitForResponse(
       (r) =>
@@ -146,6 +158,8 @@ test.describe("/risks/new risk-create form", () => {
     await page.getByTestId("risks-create-submit").click();
     await createResp;
     expect(postedAcceptanceStatus).toBe("proposed");
+    expect(postedJustification).toBe("Compensated by the edge filter.");
+    expect(postedProposedUntil).toBe("2099-03-31");
 
     // #2089 create convention: land on the new risk with a toast.
     await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {

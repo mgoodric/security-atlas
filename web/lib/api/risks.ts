@@ -495,6 +495,10 @@ export type RiskCreateInput = {
   // approved, accepter and accepted_until at create: the approval records
   // them.
   acceptance_status?: "proposed";
+  // #2391: required with acceptance_status=proposed, as on
+  // /acceptance/propose. proposed_until is YYYY-MM-DD, after today.
+  justification?: string;
+  proposed_until?: string;
   treatment_owner?: string;
   owner_user_id?: string;
   residual_score?: unknown;

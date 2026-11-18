@@ -45,9 +45,12 @@ func TestCreateRisk_TreatmentStates(t *testing.T) {
 		t.Fatalf("acceptance_status present on an untreated risk: %v", rk["acceptance_status"])
 	}
 
-	// A proposed acceptance needs no accepter or expiry.
-	resp, body = post(t, env, "/v1/risks",
-		base(map[string]any{"treatment": "accept", "acceptance_status": "proposed"}), env.bearer)
+	// A proposed acceptance needs no accepter or approved expiry; it needs
+	// the proposal's justification and proposed expiry (#2391).
+	resp, body = post(t, env, "/v1/risks", base(map[string]any{
+		"treatment": "accept", "acceptance_status": "proposed",
+		"justification": "Compensated by the edge filter.", "proposed_until": future(30),
+	}), env.bearer)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("proposed accept: status %d (body %v)", resp.StatusCode, body)
 	}

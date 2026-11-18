@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -229,19 +230,45 @@ func TestApplyCreateRisk_ProposedAcceptanceRecordsConfirmer(t *testing.T) {
 		t.Fatalf("create_risk with an approved acceptance: want treatment validation, got %v", err)
 	}
 
+	// #2391: a proposed acceptance needs the terms POST /v1/risks and the
+	// propose transition need. The proposal is refused when filed (a 400
+	// on the REST surface), before anyone is asked to confirm it.
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
+	for name, input := range map[string]string{
+		"no justification": `{"title":"T","category":"operational","treatment":"accept","acceptance_status":"proposed","proposed_until":"2099-06-30"}`,
+		"no expiry":        `{"title":"T","category":"operational","treatment":"accept","acceptance_status":"proposed","justification":"j"}`,
+		"past expiry":      `{"title":"T","category":"operational","treatment":"accept","acceptance_status":"proposed","justification":"j","proposed_until":"` + yesterday + `"}`,
+	} {
+		_, err := store.Create(ctx, writeproposals.CreateInput{
+			ToolName:       writeproposals.ToolCreateRisk,
+			ToolInput:      json.RawMessage(input),
+			AIModelName:    "llama3.1:8b-instruct-q5",
+			AIModelVersion: "2026-05-01",
+			CreatedBy:      "jwt:" + uuid.NewString(),
+		})
+		if !errors.Is(err, writeproposals.ErrInvalidInput) {
+			t.Errorf("file create_risk, %s: want ErrInvalidInput, got %v", name, err)
+		}
+	}
+
 	applied, err := confirmAs(writeproposals.ToolCreateRisk,
-		`{"title":"Proposed at create","category":"operational","treatment":"accept","acceptance_status":"proposed"}`, people[0])
+		`{"title":"Proposed at create","category":"operational","treatment":"accept","acceptance_status":"proposed",`+
+			`"justification":"Compensated by the edge filter.","proposed_until":"2099-06-30"}`, people[0])
 	if err != nil {
 		t.Fatalf("create_risk with a proposed acceptance: %v", err)
 	}
 	riskID := *applied.AppliedSubject
-	var proposedBy string
+	var proposedBy, justification, proposedUntil string
 	if err := admin.QueryRow(context.Background(),
-		`SELECT acceptance_proposed_by FROM risks WHERE id = $1`, riskID).Scan(&proposedBy); err != nil {
+		`SELECT acceptance_proposed_by, acceptance_justification, acceptance_proposed_until::text FROM risks WHERE id = $1`,
+		riskID).Scan(&proposedBy, &justification, &proposedUntil); err != nil {
 		t.Fatalf("read proposer: %v", err)
 	}
 	if proposedBy != people[0].String() {
 		t.Fatalf("acceptance_proposed_by = %q; want the confirming person %s", proposedBy, people[0])
+	}
+	if justification != "Compensated by the edge filter." || proposedUntil != "2099-06-30" {
+		t.Fatalf("acceptance terms = %q, %q; want the proposal's", justification, proposedUntil)
 	}
 
 	approve := `{"risk_id":"` + riskID + `","treatment":"accept","acceptance_status":"approved","accepted_until":"2099-06-30"}`

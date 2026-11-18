@@ -323,6 +323,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 	store := risk.NewStore(app)
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
+	until := time.Now().UTC().AddDate(0, 3, 0)
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:            "Pending acceptance",
 		CategoryRef:      "operational",
@@ -330,6 +331,8 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
 		Proposer:         "creator",
+		Justification:    "Compensated by the edge filter.",
+		ProposedUntil:    until,
 	})
 	if err != nil {
 		t.Fatalf("Create proposed accept: %v", err)
@@ -345,18 +348,31 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 	if got.Acceptance.ProposedBy != "creator" || got.Acceptance.ProposedAt == nil {
 		t.Fatalf("acceptance = %+v; want proposed by the creator, with a time", got.Acceptance)
 	}
+	// #2391: the proposal's terms are recorded as the propose transition
+	// records them.
+	if got.Acceptance.Justification != "Compensated by the edge filter." ||
+		got.Acceptance.ProposedUntil == nil ||
+		got.Acceptance.ProposedUntil.Format(time.DateOnly) != until.Format(time.DateOnly) {
+		t.Fatalf("acceptance = %+v; want the justification and proposed expiry", got.Acceptance)
+	}
 
-	// A proposed acceptance with no proposer is refused: nobody could be
-	// shown to differ from it at approval.
-	_, err = store.Create(ctx, risk.CreateInput{
-		Title:            "Pending, no proposer",
-		CategoryRef:      "operational",
-		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
-		Treatment:        dbx.RiskTreatmentAccept,
-		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
-	})
-	if !risk.IsTransitionInput(err) {
-		t.Fatalf("want transition input error for a proposal with no proposer; got %v", err)
+	// A proposed acceptance with no proposer, justification or future
+	// proposed expiry is refused, as the propose transition refuses it
+	// (#2371, #2391).
+	for name, in := range map[string]risk.CreateInput{
+		"no proposer":      {Justification: "j", ProposedUntil: until},
+		"no justification": {Proposer: "creator", ProposedUntil: until},
+		"no expiry":        {Proposer: "creator", Justification: "j"},
+		"past expiry":      {Proposer: "creator", Justification: "j", ProposedUntil: time.Now().UTC().AddDate(0, 0, -1)},
+	} {
+		in.Title = "Pending, " + name
+		in.CategoryRef = "operational"
+		in.InherentScore = []byte(`{"likelihood":2,"impact":2}`)
+		in.Treatment = dbx.RiskTreatmentAccept
+		in.AcceptanceStatus = dbx.RiskAcceptanceStatusProposed
+		if _, err := store.Create(ctx, in); !risk.IsTransitionInput(err) {
+			t.Errorf("%s: want transition input error; got %v", name, err)
+		}
 	}
 
 	// Approved without accepter / expiry: the domain layer rejects it.
@@ -481,6 +497,8 @@ func TestList_Filters(t *testing.T) {
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
 		Proposer:         "creator",
+		Justification:    "Low exposure.",
+		ProposedUntil:    time.Now().UTC().AddDate(0, 3, 0),
 	}); err != nil {
 		t.Fatalf("A: %v", err)
 	}
