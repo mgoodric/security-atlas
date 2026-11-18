@@ -461,20 +461,25 @@ func (h *Handler) unlinkHandler(w http.ResponseWriter, r *http.Request, param st
 // PlansForRisk handles GET /v1/risks/{id}/action-plans (AC-25 read-only
 // "Linked Action Plans" section). Returns the live plans linked to a risk.
 func (h *Handler) PlansForRisk(w http.ResponseWriter, r *http.Request) {
-	h.plansForTarget(w, r, func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	h.plansForTarget(w, r, ok && authz.IsTenantRiskReader(cred), func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
 		return h.store.PlansForRisk(ctx, target)
 	})
 }
 
 // PlansForControl handles GET /v1/controls/{id}/action-plans (AC-26).
 func (h *Handler) PlansForControl(w http.ResponseWriter, r *http.Request) {
-	h.plansForTarget(w, r, func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	h.plansForTarget(w, r, ok && authz.HasAnyTenantRole(cred), func(ctx context.Context, target uuid.UUID) ([]actionplan.PlanRef, error) {
 		return h.store.PlansForControl(ctx, target)
 	})
 }
 
-func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, fn func(context.Context, uuid.UUID) ([]actionplan.PlanRef, error)) {
-	if !requireProgramRead(w, r) {
+// plansForTarget serves a target's linked plans. canRead is the target's own
+// read gate: the plans list is a section of the risk or control page, so it
+// admits whoever reads that page (#2507).
+func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, canRead bool, fn func(context.Context, uuid.UUID) ([]actionplan.PlanRef, error)) {
+	if !admit(w, canRead, "role does not grant read access to this record") {
 		return
 	}
 	ctx, _, ok := h.tenantCtx(r)

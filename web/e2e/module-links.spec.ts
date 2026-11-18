@@ -4,11 +4,13 @@
 // so a browser route-mock cannot reach them).
 //
 // On a control linked to a policy, an admin sees the linked-policies
-// section and the Policies tab. A member without Policies access sees
-// neither: no section, no tab, no count.
+// section. A member without Policies access does not: no section, no
+// count. #2140 moved the link sections into the control page's Linked
+// section and added exceptions there: a member without the Risk and
+// Exceptions modules sees no action plans part and no exceptions part.
 //
-// The tenant, control, policy and member are the spec's own
-// (fixtures/e2e/module-links.sql); the member's access is reset each run.
+// The tenant, control, policy and members are the spec's own
+// (fixtures/e2e/module-links.sql); the members' access is reset each run.
 
 import type { Page } from "@playwright/test";
 
@@ -16,14 +18,17 @@ import { expect, test } from "./fixtures";
 import { seedFromFixture } from "./seed";
 
 const TENANT = "00000000-0000-0000-0000-000000002174";
+// Every optional module except Policies.
 const MEMBER = "44444444-4444-4444-4444-444444442174";
+// Every optional module except Risk and Exceptions (#2140).
+const MEMBER_B = "44444444-4444-4444-4444-444444442140";
 const CONTROL = "88888888-8888-8888-8888-888888882174";
 
 function atlasBaseURL(): string {
   return process.env.ATLAS_HTTP_URL ?? "http://localhost:8080";
 }
 
-async function mintJWT(member: boolean): Promise<string> {
+async function mintJWT(member?: string): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const res = await fetch(url, {
     method: "POST",
@@ -32,7 +37,7 @@ async function mintJWT(member: boolean): Promise<string> {
       member
         ? {
             tenant_id: TENANT,
-            user_id: MEMBER,
+            user_id: member,
             roles: ["grc_engineer"],
             super_admin: false,
           }
@@ -72,35 +77,58 @@ test.describe("#2174 — link sections follow module access", () => {
     seedFromFixture("module-links");
   });
 
-  test("an admin sees the control's linked policies", async ({ page }) => {
-    await signInAs(page, await mintJWT(false));
+  test("an admin sees the control's linked policies, plans and exceptions", async ({
+    page,
+  }) => {
+    await signInAs(page, await mintJWT());
     await page.goto(`/controls/${CONTROL}`);
 
     const section = page.getByTestId("policies-section");
-    await expect(section).toBeVisible();
+    await expect(section).toBeVisible({ timeout: 30_000 });
     await expect(section).toContainText("E2E 2174 linked policy");
-    await expect(page.getByTestId("control-tab-policies")).toBeVisible();
+    await expect(page.getByTestId("linked-action-plans")).toBeVisible();
+    await expect(page.getByTestId("exceptions-section")).toBeVisible();
   });
 
   test("a member without Policies access sees no linked-policies section", async ({
     page,
   }) => {
-    await signInAs(page, await mintJWT(true));
+    await signInAs(page, await mintJWT(MEMBER));
     await page.goto(`/controls/${CONTROL}`);
 
     // The page itself renders (Controls is core), and so does a link
     // section into a module the member can see (Risk).
-    await expect(page.getByTestId("control-tabs")).toBeVisible();
+    await expect(page.getByTestId("control-tabs")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("risks-section")).toBeVisible();
-    await expect(page.getByTestId("control-tab-risks")).toBeVisible();
 
     await expect(page.getByTestId("policies-section")).toHaveCount(0);
-    await expect(page.getByTestId("control-tab-policies")).toHaveCount(0);
     await expect(page.getByText("E2E 2174 linked policy")).toHaveCount(0);
 
-    // A direct ?tab=policies falls back to the overview.
+    // A retired ?tab=policies lands on the overview, still without it.
     await page.goto(`/controls/${CONTROL}?tab=policies`);
-    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible();
+    await expect(page.getByTestId("control-tab-panel-overview")).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(page.getByTestId("policies-section")).toHaveCount(0);
+  });
+
+  test("a member without the Risk and Exceptions modules sees no plans or exceptions (#2140)", async ({
+    page,
+  }) => {
+    await signInAs(page, await mintJWT(MEMBER_B));
+    await page.goto(`/controls/${CONTROL}`);
+
+    const linked = page.locator(
+      '[data-testid="control-detail-section"][data-section="linked"]',
+    );
+    await expect(linked).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("policies-section")).toBeVisible();
+
+    await expect(page.getByTestId("exceptions-section")).toHaveCount(0);
+    await expect(page.getByTestId("linked-action-plans")).toHaveCount(0);
+    await expect(page.getByTestId("risks-section")).toHaveCount(0);
+    await expect(page.getByTestId("control-strip-action-plan")).toHaveCount(0);
   });
 });

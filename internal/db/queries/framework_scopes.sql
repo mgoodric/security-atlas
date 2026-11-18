@@ -70,6 +70,9 @@ WHERE tenant_id = $1
 -- supplied timestamp. The row whose effective_from <= as_of AND (the row was
 -- not yet superseded at as_of OR was never superseded).
 -- ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
+-- A backdated effective_from counts here, for planning. A read pinned to a
+-- frozen audit period also requires activated_at <= frozen_at (#2078; see
+-- ListExcludedRequirementsAsOfForExport).
 SELECT *
 FROM framework_scopes
 WHERE tenant_id = $1
@@ -130,7 +133,8 @@ RETURNING *;
 -- (timestamptz). The application supersedes the prior `activated` row in
 -- the same transaction by calling SupersedePreviousActivated below; both
 -- statements run inside one tx so the partial unique index never sees
--- two `activated` rows at once.
+-- two `activated` rows at once. activated_at is stamped by the
+-- framework_scopes_stamp_activated_at trigger (#2078).
 UPDATE framework_scopes
 SET state = 'activated',
     effective_from = $3,
@@ -152,6 +156,24 @@ WHERE tenant_id = $1
   AND framework_version_id = $2
   AND id <> $3
   AND state = 'activated';
+
+-- name: LockFrameworkScopeFreeze :exec
+-- Serialises framework-scope activation against audit-period freeze on one
+-- (tenant, framework version) for the rest of the transaction (#2078).
+-- Activate takes it before reading the latest freeze; Freeze takes it
+-- before writing frozen_at. Namespace 10 is
+-- advisorylock.FrameworkScopeFreeze.
+SELECT pg_advisory_xact_lock(10, hashtext(sqlc.arg(tenant_id)::uuid::text || '/' || sqlc.arg(framework_version_id)::uuid::text));
+
+-- name: GetLatestFrozenAtForFrameworkVersion :one
+-- The latest frozen_at of the tenant's frozen audit periods on a framework
+-- version, or NULL when none is frozen. Activate refuses an effective_from
+-- at or before it (#2078).
+SELECT max(frozen_at)::timestamptz AS frozen_at
+FROM audit_periods
+WHERE tenant_id = $1
+  AND framework_version_id = $2
+  AND status = 'frozen';
 
 -- name: DeleteFrameworkScope :exec
 -- Used by tests + cleanup paths. Production deployments will rarely delete

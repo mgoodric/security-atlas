@@ -3438,7 +3438,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/exceptions:
     get:
-      summary: GET /v1/exceptions
+      summary: GET /v1/exceptions — the tenant's exceptions, filterable by ?status= and ?control_id= (#2140)
       tags: [exceptions]
       operationId: get-v1-exceptions
       security:

@@ -30,8 +30,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidencesummary"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -104,10 +106,11 @@ type portfolioSetWire struct {
 // plus a fixed suppression reason so the frontend can show the rollup alone
 // (AC-7).
 func (h *PortfolioHandler) PortfolioEvidenceSummary(w http.ResponseWriter, r *http.Request) {
-	// Dashboard surface: the program/control-read role set guards it (no new
-	// role) — reuse the same defense-in-depth guard the single-control surface
-	// uses (admin/approver/owner).
-	if !requireControlRead(w, r) {
+	// Dashboard surface. OPA reads `evidence-summary` for admin and
+	// grc_engineer only, so the defense-in-depth guard is the approver set,
+	// narrower than the single-control surface's any-role guard (#2507).
+	if cred, ok := authctx.CredentialFromContext(r.Context()); !ok || !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "role does not grant evidence-summary read access")
 		return
 	}
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {

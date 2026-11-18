@@ -95,6 +95,11 @@
           "code": "CC6.1",
           "coverage": null,
           "edge_id": "44444444-4444-4444-8444-444444444444",
+          "exclusion": {
+            "decided_at": "2026-10-01T00:00:00Z",
+            "framework_scope_id": "66666666-6666-4666-8666-666666666666",
+            "justification": "No in-house software development"
+          },
           "framework_name": "SOC 2",
           "framework_slug": "soc2",
           "framework_version": "2017",

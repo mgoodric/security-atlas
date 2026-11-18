@@ -79,6 +79,33 @@ func IsTenantRiskReader(cred credstore.Credential) bool {
 	return IsTenantApprover(cred) || containsLabel(TenantRoleLabels(cred), string(RoleViewer))
 }
 
+// HasAnyTenantRole reports whether cred holds any canonical role in its
+// tenant (#2507): a tenant approver (IsTenantApprover, which covers the admin
+// and approver flags), or any canonical role among TenantRoleLabels: a live
+// user_roles row, or, for a credential naming no user, its own label. A label
+// outside the five roles does not count, by decision (Matt, 2026-11-17):
+// a free-text label grants nothing at the handler. OPA is wider here today:
+// derivedRolesFor turns a free-text label into control_owner, on an unbound
+// key, a machine token or a legacy credential and on a key bound to a user,
+// so OPA admits those to the control, evidence and activity reads that this
+// gate refuses (TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses;
+// the policy-layer half is #2596).
+//
+// It replaces the `IsAdmin || IsApprover || len(OwnerRoles) > 0` read gate,
+// which counted a session's role claim (#2381) and admitted any label. Use a
+// narrower helper (IsTenantRiskReader) where OPA admits fewer roles.
+func HasAnyTenantRole(cred credstore.Credential) bool {
+	if IsTenantApprover(cred) {
+		return true
+	}
+	for _, l := range TenantRoleLabels(cred) {
+		if isCanonicalRole(l) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsTenantControlOwner reports whether cred holds the live tenant
 // control_owner role, or, for an unbound API key, the control_owner
 // owner_roles label. As in IsTenantAdmin, neither a JWT role claim nor a
