@@ -201,3 +201,42 @@ func TestCatalogRemap_DecidedProposalSurfacesConflict(t *testing.T) {
 		t.Fatalf("err = %v; want the API's 409", err)
 	}
 }
+
+func TestCatalogRemapHeldBack_ListsShippedUpdates(t *testing.T) {
+	resetControlsAuth(t)
+	api := &remapAPI{status: http.StatusOK, response: map[string]any{
+		"controls": []control.HeldBackStockControl{{
+			BundleID: "soc2_cc8_1_change_management", ActiveVersion: 3, ApprovedVersion: 2,
+			ApprovedSCFID: "CHG-21", ApprovedRelease: "2025.2", ShippedUpdate: true,
+			ShippedManifestHash: "0123456789abcdef0123", FirstHeldAt: "2026-11-17T10:00:00Z",
+		}},
+	}}
+	srv := api.server(t)
+	out, err := runImportCmd(t, "--endpoint", srv.URL, "--token", "tok-1", "catalog", "remap", "held-back")
+	if err != nil {
+		t.Fatalf("held-back: %v\n%s", err, out)
+	}
+	if api.gotMethod != http.MethodGet || api.gotPath != "/v1/admin/controls/held-back" || api.gotAuth != "Bearer tok-1" {
+		t.Errorf("request %s %s auth=%q", api.gotMethod, api.gotPath, api.gotAuth)
+	}
+	want := "soc2_cc8_1_change_management  v3  approved v2 on CHG-21@2025.2  shipped update 0123456789ab  held since 2026-11-17T10:00:00Z"
+	if !strings.Contains(out, want) {
+		t.Errorf("output %q; want it to contain %q", out, want)
+	}
+}
+
+func TestCatalogRemapHeldBack_EmptyAndForbidden(t *testing.T) {
+	resetControlsAuth(t)
+	api := &remapAPI{status: http.StatusOK, response: map[string]any{"controls": []any{}}}
+	srv := api.server(t)
+	out, err := runImportCmd(t, "--endpoint", srv.URL, "--token", "tok-1", "catalog", "remap", "held-back")
+	if err != nil || !strings.Contains(out, "no held-back stock controls") {
+		t.Fatalf("empty list: err=%v out=%q", err, out)
+	}
+	denied := &remapAPI{status: http.StatusForbidden, response: map[string]string{"error": "tenant-admin role required"}}
+	srv = denied.server(t)
+	if _, err := runImportCmd(t, "--endpoint", srv.URL, "--token", "tok-1", "catalog", "remap", "held-back"); err == nil ||
+		!strings.Contains(err.Error(), "tenant-admin role required") {
+		t.Fatalf("403: err=%v; want the API's refusal", err)
+	}
+}
