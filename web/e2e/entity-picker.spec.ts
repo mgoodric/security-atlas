@@ -11,6 +11,9 @@
 //     multi-select, capped at 50; a refused list reads "not available".
 //     The new-risk form's control picker is covered by
 //     risks-create-control-link.spec.ts.
+//   - #2432: the multi-select passes axe with its list open. The
+//     evidence kind (the questionnaire cite field, its 403 path and its
+//     raw-value scan) is covered by questionnaires.spec.ts.
 //
 // Mocked with `route.fulfill` (the questionnaires.spec.ts convention): the
 // assertions are on the request each form sends, which must carry the
@@ -316,6 +319,41 @@ test("New action plan links risks and controls through the shared picker", async
     `/api/action-plans/${PLAN_ID}/risks/${RISK_VENDOR}`,
     `/api/action-plans/${PLAN_ID}/controls/${CONTROL_MFA}`,
   ]);
+});
+
+test("the multi-picker has no serious axe findings with its list open (#2432)", async ({
+  authedPage: page,
+}) => {
+  await mockRisksAndControls(page, {
+    status: 200,
+    body: {
+      risks: [
+        riskRow(RISK_ACCESS, "Stale access reviews"),
+        riskRow(RISK_VENDOR, "Unvetted vendor"),
+      ],
+    },
+  });
+  await page.goto("/action-plans/new");
+
+  // Open: the list rendered, narrowed by a search, one row checked.
+  await page.getByTestId("action-plan-risks-search").fill("vendor");
+  await page.getByTestId(`action-plan-risks-checkbox-${RISK_VENDOR}`).check();
+  await expect(page.getByTestId("action-plan-risks-list")).toBeVisible();
+  await expect(page.getByTestId("action-plan-controls-list")).toBeVisible();
+
+  const open = await new AxeBuilder({ page })
+    .include('[data-testid="action-plan-risks"]')
+    .include('[data-testid="action-plan-controls"]')
+    .analyze();
+  expect(
+    open.violations.filter(
+      (v) => v.impact === "serious" || v.impact === "critical",
+    ),
+  ).toEqual([]);
+  expectNoSeriousAxe(
+    await seriousAxeViolations(page),
+    "entity multi-picker open",
+  );
 });
 
 test("the risk picker stops at 50 links, as the server does", async ({

@@ -9,7 +9,7 @@
 //   - Suggestions panel (deterministic, AI-clean)
 //   - Quick yes/no/n.a. answer-value chips
 //   - Narrative textarea with 500ms debounced autosave (PATCH)
-//   - Citation chips + + Cite picker (slice 268 unified search)
+//   - Citation chips + the cite picker (the shared entity picker, #2432)
 //   - Save-to-library checkbox (default OFF; AC-18)
 //   - Inline retry banner above textarea on PATCH error (AC-11)
 
@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { AISuggestPanel } from "./ai-suggest-panel";
-import { CitationChips, CitationPicker } from "./citation-picker";
+import { CitationChips, CitationPicker } from "./citations";
 import { MappingSuggestPanel } from "./mapping-suggest-panel";
 import { SuggestionsPanel } from "./suggestions-panel";
 import type { Citation, Question } from "./types";
@@ -301,19 +301,20 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
 
         {/* citations */}
         <div>
-          <div className="flex items-center justify-between mb-1">
+          <div className="mb-1">
             <span className="text-[11px] uppercase tracking-wider font-medium text-muted-foreground">
               Citations
             </span>
-            <CitationPicker
-              onPick={(c) => {
-                if (citations.some((x) => x.id === c.id && x.type === c.type))
-                  return;
-                markDirty();
-                setCitations([...citations, c]);
-              }}
-            />
           </div>
+          <CitationPicker
+            id={`citation-picker-${question.id}`}
+            onPick={(c) => {
+              if (citations.some((x) => x.id === c.id && x.type === c.type))
+                return;
+              markDirty();
+              setCitations([...citations, c]);
+            }}
+          />
           <CitationChips
             citations={citations}
             onRemove={(c) => {
