@@ -1888,15 +1888,6 @@ jobs:
       - name: Run Playwright tests
         working-directory: web
         run: npx playwright test
-      # TEMPORARY (#2356 proof, removed before merge): repeat the ⌘K specs.
-      - name: "TEMP #2356 — ⌘K specs --repeat-each=20 --retries=0"
-        working-directory: web
-        run: |
-          npx playwright test --repeat-each=20 --retries=0 \
-            -g "keyboard shortcut focuses|⌘K opens|arrow-keys" \
-            controls-top-bar.spec.ts risks-top-bar.spec.ts \
-            control-detail-top-bar.spec.ts evidence-header.spec.ts \
-            global-search.spec.ts
       # #2080 — the route sweep's axe findings (serious + critical) are
       # REPORTED, not enforced: one JSON per route, uploaded on every run
       # whether or not the suite passed.
