@@ -2,143 +2,283 @@
 
 // Slice 448 — selection bar + saved filter-views bar for the /controls
 // list. Presentational + interaction wiring only; all the set/persist
-// math lives in the pure `selection.ts` + `saved-views.ts` modules
-// (node-env vitest-covered). This `.tsx` is covered by the Playwright
-// tier per `web/testing.md` (no vitest JSX — slice 069 P0-A3).
+// math lives in the pure `selection.ts`, `saved-views.ts` and
+// `bulk-actions.ts` modules (node-env vitest-covered). This `.tsx` is
+// covered by the Playwright tier per `web/testing.md` (no vitest JSX —
+// slice 069 P0-A3).
 //
-// Two stacked bars:
 //   1. SelectionBar — visible only when at least one row is selected.
-//      Shows the live count, the cap state (AC-3), a "Clear" action, and
-//      the WORKING bulk-assign-owner trigger (slice 468 replaced slice
-//      448's future-state disclosure with a real action: the server-backed
-//      bulk-assign endpoint now exists). v1 assigns the selected set to the
-//      CURRENT USER ("Assign to me") — the dominant triage use case the
-//      slice-448 narrative names ("assign all these 12 unowned controls to
-//      me"); a richer assign-to-any-user picker is a documented follow-on
-//      (decisions log 468 D4). The upstream re-checks per item (AC-11).
-//   2. SavedViewsBar — always visible. A native <select> (matching the
+//      Shows the live count, the bulk actions the caller may take (#2141:
+//      assign owner to anyone by picker, evaluate now, link to an action
+//      plan, request exception) and a "Clear" action. Which actions show
+//      is decided by `bulkActionGates` from the live /v1/me and the
+//      caller's modules; the platform re-checks every write. The cap is
+//      mentioned only when the selection exceeds it, and then every
+//      action is disabled.
+//   2. BulkResultMessage — the last bulk action's outcome, rendered
+//      outside the selection bar so it survives the selection-clear
+//      (slice 745). A per-control action lists each refusal with its
+//      reason.
+//   3. ExportMenu (#2141) — the six export links, folded into one menu.
+//      Each keeps its URL, params and testid.
+//   4. SavedViewsBar — always visible. A native <select> (matching the
 //      slice-098 FilterPills idiom) to load a saved view, a "Save
 //      current filters" button opening a small inline name form, and a
 //      delete control for the loaded view. Per-user; slice 468 moved the
 //      persistence from client localStorage to the server-backed
 //      (tenant, user)-scoped store (the SavedViewStore seam swap).
 
+import { Menu } from "@base-ui/react/menu";
+import Link from "next/link";
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { EntityPicker } from "@/components/ui/entity-picker";
 import { Input } from "@/components/ui/input";
+import type { ActionPlan } from "@/lib/api/action-plans";
 
+import {
+  exceptionRequestHref,
+  type BulkActionGates,
+  type BulkMessage,
+} from "./bulk-actions";
 import { SELECTION_CAP } from "./selection";
 import { MAX_VIEW_NAME_LENGTH, type SavedView } from "./saved-views";
 
 export type SelectionBarProps = {
-  selectedCount: number;
+  selectedIds: readonly string[];
   overCap: boolean;
+  gates: BulkActionGates;
   onClear: () => void;
-  /** Assign the selected controls to the current user. */
-  onAssignToMe: () => void;
-  /** True while a bulk-assign request is in flight (disables the trigger). */
-  assigning: boolean;
+  onAssignOwner: (ownerUserId: string) => void;
+  onEvaluate: () => void;
+  /** The plans offered by the link picker; undefined while loading. */
+  plans: ActionPlan[] | undefined;
+  /** Asked for when the link picker opens, so plans load on demand. */
+  onWantPlans: () => void;
+  onLinkPlan: (planId: string) => void;
+  /** The action in flight, if any; every action is disabled meanwhile. */
+  busy: "assign" | "evaluate" | "link" | null;
 };
 
+type Panel = "none" | "assign" | "link";
+
 /**
- * Selection summary + WORKING bulk-action trigger. Rendered by the page
- * only when `selectedCount > 0`.
- *
- * Slice 745 — the bulk-assign success/error confirmation is NO LONGER
- * rendered here. The success handler clears the selection
- * (`setSelected(new Set())`) in the same batched update that sets the
- * message, which unmounted this bar (gated on `selected.size > 0`) in the
- * same render the message was set — the operator never saw the
- * confirmation (slice 743's quarantined message sub-assertion). The
- * confirmation now lives in a persistent `BulkAssignMessage` region the
- * page renders above the table, independent of `selected.size`, so it
- * survives the selection-clear. See
- * `docs/audit-log/745-bulk-assign-message-region-decisions.md`.
+ * Selection summary + the bulk actions. Rendered by the page only when at
+ * least one control is selected.
  */
 export function SelectionBar({
-  selectedCount,
+  selectedIds,
   overCap,
+  gates,
   onClear,
-  onAssignToMe,
-  assigning,
+  onAssignOwner,
+  onEvaluate,
+  plans,
+  onWantPlans,
+  onLinkPlan,
+  busy,
 }: SelectionBarProps) {
+  const [panel, setPanel] = useState<Panel>("none");
+  const [owner, setOwner] = useState("");
+  const [planId, setPlanId] = useState("");
+  const disabled = overCap || busy !== null;
+  const count = selectedIds.length;
+
   return (
     <div
       data-testid="controls-selection-bar"
       role="region"
       aria-label="Bulk actions for selected controls"
-      className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm"
+      className="mb-3 space-y-2 rounded-lg border bg-card px-3 py-2 text-sm"
     >
-      <span data-testid="controls-selection-count" className="font-medium">
-        {selectedCount} selected
-      </span>
-      <span className="text-xs text-muted-foreground">
-        (cap {SELECTION_CAP} per bulk action)
-      </span>
+      <div className="flex flex-wrap items-center gap-3">
+        <span data-testid="controls-selection-count" className="font-medium">
+          {count} selected
+        </span>
+        {gates.assignOwner ? (
+          <Button
+            type="button"
+            size="sm"
+            variant={panel === "assign" ? "default" : "outline"}
+            data-testid="controls-bulk-assign-owner"
+            aria-expanded={panel === "assign"}
+            disabled={disabled}
+            onClick={() => setPanel(panel === "assign" ? "none" : "assign")}
+          >
+            {busy === "assign" ? "Assigning…" : "Assign owner"}
+          </Button>
+        ) : null}
+        {gates.evaluate ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="controls-bulk-evaluate"
+            disabled={disabled}
+            onClick={onEvaluate}
+          >
+            {busy === "evaluate" ? "Evaluating…" : "Evaluate now"}
+          </Button>
+        ) : null}
+        {gates.linkPlan ? (
+          <Button
+            type="button"
+            size="sm"
+            variant={panel === "link" ? "default" : "outline"}
+            data-testid="controls-bulk-link-plan"
+            aria-expanded={panel === "link"}
+            disabled={disabled}
+            onClick={() => {
+              if (panel !== "link") onWantPlans();
+              setPanel(panel === "link" ? "none" : "link");
+            }}
+          >
+            {busy === "link" ? "Linking…" : "Link to action plan"}
+          </Button>
+        ) : null}
+        {gates.requestException ? (
+          overCap ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid="controls-bulk-request-exception"
+              disabled
+            >
+              Request exception
+            </Button>
+          ) : (
+            <Link
+              href={exceptionRequestHref(selectedIds)}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              data-testid="controls-bulk-request-exception"
+            >
+              Request exception
+            </Link>
+          )
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onClear}
+          data-testid="controls-selection-clear"
+          className="ml-auto"
+        >
+          Clear selection
+        </Button>
+      </div>
       {overCap ? (
-        <span
+        <p
           data-testid="controls-selection-overcap"
           role="alert"
           className="text-xs font-medium text-destructive"
         >
-          Selection exceeds the {SELECTION_CAP}-control cap — narrow your
-          filters or deselect before applying a bulk action.
-        </span>
+          A bulk action takes at most {SELECTION_CAP} controls. Narrow your
+          filters or deselect some before applying one.
+        </p>
       ) : null}
-      {/* Bulk assign-owner — WORKING trigger (slice 468). Assigns the
-          selected set to the current user. Disabled while a request is in
-          flight or the selection is over the cap. */}
-      <Button
-        type="button"
-        size="sm"
-        data-testid="controls-bulk-assign-owner"
-        disabled={assigning || overCap}
-        title={
-          overCap
-            ? "Narrow the selection below the cap before assigning"
-            : "Assign the selected controls to you (bulk assign-owner)"
-        }
-        onClick={onAssignToMe}
-      >
-        {assigning ? "Assigning…" : "Bulk assign-owner to me"}
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={onClear}
-        data-testid="controls-selection-clear"
-        className="ml-auto"
-      >
-        Clear selection
-      </Button>
+      {panel === "assign" && gates.assignOwner ? (
+        <div
+          className="flex flex-wrap items-end gap-2"
+          data-testid="controls-bulk-assign-panel"
+        >
+          <div className="min-w-64 space-y-1">
+            <label
+              htmlFor="controls-bulk-owner"
+              className="text-xs font-medium"
+            >
+              New owner
+            </label>
+            <EntityPicker
+              kinds={["user"]}
+              id="controls-bulk-owner"
+              value={owner}
+              onChange={setOwner}
+              testId="controls-bulk-owner"
+              placeholder="Search people by name"
+            />
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            data-testid="controls-bulk-assign-confirm"
+            disabled={disabled || owner === ""}
+            onClick={() => {
+              onAssignOwner(owner);
+              setPanel("none");
+              setOwner("");
+            }}
+          >
+            Assign {count} control{count === 1 ? "" : "s"}
+          </Button>
+        </div>
+      ) : null}
+      {panel === "link" && gates.linkPlan ? (
+        <div
+          className="flex flex-wrap items-end gap-2"
+          data-testid="controls-bulk-link-panel"
+        >
+          <label className="space-y-1">
+            <span className="block text-xs font-medium">Action plan</span>
+            <select
+              aria-label="Action plan"
+              data-testid="controls-bulk-plan-select"
+              value={planId}
+              onChange={(e) => setPlanId(e.target.value)}
+              className="min-w-64 rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="">
+                {plans === undefined ? "Loading plans…" : "Choose a plan"}
+              </option>
+              {(plans ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          {plans !== undefined && plans.length === 0 ? (
+            <span className="text-xs text-muted-foreground">
+              No action plans yet.{" "}
+              <Link href="/action-plans/new" className="underline">
+                Create one
+              </Link>
+            </span>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            data-testid="controls-bulk-link-confirm"
+            disabled={disabled || planId === ""}
+            onClick={() => {
+              onLinkPlan(planId);
+              setPanel("none");
+              setPlanId("");
+            }}
+          >
+            Link {count} control{count === 1 ? "" : "s"}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-export type BulkAssignMessageProps = {
-  /** The last bulk-assign result message, or null when there is none. */
-  message: { kind: "ok" | "error"; text: string } | null;
+export type BulkResultMessageProps = {
+  /** The last bulk action's outcome, or null when there is none. */
+  message: BulkMessage | null;
 };
 
 /**
- * Slice 745 — bulk-assign success/error confirmation, rendered by the page
- * ABOVE the table and INDEPENDENT of `selected.size`. This is the fix for
- * the structurally-unobservable confirmation: because this region is not
- * gated on the selection, it survives the `setSelected(new Set())` clear
- * that runs in the same batched update as the success message set, so the
- * operator actually sees "Assigned N controls to you." after a successful
- * bulk-assign. Carries the `controls-bulk-assign-message` testid (moved off
- * the now-removed inline span in the selection bar) so slice 743's
- * quarantined e2e sub-assertion turns back on.
- *
- * `role="status"` + `aria-live="polite"` keeps the announcement
- * non-interruptive for screen-reader users (an assistive-tech read of a
- * background confirmation, not an alert). Auto-dismiss timing is owned by
- * the page (it nulls the message after a delay / on the next action).
+ * Slice 745 — the bulk result, rendered by the page ABOVE the table and
+ * INDEPENDENT of the selection, so it survives the selection-clear that
+ * runs in the same batched update as the message set. #2141: a
+ * per-control action lists each refused control with the platform's
+ * reason. `role="status"` keeps the announcement non-interruptive.
  */
-export function BulkAssignMessage({ message }: BulkAssignMessageProps) {
+export function BulkResultMessage({ message }: BulkResultMessageProps) {
   if (!message) return null;
   return (
     <div
@@ -151,8 +291,68 @@ export function BulkAssignMessage({ message }: BulkAssignMessageProps) {
           : "mb-3 rounded-lg border bg-card px-3 py-2 text-sm font-medium text-muted-foreground"
       }
     >
-      {message.text}
+      <p data-testid="controls-bulk-result-summary">{message.text}</p>
+      {message.refusals && message.refusals.length > 0 ? (
+        <ul
+          className="mt-1 list-disc pl-5 text-xs font-normal"
+          data-testid="controls-bulk-refusals"
+        >
+          {message.refusals.map((r, i) => (
+            <li key={i} data-testid="controls-bulk-refusal">
+              {r.label}: {r.reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
+  );
+}
+
+export type ExportLink = {
+  href: string;
+  label: string;
+  testId: string;
+};
+
+/**
+ * #2141 — every controls export in one menu. The links keep the URL,
+ * params and testid each had as a header button; each is an
+ * `<a download>` so the browser honours the backend's filename.
+ */
+export function ExportMenu({ links }: { links: readonly ExportLink[] }) {
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+        data-testid="controls-export-menu"
+      >
+        Export
+        <span aria-hidden="true" className="ml-1 text-xs">
+          ▾
+        </span>
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner align="end" sideOffset={4} className="z-50">
+          <Menu.Popup
+            className="min-w-48 rounded-lg bg-popover p-1 text-left text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none"
+            data-testid="controls-export-menu-popup"
+          >
+            {links.map((l) => (
+              <Menu.LinkItem
+                key={l.testId}
+                href={l.href}
+                download
+                rel="noopener"
+                className="flex cursor-default rounded-md px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-muted"
+                data-testid={l.testId}
+              >
+                {l.label}
+              </Menu.LinkItem>
+            ))}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }
 

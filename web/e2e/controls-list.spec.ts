@@ -32,9 +32,23 @@
 //   npx playwright install chromium     # once per machine
 //   npx playwright test e2e/controls-list.spec.ts
 
+import type { Page } from "@playwright/test";
+
 import { expect, test } from "./fixtures";
 
 import { seedFromFixture } from "./seed";
+
+// #2141 — assign the selection to a person picked by name.
+async function assignTo(page: Page, name: string): Promise<void> {
+  await page.getByTestId("controls-bulk-assign-owner").click();
+  await page.getByTestId("controls-bulk-owner").fill(name);
+  await page
+    .getByTestId("controls-bulk-owner-option")
+    .filter({ has: page.getByText(name, { exact: true }) })
+    .first()
+    .click();
+  await page.getByTestId("controls-bulk-assign-confirm").click();
+}
 
 test.describe("/controls list view", () => {
   test.beforeAll(() => {
@@ -366,36 +380,21 @@ test.describe("/controls list view", () => {
     await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
-  // Slice 468 — the bulk-assign action is now a WORKING trigger (the
-  // slice-448 future-state disclosure was replaced once the server-backed
-  // endpoint landed). Assigning the selected set to the current user round-
-  // trips to `/v1/controls:bulk-assign-owner` (the upstream re-checks role +
-  // tenant PER ITEM — AC-11). The seeded demo user is the assign target.
+  // Slice 468 / #2141 — bulk assign owner round-trips to
+  // `/v1/controls:bulk-assign-owner` (the upstream re-checks role + tenant
+  // PER ITEM — AC-11). #2141 replaced "assign to me" with a people picker;
+  // the bulk tests against a tenant of their own are in
+  // controls-bulk-2141.spec.ts. Here the demo user picks themselves, which
+  // is the round-trip #2128 reads back below.
   //
-  // The test drives the REAL round-trip end-to-end (the seed mirrors each
-  // anchor id into a tenant `controls` row of the same id, so the upstream
-  // per-item ControlExistsInTenant check resolves and the POST returns 200
-  // `{assigned:1}` — verified during slice 743). It asserts:
-  //   1. the trigger is a real <button> carrying "bulk assign-owner",
-  //   2. the success MESSAGE is observable (slice 745 — see below),
-  //   3. the selection CLEARS on success (`selected.size → 0`, which is the
-  //      page's observable success effect).
-  //
-  // RESOLVED (slice 745 — closes the slice-743 FINDING): the success MESSAGE
-  // (`controls-bulk-assign-message`) was structurally UNOBSERVABLE in the
-  // slice-468 impl: the page rendered `<SelectionBar>` (and the message
-  // lived INSIDE it) gated on `selected.size > 0`, while the bulk-assign
-  // `onSuccess` handler called `setAssignMessage(...)` AND
-  // `setSelected(new Set())` in the same batched update — so `selected.size`
-  // dropped to 0 and the SelectionBar (with the message) unmounted in the
-  // same render the message was set, and "Assigned N controls to you." was
-  // never painted. Slice 745 moved the confirmation into a persistent
-  // `BulkAssignMessage` region the page renders ABOVE the table, independent
-  // of `selected.size`, so it survives the selection-clear and is now
-  // observable. The message sub-assertion below is re-enabled (AC-3).
-  test("slice 468 AC-2: bulk-assign-owner is a working trigger that assigns the selection to me", async ({
+  // Slice 745: the success message renders in a persistent region above
+  // the table, independent of the selection, so it survives the
+  // selection-clear that runs in the same batched success update.
+  test("slice 468 AC-2: bulk assign owner assigns the selection to the picked person", async ({
     authedPage: page,
   }) => {
+    const meRes = await page.request.get("/api/me");
+    const me = ((await meRes.json()) as { display_name: string }).display_name;
     await page.goto("/controls");
     await expect(page.getByTestId("list-table-row").first()).toBeVisible();
     await page
@@ -403,19 +402,7 @@ test.describe("/controls list view", () => {
       .first()
       .click();
     await expect(page.getByTestId("controls-selection-bar")).toBeVisible();
-    const trigger = page.getByTestId("controls-bulk-assign-owner");
-    await expect(trigger).toBeVisible();
-    // It IS a real <button> now (slice 468 replaced the disclosure span).
-    const text = (await trigger.textContent())?.toLowerCase() ?? "";
-    expect(text).toContain("bulk assign-owner");
-    await trigger.click();
-    // The success message confirms the round-trip (seeded user is the
-    // owner target; the upstream re-checks per item). Slice 745 fixed the
-    // structural-unobservability finding below: the confirmation now
-    // renders in a PERSISTENT `controls-bulk-assign-message` region above
-    // the table (independent of `selected.size`), so it survives the
-    // selection-clear that runs in the same batched success update and is
-    // observable here. Re-enabled per slice 745 AC-3.
+    await assignTo(page, me);
     await expect(
       page.getByTestId("controls-bulk-assign-message"),
     ).toContainText(/assigned \d+ control/i);
@@ -423,7 +410,7 @@ test.describe("/controls list view", () => {
     await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
-  // #2128 — the assignment is read back: "assign to me" shows my name in
+  // #2128 — the assignment is read back: assigning myself shows my name in
   // the Owner column and on the control page, while the manifest
   // owner_role stays visible as the default owner role. "My name" is read
   // from /api/me: the demo user's display name depends on which fixture
@@ -441,7 +428,7 @@ test.describe("/controls list view", () => {
       .filter({ hasText: "Encryption at rest (e2e fixture control 1)" });
     await expect(row).toBeVisible();
     await row.getByRole("checkbox", { name: /^Select control / }).click();
-    await page.getByTestId("controls-bulk-assign-owner").click();
+    await assignTo(page, me);
     await expect(
       page.getByTestId("controls-bulk-assign-message"),
     ).toContainText(/assigned \d+ control/i);
@@ -454,7 +441,7 @@ test.describe("/controls list view", () => {
     );
   });
 
-  test("slice 448 AC-3: the selection cap is communicated in the selection bar", async ({
+  test("#2141: below the cap, the selection bar does not mention it", async ({
     authedPage: page,
   }) => {
     await page.goto("/controls");
@@ -463,13 +450,12 @@ test.describe("/controls list view", () => {
       .getByRole("checkbox", { name: /^Select control / })
       .first()
       .click();
-    // The cap copy is always present in the selection bar.
-    await expect(page.getByTestId("controls-selection-bar")).toContainText(
-      /cap \d+ per bulk action/,
+    await expect(page.getByTestId("controls-selection-bar")).toBeVisible();
+    await expect(page.getByTestId("controls-selection-bar")).not.toContainText(
+      /cap/i,
     );
-    // The over-cap alert is absent for a small selection. (Driving the
-    // selection over the cap requires a >200-row seeded catalog; the
-    // over-cap branch is unit-pinned in selection.test.ts — isOverCap.)
+    // The over-cap alert is absent for a small selection; the over-cap
+    // branch is driven in controls-bulk-2141.spec.ts.
     await expect(page.getByTestId("controls-selection-overcap")).toHaveCount(0);
   });
 
