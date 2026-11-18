@@ -262,6 +262,9 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 	// subject (sub claim) when present; fall back to the slice-034
 	// credential's UserID.
 	actorUserID := actorFromContext(ctx)
+	// The acting credential, recorded on every audit row even when the
+	// caller is not a user and actorUserID is uuid.Nil (#2329).
+	actorPrincipal := principalFromContext(ctx)
 
 	// Single transaction: read current row (for audit before/after); UPDATE
 	// the requested field(s); INSERT one me_audit_log row per mutator. All run
@@ -301,11 +304,12 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			beforeBlob, _ := json.Marshal(map[string]any{"name": before.Name})
 			afterBlob, _ := json.Marshal(map[string]any{"name": after.Name})
 			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-				TenantID: pgtypeUUID(id),
-				UserID:   pgtypeUUID(actorUserID),
-				Action:   auditActionTenantRename,
-				Before:   beforeBlob,
-				After:    afterBlob,
+				TenantID:       pgtypeUUID(id),
+				UserID:         pgtypeUUID(actorUserID),
+				ActorPrincipal: actorPrincipal,
+				Action:         auditActionTenantRename,
+				Before:         beforeBlob,
+				After:          afterBlob,
 			}); err != nil {
 				return fmt.Errorf("audit insert (rename): %w", err)
 			}
@@ -325,11 +329,12 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			beforeBlob, _ := json.Marshal(map[string]any{"bundle_gate_mode": beforeMode})
 			afterBlob, _ := json.Marshal(map[string]any{"bundle_gate_mode": after.BundleGateMode})
 			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-				TenantID: pgtypeUUID(id),
-				UserID:   pgtypeUUID(actorUserID),
-				Action:   auditActionTenantGatePolicy,
-				Before:   beforeBlob,
-				After:    afterBlob,
+				TenantID:       pgtypeUUID(id),
+				UserID:         pgtypeUUID(actorUserID),
+				ActorPrincipal: actorPrincipal,
+				Action:         auditActionTenantGatePolicy,
+				Before:         beforeBlob,
+				After:          afterBlob,
 			}); err != nil {
 				return fmt.Errorf("audit insert (gate policy): %w", err)
 			}
@@ -349,11 +354,12 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			beforeBlob, _ := json.Marshal(map[string]any{"risk_review_cadence_days": beforeDays})
 			afterBlob, _ := json.Marshal(map[string]any{"risk_review_cadence_days": after.RiskReviewCadenceDays})
 			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-				TenantID: pgtypeUUID(id),
-				UserID:   pgtypeUUID(actorUserID),
-				Action:   auditActionTenantRiskReviewCadence,
-				Before:   beforeBlob,
-				After:    afterBlob,
+				TenantID:       pgtypeUUID(id),
+				UserID:         pgtypeUUID(actorUserID),
+				ActorPrincipal: actorPrincipal,
+				Action:         auditActionTenantRiskReviewCadence,
+				Before:         beforeBlob,
+				After:          afterBlob,
 			}); err != nil {
 				return fmt.Errorf("audit insert (risk review cadence): %w", err)
 			}
@@ -373,11 +379,12 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			beforeBlob, _ := json.Marshal(map[string]any{"allow_self_approval": beforeAllow})
 			afterBlob, _ := json.Marshal(map[string]any{"allow_self_approval": after.AllowSelfApproval})
 			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-				TenantID: pgtypeUUID(id),
-				UserID:   pgtypeUUID(actorUserID),
-				Action:   auditActionTenantSelfApproval,
-				Before:   beforeBlob,
-				After:    afterBlob,
+				TenantID:       pgtypeUUID(id),
+				UserID:         pgtypeUUID(actorUserID),
+				ActorPrincipal: actorPrincipal,
+				Action:         auditActionTenantSelfApproval,
+				Before:         beforeBlob,
+				After:          afterBlob,
 			}); err != nil {
 				return fmt.Errorf("audit insert (allow self-approval): %w", err)
 			}
@@ -397,11 +404,12 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			beforeBlob, _ := json.Marshal(map[string]any{"vendor_initial_review_days": beforeDays})
 			afterBlob, _ := json.Marshal(map[string]any{"vendor_initial_review_days": after.VendorInitialReviewDays})
 			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-				TenantID: pgtypeUUID(id),
-				UserID:   pgtypeUUID(actorUserID),
-				Action:   auditActionTenantVendorInitialReview,
-				Before:   beforeBlob,
-				After:    afterBlob,
+				TenantID:       pgtypeUUID(id),
+				UserID:         pgtypeUUID(actorUserID),
+				ActorPrincipal: actorPrincipal,
+				Action:         auditActionTenantVendorInitialReview,
+				Before:         beforeBlob,
+				After:          afterBlob,
 			}); err != nil {
 				return fmt.Errorf("audit insert (vendor initial review window): %w", err)
 			}
@@ -620,6 +628,25 @@ func actorFromContext(ctx context.Context) uuid.UUID {
 		}
 	}
 	return uuid.Nil
+}
+
+// principalFromContext is the acting credential's principal for the audit
+// row's actor_principal (#2329): credstore.PrincipalOf of the credential, else
+// the JWT subject, else nil. An id, never a token.
+func principalFromContext(ctx context.Context) *string {
+	p := ""
+	if cred, ok := authctx.CredentialFromContext(ctx); ok {
+		p = credstore.PrincipalOf(cred)
+	}
+	if p == "" {
+		if claims := jwtmw.FromContext(ctx); claims != nil {
+			p = claims.Subject
+		}
+	}
+	if p == "" {
+		return nil
+	}
+	return &p
 }
 
 // tenantFromGetRow / tenantFromUpdateNameRow / tenantFromUpdateGateModeRow /

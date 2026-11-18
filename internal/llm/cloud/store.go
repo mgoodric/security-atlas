@@ -93,10 +93,11 @@ func (s *Store) Get(ctx context.Context) (MaskedConfig, error) {
 // cleared. Requires the tenant context (RLS scopes the write).
 //
 // The same transaction writes one me_audit_log row naming actor (uuid.Nil
-// for a caller that is not a user) with the before and after routing (#2224).
+// for a caller that is not a user) and principal, the acting credential's
+// credstore.PrincipalOf (#2329), with the before and after routing (#2224).
 // The row carries the provider and whether a key is configured, never the key
 // or its ciphertext.
-func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret, actor uuid.UUID) (MaskedConfig, error) {
+func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret, actor uuid.UUID, principal string) (MaskedConfig, error) {
 	tenantID, err := tenantUUID(ctx)
 	if err != nil {
 		return MaskedConfig{}, err
@@ -127,7 +128,7 @@ func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret, actor
 
 	var row dbx.TenantLlmRouting
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
-		before, berr := currentRouting(ctx, q, tenantID)
+		before, berr := lockedRouting(ctx, q, tenantID)
 		if berr != nil {
 			return berr
 		}
@@ -142,7 +143,7 @@ func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret, actor
 		row = r
 		after := auditRouting(maskRow(r))
 		after.APIKeyWritten = ciphertext != nil
-		return insertRoutingAudit(ctx, q, tenantID, actor, AuditActionRoutingUpdate, before, after)
+		return insertRoutingAudit(ctx, q, tenantID, actor, principal, AuditActionRoutingUpdate, before, after)
 	})
 	if err != nil {
 		return MaskedConfig{}, err
@@ -152,17 +153,17 @@ func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret, actor
 
 // Clear removes the tenant's routing config, reverting to the local-ollama
 // default. Returns true when a row was removed, false when none existed.
-// Removing a row writes one me_audit_log row naming actor in the same
-// transaction (#2224); clearing a tenant that has no row changes nothing and
-// writes none.
-func (s *Store) Clear(ctx context.Context, actor uuid.UUID) (bool, error) {
+// Removing a row writes one me_audit_log row naming actor and principal in
+// the same transaction (#2224, #2329); clearing a tenant that has no row
+// changes nothing and writes none.
+func (s *Store) Clear(ctx context.Context, actor uuid.UUID, principal string) (bool, error) {
 	tenantID, err := tenantUUID(ctx)
 	if err != nil {
 		return false, err
 	}
 	var removed int64
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
-		before, berr := currentRouting(ctx, q, tenantID)
+		before, berr := lockedRouting(ctx, q, tenantID)
 		if berr != nil {
 			return berr
 		}
@@ -175,7 +176,7 @@ func (s *Store) Clear(ctx context.Context, actor uuid.UUID) (bool, error) {
 			return nil
 		}
 		after := auditRouting(MaskedConfig{Provider: ProviderLocalOllama})
-		return insertRoutingAudit(ctx, q, tenantID, actor, AuditActionRoutingClear, before, after)
+		return insertRoutingAudit(ctx, q, tenantID, actor, principal, AuditActionRoutingClear, before, after)
 	})
 	if err != nil {
 		return false, err
@@ -277,10 +278,17 @@ func auditRouting(mc MaskedConfig) routingAudit {
 	return routingAudit{Provider: mc.Provider.String(), IsCloud: mc.IsCloud, HasAPIKey: mc.HasAPIKey}
 }
 
-// currentRouting reads the tenant's routing inside the write transaction, as
-// the before value of an audit row; no row is the local-ollama default.
-func currentRouting(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (routingAudit, error) {
-	r, err := q.GetTenantLLMRouting(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
+// lockedRouting serialises the tenant's routing writes and reads the current
+// routing, as the before value of an audit row; no row is the local-ollama
+// default. It runs first in the write transaction (#2329). The advisory lock
+// covers a tenant with no row yet, which FOR UPDATE cannot lock, so two
+// concurrent first PUTs, or a PUT racing a DELETE, each record the state the
+// other committed rather than a stale one.
+func lockedRouting(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (routingAudit, error) {
+	if err := q.LockTenantLLMRouting(ctx, pgtype.UUID{Bytes: tenantID, Valid: true}); err != nil {
+		return routingAudit{}, fmt.Errorf("cloud: lock routing: %w", err)
+	}
+	r, err := q.GetTenantLLMRoutingForUpdate(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
 	if errors.Is(err, pgxNoRows) {
 		return auditRouting(MaskedConfig{Provider: ProviderLocalOllama}), nil
 	}
@@ -290,7 +298,7 @@ func currentRouting(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (ro
 	return auditRouting(maskRow(r)), nil
 }
 
-func insertRoutingAudit(ctx context.Context, q *dbx.Queries, tenantID, actor uuid.UUID, action string, before, after routingAudit) error {
+func insertRoutingAudit(ctx context.Context, q *dbx.Queries, tenantID, actor uuid.UUID, principal, action string, before, after routingAudit) error {
 	beforeBlob, err := json.Marshal(before)
 	if err != nil {
 		return fmt.Errorf("cloud: audit before: %w", err)
@@ -300,11 +308,12 @@ func insertRoutingAudit(ctx context.Context, q *dbx.Queries, tenantID, actor uui
 		return fmt.Errorf("cloud: audit after: %w", err)
 	}
 	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-		TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
-		UserID:   pgtype.UUID{Bytes: actor, Valid: true},
-		Action:   action,
-		Before:   beforeBlob,
-		After:    afterBlob,
+		TenantID:       pgtype.UUID{Bytes: tenantID, Valid: true},
+		UserID:         pgtype.UUID{Bytes: actor, Valid: true},
+		Action:         action,
+		Before:         beforeBlob,
+		After:          afterBlob,
+		ActorPrincipal: nilIfEmpty(principal),
 	}); err != nil {
 		return fmt.Errorf("cloud: audit routing change: %w", err)
 	}
@@ -344,4 +353,12 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries)
 		return fmt.Errorf("cloud: commit: %w", err)
 	}
 	return nil
+}
+
+// nilIfEmpty maps an empty principal (a caller with no credential) to NULL.
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

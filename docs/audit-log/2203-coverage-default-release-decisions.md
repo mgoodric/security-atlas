@@ -78,5 +78,15 @@ there, and `?scf_release=A` still reads it. This matters once declaring
 `scf_release` becomes mandatory: every crosswalk would then be in the
 legacy-pinned row. See `docs/audit-log/2315-crosswalk-carry-forward-decisions.md`.
 
+**Interaction with overlay carry-forward (#2554, 2026-11-17).** The second
+bullet of "What the pin costs" no longer holds for an overlay edge on an
+anchor that keeps its code and title. The same import step carries it onto the
+new release, in its tenant's own context, and keeps the legacy edge. What
+still drops from the default read is narrower than above: an overlay edge on a
+retitled, split, reused or withdrawn anchor, until a writer of its tenant
+decides the proposal, and an edge from a crosswalk declaring an old release
+under the same conditions. `?scf_release=<old>` still reads both. See
+`docs/audit-log/2554-overlay-carry-forward-decisions.md`.
+
 Matt may override this before merge. The dispatcher took it as a routine call
 on the measured recommendation.

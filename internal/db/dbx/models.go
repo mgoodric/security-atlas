@@ -2818,14 +2818,15 @@ type LocalCredential struct {
 }
 
 type MeAuditLog struct {
-	ID            pgtype.UUID        `json:"id"`
-	TenantID      pgtype.UUID        `json:"tenant_id"`
-	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
-	UserID        pgtype.UUID        `json:"user_id"`
-	Action        string             `json:"action"`
-	Before        []byte             `json:"before"`
-	After         []byte             `json:"after"`
-	SubjectModule string             `json:"subject_module"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	Action         string             `json:"action"`
+	Before         []byte             `json:"before"`
+	After          []byte             `json:"after"`
+	SubjectModule  string             `json:"subject_module"`
+	ActorPrincipal *string            `json:"actor_principal"`
 }
 
 type MemberModuleAccess struct {

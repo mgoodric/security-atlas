@@ -21,6 +21,11 @@
 // resolved role set rather than the credential flags (the same revisit
 // slices 064/066 record in their decisions logs).
 //
+// #2556: the read gate is now authz.IsTenantRiskReader — admin,
+// grc_engineer and viewer by live tenant role, the set OPA admits on
+// `risks` reads. control_owner and auditor no longer pass the handler; OPA
+// already refused them, so nothing they could reach changes.
+//
 // SCOPE: this guard is applied ONLY to the read endpoints slice 067
 // touches. It is NOT retrofitted onto the slice-019/020/053 risk write
 // endpoints (CreateRisk, LinkControl, DeleteRisk, Aggregate, theme
@@ -38,22 +43,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
-// hasProgramRead reports whether the credential carries an explicit
-// program-read role signal:
-//
-//	IsAdmin            -> admin         (wildcard — program-read granted)
-//	IsApprover         -> grc_engineer  (program-read granted)
-//	len(OwnerRoles)>0  -> control_owner (program-read granted)
+// hasProgramRead reports whether the credential may read the risk register:
+// authz.IsTenantRiskReader, which counts the live tenant role authzmw
+// resolved, never a session's role claim (#2556). It admits admin,
+// grc_engineer and viewer, the roles OPA admits on `risks` reads, and
+// refuses control_owner and auditor, which OPA refuses there too.
 //
 // Deliberately STRICTER than authz.derivedRolesFor, which maps a bare
-// tenant credential to grc_engineer. The risk read surface this guards is
-// the slice-056 operator/auditor dashboard, not a connector surface — a
-// bare push credential (no flags) has no business reading it. Requiring an
-// explicit role signal also makes AC-6/AC-8 genuinely testable: the "role
-// without program-read access" is exactly a credential carrying none of
-// the three signals.
+// tenant credential to grc_engineer: a bare push credential (no flag, no
+// label) has no business reading the register.
 func hasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.IsTenantRiskReader(c)
 }
 
 // requireProgramRead is the guard the slice-067 read handlers call FIRST —

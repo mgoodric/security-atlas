@@ -36,11 +36,15 @@ DO UPDATE SET
 --
 -- Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 -- the DB layer; explicit-is-clearer per AC-5).
+--
+-- #2329: actor_principal is the acting credential's principal
+-- (credstore.PrincipalOf), so a change made with a key that is not a user's
+-- still names its credential. NULL for a writer with no caller.
 INSERT INTO me_audit_log (
-    tenant_id, user_id, action, before, after, subject_module
+    tenant_id, user_id, action, before, after, subject_module, actor_principal
 )
 VALUES (
-    $1, $2, $3, $4, $5, 'core'
+    $1, $2, $3, $4, $5, 'core', sqlc.narg(actor_principal)
 );
 
 -- name: ListOnboardingHintDismissals :many
