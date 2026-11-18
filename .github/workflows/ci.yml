@@ -1914,6 +1914,10 @@ jobs:
       - name: Run Playwright tests
         working-directory: web
         run: npx playwright test
+      # TEMPORARY (#2589 proof, removed before merge): repeat the metric-targets spec.
+      - name: "TEMP #2589 — metric-targets --repeat-each=20 --retries=0"
+        working-directory: web
+        run: npx playwright test --repeat-each=20 --retries=0 metric-targets.spec.ts
       # #2080 — the route sweep's axe findings (serious + critical) are
       # REPORTED, not enforced: one JSON per route, uploaded on every run
       # whether or not the suite passed.
