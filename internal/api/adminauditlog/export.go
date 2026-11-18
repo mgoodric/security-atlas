@@ -155,9 +155,9 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 
 	// Role gate (defense-in-depth) — same as slice 124's
 	// UnifiedList: admin OR auditor OR grc_engineer. The upstream
-	// slice-035 OPA middleware is the canonical gate; AC-10 of
-	// slice 135 + the rego matrix test ensure the admit set matches
-	// audit-log-unified exactly.
+	// slice-035 OPA middleware is the canonical gate and admits admin
+	// and grc_engineer; the slice 135 parity test pins that the
+	// unified read and this export admit the same roles (#2378).
 	allowed, err := h.callerAllowedUnified(ctx, tenantID, cred.UserID, cred.IsAdmin)
 	if err != nil {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{

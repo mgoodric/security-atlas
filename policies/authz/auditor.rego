@@ -144,22 +144,11 @@ auditor_readable_resources := {
     "artifacts",
     "scopes",
     "audit-periods",
-    # Slice 124: the unified audit-log aggregation endpoint (read-only
-    # UNION ALL across the nine per-domain audit-log tables). Auditors
-    # need this for the same reason they need 'audit-periods' — visibility
-    # into the test artifacts of the program. RLS keeps the read
-    # tenant-scoped; the canvas §9.5 ABAC layer is not needed because the
-    # log is already tenant-internal (every row already belongs to the
-    # caller's tenant after RLS filtering).
-    "audit-log-unified",
-    # Slice 135: the bulk-download (csv / json / xlsx) variant of the
-    # same unified audit-log read. Admit set MUST match audit-log-unified
-    # bit-for-bit (slice 135 P0-A9) — the export endpoint is the SAME
-    # underlying query with an encoder swap, so any role admitted to
-    # the read MUST be admitted to the export. The slice-135 OPA matrix
-    # test (TestSlice135_UnifiedAuditLogExportAdmitSetParity) pins this
-    # parity at the rego layer.
-    "audit-log-export",
+    # #2378: no unified audit-log entry. /v1/admin/audit-log/unified and
+    # /export resolve to resource type "admin", which auditors do not
+    # read; the "audit-log-unified" / "audit-log-export" entries slice
+    # 124 / 135 put here matched no path. Auditors read the same rows,
+    # payload-gated per kind, through /v1/activity/unified.
     # Slice 148: compliance calendar is cross-business by design
     # (slice 094 AC-9: "accessible to all signed-in users, no admin
     # gate"). The auditor needs visibility into the audit-period

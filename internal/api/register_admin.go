@@ -281,14 +281,17 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// Slice 124: unified audit-log aggregation read across all nine
 	// per-domain audit-log tables (decision/evidence/exception/sample/
 	// audit_period/aggregation_rule/feature_flag/me/walkthrough). The
-	// upstream slice 035 OPA middleware is the canonical role gate; the
-	// handler does defense-in-depth (admin OR auditor OR grc_engineer).
+	// upstream slice 035 OPA middleware is the canonical role gate and
+	// admits admin and grc_engineer (resource type "admin"; auditors read
+	// the same rows through /v1/activity/unified, #2378). The handler's
+	// defense-in-depth probe (admin OR auditor OR grc_engineer) is the
+	// wider layer, shared with the activity route.
 	// Route appended per the parallel-batch convention (chi.Mux rejects
 	// two Mounts at "/", so individual routes register onto the root).
 	root.Get("/v1/admin/audit-log/unified", auditLogH.UnifiedList)
 	// Slice 135: bulk data-export variant of the unified read.
-	// Same admit set (admin OR auditor OR grc_engineer — slice 124 D5;
-	// slice 135 P0-A9 admit-set parity test pins it at the OPA layer),
+	// Same admit set as the unified read (slice 135 P0-A9; the parity
+	// test pins it at the real paths in OPA),
 	// same 90-day window cap, same tenancy + RLS path. Reuses the
 	// slice-124 aggregator (internal/audit/unifiedlog.Query) with a
 	// format-encoder swap on the response body (CSV / JSON / XLSX).
