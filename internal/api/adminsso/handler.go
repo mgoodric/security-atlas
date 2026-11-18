@@ -15,9 +15,10 @@
 //
 // Anti-criteria honored (P0):
 //
-//   - client_secret is NEVER returned in any GET response. The DB column
-//     client_secret_enc is encrypted-at-rest (slice 034 contract); we
-//     never read it back to the wire.
+//   - client_secret is NEVER returned in any GET response. PATCH seals it
+//     with idpconfig.SecretCrypter (AES-256-GCM bound to tenant + name,
+//     #2034) before it reaches client_secret_enc; we never read it back to
+//     the wire.
 //   - PATCH treats an empty client_secret field as "leave existing" -- the
 //     UI cannot accidentally clear the secret by submitting an empty form.
 //   - Preflight is SSRF-hardened: scheme must be https, host must not
@@ -57,6 +58,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/netguard"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -72,6 +74,10 @@ const configName = "primary"
 type Handler struct {
 	pool          *pgxpool.Pool
 	preflightOpts PreflightOptions
+	// crypter seals the client secret before it is stored (#2034). nil
+	// means the deployment set no ATLAS_OIDC_SECRET_KEY: PATCH then refuses
+	// a new secret rather than store one the sign-in path cannot read.
+	crypter *idpconfig.SecretCrypter
 }
 
 // PreflightOptions configures the SSRF defenses for the OIDC discovery
@@ -114,7 +120,12 @@ func (h *Handler) WithPreflightOptions(opts PreflightOptions) *Handler {
 	if opts.MaxBodyBytes == 0 {
 		opts.MaxBodyBytes = h.preflightOpts.MaxBodyBytes
 	}
-	return &Handler{pool: h.pool, preflightOpts: opts}
+	return &Handler{pool: h.pool, preflightOpts: opts, crypter: h.crypter}
+}
+
+// WithSecretCrypter returns a copy of h that seals client secrets with c.
+func (h *Handler) WithSecretCrypter(c *idpconfig.SecretCrypter) *Handler {
+	return &Handler{pool: h.pool, preflightOpts: h.preflightOpts, crypter: c}
 }
 
 // --- response shapes ---
@@ -235,6 +246,12 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "client_id is required")
 		return
 	}
+	// The sign-in path refuses the same issuers (#2034), so a config that
+	// saves here is one the resolver will use.
+	if err := idpconfig.ValidateIssuerURL(req.IssuerURL, h.preflightOpts.AllowPrivateIPs); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// First INSERT requires a non-empty client_secret -- the upsert ON
 	// CONFLICT branch tolerates empty (leave-existing). We check by
@@ -263,11 +280,22 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Encrypt-at-rest in v1 is a stub: we store the raw bytes. KMS-wrap
-	// is a v1.x follow-up (per slice 034's contract). The handler treats
-	// the field as already-encrypted for forward compatibility -- callers
-	// pass a base-string today, KMS-ciphertext tomorrow.
-	secretBytes := []byte(req.ClientSecret)
+	// #2034: the secret is sealed before it is stored; an empty value is
+	// the upsert's leave-existing sentinel and is passed through as such.
+	secretBytes := []byte{}
+	if req.ClientSecret != "" {
+		if h.crypter == nil {
+			httpresp.WriteError(w, http.StatusServiceUnavailable,
+				"client secret encryption is not configured on this deployment (set "+idpconfig.SecretKeyEnv+")")
+			return
+		}
+		sealed, sErr := h.crypter.Seal(tenantID, configName, req.ClientSecret)
+		if sErr != nil {
+			httpresp.WriteError(w, http.StatusInternalServerError, "seal client secret failed")
+			return
+		}
+		secretBytes = sealed
+	}
 	// Normalize nil slice -> empty slice so the column's NOT NULL
 	// constraint is satisfied. allowed_email_domains is text[] with NOT
 	// NULL DEFAULT '{}' at the schema layer; the upsert path passes the

@@ -19,7 +19,6 @@ import { LineChart } from "@/components/dashboards-metrics/line-chart";
 import { ManualInputModal } from "@/components/dashboards-metrics/manual-input-modal";
 import { ThresholdBadge } from "@/components/dashboards-metrics/threshold-badge";
 import {
-  formatRelative,
   formatValue,
   parseValue,
 } from "@/components/dashboards-metrics/format";
@@ -35,6 +34,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   Table,
   TableBody,
@@ -324,10 +324,7 @@ export default function MetricDetailPage({
                       {formatValue(parseValue(o.numeric_value), metric.unit)}
                     </TableCell>
                     <TableCell>
-                      {formatRelative(o.observed_at)}{" "}
-                      <span className="text-xs text-muted-foreground">
-                        ({o.observed_at})
-                      </span>
+                      <Timestamp value={o.observed_at} />
                     </TableCell>
                     <TableCell>
                       <code className="font-mono text-xs">{o.source}</code>

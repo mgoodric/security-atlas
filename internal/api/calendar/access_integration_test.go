@@ -1,9 +1,11 @@
 //go:build integration
 
 // #2130 review — risk reviews and action-plan due dates reach only callers
-// who may read risks / action plans; the ICS feed (whose token names no
-// user) never carries them; and policy acknowledgement expiries stay on the
-// calendar after the upcoming rollup's retirement. #2232 gates vendor and
+// who may read risks / action plans; a control owner's ICS feed never
+// carries them (#2331 decides the feed as its subscriber; the other roles
+// are in ics_subscriber_integration_test.go); and policy acknowledgement
+// expiries stay on the calendar after the upcoming rollup's retirement.
+// #2232 gates vendor and
 // exception events the same way, on vendors and exceptions reads.
 
 package calendar_test
@@ -149,9 +151,9 @@ func TestCalendar_RiskAndPlanEventsFollowOPA(t *testing.T) {
 	}
 }
 
-// TestCalendarICS_LeavesOutRiskAndPlanEvents: the ICS feed carries the
-// ungated events and no risk review, action plan, vendor or exception,
-// even when asked (#2130, #2232).
+// TestCalendarICS_LeavesOutRiskAndPlanEvents: a control owner's ICS feed
+// carries the ungated events and no risk review, action plan, vendor or
+// exception, even when asked (#2130, #2232, #2331).
 func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)

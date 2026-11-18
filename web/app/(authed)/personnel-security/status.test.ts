@@ -9,7 +9,6 @@ import type { Checklist } from "@/lib/api/personnel-security";
 
 import {
   checklistRank,
-  dateLabel,
   isOverdue,
   itemProgress,
   kindLabel,
@@ -152,13 +151,6 @@ describe("labels", () => {
     expect(kindLabel("onboarding")).toBe("Onboarding");
     expect(kindLabel("offboarding")).toBe("Offboarding");
     expect(kindLabel("other")).toBe("other");
-  });
-
-  it("dateLabel formats ISO timestamps and dashes empties", () => {
-    expect(dateLabel("2026-08-01T00:00:00Z")).toBe("2026-08-01");
-    expect(dateLabel("")).toBe("—");
-    expect(dateLabel(undefined)).toBe("—");
-    expect(dateLabel("garbage")).toBe("garbage");
   });
 
   it("itemProgress counts completed items", () => {

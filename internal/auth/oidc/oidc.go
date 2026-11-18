@@ -151,6 +151,11 @@ var ErrUnknownIdp = errors.New("oidc: unknown IdP")
 // endpoint cannot be reached or does not answer in time.
 var ErrProviderUnavailable = errors.New("oidc: provider unavailable")
 
+// ErrEmailDomainNotAllowed is returned when the IdP config lists allowed
+// email domains and the ID token's email is not a verified address in one
+// of them (#2034). An empty list allows every domain.
+var ErrEmailDomainNotAllowed = errors.New("oidc: email domain not in allowlist")
+
 // ErrStateMismatch is the CSRF guard's sentinel. The callback returns 400
 // when this fires.
 var ErrStateMismatch = errors.New("oidc: state mismatch (CSRF guard)")
@@ -457,6 +462,12 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	if idTok.Nonce != nonceCookie.Value {
 		return CallbackResult{}, ErrNonceMismatch
 	}
+	// The verifier checked iss against the discovered issuer, which go-oidc
+	// requires to equal cfg.IssuerURL. Comparing to the config directly
+	// keeps the token bound to the row that resolved it (#2034).
+	if idTok.Issuer != cfg.IssuerURL {
+		return CallbackResult{}, errors.New("oidc: id_token issuer does not match the IdP config")
+	}
 	var claims struct {
 		Email             string   `json:"email"`
 		EmailVerified     any      `json:"email_verified"`
@@ -470,17 +481,9 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	if claims.Email == "" {
 		return CallbackResult{}, errors.New("oidc: id_token missing email")
 	}
-	if len(cfg.AllowedEmailDomains) > 0 {
-		ok := false
-		for _, d := range cfg.AllowedEmailDomains {
-			if strings.HasSuffix(strings.ToLower(claims.Email), "@"+strings.ToLower(d)) {
-				ok = true
-				break
-			}
-		}
-		if !ok {
-			return CallbackResult{}, fmt.Errorf("oidc: email domain not in allowlist")
-		}
+	emailVerified := parseEmailVerified(claims.EmailVerified)
+	if len(cfg.AllowedEmailDomains) > 0 && !emailDomainAllowed(claims.Email, emailVerified, cfg) {
+		return CallbackResult{}, ErrEmailDomainNotAllowed
 	}
 	name := claims.Name
 	if name == "" {
@@ -495,12 +498,39 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		Subject:       idTok.Subject,
 		Email:         claims.Email,
 		DisplayName:   name,
-		EmailVerified: parseEmailVerified(claims.EmailVerified),
+		EmailVerified: emailVerified,
 		IDPConfigID:   cfg.ID,
 		Groups:        claims.Groups,
 
 		TrustUnverifiedEmailForLink: cfg.TrustUnverifiedEmailForLink,
 	}, nil
+}
+
+// emailDomainAllowed reports whether email's domain, the part after its last
+// "@", equals one of cfg.AllowedEmailDomains, ignoring case. A domain is
+// never matched as a suffix, so "evil-example.com" and "sub.example.com" do
+// not match "example.com". The domain counts only on a verified address:
+// email_verified true, or absent when the config trusts unverified email
+// (#2034). An explicit false never passes.
+func emailDomainAllowed(email string, verified *bool, cfg IdpConfig) bool {
+	if verified == nil {
+		if !cfg.TrustUnverifiedEmailForLink {
+			return false
+		}
+	} else if !*verified {
+		return false
+	}
+	at := strings.LastIndexByte(email, '@')
+	if at <= 0 || at == len(email)-1 {
+		return false
+	}
+	domain := email[at+1:]
+	for _, d := range cfg.AllowedEmailDomains {
+		if d = strings.TrimSpace(d); d != "" && strings.EqualFold(domain, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseEmailVerified reads the email_verified claim. OIDC Core types it as a

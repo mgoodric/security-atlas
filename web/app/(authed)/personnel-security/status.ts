@@ -87,14 +87,6 @@ export function kindLabel(kind: string): string {
   }
 }
 
-/** Format an ISO date/timestamp as YYYY-MM-DD; "—" for empty/malformed. */
-export function dateLabel(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toISOString().slice(0, 10);
-}
-
 /** "3 of 12 items complete" progress line for a checklist's items. */
 export function itemProgress(items: { completed_at?: string }[]): string {
   const done = items.filter((i) => Boolean(i.completed_at)).length;

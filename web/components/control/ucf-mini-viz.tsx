@@ -266,6 +266,9 @@ export function UcfMiniViz({
       role="img"
       aria-label={`UCF graph neighborhood for ${control.title}`}
     >
+      {/* #2374 — the accessible name for assistive tech that reads the
+          SVG title, and the hover tooltip. */}
+      <title>{`UCF graph neighborhood for ${control.title}`}</title>
       {/* control node */}
       <g data-testid="ucf-viz-control">
         <rect
