@@ -69,3 +69,31 @@ func TestExceptedIn_MalformedPredicateIsAnError(t *testing.T) {
 		t.Fatal("want an error for a malformed predicate on the whole-tenant row")
 	}
 }
+
+// #2343: an unknown op never waives evaluation. On a cell it is an error
+// (the control's evaluation fails rather than recording excepted); on the
+// whole-tenant row it is simply not always-true. Either way nothing is
+// excepted, alone or alongside a valid exception that does not cover it.
+func TestExceptedIn_UnknownOpFailsClosed(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	bogus := activeException{predicate: []byte(`{"op":"bogus"}`), expiresAt: now.Add(time.Hour)}
+	narrow := activeException{predicate: []byte(`{"op":"eq","dim":"environment","value":"staging"}`), expiresAt: now.Add(time.Hour)}
+	prod := &scope.Cell{ID: uuid.New(), Dimensions: map[string]string{"environment": "prod"}}
+	for name, tc := range map[string]struct {
+		exs  []activeException
+		cell *scope.Cell
+	}{
+		"cell":                      {[]activeException{bogus}, prod},
+		"whole-tenant row":          {[]activeException{bogus}, nil},
+		"cell, with a narrow valid": {[]activeException{narrow, bogus}, prod},
+		"row, with a narrow valid":  {[]activeException{narrow, bogus}, nil},
+	} {
+		if got, _ := exceptedIn(tc.exs, tc.cell, now); got {
+			t.Errorf("%s: exceptedIn = true for an unknown op, want not excepted", name)
+		}
+		if got, _ := ExceptionCovers(bogus.predicate, tc.cell); got {
+			t.Errorf("%s: ExceptionCovers = true for an unknown op", name)
+		}
+	}
+}
