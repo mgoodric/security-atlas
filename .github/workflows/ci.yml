@@ -1475,6 +1475,11 @@ jobs:
       # of DATABASE_URL before calling psql; the self-test pins that parse.
       - name: Run pg-conn self-test
         run: bash scripts/pg-conn_test.sh
+      # #2353: bootstrap sends its client secret and bearer over plain
+      # http:// only to the one private service host; the self-test pins
+      # which ATLAS_HTTP_URL values get --allow-insecure-http.
+      - name: Run http-endpoint self-test
+        run: bash scripts/http-endpoint_test.sh
       # #2033: the scratch-cluster script must refuse a Postgres it did not
       # start. The runner image ships PostgreSQL server binaries off PATH;
       # the test skips (exit 0) if none are found. One matrix leg is enough.

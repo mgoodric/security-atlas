@@ -96,6 +96,11 @@ spec:
                 configMapKeyRef:
                   name: {{ include "security-atlas.configMapName" . }}
                   key: ATLAS_HTTP_URL
+            # #2353: the one http:// host bootstrap.sh may send the client
+            # secret and bearer to: the in-cluster atlas Service, the host
+            # of ATLAS_HTTP_URL in the ConfigMap.
+            - name: ATLAS_BOOTSTRAP_PLAINTEXT_HOST
+              value: {{ printf "%s-atlas" (include "security-atlas.fullname" .) | quote }}
             - name: ATLAS_BOOTSTRAP_TENANT
               valueFrom:
                 configMapKeyRef:
