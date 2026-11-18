@@ -140,6 +140,11 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"features/handler.go requireAdmin": site(adm,
 			r2447(get, "/v1/admin/features"),
 			r2447(patch, "/v1/admin/features/policy.enabled")),
+		// #2503: the tenant's API keys, within mintWithinCaller. POST /issue
+		// shares the GET path, which handlerNarrower2428 keys on.
+		"admincreds/http.go requireAdmin": site(adm,
+			r2447(get, "/v1/admin/credentials"),
+			r2447(post, "/v1/admin/credentials/"+id+"/revoke")),
 		// #2503 D5: the tenant's feature-flag flip log.
 		"adminauditlog/handler.go requireAdmin": site(adm, r2447(get, "/v1/admin/audit-log")),
 		// #2503 D5: the unified read and its export admit IsTenantAdmin or a
