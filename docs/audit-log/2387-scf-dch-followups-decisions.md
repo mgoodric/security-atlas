@@ -26,8 +26,16 @@ The 2026.3 title of `DCH-27` is "Media & Data Retention". Four rationales were u
 | `data/crosswalks/soc2-tsc-2017.yaml` | C1.2           | "Data Retention defines..."       |
 | `data/crosswalks/pci-dss-4.0.yaml`   | 9.4.1          | "SCF Media & Physical Storage..." |
 
-The SOC 2 PI1.5 rationale ("overlaps data retention") and the HIPAA §164.316(b)(2)(i) rationale ("data retention") use the concept in lower case, not as a title, so they were left alone. The other anchors in the family were also checked against their 2026.3 titles. Every rationale citing `DCH-04` says "Data & Asset Classification" or paraphrases it, and the `DCH-16` and `MON-27` rows already carry their 2026.3 titles. `internal/demoseed/fixtures.go` keeps "Data Classification & Handling", because there it is the SCF family name, not a control title.
+The HIPAA §164.316(b)(2)(i) rationale ("data retention") uses the concept in lower case, not as a title, so it was left alone. The SOC 2 PI1.5 rationale was rewritten under D3. The other anchors in the family were also checked against their 2026.3 titles. Every rationale citing `DCH-04` says "Data & Asset Classification" or paraphrases it, and the `DCH-16` and `MON-27` rows already carry their 2026.3 titles. `internal/demoseed/fixtures.go` keeps "Data Classification & Handling", because there it is the SCF family name, not a control title.
 
-## D3 — `soc2_pi1_5_storage_integrity` anchor
+## D3 — `soc2_pi1_5_storage_integrity` anchor (Matt, 2026-11-18)
 
-Not changed in this PR. Whether to keep `DCH-27` or move to `MON-27` is an SCF anchor pick, so it went to Matt through the dispatcher. The recommendation is to keep `DCH-27`: the control attests retention per data class and protective integrity mechanisms, while FIM only detects changes.
+The control stays anchored on `DCH-27`. Its attestation covers retention per data class and protective integrity mechanisms (content hashes, signed records, append-only ledgers, checksums). `MON-27` File Integrity Monitoring (FIM) only detects changes, the same split as the HIPAA §164.312(c)(1) call in #1977 D3. Moving the control would also supersede a stock control and leave owners and evidence to be moved by hand.
+
+The detection side gets a secondary crosswalk edge instead: SOC 2 PI1.5 → `MON-27`, `intersects_with`, 0.4, LOW. It moves no control. The PI1.5 → `DCH-27` rationale now names Media & Data Retention and calls itself the retention half of the fit.
+
+Options weighed:
+
+- **(a) keep `DCH-27`, add a `MON-27` edge** (chosen; Matt, 2026-11-18, relayed by the dispatcher);
+- (b) re-anchor the control on `MON-27`: FIM fits none of the attested fields, and it would trigger a supersede;
+- (c) keep `DCH-27` with no extra edge: the detection facet stays unmapped.
