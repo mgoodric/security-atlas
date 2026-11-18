@@ -130,7 +130,25 @@ describe("risk history format (#2104)", () => {
           { control_id: null },
         ),
       ),
-    ).toEqual([{ field: "Control", before: control, after: "none" }]);
+    ).toEqual([
+      { field: "Control", before: control, after: "none", ref: "control" },
+    ]);
+  });
+
+  test("id-valued fields carry the kind of thing they name (#2138)", () => {
+    const changes = historyChanges(
+      entry(
+        "acceptance_approved",
+        { owner_user_id: "u-1", org_unit_id: null },
+        { owner_user_id: "u-2", org_unit_id: "ou-1", accepter: "u-3" },
+      ),
+    );
+    expect(changes.map((c) => [c.field, c.ref])).toEqual([
+      ["Owner", "person"],
+      ["Org unit", "org_unit"],
+      ["Approved by", "person"],
+    ]);
+    expect(historyActionLabel("some_new_action")).toBe("Some new action");
   });
 
   test("a close and a reopen read their status and closure (#2107)", () => {

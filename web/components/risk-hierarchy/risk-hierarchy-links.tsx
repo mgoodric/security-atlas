@@ -13,6 +13,10 @@
 // Attaching or detaching never changes this risk's stored score; the page
 // re-reads the risk afterwards so the roll-up beside the assessed score
 // follows the new set of children.
+//
+// #2138: a caller who may not write risks (canEdit false) sees both lists
+// without Attach or Detach, and the register is not fetched for them.
+// Levels show as labels, never the enum keys.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -32,12 +36,14 @@ import {
   type LinkedRisk,
   type Risk,
 } from "@/lib/api/risks";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 type Props = {
   risk: Pick<Risk, "id" | "level">;
+  canEdit: boolean;
 };
 
-export function RiskHierarchyLinks({ risk }: Props) {
+export function RiskHierarchyLinks({ risk, canEdit }: Props) {
   const queryClient = useQueryClient();
   const pickerId = useId();
   const [selected, setSelected] = useState("");
@@ -59,7 +65,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
   const register = useQuery({
     queryKey: ["risks", "list", "with-rollups"],
     queryFn: fetchRisksListWithRollUps,
-    enabled: canHaveChildren,
+    enabled: canHaveChildren && canEdit,
   });
 
   const refresh = async () => {
@@ -157,7 +163,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
             <ul className="space-y-1.5" data-testid="risk-detail-children-list">
               {childRows.map((c) => (
                 <LinkedRiskRow key={c.id} link={c} testid="risk-detail-child">
-                  {confirmingDetach === c.id ? (
+                  {!canEdit ? null : confirmingDetach === c.id ? (
                     <ConfirmInline
                       prompt={`Detach ${c.title}? It stops rolling up to this risk.`}
                       confirmLabel="Detach"
@@ -184,7 +190,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
             </ul>
           )}
 
-          {canHaveChildren ? (
+          {!canEdit ? null : canHaveChildren ? (
             <form
               className="flex flex-wrap items-end gap-2"
               data-testid="risk-detail-attach"
@@ -216,7 +222,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
                   </option>
                   {candidates.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.title} ({r.level})
+                      {r.title} ({enumLabel("RiskLevel", r.level)})
                     </option>
                   ))}
                 </Select>
@@ -275,8 +281,8 @@ function LinkedRiskRow({
       >
         {link.title}
       </Link>
-      <span className="text-xs capitalize text-muted-foreground">
-        {link.level}
+      <span className="text-xs text-muted-foreground">
+        {enumLabel("RiskLevel", link.level)}
       </span>
       <span className="font-mono text-xs text-muted-foreground">
         severity {link.severity}
