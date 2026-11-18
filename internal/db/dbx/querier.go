@@ -2526,6 +2526,9 @@ type Querier interface {
 	// under a few hundred for any realistic deployment.
 	ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error)
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
+	// #2457: the framework scopes waiting for approval, for GET /v1/approvals
+	// and its sidebar badge.
+	ListFrameworkScopesInReview(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error)
 	// Audit history for one framework (newest first). Admin-scoped.
 	ListFrameworkVersionAudit(ctx context.Context, frameworkID pgtype.UUID) ([]FrameworkVersionAudit, error)
 	// The tenant controls behind each requirement of a framework version, for
@@ -2546,6 +2549,12 @@ type Querier interface {
 	// the exact-code set-intersection / set-difference between two versions.
 	ListFrameworkVersionRequirementCodes(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFrameworkVersionRequirementCodesRow, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
+	// #2414: every catalog version plus the caller's own tenant-private
+	// versions, for `GET /v1/frameworks?include=versions`, newest first within
+	// each framework. RLS (tenant_or_catalog) is the boundary; the tenant_id
+	// predicate is the ADR 0026 second leg. Pairs with ListFrameworksForTenant
+	// (board_briefs.sql).
+	ListFrameworkVersionsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// The registered frameworks the program runs against — both the global
 	// catalog (`tenant_id IS NULL`) and any tenant-private frameworks. Drives
@@ -2748,6 +2757,9 @@ type Querier interface {
 	// ordering. The policy library is small per the canvas v1 scope, so this
 	// endpoint is not paginated.
 	ListPoliciesLinkedToControl(ctx context.Context, arg ListPoliciesLinkedToControlParams) ([]ListPoliciesLinkedToControlRow, error)
+	// #2457: the policies waiting for approval, for GET /v1/approvals and its
+	// sidebar badge. Served by the (tenant_id, status, created_at DESC) index.
+	ListPoliciesUnderReview(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
 	// Slice 107 — paginated policy list LEFT JOINed to the per-policy
 	// acknowledgment-rate cell. Single query; the handler MUST NOT loop
 	// per-policy (anti-criterion P0 -- the whole point of the extension).
@@ -2843,6 +2855,10 @@ type Querier interface {
 	// ops paths (a future admin UI surface) and by the integration test
 	// asserting projected-Entry fields landed correctly.
 	ListRecentSinkFailures(ctx context.Context, limit int32) ([]AuditSinkFailure, error)
+	// #2457: the exceptions waiting for approval, for GET /v1/approvals and
+	// its sidebar badge. Served by idx_exceptions_tenant_status_expires's
+	// (tenant_id, status) prefix.
+	ListRequestedExceptions(ctx context.Context, tenantID pgtype.UUID) ([]Exception, error)
 	// AC-2. Reverse traversal — given an SCF anchor, return every framework
 	// requirement it satisfies, joined to framework_versions + frameworks so
 	// callers see the full natural key (slug + version + code) in one
@@ -2994,6 +3010,10 @@ type Querier interface {
 	// RLS posture: the explicit tenant_id predicates sit alongside the
 	// GUC-driven RLS on every table read here.
 	ListRisksPage(ctx context.Context, arg ListRisksPageParams) ([]ListRisksPageRow, error)
+	// #2457: the open risks whose acceptance waits for approval, for GET
+	// /v1/approvals and its sidebar badge. A closed risk's acceptance cannot
+	// be approved until it is reopened, so it is not read.
+	ListRisksWithProposedAcceptance(ctx context.Context, tenantID pgtype.UUID) ([]Risk, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
@@ -3316,6 +3336,23 @@ type Querier interface {
 	// (the wire shape tolerates null — bootstrap-key + credential-only callers
 	// have no users row).
 	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
+	// #2414 — the machine and system actors (`system`, `system:<process>`,
+	// `oauth_client:<id>`) that appear in the tenant's activity in a window,
+	// for the Activity page's actor picker. A person or API key is listed
+	// from /v1/people instead, so only these shapes are returned.
+	//
+	// The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+	// what the visibility rules read: the same window, the slice 270
+	// non-privileged predicate and the slice 669 read-telemetry predicate.
+	// One row per (actor, kind, target_type, request_path), so the handler
+	// applies the #2173 module filter exactly as it does to the feed, and an
+	// actor seen only in rows the caller may not see is not listed.
+	// `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
+	// to one query and not the other.
+	//
+	// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
+	// atlas_app and takes no tenant parameter.
+	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]ListUnifiedAuditMachineActorsRow, error)
 	// The tested-under references ListAuditedUnderGaps cannot resolve (#2324):
 	// the system names no global framework with a current version, or the id
 	// names no requirement in that version. Typos and withdrawn codes land

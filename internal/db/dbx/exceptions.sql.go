@@ -588,6 +588,61 @@ func (q *Queries) ListExpiringExceptions(ctx context.Context, arg ListExpiringEx
 	return items, nil
 }
 
+const listRequestedExceptions = `-- name: ListRequestedExceptions :many
+SELECT id, tenant_id, control_id, scope_cell_predicate, justification, compensating_controls, requested_by, requested_at, approved_by, approved_at, denied_by, denied_at, activated_by, activated_at, effective_from, expires_at, expired_at, status, created_at, updated_at, self_approved, revoked_by, revoked_at
+FROM exceptions
+WHERE tenant_id = $1
+  AND status = 'requested'
+ORDER BY created_at DESC, id ASC
+`
+
+// #2457: the exceptions waiting for approval, for GET /v1/approvals and
+// its sidebar badge. Served by idx_exceptions_tenant_status_expires's
+// (tenant_id, status) prefix.
+func (q *Queries) ListRequestedExceptions(ctx context.Context, tenantID pgtype.UUID) ([]Exception, error) {
+	rows, err := q.db.Query(ctx, listRequestedExceptions, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Exception
+	for rows.Next() {
+		var i Exception
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ControlID,
+			&i.ScopeCellPredicate,
+			&i.Justification,
+			&i.CompensatingControls,
+			&i.RequestedBy,
+			&i.RequestedAt,
+			&i.ApprovedBy,
+			&i.ApprovedAt,
+			&i.DeniedBy,
+			&i.DeniedAt,
+			&i.ActivatedBy,
+			&i.ActivatedAt,
+			&i.EffectiveFrom,
+			&i.ExpiresAt,
+			&i.ExpiredAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SelfApproved,
+			&i.RevokedBy,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTenantsWithActiveExceptions = `-- name: ListTenantsWithActiveExceptions :many
 SELECT DISTINCT tenant_id
 FROM exceptions
