@@ -17,6 +17,7 @@ import type {
   NeedsAttentionResponse,
   NeedsAttentionView,
 } from "@/lib/api/needs-attention";
+import { Term } from "@/components/help/term";
 
 export function NeedsAttentionPanel({
   report,
@@ -32,7 +33,7 @@ export function NeedsAttentionPanel({
   const view = report?.for ?? "me";
   return (
     <PanelCard
-      title="Needs attention"
+      title={<Term id="needs-attention">Needs attention</Term>}
       description={
         report
           ? `${report.total} ${

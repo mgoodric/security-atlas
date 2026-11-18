@@ -37,6 +37,7 @@ import {
   parseNeedsAttentionSearch,
   toggleType,
 } from "./search";
+import { Term } from "@/components/help/term";
 
 function NeedsAttentionPageInner() {
   const router = useRouter();
@@ -77,7 +78,13 @@ function NeedsAttentionPageInner() {
   return (
     <PageShell
       title="Needs attention"
-      subtitle="Failing controls, approvals waiting for you, overdue and due-soon reviews, and ownership gaps, most urgent first."
+      subtitle={
+        <>
+          Failing controls, approvals waiting for you, overdue and due-soon
+          reviews, and <Term id="owner">ownership</Term> gaps, most urgent
+          first.
+        </>
+      }
       actions={
         <ViewToggle
           view={view}

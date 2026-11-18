@@ -345,6 +345,54 @@
       "short": "A record of a trade-off someone made, such as deferring a piece of work, with who decided, why, and when to look at it again.",
       "long": "A decision is broader than an exception: an exception waives one control for a time, while a decision records the reasoning behind a choice. Decisions are always made and recorded by a person. Once a decision's revisit date passes, it is marked overdue until someone acts on it.",
       "glossary": "GLOSSARY.md#decision-log-slice-055"
+    },
+    {
+      "id": "needs-attention",
+      "name": "Needs attention",
+      "short": "One list of the work that needs someone now, most urgent first: failing controls, waiting approvals, overdue reviews, then what is due in the next two weeks.",
+      "long": "For you keeps what you own and what waits for your approval. Everyone, open to admins and GRC engineers, shows the whole organisation and adds controls and open risks that have no owner yet. Each item links to the page where you act on it."
+    },
+    {
+      "id": "approver",
+      "name": "Approver",
+      "short": "Someone who may approve exceptions, risk acceptances, policies and framework scopes. Today that means admins and GRC engineers.",
+      "long": "An approver still can't approve their own request unless the organisation allows self-approval. Only a person approves: an API key or other machine credential never does."
+    },
+    {
+      "id": "second-person-rule",
+      "name": "Second-person rule",
+      "short": "The person who asks for an approval cannot also give it. Someone else must approve.",
+      "long": "It applies to exceptions, risk acceptances, policies and framework scopes, so every commitment is checked by two people. A small team can relax it by turning on Allow self-approval; a record approved that way is marked Self-approved."
+    },
+    {
+      "id": "calendar-subscription",
+      "name": "Calendar subscription",
+      "short": "A personal, read-only link that lets Google, Apple or Outlook Calendar show your compliance dates and keep them up to date.",
+      "long": "The link carries its own access, so anyone who has it can read the events it lists. Keep it private, as you would a password."
+    },
+    {
+      "id": "board-kpi",
+      "name": "Board KPI",
+      "short": "One of the few top-level numbers that tell the board whether security is improving. Each is fed by program and team metrics.",
+      "long": "A board KPI has a value over time and, usually, a target. Following its cascade shows which program and team metrics drive it, so a change at the top can be traced to the work underneath."
+    },
+    {
+      "id": "metric-cascade",
+      "name": "Cascade",
+      "short": "The tree of metrics under a board KPI: the program metrics that feed it, and the team metrics that feed those.",
+      "long": "The cascade lets you see why a top-level number moved, by walking down to the metric that changed."
+    },
+    {
+      "id": "metric-target",
+      "name": "Target",
+      "short": "The value a metric should reach, with optional warning and critical levels. The metric's badge turns green, yellow or red against them.",
+      "long": "Green means the latest value meets the target, yellow that it falls short but is above warning, and red that it passes critical. The colour comes from the numbers alone. Only admins set targets."
+    },
+    {
+      "id": "activity-log",
+      "name": "Activity log",
+      "short": "The append-only record of who did what and when in your organisation. Nobody can edit or delete an entry.",
+      "long": "It is how you answer who approved something or when a control changed, and it is what auditors rely on. GRC engineers, auditors and super admins see every event; everyone else sees the organisation's shared events and their own account activity."
     }
   ]
 }
