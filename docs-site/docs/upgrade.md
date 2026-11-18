@@ -206,6 +206,18 @@ remap changed the default `control_id` five connectors stamp on their records:
 | GCP       | `--bucket-control-id` | `scf:CRY-04` | `scf:CRY-07` |
 | k8s       | `--secret-control`    | `scf:CRY-01` | `scf:CRY-02` |
 
+The follow-up to the SCF 2026.3 DCH remap (#2387) moved one more default:
+
+| Connector | Flag                     | Old default  | New default  |
+| --------- | ------------------------ | ------------ | ------------ |
+| Slack     | `--retention-control-id` | `scf:DCH-04` | `scf:DCH-27` |
+
+`DCH-04` still names a real control in 2026.3 (Data & Asset Classification),
+but a retention record belongs on `DCH-27` Media & Data Retention. The
+`slack.retention_settings.v1` default SCF anchors are now `DCH-27` only. An
+install that already registered that schema keeps its stored anchors, because
+the boot import skips a kind and version that is already present.
+
 A connector run on its defaults picks up the new code when you upgrade it. If
 you pass one of these flags with the old value, by hand or in a scheduler or
 manifest, change it to the new code: in SCF 2026.3 the old code names a
