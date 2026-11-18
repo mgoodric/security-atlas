@@ -221,6 +221,8 @@ test.describe("/controls/{id} anchor fit (issue #1736)", () => {
     await expect(page.getByTestId("control-anchor-fit-note")).toHaveText(
       NONE_NOTE,
     );
-    await expect(page.getByTestId("scf-anchor-pill")).toHaveText("unanchored");
+    await expect(page.getByTestId("scf-anchor-pill")).toHaveText(
+      "Not anchored",
+    );
   });
 });

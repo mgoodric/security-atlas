@@ -6,9 +6,10 @@
 // cited, local-Ollama explanation of that rollup when the backend returns one
 // (AC-6). The explanation is a comprehension aid — there is NO
 // approve/publish/export affordance anywhere in this component (AC-5,
-// P0-444-3). When the explanation is suppressed (generation unavailable or a
-// citation failed to verify) the rollup still renders with a short honest note
-// (graceful degradation, AC-7).
+// P0-444-3). #2140 changed the degraded case: when the explanation is
+// suppressed (generation unavailable or a citation failed to verify), still
+// loading, or the read failed, the card renders nothing. The control page's
+// state strip carries the deterministic state and freshness instead.
 //
 // The render decisions live in the node-testable view-model
 // (gap-explanation-view.ts); this component is a thin renderer over it so the
@@ -25,7 +26,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   buildGapExplanationView,
   formatRollupSummary,
@@ -41,6 +41,14 @@ export function GapExplanationCard({ id }: { id: string }) {
     refetchOnWindowFocus: false,
   });
 
+  // #2140: the card shows only when there is an explanation to show. While
+  // it loads, when the read fails, or when generation was suppressed, it
+  // renders nothing: no "unavailable" notice, and the state strip already
+  // carries the deterministic state and freshness.
+  if (!gapQ.data || !buildGapExplanationView(gapQ.data).showExplanation) {
+    return null;
+  }
+
   return (
     <Card data-testid="gap-explanation-section">
       <CardHeader>
@@ -48,15 +56,7 @@ export function GapExplanationCard({ id }: { id: string }) {
         <CardDescription>Plain-language gap explanation</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {gapQ.isLoading ? (
-          <Skeleton className="h-20 w-full" />
-        ) : gapQ.error || !gapQ.data ? (
-          <p className="text-sm text-muted-foreground">
-            Gap explanation is unavailable for this control right now.
-          </p>
-        ) : (
-          <GapBody data={gapQ.data} />
-        )}
+        <GapBody data={gapQ.data} />
       </CardContent>
     </Card>
   );

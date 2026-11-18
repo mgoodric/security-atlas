@@ -5,6 +5,7 @@
 
 import { apiFetch, bffControlFetch } from "./_shared";
 import type { EdgeOrigin, OverlayProvenance } from "./org-mapping";
+import type { RequirementExclusion } from "./requirement-coverage";
 
 // ===== Slice 041 — Control detail view =====
 //
@@ -107,6 +108,9 @@ export type CoverageRequirement = {
   origin?: EdgeOrigin;
   rationale?: string;
   overlay?: OverlayProvenance;
+  // #2140: the activated Statement of Applicability's exclusion of this
+  // requirement; omitted when it is applicable or undecided.
+  exclusion?: RequirementExclusion;
 };
 
 export type ControlCoverage = {
