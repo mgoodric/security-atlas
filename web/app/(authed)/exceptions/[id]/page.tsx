@@ -36,6 +36,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Person } from "@/components/ui/person";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
@@ -251,21 +252,27 @@ export default function ExceptionDetailPage({
 }
 
 function DetailsCard({ ex }: { ex: Exception }) {
+  // #2385: who acted renders through <Person>, never the raw ID.
+  const by = (at: string, actor: string | null | undefined, key: string) => (
+    <>
+      {day(at)} by <Person id={actor} testId={`exception-${key}-by`} />
+    </>
+  );
   const rows: [string, React.ReactNode, string][] = [
-    ["Requested", `${day(ex.requested_at)} by ${ex.requested_by}`, "requested"],
+    [
+      "Requested",
+      by(ex.requested_at, ex.requested_by, "requested"),
+      "requested",
+    ],
   ];
   if (ex.approved_at)
     rows.push([
       "Approved",
-      `${day(ex.approved_at)} by ${ex.approved_by ?? "—"}`,
+      by(ex.approved_at, ex.approved_by, "approved"),
       "approved",
     ]);
   if (ex.denied_at)
-    rows.push([
-      "Denied",
-      `${day(ex.denied_at)} by ${ex.denied_by ?? "—"}`,
-      "denied",
-    ]);
+    rows.push(["Denied", by(ex.denied_at, ex.denied_by, "denied"), "denied"]);
   if (ex.activated_at)
     rows.push([
       "Activated",
@@ -275,7 +282,7 @@ function DetailsCard({ ex }: { ex: Exception }) {
   if (ex.revoked_at)
     rows.push([
       "Revoked",
-      `${day(ex.revoked_at)} by ${ex.revoked_by ?? "—"}`,
+      by(ex.revoked_at, ex.revoked_by, "revoked"),
       "revoked",
     ]);
   if (ex.expired_at) rows.push(["Expired", day(ex.expired_at), "expired"]);
@@ -367,7 +374,8 @@ function AuditCard({ id }: { id: string }) {
                 <span className="font-mono text-xs text-muted-foreground">
                   {e.occurred_at.slice(0, 16).replace("T", " ")}
                 </span>{" "}
-                <span className="font-medium">{e.action}</span> by {e.actor}
+                <span className="font-medium">{e.action}</span> by{" "}
+                <Person id={e.actor} testId="exception-audit-actor" />
                 {e.reason ? (
                   <span className="text-muted-foreground">: {e.reason}</span>
                 ) : null}

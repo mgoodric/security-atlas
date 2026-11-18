@@ -213,6 +213,17 @@ describe("evidence filters", () => {
     ]);
   });
 
+  test("buildSourceOptions labels an actor by name, keeping the ID in the value (#2385)", () => {
+    const opts = buildSourceOptions(
+      [{ actor_type: "human", actor_id: "u-1" }],
+      (id) => (id === "u-1" ? "Alice Admin" : id),
+    );
+    expect(opts[1]).toEqual({
+      value: "human|u-1",
+      label: "human · Alice Admin",
+    });
+  });
+
   test("buildSourceOptions handles an empty input", () => {
     expect(buildSourceOptions([])).toEqual([
       { value: ALL, label: "All sources" },

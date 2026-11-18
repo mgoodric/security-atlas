@@ -22,6 +22,7 @@ import {
 } from "@/lib/people-cache";
 import {
   buildDirectory,
+  isActorReference,
   resolvePerson,
   type DirectoryApiKey,
   type DirectoryUser,
@@ -69,21 +70,40 @@ export function usePeopleDirectory(module?: string) {
 export function Person({
   id,
   avatar = false,
+  freeText = false,
+  directory,
   className,
   testId,
 }: {
   id: string | null | undefined;
   // Show the initials badge beside a resolved user's name.
   avatar?: boolean;
+  // #2385: the field may hold a typed name instead of a reference (a
+  // board pack's `published_by`, an evidence actor). A value that is not
+  // reference-shaped (isActorReference) shows as written.
+  freeText?: boolean;
+  // #2385: resolve against this directory instead of the tenant's. For a
+  // page whose people span tenants (admin super-admins), which
+  // `/v1/people` cannot list by design.
+  directory?: PersonDirectory;
   className?: string;
   testId?: string;
 }) {
-  const { data, isPending } = usePeopleDirectory();
+  const shared = usePeopleDirectory();
+  const data = directory ?? shared.data;
+  const isPending = directory ? false : shared.isPending;
 
   if (!id) {
     return (
       <span className={className} data-testid={testId}>
         —
+      </span>
+    );
+  }
+  if (freeText && !isActorReference(id)) {
+    return (
+      <span className={className} data-testid={testId} data-person-kind="text">
+        {id}
       </span>
     );
   }

@@ -146,6 +146,9 @@ export type FixtureName =
   // #2085: a named user who owns an action plan, created an audit
   // period and completed a personnel item, for person-names.spec.ts.
   | "person-names"
+  // #2385 — a named user who requested an exception (and its history)
+  // and published a board pack, for person-names-2385.spec.ts.
+  | "person-names-2385"
   // #2136 — two framework versions, one with an activated scope and no
   // posture target (reset each run), one with no scope, for
   // posture-targets.spec.ts.

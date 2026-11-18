@@ -116,6 +116,41 @@ export function isMachineActor(ref: string): boolean {
   );
 }
 
+const ANY_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * #2385 — whether a value is an actor reference rather than free text:
+ * a UUID (a user or an API key), a `user:` or `jwt:` subject, a
+ * credential ID (`key_…`, `bootstrap-admin`, credstore.PrincipalOf), or
+ * a machine actor. A field that holds either a typed name or a
+ * reference (a board pack's `published_by`, an evidence record's
+ * `actor_id`) resolves the reference and shows anything else as written.
+ */
+export function isActorReference(ref: string): boolean {
+  const s = ref.trim();
+  return (
+    ANY_UUID_RE.test(s) ||
+    s.startsWith("user:") ||
+    s.startsWith("jwt:") ||
+    s.startsWith("key_") ||
+    s === "bootstrap-admin" ||
+    isMachineActor(s)
+  );
+}
+
+/**
+ * #2385 — the visible text for a field that holds either a typed name or
+ * an actor reference, where only a string fits (a filter option's
+ * label): the name as written, or the reference resolved.
+ */
+export function actorText(
+  ref: string,
+  dir: PersonDirectory | null | undefined,
+): string {
+  return isActorReference(ref) ? resolvePerson(ref, dir).text : ref;
+}
+
 function unknown(ref: string): ResolvedPerson {
   return {
     kind: "unknown",

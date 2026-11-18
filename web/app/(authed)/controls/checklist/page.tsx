@@ -24,6 +24,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Person } from "@/components/ui/person";
 import {
   Card,
   CardContent,
@@ -136,7 +137,7 @@ export default function ChecklistPage() {
         <ChecklistBody
           checklist={checklist}
           onApprove={(sectionId) => approve.mutate(sectionId)}
-          approvingId={approve.isPending ? approve.variables ?? "" : ""}
+          approvingId={(approve.isPending && approve.variables) || ""}
         />
       ) : null}
     </PageShell>
@@ -236,7 +237,10 @@ function ChecklistBody({
                 <CardDescription>{st.modelDisclosure}</CardDescription>
               ) : null}
               {st.approved && st.approver ? (
-                <CardDescription>Approved by {st.approver}</CardDescription>
+                <CardDescription>
+                  Approved by{" "}
+                  <Person id={st.approver} testId={`approver-${s.role}`} />
+                </CardDescription>
               ) : null}
             </CardHeader>
             <CardContent>
