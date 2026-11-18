@@ -98,7 +98,7 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// #2556: a grc_engineer by live role, through OPA (liveRoleBearer).
+	// #2556: a grc_engineer by live role, through OPA (liveroletest).
 	liveroletest.Attach(t, srv, app)
 	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
 	h := srv.HTTPHandlerForTests()

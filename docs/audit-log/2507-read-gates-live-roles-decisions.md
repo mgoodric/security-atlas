@@ -122,7 +122,24 @@ gate changed here and each asserts the shape it has:
   `AttachAuthz` already (policies `ack_rate`, policyacks, risks
   `lifecycle`) seed users and attach OPA.
 
-## D7 — the ban test
+## D7 — gate count, and what is left for a follow-up
+
+The ticket counts 17 gates. The #2505 allow-list as merged (2822e908) held
+19 `readGate2507` entries, keyed by function, so the two checklist handler
+methods and actionplans' separate read and write gates each count. #2563
+(c3364af8) moved three of them (risks, decisions, orgunits), leaving 16;
+all 16 moved here, and the allow-list has no `readGate2507` entry left.
+
+Not done here, and left for a follow-up ticket: folding the other
+hand-rolled live-role fixtures into `liveroletest` (`issueRoledUserBearer`
+in policies `ack_rate`, the `user_roles` seeding in policyacks and risks
+`lifecycle`, `roleUser` in risks `unified_audit`), and the policies suite's
+claim-only bearers (`discard_draft`, `import`, `review_date`, which run on
+`setupWith(t, false)`). None of them reaches a gate this PR changed, and
+each already passes; moving them is a fixture refactor with its own review,
+not a step of the gate swap.
+
+## D8 — the ban test
 
 `ownerRolesReads2505` has no `readGate2507` entries left. What remains is the
 non-gate reads (minting, display, persistence, policy-ack free text), each

@@ -85,7 +85,7 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	// #2556: a viewer by live role, through OPA (liveRoleBearer). The
+	// #2556: a viewer by live role, through OPA (liveroletest). The
 	// tests here only read, and a viewer reads the decision log.
 	liveroletest.Attach(t, srv, app)
 	bearer := liveroletest.Bearer(t, srv, tenant, "viewer")
