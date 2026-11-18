@@ -59,6 +59,12 @@ var HintModules = []string{
 	"risks",
 	"risks-hierarchy",
 	"action-plans",
+	// #2149: Program.
+	"dashboard",
+	"calendar",
+	"metrics",
+	"activity",
+	"approvals",
 }
 
 // HintChange is one PATCH's worth of hint edits. Reset clears every

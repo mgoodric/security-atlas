@@ -22,16 +22,21 @@ func TestAckCallerFromCred2505(t *testing.T) {
 	}{
 		{"stale grc_engineer claim, live viewer",
 			credstore.Credential{ID: "jwt:2505", UserID: "user:" + owner, OwnerRoles: []string{"grc_engineer"}, TenantRoles: []string{"viewer"}},
-			[]string{"viewer"}},
+			[]string{"viewer", "everyone"}},
 		{"stale claim, no live role",
 			credstore.Credential{ID: "jwt:2505", UserID: "user:" + owner, OwnerRoles: []string{"admin"}},
 			nil},
 		{"bound key, category label plus live viewer",
 			credstore.Credential{ID: "key_2505", UserID: owner, OwnerRoles: []string{"employee"}, TenantRoles: []string{"viewer"}},
-			[]string{"viewer", "employee"}},
+			[]string{"viewer", "employee", "everyone"}},
+		// #2524: a bound key's free-text label is not a live role, so it
+		// does not make its owner a member for an "everyone" policy.
+		{"bound key, category label, no live role",
+			credstore.Credential{ID: "key_2505", UserID: owner, OwnerRoles: []string{"employee"}},
+			[]string{"employee"}},
 		{"unbound key, category label",
 			credstore.Credential{ID: "key_2505", UserID: "key_2505", OwnerRoles: []string{"employee"}},
-			[]string{"employee"}},
+			[]string{"employee", "everyone"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

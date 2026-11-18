@@ -9,8 +9,7 @@ linked_control_ids:
   - IAC-04
   - IAC-22
 acknowledgment_required_roles:
-  - employee
-  - contractor
+  - everyone
 source_attribution: community_draft
 ---
 
