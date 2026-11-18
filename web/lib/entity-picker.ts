@@ -13,7 +13,9 @@ import type { Risk } from "./api/risks";
 import { enumLabel } from "./labels/enum-labels";
 import { frameworkLabel } from "./labels/framework-label";
 import {
+  isMachineActor,
   normaliseUserId,
+  resolvePerson,
   type DirectoryApiKey,
   type DirectoryUser,
 } from "./person";
@@ -117,6 +119,31 @@ export function credentialOptions(
       label: owner ? `API key (owner: ${owner})` : "API key",
     };
   });
+}
+
+/**
+ * #2414: machine and system actors (the Activity filter only), labelled
+ * the way `<Person>` labels them ("System", "OAuth client"), with the
+ * process or client ID as the hint so two of them stay apart. Anything
+ * that is not a machine actor is dropped, and duplicates collapse.
+ */
+export function machineActorOptions(refs: readonly string[]): EntityOption[] {
+  const out = new Map<string, EntityOption>();
+  for (const raw of refs) {
+    const a = raw.trim();
+    if (!isMachineActor(a) || out.has(a)) continue;
+    const colon = a.indexOf(":");
+    out.set(a, {
+      value: a,
+      label: resolvePerson(a, null).text,
+      hint: colon >= 0 ? a.slice(colon + 1) : undefined,
+    });
+  }
+  return [...out.values()].sort(
+    (x, y) =>
+      x.label.localeCompare(y.label) ||
+      (x.hint ?? "").localeCompare(y.hint ?? ""),
+  );
 }
 
 /**

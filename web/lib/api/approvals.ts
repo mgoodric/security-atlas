@@ -7,8 +7,12 @@
 // type, so the sidebar badge and the /approvals page read one number.
 // A caller who cannot approve gets an empty list, not an error.
 //
-// The page and the badge share APPROVALS_QUERY_KEY, so a refetch on
-// either updates both, and every approval flow invalidates it.
+// The page and the badge share approvalsQuery, so a refetch on either
+// updates both, and every approval flow invalidates it.
+//
+// #2457: the list is keyed by the session's tenant (the #2399 pattern),
+// so a sign-in to another tenant in the same tab never shows the previous
+// tenant's list or badge. With the tenant unknown the query does not run.
 
 import type { QueryClient } from "@tanstack/react-query";
 
@@ -49,9 +53,24 @@ export type ApprovalsResponse = {
   truncated: boolean;
 };
 
+// The prefix every tenant's list sits under.
 export const APPROVALS_QUERY_KEY = ["approvals", "pending"] as const;
 
-/** invalidateApprovals refreshes the page and the badge after a transition. */
+/**
+ * The approvals query for one tenant. `enabled` is false while the tenant
+ * is unknown: no entry is read or fetched without a tenant in its key.
+ */
+export function approvalsQuery(tenantId: string | undefined) {
+  return {
+    queryKey: [...APPROVALS_QUERY_KEY, tenantId ?? ""],
+    enabled: tenantId !== undefined && tenantId !== "",
+  };
+}
+
+/**
+ * invalidateApprovals refreshes the page and the badge after a transition.
+ * It matches every tenant's entry by prefix.
+ */
 export function invalidateApprovals(qc: QueryClient): Promise<void> {
   return qc.invalidateQueries({ queryKey: APPROVALS_QUERY_KEY });
 }

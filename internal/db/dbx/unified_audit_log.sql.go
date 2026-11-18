@@ -546,3 +546,141 @@ func (q *Queries) ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditL
 	}
 	return items, nil
 }
+
+const listUnifiedAuditMachineActors = `-- name: ListUnifiedAuditMachineActors :many
+WITH unified AS (
+    SELECT occurred_at, user_id AS actor_id, 'decision'::text AS kind,
+           action, resource_type AS target_type, request_path
+    FROM decision_audit_log
+    UNION ALL
+    SELECT received_at, credential_id, 'evidence', decision, '', ''
+    FROM evidence_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'exception', action, '', ''
+    FROM exception_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'sample', action, '', ''
+    FROM sample_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'audit_period', action, '', ''
+    FROM audit_period_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'aggregation_rule', event, '', ''
+    FROM aggregation_rule_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'feature_flag', '', '', ''
+    FROM feature_flag_audit_log
+    UNION ALL
+    SELECT occurred_at, user_id::text, 'me', action, '', ''
+    FROM me_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'walkthrough', action, '', ''
+    FROM walkthrough_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'framework_scope', action, '', ''
+    FROM framework_scope_workflow_log
+    UNION ALL
+    SELECT occurred_at, actor, 'taxonomy', action, '', ''
+    FROM taxonomy_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'mapping_overlay', action, '', ''
+    FROM fw_to_scf_overlay_edge_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'control_import', action, '', ''
+    FROM control_import_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'risk', action_type, '', ''
+    FROM risk_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'posture_target', action, '', ''
+    FROM framework_posture_target_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'module_access', '', '', ''
+    FROM member_module_access_audit_log
+)
+SELECT DISTINCT
+    unified.actor_id::text     AS actor_id,
+    unified.kind::text         AS kind,
+    unified.target_type::text  AS target_type,
+    unified.request_path::text AS request_path
+FROM unified
+WHERE unified.occurred_at >= $1::timestamptz
+  AND unified.occurred_at <  $2::timestamptz
+  AND (unified.actor_id = 'system'
+       OR starts_with(unified.actor_id, 'system:')
+       OR starts_with(unified.actor_id, 'oauth_client:'))
+  AND (
+      $3::boolean = true
+      OR (
+          unified.kind <> 'feature_flag'
+          AND unified.kind <> 'module_access'
+          AND unified.kind <> 'me'
+      )
+  )
+  AND (
+      $4::boolean = false
+      OR NOT (unified.kind = 'decision' AND unified.action = 'read')
+  )
+ORDER BY 1, 2, 3, 4
+LIMIT 1000
+`
+
+type ListUnifiedAuditMachineActorsParams struct {
+	FromTs               pgtype.Timestamptz `json:"from_ts"`
+	ToTs                 pgtype.Timestamptz `json:"to_ts"`
+	CallerIsPrivileged   bool               `json:"caller_is_privileged"`
+	ExcludeReadTelemetry bool               `json:"exclude_read_telemetry"`
+}
+
+type ListUnifiedAuditMachineActorsRow struct {
+	ActorID     string `json:"actor_id"`
+	Kind        string `json:"kind"`
+	TargetType  string `json:"target_type"`
+	RequestPath string `json:"request_path"`
+}
+
+// #2414 — the machine and system actors (`system`, `system:<process>`,
+// `oauth_client:<id>`) that appear in the tenant's activity in a window,
+// for the Activity page's actor picker. A person or API key is listed
+// from /v1/people instead, so only these shapes are returned.
+//
+// The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+// what the visibility rules read: the same window, the slice 270
+// non-privileged predicate and the slice 669 read-telemetry predicate.
+// One row per (actor, kind, target_type, request_path), so the handler
+// applies the #2173 module filter exactly as it does to the feed, and an
+// actor seen only in rows the caller may not see is not listed.
+// `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
+// to one query and not the other.
+//
+// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
+// atlas_app and takes no tenant parameter.
+func (q *Queries) ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]ListUnifiedAuditMachineActorsRow, error) {
+	rows, err := q.db.Query(ctx, listUnifiedAuditMachineActors,
+		arg.FromTs,
+		arg.ToTs,
+		arg.CallerIsPrivileged,
+		arg.ExcludeReadTelemetry,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnifiedAuditMachineActorsRow
+	for rows.Next() {
+		var i ListUnifiedAuditMachineActorsRow
+		if err := rows.Scan(
+			&i.ActorID,
+			&i.Kind,
+			&i.TargetType,
+			&i.RequestPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

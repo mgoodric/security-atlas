@@ -10,7 +10,7 @@
 // caller, so this page never decides who may approve. The caller's own
 // requests appear only when the organisation allows self-approval, and
 // are marked. The page shares its query with the sidebar badge
-// (APPROVALS_QUERY_KEY) and refetches on every visit, so returning here
+// (approvalsQuery, keyed by tenant) and refetches on every visit, so returning here
 // after an approval shows the list and the badge one shorter.
 
 import { useQuery } from "@tanstack/react-query";
@@ -22,18 +22,20 @@ import { Badge } from "@/components/ui/badge";
 import { Person } from "@/components/ui/person";
 import { Timestamp } from "@/components/ui/timestamp";
 import {
-  APPROVALS_QUERY_KEY,
+  approvalsQuery,
   approvalHref,
   fetchApprovals,
   groupApprovals,
   type ApprovalsResponse,
 } from "@/lib/api/approvals";
+import { useSessionTenant } from "@/components/session-tenant-context";
 import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
 
 export default function ApprovalsPage() {
+  const tenantId = useSessionTenant();
   const q = useQuery<ApprovalsResponse>({
-    queryKey: APPROVALS_QUERY_KEY,
+    ...approvalsQuery(tenantId),
     queryFn: fetchApprovals,
     refetchOnMount: "always",
     retry: false,
@@ -54,7 +56,7 @@ export default function ApprovalsPage() {
       }
       bodyClassName="space-y-6"
     >
-      {q.isLoading ? (
+      {q.isPending ? (
         <p
           className="text-sm text-muted-foreground"
           data-testid="approvals-loading"
