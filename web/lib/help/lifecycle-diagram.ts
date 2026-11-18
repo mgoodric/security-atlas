@@ -133,6 +133,11 @@ export function parseStateDiagram(source: string): LifecycleDiagram {
   let header = false;
   for (const raw of source.split("\n")) {
     const line = raw.trim();
+    // `%%{…}%%` is a Mermaid init directive, not a comment: it can set
+    // `securityLevel` or `htmlLabels` for the render (#2429).
+    if (/^%%\s*\{/.test(line) || line.includes("%%{")) {
+      throw new Error(`a Mermaid directive is not allowed: ${line}`);
+    }
     if (line === "" || line.startsWith("%%")) continue;
     if (!header) {
       if (line !== "stateDiagram-v2") {
