@@ -481,7 +481,7 @@ LIMIT sqlc.arg('limit_n')::integer;
 -- for the Activity page's actor picker. A person or API key is listed
 -- from /v1/people instead, so only these shapes are returned.
 --
--- The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+-- The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
 -- what the visibility rules read: the same window, the slice 270
 -- non-privileged predicate and the slice 669 read-telemetry predicate.
 -- One row per (actor, kind, target_type, request_path), so the handler
@@ -541,6 +541,9 @@ WITH unified AS (
     UNION ALL
     SELECT occurred_at, actor, 'module_access', '', '', ''
     FROM member_module_access_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'vendor', action_type, '', ''
+    FROM vendor_audit_log
 )
 SELECT DISTINCT
     unified.actor_id::text     AS actor_id,

@@ -3348,7 +3348,7 @@ type Querier interface {
 	// for the Activity page's actor picker. A person or API key is listed
 	// from /v1/people instead, so only these shapes are returned.
 	//
-	// The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+	// The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
 	// what the visibility rules read: the same window, the slice 270
 	// non-privileged predicate and the slice 669 read-telemetry predicate.
 	// One row per (actor, kind, target_type, request_path), so the handler
