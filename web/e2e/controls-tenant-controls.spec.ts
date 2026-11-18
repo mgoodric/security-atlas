@@ -44,7 +44,7 @@ const myControls = [
     id: CONTROL_B,
     title: "Encryption at rest (1741)",
     control_family: "Cryptographic Protections",
-    scf_id: "CRY-05",
+    scf_id: "CRY-07",
     lifecycle_state: "active",
     bundle_id: "ctrl-1741-b",
     scf_anchor_id: null,
