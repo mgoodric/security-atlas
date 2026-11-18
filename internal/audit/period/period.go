@@ -254,6 +254,16 @@ func (s *Store) Freeze(ctx context.Context, id uuid.UUID, frozenBy string, at ti
 			return ErrAlreadyFrozen
 		}
 
+		// #2078: serialise against framework-scope activation on this
+		// framework version, so an activation cannot read "no freeze"
+		// while this freeze commits.
+		if err := q.LockFrameworkScopeFreeze(ctx, dbx.LockFrameworkScopeFreezeParams{
+			TenantID:           pgUUID(tenantID),
+			FrameworkVersionID: existing.FrameworkVersionID,
+		}); err != nil {
+			return fmt.Errorf("lock framework scope freeze: %w", err)
+		}
+
 		// Compute the content commitment hash BEFORE the UPDATE so a
 		// hash-computation failure aborts the freeze without partial
 		// state. Ingredients: sorted evidence_record_ids visible at

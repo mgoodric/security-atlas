@@ -378,6 +378,8 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusConflict, "scope must be in `approved` to activate")
 		case errors.Is(err, frameworkscope.ErrAnotherActivated):
 			httpresp.WriteError(w, http.StatusConflict, "another scope is already activated for this framework version")
+		case errors.Is(err, frameworkscope.ErrEffectiveBeforeFreeze):
+			httpresp.WriteError(w, http.StatusConflict, "effective_from must be after the freeze of every audit period on this framework version; a frozen period cannot be changed")
 		default:
 			httperr.WriteInternal(w, r, "activate framework_scope", err)
 		}

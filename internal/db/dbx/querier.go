@@ -44,7 +44,8 @@ type Querier interface {
 	// (timestamptz). The application supersedes the prior `activated` row in
 	// the same transaction by calling SupersedePreviousActivated below; both
 	// statements run inside one tx so the partial unique index never sees
-	// two `activated` rows at once.
+	// two `activated` rows at once. activated_at is stamped by the
+	// framework_scopes_stamp_activated_at trigger (#2078).
 	ActivateFrameworkScope(ctx context.Context, arg ActivateFrameworkScopeParams) (FrameworkScope, error)
 	AddIncidentControlLink(ctx context.Context, arg AddIncidentControlLinkParams) (IncidentControl, error)
 	AddIncidentEvidenceLink(ctx context.Context, arg AddIncidentEvidenceLinkParams) (IncidentEvidenceLink, error)
@@ -938,6 +939,9 @@ type Querier interface {
 	// supplied timestamp. The row whose effective_from <= as_of AND (the row was
 	// not yet superseded at as_of OR was never superseded).
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
+	// A backdated effective_from counts here, for planning. A read pinned to a
+	// frozen audit period also requires activated_at <= frozen_at (#2078; see
+	// ListExcludedRequirementsAsOfForExport).
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
 	// The actor of a revision's most recent approval, for the SoA export
@@ -1010,6 +1014,10 @@ type Querier interface {
 	// The latest snapshot for one specific calendar day — used by the on-ingest
 	// refresh to decide whether today already has a snapshot, and by tests.
 	GetLatestDriftSnapshotForDay(ctx context.Context, arg GetLatestDriftSnapshotForDayParams) (ControlDriftSnapshot, error)
+	// The latest frozen_at of the tenant's frozen audit periods on a framework
+	// version, or NULL when none is frozen. Activate refuses an effective_from
+	// at or before it (#2078).
+	GetLatestFrozenAtForFrameworkVersion(ctx context.Context, arg GetLatestFrozenAtForFrameworkVersionParams) (pgtype.Timestamptz, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
 	// #2172: module access for each member. Every query runs under
 	// tenancy.ApplyTenant as atlas_app; the explicit tenant_id predicate is the
@@ -2413,7 +2421,7 @@ type Querier interface {
 	// The requirements excluded in the framework-scope revision that was in
 	// force for a framework version at the audit period's frozen_at. The
 	// revision is chosen exactly as GetFrameworkScopeAsOf chooses it (the
-	// revision active at that time); decisions on an activated or superseded
+	// revision active at that time, activated by then, #2078); decisions on an activated or superseded
 	// revision are frozen, so its rows are exactly what applied at the freeze.
 	// A requirement excluded only after the freeze lives on a later revision
 	// and is not returned. RLS scopes every table to the caller tenant; the
@@ -3362,6 +3370,12 @@ type Querier interface {
 	// hashtext maps the hex key into it, and a hash collision only
 	// over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// Serialises framework-scope activation against audit-period freeze on one
+	// (tenant, framework version) for the rest of the transaction (#2078).
+	// Activate takes it before reading the latest freeze; Freeze takes it
+	// before writing frozen_at. Namespace 10 is
+	// advisorylock.FrameworkScopeFreeze.
+	LockFrameworkScopeFreeze(ctx context.Context, arg LockFrameworkScopeFreezeParams) error
 	// The applicability carry-over's target (#2179): a draft or review revision
 	// of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
 	// (approved, activated, superseded) or unknown revision.

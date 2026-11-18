@@ -57,6 +57,12 @@ const (
 	// audit row's before value is the state its write replaced (#2329,
 	// LockTenantLLMRouting). Key: hashtext(tenant uuid text).
 	TenantLLMRouting Namespace = 9
+	// FrameworkScopeFreeze serialises framework-scope activation against
+	// audit-period freeze on one framework version, so an activation never
+	// reads "no freeze" while a freeze commits (#2078,
+	// LockFrameworkScopeFreeze). Key: hashtext(tenant uuid || '/' ||
+	// framework_version uuid).
+	FrameworkScopeFreeze Namespace = 10
 )
 
 // Keys within IntegrationTestSeed. Distinct values; never reuse one.
@@ -87,6 +93,7 @@ func All() []Entry {
 		{AggregationKey, "aggregation_key"},
 		{IntegrationTestSeed, "integration_test_seed"},
 		{TenantLLMRouting, "tenant_llm_routing"},
+		{FrameworkScopeFreeze, "framework_scope_freeze"},
 	}
 }
 
