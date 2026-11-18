@@ -21,9 +21,18 @@
 // see it) or that its module hides (404, the module switched off) shows
 // "not available" in place, never an error page. The picker is UI only:
 // the server still checks link caps and tenant ownership.
+//
+// #2432 adds evidence for the questionnaire citation picker: the
+// tenant's newest records (`/api/evidence`) as suggestions, and once two
+// characters are typed, a debounced server-side search of the whole
+// ledger (`/api/search?types=evidence`). Every record list is cached under
+// the session's tenant, so one tenant's titles never show under another.
+// When a picker lists several kinds and the server refuses one (a viewer
+// asking for evidence), the others still list and the refused one is
+// named "not available"; nothing from its list is shown.
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Combobox,
@@ -33,21 +42,26 @@ import {
   ComboboxList,
   ComboboxPopup,
 } from "@/components/ui/combobox";
+import { useSessionTenant } from "@/components/session-tenant-context";
 import { usePeopleDirectory } from "@/components/ui/person";
 import { APIError } from "@/lib/api/base";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
+import { fetchEvidenceList, searchEvidence } from "@/lib/api/evidence";
 import { fetchPoliciesList } from "@/lib/api/policies";
 import { fetchRisksListWithRollUps } from "@/lib/api/risks";
 import {
   controlOptions,
   credentialOptions,
+  evidencePickerOptions,
   frameworkOptions,
   KIND_PLURAL,
   matchesQuery,
+  notListedError,
   parsePastedId,
   policyOptions,
   riskOptions,
   toggleSelection,
+  uniqueOptions,
   userOptions,
   type EntityKind,
   type EntityOption,
@@ -69,12 +83,43 @@ function isUnavailable(err: unknown): boolean {
   return err instanceof APIError && (err.status === 403 || err.status === 404);
 }
 
-function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
+// The newest evidence records the picker suggests before a search: the
+// endpoint's page cap.
+const EVIDENCE_LIMIT = 200;
+// Typed text searches evidence server-side once it is this long (the
+// search endpoint's minimum), after this pause.
+const SEARCH_MIN_CHARS = 2;
+const SEARCH_DEBOUNCE_MS = 250;
+
+async function fetchEvidenceForPicker() {
+  return (await fetchEvidenceList({ limit: EVIDENCE_LIMIT })).evidence;
+}
+
+// useDebounced returns `value` once it has stopped changing for `ms`.
+function useDebounced(value: string, ms: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
+// The evidence list holds only the newest records, so once the caller
+// types, the whole ledger is searched server-side (searchEvidence).
+function useEntityOptions(
+  kinds: readonly EntityKind[],
+  module?: string,
+  query = "",
+) {
   const wantsFrameworks = kinds.includes("framework");
   const wantsPeople = kinds.includes("user") || kinds.includes("credential");
   const wantsControls = kinds.includes("control");
   const wantsRisks = kinds.includes("risk");
   const wantsPolicies = kinds.includes("policy");
+  const wantsEvidence = kinds.includes("evidence");
+  // Record lists are keyed by tenant and not read while it is unknown.
+  const tenantId = useSessionTenant() ?? "";
   const frameworks = useQuery({
     queryKey: ["entity-picker", "framework-versions"],
     queryFn: fetchFrameworkVersions,
@@ -85,27 +130,55 @@ function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
   // Refused lists are not retried: a 403 or 404 will not change.
   const retry = (n: number, err: unknown) => !isUnavailable(err) && n < 2;
   const controls = useQuery({
-    queryKey: ["entity-picker", "controls"],
+    queryKey: ["entity-picker", "controls", tenantId],
     queryFn: fetchTenantControlsList,
     staleTime: 30_000,
-    enabled: wantsControls,
+    enabled: wantsControls && tenantId !== "",
     retry,
   });
   const risks = useQuery({
-    queryKey: ["entity-picker", "risks"],
+    queryKey: ["entity-picker", "risks", tenantId],
     queryFn: fetchRisksListWithRollUps,
     staleTime: 30_000,
-    enabled: wantsRisks,
+    enabled: wantsRisks && tenantId !== "",
     retry,
   });
   const policies = useQuery({
-    queryKey: ["entity-picker", "policies"],
+    queryKey: ["entity-picker", "policies", tenantId],
     queryFn: fetchPoliciesList,
     staleTime: 30_000,
-    enabled: wantsPolicies,
+    enabled: wantsPolicies && tenantId !== "",
+    retry,
+  });
+  const evidence = useQuery({
+    queryKey: ["entity-picker", "evidence", tenantId],
+    queryFn: fetchEvidenceForPicker,
+    staleTime: 30_000,
+    enabled: wantsEvidence && tenantId !== "",
+    retry,
+  });
+  const searchFor = useDebounced(query.trim(), SEARCH_DEBOUNCE_MS);
+  const evidenceSearch = useQuery({
+    queryKey: ["entity-picker", "evidence-search", tenantId, searchFor],
+    queryFn: () => searchEvidence(searchFor),
+    staleTime: 30_000,
+    enabled:
+      wantsEvidence &&
+      tenantId !== "" &&
+      searchFor.length >= SEARCH_MIN_CHARS &&
+      // A refused list is not searched either.
+      !isUnavailable(evidence.error),
     retry,
   });
 
+  // Evidence is refused when either its list or its search is. The
+  // refused kind's error is the one counted below; a search that fails
+  // for any other reason is only a failed search (searchFailed), since
+  // the list itself loaded.
+  const evidenceError =
+    [evidence.error, evidenceSearch.error].find(isUnavailable) ??
+    evidence.error;
+  const evidenceRefused = isUnavailable(evidenceError);
   const options = useMemo(() => {
     const out: EntityOption[] = [];
     if (wantsFrameworks) out.push(...frameworkOptions(frameworks.data ?? []));
@@ -123,7 +196,17 @@ function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
     if (wantsPolicies) {
       out.push(...policyOptions(policies.data?.policies ?? []));
     }
-    return out;
+    if (wantsEvidence) {
+      out.push(
+        ...evidencePickerOptions({
+          refused: evidenceRefused,
+          listed: evidence.data,
+          found: evidenceSearch.data,
+          searchFor,
+        }),
+      );
+    }
+    return uniqueOptions(out);
   }, [
     kinds,
     wantsFrameworks,
@@ -131,31 +214,64 @@ function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
     wantsControls,
     wantsRisks,
     wantsPolicies,
+    wantsEvidence,
     frameworks.data,
     people.data,
     controls.data,
     risks.data,
     policies.data,
+    evidence.data,
+    evidenceSearch.data,
+    evidenceRefused,
+    searchFor,
   ]);
 
-  const records = [
-    wantsControls ? controls : null,
-    wantsRisks ? risks : null,
-    wantsPolicies ? policies : null,
-  ].filter((q) => q !== null);
+  const records = (
+    [
+      ["control", wantsControls, controls.isPending, controls.error],
+      ["risk", wantsRisks, risks.isPending, risks.error],
+      ["policy", wantsPolicies, policies.isPending, policies.error],
+      ["evidence", wantsEvidence, evidence.isPending, evidenceError],
+    ] as const
+  ).filter(([, wanted]) => wanted);
   const isLoading =
     (wantsFrameworks && frameworks.isPending) ||
     (wantsPeople && people.isPending) ||
-    records.some((q) => q.isPending);
+    records.some(([, , pending]) => pending);
+  // The kinds the server refused (403 or 404). Decided from the answer,
+  // never from the caller's role as the browser sees it.
+  const unavailableKinds: EntityKind[] = records
+    .filter(([, , , error]) => isUnavailable(error))
+    .map(([kind]) => kind);
   const unavailable =
-    records.length > 0 && records.every((q) => isUnavailable(q.error));
+    records.length > 0 && unavailableKinds.length === records.length;
   // The people endpoint answers null (not an error) to a caller it refuses.
   const isError =
     !unavailable &&
     ((wantsFrameworks && frameworks.isError) ||
       (wantsPeople && !people.isPending && !people.data) ||
-      records.some((q) => q.isError && !isUnavailable(q.error)));
-  return { options, isLoading, isError, unavailable };
+      records.some(([, , , error]) => error && !isUnavailable(error)));
+  // A search is due (still debouncing) or on its way.
+  const isSearching =
+    wantsEvidence &&
+    !evidenceRefused &&
+    query.trim().length >= SEARCH_MIN_CHARS &&
+    (searchFor !== query.trim() || evidenceSearch.isFetching);
+  const searchFailed =
+    wantsEvidence &&
+    !evidenceRefused &&
+    !isSearching &&
+    evidenceSearch.isError &&
+    query.trim().length >= SEARCH_MIN_CHARS;
+  return {
+    options,
+    isLoading,
+    isError,
+    unavailable,
+    unavailableKinds,
+    isSearching,
+    searchFailed,
+  };
 }
 
 export function EntityPicker({
@@ -170,6 +286,8 @@ export function EntityPicker({
   extraOptions,
   describedBy,
   module,
+  onPick,
+  listedOnly = false,
 }: {
   // What the picker lists and which pasted IDs it accepts.
   kinds: readonly EntityKind[];
@@ -190,8 +308,16 @@ export function EntityPicker({
   // then lists only the members who can work in it (the platform
   // filters `/v1/people?module=`).
   module?: string;
+  // #2432: called with the listed option each time one is picked, for a
+  // caller that needs more than its ID (the citation's kind and title).
+  onPick?: (option: EntityOption) => void;
+  // Accept only listed options: a pasted ID the list does not hold is
+  // an inline error rather than a selection.
+  listedOnly?: boolean;
 }) {
-  const fetched = useEntityOptions(kinds, module);
+  // What the caller has typed, which an evidence picker searches for.
+  const [typed, setTyped] = useState("");
+  const fetched = useEntityOptions(kinds, module, typed);
   const options = useMemo(
     () => [...(extraOptions ?? []), ...fetched.options],
     [extraOptions, fetched.options],
@@ -225,6 +351,8 @@ export function EntityPicker({
 
   function select(next: string) {
     setPasteError(null);
+    const picked = next ? options.find((o) => o.value === next) : undefined;
+    if (picked) onPick?.(picked);
     if (next !== value) onChange(next);
   }
 
@@ -247,14 +375,14 @@ export function EntityPicker({
       return;
     }
     const parsed = parsePastedId(kinds, t);
-    if (parsed.ok) {
+    if (parsed.ok && !listedOnly) {
       select(parsed.id);
       return;
     }
     // An invalid entry clears the selection so the form cannot submit
     // the previous ID behind text that no longer names it.
     select("");
-    setPasteError(parsed.error);
+    setPasteError(parsed.ok ? notListedError(kinds, t) : parsed.error);
   }
 
   const shownError = pasteError ?? error;
@@ -271,6 +399,7 @@ export function EntityPicker({
         inputValue={input}
         onInputValueChange={(next: string) => {
           setInput(next);
+          setTyped(next);
           setPasteError(null);
         }}
         filter={(item: EntityOption, query: string) =>
@@ -318,11 +447,19 @@ export function EntityPicker({
           <ComboboxEmpty>
             {fetched.isLoading
               ? "Loading…"
-              : fetched.unavailable
-                ? unavailableText(kinds)
-                : fetched.isError
-                  ? "The list could not be loaded. Paste an ID instead."
-                  : "No matches. Paste an ID to use one not listed."}
+              : fetched.isSearching
+                ? "Searching…"
+                : fetched.unavailable
+                  ? unavailableText(kinds)
+                  : fetched.isError
+                    ? listedOnly
+                      ? "The list could not be loaded. Reload the page to try again."
+                      : "The list could not be loaded. Paste an ID instead."
+                    : fetched.searchFailed
+                      ? "The search could not be completed. Try again."
+                      : listedOnly
+                        ? "No matches."
+                        : "No matches. Paste an ID to use one not listed."}
           </ComboboxEmpty>
           <ComboboxList>
             {(o: EntityOption) => (
@@ -342,6 +479,7 @@ export function EntityPicker({
           </ComboboxList>
         </ComboboxPopup>
       </Combobox>
+      <PartlyUnavailable fetched={fetched} testId={testId} />
       {shownError ? (
         <p
           id={errorId}
@@ -358,9 +496,33 @@ export function EntityPicker({
 
 function unavailableText(kinds: readonly EntityKind[]): string {
   const noun = kinds.map((k) => KIND_PLURAL[k]).join(" and ");
+  // "Evidence" is a mass noun: "Evidence is", but "Controls are".
+  const verb = kinds.length === 1 && kinds[0] === "evidence" ? "is" : "are";
   return `${noun.charAt(0).toUpperCase()}${noun.slice(
     1,
-  )} are not available to you.`;
+  )} ${verb} not available to you.`;
+}
+
+// PartlyUnavailable names the kinds the server refused when the picker
+// still lists others. A picker refused everything says so in its list.
+function PartlyUnavailable({
+  fetched,
+  testId,
+}: {
+  fetched: { unavailable: boolean; unavailableKinds: readonly EntityKind[] };
+  testId: string;
+}) {
+  if (fetched.unavailable || fetched.unavailableKinds.length === 0) {
+    return null;
+  }
+  return (
+    <p
+      className="mt-1 text-xs text-muted-foreground"
+      data-testid={`${testId}-unavailable`}
+    >
+      {unavailableText(fetched.unavailableKinds)}
+    </p>
+  );
 }
 
 // EntityMultiPicker picks several records of one or more kinds: a search
@@ -403,8 +565,8 @@ export function EntityMultiPicker({
   error?: string;
   errorId?: string;
 }) {
-  const fetched = useEntityOptions(kinds);
   const [filter, setFilter] = useState("");
+  const fetched = useEntityOptions(kinds, undefined, filter);
   const filtered = useMemo(
     () => fetched.options.filter((o) => matchesQuery(o, filter)),
     [fetched.options, filter],
@@ -469,6 +631,7 @@ export function EntityMultiPicker({
         ) : null}
       </div>
 
+      <PartlyUnavailable fetched={fetched} testId={testId} />
       {fetched.isLoading ? (
         <p
           className="text-sm text-muted-foreground"
