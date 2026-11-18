@@ -731,12 +731,17 @@ function ResultGroup({
   // has not yet been expanded to the contract's ceiling.
   const canShowAll = total > rows.length && rows.length < SEARCH_MAX_LIMIT;
   return (
+    // role="group" with `ul`/`li` as role="none": a listbox may own only
+    // groups and options, and an option needs a listbox or group parent
+    // (axe aria-required-children / aria-required-parent, #2397).
     <div
       data-testid={`global-search-group-${type}`}
+      role="group"
+      aria-labelledby={`global-search-group-label-${type}`}
       className="border-b border-border last:border-b-0"
     >
       <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-        <span>
+        <span id={`global-search-group-label-${type}`}>
           {GROUP_LABELS[type]}{" "}
           <span
             data-testid={`global-search-group-count-${type}`}
@@ -757,7 +762,7 @@ function ResultGroup({
           </button>
         ) : null}
       </div>
-      <ul className="pb-1">
+      <ul role="none" className="pb-1">
         {rows.map((hit, idx) => {
           const flatIdx = flatIndexFor(idx);
           const isActive = flatIdx === activeIndex;
@@ -765,7 +770,7 @@ function ResultGroup({
           // `aria-activedescendant` can name this row when active.
           const optionId = optionIdFor(type, hit.id);
           return (
-            <li key={hit.id}>
+            <li key={hit.id} role="none">
               <Link
                 id={optionId}
                 href={hrefForHit(hit)}
