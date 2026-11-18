@@ -316,6 +316,18 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 	// caller's tenant GUC; user_roles RLS policies fire on every
 	// statement).
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
+		// #2503: the target must be a member of the caller's tenant. An id
+		// from another tenant is a 404, and no orphan user_roles row is
+		// written for it.
+		if _, mErr := q.GetAdminUser(ctx, dbx.GetAdminUserParams{
+			TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
+			ID:       pgtype.UUID{Bytes: targetID, Valid: true},
+		}); mErr != nil {
+			if errors.Is(mErr, pgx.ErrNoRows) {
+				return errTargetNotMember
+			}
+			return fmt.Errorf("lookup target: %w", mErr)
+		}
 		// A replacement that drops admin can strand the tenant; lock the
 		// roster first and recount after (#2261).
 		guard, gErr := users.LockAdmins(ctx, q, tenantID)
@@ -344,6 +356,10 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 		}
 		return guard.Check(ctx, q)
 	})
+	if errors.Is(err, errTargetNotMember) {
+		httpresp.WriteError(w, http.StatusNotFound, "user not found")
+		return
+	}
 	if errors.Is(err, users.ErrLastAdmin) {
 		httpresp.WriteError(w, http.StatusConflict, lastAdminReason)
 		return
@@ -445,7 +461,10 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles manages its own tenant's
+	// users. Every query runs under the caller's tenant RLS, and the
+	// cross-tenant assign/revoke paths gate on super_admin before this.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}

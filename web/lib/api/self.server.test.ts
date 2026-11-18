@@ -129,12 +129,18 @@ describe("OE-549: server-side probes under a containerized topology", () => {
 
   test("admin gate resolves is_admin=true with the web port remapped (3001 external / 3000 internal)", async () => {
     const { urls } = containerNetwork({
-      "/v1/me": { body: { is_admin: true, roles: ["admin"] } },
+      "/v1/me": {
+        body: { is_admin: true, is_tenant_admin: true, roles: ["admin"] },
+      },
     });
 
     const me = await fetchAdminMe("admin-bearer");
 
-    expect(me).toEqual({ is_admin: true, roles: ["admin"] });
+    expect(me).toEqual({
+      is_admin: true,
+      is_tenant_admin: true,
+      roles: ["admin"],
+    });
     expect(urls).toEqual([`${ATLAS_BASE}/v1/me`]);
     expectNoSelfFetch(urls);
   });
@@ -146,7 +152,11 @@ describe("OE-549: server-side probes under a containerized topology", () => {
 
     const me = await fetchAdminMe("viewer-bearer");
 
-    expect(me).toEqual({ is_admin: false, roles: ["control_owner"] });
+    expect(me).toEqual({
+      is_admin: false,
+      is_tenant_admin: false,
+      roles: ["control_owner"],
+    });
     expectNoSelfFetch(urls);
   });
 
@@ -236,6 +246,7 @@ describe("OE-549: server-side probes under a containerized topology", () => {
 
     await expect(fetchAdminMe("b")).resolves.toEqual({
       is_admin: true,
+      is_tenant_admin: false,
       roles: [],
     });
     expect(urls).toEqual([`${ATLAS_BASE}/v1/me`]);
@@ -286,6 +297,20 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
   test("non-JSON 200 body denies", async () => {
     containerNetwork({ "/v1/me": { text: "<html>gateway</html>" } });
     await expect(fetchAdminMe("b")).resolves.toEqual(emptyAdminMe());
+  });
+
+  test("#2503: normalizeAdminMe admits is_tenant_admin only on a literal true", () => {
+    expect(normalizeAdminMe({ is_tenant_admin: "true" }).is_tenant_admin).toBe(
+      false,
+    );
+    expect(normalizeAdminMe({ is_tenant_admin: 1 }).is_tenant_admin).toBe(
+      false,
+    );
+    expect(normalizeAdminMe({ is_tenant_admin: true }).is_tenant_admin).toBe(
+      true,
+    );
+    // A tenant admin is not a super-admin.
+    expect(normalizeAdminMe({ is_tenant_admin: true }).is_admin).toBe(false);
   });
 
   test("normalizeAdminMe never admits on a soft-truthy is_admin", () => {

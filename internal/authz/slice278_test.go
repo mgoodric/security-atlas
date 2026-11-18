@@ -43,17 +43,23 @@ var slice278DemoPaths = []struct {
 // slice278RolePairs is the role × want-allow matrix. Admin is the
 // only canonical role that admits. Auditor / grc_engineer /
 // control_owner / viewer / (no role) all deny.
+//
+// #2503: the demo segment is platform, so only an admin credential
+// (is_admin_credential, cred.IsAdmin) admits; a tenant admin by role
+// alone is denied.
 var slice278RolePairs = []struct {
-	name  string
-	roles []authz.Role
-	want  bool
+	name      string
+	roles     []authz.Role
+	adminCred bool
+	want      bool
 }{
-	{"admin", []authz.Role{authz.RoleAdmin}, true},
-	{"auditor", []authz.Role{authz.RoleAuditor}, false},
-	{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}, false},
-	{"control_owner", []authz.Role{authz.RoleControlOwner}, false},
-	{"viewer", []authz.Role{authz.RoleViewer}, false},
-	{"no_role", []authz.Role{}, false},
+	{"admin", []authz.Role{authz.RoleAdmin}, true, true},
+	{"tenant_admin_by_role", []authz.Role{authz.RoleAdmin}, false, false},
+	{"auditor", []authz.Role{authz.RoleAuditor}, false, false},
+	{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}, false, false},
+	{"control_owner", []authz.Role{authz.RoleControlOwner}, false, false},
+	{"viewer", []authz.Role{authz.RoleViewer}, false, false},
+	{"no_role", []authz.Role{}, false, false},
 }
 
 // TestSlice278_DemoSeedAdmitMatrix pins the per-role admit matrix
@@ -72,6 +78,7 @@ func TestSlice278_DemoSeedAdmitMatrix(t *testing.T) {
 					User: authz.UserInput{
 						ID:    "user-" + role.name + "-" + path.name,
 						Roles: role.roles,
+						Attrs: map[string]any{"is_admin_credential": role.adminCred},
 					},
 					TenantID: "00000000-0000-0000-0000-000000000278",
 					Action:   path.action,
