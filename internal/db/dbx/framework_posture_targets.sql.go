@@ -11,6 +11,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const carryFrameworkPostureTarget = `-- name: CarryFrameworkPostureTarget :one
+INSERT INTO framework_posture_targets (
+    tenant_id, framework_version_id, target_value, warning_threshold,
+    critical_threshold, direction, updated_by
+)
+SELECT src.tenant_id, $1, src.target_value,
+       src.warning_threshold, src.critical_threshold, src.direction,
+       $2
+FROM framework_posture_targets src
+WHERE src.tenant_id = $3
+  AND src.framework_version_id = $4
+ON CONFLICT (tenant_id, framework_version_id) DO NOTHING
+RETURNING tenant_id, framework_version_id, target_value, warning_threshold,
+          critical_threshold, direction, updated_by, created_at, updated_at
+`
+
+type CarryFrameworkPostureTargetParams struct {
+	ToVersionID   pgtype.UUID `json:"to_version_id"`
+	Actor         string      `json:"actor"`
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	FromVersionID pgtype.UUID `json:"from_version_id"`
+}
+
+// #2406: copy the tenant's target on the source version to the destination
+// version, only when the destination has none. No row back means nothing
+// was copied: the source has no target, or the destination already has
+// one (left alone, so a re-run writes nothing).
+func (q *Queries) CarryFrameworkPostureTarget(ctx context.Context, arg CarryFrameworkPostureTargetParams) (FrameworkPostureTarget, error) {
+	row := q.db.QueryRow(ctx, carryFrameworkPostureTarget,
+		arg.ToVersionID,
+		arg.Actor,
+		arg.TenantID,
+		arg.FromVersionID,
+	)
+	var i FrameworkPostureTarget
+	err := row.Scan(
+		&i.TenantID,
+		&i.FrameworkVersionID,
+		&i.TargetValue,
+		&i.WarningThreshold,
+		&i.CriticalThreshold,
+		&i.Direction,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const frameworkVersionScopeState = `-- name: FrameworkVersionScopeState :one
 SELECT
     fv.id,
@@ -132,6 +181,31 @@ func (q *Queries) InsertFrameworkPostureTargetAudit(ctx context.Context, arg Ins
 	return err
 }
 
+const insertFrameworkPostureTargetCarryAudit = `-- name: InsertFrameworkPostureTargetCarryAudit :exec
+INSERT INTO framework_posture_target_audit_log (
+    tenant_id, framework_version_id, action, before, after, actor
+) VALUES ($1, $2, 'carry_over', NULL, $3, $4)
+`
+
+type InsertFrameworkPostureTargetCarryAuditParams struct {
+	TenantID           pgtype.UUID `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+	After              []byte      `json:"after"`
+	Actor              string      `json:"actor"`
+}
+
+// #2406: the audit row of a carried target. before is NULL: the version
+// had no target.
+func (q *Queries) InsertFrameworkPostureTargetCarryAudit(ctx context.Context, arg InsertFrameworkPostureTargetCarryAuditParams) error {
+	_, err := q.db.Exec(ctx, insertFrameworkPostureTargetCarryAudit,
+		arg.TenantID,
+		arg.FrameworkVersionID,
+		arg.After,
+		arg.Actor,
+	)
+	return err
+}
+
 const listFrameworkPostureTargets = `-- name: ListFrameworkPostureTargets :many
 
 SELECT tenant_id, framework_version_id, target_value, warning_threshold,
@@ -164,6 +238,39 @@ func (q *Queries) ListFrameworkPostureTargets(ctx context.Context, tenantID pgty
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFrameworkVersionMigrationSources = `-- name: ListFrameworkVersionMigrationSources :many
+SELECT DISTINCT to_version_id, from_version_id
+FROM framework_version_migrations
+ORDER BY to_version_id, from_version_id
+`
+
+type ListFrameworkVersionMigrationSourcesRow struct {
+	ToVersionID   pgtype.UUID `json:"to_version_id"`
+	FromVersionID pgtype.UUID `json:"from_version_id"`
+}
+
+// #2406: the distinct (to, from) version pairs of the version-migration
+// queue (ADR 0019), for the prior-target prefill. Catalog rows: no tenant.
+func (q *Queries) ListFrameworkVersionMigrationSources(ctx context.Context) ([]ListFrameworkVersionMigrationSourcesRow, error) {
+	rows, err := q.db.Query(ctx, listFrameworkVersionMigrationSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFrameworkVersionMigrationSourcesRow
+	for rows.Next() {
+		var i ListFrameworkVersionMigrationSourcesRow
+		if err := rows.Scan(&i.ToVersionID, &i.FromVersionID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
