@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -74,6 +75,13 @@ func (r *DBRolesResolver) RolesFor(ctx context.Context, tenantID, userID string)
 	var user any
 	if u, ok := identity.UserID(key); ok {
 		user = u.String()
+	} else if _, err := uuid.Parse(strings.TrimPrefix(key, "user:")); err == nil {
+		// uuid-shaped but not canonical (upper-case, braced, urn, 32-hex,
+		// the nil uuid): it names no user, so $3 would be NULL and the
+		// deactivation guard would never fire, while user_id = $2 could
+		// still match a row stored in exactly that text. No path writes
+		// such a row; fail closed rather than rely on that (#2483).
+		return nil, nil
 	}
 
 	tx, err := r.pool.Begin(ctx)

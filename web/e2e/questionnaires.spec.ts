@@ -2,8 +2,8 @@
 //
 // Walks the slice 263 happy path against the new /questionnaires +
 // /questionnaires/{id} routes (Stage A + Stage C). The slice consumes
-// six BFF endpoints under /api/questionnaires/* + the slice-268
-// /api/search endpoint; all are mocked via `page.route()` here so the
+// six BFF endpoints under /api/questionnaires/* + the cite picker's
+// /api/controls-list and /api/evidence (#2432); all are mocked via `page.route()` here so the
 // spec is deterministic across CI runs without requiring a new SQL
 // fixture (the slice 155 backend doesn't ship one for the demo
 // tenant).
@@ -28,6 +28,15 @@
 // / route-coverage race that slice 254 ran into, quarantine the
 // failing assertion with test.skip + file a spillover slice; do NOT
 // over-rotate on Playwright timing here.
+//
+// #2432 — the cite field is the shared entity picker over the tenant's
+// controls and evidence. The specs below the happy path cover a refused
+// evidence list (403, "not available", nothing from evidence on the
+// page), labelled options (no raw IDs or enum values) and axe with the
+// list open.
+
+import AxeBuilder from "@axe-core/playwright";
+import type { Page, Route } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 
@@ -36,6 +45,122 @@ const Q_NAME = "Acme Corp Security Diligence";
 const QUESTION_ID = "00000000-0000-0000-0000-0000000Q11Q1";
 const ANCHOR_ID = "IAC-37";
 const EVIDENCE_ID = "00000000-0000-0000-0000-0000000ev01";
+// Neutral test strings (P0-A9).
+const CITE_EVIDENCE_ID = "e7e7e7e7-0000-4000-8000-000000002432";
+const CITE_CONTROL_ID = "c7c7c7c7-0000-4000-8000-000000002432";
+const EVIDENCE_KIND = "okta.workforce_policy";
+const EVIDENCE_TITLE = `${EVIDENCE_KIND} · 2026-11-01`;
+const CONTROL_TITLE = "Multi-factor authentication";
+const UUID_TEXT =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+async function json(route: Route, status: number, body: unknown) {
+  await route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
+}
+
+// An evidence record older than the newest 200 the picker suggests:
+// only the server-side search finds it.
+const OLD_EVIDENCE_ID = "e8e8e8e8-0000-4000-8000-000000002432";
+const OLD_EVIDENCE_TITLE = "legacy.backup_restore_test · BCD-11";
+
+// newestEvidence is a full first page: 200 records, none of them the
+// old one.
+function newestEvidence(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    evidence_id: `e9e9e9e9-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    evidence_kind: "aws.iam.mfa_status",
+    observed_at: "2026-11-17T09:00:00Z",
+    source: null,
+    content_hash: "sha256:test",
+    scope_cell: null,
+    result: "pass",
+  }));
+}
+
+// mockCiteLists serves the cite picker's two lists and the evidence
+// search. `evidenceStatus` 403 is what the platform answers a role that
+// cannot read evidence; search then lists evidence in partial_types.
+async function mockCiteLists(
+  page: Page,
+  evidenceStatus = 200,
+  evidence: unknown[] | null = null,
+) {
+  await page.route(
+    (url) => url.pathname === "/api/search",
+    (route, req) => {
+      const q = new URL(req.url()).searchParams.get("q") ?? "";
+      if (evidenceStatus !== 200) {
+        return json(route, 200, {
+          hits: [],
+          count: 0,
+          groups: [],
+          partial_types: ["evidence"],
+        });
+      }
+      const hits = q.toLowerCase().startsWith("leg")
+        ? [
+            {
+              id: OLD_EVIDENCE_ID,
+              type: "evidence",
+              title: OLD_EVIDENCE_TITLE,
+              snippet: OLD_EVIDENCE_TITLE,
+              relevance_score: 1,
+            },
+          ]
+        : [];
+      return json(route, 200, {
+        hits,
+        count: hits.length,
+        groups: [{ type: "evidence", count: hits.length }],
+        partial_types: [],
+      });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === "/api/controls-list",
+    (route) =>
+      json(route, 200, {
+        controls: [
+          {
+            id: CITE_CONTROL_ID,
+            title: CONTROL_TITLE,
+            control_family: "IAC",
+            scf_id: "IAC-06",
+            lifecycle_state: "active",
+            bundle_id: "",
+          },
+        ],
+        count: 1,
+      }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/evidence",
+    (route) =>
+      evidenceStatus === 200
+        ? json(route, 200, {
+            control_id: "",
+            evidence: evidence ?? [
+              {
+                evidence_id: CITE_EVIDENCE_ID,
+                evidence_kind: EVIDENCE_KIND,
+                observed_at: "2026-11-01T09:00:00Z",
+                source: null,
+                content_hash: "sha256:test",
+                scope_cell: null,
+                result: "pass",
+              },
+            ],
+            count: evidence?.length ?? 1,
+            total: evidence ? evidence.length + 1 : 1,
+            next_cursor: evidence ? "next" : "",
+          })
+        : json(route, evidenceStatus, { error: "forbidden" }),
+  );
+}
 
 // Detail payload — slice 155 getResponse shape.
 function detailBody(answerOverride?: {
@@ -194,26 +319,8 @@ test.describe("questionnaires (slice 263)", () => {
       },
     );
 
-    // 7. Search — slice 268 unified search BFF; citation picker
-    //    consumes this. Returns one evidence row matching the query.
-    await page.route("**/api/search**", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          hits: [
-            {
-              id: EVIDENCE_ID,
-              type: "evidence",
-              title: "Okta workforce policy snapshot",
-              snippet: "MFA enforced via Okta",
-              relevance_score: 1,
-            },
-          ],
-          count: 1,
-        }),
-      });
-    });
+    // 7. The cite picker's lists (#2432): one control, one evidence.
+    await mockCiteLists(page);
 
     // 8. Export PDF — return a tiny PDF byte stream.
     await page.route(
@@ -275,24 +382,37 @@ test.describe("questionnaires (slice 263)", () => {
     const textarea = page.getByTestId("answer-editor-narrative");
     await expect(textarea).toContainText("MFA is enforced");
 
-    // === Cite one evidence — open picker, type, click result ===
-    const patchAfterCite = page.waitForResponse(
+    // === Cite one evidence — search the picker, pick the record ===
+    // The narrative PATCH may still be in flight, so wait for the one
+    // that carries the citation.
+    const patchAfterCite = page.waitForRequest(
       (r) =>
+        r.method() === "PATCH" &&
         r
           .url()
           .includes(`/api/questionnaires/${Q_ID}/answers/${QUESTION_ID}`) &&
-        r.status() === 200,
+        ((r.postDataJSON() as { citations?: unknown[] }).citations ?? [])
+          .length > 0,
       { timeout: 30_000 },
     );
-    await page.getByTestId("citation-picker-open").click();
-    await page.getByTestId("citation-picker-input").fill("okta");
-    await expect(
-      page.getByTestId("citation-picker-row-evidence").first(),
-    ).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId("citation-picker-row-evidence").first().click();
-    await patchAfterCite;
-    // The chip is now visible below the textarea.
-    await expect(page.getByTestId("citation-chip")).toBeVisible();
+    await page.getByTestId("citation-picker").fill("okta");
+    await page
+      .getByTestId("citation-picker-option")
+      .filter({ hasText: EVIDENCE_TITLE })
+      .click();
+    const citePatch = await patchAfterCite;
+    // One pick saves one citation: the record's ID, kind and title.
+    expect(
+      (citePatch.postDataJSON() as { citations: unknown[] }).citations,
+    ).toEqual([
+      { id: CITE_EVIDENCE_ID, type: "evidence", title: EVIDENCE_TITLE },
+    ]);
+    // The chip renders it, and the field clears for the next pick.
+    await expect(page.getByTestId("citation-chip")).toHaveCount(1);
+    await expect(page.getByTestId("citation-chip")).toContainText(
+      EVIDENCE_TITLE,
+    );
+    await expect(page.getByTestId("citation-picker")).toHaveValue("");
 
     // === Save-to-library — tick the checkbox, wait for the next PATCH ===
     const patchAfterLib = page.waitForResponse(
@@ -551,5 +671,149 @@ test.describe("questionnaires (slice 263)", () => {
     // The panel rendered AND the routing config resolved (local) — the banner
     // must not be present.
     await expect(page.getByTestId("cloud-routing-banner")).toHaveCount(0);
+  });
+  // #2432 — the cite field on a saved answer.
+  async function openSavedAnswer(
+    page: Page,
+    evidenceStatus: number,
+    evidence: unknown[] | null = null,
+  ) {
+    await page.route(`**/api/questionnaires/${Q_ID}`, (route) =>
+      json(
+        route,
+        200,
+        detailBody({
+          answer_value: "yes",
+          narrative: "MFA is enforced.",
+          citations: [
+            { id: CITE_CONTROL_ID, type: "controls", title: CONTROL_TITLE },
+          ],
+        }),
+      ),
+    );
+    await page.route(`**/api/questionnaires/${Q_ID}/suggestions**`, (route) =>
+      json(route, 200, { suggestions: [] }),
+    );
+    await mockCiteLists(page, evidenceStatus, evidence);
+    await page.goto(`/questionnaires/${Q_ID}`);
+    await expect(page.getByTestId("answer-editor")).toBeVisible({
+      timeout: 30_000,
+    });
+  }
+
+  test("#2432: evidence older than the newest 200 is found by server search and cited", async ({
+    authedPage: page,
+  }) => {
+    await page.route(
+      `**/api/questionnaires/${Q_ID}/answers/${QUESTION_ID}`,
+      (route, req) =>
+        json(route, 200, { id: "answ-1", ...(req.postDataJSON() as object) }),
+    );
+    // A full first page of 200 newer records; the old one is not on it.
+    await openSavedAnswer(page, 200, newestEvidence(200));
+
+    const searched = page.waitForRequest(
+      (r) =>
+        new URL(r.url()).pathname === "/api/search" &&
+        new URL(r.url()).searchParams.get("types") === "evidence",
+    );
+    const saved = page.waitForRequest(
+      (r) =>
+        r.method() === "PATCH" &&
+        ((r.postDataJSON() as { citations?: unknown[] }).citations ?? [])
+          .length === 2,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("citation-picker").fill("legacy");
+    expect(new URL((await searched).url()).searchParams.get("q")).toBe(
+      "legacy",
+    );
+    await page
+      .getByTestId("citation-picker-option")
+      .filter({ hasText: OLD_EVIDENCE_TITLE })
+      .click();
+    expect(
+      ((await saved).postDataJSON() as { citations: unknown[] }).citations,
+    ).toEqual([
+      { id: CITE_CONTROL_ID, type: "controls", title: CONTROL_TITLE },
+      { id: OLD_EVIDENCE_ID, type: "evidence", title: OLD_EVIDENCE_TITLE },
+    ]);
+    await expect(page.getByTestId("citation-chip")).toHaveCount(2);
+  });
+
+  test("#2432: a saved citation renders; picks are labelled, never raw values", async ({
+    authedPage: page,
+  }) => {
+    await openSavedAnswer(page, 200);
+    // The saved citation renders from the answer as stored.
+    await expect(page.getByTestId("citation-chip")).toHaveCount(1);
+    await expect(page.getByTestId("citation-chip")).toContainText(
+      CONTROL_TITLE,
+    );
+
+    // "i" matches both the control's title and the evidence kind.
+    await page.getByTestId("citation-picker").fill("i");
+    const listbox = page.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await expect(page.getByTestId("citation-picker-option")).toHaveCount(2);
+    const text = await listbox.innerText();
+    expect(text).toContain(EVIDENCE_TITLE);
+    expect(text).toContain("Pass");
+    // No raw IDs and no raw result enum in the open list.
+    expect(text, "the list shows a raw ID").not.toMatch(UUID_TEXT);
+    expect(text, "the list shows a raw result").not.toMatch(/\bpass\b/);
+
+    // Open-state axe on the widget itself (base-ui hides the rest of the
+    // page from assistive tech while the list is open; see
+    // entity-picker.spec.ts).
+    const open = await new AxeBuilder({ page })
+      .include('[data-testid="citation-picker-picker"]')
+      .include('[role="listbox"]')
+      .analyze();
+    expect(
+      open.violations.filter(
+        (v) => v.impact === "serious" || v.impact === "critical",
+      ),
+    ).toEqual([]);
+  });
+
+  test("#2432: a refused evidence list says not available and leaks nothing", async ({
+    authedPage: page,
+  }) => {
+    await openSavedAnswer(page, 403);
+    // The server's 403 decides it; controls still list.
+    await expect(page.getByTestId("citation-picker-unavailable")).toHaveText(
+      "Evidence is not available to you.",
+    );
+    await page.getByTestId("citation-picker").fill("i");
+    await expect(page.getByTestId("citation-picker-option")).toHaveCount(1);
+    await expect(page.getByTestId("citation-picker-option")).toContainText(
+      CONTROL_TITLE,
+    );
+    // Nothing from evidence anywhere on the page.
+    const body = await page.locator("body").innerText();
+    expect(body).not.toContain(EVIDENCE_KIND);
+    expect(body).not.toContain(CITE_EVIDENCE_ID);
+    // A pasted evidence ID is not cited behind the refusal. A real paste
+    // event, as entity-picker.spec.ts sends: the picker checks a pasted
+    // ID on paste.
+    const input = page.getByTestId("citation-picker");
+    await input.fill("");
+    await input.focus();
+    await input.evaluate((el, t) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", t);
+      el.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, CITE_EVIDENCE_ID);
+    await expect(page.getByTestId("citation-picker-error")).toContainText(
+      "is not in the list",
+    );
+    await expect(page.getByTestId("citation-chip")).toHaveCount(1);
   });
 });
