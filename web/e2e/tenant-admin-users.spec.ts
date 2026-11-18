@@ -3,8 +3,8 @@
 // read GET /v1/me server-side, so a browser route-mock cannot reach them).
 //
 //   1. A tenant admin (a user_roles 'admin' row, no super_admin) sees the
-//      sidebar Admin entry, and the admin section lists SSO, Users and
-//      Audit and none of the platform pages.
+//      sidebar Admin entry, and the admin section lists SSO, Users,
+//      Features and Audit and none of the platform pages.
 //   2. In Admin › Users it sees its own tenant's members and grants one of
 //      them a role; the platform writes it.
 //   3. Its SSO page opens (#2503), and a platform page (/admin/api-keys)
@@ -75,7 +75,7 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
     seedFromFixture("tenant-admin-users");
   });
 
-  test("the admin section shows SSO, Users and Audit, no platform pages", async ({
+  test("the admin section shows its tenant pages, no platform pages", async ({
     page,
   }) => {
     await signInAs(page, await mintTenantAdminJWT());
@@ -86,10 +86,10 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
 
     await page.goto("/admin");
     const sections = page.getByRole("navigation", { name: "Admin sections" });
-    for (const name of ["SSO", "Users", "Audit"]) {
+    for (const name of ["SSO", "Users", "Features", "Audit"]) {
       await expect(sections.getByRole("link", { name })).toBeVisible();
     }
-    for (const name of ["API keys", "Features", "Tenants", "Super admins"]) {
+    for (const name of ["API keys", "Tenants", "Super admins"]) {
       await expect(sections.getByRole("link", { name })).toHaveCount(0);
     }
   });

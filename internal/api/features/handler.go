@@ -6,7 +6,8 @@
 //	                                     (override merged with seed defaults)
 //	PATCH /v1/admin/features/{key}    -- toggle a flag (enabled bool)
 //
-// Both require an admin credential (slice 014 cred.IsAdmin). The slice
+// Both require an admin of the caller's tenant (authz.IsTenantAdmin, #2503;
+// slice 014 used cred.IsAdmin). The slice
 // 035 OPA RBAC middleware also covers the path under resource.type
 // "admin" -> admin.rego allows; this handler's requireAdmin check is
 // defense-in-depth so the gate stays correct even without OPA wired.
@@ -27,6 +28,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
@@ -291,7 +293,10 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles switches its own tenant's
+	// modules and features. The store reads and writes under that tenant's
+	// RLS, and refuses the spine flags for every caller.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
