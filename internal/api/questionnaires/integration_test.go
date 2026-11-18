@@ -241,6 +241,57 @@ func TestImportAnswerExportRoundTrip(t *testing.T) {
 	}
 }
 
+// ===== #2432: the cite picker's citations save and read back =====
+
+// TestAnswerCitationsRoundTrip pins the envelope the web cite picker
+// writes (one {id, type, title} per pick, a control and an evidence
+// record) through PATCH and back out of GET, unchanged and in order.
+func TestAnswerCitationsRoundTrip(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	_, body := doJSON(t, env, http.MethodPost, "/v1/questionnaires",
+		map[string]any{"name": "cite round trip"})
+	id := body["id"].(string)
+	xlsx := makeXLSXBytes(t, [][]string{
+		{"Question ID", "Question", "Domain"},
+		{"IAM-02", "Do you require MFA?", "IAM"},
+	})
+	if resp, b := doMultipart(t, env, "/v1/questionnaires/"+id+"/import-excel", "c.xlsx", xlsx); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("import = %d; body=%v", resp.StatusCode, b)
+	}
+	_, getBody := doJSON(t, env, http.MethodGet, "/v1/questionnaires/"+id, nil)
+	qid := getBody["questions"].([]any)[0].(map[string]any)["id"].(string)
+
+	citations := []any{
+		map[string]any{"id": uuid.NewString(), "type": "controls", "title": "Multi-factor authentication"},
+		map[string]any{"id": uuid.NewString(), "type": "evidence", "title": "okta.workforce_policy · 2026-11-01"},
+	}
+	resp, ansBody := doJSON(t, env, http.MethodPatch,
+		"/v1/questionnaires/"+id+"/answers/"+qid,
+		map[string]any{"answer_value": "yes", "narrative": "MFA via Okta.", "citations": citations})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH answer = %d; body=%v", resp.StatusCode, ansBody)
+	}
+
+	resp, getBody = doJSON(t, env, http.MethodGet, "/v1/questionnaires/"+id, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET = %d", resp.StatusCode)
+	}
+	q := getBody["questions"].([]any)[0].(map[string]any)
+	answer, _ := q["answer"].(map[string]any)
+	if answer == nil {
+		t.Fatalf("question has no answer after PATCH: %v", q)
+	}
+	want, _ := json.Marshal(citations)
+	got, _ := json.Marshal(answer["citations"])
+	if string(got) != string(want) {
+		t.Errorf("citations read back = %s, want %s", got, want)
+	}
+}
+
 // ===== AC-X-5 / RLS: cross-tenant suggestion isolation =====
 
 func TestCrossTenantSuggestionIsolation(t *testing.T) {
