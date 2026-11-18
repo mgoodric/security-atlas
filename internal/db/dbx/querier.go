@@ -1559,6 +1559,8 @@ type Querier interface {
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
+	// #2450: one append-only row per vendor owner change, in the write's tx.
+	InsertVendorAuditLog(ctx context.Context, arg InsertVendorAuditLogParams) error
 	// #2118: whether user_id is an active user of this tenant holding the
 	// auditor role. The assign route refuses anyone else.
 	IsActiveTenantAuditor(ctx context.Context, arg IsActiveTenantAuditorParams) (bool, error)
@@ -3163,6 +3165,10 @@ type Querier interface {
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
+	// #2450: every user of the tenant with the two columns a name is built
+	// from (people.DisplayName), for the risk and vendor exports' owner name.
+	// Disabled users stay listed: they still name the owner of older records.
+	ListTenantUserNames(ctx context.Context, tenantID pgtype.UUID) ([]ListTenantUserNamesRow, error)
 	// The 15-min cron enumerates tenants from the migrator pool (BYPASSRLS)
 	// so it can iterate every tenant; each evaluator then runs through the
 	// app pool with tenancy.WithTenant applied. Same shape as

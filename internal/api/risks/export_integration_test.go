@@ -217,6 +217,8 @@ func TestSlice136_RiskExportReturnsExpectedColumns(t *testing.T) {
 		"category_name",     // #1814, appended
 		"status",            // #2107, appended
 		"closure_reason",    // #2107, appended
+		"owner_user_id",     // #2450, appended
+		"owner_name",        // #2450, appended
 	}
 	if len(header) != len(expectedCols) {
 		t.Errorf("header column count = %d; want %d; header=%v", len(header), len(expectedCols), header)
@@ -271,6 +273,8 @@ func TestSlice136_RiskExportColumnSetMatchesCanonical(t *testing.T) {
 		"category_name",     // #1814, appended
 		"status",            // #2107, appended
 		"closure_reason",    // #2107, appended
+		"owner_user_id",     // #2450, appended
+		"owner_name",        // #2450, appended
 	}
 
 	t.Run("csv", func(t *testing.T) {
@@ -568,5 +572,79 @@ func TestRiskExport_ParentRiskIDsColumn(t *testing.T) {
 	}
 	if got[parentA.String()] != "" {
 		t.Errorf("parent A parent_risk_ids = %q; want empty", got[parentA.String()])
+	}
+}
+
+// #2450: a risk owned by a user exports the owner's id and the name
+// GET /v1/people shows for them: display_name, else the email's
+// local-part. A risk with no owner user leaves both empty and keeps its
+// free-text treatment_owner.
+func TestRiskExport_OwnerNameBesideFreeText(t *testing.T) {
+	tenant := uuid.New()
+	admin := dbtest.NewMigratePool(t)
+	named, unnamed := uuid.New(), uuid.New()
+	for _, u := range []struct {
+		id    uuid.UUID
+		name  string
+		email string
+	}{
+		{named, "Alice Owner", "alice-2450@example.test"},
+		{unnamed, "  ", "bob-2450@example.test"},
+	} {
+		if _, err := admin.Exec(context.Background(), `
+			INSERT INTO users (id, tenant_id, email, display_name, status)
+			VALUES ($1, $2, $3, $4, 'active')`, u.id, tenant, u.email, u.name); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM users WHERE tenant_id = $1`, tenant)
+	})
+	owners := map[uuid.UUID]uuid.UUID{}
+	for _, owner := range []uuid.UUID{named, unnamed} {
+		id := seedRiskForExport(t, tenant, "owned "+owner.String(), "operational")
+		if _, err := admin.Exec(context.Background(),
+			`UPDATE risks SET owner_user_id = $1, treatment_owner = '' WHERE id = $2`, owner, id); err != nil {
+			t.Fatalf("set owner: %v", err)
+		}
+		owners[id] = owner
+	}
+	unowned := seedRiskForExport(t, tenant, "unowned", "operational")
+
+	r := newRiskExportRouter(t, tenant, true, []string{"owner"})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/risks/export?format=csv", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	rows := mustParseRiskCSV(t, rec.Body.String())
+	idx := map[string]int{}
+	for i, h := range rows[0] {
+		idx[h] = i
+	}
+	want := map[string][3]string{
+		unowned.String(): {"test-owner", "", ""},
+	}
+	for id, owner := range owners {
+		name := "Alice Owner"
+		if owner == unnamed {
+			name = "bob-2450"
+		}
+		want[id.String()] = [3]string{"", owner.String(), name}
+	}
+	seen := 0
+	for _, row := range rows[1:] {
+		w, ok := want[row[0]]
+		if !ok {
+			continue
+		}
+		seen++
+		got := [3]string{row[idx["treatment_owner"]], row[idx["owner_user_id"]], row[idx["owner_name"]]}
+		if got != w {
+			t.Errorf("risk %s treatment_owner, owner_user_id, owner_name = %v; want %v", row[0], got, w)
+		}
+	}
+	if seen != len(want) {
+		t.Errorf("found %d of %d seeded risks in the export", seen, len(want))
 	}
 }

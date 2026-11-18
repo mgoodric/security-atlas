@@ -3,9 +3,10 @@
 // owner_user_id names the owner, an active user of the vendor's own tenant.
 // The free-text owner_user it replaces is kept: while owner_user_id is NULL,
 // its text is the display-only "Owner (unlinked)". Picking an owner clears
-// the text. Every change to either writes one me_audit_log row,
-// 'vendor_owner_update', in the write's transaction, naming the vendor and
-// the before and after owner.
+// the text. Every change to either writes one vendor_audit_log row,
+// 'owner_changed', in the write's transaction, naming the vendor, the
+// caller's principal and the before and after owner (#2450). Rows #2129
+// wrote to me_audit_log ('vendor_owner_update') stay there.
 
 package vendor
 
@@ -26,11 +27,16 @@ import (
 // active user of the vendor's tenant. The HTTP layer renders it as a 422.
 var ErrOwnerNotActiveUser = errors.New("vendor: owner is not an active user in this tenant")
 
-// auditActionOwnerUpdate is the me_audit_log action for an owner change.
-// The CHECK constraint (20261226000000_risk_vendor_owner_users.sql) lists it.
-const auditActionOwnerUpdate = "vendor_owner_update"
+// auditActionOwnerChanged is the vendor_audit_log action for an owner
+// change. The CHECK constraint (20261260000000_vendor_audit_log.sql) lists
+// it.
+const auditActionOwnerChanged = "owner_changed"
 
-// ownerState is one side of a vendor_owner_update row.
+// systemActor names a write that has no caller (the demo seeder, a test):
+// vendor_audit_log.actor is never empty.
+const systemActor = "system:vendor-store"
+
+// ownerState is one side of an owner_changed row.
 type ownerState struct {
 	VendorID      string  `json:"vendor_id"`
 	OwnerUserID   *string `json:"owner_user_id"`
@@ -81,9 +87,10 @@ func checkOwnerUser(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, own
 	return nil
 }
 
-// auditOwnerChange writes the vendor_owner_update row when before and after
-// differ, and nothing when they are the same.
-func auditOwnerChange(ctx context.Context, q *dbx.Queries, tenantID, actor uuid.UUID, before, after ownerState) error {
+// auditOwnerChange writes the owner_changed row when before and after
+// differ, and nothing when they are the same. actor is the caller's
+// principal; empty means no caller.
+func auditOwnerChange(ctx context.Context, q *dbx.Queries, tenantID, vendorID uuid.UUID, actor string, before, after ownerState) error {
 	if before.equal(after) {
 		return nil
 	}
@@ -95,12 +102,16 @@ func auditOwnerChange(ctx context.Context, q *dbx.Queries, tenantID, actor uuid.
 	if err != nil {
 		return fmt.Errorf("vendor: audit after: %w", err)
 	}
-	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
-		TenantID: pgUUID(tenantID),
-		UserID:   pgUUID(actor),
-		Action:   auditActionOwnerUpdate,
-		Before:   beforeBlob,
-		After:    afterBlob,
+	if actor == "" {
+		actor = systemActor
+	}
+	if err := q.InsertVendorAuditLog(ctx, dbx.InsertVendorAuditLogParams{
+		TenantID:    pgUUID(tenantID),
+		VendorID:    pgUUID(vendorID),
+		Actor:       actor,
+		ActionType:  auditActionOwnerChanged,
+		BeforeState: beforeBlob,
+		AfterState:  afterBlob,
 	}); err != nil {
 		return fmt.Errorf("vendor: audit owner change: %w", err)
 	}

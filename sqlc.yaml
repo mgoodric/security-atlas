@@ -164,6 +164,8 @@ sql:
       - "migrations/sql/20261256000000_stock_control_holdbacks.sql"
       # #2078: framework_scopes.activated_at, read by the as-of queries.
       - "migrations/sql/20261258000000_framework_scope_activated_at.sql"
+      # #2450: vendor owner changes, in their own audit log.
+      - "migrations/sql/20261260000000_vendor_audit_log.sql"
     queries: "internal/db/queries"
     gen:
       go:

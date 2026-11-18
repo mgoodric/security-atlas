@@ -308,6 +308,26 @@ WITH unified AS (
         (to_jsonb(ma) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'user_id' - 'subject_module')::jsonb AS payload_json
     FROM member_module_access_audit_log ma
+
+    UNION ALL
+
+    -- 17. vendor_audit_log (#2450): a vendor's owner changed. The payload
+    -- holds the before and after owner (owner_user_id and the unlinked
+    -- text); the payload gate shows it only to a caller who can read
+    -- vendors.
+    SELECT
+        created_at     AS occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'vendor'::text AS kind,
+        'vendor'::text AS target_type,
+        vendor_id::text AS target_id,
+        action_type    AS action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(va) - 'tenant_id' - 'created_at' - 'actor'
+            - 'action_type' - 'vendor_id' - 'subject_module')::jsonb AS payload_json
+    FROM vendor_audit_log va
 )
 SELECT
     unified.occurred_at,

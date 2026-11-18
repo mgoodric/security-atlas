@@ -282,6 +282,10 @@
             "description": "Optional; defaults to nist_800_30. Other valid values: qualitative_5x5, fair.",
             "type": "string"
           },
+          "owner_user_id": {
+            "description": "Optional; the risk's owner, the UUID of an active user of this organisation. When set, treatment_owner is not stored. A user of another organisation, a disabled user or an unknown id is refused.",
+            "type": "string"
+          },
           "proposed_until": {
             "description": "Required with acceptance_status=proposed, forbidden otherwise: the proposed expiry, YYYY-MM-DD, after today. The approver sets the approved expiry.",
             "type": "string"
@@ -304,7 +308,7 @@
             "type": "string"
           },
           "treatment_owner": {
-            "description": "User/credential id responsible for the treatment plan.",
+            "description": "Free text naming who is responsible for the treatment plan, shown as Owner (unlinked) only while no owner_user_id is set. Prefer owner_user_id.",
             "type": "string"
           }
         },
@@ -396,7 +400,7 @@
     },
     {
       "name": "update_risk_treatment",
-      "description": "Propose a risk treatment change (and optionally a treatment_owner reassignment). Proposal sits at state='ai_proposed' until an approver confirms.",
+      "description": "Propose a risk treatment change (and optionally an owner reassignment). Proposal sits at state='ai_proposed' until an approver confirms.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -416,6 +420,10 @@
             "description": "Required with acceptance_status=proposed: why the risk should be accepted.",
             "type": "string"
           },
+          "owner_user_id": {
+            "description": "Optional; the risk's new owner, the UUID of an active user of this organisation. Clears treatment_owner. A user of another organisation, a disabled user or an unknown id is refused.",
+            "type": "string"
+          },
           "risk_id": {
             "description": "Risk UUID to update.",
             "type": "string"
@@ -432,7 +440,7 @@
             "type": "string"
           },
           "treatment_owner": {
-            "description": "Optional; the user/credential id that owns the new treatment plan.",
+            "description": "Optional free text naming who owns the new treatment plan, shown as Owner (unlinked) only while the risk has no owner user. Prefer owner_user_id; ignored when owner_user_id is given.",
             "type": "string"
           }
         },

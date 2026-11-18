@@ -287,9 +287,10 @@ type CreateVendorInput struct {
 	Status         CommercialStatus
 	BillingCadence *BillingCadence
 	ScopeCellIDs   []uuid.UUID
-	// Actor names the caller on the owner audit row (#2129); uuid.Nil for
-	// a caller that is not a user.
-	Actor uuid.UUID
+	// Actor is the caller's principal (credstore.PrincipalOf) on the owner
+	// audit row (#2450): a person's users(id), else the key or client id.
+	// Empty only for a write with no caller.
+	Actor string
 }
 
 // UpdateVendorInput mirrors CreateVendorInput. UPDATE in slice 024 is a

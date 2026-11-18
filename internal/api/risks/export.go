@@ -65,6 +65,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -149,6 +150,10 @@ type riskRow struct {
 	// (#2107). The export carries every risk, closed ones included.
 	Status        string
 	ClosureReason string
+	// OwnerUserID is the risk's owner user (#2129) and OwnerName the name
+	// GET /v1/people shows for them (#2450); both empty when unset.
+	OwnerUserID *uuid.UUID
+	OwnerName   string
 }
 
 // NewExportHandler constructs the slice 136 export handler. The pool
@@ -425,6 +430,10 @@ func riskExportHeader() []string {
 		// Appended for the same reason.
 		"status",
 		"closure_reason",
+		// #2450: the owner user (#2129) and their name, beside the
+		// free-text treatment_owner. Appended for the same reason.
+		"owner_user_id",
+		"owner_name",
 	}
 }
 
@@ -463,6 +472,10 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 			if len(r.ResidualScore) > 0 {
 				residual = string(r.ResidualScore)
 			}
+			owner := ""
+			if r.OwnerUserID != nil {
+				owner = r.OwnerUserID.String()
+			}
 			parents := make([]string, len(r.ParentIDs))
 			for i, p := range r.ParentIDs {
 				parents[i] = p.String()
@@ -491,6 +504,8 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 				r.CategoryName,
 				r.Status,
 				r.ClosureReason,
+				owner,
+				r.OwnerName,
 			}
 			if !yield(row) {
 				return
@@ -560,6 +575,10 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 		child := uuid.UUID(l.ChildRiskID.Bytes)
 		parentsOf[child] = append(parentsOf[child], uuid.UUID(l.ParentRiskID.Bytes))
 	}
+	ownerNames, err := people.NamesByID(ctx, q, tenantID)
+	if err != nil {
+		return nil, false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("commit: %w", err)
 	}
@@ -611,6 +630,11 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 		if r.OrgUnitID.Valid {
 			ou := uuid.UUID(r.OrgUnitID.Bytes)
 			out[i].OrgUnitID = &ou
+		}
+		if r.OwnerUserID.Valid {
+			owner := uuid.UUID(r.OwnerUserID.Bytes)
+			out[i].OwnerUserID = &owner
+			out[i].OwnerName = ownerNames[owner]
 		}
 		if r.CreatedAt.Valid {
 			out[i].CreatedAt = r.CreatedAt.Time

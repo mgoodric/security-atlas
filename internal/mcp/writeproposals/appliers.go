@@ -72,6 +72,35 @@ type CreateRiskInput struct {
 	Justification  string `json:"justification,omitempty"`
 	ProposedUntil  string `json:"proposed_until,omitempty"`
 	TreatmentOwner string `json:"treatment_owner,omitempty"`
+	// OwnerUserID is the owner, an active user of the tenant (#2450), as
+	// POST /v1/risks takes it. When set, treatment_owner is not stored.
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+}
+
+// parseOwnerUserID is a proposal's owner_user_id: nil when omitted, an
+// ErrInvalidInput when it is not a UUID.
+func parseOwnerUserID(tool, raw string) (*uuid.UUID, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: owner_user_id must be a UUID", ErrInvalidInput, tool)
+	}
+	return &id, nil
+}
+
+// checkOwnerUser runs the REST owner check (risk.CheckOwnerUser) and
+// reports a refused owner as ErrInvalidInput, naming the field.
+func checkOwnerUser(ctx context.Context, q *dbx.Queries, tool string, tenantID uuid.UUID, owner *uuid.UUID) error {
+	err := risk.CheckOwnerUser(ctx, q, tenantID, owner)
+	if errors.Is(err, risk.ErrOwnerNotActiveUser) {
+		return fmt.Errorf("%w: apply %s: owner_user_id: %s", ErrInvalidInput, tool, err.Error())
+	}
+	if err != nil {
+		return fmt.Errorf("apply %s: %w", tool, err)
+	}
+	return nil
 }
 
 // ApplyCreateRisk inserts a new risk row using the proposal's tool_input.
@@ -90,6 +119,18 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	inherent, residual, err := createRiskScores(in)
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: %w", err)
+	}
+	owner, err := parseOwnerUserID("create_risk", in.OwnerUserID)
+	if err != nil {
+		return "", err
+	}
+	if err := checkOwnerUser(ctx, dbx.New(tx), "create_risk", p.TenantID, owner); err != nil {
+		return "", err
+	}
+	// A picked owner replaces the free text, as POST /v1/risks stores it.
+	treatmentOwner := in.TreatmentOwner
+	if owner != nil {
+		treatmentOwner = ""
 	}
 	// An omitted treatment is untreated: the applier never records a
 	// treatment decision the proposal did not make (#1746).
@@ -137,12 +178,12 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 			inherent_score, treatment, treatment_owner, residual_score,
 			accepted_until, accepter, instrument_reference, acceptance_status,
 			acceptance_proposed_by, acceptance_proposed_at,
-			acceptance_justification, acceptance_proposed_until
+			acceptance_justification, acceptance_proposed_until, owner_user_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, '', '', $11, $12, $13, $14, $15)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, '', '', $11, $12, $13, $14, $15, $16)
 	`, id, p.TenantID, in.Title, in.Description, category.ID, createRiskMethodology(in),
-		inherent, treatment, in.TreatmentOwner, residual, risk.NullAcceptanceStatus(status),
-		proposal.ProposedBy, proposal.ProposedAt, proposal.Justification, proposal.ProposedUntil)
+		inherent, treatment, treatmentOwner, residual, risk.NullAcceptanceStatus(status),
+		proposal.ProposedBy, proposal.ProposedAt, proposal.Justification, proposal.ProposedUntil, owner)
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)
 	}
@@ -208,6 +249,11 @@ func validateToolInput(tool string, input json.RawMessage) error {
 		return fmt.Errorf("%w: create_risk tool_input: %v", ErrInvalidInput, err)
 	}
 	if _, _, err := createRiskScores(in); err != nil {
+		return err
+	}
+	// Whether the owner is an active user is checked when the proposal is
+	// confirmed, inside its transaction; only the shape is checked here.
+	if _, err := parseOwnerUserID("create_risk tool_input", in.OwnerUserID); err != nil {
 		return err
 	}
 	// The confirmer, recorded as proposer, is not known until confirm.
@@ -443,20 +489,25 @@ func ingestProposalRecord(ctx context.Context, ing EvidenceProcessor, tx pgx.Tx,
 //
 // Accepter is refused: the approving person is the accepter.
 type UpdateRiskTreatmentInput struct {
-	RiskID           string  `json:"risk_id"`
-	Treatment        string  `json:"treatment"`
-	AcceptanceStatus string  `json:"acceptance_status"`
-	TreatmentOwner   string  `json:"treatment_owner"`
-	Justification    string  `json:"justification,omitempty"`
-	Accepter         *string `json:"accepter,omitempty"`
-	AcceptedUntil    *string `json:"accepted_until,omitempty"`
+	RiskID           string `json:"risk_id"`
+	Treatment        string `json:"treatment"`
+	AcceptanceStatus string `json:"acceptance_status"`
+	TreatmentOwner   string `json:"treatment_owner"`
+	// OwnerUserID is the risk's new owner, an active user of the tenant
+	// (#2450). It takes the place of treatment_owner, which is ignored
+	// when both are given.
+	OwnerUserID   string  `json:"owner_user_id,omitempty"`
+	Justification string  `json:"justification,omitempty"`
+	Accepter      *string `json:"accepter,omitempty"`
+	AcceptedUntil *string `json:"accepted_until,omitempty"`
 }
 
 // ApplyUpdateRiskTreatment applies a confirmed update_risk_treatment
 // proposal through the risk's treatment and acceptance transitions, so it
 // writes the same audit events and is refused by the same state machine
-// and approval rule as the REST path. A treatment_owner, when set, is
-// changed as a record field and audit-logged as PATCH logs it.
+// and approval rule as the REST path. An owner_user_id or, without one, a
+// treatment_owner, when set, is changed as a record field and audit-logged
+// as PATCH logs it; the owner_user_id is checked as PATCH checks it.
 func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
 	var in UpdateRiskTreatmentInput
 	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
@@ -471,6 +522,10 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 	}
 	if in.Accepter != nil {
 		return "", fmt.Errorf("apply update_risk_treatment: %w: accepter is not proposed; the approving person is the accepter", risk.ErrTransitionInput)
+	}
+	owner, err := parseOwnerUserID("apply update_risk_treatment", in.OwnerUserID)
+	if err != nil {
+		return "", err
 	}
 	var until time.Time
 	if in.AcceptedUntil != nil {
@@ -511,10 +566,17 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 	if err != nil {
 		return "", fmt.Errorf("apply update_risk_treatment: %w", err)
 	}
-	if in.TreatmentOwner != "" {
-		if err := risk.SetTreatmentOwnerTx(ctx, q, p.TenantID, riskID, in.TreatmentOwner, actor); err != nil {
-			return "", fmt.Errorf("apply update_risk_treatment: %w", err)
+	switch {
+	case owner != nil:
+		err = risk.SetOwnerUserTx(ctx, q, p.TenantID, riskID, *owner, actor)
+		if errors.Is(err, risk.ErrOwnerNotActiveUser) {
+			return "", fmt.Errorf("%w: apply update_risk_treatment: owner_user_id: %s", ErrInvalidInput, err.Error())
 		}
+	case in.TreatmentOwner != "":
+		err = risk.SetTreatmentOwnerTx(ctx, q, p.TenantID, riskID, in.TreatmentOwner, actor)
+	}
+	if err != nil {
+		return "", fmt.Errorf("apply update_risk_treatment: %w", err)
 	}
 	return riskID.String(), nil
 }

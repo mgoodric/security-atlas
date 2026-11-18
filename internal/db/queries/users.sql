@@ -111,3 +111,12 @@ SELECT (
           AND u.idp_subject = sqlc.arg('idp_subject')
     )
 )::boolean AS taken;
+
+-- name: ListTenantUserNames :many
+-- #2450: every user of the tenant with the two columns a name is built
+-- from (people.DisplayName), for the risk and vendor exports' owner name.
+-- Disabled users stay listed: they still name the owner of older records.
+SELECT id, display_name, email
+FROM users
+WHERE tenant_id = $1
+ORDER BY id;

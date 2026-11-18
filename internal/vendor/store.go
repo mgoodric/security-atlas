@@ -92,7 +92,7 @@ func (s *Store) Create(ctx context.Context, in CreateVendorInput) (Vendor, error
 			}
 			return fmt.Errorf("create vendor: %w", err)
 		}
-		if err := auditOwnerChange(ctx, q, tenantID, in.Actor,
+		if err := auditOwnerChange(ctx, q, tenantID, vendorID, in.Actor,
 			ownerStateOf(vendorID, nil, ""),
 			ownerStateOf(vendorID, in.OwnerUserID, in.OwnerUser)); err != nil {
 			return err
@@ -180,7 +180,7 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 			}
 			return fmt.Errorf("update vendor: %w", err)
 		}
-		if err := auditOwnerChange(ctx, q, tenantID, in.Actor, before, after); err != nil {
+		if err := auditOwnerChange(ctx, q, tenantID, id, in.Actor, before, after); err != nil {
 			return err
 		}
 		// Re-bind scope cells: clear then add. Same tx so failure rolls

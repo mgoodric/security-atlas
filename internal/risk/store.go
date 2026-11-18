@@ -304,7 +304,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 
 	var out Risk
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		if err := checkOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
+		if err := CheckOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
 			return err
 		}
 		unitLevel, err := orgUnitLevel(ctx, q, tenantID, in.OrgUnitID)

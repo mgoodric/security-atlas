@@ -204,6 +204,42 @@ func (q *Queries) LinkUserIdpByEmail(ctx context.Context, arg LinkUserIdpByEmail
 	return i, err
 }
 
+const listTenantUserNames = `-- name: ListTenantUserNames :many
+SELECT id, display_name, email
+FROM users
+WHERE tenant_id = $1
+ORDER BY id
+`
+
+type ListTenantUserNamesRow struct {
+	ID          pgtype.UUID `json:"id"`
+	DisplayName string      `json:"display_name"`
+	Email       string      `json:"email"`
+}
+
+// #2450: every user of the tenant with the two columns a name is built
+// from (people.DisplayName), for the risk and vendor exports' owner name.
+// Disabled users stay listed: they still name the owner of older records.
+func (q *Queries) ListTenantUserNames(ctx context.Context, tenantID pgtype.UUID) ([]ListTenantUserNamesRow, error) {
+	rows, err := q.db.Query(ctx, listTenantUserNames, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTenantUserNamesRow
+	for rows.Next() {
+		var i ListTenantUserNamesRow
+		if err := rows.Scan(&i.ID, &i.DisplayName, &i.Email); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const oIDCFirstSignInEmailTaken = `-- name: OIDCFirstSignInEmailTaken :one
 SELECT (
     EXISTS (
