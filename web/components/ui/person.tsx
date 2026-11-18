@@ -14,10 +14,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
+import { useSessionTenant } from "@/components/session-tenant-context";
 import {
-  PEOPLE_QUERY_KEY,
   PEOPLE_STALE_MS,
   forgetPeopleOnTenantSwitch,
+  peopleDirectoryQuery,
 } from "@/lib/people-cache";
 import {
   buildDirectory,
@@ -48,13 +49,17 @@ async function fetchPeopleDirectory(
  * assignee picker never offers someone who could not open the record.
  * The module-filtered list is cached under its own key, below the shared
  * one, so a tenant switch drops it too.
+ *
+ * #2399: every entry is keyed by the session's tenant; with the tenant
+ * unknown nothing is read, and the directory stays pending.
  */
 export function usePeopleDirectory(module?: string) {
   const qc = useQueryClient();
+  const tenantId = useSessionTenant();
   // A tenant switch in any tab drops the directory (lib/people-cache.ts).
   useEffect(() => forgetPeopleOnTenantSwitch(qc), [qc]);
   return useQuery({
-    queryKey: module ? [...PEOPLE_QUERY_KEY, { module }] : PEOPLE_QUERY_KEY,
+    ...peopleDirectoryQuery(tenantId, module),
     queryFn: () => fetchPeopleDirectory(module),
     staleTime: PEOPLE_STALE_MS,
     retry: false,
