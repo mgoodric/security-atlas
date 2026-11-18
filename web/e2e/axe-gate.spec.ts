@@ -33,12 +33,17 @@ test.describe("axe gate (#2097)", () => {
   }) => {
     await page.setContent(FAILING);
     const findings = await seriousAxeViolations(page);
-    expect(findings.map((f) => f.id).sort()).toEqual(
-      ["color-contrast", "label"].sort(),
+    // Contains both, rather than equals: an axe-core upgrade that adds a
+    // rule this fixture also trips must not break the self-test (#2397).
+    expect(findings.map((f) => f.id)).toEqual(
+      expect.arrayContaining(["color-contrast", "label"]),
     );
     expect(() => expectNoSeriousAxe(findings, "failing fixture")).toThrow(
-      /2 serious\/critical axe violation\(s\)[\s\S]*color-contrast[\s\S]*label/,
+      /serious\/critical axe violation\(s\)/,
     );
+    for (const id of ["color-contrast", "label"]) {
+      expect(() => expectNoSeriousAxe(findings, "failing fixture")).toThrow(id);
+    }
   });
 
   test("passes a clean page", async ({ page }) => {
