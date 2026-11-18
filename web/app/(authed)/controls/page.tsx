@@ -1091,6 +1091,19 @@ function ControlsPageInner() {
             {fit.label}
           </Badge>
         ) : null;
+        // #2392 — an undecided SCF remap proposal; the badge opens the
+        // review page, where a reviewer settles it.
+        const legacy = row.legacyAnchor ? (
+          <Link
+            href="/controls/remap"
+            className="ml-2"
+            title="An SCF remap proposal for this control is still undecided"
+            data-testid="controls-row-legacy-anchor"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Badge variant="outline">Legacy anchor</Badge>
+          </Link>
+        ) : null;
         return href ? (
           <>
             <Link
@@ -1102,6 +1115,7 @@ function ControlsPageInner() {
             </Link>
             {row.demo ? <DemoBadge testId="controls-row-demo" /> : null}
             {marker}
+            {legacy}
           </>
         ) : (
           <span className="text-muted-foreground">{row.anchor.name}</span>
