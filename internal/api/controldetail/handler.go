@@ -90,6 +90,9 @@ type Handler struct {
 	// at store. redaction, when set, re-applies current redaction rules.
 	detail    evidenceDetailReader
 	redaction RedactionLookup
+	// anchors is the GET /v1/controls/{id}/anchor-history read seam
+	// (#2392); New points it at store.
+	anchors anchorHistoryReader
 }
 
 // New constructs a Handler over the application pgx pool. The slice-411
@@ -97,7 +100,7 @@ type Handler struct {
 // the per-control and tenant-wide branches) are wired to the same store — the
 // public signature is unchanged (P0-409-2).
 func New(store *Store) *Handler {
-	return &Handler{store: store, reader: store, evidence: store, detail: store}
+	return &Handler{store: store, reader: store, evidence: store, detail: store, anchors: store}
 }
 
 // newHandlerWithReader constructs a Handler whose policies/risks/history

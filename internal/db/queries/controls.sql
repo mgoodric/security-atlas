@@ -418,7 +418,11 @@ ORDER BY c.tenant_id, c.bundle_id, c.id;
 -- narrows the rollup exactly as slice 224 does on the anchor list.
 --
 -- #2131: filters on state, freshness, family, framework, anchor fit and
--- owner (a person, or unowned), and an allow-listed sort. sort_key is one
+-- owner (a person, or unowned), and an allow-listed sort. #2392:
+-- legacy_anchor_only keeps only controls with an open or rejected remap
+-- proposal, the same predicate as the legacy_anchor column; the WHERE
+-- here and in CountActiveControls repeat it and must stay in step with
+-- it (and with isPending in web/lib/remap-review.ts). sort_key is one
 -- of the fixed keys in the ORDER BY; the handler refuses any other value
 -- before it gets here, and a key this query does not name falls through
 -- to the tiebreakers. The default order is failing first (worst state
@@ -513,7 +517,13 @@ SELECT
     wpc.last_observed_at::timestamptz AS state_last_observed_at,
     wpc.evaluated_at::timestamptz     AS state_evaluated_at,
     af.framework_slugs::text[]        AS framework_slugs,
-    coa.owner_user_id                 AS owner_user_id
+    coa.owner_user_id                 AS owner_user_id,
+    -- #2392: the control still has an undecided SCF remap proposal (open,
+    -- or rejected and so open to revisit). The active row is the one a
+    -- pending proposal names; a proposal on a superseded row is stale.
+    EXISTS (SELECT 1 FROM scf_remap_proposals rp
+            WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+              AND rp.status IN ('open', 'rejected')) AS legacy_anchor
 FROM controls c
 LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
 LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
@@ -531,6 +541,10 @@ WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
   AND (sqlc.narg('freshness')::text IS NULL OR wpc.freshness_status = sqlc.narg('freshness')::text)
   AND (sqlc.narg('family')::text IS NULL OR lower(c.control_family) = lower(sqlc.narg('family')::text))
   AND (sqlc.narg('framework')::text IS NULL OR sqlc.narg('framework')::text = ANY(af.framework_slugs))
+  AND (NOT sqlc.arg(legacy_anchor_only)::bool OR EXISTS (
+        SELECT 1 FROM scf_remap_proposals rp
+        WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+          AND rp.status IN ('open', 'rejected')))
 ORDER BY
     -- default: failing first, then the stalest evidence.
     CASE WHEN sqlc.arg(sort_key)::text = 'default' THEN COALESCE(wpc.result_rank, 0) END DESC,
@@ -631,7 +645,11 @@ WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
   AND (sqlc.narg('result')::text IS NULL OR wpc.result = sqlc.narg('result')::text)
   AND (sqlc.narg('freshness')::text IS NULL OR wpc.freshness_status = sqlc.narg('freshness')::text)
   AND (sqlc.narg('family')::text IS NULL OR lower(c.control_family) = lower(sqlc.narg('family')::text))
-  AND (sqlc.narg('framework')::text IS NULL OR sqlc.narg('framework')::text = ANY(af.framework_slugs));
+  AND (sqlc.narg('framework')::text IS NULL OR sqlc.narg('framework')::text = ANY(af.framework_slugs))
+  AND (NOT sqlc.arg(legacy_anchor_only)::bool OR EXISTS (
+        SELECT 1 FROM scf_remap_proposals rp
+        WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+          AND rp.status IN ('open', 'rejected')));
 
 -- name: ListActiveControlFamilies :many
 -- #2131: the distinct families of the active tenant's active controls. The
