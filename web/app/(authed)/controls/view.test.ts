@@ -87,6 +87,16 @@ describe("rowsFromControls", () => {
     expect(assigned.ownerUserId).toBe(owner);
     expect(unassigned.ownerUserId).toBeNull();
   });
+  test("flags a legacy anchor only when the platform says so (#2392)", () => {
+    const [flagged, settled, older] = rowsFromControls([
+      control({ legacy_anchor: true }),
+      control({ legacy_anchor: false }),
+      control(),
+    ]);
+    expect(flagged.legacyAnchor).toBe(true);
+    expect(settled.legacyAnchor).toBe(false);
+    expect(older.legacyAnchor).toBe(false);
+  });
   test("carries the control's own state cell", () => {
     const [row] = rowsFromControls([
       control({
