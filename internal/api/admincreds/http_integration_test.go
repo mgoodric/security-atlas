@@ -231,6 +231,64 @@ func TestRotateGivesSuccessor(t *testing.T) {
 	}
 }
 
+// #2384: a label given at mint is trimmed, stored, listed back and kept by
+// the rotate successor; a key minted without one lists none.
+func TestIssue_LabelListsAndSurvivesRotate(t *testing.T) {
+	tenantID := uuid.New()
+	_, _, handler := newHandler(t, tenantID)
+	defer cleanupTenant(tenantID)
+
+	issue := func(label string) admincreds.IssueResponse {
+		t.Helper()
+		body, _ := json.Marshal(admincreds.IssueRequest{Label: label})
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body)))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Issue(%q): want 201, got %d: %s", label, w.Code, w.Body.String())
+		}
+		var resp admincreds.IssueResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+	labelled := issue("  CI deploy  ")
+	if labelled.Label != "CI deploy" {
+		t.Fatalf("issue label = %q, want trimmed %q", labelled.Label, "CI deploy")
+	}
+	plain := issue("")
+
+	rotW := httptest.NewRecorder()
+	handler.ServeHTTP(rotW, httptest.NewRequest(http.MethodPost, "/v1/admin/credentials/"+labelled.ID+"/rotate", nil))
+	if rotW.Code != http.StatusOK {
+		t.Fatalf("Rotate: want 200, got %d: %s", rotW.Code, rotW.Body.String())
+	}
+	var rot admincreds.RotateResponse
+	if err := json.Unmarshal(rotW.Body.Bytes(), &rot); err != nil {
+		t.Fatalf("decode rotate: %v", err)
+	}
+
+	listW := httptest.NewRecorder()
+	handler.ServeHTTP(listW, httptest.NewRequest(http.MethodGet, "/v1/admin/credentials", nil))
+	var list admincreds.ListResponse
+	if err := json.Unmarshal(listW.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	labels := map[string]string{}
+	for _, it := range list.Items {
+		labels[it.ID] = it.Label
+	}
+	want := map[string]string{labelled.ID: "CI deploy", rot.ID: "CI deploy", plain.ID: ""}
+	for id, w := range want {
+		got, ok := labels[id]
+		if !ok {
+			t.Errorf("%s missing from list %v", id, labels)
+		} else if got != w {
+			t.Errorf("%s label = %q, want %q", id, got, w)
+		}
+	}
+}
+
 // === Slice 051: tenant must derive from credential, not request ===
 
 // TestIssue_RejectsCrossTenantInRequestBody asserts the Issue handler refuses

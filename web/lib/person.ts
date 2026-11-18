@@ -22,6 +22,9 @@ export interface DirectoryApiKey {
   // users(id) of the key's owner (api_keys.issued_by); absent when the
   // key has none. The minting admin is never a stand-in.
   owner_id?: string;
+  // The admin-chosen name for the key (api_keys.label, #2384); absent
+  // when the key has none.
+  label?: string;
 }
 
 // The tenant's people, keyed by normalised ID.
@@ -83,6 +86,18 @@ function userName(u: DirectoryUser): string {
 
 const UNKNOWN_TEXT = "Unknown";
 
+/**
+ * #2384 — the text an API key reads as: "API key '<label>' (owner:
+ * <name>)", dropping the label or the owner when the key has none. Built
+ * from the label and owner name only; the token, prefix and last four are
+ * never inputs.
+ */
+export function apiKeyText(label?: string, ownerName?: string): string {
+  const name = label?.trim();
+  const base = name ? `API key '${name}'` : "API key";
+  return ownerName ? `${base} (owner: ${ownerName})` : base;
+}
+
 // The principal a machine token records (`identity.UserID` on the
 // backend names it as "oauth_client:<id>").
 const OAUTH_CLIENT_PREFIX = "oauth_client:";
@@ -114,9 +129,9 @@ function unknown(ref: string): ResolvedPerson {
  *
  * - an active user → their name and initials;
  * - a disabled user → "Former user";
- * - an API key → "API key (owner: <name>)", or "API key" when the owner
- *   does not resolve. Keys carry no label today, and the token, prefix
- *   and last four characters are never shown;
+ * - an API key → "API key '<label>' (owner: <name>)" (apiKeyText), the
+ *   label left out when the key has none and the owner when it does not
+ *   resolve. The token, prefix and last four characters are never shown;
  * - "system" or "system:<process>" → "System", as the platform's
  *   people.Directory.Name reads it (#2138);
  * - "oauth_client:<id>" (a machine token) → "OAuth client", the client
@@ -166,8 +181,7 @@ export function resolvePerson(
     if (key) {
       const ownerId = key.owner_id ? normaliseUserId(key.owner_id) : null;
       const owner = ownerId ? dir.users.get(ownerId) : undefined;
-      const ownerName = owner ? userName(owner) : "";
-      const text = ownerName ? `API key (owner: ${ownerName})` : "API key";
+      const text = apiKeyText(key.label, owner ? userName(owner) : "");
       return { kind: "api_key", text, title: text };
     }
   }
