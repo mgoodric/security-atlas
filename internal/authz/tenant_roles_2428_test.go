@@ -127,6 +127,9 @@ var routes2428 = []route2428{
 	// #2503: the tenant's SCIM bearer.
 	{http.MethodGet, "/v1/admin/scim-credentials", tenantAdminGate},
 	{http.MethodDelete, "/v1/admin/scim-credentials/" + id2428, tenantAdminGate},
+	// #2503: the tenant's IdP group-to-role map.
+	{http.MethodGet, "/v1/admin/group-role-mappings", tenantAdminGate},
+	{http.MethodDelete, "/v1/admin/group-role-mappings/" + id2428, tenantAdminGate},
 
 	// Tenant-admin gates.
 	{http.MethodPost, "/v1/audit-periods", tenantAdminGate},
@@ -293,6 +296,8 @@ var handlerNarrower2428 = map[string]bool{
 	// grc_engineer's blanket read also admits the SCIM credential list
 	// (ids and descriptions, never a token); the handler refuses it.
 	"/v1/admin/scim-credentials grc_engineer": true,
+	// ... and the group-to-role map; the handler refuses it.
+	"/v1/admin/group-role-mappings grc_engineer": true,
 }
 
 // TestTenantGates2428_HandlerAgreesWithOPA runs the real bundle for every
