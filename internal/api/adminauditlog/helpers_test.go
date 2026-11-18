@@ -97,3 +97,38 @@ func TestToAuditShape_RecordsIncludeReads(t *testing.T) {
 		t.Errorf("toAuditShape.IncludeReads = false; want true (opt-in must be recorded)")
 	}
 }
+
+// TestParseUnifiedParams_Limit pins `?limit=` (#2135): absent is the
+// page cap, 1..cap narrows the page (the aggregator is asked for one
+// more), anything else is refused.
+func TestParseUnifiedParams_Limit(t *testing.T) {
+	t.Parallel()
+	const window = "from=2026-06-01T00:00:00Z&to=2026-06-02T00:00:00Z"
+	for _, tc := range []struct {
+		qs   string
+		want int
+		bad  bool
+	}{
+		{qs: window, want: unifiedPageSize},
+		{qs: window + "&limit=10", want: 10},
+		{qs: window + "&limit=1000", want: 1000},
+		{qs: window + "&limit=0", bad: true},
+		{qs: window + "&limit=1001", bad: true},
+		{qs: window + "&limit=ten", bad: true},
+	} {
+		req := httptest.NewRequest("GET", "/v1/activity/unified?"+tc.qs, nil)
+		got, err := parseUnifiedParams(req)
+		if tc.bad {
+			if err == nil {
+				t.Errorf("%s: want an error", tc.qs)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc.qs, err)
+		}
+		if got.pageSize != tc.want || got.queryParams.Limit != tc.want+1 {
+			t.Errorf("%s: pageSize %d, Limit %d; want %d, %d", tc.qs, got.pageSize, got.queryParams.Limit, tc.want, tc.want+1)
+		}
+	}
+}

@@ -127,8 +127,47 @@ type Response struct {
 	Items  []Item         `json:"items"`
 	Total  int            `json:"total"`
 	Counts map[string]int `json:"counts"`
-	Limit  int            `json:"limit"`
-	Offset int            `json:"offset"`
+	// TypeCounts counts the view's items by type before any `?type=`
+	// filter, so the full page's type filters can show what each holds
+	// (#2135).
+	TypeCounts map[string]int `json:"type_counts"`
+	Limit      int            `json:"limit"`
+	Offset     int            `json:"offset"`
+}
+
+// ItemTypes lists every item type a `?type=` filter may name: the record
+// types of the due-based and control bands, and the approval types.
+var ItemTypes = []string{
+	"control", "policy", "risk", "vendor", "action_plan", "exception",
+	"risk_acceptance", "framework_scope",
+}
+
+// CountTypes counts ranked items by type.
+func CountTypes(ranked []Item) map[string]int {
+	out := map[string]int{}
+	for _, it := range ranked {
+		out[it.Type]++
+	}
+	return out
+}
+
+// FilterTypes keeps the items whose type is in types. An empty types
+// keeps everything.
+func FilterTypes(ranked []Item, types []string) []Item {
+	if len(types) == 0 {
+		return ranked
+	}
+	keep := make(map[string]bool, len(types))
+	for _, t := range types {
+		keep[t] = true
+	}
+	out := make([]Item, 0, len(ranked))
+	for _, it := range ranked {
+		if keep[it.Type] {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // Page builds the response for one page of ranked items.
@@ -145,5 +184,5 @@ func Page(ranked []Item, view string, limit, offset int) Response {
 		end := min(offset+limit, len(ranked))
 		page = append(page, ranked[offset:end]...)
 	}
-	return Response{For: view, Items: page, Total: len(ranked), Counts: counts, Limit: limit, Offset: offset}
+	return Response{For: view, Items: page, Total: len(ranked), Counts: counts, TypeCounts: CountTypes(ranked), Limit: limit, Offset: offset}
 }
