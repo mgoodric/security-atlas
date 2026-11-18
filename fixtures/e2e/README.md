@@ -42,7 +42,6 @@ cross-references slice 050 sanitization rules and slice 057 P0-A2):
 | `control-detail.sql`       | `web/e2e/control-detail.spec.ts`       |
 | `control-detail-empty.sql` | `web/e2e/control-detail-empty.spec.ts` |
 | `audit-workspace.sql`      | `web/e2e/audit-workspace.spec.ts`      |
-| `audit-log.sql`            | `web/e2e/audit-log.spec.ts`            |
 | `risk-hierarchy.sql`       | `web/e2e/risk-hierarchy.spec.ts`       |
 | `admin-bootstrap.sql`      | `web/e2e/admin-bootstrap.spec.ts`      |
 | `settings.sql`             | `web/e2e/settings.spec.ts`             |
