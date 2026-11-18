@@ -30,9 +30,11 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import {
+  ACTOR_ME_SENTINEL,
+  resolveCallerUserID,
+} from "@/lib/api/caller-user-id";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-
-const ACTOR_ME_SENTINEL = "me";
 
 export async function GET(request: Request): Promise<Response> {
   const jar = await cookies();
@@ -73,25 +75,5 @@ export async function GET(request: Request): Promise<Response> {
     // Non-JSON upstream body (rare) — pass through as-is so the user
     // can see what the platform returned rather than swallowing it.
     return new NextResponse(text, { status: upstream.status });
-  }
-}
-
-// resolveCallerUserID fetches GET /v1/me and returns the response's
-// `user_id` field, or null when /v1/me is unreachable or the field is
-// missing. Used to expand the slice 270 D5 `?actor=me` sentinel.
-async function resolveCallerUserID(bearer: string): Promise<string | null> {
-  try {
-    const meRes = await fetch(`${apiBaseURL()}/v1/me`, {
-      headers: { Authorization: `Bearer ${bearer}` },
-      cache: "no-store",
-    });
-    if (!meRes.ok) return null;
-    const body = (await meRes.json()) as { user_id?: unknown };
-    if (typeof body.user_id === "string" && body.user_id.length > 0) {
-      return body.user_id;
-    }
-    return null;
-  } catch {
-    return null;
   }
 }
