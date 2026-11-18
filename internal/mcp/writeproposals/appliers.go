@@ -67,7 +67,11 @@ type CreateRiskInput struct {
 	// AcceptanceStatus applies to treatment=accept only. create_risk cannot
 	// set an accepter or expiry, so only a proposed acceptance can pass.
 	AcceptanceStatus string `json:"acceptance_status,omitempty"`
-	TreatmentOwner   string `json:"treatment_owner,omitempty"`
+	// Justification and ProposedUntil (YYYY-MM-DD) are required with
+	// acceptance_status=proposed, as POST /v1/risks requires them (#2391).
+	Justification  string `json:"justification,omitempty"`
+	ProposedUntil  string `json:"proposed_until,omitempty"`
+	TreatmentOwner string `json:"treatment_owner,omitempty"`
 }
 
 // ApplyCreateRisk inserts a new risk row using the proposal's tool_input.
@@ -121,11 +125,9 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	// id the AI-assisted proposal was filed under (a per-session "jwt:" id
 	// for a browser caller), which names no person to compare with, and the
 	// confirmer is the person who decides to make the proposal.
-	proposedBy := ""
-	var proposedAt *time.Time
-	if status == dbx.RiskAcceptanceStatusProposed {
-		now := time.Now().UTC()
-		proposedBy, proposedAt = p.Confirmer.Actor(), &now
+	proposal, err := createRiskProposal(in, status, p.Confirmer.Actor())
+	if err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
 
 	id := uuid.New()
@@ -134,16 +136,36 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 			id, tenant_id, title, description, category_id, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
 			accepted_until, accepter, instrument_reference, acceptance_status,
-			acceptance_proposed_by, acceptance_proposed_at
+			acceptance_proposed_by, acceptance_proposed_at,
+			acceptance_justification, acceptance_proposed_until
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, '', '', $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, '', '', $11, $12, $13, $14, $15)
 	`, id, p.TenantID, in.Title, in.Description, category.ID, createRiskMethodology(in),
 		inherent, treatment, in.TreatmentOwner, residual, risk.NullAcceptanceStatus(status),
-		proposedBy, proposedAt)
+		proposal.ProposedBy, proposal.ProposedAt, proposal.Justification, proposal.ProposedUntil)
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)
 	}
 	return id.String(), nil
+}
+
+// createRiskProposal is the acceptance a create_risk proposal records,
+// under the rule POST /v1/risks applies (risk.CreateProposal, #2391).
+// proposer is the confirming person; when the proposal is filed there is
+// none yet, and validateToolInput passes a placeholder.
+func createRiskProposal(in CreateRiskInput, status dbx.RiskAcceptanceStatus, proposer string) (risk.Acceptance, error) {
+	var until time.Time
+	if in.ProposedUntil != "" {
+		var err error
+		if until, err = time.Parse(time.DateOnly, in.ProposedUntil); err != nil {
+			return risk.Acceptance{}, fmt.Errorf("%w: proposed_until must be YYYY-MM-DD", risk.ErrTransitionInput)
+		}
+	}
+	return risk.CreateProposal(status, risk.ProposeAcceptanceInput{
+		Justification: in.Justification,
+		ProposedUntil: until,
+		Proposer:      proposer,
+	}, time.Now().UTC())
 }
 
 // createRiskMethodology is the proposal's methodology, defaulting as
@@ -175,8 +197,8 @@ func createRiskScores(in CreateRiskInput) ([]byte, []byte, error) {
 // validateToolInput refuses, when a proposal is filed, a tool_input its
 // applier would refuse, so the MCP tool call gets the error rather than
 // the person who confirms it later. Today that is create_risk: a
-// tool_input that does not decode (ErrInvalidInput, a 400) and its scores
-// (#2502).
+// tool_input that does not decode (ErrInvalidInput, a 400), its scores
+// (#2502) and its proposed acceptance (#2391, also ErrInvalidInput).
 func validateToolInput(tool string, input json.RawMessage) error {
 	if tool != ToolCreateRisk {
 		return nil
@@ -185,8 +207,19 @@ func validateToolInput(tool string, input json.RawMessage) error {
 	if err := json.Unmarshal(input, &in); err != nil {
 		return fmt.Errorf("%w: create_risk tool_input: %v", ErrInvalidInput, err)
 	}
-	_, _, err := createRiskScores(in)
-	return err
+	if _, _, err := createRiskScores(in); err != nil {
+		return err
+	}
+	// The confirmer, recorded as proposer, is not known until confirm.
+	// Other treatments are left to the applier's treatment check, which
+	// names their fault.
+	if in.Treatment != string(dbx.RiskTreatmentAccept) {
+		return nil
+	}
+	if _, err := createRiskProposal(in, dbx.RiskAcceptanceStatus(in.AcceptanceStatus), "pending-confirmer"); err != nil {
+		return fmt.Errorf("%w: create_risk tool_input: %v", ErrInvalidInput, err)
+	}
+	return nil
 }
 
 // EvidenceProcessor is the ingestion stage the evidence appliers hand

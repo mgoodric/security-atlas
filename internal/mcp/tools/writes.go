@@ -113,7 +113,15 @@ const createRiskInputSchema = `{
     "acceptance_status": {
       "type": "string",
       "enum": ["proposed"],
-      "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off. A risk cannot be created already approved; approve the acceptance afterwards."
+      "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off; needs justification and proposed_until. A risk cannot be created already approved; approve the acceptance afterwards."
+    },
+    "justification": {
+      "type": "string",
+      "description": "Required with acceptance_status=proposed, forbidden otherwise: why the risk should be accepted."
+    },
+    "proposed_until": {
+      "type": "string",
+      "description": "Required with acceptance_status=proposed, forbidden otherwise: the proposed expiry, YYYY-MM-DD, after today. The approver sets the approved expiry."
     },
     "treatment_owner": {
       "type": "string",

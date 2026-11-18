@@ -111,34 +111,6 @@ export function buildUnifiedQuery(params: UnifiedListParams): string {
   return `?${u.toString()}`;
 }
 
-/**
- * Browser-side fetch helper for the BFF. Returns the parsed JSON envelope
- * (or throws on non-2xx with the upstream error message attached).
- */
-export async function fetchUnifiedAuditLog(
-  params: UnifiedListParams,
-  signal?: AbortSignal,
-): Promise<UnifiedListResponse> {
-  const res = await fetch(
-    `/api/audit-log/unified${buildUnifiedQuery(params)}`,
-    {
-      cache: "no-store",
-      signal,
-    },
-  );
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const body = (await res.json()) as { error?: string };
-      detail = body.error ?? "";
-    } catch {
-      // body is empty / non-JSON — fall through with status-only detail
-    }
-    throw new AuditLogFetchError(res.status, detail);
-  }
-  return (await res.json()) as UnifiedListResponse;
-}
-
 export class AuditLogFetchError extends Error {
   status: number;
   constructor(status: number, detail: string) {

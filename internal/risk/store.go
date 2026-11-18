@@ -252,6 +252,11 @@ type CreateInput struct {
 	// acceptance, so the approval rule can refuse them as approver (#2371).
 	// Required with acceptance_status=proposed.
 	Proposer string
+	// Justification and ProposedUntil are the proposal's, required with
+	// acceptance_status=proposed as the propose transition requires them
+	// (ValidateProposal, #2391). A zero ProposedUntil is absent.
+	Justification string
+	ProposedUntil time.Time
 }
 
 // Create inserts a new risk row plus its control links. Methodology defaults
@@ -274,15 +279,6 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	if err := ValidateCreateAcceptance(in.AcceptanceStatus, in.Accepter, in.AcceptedUntil != nil); err != nil {
 		return Risk{}, err
 	}
-	var proposedBy string
-	var proposedAt *time.Time
-	if in.AcceptanceStatus == dbx.RiskAcceptanceStatusProposed {
-		if in.Proposer == "" {
-			return Risk{}, fmt.Errorf("%w: a proposed acceptance requires its proposer", ErrTransitionInput)
-		}
-		now := time.Now().UTC()
-		proposedBy, proposedAt = in.Proposer, &now
-	}
 	if err := ValidateTreatment(TreatmentInput{
 		Treatment:            in.Treatment,
 		AcceptanceStatus:     in.AcceptanceStatus,
@@ -291,6 +287,14 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		InstrumentReference:  in.InstrumentReference,
 		LinkedControlCount:   len(in.LinkedControlIDs),
 	}); err != nil {
+		return Risk{}, err
+	}
+	proposal, err := CreateProposal(in.AcceptanceStatus, ProposeAcceptanceInput{
+		Justification: in.Justification,
+		ProposedUntil: in.ProposedUntil,
+		Proposer:      in.Proposer,
+	}, time.Now().UTC())
+	if err != nil {
 		return Risk{}, err
 	}
 
@@ -334,9 +338,12 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			AcceptanceStatus:     NullAcceptanceStatus(in.AcceptanceStatus),
 			Level:                level,
 			OrgUnitID:            pgUUIDPtr(in.OrgUnitID),
-			AcceptanceProposedBy: proposedBy,
-			AcceptanceProposedAt: pgTimestamptzPtr(proposedAt),
+			AcceptanceProposedBy: proposal.ProposedBy,
+			AcceptanceProposedAt: pgTimestamptzPtr(proposal.ProposedAt),
 			OwnerUserID:          pgUUIDPtr(in.OwnerUserID),
+			// The rest of the proposal, as ProposeAcceptanceTx records it.
+			AcceptanceJustification: proposal.Justification,
+			AcceptanceProposedUntil: pgDatePtr(proposal.ProposedUntil),
 		})
 		if err != nil {
 			return fmt.Errorf("create risk: %w", err)

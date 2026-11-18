@@ -102,7 +102,6 @@ export type FixtureName =
   | "audit-workspace"
   | "risk-hierarchy"
   | "admin-bootstrap"
-  | "audit-log"
   | "settings"
   | "audits-header"
   | "controls-top-bar"

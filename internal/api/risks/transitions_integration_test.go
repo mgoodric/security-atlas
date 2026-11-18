@@ -300,13 +300,9 @@ func TestTransition_ProposerApprovalRefusedUnlessSelfApprovalOn(t *testing.T) {
 func TestTransition_CreateRecordsProposer(t *testing.T) {
 	env := newTransitionEnv(t)
 	create := func(status string) (int, map[string]any) {
-		return env.do(t, http.MethodPost, "/v1/risks", env.ownerJWT, map[string]any{
-			"title":             "accepted at create",
-			"category":          "operational",
-			"inherent_score":    map[string]int{"likelihood": 3, "impact": 4},
-			"treatment":         "accept",
+		return env.do(t, http.MethodPost, "/v1/risks", env.ownerJWT, createProposed(map[string]any{
 			"acceptance_status": status,
-		})
+		}))
 	}
 	if code, body := create("approved"); code != http.StatusBadRequest {
 		t.Fatalf("create approved: status %d, want 400: %v", code, body)
@@ -325,6 +321,103 @@ func TestTransition_CreateRecordsProposer(t *testing.T) {
 	body = env.step(t, id, "acceptance/approve", env.apprJWT, until, http.StatusOK)
 	if riskField(t, body, "acceptance_status") != "approved" || riskField(t, body, "accepter") != env.approver.String() {
 		t.Fatalf("after second-person approval: %v", body["risk"])
+	}
+}
+
+// createProposed is a POST /v1/risks body that proposes an acceptance on
+// the terms /acceptance/propose asks for, with extra's keys set over it (a
+// nil value removes the key).
+func createProposed(extra map[string]any) map[string]any {
+	body := map[string]any{
+		"title":             "accepted at create",
+		"category":          "operational",
+		"inherent_score":    map[string]int{"likelihood": 3, "impact": 4},
+		"treatment":         "accept",
+		"acceptance_status": "proposed",
+		"justification":     "Compensated by the edge filter.",
+		"proposed_until":    future(30),
+	}
+	for k, v := range extra {
+		if v == nil {
+			delete(body, k)
+			continue
+		}
+		body[k] = v
+	}
+	return body
+}
+
+// TestTransition_CreateProposalTerms (#2391): a create proposing an
+// acceptance needs what /acceptance/propose needs, a justification and a
+// proposed expiry after today, and records both. A refusal is a 400 and
+// writes nothing.
+func TestTransition_CreateProposalTerms(t *testing.T) {
+	env := newTransitionEnv(t)
+	for name, extra := range map[string]map[string]any{
+		"no justification":         {"justification": nil},
+		"blank justification":      {"justification": "   "},
+		"no proposed expiry":       {"proposed_until": nil},
+		"past proposed expiry":     {"proposed_until": time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)},
+		"proposed expiry today":    {"proposed_until": future(0)},
+		"malformed expiry":         {"proposed_until": "31/03/2099"},
+		"justification, untreated": {"treatment": "untreated", "acceptance_status": nil, "proposed_until": nil},
+	} {
+		code, body := env.do(t, http.MethodPost, "/v1/risks", env.ownerJWT, createProposed(extra))
+		if code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400: %v", name, code, body)
+		}
+	}
+	code, body := env.do(t, http.MethodGet, "/v1/risks", env.ownerJWT, nil)
+	if code != http.StatusOK || body["count"] != float64(0) {
+		t.Fatalf("refused creates wrote risks: status %d count %v", code, body["count"])
+	}
+
+	until := future(45)
+	code, body = env.do(t, http.MethodPost, "/v1/risks", env.ownerJWT,
+		createProposed(map[string]any{"justification": "  Compensated by the edge filter.  ", "proposed_until": until}))
+	if code != http.StatusCreated {
+		t.Fatalf("valid create: status %d: %v", code, body)
+	}
+	acc, _ := riskField(t, body, "acceptance").(map[string]any)
+	if acc["justification"] != "Compensated by the edge filter." || acc["proposed_until"] != until {
+		t.Fatalf("acceptance after create = %v; want the trimmed justification and proposed_until %s", acc, until)
+	}
+}
+
+// TestTransition_BoundKeyProposerIsItsUser (#2391): a key bound to a
+// person acts as that person. A proposal it files at create records the
+// person, so the person cannot approve it (403, the second-person rule)
+// and someone else can (200). Pins credstore.PrincipalOf and
+// MinterUserID for a bound key.
+func TestTransition_BoundKeyProposerIsItsUser(t *testing.T) {
+	env := newTransitionEnv(t)
+	cred := credstore.Credential{ID: "key_" + uuid.NewString(), TenantID: env.tenant, UserID: env.owner.String()}
+	ctx, err := tenancy.WithTenant(authctx.WithCredential(context.Background(), cred), env.tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	_ = json.NewEncoder(&buf).Encode(createProposed(nil))
+	req := httptest.NewRequest(http.MethodPost, "/v1/risks", &buf).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	risks.New(risk.NewStore(env.app)).CreateRisk(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("bound-key create: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := riskField(t, created, "id").(string)
+	if acc, _ := riskField(t, created, "acceptance").(map[string]any); acc["proposed_by"] != env.owner.String() {
+		t.Fatalf("proposed_by = %v; want the key's user %s", acc["proposed_by"], env.owner)
+	}
+
+	until := map[string]any{"accepted_until": future(60)}
+	env.step(t, id, "acceptance/approve", env.ownerJWT, until, http.StatusForbidden)
+	body := env.step(t, id, "acceptance/approve", env.apprJWT, until, http.StatusOK)
+	if riskField(t, body, "accepter") != env.approver.String() {
+		t.Fatalf("accepter = %v; want %s", riskField(t, body, "accepter"), env.approver)
 	}
 }
 

@@ -224,15 +224,9 @@ func ChangeTreatmentTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UU
 // after today (UTC). Any earlier approval's accepter and expiry are
 // cleared; the approver sets them.
 func ProposeAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID, in ProposeAcceptanceInput, now time.Time) (Risk, error) {
-	justification := strings.TrimSpace(in.Justification)
-	if justification == "" {
-		return Risk{}, fmt.Errorf("%w: justification is required", ErrTransitionInput)
-	}
-	if err := checkExpiry("proposed_until", in.ProposedUntil, now); err != nil {
+	justification, err := ValidateProposal(in, now)
+	if err != nil {
 		return Risk{}, err
-	}
-	if in.Proposer == "" {
-		return Risk{}, fmt.Errorf("%w: proposer is required", ErrTransitionInput)
 	}
 	current, err := lockOpenRisk(ctx, q, tenantID, id)
 	if err != nil {
@@ -260,6 +254,50 @@ func ProposeAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 		"proposed_until":    until.Format(time.DateOnly),
 	}
 	return writeTreatment(ctx, q, tenantID, next, in.Proposer, ActionAcceptanceProposed, before, after)
+}
+
+// ValidateProposal is the rule every proposed acceptance meets, whether
+// proposed on an existing risk or at create (#2391): a justification, a
+// proposed expiry after today (UTC) and a proposer. It returns the trimmed
+// justification. Its errors are ErrTransitionInput.
+func ValidateProposal(in ProposeAcceptanceInput, now time.Time) (string, error) {
+	justification := strings.TrimSpace(in.Justification)
+	if justification == "" {
+		return "", fmt.Errorf("%w: justification is required", ErrTransitionInput)
+	}
+	if err := checkExpiry("proposed_until", in.ProposedUntil, now); err != nil {
+		return "", err
+	}
+	if in.Proposer == "" {
+		return "", fmt.Errorf("%w: proposer is required", ErrTransitionInput)
+	}
+	return justification, nil
+}
+
+// CreateProposal is the acceptance a create records: for
+// acceptance_status=proposed, the proposal ValidateProposal admits, so a
+// create proposes on the same terms as the propose transition (#2391); for
+// any other status, none, and a justification or proposed expiry is
+// refused. Both create paths call it: Store.Create and the MCP create_risk
+// applier.
+func CreateProposal(status dbx.RiskAcceptanceStatus, in ProposeAcceptanceInput, now time.Time) (Acceptance, error) {
+	if status != dbx.RiskAcceptanceStatusProposed {
+		if strings.TrimSpace(in.Justification) != "" || !in.ProposedUntil.IsZero() {
+			return Acceptance{}, fmt.Errorf("%w: justification and proposed_until apply only to acceptance_status=proposed", ErrTransitionInput)
+		}
+		return Acceptance{}, nil
+	}
+	justification, err := ValidateProposal(in, now)
+	if err != nil {
+		return Acceptance{}, err
+	}
+	until := dateOnly(in.ProposedUntil)
+	return Acceptance{
+		Justification: justification,
+		ProposedUntil: &until,
+		ProposedBy:    in.Proposer,
+		ProposedAt:    &now,
+	}, nil
 }
 
 // ApproveAcceptanceTx approves a proposed acceptance. accepted_until is
