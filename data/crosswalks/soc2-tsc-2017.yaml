@@ -573,7 +573,7 @@ mappings:
     scf_anchor: DCH-27
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Data Retention defines when confidential info should be disposed."
+    rationale: "Media & Data Retention defines when confidential info should be disposed."
 
   # =====================================================================
   # PI1 — Processing Integrity — anchors to SEA-* + governance

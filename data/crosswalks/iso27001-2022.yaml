@@ -522,7 +522,7 @@ mappings:
     scf_anchor: DCH-27
     relationship_type: equal
     strength: 0.7
-    rationale: "Protection and integrity of records over their lifetime maps to Data Retention (DCH-27)."
+    rationale: "Protection and integrity of records over their lifetime maps to Media & Data Retention (DCH-27)."
   - requirement_code: A.5.33
     scf_anchor: MON-13
     relationship_type: intersects_with
@@ -775,7 +775,7 @@ mappings:
     scf_anchor: DCH-27
     relationship_type: equal
     strength: 0.8
-    rationale: "Deletion of information when no longer required is the disposal end of Data Retention (DCH-27)."
+    rationale: "Deletion of information when no longer required is the disposal end of Media & Data Retention (DCH-27)."
   - requirement_code: A.8.10
     scf_anchor: AST-22
     relationship_type: subset_of
