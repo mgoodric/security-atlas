@@ -16,7 +16,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useRef, useState } from "react";
 
 import { ScfAnchorPicker } from "@/components/control/scf-anchor-picker";
 import { DetailHeader } from "@/components/detail/detail-header";
@@ -91,6 +91,7 @@ export default function ControlImportReviewPage({
     noCandidateReaches: false,
   });
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const clearRef = useRef<HTMLButtonElement>(null);
 
   const batchQ = useQuery({
     queryKey: ["control-import", id],
@@ -208,6 +209,7 @@ export default function ControlImportReviewPage({
           variant="secondary"
           size="sm"
           disabled={progress.pending === 0 || clearM.isPending}
+          ref={clearRef}
           onClick={() => setConfirmingClear(true)}
           data-testid="control-import-approve-clear"
         >
@@ -230,6 +232,7 @@ export default function ControlImportReviewPage({
             confirmLabel="Approve clear rows"
             busy={clearM.isPending}
             onCancel={() => setConfirmingClear(false)}
+            returnFocus={() => clearRef.current}
             onConfirm={() => clearM.mutate()}
             data-testid="control-import-approve-clear-confirm"
           >
@@ -381,6 +384,8 @@ function ImportRow({
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [rejecting, setRejecting] = useState(false);
+  const rejectRef = useRef<HTMLButtonElement>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
   const [reason, setReason] = useState("");
 
   const anchorsQ = useQuery({
@@ -533,6 +538,7 @@ function ImportRow({
             <Button
               variant="outline"
               size="sm"
+              ref={rejectRef}
               onClick={() => setRejecting(true)}
               disabled={busy}
               data-testid="control-import-reject"
@@ -567,6 +573,8 @@ function ImportRow({
               prompt={`Reject ${row.external_id}? It is excluded from this import and the reason is kept.`}
               confirmLabel="Reject"
               busy={rejectM.isPending || reason.trim() === ""}
+              initialFocus={reasonRef}
+              returnFocus={() => rejectRef.current}
               onCancel={() => {
                 setRejecting(false);
                 setReason("");
@@ -575,6 +583,7 @@ function ImportRow({
               data-testid="control-import-reject-confirm"
             >
               <textarea
+                ref={reasonRef}
                 aria-label="Reason for rejecting"
                 placeholder="Reason (required)"
                 className="w-full rounded-md border p-2 text-sm"

@@ -207,6 +207,9 @@ test.describe("audit-period detail (#2117)", () => {
     await expect(confirm).toContainText("evidence becomes immutable");
     await page.getByTestId("audit-period-freeze-confirm-cancel").click();
     await expect(confirm).toBeHidden();
+    // #2518: the header's Freeze, disabled while the confirm was open,
+    // gets focus back.
+    await expect(page.getByTestId("audit-period-freeze")).toBeFocused();
     expect(freezeCalls).toBe(0);
     await expect(page.getByTestId("audit-period-status")).toHaveText("Open");
     await expect(page.getByTestId("audit-period-frozen-hash")).toHaveCount(0);
