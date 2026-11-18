@@ -120,6 +120,10 @@ var routes2428 = []route2428{
 	// #2503: the tenant's own users, read and re-roled by a tenant admin.
 	{http.MethodGet, "/v1/admin/users/" + id2428, tenantAdminGate},
 	{http.MethodPatch, "/v1/admin/users/" + id2428 + "/roles", tenantAdminGate},
+	// #2503: the tenant's SSO config, and (D5) its feature-flag flip log.
+	{http.MethodGet, "/v1/admin/sso", tenantAdminGate},
+	{http.MethodPost, "/v1/admin/sso/preflight", tenantAdminGate},
+	{http.MethodGet, "/v1/admin/audit-log", tenantAdminGate},
 
 	// Tenant-admin gates.
 	{http.MethodPost, "/v1/audit-periods", tenantAdminGate},
@@ -278,10 +282,11 @@ var handlerNarrower2428 = map[string]bool{
 	"/v1/needs-attention?for=all control_owner": true,
 	"/v1/needs-attention?for=all auditor":       true,
 	"/v1/needs-attention?for=all viewer":        true,
-	// #2503: grc_engineer.rego's blanket read admits GET /v1/admin/users;
-	// the handler has always refused it (cred.IsAdmin before, IsTenantAdmin
-	// now). grc_engineer's OPA rules are unchanged by #2503.
-	"/v1/admin/users/" + id2428 + " grc_engineer": true,
+	// #2503: grc_engineer.rego's blanket read admits GET /v1/admin/sso and
+	// the feature-flag log; their handlers refuse it, as they always have.
+	// (Users is tenant-admin-only in OPA too since #2503 D5a.)
+	"/v1/admin/sso grc_engineer":       true,
+	"/v1/admin/audit-log grc_engineer": true,
 }
 
 // TestTenantGates2428_HandlerAgreesWithOPA runs the real bundle for every

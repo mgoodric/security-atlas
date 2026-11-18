@@ -120,6 +120,24 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		// #2503: the tenant's own users. Assign and revoke also run it, for
 		// the within-tenant path; their routes need a body this table
 		// cannot send, so the two GETs and PATCH stand for the gate.
+		// #2503: the tenant's SSO config and its preflight. PATCH shares the
+		// gate; handlerNarrower2428 keys on path, so the GET row stands for it
+		// (adminusers' 2503 integration test sends the PATCH).
+		"adminsso/handler.go requireAdmin": site(adm,
+			r2447(get, "/v1/admin/sso"),
+			r2447(post, "/v1/admin/sso/preflight")),
+		// #2503 D5: the tenant's feature-flag flip log.
+		"adminauditlog/handler.go requireAdmin": site(adm, r2447(get, "/v1/admin/audit-log")),
+		// #2503 D5: the unified read and its export admit IsTenantAdmin or a
+		// live auditor/grc_engineer user_roles row (callerAllowedUnified, a
+		// DB lookup this cred-only table cannot express). slice124_test.go,
+		// slice135_test.go and adminusers' 2503 integration test pin them.
+		"adminauditlog/unified.go Handler.UnifiedList": notRoute(adm,
+			"unified audit-log read: IsTenantAdmin or a live auditor/grc_engineer row (callerAllowedUnified, #2503 D5)"),
+		"adminauditlog/export.go Handler.ExportUnified": notRoute(adm,
+			"unified audit-log export: IsTenantAdmin or a live auditor/grc_engineer row (callerAllowedUnified, #2503 D5)"),
+		"adminauditlog/activity.go Handler.ActivityList": notRoute(adm,
+			"activity ledger (#2503 D5): picks the privileged view for an admin; never a refusal"),
 		"adminusers/handler.go requireAdmin": site(adm,
 			r2447(get, "/v1/admin/users/"+id),
 			r2447(patch, "/v1/admin/users/"+id+"/roles")),
