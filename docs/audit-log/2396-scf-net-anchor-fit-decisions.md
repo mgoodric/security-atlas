@@ -14,7 +14,7 @@ These are follow-ups from the review of #2388 (#1978, the END/NET/PES remap). Th
 
 1.4.1 requires network security controls between trusted and untrusted networks. Its rationale already said "map to SCF Network Segmentation". The `NET-24` anchor came from the mechanical #1978 move of old `NET-08` (Wireless Network Security), which was already the wrong concept before the remap. In the workbook's `PCI DSS 4.0.1` column, 1.4.1 maps to `NET-03`, `NET-06`, `NET-29`, `NET-41.1`, `CFG-03`, `MON-25` and `SEA-06`, and not to `NET-24`. `NET-06` matches the rationale's stated concept, so it was chosen over `NET-03`. The rationale now quotes the full 2026.3 title.
 
-On the next catalog import, the crosswalk importer retires the `1.4.1 → NET-24` edge, because the crosswalk no longer lists it (#1971), and adds `1.4.1 → NET-06`. No stock control and no connector default anchors on either code through this mapping.
+On the next catalog import, the crosswalk importer retires the `1.4.1 → NET-24` edge, because the crosswalk no longer lists it (#1971), and adds `1.4.1 → NET-06`. For PCI 1.4.1, no stock control and no connector default anchors on either code through this mapping.
 
 Confidence: HIGH. The requirement's own rationale and the workbook agree.
 
@@ -45,7 +45,7 @@ The schema anchor lists are flat (#2620), so "secondary" means a later entry in 
 
 - An install that has already registered `k8s.networkpolicy_coverage` or `azure.nsg_rules` 1.0.0 keeps the default anchors it stored, because the boot import skips a kind and version that is already present (as with #2387). New installs get the new lists.
 - A k8s connector run on its defaults stamps `scf:NET-06` once upgraded. Evidence already ingested keeps its `control_id`, so records from before and after the change sit under different codes. The upgrade guide's connector-default table carries the row.
-- On boot, the bundled ISO crosswalk converges (#2014): the `A.8.22 → NET-03` edge is retired and `A.8.22 → NET-06` is added.
+- On boot, the bundled ISO crosswalk converges (#2014): the `A.8.22 → NET-03` edge is retired and `A.8.22 → NET-06` is added. ISO A.8.22 no longer maps to the stock `soc2_cc6_6_boundary_protection` (NET-03) control. It reports as uncovered until a control is anchored on NET-06. Matt accepted this on 2026-11-18. A stock `NET-06` control is a separate follow-up ticket.
 
 ## D6 — Tests
 

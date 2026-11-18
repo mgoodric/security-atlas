@@ -233,6 +233,8 @@ defaults stay `scf:NET-03`; the `azure.nsg_rules.v1` default anchors gain
 registered either schema keeps its stored anchors. To keep NetworkPolicy
 records on the old code, pass `--netpol-control scf:NET-03`.
 
+ISO A.8.22 no longer maps to the stock `soc2_cc6_6_boundary_protection` (NET-03) control. It reports as uncovered until a control is anchored on NET-06.
+
 A connector run on its defaults picks up the new code when you upgrade it. If
 you pass one of these flags with the old value, by hand or in a scheduler or
 manifest, change it to the new code: in SCF 2026.3 the old code names a
