@@ -1,16 +1,16 @@
 package authz_test
 
 // #2507: the `IsAdmin || IsApprover || len(OwnerRoles) > 0` read gates moved
-// onto the live-role helpers. Each route below runs through authzmw with the
-// real OPA bundle and a resolver standing in for user_roles, then a handler
-// applying the route's gate. The caller is a signed-in person's JWT session
-// whose role claim names the same role as its live user_roles row, and the
-// test pins which of the five roles both layers admit. A session holding the
-// role in its claim alone is refused everywhere.
+// onto the live-role helpers. Their routes are rows in routes2428, where
+// TestTenantGates2428_HandlerAgreesWithOPA checks each gate against OPA. This
+// file adds what that table cannot hold:
 //
-// Where a gate is shared by routes OPA reads differently (controldetail's
-// control and evidence routes), the gate is the wider any-role check and OPA
-// makes the narrower cut; the matrix records the result of both.
+//   - controldetail's evidence routes, whose gate is the any-role check it
+//     shares with the control-detail routes while OPA makes a narrower cut;
+//     the matrix pins the result of both layers;
+//   - that no routes2428 gate admits a session holding a role in its claim
+//     alone (a revoked user's token, #2381);
+//   - the HasAnyTenantRole helper itself.
 
 import (
 	"context"

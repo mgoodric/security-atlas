@@ -142,9 +142,9 @@ func (h *Handler) Provenance(w http.ResponseWriter, r *http.Request) {
 // unit/integration test servers, so a handler-level check is the testable
 // enforcement point — the controldetail.requireControlRead precedent). The
 // OSCAL imported-profile provenance read is an operator/auditor surface:
-// the read set is admin (wildcard) + grc_engineer (IsApprover) +
-// control_owner (OwnerRoles), the same set controldetail.hasControlRead
-// admits. A bare push credential (no flags) has no business reading it.
+// the read set is admin + grc_engineer by live role (hasOscalRead, #2507),
+// as OPA reads oscal. A bare push credential (no flags) has no business
+// reading it.
 func requireOscalRead(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok || !hasOscalRead(cred) {
@@ -154,8 +154,11 @@ func requireOscalRead(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// hasOscalRead reports whether the credential carries an explicit
-// OSCAL-read role signal. Mirrors controldetail.hasControlRead.
+// hasOscalRead reports whether the credential may read imported-profile
+// provenance: a tenant approver by its live roles (authz.IsTenantApprover),
+// as OPA reads it for admin and grc_engineer only. #2507 moved it off
+// `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which counted a session's
+// role claim (#2381) and admitted roles OPA refuses here.
 func hasOscalRead(c credstore.Credential) bool {
 	return authz.IsTenantApprover(c)
 }

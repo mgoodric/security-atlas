@@ -653,14 +653,12 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
-// controlsHasProgramRead reports whether the credential carries an
-// explicit program-read role signal. Mirrors `hasProgramRead` from
-// `internal/api/risks/authz.go`; the controls catalog includes the
-// same class of tenant-private data (applicability_expr) and demands
-// the same gate.
-//
-// Deliberately stricter than authz.derivedRolesFor — a bare push
-// credential (no flags) has no business reading the control catalog.
+// controlsHasProgramRead reports whether the credential holds a tenant role:
+// any of the five, by its live user_roles (authz.HasAnyTenantRole). OPA
+// reads the controls exports for every role, so the defense-in-depth gate
+// admits the same set. A bare push credential, or a session whose role claim
+// names a role it no longer holds (#2381), is refused. #2507 moved it off
+// `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which counted that claim.
 func controlsHasProgramRead(c credstore.Credential) bool {
 	return authz.HasAnyTenantRole(c)
 }

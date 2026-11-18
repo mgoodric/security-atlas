@@ -30,20 +30,13 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
-// hasProgramRead reports whether the credential carries an explicit
-// program-read role signal:
-//
-//	IsAdmin            -> admin         (wildcard — program-read granted)
-//	IsApprover         -> grc_engineer  (program-read granted)
-//	len(OwnerRoles)>0  -> control_owner (program-read granted)
-//
-// Deliberately STRICTER than authz.derivedRolesFor, which maps a bare
-// tenant credential to grc_engineer. The program dashboard is the
-// slice-040 operator/auditor UI, not a connector surface — a bare push
-// credential (no flags) has no business reading it. Requiring an explicit
-// role signal also makes AC-5 genuinely testable: the "role without
-// program-read access" is exactly a credential carrying none of the three
-// signals.
+// hasProgramRead reports whether the credential holds a tenant role: any of
+// the five, by its live user_roles (authz.HasAnyTenantRole). OPA reads the
+// activity feed and framework posture for every role, so the
+// defense-in-depth gate admits the same set. A bare push credential, or a
+// session whose role claim names a role it no longer holds (#2381), is
+// refused. #2507 moved it off `IsAdmin || IsApprover || len(OwnerRoles) >
+// 0`, which counted that claim.
 func hasProgramRead(c credstore.Credential) bool {
 	return authz.HasAnyTenantRole(c)
 }

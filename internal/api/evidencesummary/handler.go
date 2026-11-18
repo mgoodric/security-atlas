@@ -192,11 +192,12 @@ func summaryWireFrom(sum evidencesummary.Summary) summaryWire {
 
 // ===== authz: control-read role guard (defense-in-depth) =====
 
-// hasControlRead mirrors controldetail.hasControlRead / gapexplain.hasControlRead
-// — the control-read role set is admin (wildcard) OR grc_engineer (IsApprover)
-// OR control_owner (OwnerRoles). The slice-035 OPA middleware is the primary
-// gate in production; this handler-level guard is the testable enforcement point
-// when OPA is not wired (unit/integration servers).
+// hasControlRead reports whether the credential holds a tenant role: any of
+// the five, by its live user_roles (authz.HasAnyTenantRole). OPA reads a
+// control's evidence summary for every role, so the defense-in-depth gate
+// admits the same set. A bare push credential, or a session whose role claim
+// names a role it no longer holds (#2381), is refused. #2507 moved it off
+// `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which counted that claim.
 func hasControlRead(c credstore.Credential) bool {
 	return authz.HasAnyTenantRole(c)
 }

@@ -504,10 +504,12 @@ func (h *ExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
-// evidenceHasProgramRead reports whether the credential grants
-// program-read access to the evidence ledger. Bare push credentials
-// (no flags) MUST NOT enumerate the ledger; that's a deliberate
-// separation from the push-side rate-limited POST surface.
+// evidenceHasProgramRead reports whether the credential may read the
+// evidence ledger export: a tenant approver by its live roles
+// (authz.IsTenantApprover), as OPA reads it for admin and grc_engineer only.
+// #2507 moved it off `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which
+// counted a session's role claim (#2381) and admitted roles OPA refuses
+// here.
 func evidenceHasProgramRead(c credstore.Credential) bool {
 	return authz.IsTenantApprover(c)
 }

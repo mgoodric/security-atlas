@@ -26,11 +26,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
-// hasProgramRead reports whether the credential carries an explicit
-// program-read role signal. Identical derivation to
-// internal/api/risks.hasProgramRead — deliberately stricter than
-// authz.derivedRolesFor, which maps a bare tenant credential to
-// grc_engineer.
+// hasProgramRead reports whether the credential may read or change
+// personnel-security checklists: a tenant approver by its live roles
+// (authz.IsTenantApprover), as OPA reads it for admin and grc_engineer only.
+// #2507 moved it off `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which
+// counted a session's role claim (#2381) and admitted roles OPA refuses
+// here.
 func hasProgramRead(c credstore.Credential) bool {
 	return authz.IsTenantApprover(c)
 }

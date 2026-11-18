@@ -519,6 +519,11 @@ func (h *SamplesExportHandler) exportLimiter() *export.Limiter {
 
 // ===== Role gate =====
 
+// samplesHasProgramRead reports whether the credential may read the samples
+// export: a tenant approver by its live roles (authz.IsTenantApprover), as
+// OPA reads it for admin and grc_engineer only. #2507 moved it off `IsAdmin
+// || IsApprover || len(OwnerRoles) > 0`, which counted a session's role
+// claim (#2381) and admitted roles OPA refuses here.
 func samplesHasProgramRead(c credstore.Credential) bool {
 	return authz.IsTenantApprover(c)
 }

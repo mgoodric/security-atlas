@@ -40,6 +40,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
@@ -214,10 +215,20 @@ type testEnv struct {
 	bearer string
 }
 
-// ownerServer assembles the router with an owner credential (read-capable,
-// not approver). Used to assert reads work + disposition is forbidden.
-func ownerServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
-	return newServer(t, app, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+// readerServer assembles the router, OPA attached, with a grc_engineer by
+// live role (liveroletest): read-capable, not a tenant admin. Used to
+// assert reads work + disposition (admin only) is forbidden. OPA reads oscal
+// for admin and grc_engineer only, so a control_owner is not a reader
+// (#2507).
+func readerServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
+	t.Helper()
+	srv := api.New(api.Config{})
+	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "grc_engineer")
+	ts := httptest.NewServer(srv.HTTPHandlerForTests())
+	t.Cleanup(ts.Close)
+	return testEnv{server: ts, bearer: bearer}
 }
 
 // approverServer assembles the router with an approver (grc_engineer)
@@ -273,7 +284,7 @@ func TestList_ReturnsDefinitions(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	seedComponentDef(t, admin, tenant)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 
 	resp, body := do(t, env, http.MethodGet, "/v1/oscal/component-definitions", "")
 	if resp.StatusCode != http.StatusOK {
@@ -315,7 +326,7 @@ func TestList_EmptyTenantReturns200EmptyList(t *testing.T) {
 	// tenant shape that 500'd on edge. freshTenant registers the cleanup;
 	// nothing is seeded.
 	tenant := freshTenant(t, admin)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 
 	resp, body := do(t, env, http.MethodGet, "/v1/oscal/component-definitions", "")
 	if resp.StatusCode != http.StatusOK {
@@ -342,7 +353,7 @@ func TestGet_ReturnsClaimsWithUnmappedFlag(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	defID, _ := seedComponentDef(t, admin, tenant)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 
 	resp, body := do(t, env, http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "")
 	if resp.StatusCode != http.StatusOK {
@@ -473,7 +484,7 @@ func TestRLS_CrossTenantIsolation(t *testing.T) {
 	defA, claimsA := seedComponentDef(t, admin, tenantA)
 
 	// Tenant B cannot READ tenant A's definition (404).
-	envB := ownerServer(t, app, tenantB)
+	envB := readerServer(t, app, tenantB)
 	resp, _ := do(t, envB, http.MethodGet, "/v1/oscal/component-definitions/"+defA.String(), "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-tenant get: status = %d, want 404", resp.StatusCode)
@@ -522,8 +533,8 @@ func TestAuthz_NonApproverForbiddenDisposition(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
-	// An owner can READ but cannot DISPOSITION (write needs approver/admin).
-	env := ownerServer(t, app, tenant)
+	// A grc_engineer can READ but cannot DISPOSITION (write needs a tenant admin).
+	env := readerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodPost, "/v1/oscal/component-claims/"+claims[0].claimID.String()+":accept", "")
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
@@ -534,7 +545,7 @@ func TestGet_UnknownID404(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodGet, "/v1/oscal/component-definitions/"+uuid.New().String(), "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
@@ -677,14 +688,14 @@ func TestMapScfAnchor_UnknownClaim404(t *testing.T) {
 	}
 }
 
-// TestMapScfAnchor_NonApproverForbidden asserts an owner (read role) cannot map.
+// TestMapScfAnchor_NonApproverForbidden asserts a grc_engineer (read role) cannot map.
 func TestMapScfAnchor_NonApproverForbidden(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
 	scfID := ensureCurrentSCFAnchor(t, admin)
-	env := ownerServer(t, app, tenant)
+	env := readerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodPatch,
 		"/v1/oscal/component-claims/"+claims[1].claimID.String()+"/scf-anchor",
 		`{"scf_anchor_id":"`+scfID+`"}`)
