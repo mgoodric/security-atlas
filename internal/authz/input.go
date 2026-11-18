@@ -183,6 +183,11 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		return readOnlyRoles(cred.OwnerRoles)
 	case len(cred.OwnerRoles) > 0:
 		return []Role{RoleControlOwner}
+	case boundKey(cred):
+		// #2431 (Matt, 2026-11-18): an unlabelled key bound to a user holds
+		// exactly its owner's live user_roles rows, not the grc_engineer
+		// default below. The flags were handled above.
+		return nil
 	case cred.TenantID == "":
 		// No credential in context -- exempt path. Return empty so
 		// authz.Decide hits default-deny.
@@ -209,7 +214,8 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 // still a narrowing.
 //
 // An empty label means no cap (Matt, 2026-11-18): an unlabelled bound key
-// keeps acting as its user. The is_admin and is_approver flags keep their own
+// acts as its user, with exactly the owner's live roles (derivedRolesFor
+// gives it nothing of its own). The is_admin and is_approver flags keep their own
 // cases in derivedRolesFor and are not capped here.
 func boundKeyCeiling(cred credstore.Credential) []Role {
 	if cred.IsAdmin || cred.IsApprover || !boundKey(cred) || len(cred.OwnerRoles) == 0 {

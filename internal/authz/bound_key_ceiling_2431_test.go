@@ -64,6 +64,9 @@ func TestDecide2431_BoundKeyCeiling(t *testing.T) {
 		{"mixed label, viewer+auditor owner", key("viewer", "control_owner"), R(authz.RoleViewer, authz.RoleAuditor), R(authz.RoleViewer)},
 		{"mixed label, admin owner", key("viewer", "platform-eng"), R(authz.RoleAdmin), R(authz.RoleViewer, authz.RoleControlOwner)},
 		{"no label, admin owner: not capped", key(), R(authz.RoleAdmin), R(authz.RoleAdmin)},
+		// No label: exactly the owner's live roles, no grc_engineer default.
+		{"no label, viewer owner", key(), R(authz.RoleViewer), R(authz.RoleViewer)},
+		{"no label, owner has no roles", key(), nil, nil},
 	} {
 		got, allow := liveRoles2431(t, c.cred, c.live)
 		if allow != (c.want != nil) {
@@ -86,6 +89,34 @@ func TestDecide2431_NotCapped(t *testing.T) {
 	} {
 		if _, allow := liveRoles2431(t, cred, nil); !allow {
 			t.Errorf("%s: GET /v1/controls refused; want the derivation it had before #2431", cred.ID)
+		}
+	}
+}
+
+// An unbound key with no label keeps the grc_engineer default (#2431 changes
+// only keys bound to a user): it still writes controls, which grc_engineer
+// grants, while an unlabelled key bound to a user with no roles does not.
+func TestDecide2431_UnlabelledUnboundKeyKeepsGRCEngineer(t *testing.T) {
+	t.Parallel()
+	e, err := authz.NewEngine(context.Background(), tenantResolver{})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	for _, c := range []struct {
+		cred credstore.Credential
+		want bool
+	}{
+		{credstore.Credential{ID: "key_2431e", TenantID: tenant2431, UserID: "key_2431e"}, true},
+		{credstore.Credential{ID: "key_2431f", TenantID: tenant2431, UserID: owner2431}, false},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/v1/controls", nil)
+		r = r.WithContext(authctx.WithCredential(r.Context(), c.cred))
+		d, err := e.Decide(context.Background(), authz.BuildInput(r, nil))
+		if err != nil {
+			t.Fatalf("Decide: %v", err)
+		}
+		if d.Allow != c.want {
+			t.Errorf("%s (UserID %s), no label: POST /v1/controls allow = %v, want %v", c.cred.ID, c.cred.UserID, d.Allow, c.want)
 		}
 	}
 }

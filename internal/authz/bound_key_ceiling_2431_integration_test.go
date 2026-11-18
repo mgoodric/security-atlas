@@ -11,7 +11,9 @@
 // with the owner's live roles) with the shipped one, and allows only
 // narrowing: nothing may gain. It also checks the shipped decision equals
 // the decision for the roles the ceiling rule names, so the narrowing is the
-// intended one. An unlabelled key is not capped and must not change at all.
+// intended one. An unlabelled key is not capped, and holds exactly its
+// owner's live roles: it loses the grc_engineer default it used to derive.
+// Unbound keys must not change.
 //
 // Run with:  go test -tags=integration -race -run 2431 ./internal/authz/...
 
@@ -157,8 +159,9 @@ func TestDecide2431_BoundKeyRoleMatrix(t *testing.T) {
 			before := union2431(legacyBoundDerived2431(l), o.live)
 			want := ceiling2431(l, o.live)
 			if len(l) == 0 {
-				// No cap: the pre-#2431 roles exactly.
-				want = before
+				// No cap, and no grc_engineer default either (Matt,
+				// 2026-11-18): exactly the owner's live roles.
+				want = o.live
 			}
 			lost := 0
 			for _, rt := range routes2381 {
@@ -171,9 +174,6 @@ func TestDecide2431_BoundKeyRoleMatrix(t *testing.T) {
 				case is && !was:
 					t.Errorf("%s: %s %s gained access; #2431 only narrows", name, rt.method, rt.path)
 				case was && !is:
-					if len(l) == 0 {
-						t.Errorf("%s: %s %s lost access; an unlabelled bound key is not capped", name, rt.method, rt.path)
-					}
 					lost++
 				}
 			}
@@ -185,6 +185,23 @@ func TestDecide2431_BoundKeyRoleMatrix(t *testing.T) {
 			}
 		}
 	}
+	// Unbound keys are untouched: an unlabelled one keeps grc_engineer, a
+	// labelled one its #2402 derivation.
+	for _, u := range []struct {
+		cred credstore.Credential
+		want []authz.Role
+	}{
+		{credstore.Credential{ID: "key_2431_ue", TenantID: tenant, UserID: "key_2431_ue"}, []authz.Role{authz.RoleGRCEngineer}},
+		{credstore.Credential{ID: "key_2431_uv", TenantID: tenant, UserID: "key_2431_uv", OwnerRoles: []string{"viewer"}}, []authz.Role{authz.RoleViewer}},
+		{credstore.Credential{ID: "key_2431_uf", TenantID: tenant, UserID: "key_2431_uf", OwnerRoles: []string{"platform-eng"}}, []authz.Role{authz.RoleControlOwner}},
+	} {
+		for _, rt := range routes2381 {
+			if is, exp := decide2239(t, ctx, engine, u.cred, rt, nil), decide2239(t, ctx, fixed, u.cred, rt, u.want); is != exp {
+				t.Errorf("unbound key %v: %s %s allow=%v, want %v (roles %v)", u.cred.OwnerRoles, rt.method, rt.path, is, exp, u.want)
+			}
+		}
+	}
+
 	if narrowed == 0 {
 		t.Error("no bound key narrowed; the label is not capping the owner's roles")
 	}

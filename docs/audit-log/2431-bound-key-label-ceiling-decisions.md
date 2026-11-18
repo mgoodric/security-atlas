@@ -16,7 +16,9 @@ In this log, a key's "label" means its `owner_roles` role label, not the
 - **detection_tier_target:** integration.
   `TestDecide2431_BoundKeyRoleMatrix` (real Postgres) printed
   `0 bound keys narrowed; 72 unchanged` and failed on the old code, and
-  passes with the fix.
+  passes with the fix. Without D2's new case it fails on the unlabelled
+  rows (`48 bound keys narrowed; 24 unchanged`); with it, it prints
+  `53 bound keys narrowed; 19 unchanged`.
 
 ## Decisions
 
@@ -37,16 +39,30 @@ For a bound key with a non-empty label:
 - An owner with no live roles, or a disabled owner (whose rows the
   resolver already drops, #2239), gives no access.
 
-### D2: an empty label means no cap (Matt's call, 2026-11-18)
+### D2: an empty label means exactly the owner's live roles (Matt's call, 2026-11-18)
 
-An unlabelled bound key keeps acting as its user, so existing keys don't
-change. It keeps the derivation it had before (`grc_engineer`, merged with
-the owner's live roles). The matrix asserts every route is unchanged for
-it.
+An unlabelled bound key is not capped. It acts as its user, with exactly
+the owner's live roles. `derivedRolesFor` has a new case before its
+`default`: a bound key with no label and neither flag derives nothing.
+Before, it fell through to the default and derived `grc_engineer`, which
+was merged with the owner's roles.
 
-That is "no change", which is not quite "equals the owner's live roles":
-the old derivation still adds `grc_engineer`. Dropping that is a narrowing
-of its own and was not asked for here.
+The first version of this PR kept that `grc_engineer` ("no cap, existing
+keys don't change"). Matt then ruled that an unlabelled key gets the
+owner's live roles only. So this narrows unlabelled bound keys too:
+
+- An owner with no live roles, or a disabled owner, now gives the key
+  nothing. Before, it had `grc_engineer`.
+- **Connector and push keys minted by low-role owners lose `grc_engineer`.**
+  A key bound to a `viewer`, `auditor` or `control_owner` owner can no
+  longer push evidence, write controls, policies or risks, or approve
+  anything that `grc_engineer` granted. It keeps only what the owner's own
+  role grants.
+- An owner holding `admin` or `grc_engineer` loses nothing.
+
+Unbound keys (`issued_by` NULL) are unchanged. An unlabelled one still
+derives `grc_engineer`, as connectors minted through
+`POST /v1/admin/credentials` do. A unit row and a matrix row pin that.
 
 ### D3: settles #2427's D2 by capping in Decide, after the resolver
 
@@ -79,13 +95,21 @@ capped rows, the handler gates (`IsTenantAdmin`, `IsTenantApprover`,
   `TestDecide2431_BoundKeyRoleMatrix`, which compares the #2402 derivation
   plus live roles with the capped one for 11 label shapes x 8 owners. It
   allows only narrowing, and checks each decision against the ceiling rule
-  written out separately in the test. No rego changed.
+  written out separately in the test. An unlabelled key must equal its
+  owner's live roles (D2), and unbound keys must not change. No rego changed.
 
 ## Rollout
 
 `scripts/dry-run-2431-bound-key-ceiling.sql` is read-only and prints counts
-only. Per tenant, it counts in-scope bound keys by label shape and outcome
-(`none`, `narrowed` or `unchanged` role set), plus the live keys out of
-scope. A key that must keep a role its label doesn't name has to be
-re-minted with that label first, or left unlabelled. There is no live
-install today. Matt approves before merge.
+only. Per tenant and `owner_roles` shape (`unlabelled` included), it counts
+bound keys by outcome (`none`, `narrowed` or `unchanged` role set). It also
+counts, before and after, the keys that hold any role, `grc_engineer`, and
+`admin`, and the live keys out of scope. Before rollout:
+
+- A key that must keep a role its label doesn't name has to be re-minted
+  with that label.
+- An unlabelled connector key whose owner holds neither `admin` nor
+  `grc_engineer` needs its owner granted `grc_engineer`, or must be
+  re-minted as an unbound key.
+
+There is no live install today. Matt approves before merge.
