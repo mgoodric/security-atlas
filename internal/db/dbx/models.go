@@ -1739,6 +1739,8 @@ type ApiKey struct {
 	Purpose *string `json:"purpose"`
 	// users(id) of whoever minted the key, for attribution only (#1892). Not the key's owner: that is issued_by. Never read for identity or authorization.
 	MintedBy pgtype.UUID `json:"minted_by"`
+	// Admin-chosen name for the key, shown in place of its id (#2384). Never the token, its prefix or last4.
+	Label *string `json:"label"`
 }
 
 type Artifact struct {

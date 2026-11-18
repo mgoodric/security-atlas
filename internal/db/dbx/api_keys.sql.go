@@ -12,7 +12,7 @@ import (
 )
 
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
-SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by
+SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by, label
 FROM api_keys
 WHERE token_hash = $1
 `
@@ -43,12 +43,13 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, tokenHash []byte) (ApiKey
 		&i.TtlSeconds,
 		&i.Purpose,
 		&i.MintedBy,
+		&i.Label,
 	)
 	return i, err
 }
 
 const getAPIKeyByID = `-- name: GetAPIKeyByID :one
-SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by
+SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by, label
 FROM api_keys
 WHERE tenant_id = $1 AND id = $2
 `
@@ -81,6 +82,7 @@ func (q *Queries) GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (A
 		&i.TtlSeconds,
 		&i.Purpose,
 		&i.MintedBy,
+		&i.Label,
 	)
 	return i, err
 }
@@ -90,15 +92,15 @@ INSERT INTO api_keys (
     id, tenant_id, token_hash, scope_predicate, allowed_kinds,
     issued_by, expires_at, rotated_from,
     is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose,
-    minted_by
+    minted_by, label
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10, $11, $12, $13, $14,
-    $15
+    $15, $16
 )
-RETURNING id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by
+RETURNING id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by, label
 `
 
 type InsertAPIKeyParams struct {
@@ -117,6 +119,7 @@ type InsertAPIKeyParams struct {
 	TtlSeconds     int64              `json:"ttl_seconds"`
 	Purpose        *string            `json:"purpose"`
 	MintedBy       pgtype.UUID        `json:"minted_by"`
+	Label          *string            `json:"label"`
 }
 
 // Persist a new API key. token_hash is HMAC-SHA256(plaintext, BEARER_HASH_KEY)
@@ -139,6 +142,7 @@ func (q *Queries) InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (Api
 		arg.TtlSeconds,
 		arg.Purpose,
 		arg.MintedBy,
+		arg.Label,
 	)
 	var i ApiKey
 	err := row.Scan(
@@ -161,12 +165,13 @@ func (q *Queries) InsertAPIKey(ctx context.Context, arg InsertAPIKeyParams) (Api
 		&i.TtlSeconds,
 		&i.Purpose,
 		&i.MintedBy,
+		&i.Label,
 	)
 	return i, err
 }
 
 const listAPIKeysByTenant = `-- name: ListAPIKeysByTenant :many
-SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by
+SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by, label
 FROM api_keys
 WHERE tenant_id = $1 AND revoked_at IS NULL
 ORDER BY issued_at DESC
@@ -203,6 +208,7 @@ func (q *Queries) ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID)
 			&i.TtlSeconds,
 			&i.Purpose,
 			&i.MintedBy,
+			&i.Label,
 		); err != nil {
 			return nil, err
 		}
@@ -215,7 +221,7 @@ func (q *Queries) ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID)
 }
 
 const listAllActiveAPIKeys = `-- name: ListAllActiveAPIKeys :many
-SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by
+SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by, label
 FROM api_keys
 WHERE revoked_at IS NULL
 ORDER BY issued_at
@@ -257,6 +263,7 @@ func (q *Queries) ListAllActiveAPIKeys(ctx context.Context) ([]ApiKey, error) {
 			&i.TtlSeconds,
 			&i.Purpose,
 			&i.MintedBy,
+			&i.Label,
 		); err != nil {
 			return nil, err
 		}
