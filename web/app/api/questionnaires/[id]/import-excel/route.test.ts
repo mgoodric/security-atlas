@@ -75,6 +75,23 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
     expect(init?.body).toBeInstanceOf(FormData);
   });
 
+  test("400 for a body that is not valid multipart, before calling the platform", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const body = "not multipart";
+    const req = new Request("http://t/", {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=x",
+        "content-length": String(body.length),
+      },
+      body,
+    });
+    const res = await POST(req as never, paramsFor("abc"));
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   test("propagates upstream 413 too-large", async () => {
     mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
