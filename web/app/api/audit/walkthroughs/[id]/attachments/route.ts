@@ -6,10 +6,19 @@
 // platform, which persists the blob to the slice-036 artifact store and
 // recomputes the walkthrough canonical_hash. Same auth gate as creation
 // applies upstream (IsAdmin OR grc_engineer) — 403 is forwarded verbatim.
+// readBoundedUpload (#2344) caps the body before the form is parsed.
 
 import { NextRequest, NextResponse } from "next/server";
 
 import { forwardMultipart, rejectNonUUID } from "@/lib/api/bff";
+import { parseBoundedForm, readBoundedUpload } from "@/lib/api/upload";
+
+// MAX_UPLOAD_BYTES mirrors the handler's MaxBytesReader in
+// internal/api/walkthroughs: MaxAttachmentBytes (artifact.MaxUploadBytes,
+// 100 MiB) plus 1 KiB for the multipart envelope.
+const MAX_UPLOAD_BYTES = (100 << 20) + 1024;
+
+const NOT_MULTIPART = "invalid multipart body";
 
 export async function POST(
   req: NextRequest,
@@ -18,14 +27,15 @@ export async function POST(
   const { id } = await ctx.params;
   const bad = rejectNonUUID({ id });
   if (bad) return bad;
-  let form: FormData;
-  try {
-    form = await req.formData();
-  } catch {
-    return NextResponse.json(
-      { error: "invalid multipart body" },
-      { status: 400 },
-    );
+  const read = await readBoundedUpload(req, {
+    maxBytes: MAX_UPLOAD_BYTES,
+    tooLarge: "attachment exceeds the 100 MiB upload cap",
+    notMultipart: NOT_MULTIPART,
+  });
+  if (!read.ok) return read.response;
+  const form = await parseBoundedForm(read.upload);
+  if (!form) {
+    return NextResponse.json({ error: NOT_MULTIPART }, { status: 400 });
   }
   return forwardMultipart(
     `/v1/walkthroughs/${encodeURIComponent(id)}/attachments`,
