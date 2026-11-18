@@ -45,7 +45,12 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // Create inserts a (group -> role) mapping. The role MUST be an existing
 // canonical atlas role (P0-509-4) — callers validate via ValidateMappingRole
 // first; the DB CHECK is the backstop. Idempotent on the unique index.
-func (s *Store) Create(ctx context.Context, in CreateMappingInput) (Mapping, error) {
+//
+// The group_role_mapping_create audit row naming by is written in the same
+// transaction (#2609). A create that matches an existing mapping writes one
+// too: the insert returns the existing row and cannot tell the two apart,
+// and the admin did ask for the mapping.
+func (s *Store) Create(ctx context.Context, in CreateMappingInput, by Actor) (Mapping, error) {
 	if err := ValidateMappingRole(in.Role); err != nil {
 		return Mapping{}, err
 	}
@@ -69,7 +74,7 @@ func (s *Store) Create(ctx context.Context, in CreateMappingInput) (Mapping, err
 			return fmt.Errorf("grouprole: insert mapping: %w", cErr)
 		}
 		out = mappingFromRow(row)
-		return nil
+		return s.audit(ctx, q, tID, by, AuditActionMappingCreate, map[string]any{}, mappingAuditOf(out))
 	})
 	if err != nil {
 		return Mapping{}, err
@@ -102,13 +107,23 @@ func (s *Store) List(ctx context.Context) ([]Mapping, error) {
 }
 
 // Delete removes a mapping by id within the tenant (AC-8). Returns
-// ErrMappingNotFound when the id is absent.
-func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
+// ErrMappingNotFound when the id is absent. The group_role_mapping_delete
+// audit row naming by is written in the same transaction (#2609).
+func (s *Store) Delete(ctx context.Context, id uuid.UUID, by Actor) error {
 	tID, err := tenantPg(ctx)
 	if err != nil {
 		return err
 	}
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		cur, gErr := q.GetGroupRoleMapping(ctx, dbx.GetGroupRoleMappingParams{
+			TenantID: tID, ID: pgtype.UUID{Bytes: id, Valid: true},
+		})
+		if errors.Is(gErr, pgx.ErrNoRows) {
+			return ErrMappingNotFound
+		}
+		if gErr != nil {
+			return fmt.Errorf("grouprole: get mapping: %w", gErr)
+		}
 		n, dErr := q.DeleteGroupRoleMapping(ctx, dbx.DeleteGroupRoleMappingParams{
 			TenantID: tID, ID: pgtype.UUID{Bytes: id, Valid: true},
 		})
@@ -118,7 +133,7 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 		if n == 0 {
 			return ErrMappingNotFound
 		}
-		return nil
+		return s.audit(ctx, q, tID, by, AuditActionMappingDelete, mappingAuditOf(mappingFromRow(cur)), map[string]any{})
 	})
 }
 

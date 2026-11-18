@@ -18,7 +18,7 @@ func TestStore_CRUD(t *testing.T) {
 	ctx := tenantCtx(t, tenant)
 
 	// Create (SCIM source — idp_config nil).
-	m, err := store.Create(ctx, grouprole.CreateMappingInput{GroupRef: "SecTeam", Role: "auditor"})
+	m, err := store.Create(ctx, grouprole.CreateMappingInput{GroupRef: "SecTeam", Role: "auditor"}, grouprole.Actor{})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestStore_CRUD(t *testing.T) {
 	}
 
 	// Create idempotent on the unique index.
-	if _, err := store.Create(ctx, grouprole.CreateMappingInput{GroupRef: "SecTeam", Role: "auditor"}); err != nil {
+	if _, err := store.Create(ctx, grouprole.CreateMappingInput{GroupRef: "SecTeam", Role: "auditor"}, grouprole.Actor{}); err != nil {
 		t.Fatalf("idempotent create: %v", err)
 	}
 
@@ -41,15 +41,15 @@ func TestStore_CRUD(t *testing.T) {
 	}
 
 	// P0-509-4: a mapping to a non-existent role is rejected at the store.
-	if _, err := store.Create(ctx, grouprole.CreateMappingInput{GroupRef: "X", Role: "superuser"}); err == nil {
+	if _, err := store.Create(ctx, grouprole.CreateMappingInput{GroupRef: "X", Role: "superuser"}, grouprole.Actor{}); err == nil {
 		t.Fatal("expected unknown-role rejection (P0-509-4)")
 	}
 
 	// Delete.
-	if err := store.Delete(ctx, m.ID); err != nil {
+	if err := store.Delete(ctx, m.ID, grouprole.Actor{}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if err := store.Delete(ctx, m.ID); err != grouprole.ErrMappingNotFound {
+	if err := store.Delete(ctx, m.ID, grouprole.Actor{}); err != grouprole.ErrMappingNotFound {
 		t.Fatalf("re-delete err = %v; want ErrMappingNotFound", err)
 	}
 }
@@ -61,7 +61,7 @@ func TestStore_CrossTenantRLS(t *testing.T) {
 	store := grouprole.NewStore(appPool)
 
 	// Tenant A creates a mapping.
-	mA, err := store.Create(tenantCtx(t, tenantA), grouprole.CreateMappingInput{GroupRef: "Admins", Role: "admin"})
+	mA, err := store.Create(tenantCtx(t, tenantA), grouprole.CreateMappingInput{GroupRef: "Admins", Role: "admin"}, grouprole.Actor{})
 	if err != nil {
 		t.Fatalf("create A: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestStore_CrossTenantRLS(t *testing.T) {
 	}
 
 	// Tenant B cannot delete tenant A's mapping (RLS scopes the DELETE to B).
-	if err := store.Delete(tenantCtx(t, tenantB), mA.ID); err != grouprole.ErrMappingNotFound {
+	if err := store.Delete(tenantCtx(t, tenantB), mA.ID, grouprole.Actor{}); err != grouprole.ErrMappingNotFound {
 		t.Fatalf("tenant B delete of A's mapping err = %v; want ErrMappingNotFound", err)
 	}
 
