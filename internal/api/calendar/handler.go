@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -114,7 +115,7 @@ func (h *Handler) WithNow(fn func() time.Time) *Handler {
 // WithAuthz wires the OPA engine that narrows the gated event types
 // (gatedEventTypes) to the ones the caller may read (#2130). With no
 // engine (unit-test servers) the JSON list returns every type, as the
-// search handler does; the ICS feed leaves the gated types out either way.
+// search handler does; the ICS feed leaves the gated types out.
 func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
 	h.engine = engine
 	return h
@@ -345,9 +346,16 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// #2130: an ICS token names no user, so there is no caller to ask OPA
-	// about; the gated types are left out of every feed (fail closed).
-	typeFilter, anyLeft := withoutTypes(typeFilter, gatedEventTypes)
+	// #2331: the feed shows the gated types its subscriber may read now,
+	// asked of OPA with their live user_roles (ADR 0027). A token that
+	// names no subscriber (minted before #2173) leaves them all out, and
+	// so does a failed role lookup: the feed still serves the rest.
+	subscriber := credstore.MinterUserID(cred)
+	typeFilter, anyLeft, aerr := ReadableTypesFor(ctx, h.engine, cred.TenantID, subscriber, typeFilter)
+	if aerr != nil {
+		slog.WarnContext(ctx, "calendar ics: subscriber authz failed; gated types left out",
+			slog.String("credential_id", cred.ID), slog.Any("err", aerr))
+	}
 	// #2173: the feed shows the modules its subscriber may see now, not
 	// when they subscribed.
 	if anyLeft {
@@ -356,7 +364,7 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 			httperr.WriteInternal(w, r, "calendar", perr)
 			return
 		}
-		viewer, verr := h.views.ForUser(r.WithContext(ctx), tenantID, credstore.MinterUserID(cred))
+		viewer, verr := h.views.ForUser(r.WithContext(ctx), tenantID, subscriber)
 		if verr != nil {
 			httperr.WriteInternal(w, r, "calendar module access", verr)
 			return
@@ -506,8 +514,8 @@ func normalizeTypeFilter(raw string) (string, error) {
 // Vendor and exception events (#2232) name a vendor or the control an
 // exception waives, so they need a vendors or exceptions read: the auditor
 // reads exceptions but not vendors, and the control owner reads neither.
-// The ICS feed drops every gated type, these two included, because its
-// token names no user to ask OPA about.
+// The ICS feed asks OPA about its subscriber instead (ReadableTypesFor,
+// #2331), and drops every gated type for a token that names none.
 var gatedEventTypes = map[string]string{
 	"risk":        "risks",
 	"action_plan": "action-plans",
@@ -545,6 +553,47 @@ func ReadableTypes(r *http.Request, engine *authz.Engine, typeFilter string) (st
 		}
 	}
 	return withoutTypes(typeFilter, denied)
+}
+
+// ReadableTypesFor narrows a normalized type filter to the event types
+// the person userID (a bare users(id) uuid) may read in tenantID, for a
+// caller that is not that person: the ICS feed, whose calendar-only token
+// acts for its subscriber on these reads alone (#2331, ADR 0027). OPA
+// decides as them with no role but the live user_roles rows the engine
+// resolves in Decide, so a demoted subscriber's feed narrows at the next
+// fetch and a deactivated or removed one reads no gated type.
+//
+// It fails closed: with no engine or no userID every gated type is left
+// out, and so it is when a decision errors, which is also returned for
+// the caller to log. ctx must carry tenantID (tenancy.WithTenant) for the
+// role lookup.
+func ReadableTypesFor(ctx context.Context, engine *authz.Engine, tenantID, userID, typeFilter string) (string, bool, error) {
+	if engine == nil || userID == "" {
+		filter, left := withoutTypes(typeFilter, gatedEventTypes)
+		return filter, left, nil
+	}
+	denied := map[string]string{}
+	for eventType, resource := range gatedEventTypes {
+		d, err := engine.Decide(ctx, authz.Input{
+			User: authz.UserInput{
+				ID:    userID,
+				Attrs: map[string]interface{}{"is_machine_actor": false, "is_super_admin": false},
+			},
+			TenantID: tenantID,
+			Action:   "read",
+			Resource: authz.ResourceInput{Type: resource, Attrs: map[string]interface{}{}},
+			Request:  authz.RequestInput{Method: http.MethodGet, Path: "/v1/calendar.ics"},
+		})
+		if err != nil {
+			filter, left := withoutTypes(typeFilter, gatedEventTypes)
+			return filter, left, err
+		}
+		if !d.Allow {
+			denied[eventType] = resource
+		}
+	}
+	filter, left := withoutTypes(typeFilter, denied)
+	return filter, left, nil
 }
 
 // withoutTypes removes drop's keys from a normalized type filter ("" is

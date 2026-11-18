@@ -61,18 +61,11 @@ import { lastSuperAdminReason } from "@/components/admin/last-holder";
 import type { SuperAdminRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
 
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
 
 const GRANT_KINDS: readonly EntityKind[] = ["user"];
-
-function formatGrantedAt(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
 
 function formatUserID(s: SuperAdminRow): string {
   if (s.display_name) {
@@ -321,7 +314,7 @@ export default function SuperAdminsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatGrantedAt(s.granted_at)}
+                      <Timestamp value={s.granted_at} style="datetime" />
                     </TableCell>
                     <TableCell className="text-right">
                       {/* #2090: Demote opens the confirm dialog below.

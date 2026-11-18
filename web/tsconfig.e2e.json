@@ -1,0 +1,19 @@
+{
+  "_comment": "#2374 — typecheck for Playwright specs. tsconfig.json and tsconfig.test.json both exclude e2e/, and Playwright transpiles without typechecking, so a spec's typed mocks (`satisfies` against the BFF wire types) fail on shape drift only if this config runs; `npm run typecheck` runs it. The exclude list below is a ratchet of specs that had type errors when this config landed: fix one, then drop it from the list. Never add to it.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["next-env.d.ts", "e2e/**/*.ts", "help/markdown.d.ts"],
+  "exclude": [
+    "node_modules",
+    ".next",
+    "e2e/board-pack-detail.spec.ts",
+    "e2e/control-actions-2110.spec.ts",
+    "e2e/control-detail-empty.spec.ts",
+    "e2e/org-mapping.spec.ts",
+    "e2e/tenant-switch-rls.spec.ts",
+    "e2e/vendor-review-workflow.spec.ts"
+  ]
+}

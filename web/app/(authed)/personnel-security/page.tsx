@@ -31,6 +31,7 @@ import {
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   CHECKLIST_KINDS,
   CHECKLIST_STATUSES,
@@ -40,7 +41,6 @@ import {
 } from "@/lib/api/personnel-security";
 
 import {
-  dateLabel,
   kindLabel,
   sortChecklists,
   statusBadgeClass,
@@ -169,7 +169,7 @@ function PersonnelSecurityPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="personnel-row-due"
         >
-          {dateLabel(row.due_at)}
+          <Timestamp value={row.due_at} style="date" />
         </span>
       ),
     },

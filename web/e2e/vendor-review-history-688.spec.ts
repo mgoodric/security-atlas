@@ -106,9 +106,11 @@ test.describe("vendor review history (slice 688)", () => {
 
     // Newest-first ordering: the first row is the 2026-05-01 pass.
     const dates = page.getByTestId("vendor-detail-review-date");
-    await expect(dates.nth(0)).toHaveText("2026-05-01");
-    await expect(dates.nth(1)).toHaveText("2026-02-01");
-    await expect(dates.nth(2)).toHaveText("2025-11-01");
+    // #2365 — calendar days render through <Timestamp style="date">
+    // (en-US pinned in playwright.config.ts).
+    await expect(dates.nth(0)).toHaveText("May 1, 2026");
+    await expect(dates.nth(1)).toHaveText("Feb 1, 2026");
+    await expect(dates.nth(2)).toHaveText("Nov 1, 2025");
 
     // Outcomes render as human-readable labels.
     const outcomes = page.getByTestId("vendor-detail-review-outcome");
@@ -140,7 +142,7 @@ test.describe("vendor review history (slice 688)", () => {
     const scalar = page.getByTestId("vendor-detail-review-history-scalar");
     await expect(scalar).toBeVisible();
     await expect(scalar).toContainText("No per-review history recorded yet");
-    await expect(scalar).toContainText("2026-05-01");
+    await expect(scalar).toContainText("May 1, 2026");
   });
 
   test("AC-5: the Record review affordance routes to the record form", async ({

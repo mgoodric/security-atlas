@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/table";
 import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
 
 interface Questionnaire {
   id: string;
@@ -279,7 +280,7 @@ function QuestionnaireTable({ items }: { items: Questionnaire[] }) {
               <StatusBadge value={q.status} />
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {q.updated_at ? new Date(q.updated_at).toLocaleString() : "never"}
+              <Timestamp value={q.updated_at} fallback="never" />
             </TableCell>
           </TableRow>
         ))}

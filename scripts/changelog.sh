@@ -26,7 +26,10 @@
 # `require` reads PR_LABELS (newline-separated), PR_AUTHOR and
 # PR_HEAD_REF from the environment. A PR is exempt when it carries the
 # `no-changelog` label, is opened by Dependabot, is a release-please PR,
-# or changes only docs (*.md, docs/, docs-site/, Plans/, isa/).
+# or changes only docs (*.md, docs/, docs-site/, Plans/). Each stdin
+# line is `<status>\t<path>` with a GitHub PR-files status (added,
+# modified, removed, renamed, ...); a bare `<path>` reads as modified.
+# Only an added or modified fragment at the top of the directory counts.
 #
 # Env (for the self-test): CHANGELOG_DIR (default changelog.d),
 # CHANGELOG_FILE (default CHANGELOG.md).
@@ -34,6 +37,11 @@
 # Self-test: bash scripts/changelog_test.sh
 
 set -euo pipefail
+# A failure inside $(...) must abort too (bash >= 4.4; macOS /bin/bash is
+# 3.2, so the explicit status checks below do not rely on it).
+shopt -s inherit_errexit 2>/dev/null || true
+# Byte order for sort and globbing, so output is the same on every host.
+export LC_ALL=C
 
 DIR="${CHANGELOG_DIR:-changelog.d}"
 FILE="${CHANGELOG_FILE:-CHANGELOG.md}"
@@ -95,8 +103,16 @@ of_type() {
   done < <(fragments) | sort -t "$(printf '\t')" -k1,1nr -k2,2 | cut -f3
 }
 
+# Every fragment render would print, in render order.
+rendered_files() {
+  local type
+  for type in $TYPES; do
+    of_type "$type"
+  done
+}
+
 cmd_render() {
-  cmd_check
+  cmd_check || return 1
   local type f files first=1
   for type in $TYPES; do
     files="$(of_type "$type")"
@@ -123,8 +139,12 @@ cmd_assemble() {
     echo "changelog: no '$target' heading in $FILE; run this on the release PR branch" >&2
     return 1
   fi
-  local body tmp
-  body="$(cmd_render)"
+  # Fail closed: an invalid fragment stops assemble before CHANGELOG.md
+  # is touched or anything is deleted.
+  cmd_check || return 1
+  local body tmp files
+  files="$(rendered_files)" || return 1
+  body="$(cmd_render)" || return 1
   if [[ -z "$body" ]]; then
     echo "changelog: no fragments to assemble" >&2
     return 0
@@ -136,13 +156,16 @@ cmd_assemble() {
     { print }
   ' "$FILE" >"$tmp"
   mv "$tmp" "$FILE"
-  fragments | while IFS= read -r f; do [[ -z "$f" ]] || rm -- "$f"; done
+  # Delete exactly the files that were rendered, nothing else.
+  while IFS= read -r f; do
+    [[ -z "$f" ]] || rm -- "$f"
+  done <<<"$files"
   echo "changelog: assembled into $target"
 }
 
 is_docs() {
   case "$1" in
-    *.md | docs/* | docs-site/* | Plans/* | isa/*) return 0 ;;
+    *.md | docs/* | docs-site/* | Plans/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -163,11 +186,25 @@ cmd_require() {
     echo "changelog: exempt (release-please PR)"
     return 0
   fi
-  local f code=0 fragment=0
-  while IFS= read -r f; do
-    [[ -n "$f" ]] || continue
-    if [[ "$f" == "$DIR/"* && "$(basename "$f")" != README.md ]]; then
-      fragment=1
+  local line status f rest code=0 fragment=0
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ "$line" == *$'\t'* ]]; then
+      status="${line%%$'\t'*}"
+      f="${line#*$'\t'}"
+    else
+      status=modified
+      f="$line"
+    fi
+    rest="${f#"$DIR/"}"
+    if [[ "$f" == "$DIR/"* ]]; then
+      # A fragment counts only when added or modified, directly in the
+      # directory, with a valid name. Deletions and subdirectory files
+      # do not, and neither does the README.
+      if [[ "$status" == added || "$status" == modified ]] &&
+        [[ "$rest" != */* && "$rest" =~ $NAME_RE ]]; then
+        fragment=1
+      fi
     elif ! is_docs "$f"; then
       code=1
     fi
