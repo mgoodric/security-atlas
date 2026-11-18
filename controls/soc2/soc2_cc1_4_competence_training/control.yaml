@@ -13,7 +13,7 @@ description: |
   within the last 365 days.
 
 scf_anchor_id: SAT-04
-control_family: HRS
+control_family: SAT
 implementation_type: automated
 owner_role: hr
 lifecycle_state: active
