@@ -365,6 +365,13 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusBadRequest, "tenant does not match the login flow")
 			return
 		}
+		// #2034: the IdP authenticated someone the saved config does not
+		// admit. The email stays out of the response.
+		if errors.Is(err, oidc.ErrEmailDomainNotAllowed) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusForbidden, "email domain not allowed for this organisation")
+			return
+		}
 		writeAuthError(w, http.StatusBadGateway, "OIDC callback: "+err.Error())
 		return
 	}

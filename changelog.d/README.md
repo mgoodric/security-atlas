@@ -25,11 +25,15 @@ written here:
 ## Which PRs need one
 
 CI (`changelog-fragment`) fails a PR that changes code and adds no
-fragment. It is exempt when the PR:
+fragment. Only a fragment the PR adds or modifies directly in
+`changelog.d/`, with a valid name, counts. Deleting one, or adding a file
+in a subdirectory, does not. It is exempt when the PR:
 
 - carries the `no-changelog` label (nothing user-visible: tests, CI,
   refactors). Add the label, then re-run the failed job;
-- changes only docs (`*.md`, `docs/`, `docs-site/`, `Plans/`, `isa/`);
+- changes only docs (`*.md`, `docs/`, `docs-site/`, `Plans/`). Scripts
+  under `isa/` (`check-probes.sh`, `run-probes.sh`, `isa/probes/`) are
+  code, so they need a fragment or the label;
 - is opened by Dependabot, or is a release-please release PR.
 
 ## Commands
@@ -41,5 +45,24 @@ bash scripts/changelog.sh assemble 1.22.0  # release time: write them under
                                            # "## [1.22.0]" and delete them
 ```
 
-Run `assemble` on the release-please PR branch, after release-please has
-written the `## [<version>]` heading, and commit the result to that PR.
+`assemble` runs `check` first. If any fragment is invalid it exits
+non-zero before it touches `CHANGELOG.md` or deletes anything. On success
+it deletes exactly the fragments it rendered.
+
+## Release-please hand-off
+
+release-please regenerates its release PR branch on every push to
+`main`, and that overwrites an `assemble` commit made on the branch. So:
+
+1. Wait until everything meant for the release is merged to `main`.
+2. Immediately before merging the release PR, check out its branch, run
+   `bash scripts/changelog.sh assemble <version>` (the version in its
+   `## [<version>]` heading), and push the commit to that PR.
+3. If anything merges to `main` before the release PR does,
+   release-please rewrites the branch and the assembled entries are gone
+   from it, while the fragments are still on `main`. Run step 2 again.
+4. Merge the release PR right after its checks pass.
+
+This is a manual step for now. Automating it would need the workflow to
+push to the release PR branch, a new write permission (#2366 decisions
+log).

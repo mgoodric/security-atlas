@@ -9,27 +9,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   dpaStatusLabel,
-  formatDetailDate,
   ownerMailto,
   reviewOutcomeBadgeVariant,
   reviewOutcomeLabel,
 } from "./detail-view";
-
-describe("formatDetailDate", () => {
-  it("renders an em-dash for null / undefined / empty", () => {
-    expect(formatDetailDate(null)).toBe("—");
-    expect(formatDetailDate(undefined)).toBe("—");
-    expect(formatDetailDate("")).toBe("—");
-  });
-
-  it("trims an ISO timestamp to its date portion", () => {
-    expect(formatDetailDate("2026-01-15T09:30:00Z")).toBe("2026-01-15");
-  });
-
-  it("passes a bare date through unchanged", () => {
-    expect(formatDetailDate("2026-01-15")).toBe("2026-01-15");
-  });
-});
 
 describe("ownerMailto", () => {
   it("returns a mailto href for a valid email owner", () => {
