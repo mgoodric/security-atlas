@@ -14,9 +14,11 @@
 
 import type { ReactNode } from "react";
 
+import { SessionTenantProvider } from "@/components/session-tenant-context";
 import { MobileSidebar } from "@/components/shell/mobile-sidebar";
 import { Sidebar, getAuthedNav } from "@/components/shell/sidebar";
 import { TopBar } from "@/components/shell/topbar";
+import { readSessionTenantId } from "@/lib/auth/session-tenant.server";
 import { cn } from "@/lib/utils";
 
 export async function AppShell({
@@ -30,41 +32,46 @@ export async function AppShell({
   // client `<MobileSidebar>`, so the drawer applies exactly the gates the
   // desktop `<Sidebar>` does (#2081: both render `getAuthedNav()`).
   const nav = await getAuthedNav();
+  // #2399: client caches of tenant data (the <Person> directory) key by
+  // the session's tenant, so one tenant's entries never answer another's.
+  const tenantId = await readSessionTenantId();
 
   return (
-    <div className="flex h-screen flex-col">
-      {/* Slice 359 (a11y A11Y-1): visually-hidden skip-link that
+    <SessionTenantProvider tenantId={tenantId}>
+      <div className="flex h-screen flex-col">
+        {/* Slice 359 (a11y A11Y-1): visually-hidden skip-link that
         becomes visible on focus. WCAG SC 2.4.1 Bypass Blocks (Level
         A). Lets keyboard-only users skip the TopBar + Sidebar (~25
         affordances) on every authed page navigation. Must remain
         the first focusable element inside the authed layout. */}
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
-      >
-        Skip to main content
-      </a>
-      <TopBar mobileSidebar={<MobileSidebar nav={nav} />} />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Sidebar />
-        {/* min-w-0: without it this flex item's minimum width is its
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          Skip to main content
+        </a>
+        <TopBar mobileSidebar={<MobileSidebar nav={nav} />} />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <Sidebar />
+          {/* min-w-0: without it this flex item's minimum width is its
           content's, so a wide table widens the column and the page
           scrolls sideways instead of the table's own container.
           A page with a sticky tab strip marks it `data-sticky-tabs`;
           the scroll padding keeps focused rows clear of it (#2096). */}
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className={cn(
-            "min-w-0 flex-1",
-            bleed
-              ? "flex flex-col overflow-hidden"
-              : "overflow-y-auto p-4 sm:p-6 has-[[data-sticky-tabs]]:scroll-pt-16",
-          )}
-        >
-          {children}
-        </main>
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className={cn(
+              "min-w-0 flex-1",
+              bleed
+                ? "flex flex-col overflow-hidden"
+                : "overflow-y-auto p-4 sm:p-6 has-[[data-sticky-tabs]]:scroll-pt-16",
+            )}
+          >
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </SessionTenantProvider>
   );
 }
