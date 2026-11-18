@@ -43,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/catalog"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -180,9 +181,11 @@ var stateResultFilters = map[string]bool{
 	"pass": true, "fail": true, "inconclusive": true, "excepted": true, "na": true,
 }
 
-// freshnessFilters are the `?freshness=` values the rollup produces.
+// freshnessFilters are the `?freshness=` values: the freshness_status
+// CHECK vocabulary the evaluator writes. There is no "expired" state;
+// the filter offered one until #2359, and it is now a 400.
 var freshnessFilters = map[string]bool{
-	"fresh": true, "stale": true, "expired": true, "no_evidence": true,
+	eval.FreshnessFresh: true, eval.FreshnessStale: true, eval.FreshnessNoEvidence: true,
 }
 
 // parseListFilter reads the `?include=state` filters and sort (#2131). Every
@@ -223,7 +226,7 @@ func parseListFilter(r *http.Request) (control.ListFilter, string) {
 	}
 	f.Freshness = q.Get("freshness")
 	if f.Freshness != "" && !freshnessFilters[f.Freshness] {
-		return f, "freshness must be one of fresh|stale|expired|no_evidence"
+		return f, "freshness must be one of fresh|stale|no_evidence"
 	}
 	f.Family = q.Get("family")
 	// The framework filter matches the catalog framework slugs the list's
