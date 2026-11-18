@@ -101,6 +101,10 @@ const (
 // Handler bundles the slice-142 routes.
 type Handler struct {
 	pool *pgxpool.Pool
+	// authPool is the BYPASSRLS `atlas_migrate` pool (optional, #2385).
+	// List reads super admins' names from it: a super admin's users row
+	// lives in their own tenant, which the session tenant's RLS hides.
+	authPool *pgxpool.Pool
 }
 
 // New constructs a Handler over a *pgxpool.Pool. The handler uses the
@@ -109,6 +113,14 @@ type Handler struct {
 // GUC. Single pool keeps the transaction surface simple.
 func New(pool *pgxpool.Pool) *Handler {
 	return &Handler{pool: pool}
+}
+
+// SetAuthPool wires the BYPASSRLS pool List uses to name super admins
+// outside the session tenant (#2385). Nil keeps the session-tenant-only
+// names. Returns the handler so it composes with New(...).
+func (h *Handler) SetAuthPool(p *pgxpool.Pool) *Handler {
+	h.authPool = p
+	return h
 }
 
 // --- wire types ---
@@ -138,10 +150,9 @@ type grantRequest struct {
 //
 // Returns every super_admin row, joined LEFT to users (under the
 // caller's session tenant) so the display_name + email render on the
-// management page. Rows whose target_user_id has no users row in the
-// session tenant render as `null` for the display fields — this is the
-// expected case for a super_admin whose primary tenant is not the
-// session tenant.
+// management page. A row whose users row is in another tenant is named
+// from that tenant through the BYPASSRLS authPool when it is wired
+// (#2385); without it the display fields are `null`.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !requireSuperAdmin(w, r) {
 		return
@@ -186,6 +197,32 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httperr.WriteInternal(w, r, "list super_admins", err)
 		return
+	}
+
+	// #2385: a row the session tenant cannot name is named from the
+	// super admin's own tenant. The read is bounded to the super_admins
+	// user IDs and returns only display_name + email, which this
+	// super-admin-only endpoint already returns for the session tenant.
+	if h.authPool != nil {
+		var unnamed []uuid.UUID
+		for _, rr := range rows {
+			if rr.DisplayName == nil && rr.Email == nil {
+				unnamed = append(unnamed, rr.UserID)
+			}
+		}
+		if len(unnamed) > 0 {
+			names, nErr := h.crossTenantNames(r.Context(), unnamed)
+			if nErr != nil {
+				httperr.WriteInternal(w, r, "name super_admins", nErr)
+				return
+			}
+			for i := range rows {
+				if n, ok := names[rows[i].UserID]; ok {
+					rows[i].DisplayName = &n.displayName
+					rows[i].Email = &n.email
+				}
+			}
+		}
 	}
 
 	items := make([]superAdminWire, 0, len(rows))
@@ -511,6 +548,32 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- helpers ---
+
+type userName struct {
+	displayName string
+	email       string
+}
+
+// crossTenantNames reads the users rows for ids from the BYPASSRLS
+// pool, whatever their tenant. PK-bounded: only the given ids.
+func (h *Handler) crossTenantNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]userName, error) {
+	rows, err := h.authPool.Query(ctx,
+		`SELECT id, display_name, email FROM users WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("query users: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID]userName, len(ids))
+	for rows.Next() {
+		var id uuid.UUID
+		var n userName
+		if scanErr := rows.Scan(&id, &n.displayName, &n.email); scanErr != nil {
+			return nil, fmt.Errorf("scan user: %w", scanErr)
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
 
 func (h *Handler) inTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
 	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{})

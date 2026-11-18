@@ -5,8 +5,9 @@
 // proxies to the platform's /v1/admin/super-admins.
 //
 // The list table renders one row per super_admin with:
-//   - display_name + email (LEFT JOIN against users in the session
-//     tenant; null fields render as a truncated user_id)
+//   - the name, through <Person> against the list's own names (#2385):
+//     the platform names each super admin from their own tenant, so
+//     no user ID renders as visible text
 //   - granted_at + granted_via (the slice-198 'bootstrap_first_install'
 //     value or the slice-142 'manual_grant' value)
 //   - per-row actions menu → Demote opens a confirmation dialog;
@@ -24,7 +25,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -58,6 +59,9 @@ import {
 } from "@/components/ui/table";
 import { RowActions } from "@/components/ui/row-actions";
 import { lastSuperAdminReason } from "@/components/admin/last-holder";
+import { superAdminDirectory } from "@/components/admin/super-admin-directory";
+import { Person } from "@/components/ui/person";
+import { resolvePerson } from "@/lib/person";
 import type { SuperAdminRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 import { Term } from "@/components/help/term";
@@ -66,17 +70,6 @@ import { Timestamp } from "@/components/ui/timestamp";
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
 
 const GRANT_KINDS: readonly EntityKind[] = ["user"];
-
-function formatUserID(s: SuperAdminRow): string {
-  if (s.display_name) {
-    return s.display_name;
-  }
-  if (s.email) {
-    return s.email;
-  }
-  // Truncate UUID to first 8 chars + ellipsis to keep cell narrow.
-  return s.user_id.length > 12 ? `${s.user_id.slice(0, 8)}…` : s.user_id;
-}
 
 export default function SuperAdminsPage() {
   const queryClient = useQueryClient();
@@ -98,6 +91,9 @@ export default function SuperAdminsPage() {
       return body.items ?? [];
     },
   });
+  // #2385: names come from the list (cross-tenant), not /v1/people.
+  const directory = useMemo(() => superAdminDirectory(data ?? []), [data]);
+  const nameOf = (s: SuperAdminRow) => resolvePerson(s.user_id, directory).text;
 
   const grantMutation = useMutation({
     mutationFn: async (userID: string) => {
@@ -297,10 +293,12 @@ export default function SuperAdminsPage() {
                     data-testid={`super-admin-row-${s.user_id}`}
                   >
                     <TableCell>
-                      <div className="font-medium">{formatUserID(s)}</div>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {s.user_id}
-                      </div>
+                      <Person
+                        id={s.user_id}
+                        directory={directory}
+                        className="font-medium"
+                        testId="super-admin-name"
+                      />
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -321,7 +319,7 @@ export default function SuperAdminsPage() {
                           It is withheld, with the reason, from the last
                           super admin; the backend's 409 still stands. */}
                       <RowActions
-                        label={`Actions for ${formatUserID(s)}`}
+                        label={`Actions for ${nameOf(s)}`}
                         data-testid={`super-admin-actions-${s.user_id}`}
                         items={[
                           {
@@ -368,10 +366,7 @@ export default function SuperAdminsPage() {
               <div className="space-y-2 text-sm">
                 <div>
                   <span className="font-medium">Identity:</span>{" "}
-                  {formatUserID(demoteTarget)}
-                </div>
-                <div className="font-mono text-xs text-muted-foreground">
-                  {demoteTarget.user_id}
+                  <Person id={demoteTarget.user_id} directory={directory} />
                 </div>
               </div>
             ) : null}

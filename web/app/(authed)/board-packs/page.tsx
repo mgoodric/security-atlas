@@ -15,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -236,7 +237,11 @@ export default function BoardPacksPage() {
                       <StatusBadge status={pack.status} />
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {pack.published_by || "—"}
+                      <Person
+                        id={pack.published_by}
+                        freeText
+                        testId="board-packs-row-published-by"
+                      />
                     </TableCell>
                     <TableCell className="text-right">
                       <Link

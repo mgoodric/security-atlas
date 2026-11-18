@@ -90,8 +90,10 @@ import {
   ledgerSubtitleSuffix,
   recordCountMeta,
   scopeLabel,
-  sourceSummary,
 } from "./format";
+import { SourceAttribution } from "./source-attribution";
+import { usePeopleDirectory } from "@/components/ui/person";
+import { actorText } from "@/lib/person";
 import {
   PUSH_CTA_HREF,
   PUSH_CTA_LABEL,
@@ -383,6 +385,8 @@ function EvidencePageInner() {
   // (actor_type, actor_id) tuples on the current page of evidence
   // rows. Same provenance shape as the table cell renderer; no
   // invented values (P0 — "Options come from observed values only").
+  // #2385: a person or API key is labelled by name, never by ID.
+  const people = usePeopleDirectory();
   const sourceOptions = useMemo(
     () =>
       buildSourceOptions(
@@ -396,8 +400,9 @@ function EvidencePageInner() {
               ? r.source.actor_id
               : undefined,
         })),
+        (id) => actorText(id, people.data),
       ),
-    [records],
+    [records, people.data],
   );
   // Slice 234 — the Source pill's current value is the composite
   // `type|id` (or ALL when neither is narrowing). When the URL carries
@@ -556,7 +561,7 @@ function EvidencePageInner() {
       header: "Source",
       cell: (row) => (
         <span className="text-xs" data-testid="evidence-row-source">
-          {sourceSummary(row.source)}
+          <SourceAttribution source={row.source} />
         </span>
       ),
     },

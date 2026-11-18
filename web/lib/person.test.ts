@@ -4,8 +4,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  actorText,
   apiKeyText,
   buildDirectory,
+  isActorReference,
   isMachineActor,
   normaliseUserId,
   resolvePerson,
@@ -161,5 +163,46 @@ describe("apiKeyText (#2384)", () => {
     ["CI", "", "API key 'CI'"],
   ])("label %j owner %j reads %j", (label, owner, want) => {
     expect(apiKeyText(label, owner)).toBe(want);
+  });
+});
+
+describe("isActorReference (#2385)", () => {
+  it.each([
+    ["a user ID", ALICE],
+    ["an upper-case UUID", KEY.toUpperCase()],
+    ["a user: subject", `user:${ALICE}`],
+    ["a JWT credential", "jwt:9f1c2d"],
+    ["a key credential", "key_0a1b2c"],
+    ["the bootstrap admin", "bootstrap-admin"],
+    ["the system actor", "system"],
+    ["a system process", "system:scheduler"],
+    ["an OAuth client", "oauth_client:ci"],
+  ])("treats %s as a reference", (_, ref) => {
+    expect(isActorReference(ref)).toBe(true);
+  });
+
+  it.each([
+    ["a typed name", "Sam Rivera (CISO)"],
+    ["a connector name", "aws-config"],
+    ["a service account", "ci.test"],
+    ["the empty string", ""],
+  ])("treats %s as free text", (_, ref) => {
+    expect(isActorReference(ref)).toBe(false);
+  });
+});
+
+describe("actorText (#2385)", () => {
+  it("resolves a reference to its name", () => {
+    expect(actorText(ALICE, dir)).toBe("Alice Admin");
+    expect(actorText(`user:${ALICE}`, dir)).toBe("Alice Admin");
+  });
+
+  it("never shows an unresolved reference", () => {
+    expect(actorText(STRANGER, dir)).toBe("Unknown");
+    expect(actorText("jwt:9f1c2d", null)).toBe("Unknown");
+  });
+
+  it("shows free text as written", () => {
+    expect(actorText("aws-config", dir)).toBe("aws-config");
   });
 });

@@ -34,6 +34,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Person } from "@/components/ui/person";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
@@ -214,7 +215,7 @@ export default function ComponentDefinitionDetailPage({
         <>
           <p>
             {d.catalog_title} · OSCAL {d.oscal_version} · imported by{" "}
-            {d.imported_by}
+            <Person id={d.imported_by} />
           </p>
           <p className="mt-1 text-xs" data-testid="vendor-claim-disclaimer">
             Every row below is a vendor assertion, not platform-verified
@@ -286,7 +287,8 @@ export default function ComponentDefinitionDetailPage({
                   className="text-xs text-muted-foreground"
                   data-testid="claim-disposition-meta"
                 >
-                  {statusLabel(c.claim_status)} by {c.dispositioned_by}
+                  {statusLabel(c.claim_status)} by{" "}
+                  <Person id={c.dispositioned_by} />
                   {c.disposition_note ? ` — ${c.disposition_note}` : ""}
                 </p>
               )}
