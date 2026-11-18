@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -34,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
@@ -747,10 +749,9 @@ func main() {
 		// Slice 037: wire the user-facing auth routes so /auth/local/login
 		// mounts. The docker-compose self-host bundle is a local-mode
 		// deployment — a default local user signs in with email+password,
-		// no external IdP. The OIDC authenticator is still constructed
-		// (the handler requires a non-nil *oidc.Authenticator) but its
-		// resolver always reports "unknown IdP": OIDC is an opt-in
-		// post-install configuration step, not part of first sign-in.
+		// no external IdP. OIDC is an opt-in post-install step: an admin
+		// saves an IdP on the SSO page, and until then the resolver finds
+		// no config and /auth/oidc/* answers "unknown IdP" (#2034).
 		// secureCookies follows ATLAS_SECURE_COOKIES (default false for
 		// the local-HTTP self-host default; operators set it true behind
 		// TLS).
@@ -779,7 +780,27 @@ func main() {
 			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
 			os.Exit(1)
 		}
-		oidcAuth := oidc.New(localModeIdpResolver{}, oidcStateKey, oidc.WithIssuerPolicy(issuerPolicy))
+		// #2034: OIDC sign-in reads the tenant's saved oidc_idp_configs row
+		// (PATCH /v1/admin/sso). Only ATLAS_OIDC_LOCAL_MODE=true, for dev,
+		// wires the resolver that knows no IdP. A missing secret key does
+		// not stop the boot; every saved config then refuses sign-in.
+		oidcLocalMode, err := idpconfig.LocalModeFromEnv()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+			os.Exit(1)
+		}
+		var idpResolver oidc.IdpResolver = idpconfig.LocalModeResolver{}
+		oidcSource := "local-mode (OIDC off)"
+		if !oidcLocalMode {
+			secretCrypter, cErr := idpconfig.SecretCrypterFromEnv()
+			if cErr != nil && !errors.Is(cErr, idpconfig.ErrSecretKeyUnconfigured) {
+				fmt.Fprintf(os.Stderr, "atlas: %v\n", cErr)
+				os.Exit(1)
+			}
+			idpResolver = idpconfig.NewResolver(pool, secretCrypter, issuerPolicy.AllowLoopback)
+			oidcSource = fmt.Sprintf("oidc_idp_configs (secret_key_configured=%t)", secretCrypter != nil)
+		}
+		oidcAuth := oidc.New(idpResolver, oidcStateKey, oidc.WithIssuerPolicy(issuerPolicy))
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
 		// Slice 209: bundle the local-AS deps when OAuth wiring exists.
 		// nil when ATLAS_ISSUER_URL is unset OR pool is nil; LocalLogin
@@ -806,8 +827,8 @@ func main() {
 			authHandler.AttachImplicitTenantResolver(authapi.PoolImplicitTenantResolver{Q: authPool})
 		}
 		srv.AttachAuthHandler(authHandler)
-		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on)\n",
-			secureCookies, localAS != nil)
+		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on, oidc_idp_source=%s)\n",
+			secureCookies, localAS != nil, oidcSource)
 
 		// Slice 035: construct the OPA engine + decision audit writer
 		// once at startup. The engine loads the embedded rego bundle;
@@ -1561,19 +1582,6 @@ func oscalSignerFromEnv() (*oscal.Signer, error) {
 		return nil, fmt.Errorf("OSCAL_SIGNING_KEY is not valid hex: %w", err)
 	}
 	return oscal.NewSigner(ed25519.PrivateKey(key))
-}
-
-// localModeIdpResolver is the slice-037 no-op IdP resolver for local-mode
-// self-host deployments. The docker-compose bundle ships local-mode
-// authentication (email + password against a seeded default user); OIDC
-// is an opt-in post-install configuration step. Until an operator
-// configures an IdP, every OIDC resolution reports "unknown IdP" and the
-// /auth/oidc/* routes 400 cleanly — /auth/local/login is the working
-// sign-in path.
-type localModeIdpResolver struct{}
-
-func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
-	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
 }
 
 // oidcGroupDeriver adapts the slice-509 grouprole.Resolver to the
