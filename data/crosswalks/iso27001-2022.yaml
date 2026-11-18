@@ -490,7 +490,7 @@ mappings:
     rationale: "Post-incident learning and control improvement maps to SCF Root Cause Analysis (RCA) & Lessons Learned (IRO-14)."
   - requirement_code: A.5.28
     scf_anchor: IRO-13
-    relationship_type: equal
+    relationship_type: subset_of
     strength: 0.8
     rationale: "Evidence collection and preservation is forensic readiness, which maps to SCF Chain of Custody & Forensics (IRO-13)."
   - requirement_code: A.5.28

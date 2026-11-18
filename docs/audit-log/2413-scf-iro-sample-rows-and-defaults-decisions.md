@@ -34,7 +34,7 @@ Descriptions are our own words. `IRO-13`, optional in the ticket, was added beca
 
 The PagerDuty `--postmortem-control` default `scf:IRO-13` was wrong in 2026.3 (Chain of Custody & Forensics), so it is a fix, not a re-choice.
 
-**Low-confidence picks, for Matt:**
+**Low-confidence picks, decided by Matt on review:** both kinds stay on `IRO-02`, as built.
 
 - `pagerduty.response_metrics` → `IRO-02` rather than `IRO-06`. MTTA/MTTR aggregates describe the response program, not one incident's handling, and `IRO-02` matches the `--metrics-control` default the ticket already called a fit.
 - `pagerduty.incident_summary` → `IRO-02`. The ticket did not name this kind, but its description said `IRO-16` was used only because `IRO-02` was absent, which became false once `IRO-02` was added. It follows the `--incident-control` default `scf:IRO-02`. `IRO-06` Incident Handling is the alternative.
@@ -47,9 +47,9 @@ The `--incident-control` and `--metrics-control` defaults (`scf:IRO-02`) were al
 
 ## D4 — ISO rationale nits re-anchor two rows
 
-| Requirement                    | Old anchor             | New anchor         | Relationship                                         |
-| ------------------------------ | ---------------------- | ------------------ | ---------------------------------------------------- |
-| A.5.27 Learning from incidents | `IRO-08` subset_of 0.7 | `IRO-14` equal 0.8 | the 2026.3 control is the lessons-learned control    |
-| A.5.28 Collection of evidence  | `IRO-08` subset_of 0.6 | `IRO-13` equal 0.8 | the 2026.3 control is evidence custody and forensics |
+| Requirement                    | Old anchor             | New anchor             | Relationship                                             |
+| ------------------------------ | ---------------------- | ---------------------- | -------------------------------------------------------- |
+| A.5.27 Learning from incidents | `IRO-08` subset_of 0.7 | `IRO-14` equal 0.8     | the 2026.3 control is the lessons-learned control        |
+| A.5.28 Collection of evidence  | `IRO-08` subset_of 0.6 | `IRO-13` subset_of 0.8 | evidence collection is one part of custody and forensics |
 
-`subset_of` toward the narrower SCF control no longer described the pair, so both became `equal` at 0.8, one notch under the A.5.24 ↔ `IRO-08` equal at 0.9. A.5.28's second row (`MON-04`) is unchanged. On upgrade, the crosswalk edge retirement from #1999 retires the two `IRO-08` edges.
+A.5.27 became `equal` at 0.8, one notch under the A.5.24 ↔ `IRO-08` equal at 0.9. A.5.28 was first built as `equal` 0.8; on review Matt set it to `subset_of` 0.8, because `IRO-13` also covers forensic analysis, which A.5.28 does not ask for. A.5.27 → `IRO-14` `equal` 0.8 was kept as built. A.5.28's second row (`MON-04`) is unchanged. On upgrade, the crosswalk edge retirement from #1999 retires the two `IRO-08` edges.
