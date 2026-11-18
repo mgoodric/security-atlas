@@ -2530,6 +2530,12 @@ type Querier interface {
 	// the exact-code set-intersection / set-difference between two versions.
 	ListFrameworkVersionRequirementCodes(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFrameworkVersionRequirementCodesRow, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
+	// #2414: every catalog version plus the caller's own tenant-private
+	// versions, for `GET /v1/frameworks?include=versions`, newest first within
+	// each framework. RLS (tenant_or_catalog) is the boundary; the tenant_id
+	// predicate is the ADR 0026 second leg. Pairs with ListFrameworksForTenant
+	// (board_briefs.sql).
+	ListFrameworkVersionsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// The registered frameworks the program runs against — both the global
 	// catalog (`tenant_id IS NULL`) and any tenant-private frameworks. Drives
@@ -3300,6 +3306,23 @@ type Querier interface {
 	// (the wire shape tolerates null — bootstrap-key + credential-only callers
 	// have no users row).
 	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
+	// #2414 — the machine and system actors (`system`, `system:<process>`,
+	// `oauth_client:<id>`) that appear in the tenant's activity in a window,
+	// for the Activity page's actor picker. A person or API key is listed
+	// from /v1/people instead, so only these shapes are returned.
+	//
+	// The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+	// what the visibility rules read: the same window, the slice 270
+	// non-privileged predicate and the slice 669 read-telemetry predicate.
+	// One row per (actor, kind, target_type, request_path), so the handler
+	// applies the #2173 module filter exactly as it does to the feed, and an
+	// actor seen only in rows the caller may not see is not listed.
+	// `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
+	// to one query and not the other.
+	//
+	// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
+	// atlas_app and takes no tenant parameter.
+	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]ListUnifiedAuditMachineActorsRow, error)
 	// The tested-under references ListAuditedUnderGaps cannot resolve (#2324):
 	// the system names no global framework with a current version, or the id
 	// names no requirement in that version. Typos and withdrawn codes land

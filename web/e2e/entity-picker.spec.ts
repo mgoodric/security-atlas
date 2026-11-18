@@ -412,6 +412,38 @@ test("filters Activity by picking the actor", async ({ authedPage: page }) => {
   await expect(page).toHaveURL(new RegExp(`actor=${KEY_ALICE}`));
 });
 
+// #2414: machine and system actors in the window are listed by kind, and
+// a deep-linked one keeps its value through a blur.
+test("Activity lists machine actors and keeps a deep-linked one on blur", async ({
+  authedPage: page,
+}) => {
+  const actors: string[] = [];
+  await page.route("**/api/activity**", (route, req) => {
+    const actor = new URL(req.url()).searchParams.get("actor");
+    if (actor) actors.push(actor);
+    return json(route, 200, { entries: [] });
+  });
+  await page.route("**/api/activity/actors**", (route) =>
+    json(route, 200, { actors: ["oauth_client:ci", "system:scheduler"] }),
+  );
+
+  await page.goto("/activity?actor=system");
+  const input = page.getByTestId("activity-actor");
+  await expect(input).toHaveValue("System");
+  await input.focus();
+  await input.blur();
+  await expect(page).toHaveURL(/actor=system(&|$)/);
+  await expect(input).toHaveValue("System");
+
+  await input.fill("ci");
+  await page
+    .getByTestId("activity-actor-option")
+    .filter({ has: page.getByText("OAuth client", { exact: true }) })
+    .click();
+  await expect(page).toHaveURL(/actor=oauth_client%3Aci/);
+  await expect.poll(() => actors).toContain("oauth_client:ci");
+});
+
 test("a pasted valid ID is selected; an invalid one shows an inline error", async ({
   authedPage: page,
 }) => {
