@@ -6,13 +6,15 @@
 // Upstream answers 204 on success and 404 when the child is not linked (or
 // either risk is outside the session's tenant). Neither risk is deleted.
 
-import { forwardJSON, noStore } from "@/lib/api/bff";
+import { forwardJSON, noStore, rejectNonUUID } from "@/lib/api/bff";
 
 export async function DELETE(
   _req: Request,
   ctx: { params: Promise<{ id: string; childId: string }> },
 ): Promise<Response> {
   const { id, childId } = await ctx.params;
+  const bad = rejectNonUUID({ id, childId });
+  if (bad) return bad;
   return noStore(
     await forwardJSON(
       `/v1/risks/${encodeURIComponent(id)}/children/${encodeURIComponent(

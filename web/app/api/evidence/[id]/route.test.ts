@@ -2,6 +2,7 @@
 //
 // The route guarantees:
 //   * 401 when the bearer cookie is missing (no upstream call).
+//   * 400 for a non-UUID id, before any upstream call (#2558).
 //   * Forwards the bearer to `GET /v1/evidence/{id}`, id URL-encoded,
 //     with no query string and no tenant_id.
 //   * Upstream body + status pass through (200 and the 404 the platform
@@ -71,15 +72,14 @@ describe("GET /api/evidence/[id]", () => {
     );
   });
 
-  test("encodes the id so it cannot change the upstream path", async () => {
+  test("refuses a non-UUID id before any upstream call (#2558)", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-2137" });
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response("{}", { status: 404 }));
-    await call("../controls");
-    expect(fetchSpy.mock.calls[0][0]).toBe(
-      "http://atlas:8080/v1/evidence/..%2Fcontrols",
-    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    for (const id of ["..", "../controls"]) {
+      const res = await call(id);
+      expect(res.status).toBe(400);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("passes the upstream 404 through", async () => {

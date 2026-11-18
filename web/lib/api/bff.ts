@@ -141,3 +141,45 @@ export function rejectNonUUID(
   }
   return null;
 }
+
+// SEGMENT holds the allowlists for path params that are not UUIDs
+// (security-atlas#2558). Each matches only what the platform mints for
+// that param; none matches `.`, `..`, `/` or `\`.
+export const SEGMENT = {
+  // Lowercase slugs: theme names, category slugs, metric ids, feature keys.
+  slug: /^[a-z0-9][a-z0-9_.-]{0,63}$/,
+  // A slug, or the row's UUID: risk categories and themes take either.
+  slugOrUUID:
+    /^(?:[a-z0-9][a-z0-9_.-]{0,63}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i,
+  // base64url tokens: session ids (internal/auth/sessions NewID).
+  token: /^[A-Za-z0-9_-]{1,128}$/,
+  // API credential ids: `key_<uuid>`, or the bare UUID.
+  credentialID:
+    /^(?:key_)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  // Catalog codes that come from imported frameworks (`IAC-06.1`,
+  // `hipaa:2013:164.308(a)(1)`): any printable text without a separator.
+  code: /^[^/\\%\u0000-\u001f\u007f]{1,256}$/,
+} as const;
+
+// rejectUnsafeSegment returns a 400 when any non-UUID path param is a dot
+// segment, empty, holds `/`, `\` or `%`, or falls outside `allow`: an
+// allowlist regex (one of SEGMENT) or the param's closed set of values.
+// Like rejectNonUUID, a route calls it before building an upstream path
+// or reading the bearer (security-atlas#2558).
+export function rejectUnsafeSegment(
+  segs: Record<string, string>,
+  allow: RegExp | ReadonlySet<string>,
+): NextResponse | null {
+  for (const [name, v] of Object.entries(segs)) {
+    const unsafe = v === "" || v === "." || v === ".." || /[/\\%]/.test(v);
+    const allowed = allow instanceof RegExp ? allow.test(v) : allow.has(v);
+    if (unsafe || !allowed) {
+      const error =
+        allow instanceof RegExp
+          ? `${name} is not a valid path segment`
+          : `${name} must be one of ${[...allow].join(", ")}`;
+      return NextResponse.json({ error }, { status: 400 });
+    }
+  }
+  return null;
+}

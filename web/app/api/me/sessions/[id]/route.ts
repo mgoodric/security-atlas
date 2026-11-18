@@ -8,19 +8,22 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { OIDC_SESSION_COOKIE, ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { SEGMENT, rejectUnsafeSegment } from "@/lib/api/bff";
 import { buildSessionsForwardHeaders } from "../_headers";
 
 export async function DELETE(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await ctx.params;
+  const bad = rejectUnsafeSegment({ id }, SEGMENT.token);
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   const oidc = jar.get(OIDC_SESSION_COOKIE)?.value;
-  const { id } = await ctx.params;
   const upstream = await fetch(
     `${apiBaseURL()}/v1/me/sessions/${encodeURIComponent(id)}`,
     {

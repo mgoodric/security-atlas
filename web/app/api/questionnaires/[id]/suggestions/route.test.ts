@@ -44,8 +44,10 @@ describe("GET /api/questionnaires/[id]/suggestions", () => {
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
     const res = await GET(
-      makeReq("/api/questionnaires/q1/suggestions?anchor=IAC-37") as never,
-      paramsFor("q1"),
+      makeReq(
+        "/api/questionnaires/00000000-0000-0000-0000-000025580001/suggestions?anchor=IAC-37",
+      ) as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
     );
     expect(res.status).toBe(401);
   });
@@ -69,12 +71,16 @@ describe("GET /api/questionnaires/[id]/suggestions", () => {
       ),
     );
     const res = await GET(
-      makeReq("/api/questionnaires/q1/suggestions?anchor=IAC-37") as never,
-      paramsFor("q1"),
+      makeReq(
+        "/api/questionnaires/00000000-0000-0000-0000-000025580001/suggestions?anchor=IAC-37",
+      ) as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
     );
     expect(res.status).toBe(200);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/q1/suggestions");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/suggestions",
+    );
     expect(calledURL).toContain("anchor=IAC-37");
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
@@ -90,8 +96,10 @@ describe("GET /api/questionnaires/[id]/suggestions", () => {
       ),
     );
     const res = await GET(
-      makeReq("/api/questionnaires/q1/suggestions") as never,
-      paramsFor("q1"),
+      makeReq(
+        "/api/questionnaires/00000000-0000-0000-0000-000025580001/suggestions",
+      ) as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
     );
     expect(res.status).toBe(400);
   });

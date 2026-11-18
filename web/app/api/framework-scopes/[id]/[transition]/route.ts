@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { transitionFrameworkScope } from "@/lib/api/framework-scopes";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // Slice 018 — PATCH /v1/framework-scopes/{id}/{submit|approve|activate}.
 // Transition name comes from the path segment; we whitelist the allowed
@@ -14,14 +15,16 @@ export async function PATCH(
   req: NextRequest,
   ctx: { params: Promise<{ id: string; transition: string }> },
 ) {
+  const { id, transition } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
+  if (!ALLOWED.has(transition as "submit" | "approve" | "activate")) {
+    return NextResponse.json({ error: "unknown transition" }, { status: 404 });
+  }
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-  const { id, transition } = await ctx.params;
-  if (!ALLOWED.has(transition as "submit" | "approve" | "activate")) {
-    return NextResponse.json({ error: "unknown transition" }, { status: 404 });
   }
   let body: Record<string, unknown> | undefined;
   if (

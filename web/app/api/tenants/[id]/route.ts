@@ -24,12 +24,15 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/app/oauth/callback/route";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const jwt = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!jwt) {

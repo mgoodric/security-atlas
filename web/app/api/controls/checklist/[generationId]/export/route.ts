@@ -11,17 +11,20 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ generationId: string }> },
 ): Promise<Response> {
+  const { generationId } = await params;
+  const bad = rejectNonUUID({ generationId });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { generationId } = await params;
   const upstream = await fetch(
     `${apiBaseURL()}/v1/controls/checklist/${encodeURIComponent(
       generationId,

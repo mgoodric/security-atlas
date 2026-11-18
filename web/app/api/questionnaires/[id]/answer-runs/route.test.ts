@@ -35,7 +35,10 @@ describe("POST /api/questionnaires/[id]/answer-runs", () => {
 
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await POST({} as never, paramsFor("qn1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -47,10 +50,15 @@ describe("POST /api/questionnaires/[id]/answer-runs", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    const res = await POST({} as never, paramsFor("qn1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(201);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/qn1/answer-runs");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/answer-runs",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
     const auth = (init?.headers as Record<string, string>)?.Authorization;
@@ -67,7 +75,10 @@ describe("POST /api/questionnaires/[id]/answer-runs", () => {
         { status: 409, headers: { "Content-Type": "application/json" } },
       ),
     );
-    const res = await POST({} as never, paramsFor("qn1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(409);
   });
 });

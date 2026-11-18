@@ -18,17 +18,20 @@ import {
   upsertTarget,
 } from "@/lib/api/metrics";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { SEGMENT, rejectUnsafeSegment } from "@/lib/api/bff";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params;
+  const bad = rejectUnsafeSegment({ id }, SEGMENT.slug);
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await params;
   try {
     const target = await getTarget(bearer, id);
     return NextResponse.json(target);
@@ -45,12 +48,14 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params;
+  const bad = rejectUnsafeSegment({ id }, SEGMENT.slug);
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await params;
   let body: MetricTargetUpsert;
   try {
     body = (await request.json()) as MetricTargetUpsert;

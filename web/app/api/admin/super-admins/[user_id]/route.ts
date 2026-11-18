@@ -11,17 +11,20 @@ import { NextResponse } from "next/server";
 
 import { demoteSuperAdmin } from "@/lib/api/admin";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ user_id: string }> },
 ) {
+  const { user_id } = await params;
+  const bad = rejectNonUUID({ user_id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { user_id } = await params;
   try {
     await demoteSuperAdmin(bearer, user_id);
     return new NextResponse(null, { status: 204 });

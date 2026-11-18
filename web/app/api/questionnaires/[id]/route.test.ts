@@ -36,7 +36,10 @@ describe("GET /api/questionnaires/[id]", () => {
 
   test("401 when bearer cookie missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await GET({} as never, paramsFor("abc"));
+    const res = await GET(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -46,7 +49,7 @@ describe("GET /api/questionnaires/[id]", () => {
       new Response(
         JSON.stringify({
           questionnaire: {
-            id: "abc",
+            id: "00000000-0000-0000-0000-000025580001",
             name: "CAIQ",
             status: "draft",
           },
@@ -56,10 +59,15 @@ describe("GET /api/questionnaires/[id]", () => {
       ),
     );
 
-    const res = await GET({} as never, paramsFor("abc"));
+    const res = await GET(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(200);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/abc");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.Authorization).toBe(`Bearer ${TEST_BEARER_263}`);
@@ -70,7 +78,10 @@ describe("GET /api/questionnaires/[id]", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
     );
-    const res = await GET({} as never, paramsFor("missing"));
+    const res = await GET(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580002"),
+    );
     expect(res.status).toBe(404);
   });
 });
