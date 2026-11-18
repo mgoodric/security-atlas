@@ -99,7 +99,7 @@ INSERT INTO controls (
 VALUES (
     '33333333-3333-3333-3333-333333330001',
     '00000000-0000-0000-0000-00000000d3a0',
-    'CRY-05',
+    'CRY-07',
     'Encryption at rest — production object stores',
     'Production S3 buckets in customer-data accounts have server-side encryption enabled.',
     'Cryptography',

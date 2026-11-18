@@ -195,6 +195,25 @@ says where the concept went, for example
 edit its bundle's `scf_anchor_id` and re-upload it, or re-anchor it in the
 app.
 
+**Connector control-id defaults follow the catalog (#1976).** The SCF 2026.3
+remap changed the default `control_id` five connectors stamp on their records:
+
+| Connector | Flag                  | Old default  | New default  |
+| --------- | --------------------- | ------------ | ------------ |
+| AWS       | `--control-id`        | `scf:CRY-04` | `scf:CRY-07` |
+| Azure     | `--storage-control`   | `scf:CRY-04` | `scf:CRY-07` |
+| Azure     | `--keyvault-control`  | `scf:CRY-09` | `scf:CRY-10` |
+| GCP       | `--bucket-control-id` | `scf:CRY-04` | `scf:CRY-07` |
+| k8s       | `--secret-control`    | `scf:CRY-01` | `scf:CRY-02` |
+
+A connector run on its defaults picks up the new code when you upgrade it. If
+you pass one of these flags with the old value, by hand or in a scheduler or
+manifest, change it to the new code: in SCF 2026.3 the old code names a
+different control. Evidence keeps the `control_id` it was pushed with, because
+the ledger is append-only, so records from before and after the change sit
+under different codes. Nothing joins the two histories for you; carrying
+evidence across the change is a manual step.
+
 **Bundled crosswalks converge on boot.** On every bring-up the bootstrap
 re-imports the bundled SOC 2 crosswalk, then every other bundled crosswalk
 under `data/crosswalks/` (HIPAA, ISO 27001, PCI DSS, NIST CSF) whose framework
