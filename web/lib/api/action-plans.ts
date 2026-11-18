@@ -194,6 +194,24 @@ export async function createActionPlan(
   return { id };
 }
 
+/**
+ * Link one control to an action plan (#2141 bulk link). The platform
+ * checks the caller's role and that both records are in its tenant.
+ */
+export async function linkActionPlanControl(
+  planId: string,
+  controlId: string,
+): Promise<void> {
+  await parse(
+    await fetch(
+      `/api/action-plans/${encodeURIComponent(
+        planId,
+      )}/controls/${encodeURIComponent(controlId)}`,
+      { method: "POST" },
+    ),
+  );
+}
+
 /** Fetch the action plans linked to a risk (AC-25 read-only section). */
 export async function fetchActionPlansForRisk(
   riskId: string,

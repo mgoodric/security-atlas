@@ -56,11 +56,15 @@ VALUES ('00000000-0000-0000-0000-000000002174', '44444444-4444-4444-4444-4444444
         'e2e:module-links')
 ON CONFLICT (tenant_id, user_id) DO UPDATE SET modules = EXCLUDED.modules;
 
+-- #2141: active, so the controls list shows it for the bulk-action
+-- module checks.
 INSERT INTO controls (id, tenant_id, title, control_family, implementation_type,
-                      bundle_id, freshness_class, evidence_queries, applicability_expr)
+                      bundle_id, freshness_class, evidence_queries, applicability_expr,
+                      lifecycle_state)
 VALUES ('88888888-8888-8888-8888-888888882174', '00000000-0000-0000-0000-000000002174',
-        'E2E 2174 control', 'HRS', 'automated', 'bundle-e2e-2174', 'monthly', '[]'::jsonb, 'true')
-ON CONFLICT (id) DO NOTHING;
+        'E2E 2174 control', 'HRS', 'automated', 'bundle-e2e-2174', 'monthly', '[]'::jsonb, 'true',
+        'active')
+ON CONFLICT (id) DO UPDATE SET lifecycle_state = EXCLUDED.lifecycle_state;
 
 INSERT INTO policies (
     id, tenant_id, title, version, status, body_md, owner_role, approver_role,

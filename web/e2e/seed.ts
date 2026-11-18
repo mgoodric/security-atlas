@@ -175,7 +175,10 @@ export type FixtureName =
   | "no-tenant-role"
   // #2503 — a tenant with a tenant admin and a viewer member whose roles
   // are reset each run, for tenant-admin-users.spec.ts.
-  | "tenant-admin-users";
+  | "tenant-admin-users"
+  // #2141 — a tenant with three controls, a second member and an action
+  // plan, for controls-bulk-2141.spec.ts's bulk writes.
+  | "controls-bulk";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

@@ -82,6 +82,12 @@ import {
   type ServerSavedView,
 } from "@/lib/api/saved-views";
 import { bulkAssignOwner } from "@/lib/api/controls-bulk";
+import { evaluateControl } from "@/lib/api/control-actions";
+import {
+  fetchActionPlansList,
+  linkActionPlanControl,
+} from "@/lib/api/action-plans";
+import { useSeesPage } from "@/components/modules-context";
 import { getMe } from "@/lib/api/me";
 import { APIError } from "@/lib/api/base";
 import {
@@ -131,10 +137,19 @@ import {
   VIEW_PARAM,
 } from "./view";
 import {
-  BulkAssignMessage,
+  BulkResultMessage,
+  ExportMenu,
   SavedViewsBar,
   SelectionBar,
 } from "./controls-toolbar";
+import {
+  anyBulkAction,
+  bulkActionGates,
+  perItemMessage,
+  runPerItem,
+  type BulkMessage,
+  type PerItemResult,
+} from "./bulk-actions";
 import {
   isOverCap,
   selectAllState,
@@ -511,70 +526,169 @@ function ControlsPageInner() {
   const headerSelectState = selectAllState(visibleIds, selected);
   const selectionOverCap = isOverCap(selected);
 
-  const onToggleRow = useCallback((id: string) => {
-    setSelected((prev) => toggleSelection(prev, id));
-  }, []);
+  // #2141 — a readable name per selected control, remembered when it is
+  // selected (the selection outlives the page it was made on), so a bulk
+  // result names each refused control rather than showing its id.
+  const [selectedLabels, setSelectedLabels] = useState<Record<string, string>>(
+    {},
+  );
+  const rememberLabels = useCallback(
+    (ids: readonly string[]) => {
+      setSelectedLabels((prev) => {
+        const next = { ...prev };
+        for (const row of rows) {
+          if (row.controlId && ids.includes(row.controlId)) {
+            next[row.controlId] = row.anchor.scf_id
+              ? `${row.anchor.scf_id} ${row.anchor.name}`
+              : row.anchor.name;
+          }
+        }
+        return next;
+      });
+    },
+    [rows],
+  );
+  const labelOf = useCallback(
+    (id: string) => selectedLabels[id] ?? "A selected control",
+    [selectedLabels],
+  );
+
+  const onToggleRow = useCallback(
+    (id: string) => {
+      rememberLabels([id]);
+      setSelected((prev) => toggleSelection(prev, id));
+    },
+    [rememberLabels],
+  );
 
   const onToggleSelectAll = useCallback(() => {
+    rememberLabels(visibleIds);
     setSelected((prev) => toggleSelectAll(visibleIds, prev));
-  }, [visibleIds]);
+  }, [rememberLabels, visibleIds]);
 
   const onClearSelection = useCallback(() => {
     setSelected(new Set<string>());
   }, []);
 
-  // Slice 468 — WORKING bulk-assign-owner action. v1 assigns the selected
-  // set to the CURRENT USER ("assign to me" — the dominant triage case the
-  // slice-448 narrative names; a richer assign-to-any-user picker is a
-  // follow-on, decisions log 468 D4). The owner id is resolved from
-  // `/v1/me`; the upstream re-checks role + tenant PER ITEM (AC-11) and
-  // caps the set server-side. On success the selection clears; the message
-  // surfaces inline.
-  const [assignMessage, setAssignMessage] = useState<{
-    kind: "ok" | "error";
-    text: string;
-  } | null>(null);
+  // #2141 — the bulk actions. Which ones show follows the live /v1/me and
+  // the caller's modules, failing closed (`bulkActionGates`). Each write
+  // is one the platform already gates:
+  //   - assign owner posts the whole set to the slice-468 bulk endpoint,
+  //     which re-checks role + tenant per id and applies all or none;
+  //   - evaluate now and link to a plan call the per-control write once
+  //     per id and report per item (n succeeded, m refused with reasons).
+  // A success clears the selection (a refused control stays selected for
+  // a retry); the result lives in the persistent region above the table
+  // (slice 745).
+  const meQ = useQuery({
+    queryKey: ["settings-me-profile"],
+    queryFn: getMe,
+    staleTime: 60_000,
+  });
+  const seesActionPlans = useSeesPage("/action-plans");
+  const seesExceptions = useSeesPage("/exceptions");
+  const gates = bulkActionGates(meQ.data, {
+    actionPlans: seesActionPlans,
+    exceptions: seesExceptions,
+  });
+  // A caller offered no bulk action gets no selection column at all.
+  const selectable = anyBulkAction(gates);
+
+  const [assignMessage, setAssignMessage] = useState<BulkMessage | null>(null);
   const queryClient = useQueryClient();
+
   const bulkAssignMutation = useMutation({
-    mutationFn: async (controlIds: string[]) => {
-      const me = await getMe();
-      return bulkAssignOwner(controlIds, me.user_id);
-    },
+    mutationFn: (vars: { controlIds: string[]; ownerUserId: string }) =>
+      bulkAssignOwner(vars.controlIds, vars.ownerUserId),
     onSuccess: (res) => {
       setAssignMessage({
         kind: "ok",
         text: `Assigned ${res.assigned} control${
           res.assigned === 1 ? "" : "s"
-        } to you.`,
+        } to the new owner.`,
       });
       setSelected(new Set<string>());
       // #2128: the Owner column reads the assignment back.
       void queryClient.invalidateQueries({ queryKey: ["controls", "mine"] });
     },
     onError: (err) => {
-      const text =
-        err instanceof APIError
-          ? err.message
-          : "Could not assign the selected controls. Try again.";
-      setAssignMessage({ kind: "error", text });
+      // All or none: a refusal means no control changed owner.
+      setAssignMessage({
+        kind: "error",
+        text:
+          err instanceof APIError
+            ? `${err.message} No owner was changed.`
+            : "Could not assign the selected controls. No owner was changed.",
+      });
     },
   });
-  const onAssignToMe = useCallback(() => {
-    setAssignMessage(null);
-    bulkAssignMutation.mutate(Array.from(selected));
-  }, [bulkAssignMutation, selected]);
 
-  // Slice 745 — auto-dismiss the bulk-assign confirmation after a delay so
-  // a stale "Assigned N controls to you." does not linger across unrelated
-  // actions. The message lives in the persistent `BulkAssignMessage` region
-  // (above the table, independent of `selected.size`), so unlike the old
-  // inline span it survives the selection-clear and is actually observable;
-  // this timer is the natural counterpart that retires it. Re-armed each
-  // time a new message is set; cleared on unmount or before the next
-  // message. A null message (the initial / just-cleared state) schedules
-  // nothing.
+  const afterPerItem = useCallback(
+    (res: PerItemResult, msg: BulkMessage) => {
+      setAssignMessage(msg);
+      setSelected(new Set(res.refused.map((r) => r.id)));
+      void queryClient.invalidateQueries({ queryKey: ["controls"] });
+    },
+    [queryClient],
+  );
+  const bulkEvaluateMutation = useMutation({
+    mutationFn: (controlIds: string[]) =>
+      runPerItem(controlIds, (id) => evaluateControl(id)),
+    onSuccess: (res) =>
+      afterPerItem(res, perItemMessage(res, "evaluated", labelOf)),
+  });
+  const bulkLinkMutation = useMutation({
+    mutationFn: (vars: { controlIds: string[]; planId: string }) =>
+      runPerItem(vars.controlIds, (id) =>
+        linkActionPlanControl(vars.planId, id),
+      ),
+    onSuccess: (res) =>
+      afterPerItem(res, perItemMessage(res, "linked to the plan", labelOf)),
+  });
+
+  // The link picker's plans load once it is first opened.
+  const [wantPlans, setWantPlans] = useState(false);
+  const plansQ = useQuery({
+    queryKey: ["action-plans", "bulk-link-picker"],
+    queryFn: () => fetchActionPlansList({ limit: 100 }),
+    enabled: wantPlans && gates.linkPlan,
+  });
+
+  const busy = bulkAssignMutation.isPending
+    ? "assign"
+    : bulkEvaluateMutation.isPending
+      ? "evaluate"
+      : bulkLinkMutation.isPending
+        ? "link"
+        : null;
+
+  const onAssignOwner = useCallback(
+    (ownerUserId: string) => {
+      setAssignMessage(null);
+      bulkAssignMutation.mutate({
+        controlIds: Array.from(selected),
+        ownerUserId,
+      });
+    },
+    [bulkAssignMutation, selected],
+  );
+  const onEvaluate = useCallback(() => {
+    setAssignMessage(null);
+    bulkEvaluateMutation.mutate(Array.from(selected));
+  }, [bulkEvaluateMutation, selected]);
+  const onLinkPlan = useCallback(
+    (planId: string) => {
+      setAssignMessage(null);
+      bulkLinkMutation.mutate({ controlIds: Array.from(selected), planId });
+    },
+    [bulkLinkMutation, selected],
+  );
+
+  // Slice 745 — auto-dismiss a confirmation after a delay so it does not
+  // linger across unrelated actions. A result naming refused controls
+  // stays until the next action: the operator needs the reasons.
   useEffect(() => {
-    if (!assignMessage) return;
+    if (!assignMessage || assignMessage.kind === "error") return;
     const handle = window.setTimeout(
       () => setAssignMessage(null),
       BULK_ASSIGN_MESSAGE_TTL_MS,
@@ -891,7 +1005,7 @@ function ControlsPageInner() {
     </span>
   );
 
-  const columns: ListColumn<AnchorRow>[] = [
+  const allColumns: ListColumn<AnchorRow>[] = [
     // Slice 448 — multi-select column. Header is the select-all-in-view
     // tri-state checkbox; each row carries a per-row checkbox. The
     // checkbox click stops propagation so it never triggers the row's
@@ -920,7 +1034,9 @@ function ControlsPageInner() {
         return (
           <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
             <Checkbox
-              aria-label={`Select control ${row.anchor.scf_id}`}
+              aria-label={`Select control ${
+                row.anchor.scf_id || row.anchor.name
+              }`}
               data-testid="controls-row-select"
               checked={selected.has(controlId)}
               onCheckedChange={() => onToggleRow(controlId)}
@@ -1111,6 +1227,10 @@ function ControlsPageInner() {
         ),
     },
   ];
+  // #2141: a caller offered no bulk action gets no selection column.
+  const columns = selectable
+    ? allColumns
+    : allColumns.filter((col) => col.id !== "select");
 
   // #2131 — on "My controls" every displayed column sorts on the server.
   // A header click cycles ascending, descending, then the default order
@@ -1167,32 +1287,24 @@ function ControlsPageInner() {
   // `controls-history-export-*` data-testid. The history export
   // returns 17 columns (slice 137's 15 + superseded_by + superseded_at)
   // covering every version of every bundle, active + superseded.
+  //
+  // #2141: the six links fold into one Export menu. Each keeps its URL,
+  // params and testid.
+  const exportLinks = [
+    ...CONTROLS_EXPORT_FORMATS.map((format) => ({
+      href: buildControlsExportURL(format),
+      label: `Controls (${CONTROLS_EXPORT_FORMAT_LABELS[format]})`,
+      testId: `controls-export-${format}`,
+    })),
+    ...CONTROLS_HISTORY_EXPORT_FORMATS.map((format) => ({
+      href: buildControlsHistoryExportURL(format),
+      label: `History (${CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]})`,
+      testId: `controls-history-export-${format}`,
+    })),
+  ];
   const actions = (
     <>
-      {CONTROLS_EXPORT_FORMATS.map((format) => (
-        <a
-          key={format}
-          href={buildControlsExportURL(format)}
-          download
-          rel="noopener"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-          data-testid={`controls-export-${format}`}
-        >
-          Export {CONTROLS_EXPORT_FORMAT_LABELS[format]}
-        </a>
-      ))}
-      {CONTROLS_HISTORY_EXPORT_FORMATS.map((format) => (
-        <a
-          key={`history-${format}`}
-          href={buildControlsHistoryExportURL(format)}
-          download
-          rel="noopener"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-          data-testid={`controls-history-export-${format}`}
-        >
-          Export History {CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]}
-        </a>
-      ))}
+      <ExportMenu links={exportLinks} />
       {/* #1785 — upload a control sheet; the upload opens the batch's
           review page. */}
       <Link
@@ -1327,13 +1439,18 @@ function ControlsPageInner() {
         onSaveView={onSaveView}
         onDeleteView={onDeleteView}
       />
-      {selected.size > 0 ? (
+      {selectable && selected.size > 0 ? (
         <SelectionBar
-          selectedCount={selected.size}
+          selectedIds={Array.from(selected)}
           overCap={selectionOverCap}
+          gates={gates}
           onClear={onClearSelection}
-          onAssignToMe={onAssignToMe}
-          assigning={bulkAssignMutation.isPending}
+          onAssignOwner={onAssignOwner}
+          onEvaluate={onEvaluate}
+          plans={plansQ.data?.action_plans}
+          onWantPlans={() => setWantPlans(true)}
+          onLinkPlan={onLinkPlan}
+          busy={busy}
         />
       ) : null}
       {/* Slice 745 — bulk-assign confirmation in a PERSISTENT region,
@@ -1345,7 +1462,7 @@ function ControlsPageInner() {
           gated bar, lets the confirmation survive the selection-clear and
           be observable (re-enables slice 743's quarantined message
           assertion). Auto-dismisses via BULK_ASSIGN_MESSAGE_TTL_MS. */}
-      <BulkAssignMessage message={assignMessage} />
+      <BulkResultMessage message={assignMessage} />
       {cellsCapped ? (
         <Alert data-testid="controls-scope-cells-capped" className="mb-3">
           <AlertTitle>Scope filter capped at {SCOPE_CELL_CAP} cells</AlertTitle>
