@@ -233,6 +233,20 @@ oidc:
   # -- OIDC redirect URL (the atlas server's callback). Typically
   #    https://<your-host>/auth/callback.
   redirectUrl: ""
+  # The key that seals the OIDC client secret an admin saves on the SSO
+  # page (ATLAS_OIDC_SECRET_KEY, #2034): base64 of 32 random bytes,
+  # `openssl rand -base64 32`, the same on every replica. Unset, the SSO
+  # page cannot save a client secret and sign-in through a saved config is
+  # refused; local login is unaffected. A malformed key stops the server at
+  # boot. Changing it means re-entering the client secret on the SSO page.
+  secretKey:
+    # -- Name of a pre-created Secret holding the key (PRODUCTION). It is
+    #    mounted read-only and passed as ATLAS_OIDC_SECRET_KEY_FILE, so the
+    #    key never sits in an environment variable. Takes precedence over
+    #    secrets.oidcSecretKey.
+    existingSecret: ""
+    # -- The key inside existingSecret that holds the base64 value.
+    secretKey: oidc-secret-key
 
 # ---------------------------------------------------------------------------
 # bootstrap — first-boot seed configuration consumed by the migration Job.
@@ -285,6 +299,9 @@ secrets:
   defaultUserPassword: changeme
   # -- OIDC client secret. Only used when oidc.issuer is set.
   oidcClientSecret: changeme
+  # -- Inline ATLAS_OIDC_SECRET_KEY (dev convenience). Empty renders
+  #    nothing. Production: use oidc.secretKey.existingSecret instead.
+  oidcSecretKey: ""
   # -- S3 access key ID. Used only when minio.enabled is false (external S3).
   #    When minio.enabled is true the MinIO root credentials are used instead.
   s3AccessKeyId: changeme

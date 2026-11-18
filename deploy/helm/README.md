@@ -111,6 +111,32 @@ The Secret must carry these keys:
 | `ATLAS_OIDC_CLIENT_SECRET`                    | atlas              | Only when `oidc.issuer` is set.                                            |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | atlas              | S3 credentials. Omit if using IRSA / workload identity.                    |
 
+### The OIDC client-secret key
+
+The key that seals the OIDC client secret an admin saves on the SSO page
+(`ATLAS_OIDC_SECRET_KEY`, #2034) is set apart from the Secret above, so it
+can be mounted as a file rather than passed as an environment variable:
+
+```sh
+kubectl create secret generic atlas-oidc-secret-key \
+  --from-literal=oidc-secret-key="$(openssl rand -base64 32)"
+```
+
+```yaml
+oidc:
+  secretKey:
+    existingSecret: atlas-oidc-secret-key
+    secretKey: oidc-secret-key # the key inside that Secret
+```
+
+The chart mounts it read-only at `/etc/security-atlas/oidc/` and sets
+`ATLAS_OIDC_SECRET_KEY_FILE`. Keep the same key across upgrades and on every
+replica: changing it means re-entering the client secret on the SSO page.
+Unset, the SSO page cannot save a client secret; local login is unaffected.
+A malformed key stops the server at boot, in every mode (#2609). For a
+throwaway cluster, `secrets.oidcSecretKey` renders it into the inline Secret
+instead.
+
 ### Mode 2 — inline (dev convenience)
 
 Leave `secrets.existingSecret` empty and the chart renders a Secret named

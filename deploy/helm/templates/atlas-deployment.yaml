@@ -46,9 +46,23 @@ spec:
                 name: {{ include "security-atlas.configMapName" . }}
             - secretRef:
                 name: {{ include "security-atlas.secretName" . }}
-          {{- with .Values.atlas.extraEnv }}
+          {{- if or .Values.oidc.secretKey.existingSecret .Values.atlas.extraEnv }}
           env:
+            {{- if .Values.oidc.secretKey.existingSecret }}
+            # #2609: the OIDC client-secret key is read from a file, never
+            # from an environment variable.
+            - name: ATLAS_OIDC_SECRET_KEY_FILE
+              value: /etc/security-atlas/oidc/{{ .Values.oidc.secretKey.secretKey }}
+            {{- end }}
+            {{- with .Values.atlas.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.oidc.secretKey.existingSecret }}
+          volumeMounts:
+            - name: oidc-secret-key
+              mountPath: /etc/security-atlas/oidc
+              readOnly: true
           {{- end }}
           # The atlas server exposes /health on the HTTP port (slice 037).
           livenessProbe:
@@ -65,6 +79,16 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.atlas.resources | nindent 12 }}
+      {{- if .Values.oidc.secretKey.existingSecret }}
+      volumes:
+        - name: oidc-secret-key
+          secret:
+            secretName: {{ .Values.oidc.secretKey.existingSecret }}
+            defaultMode: 0400
+            items:
+              - key: {{ .Values.oidc.secretKey.secretKey }}
+                path: {{ .Values.oidc.secretKey.secretKey }}
+      {{- end }}
       {{- with .Values.atlas.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

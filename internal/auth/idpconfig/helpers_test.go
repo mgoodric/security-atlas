@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 func testCrypter(t *testing.T, fill byte) *SecretCrypter {
@@ -123,7 +125,7 @@ func TestValidateIssuerURL(t *testing.T) {
 		{"", false, false},
 	}
 	for _, tc := range cases {
-		err := ValidateIssuerURL(tc.raw, tc.loopback)
+		err := ValidateIssuerURL(tc.raw, netguard.Policy{AllowLoopback: tc.loopback, AllowPrivate: tc.loopback})
 		if (err == nil) != tc.ok {
 			t.Errorf("ValidateIssuerURL(%q, loopback=%t) = %v, want ok=%t", tc.raw, tc.loopback, err, tc.ok)
 		}
