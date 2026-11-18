@@ -5,7 +5,7 @@
 // argon2id client-secret verify for whatever client_id the caller
 // presents, so without a limit they are a CPU-exhaustion and
 // secret-guessing surface. `/oauth/token` already limits per client_id
-// (P0-188-9); this applies the same tokenBucketLimiter here, plus a
+// (P0-188-9); this applies the same perMinuteLimiter here, plus a
 // per-IP bucket so one source cannot spread its guesses across many
 // client_ids.
 //
@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/ratekey"
+	"github.com/mgoodric/security-atlas/internal/api/ratelimit"
 )
 
 const (
@@ -49,8 +50,8 @@ const (
 
 // clientAuthLimiter pairs a per-client_id and a per-IP token bucket.
 type clientAuthLimiter struct {
-	perClient *tokenBucketLimiter
-	perIP     *tokenBucketLimiter
+	perClient *perMinuteLimiter
+	perIP     *perMinuteLimiter
 	clientIP  func(*http.Request) string
 }
 
@@ -71,8 +72,8 @@ func newClientAuthLimiter(clientRate, ipRate int, clientIP func(*http.Request) s
 		now = time.Now
 	}
 	return &clientAuthLimiter{
-		perClient: newTokenBucketLimiter(clientRate, now),
-		perIP:     newTokenBucketLimiter(ipRate, now),
+		perClient: newPerMinuteLimiter(clientRate, now),
+		perIP:     newPerMinuteLimiter(ipRate, now),
 		clientIP:  clientIP,
 	}
 }
@@ -118,7 +119,7 @@ func presentedClientID(r *http.Request) string {
 
 // writeRateLimited writes the 429 the token endpoint uses.
 func writeRateLimited(w http.ResponseWriter, retryAfter int) {
-	retryAfterSeconds(w, retryAfter)
+	ratelimit.SetRetryAfter(w, retryAfter)
 	writeOAuthError(w, http.StatusTooManyRequests, "invalid_request",
 		"rate limit exceeded; retry after the indicated window")
 }

@@ -132,10 +132,10 @@ func ExportWriteAuthCodeAudit(t *TokenEndpoint, r interface{ Context() context.C
 }
 
 // ExportNewTokenBucketLimiter exposes the per-client token-bucket
-// limiter with an injected clock so the overflow-cap and window-edge
-// arms are assertable deterministically.
+// limiter with an injected clock so the overflow-cap arm is
+// assertable deterministically.
 func ExportNewTokenBucketLimiter(rate int, now func() time.Time) *ExportTokenBucketLimiter {
-	return newTokenBucketLimiter(rate, now)
+	return newPerMinuteLimiter(rate, now)
 }
 
 // ExportLimiterAllow consumes a token from the bucket.
@@ -143,25 +143,20 @@ func ExportLimiterAllow(l *ExportTokenBucketLimiter, key string) bool {
 	return l.Allow(key)
 }
 
-// ExportLimiterWindowSeconds returns the Retry-After window.
-func ExportLimiterWindowSeconds(l *ExportTokenBucketLimiter) int {
-	return l.WindowSeconds()
+// ExportWindowSeconds returns the Retry-After window for a rate.
+func ExportWindowSeconds(rate int) int {
+	return windowSeconds(rate)
 }
 
 // ExportTokenBucketLimiter aliases the unexported limiter so the
 // external test package can hold a typed handle.
-type ExportTokenBucketLimiter = tokenBucketLimiter
+type ExportTokenBucketLimiter = perMinuteLimiter
 
 // ExportLimiterLen reports how many buckets the limiter holds (#2041
 // pruning).
 func ExportLimiterLen(l *ExportTokenBucketLimiter) int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.buckets)
+	return l.buckets.Len()
 }
-
-// ExportTokenBucketPruneFloor re-exports the prune threshold.
-const ExportTokenBucketPruneFloor = tokenBucketPruneFloor
 
 // ExportIntrospectLimiterLens reports the per-client and per-IP bucket
 // counts of an introspection endpoint's client-auth limiter (#2041).

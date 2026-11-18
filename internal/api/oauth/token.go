@@ -39,15 +39,14 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/ratelimit"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
@@ -104,7 +103,7 @@ type TokenEndpoint struct {
 	devicePoll  *devicePollTracker
 	issuer      string
 	auditPool   *pgxpool.Pool
-	limiter     *tokenBucketLimiter
+	limiter     *perMinuteLimiter
 	now         func() time.Time
 	// superAdmins re-reads super_admins on token exchange (#1850).
 	// Nil fails closed: no exchanged token carries super_admin.
@@ -172,7 +171,7 @@ func NewTokenEndpoint(signer *tokensign.Signer, clients *oauthclient.Store, cfg 
 		clients:   clients,
 		issuer:    cfg.Issuer,
 		auditPool: cfg.AuditPool,
-		limiter:   newTokenBucketLimiter(rate, nowFn),
+		limiter:   newPerMinuteLimiter(rate, nowFn),
 		now:       nowFn,
 	}
 }
@@ -234,7 +233,7 @@ func (t *TokenEndpoint) handleClientCredentials(w http.ResponseWriter, r *http.R
 	// platform attack cannot exhaust CPU. Token bucket key = client_id;
 	// per P0-188-9, NEVER the source IP.
 	if !t.limiter.Allow(clientID) {
-		retryAfterSeconds(w, t.limiter.WindowSeconds())
+		ratelimit.SetRetryAfter(w, t.limiter.WindowSeconds())
 		writeOAuthError(w, http.StatusTooManyRequests, "invalid_request",
 			"rate limit exceeded; retry after the indicated window")
 		return
@@ -509,12 +508,6 @@ func writeTokenResponse(w http.ResponseWriter, accessToken string) {
 	})
 }
 
-// retryAfterSeconds sets the standard `Retry-After` header in the
-// 429 path. RFC 6585 §4 honors this header on Too Many Requests.
-func retryAfterSeconds(w http.ResponseWriter, seconds int) {
-	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-}
-
 // isFormContentType returns true when ct matches
 // `application/x-www-form-urlencoded` with any optional parameters
 // (charset, boundary). The check is case-insensitive on the base
@@ -557,100 +550,42 @@ func requestIP(r *http.Request) any {
 
 // ===== rate limiter =====
 //
-// A minimal in-memory token bucket keyed on client_id. v1 is a
-// single-process platform; a follow-on slice can swap to a
-// distributed limiter (Redis / Postgres advisory lock) when
-// multi-process deployment lands.
-//
-// The bucket refills at one full bucket per minute. Allow() consumes
-// a token; if none available, the request is rate-limited. The
-// bucket size = rate, so steady-state behavior is "rate requests per
-// minute; bursts up to rate at any instant".
+// perMinuteLimiter admits rate requests per key per minute, bursts up to
+// rate at any instant. The bucket is internal/api/ratelimit (#2497), per
+// process: across N replicas a key can be admitted N times the limit.
 
-type tokenBucketLimiter struct {
-	mu      sync.Mutex
-	rate    int // tokens per minute
-	buckets map[string]*tokenBucketState
-	now     func() time.Time
-	// pruneAt is the bucket count that triggers a sweep of refilled
-	// buckets (#2041). Callers pick the keys, so without the sweep the
-	// map grows with every distinct key ever seen.
-	pruneAt int
+type perMinuteLimiter struct {
+	buckets *ratelimit.Limiter
+	rate    int
 }
 
-// tokenBucketPruneFloor is the smallest map size that triggers a
-// prune, matching the login throttle's floor.
-const tokenBucketPruneFloor = 4096
-
-type tokenBucketState struct {
-	tokens    float64
-	lastCheck time.Time
-}
-
-func newTokenBucketLimiter(rate int, nowFn func() time.Time) *tokenBucketLimiter {
-	return &tokenBucketLimiter{
-		rate:    rate,
-		buckets: make(map[string]*tokenBucketState),
-		now:     nowFn,
-		pruneAt: tokenBucketPruneFloor,
-	}
+// newPerMinuteLimiter builds the limiter. rate must be positive; callers
+// apply their defaults first.
+func newPerMinuteLimiter(rate int, nowFn func() time.Time) *perMinuteLimiter {
+	return &perMinuteLimiter{buckets: ratelimit.PerMinute(rate, nowFn), rate: rate}
 }
 
 // Allow returns true when a token was consumed; false when the
 // bucket was empty and the request must be rate-limited.
-func (l *tokenBucketLimiter) Allow(key string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	now := l.now()
-	state, ok := l.buckets[key]
-	if !ok {
-		l.maybePrune(now)
-		l.buckets[key] = &tokenBucketState{
-			tokens:    float64(l.rate) - 1, // first call consumes one
-			lastCheck: now,
-		}
-		return true
-	}
-	// Refill: tokens added since last check at rate/60 per second.
-	elapsed := now.Sub(state.lastCheck).Seconds()
-	state.tokens += elapsed * (float64(l.rate) / 60.0)
-	if state.tokens > float64(l.rate) {
-		state.tokens = float64(l.rate)
-	}
-	state.lastCheck = now
-	if state.tokens < 1.0 {
-		return false
-	}
-	state.tokens -= 1.0
-	return true
-}
-
-// maybePrune drops buckets that have refilled to full: they hold no
-// state a fresh bucket would not. The threshold doubles with the
-// surviving count so a map of live buckets is not rescanned on every
-// new key. Caller holds l.mu.
-func (l *tokenBucketLimiter) maybePrune(now time.Time) {
-	if len(l.buckets) < l.pruneAt {
-		return
-	}
-	full := float64(l.rate)
-	for k, b := range l.buckets {
-		if b.tokens+now.Sub(b.lastCheck).Seconds()*(full/60.0) >= full {
-			delete(l.buckets, k)
-		}
-	}
-	l.pruneAt = max(tokenBucketPruneFloor, 2*len(l.buckets))
+func (l *perMinuteLimiter) Allow(key string) bool {
+	ok, _ := l.buckets.Allow(key)
+	return ok
 }
 
 // WindowSeconds reports the retry-after value the 429 response
-// should advertise. With a 1-token refill at rate/60 per second, the
-// expected wait for the next token is 60/rate seconds. Operators see
-// "Retry-After: 1" for the default 60/min limit.
-func (l *tokenBucketLimiter) WindowSeconds() int {
-	if l.rate <= 0 {
+// should advertise: the fixed refill time of one token, not the actual
+// wait.
+func (l *perMinuteLimiter) WindowSeconds() int {
+	return windowSeconds(l.rate)
+}
+
+// windowSeconds is 60/rate, at least 1, and 60 for a non-positive rate.
+// Operators see "Retry-After: 1" for the default 60/min limit.
+func windowSeconds(rate int) int {
+	if rate <= 0 {
 		return 60
 	}
-	return max(1, 60/l.rate)
+	return max(1, 60/rate)
 }
 
 func max(a, b int) int {
