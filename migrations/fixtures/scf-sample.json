@@ -9,583 +9,583 @@
       "scf_id": "IAC-01",
       "family": "IAC",
       "title": "Identification & Authentication Policy",
-      "description": "Mechanisms exist to facilitate the implementation of identification and access management controls."
+      "description": "The organization sets a written policy for how people and systems are identified and authenticated, and runs the access controls that put it into effect."
     },
     {
       "scf_id": "IAC-37",
       "family": "IAC",
       "title": "Multi-Factor Authentication (MFA)",
-      "description": "Mechanisms exist to require Multi-Factor Authentication for privileged accounts, network access, and remote access."
+      "description": "Privileged accounts, network logins and remote sessions need a second authentication factor on top of a password."
     },
     {
       "scf_id": "IAC-04",
       "family": "IAC",
       "title": "User Provisioning & De-Provisioning",
-      "description": "Mechanisms exist to establish, activate, modify, disable, and remove logical access for users."
+      "description": "User access is granted, changed, suspended and removed through a defined process, from a person's first day to their last."
     },
     {
       "scf_id": "IAC-14",
       "family": "IAC",
       "title": "Authenticator Management",
-      "description": "Mechanisms exist to securely manage authenticators, including the creation, distribution, strength, change, and safeguarding of passwords and other authenticators."
+      "description": "Passwords, keys and other authenticators are issued securely, meet strength rules, are changed when needed and are kept away from anyone who should not hold them."
     },
     {
       "scf_id": "IAC-12",
       "family": "IAC",
       "title": "Periodic Review of Individual & Service Account Privileges",
-      "description": "Mechanisms exist to periodically review and validate user accounts and access privileges."
+      "description": "Accounts and the privileges they hold, for people and for services, are reviewed on a schedule and corrected when they no longer fit."
     },
     {
       "scf_id": "IAC-10",
       "family": "IAC",
       "title": "Privileged Account Management (PAM)",
-      "description": "Mechanisms exist to govern the privileged account lifecycle."
+      "description": "Privileged accounts are approved before they are created, watched while they exist and removed when the need ends."
     },
     {
       "scf_id": "IAC-11",
       "family": "IAC",
       "title": "Emergency Accounts",
-      "description": "Mechanisms exist to establish, govern, and monitor emergency access accounts that allow necessary data and systems to be reached during an emergency, with after-the-fact review of their use."
+      "description": "Break-glass accounts reserved for emergencies are set up and controlled in advance, monitored, and every use is reviewed afterwards."
     },
 
     {
       "scf_id": "AST-01",
       "family": "AST",
       "title": "Asset Management Policy",
-      "description": "Mechanisms exist to facilitate the implementation of asset management."
+      "description": "A policy and owner cover how the organization tracks and looks after its technology assets."
     },
     {
       "scf_id": "AST-04",
       "family": "AST",
       "title": "Asset Inventories",
-      "description": "Mechanisms exist to maintain an authoritative inventory of technology assets."
+      "description": "One inventory of technology assets is kept current and treated as the source everyone trusts."
     },
     {
       "scf_id": "AST-22",
       "family": "AST",
       "title": "Secure Disposal, Destruction or Re-Use of Equipment",
-      "description": "Mechanisms exist to securely dispose of, destroy, or repurpose system components."
+      "description": "Equipment leaving service is wiped, destroyed or securely prepared for reuse so its data cannot be recovered."
     },
 
     {
       "scf_id": "BCD-04",
       "family": "BCD",
       "title": "Business Continuity & Disaster Recovery (BC/DR) Plans",
-      "description": "Mechanisms exist to document and assign roles and responsibilities for the continuity of operations."
+      "description": "Business continuity and disaster recovery plans are written down, and each recovery role has a named owner."
     },
     {
       "scf_id": "BCD-24",
       "family": "BCD",
       "title": "Data Backups",
-      "description": "Mechanisms exist to create recurring backups of data, software, and system configurations."
+      "description": "Data, software and system configurations are backed up on a regular schedule."
     },
     {
       "scf_id": "BCD-32",
       "family": "BCD",
       "title": "Testing for Reliability & Integrity",
-      "description": "Mechanisms exist to routinely test backups to verify recoverability."
+      "description": "Backups are restored in tests on a regular schedule to prove the data can actually be recovered."
     },
 
     {
       "scf_id": "CFG-04",
       "family": "CFG",
       "title": "Secure Baseline Configurations",
-      "description": "Mechanisms exist to develop, document, and maintain secure baseline configurations for technology platforms."
+      "description": "Each technology platform has a documented, hardened baseline configuration that is kept up to date."
     },
     {
       "scf_id": "CFG-04.5",
       "family": "CFG",
       "title": "Session Termination",
-      "description": "Mechanisms exist to automatically terminate a user session after a defined period of inactivity or on a defined trigger condition."
+      "description": "User sessions end on their own after a set idle period or when a defined event occurs."
     },
 
     {
       "scf_id": "CHG-02",
       "family": "CHG",
       "title": "Change Management Program",
-      "description": "Mechanisms exist to run a change management program that governs how changes to technology assets are requested, reviewed, approved and tracked."
+      "description": "A change management program covers how changes to technology assets are requested, reviewed, approved and tracked."
     },
     {
       "scf_id": "CHG-03",
       "family": "CHG",
       "title": "Configuration Change Control",
-      "description": "Mechanisms exist to authorize, document, and track configuration changes."
+      "description": "Configuration changes are approved before they are made and recorded so they can be traced afterwards."
     },
 
     {
       "scf_id": "CLD-02",
       "family": "CLD",
       "title": "Cloud Services",
-      "description": "Mechanisms exist to govern the cloud services the organization uses."
+      "description": "The organization decides which cloud services it uses and oversees how they are run."
     },
 
     {
       "scf_id": "CPL-02",
       "family": "CPL",
       "title": "Statutory, Regulatory & Contractual Compliance",
-      "description": "Mechanisms exist to facilitate the identification and implementation of relevant statutory, regulatory, and contractual requirements."
+      "description": "Applicable laws, regulations and contract terms are identified, and the controls needed to meet them are put in place."
     },
     {
       "scf_id": "CPL-07.1",
       "family": "CPL",
       "title": "Internal Audit Function",
-      "description": "Mechanisms exist to plan and conduct internal audits."
+      "description": "An internal audit function plans audits and carries them out."
     },
 
     {
       "scf_id": "CRY-02",
       "family": "CRY",
       "title": "Use of Cryptographic Controls",
-      "description": "Mechanisms exist to facilitate the use of cryptographic protections of data."
+      "description": "Cryptography is the organization's standard way to protect data, governed by policy."
     },
     {
       "scf_id": "CRY-07",
       "family": "CRY",
       "title": "Encrypting Data At Rest",
-      "description": "Cryptographic mechanisms exist to protect the confidentiality of sensitive data at rest through encryption."
+      "description": "Sensitive data stored on disks, databases and object stores is kept confidential with encryption at rest."
     },
     {
       "scf_id": "CRY-05",
       "family": "CRY",
       "title": "Encrypting Data In Transit",
-      "description": "Cryptographic mechanisms exist to protect the confidentiality and integrity of data in transit through encryption."
+      "description": "Data moving across networks is kept confidential and tamper-evident with encryption in transit."
     },
     {
       "scf_id": "CRY-10",
       "family": "CRY",
       "title": "Cryptographic Key Management",
-      "description": "Mechanisms exist to govern the cryptographic key management lifecycle."
+      "description": "Cryptographic keys are managed through their whole life: generation, distribution, storage, rotation and destruction."
     },
     {
       "scf_id": "CRY-14",
       "family": "CRY",
       "title": "Cryptographic Hash",
-      "description": "Cryptographic mechanisms exist to corroborate that data has not been altered or destroyed in an unauthorized manner, using hashing, digital signatures, or equivalent integrity checks."
+      "description": "Hashes, digital signatures or equivalent checks show that data has not been changed or destroyed without authorization."
     },
     {
       "scf_id": "CRY-06",
       "family": "CRY",
       "title": "Integrity of Data In Transit",
-      "description": "Cryptographic mechanisms exist to detect unauthorized modification of data during transmission across communications networks."
+      "description": "Cryptographic checks reveal data that was modified while crossing a network."
     },
 
     {
       "scf_id": "DCH-04",
       "family": "DCH",
       "title": "Data & Asset Classification",
-      "description": "Mechanisms exist to facilitate the implementation of data classification and handling."
+      "description": "Data and assets are classified by sensitivity, and each class has handling rules."
     },
     {
       "scf_id": "DCH-16",
       "family": "DCH",
       "title": "Media Transportation",
-      "description": "Mechanisms exist to protect and control digital and non-digital media during transport outside of controlled areas, recording the movement of media and the personnel accountable for it."
+      "description": "Physical and electronic media taken outside controlled areas are protected on the way, with a record of where they went and who was responsible."
     },
     {
       "scf_id": "DCH-27",
       "family": "DCH",
       "title": "Media & Data Retention",
-      "description": "Mechanisms exist to define and govern data retention."
+      "description": "Retention periods are set for data and media and are enforced."
     },
 
     {
       "scf_id": "END-03",
       "family": "END",
       "title": "Endpoint Protection Mechanisms",
-      "description": "Mechanisms exist to protect endpoint devices."
+      "description": "Laptops, servers and other endpoints run protective software and settings."
     },
     {
       "scf_id": "END-04",
       "family": "END",
       "title": "Malicious Code Protection (Antimalware)",
-      "description": "Mechanisms exist to detect and prevent malicious code execution on endpoints."
+      "description": "Antimalware on endpoints finds malicious code and stops it from running."
     },
 
     {
       "scf_id": "GOV-02",
       "family": "GOV",
       "title": "Security, Compliance & Resilience Program (SCRP)",
-      "description": "Mechanisms exist to facilitate the implementation of cybersecurity governance."
+      "description": "A security, compliance and resilience program with clear ownership directs the organization's security work."
     },
     {
       "scf_id": "GOV-04",
       "family": "GOV",
       "title": "Publishing Security, Compliance & Resilience Documentation",
-      "description": "Mechanisms exist to publish security policies, standards, and procedures and make them available to the personnel responsible for implementing them."
+      "description": "Security policies, standards and procedures are published where the people who carry them out can find them."
     },
     {
       "scf_id": "GOV-04.1",
       "family": "GOV",
       "title": "Periodic Review & Update of Security, Compliance & Resilience Program",
-      "description": "Mechanisms exist to review security policies, standards, and procedures at planned intervals and update them in response to environmental or operational change."
+      "description": "Security policies, standards and procedures are reviewed on a set schedule and revised when the business or its environment changes."
     },
     {
       "scf_id": "GOV-05",
       "family": "GOV",
       "title": "Assigned Security, Compliance & Resilience Responsibilities",
-      "description": "Mechanisms exist to define security roles and responsibilities."
+      "description": "Security roles and responsibilities are defined and assigned to named people."
     },
 
     {
       "scf_id": "HRS-02",
       "family": "HRS",
       "title": "Human Resources Security Management",
-      "description": "Mechanisms exist to address human resources security."
+      "description": "Security is part of how people are hired, managed and moved between roles."
     },
     {
       "scf_id": "HRS-06.1",
       "family": "HRS",
       "title": "Rules of Behavior",
-      "description": "Mechanisms exist to define acceptable and unacceptable rules of behavior for the use of technologies, including the manner of performance and the physical surroundings in which they are used."
+      "description": "Written rules say what people may and may not do with the organization's technology, including how and where they use it."
     },
     {
       "scf_id": "HRS-10",
       "family": "HRS",
       "title": "Personnel Sanctions",
-      "description": "Mechanisms exist to apply a formal sanctions process to personnel who fail to comply with established security policies, standards, and procedures."
+      "description": "People who break security policy face a defined disciplinary process."
     },
     {
       "scf_id": "HRS-12",
       "family": "HRS",
       "title": "Personnel Termination",
-      "description": "Mechanisms exist to govern personnel termination."
+      "description": "When someone leaves, their access is removed and the organization's property is recovered."
     },
 
     {
       "scf_id": "IRO-08",
       "family": "IRO",
       "title": "Incident Response Plan (IRP)",
-      "description": "Mechanisms exist to maintain and make available a current and viable Incident Response Plan."
+      "description": "A written incident response plan is kept up to date and available to everyone who has a part in it."
     },
     {
       "scf_id": "IRO-16",
       "family": "IRO",
       "title": "Incident Stakeholder Reporting",
-      "description": "Mechanisms exist to report incidents within defined time frames."
+      "description": "Incidents are reported to the right stakeholders within set deadlines."
     },
     {
       "scf_id": "IRO-22",
       "family": "IRO",
       "title": "Data Breach",
-      "description": "Mechanisms exist to handle breaches of personal data, including notifying the people affected and regulators."
+      "description": "A breach of personal data is handled through a defined process, including notice to the people affected and to regulators."
     },
 
     {
       "scf_id": "MNT-03",
       "family": "MNT",
       "title": "Controlled Maintenance",
-      "description": "Mechanisms exist to conduct controlled maintenance and repair activities on facilities and system components, and to retain records of the repairs and modifications performed."
+      "description": "Maintenance and repair of facilities and systems is approved and supervised, and a record is kept of what was repaired or changed."
     },
 
     {
       "scf_id": "MON-02",
       "family": "MON",
       "title": "Continuous Monitoring",
-      "description": "Mechanisms exist to facilitate the implementation of enterprise-wide monitoring."
+      "description": "Monitoring covers the whole organization, not just individual systems."
     },
     {
       "scf_id": "MON-04",
       "family": "MON",
       "title": "System Generated Event Logs & Security-Relevant Telemetry",
-      "description": "Mechanisms exist to facilitate the implementation of operational auditing and accountability."
+      "description": "Systems produce event logs and telemetry that show who did what and when."
     },
     {
       "scf_id": "MON-05.1",
       "family": "MON",
       "title": "Centralized Event Log & Security-Relevant Telemetry Review & Analysis",
-      "description": "Mechanisms exist to provide for the review and analysis of audit records."
+      "description": "Event logs and telemetry are gathered in one place and reviewed for signs of trouble."
     },
     {
       "scf_id": "MON-13",
       "family": "MON",
       "title": "Event Log & Security-Relevant Telemetry Retention",
-      "description": "Mechanisms exist to retain event logs for a defined period consistent with risk and legal requirements."
+      "description": "Event logs are kept for a set period chosen to meet risk and legal needs."
     },
     {
       "scf_id": "MON-16",
       "family": "MON",
       "title": "Anomalous Behavior",
-      "description": "Mechanisms exist to detect anomalous behavior."
+      "description": "Behavior that departs from the normal pattern is detected and investigated."
     },
     {
       "scf_id": "MON-27",
       "family": "MON",
       "title": "File Integrity Monitoring (FIM)",
-      "description": "Mechanisms exist to detect unauthorized modification of stored data, so that improper alteration or destruction is found and acted on."
+      "description": "File integrity monitoring catches unauthorized changes to stored data so they can be investigated."
     },
 
     {
       "scf_id": "NET-02",
       "family": "NET",
       "title": "Network Security Controls (NSC)",
-      "description": "Mechanisms exist to facilitate the implementation of network security controls."
+      "description": "The network is protected by layered security controls such as firewalls and filtering."
     },
     {
       "scf_id": "NET-03",
       "family": "NET",
       "title": "Boundary Protection",
-      "description": "Mechanisms exist to protect network boundaries."
+      "description": "Traffic crossing the network's boundaries is controlled and monitored."
     },
     {
       "scf_id": "NET-06",
       "family": "NET",
       "title": "Network Segmentation (macrosegmentation)",
-      "description": "Mechanisms exist to segment networks and isolate systems, applications, and services that handle sensitive data from those that do not."
+      "description": "Systems that handle sensitive data sit in network segments kept apart from the rest."
     },
     {
       "scf_id": "NET-24",
       "family": "NET",
       "title": "Wireless Networking",
-      "description": "Mechanisms exist to govern wireless network security."
+      "description": "Wireless networks are configured, authorized and monitored under security rules."
     },
 
     {
       "scf_id": "PES-08",
       "family": "PES",
       "title": "Physical Access Control",
-      "description": "Mechanisms exist to control physical access to facilities."
+      "description": "Entry to facilities is limited to authorized people."
     },
 
     {
       "scf_id": "PRI-02",
       "family": "PRI",
       "title": "Data Privacy Program",
-      "description": "Mechanisms exist to facilitate the implementation of personal data governance."
+      "description": "A privacy program with clear ownership governs how personal data is handled."
     },
     {
       "scf_id": "PRI-08",
       "family": "PRI",
       "title": "Updating Personal Data (PD) Process",
-      "description": "Mechanisms exist to keep personal data current and to act on requests to update it."
+      "description": "Personal data is kept current, and requests to correct it are acted on."
     },
     {
       "scf_id": "PRI-11",
       "family": "PRI",
       "title": "Personal Data (PD) Control Testing, Training & Monitoring",
-      "description": "Mechanisms exist to test privacy controls, train staff on them and monitor that they keep working."
+      "description": "Privacy controls are tested, staff are trained on them, and they are monitored to confirm they keep working."
     },
     {
       "scf_id": "PRI-12",
       "family": "PRI",
       "title": "Authority To Collect, Process, Store & Share Personal Data (PD)",
-      "description": "Mechanisms exist to establish the legal basis for each handling of personal data."
+      "description": "Each use of personal data has a documented legal basis."
     },
     {
       "scf_id": "PRI-14",
       "family": "PRI",
       "title": "Data Privacy Requirements for Contractors & Service Providers",
-      "description": "Mechanisms exist to bind contractors and service providers to privacy obligations."
+      "description": "Contracts bind contractors and service providers to privacy obligations."
     },
     {
       "scf_id": "PRI-16",
       "family": "PRI",
       "title": "Information Sharing With Third Parties",
-      "description": "Mechanisms exist to govern when personal data may be shared with outside parties."
+      "description": "Rules decide when personal data may be shared with outside parties."
     },
     {
       "scf_id": "PRI-17",
       "family": "PRI",
       "title": "Limiting Personal Data (PD) Disclosures",
-      "description": "Mechanisms exist to restrict disclosure of personal data to approved purposes."
+      "description": "Personal data is disclosed only for approved purposes."
     },
     {
       "scf_id": "PRI-17.1",
       "family": "PRI",
       "title": "Accounting of Disclosures",
-      "description": "Mechanisms exist to keep a record of which personal data was disclosed, when and to whom."
+      "description": "A record shows which personal data was disclosed, when and to whom."
     },
     {
       "scf_id": "PRI-21",
       "family": "PRI",
       "title": "Data Privacy Notice",
-      "description": "Mechanisms exist to tell data subjects how their personal data is handled."
+      "description": "Data subjects are told in a notice how their personal data is handled."
     },
     {
       "scf_id": "PRI-24",
       "family": "PRI",
       "title": "Data Subject Consent",
-      "description": "Mechanisms exist to obtain and record data subject consent."
+      "description": "Consent from data subjects is obtained and recorded."
     },
     {
       "scf_id": "PRI-27",
       "family": "PRI",
       "title": "Data Subject Opt-In Consent",
-      "description": "Mechanisms exist to obtain affirmative consent before handling personal data that requires it."
+      "description": "Where the law requires it, people opt in before their personal data is handled."
     },
     {
       "scf_id": "PRI-29",
       "family": "PRI",
       "title": "Usage Restrictions of Personal Data (PD)",
-      "description": "Mechanisms exist to hold use of personal data to its stated purposes."
+      "description": "Personal data is used only for the purposes stated when it was collected."
     },
     {
       "scf_id": "PRI-30",
       "family": "PRI",
       "title": "Personal Data (PD) Retention & Disposal",
-      "description": "Mechanisms exist to keep personal data no longer than needed and dispose of it securely."
+      "description": "Personal data is kept no longer than needed and then disposed of securely."
     },
     {
       "scf_id": "PRI-31",
       "family": "PRI",
       "title": "Personal Data (PD) Collection Methods",
-      "description": "Mechanisms exist to limit collection of personal data to what its purpose needs."
+      "description": "Only the personal data a purpose needs is collected."
     },
     {
       "scf_id": "PRI-35",
       "family": "PRI",
       "title": "Personal Data (PD) Accuracy & Integrity",
-      "description": "Mechanisms exist to keep personal data accurate and complete."
+      "description": "Personal data is kept accurate and complete."
     },
     {
       "scf_id": "PRI-37",
       "family": "PRI",
       "title": "Data Subject Communications",
-      "description": "Mechanisms exist to answer data subject inquiries and complaints."
+      "description": "Questions and complaints from data subjects are answered."
     },
     {
       "scf_id": "PRI-38",
       "family": "PRI",
       "title": "Data Subject Authentication",
-      "description": "Mechanisms exist to confirm a data subject's identity before acting on a request."
+      "description": "A data subject's identity is confirmed before their request is acted on."
     },
     {
       "scf_id": "PRI-39",
       "family": "PRI",
       "title": "Data Subject Rights Management",
-      "description": "Mechanisms exist to support data subject rights."
+      "description": "Requests from data subjects to exercise their rights are received, tracked and fulfilled."
     },
 
     {
       "scf_id": "RSK-02",
       "family": "RSK",
       "title": "Risk Management Program",
-      "description": "Mechanisms exist to facilitate the implementation of risk management controls."
+      "description": "A risk management program identifies, rates and treats risk across the organization."
     },
     {
       "scf_id": "RSK-13",
       "family": "RSK",
       "title": "Risk Assessment",
-      "description": "Mechanisms exist to conduct routine risk assessments."
+      "description": "Risk assessments are carried out on a regular schedule."
     },
     {
       "scf_id": "RSK-08",
       "family": "RSK",
       "title": "Business Impact Analysis (BIA)",
-      "description": "Mechanisms exist to conduct a Business Impact Analysis to determine the relative criticality of applications, data, and business processes and the impact of their loss or unavailability."
+      "description": "A business impact analysis ranks applications, data and processes by how much their loss or outage would hurt."
     },
 
     {
       "scf_id": "SAT-04",
       "family": "SAT",
       "title": "Security, Compliance & Resilience Awareness Training",
-      "description": "Mechanisms exist to provide security awareness training."
+      "description": "Staff receive security, compliance and resilience awareness training."
     },
 
     {
       "scf_id": "SEA-05",
       "family": "SEA",
       "title": "Secure Engineering Principles",
-      "description": "Mechanisms exist to facilitate the implementation of secure engineering practices."
+      "description": "Systems are designed and built to recognized secure engineering principles."
     },
 
     {
       "scf_id": "TDA-02",
       "family": "TDA",
       "title": "Technology Development & Acquisition",
-      "description": "Mechanisms exist to govern technology development and acquisition."
+      "description": "Security requirements shape how technology is built in-house and how it is bought."
     },
     {
       "scf_id": "TDA-05",
       "family": "TDA",
       "title": "Secure Software Development Practices (SSDP)",
-      "description": "Mechanisms exist to govern secure software development."
+      "description": "Software is built under secure development practices."
     },
 
     {
       "scf_id": "THR-02",
       "family": "THR",
       "title": "Threat Intelligence Program",
-      "description": "Mechanisms exist to implement a threat intelligence program that includes a cross-organization information-sharing capability to influence the development of system and security architectures, the selection of security solutions, monitoring, threat hunting, and response and recovery activities."
+      "description": "A threat intelligence program shares information across teams and uses it to shape architecture, tool choices, monitoring, threat hunting, response and recovery."
     },
     {
       "scf_id": "THR-04",
       "family": "THR",
       "title": "Threat Intelligence Feeds",
-      "description": "Mechanisms exist to maintain situational awareness of evolving threats by leveraging the knowledge of attacker tactics, techniques, and procedures to facilitate the implementation of preventative and compensating controls."
+      "description": "Threat intelligence feeds keep the organization current on attacker tactics, techniques and procedures, and that knowledge guides preventive and compensating controls."
     },
     {
       "scf_id": "THR-06",
       "family": "THR",
       "title": "Threat Catalog",
-      "description": "Mechanisms exist to develop and keep current a catalog of applicable internal and external threats to the organization, both natural and manmade."
+      "description": "A catalog of the internal, external, natural and man-made threats that apply to the organization is kept current."
     },
     {
       "scf_id": "THR-08",
       "family": "THR",
       "title": "Threat Analysis",
-      "description": "Mechanisms exist to identify, assess, and remediate technology-related threats to both assets and business processes, taking into account such factors as risk to the organization and the likelihood and impact of a threat being realized."
+      "description": "Threats to technology assets and business processes are identified, rated by likelihood and impact, and addressed."
     },
     {
       "scf_id": "THR-11",
       "family": "THR",
       "title": "Indicators of Exposure (IOE)",
-      "description": "Mechanisms exist to develop Indicators of Exposure (IOE) to understand the potential attack vectors that attackers could use to attack the organization."
+      "description": "Indicators of exposure map the paths an attacker could use against the organization."
     },
     {
       "scf_id": "THR-12",
       "family": "THR",
       "title": "Vulnerability Disclosure Program (VDP)",
-      "description": "Mechanisms exist to establish a Vulnerability Disclosure Program (VDP) to assist with the secure development and maintenance of products and services that receives unsolicited reports about potential security vulnerabilities."
+      "description": "A vulnerability disclosure program takes in unsolicited reports of security flaws in the organization's products and services and feeds them into fixes."
     },
     {
       "scf_id": "THR-13",
       "family": "THR",
       "title": "Threat Hunting",
-      "description": "Mechanisms exist to perform cyber threat hunting that uses Indicators of Compromise (IOC) to detect, track, and disrupt threats that evade existing security controls."
+      "description": "Threat hunters use indicators of compromise to find and disrupt threats that existing controls missed."
     },
     {
       "scf_id": "THR-15",
       "family": "THR",
       "title": "Insider Threat Program",
-      "description": "Mechanisms exist to implement an insider threat program that includes a cross-discipline insider threat incident handling team."
+      "description": "An insider threat program has a team drawn from several disciplines to handle insider incidents."
     },
     {
       "scf_id": "THR-16",
       "family": "THR",
       "title": "Insider Threat Awareness",
-      "description": "Mechanisms exist to utilize security awareness training on recognizing and reporting potential indicators of insider threat."
+      "description": "Awareness training teaches staff to recognize the warning signs of an insider threat and report them."
     },
 
     {
       "scf_id": "TPM-02",
       "family": "TPM",
       "title": "Third-Party Management",
-      "description": "Mechanisms exist to facilitate the implementation of third-party management."
+      "description": "A program covers how the organization selects, oversees and offboards third parties."
     },
     {
       "scf_id": "TPM-10",
       "family": "TPM",
       "title": "Third-Party Risk Assessments & Approvals",
-      "description": "Mechanisms exist to assess the risk a third party poses and to approve it before engagement."
+      "description": "Each third party's risk is assessed and approved before the organization engages it."
     },
     {
       "scf_id": "TPM-14",
       "family": "TPM",
       "title": "Third-Party Contract Requirements",
-      "description": "Mechanisms exist to require contractual security and privacy obligations of third parties, and to flow those obligations down to the agents and subcontractors that handle the organization's data on their behalf."
+      "description": "Contracts set security and privacy obligations for third parties, and those obligations flow down to their agents and subcontractors that handle the organization's data."
     },
 
     {
       "scf_id": "VPM-01",
       "family": "VPM",
       "title": "Vulnerability & Patch Management Policy",
-      "description": "Mechanisms exist to facilitate the implementation of vulnerability and patch management controls."
+      "description": "A policy and owner cover vulnerability and patch management."
     },
     {
       "scf_id": "VPM-06",
       "family": "VPM",
       "title": "Vulnerability Remediation Process",
-      "description": "Mechanisms exist to identify, assess, prioritize, and remediate vulnerabilities."
+      "description": "Vulnerabilities are found, rated, prioritized and fixed through a defined process."
     }
   ]
 }

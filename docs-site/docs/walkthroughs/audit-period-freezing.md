@@ -35,7 +35,7 @@ ROLLBACK
 
 ## 2. The Evidence Population — Before and After the Freeze Cutoff
 
-The fixture seeds three evidence records for CRY-05 in this tenant. The walkthrough freezes the period at `2026-04-15T12:00:00Z`. Two observations fall before the cutoff; one falls after.
+The fixture seeds three evidence records for CRY-07 in this tenant. The walkthrough freezes the period at `2026-04-15T12:00:00Z`. Two observations fall before the cutoff; one falls after.
 
 ```bash
 docker exec security-atlas-pg-030 psql -U atlas_app -d security_atlas -c "BEGIN; SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0'; SELECT substring(id::text, 1, 13) AS short_id, observed_at, CASE WHEN observed_at <= '2026-04-15T12:00:00Z' THEN 'before cutoff' ELSE 'after cutoff' END AS relative_to_freeze FROM evidence_records WHERE control_id = '33333333-3333-3333-3333-333333330001' ORDER BY observed_at; ROLLBACK;"

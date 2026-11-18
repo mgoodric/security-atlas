@@ -40,7 +40,7 @@ INSERT INTO controls (
 VALUES (
     '333333aa-3333-3333-3333-3333333300a1',
     '00000000-0000-0000-0000-00000000a17e',
-    'CRY-05',
+    'CRY-07',
     'Encryption at rest — alt-tenant production buckets',
     'Alt-tenant control. Visible only when app.current_tenant is the alt-tenant UUID.',
     'Cryptography',

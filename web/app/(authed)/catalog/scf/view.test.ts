@@ -24,7 +24,7 @@ function anchor(
 
 const rows = [
   anchor("IAC-37", "Multi-Factor Authentication", "IAC"),
-  anchor("CRY-05", "Encrypting Data At Rest", "CRY"),
+  anchor("CRY-07", "Encrypting Data At Rest", "CRY"),
   anchor("GOV-01", "Cybersecurity Governance Program", "GOV"),
 ];
 
@@ -41,7 +41,7 @@ describe("searchAnchors (issue 2066)", () => {
 
   it("finds an anchor by a title word", () => {
     expect(searchAnchors(rows, "encrypting").map((a) => a.scf_id)).toEqual([
-      "CRY-05",
+      "CRY-07",
     ]);
   });
 
@@ -51,7 +51,7 @@ describe("searchAnchors (issue 2066)", () => {
 
   it("requires every word to match", () => {
     expect(searchAnchors(rows, "data rest").map((a) => a.scf_id)).toEqual([
-      "CRY-05",
+      "CRY-07",
     ]);
     expect(searchAnchors(rows, "data governance")).toEqual([]);
   });
