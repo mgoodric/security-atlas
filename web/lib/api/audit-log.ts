@@ -79,6 +79,9 @@ export type UnifiedListParams = {
   // every row and ignores the parameter). Emitted as `include_reads=true`
   // only when true — omitted otherwise so the default URL stays clean.
   includeReads?: boolean;
+  // limit (#2135) caps the page; the dashboard's Recent activity asks for
+  // 10. Omitted, the platform returns its full page.
+  limit?: number;
 };
 
 /**
@@ -101,6 +104,9 @@ export function buildUnifiedQuery(params: UnifiedListParams): string {
   }
   if (params.includeReads) {
     u.set("include_reads", "true");
+  }
+  if (params.limit != null) {
+    u.set("limit", String(params.limit));
   }
   return `?${u.toString()}`;
 }

@@ -79,7 +79,11 @@ func (h *Handler) WithNow(fn func() time.Time) *Handler {
 	return h
 }
 
-// List handles GET /v1/needs-attention?for=me|all&limit=&offset=.
+// List handles GET /v1/needs-attention?for=me|all&type=&limit=&offset=.
+//
+// `type` is a comma-separated list of item types (ItemTypes); the page,
+// total and band counts then cover those types only, while type_counts
+// still counts every type in the view (#2135).
 //
 // With `for` omitted the view is "me", unless the caller owns nothing and
 // may see everyone, in which case it is "all" (#2072 user story 4). The
@@ -111,6 +115,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	types, err := parseTypes(q["type"])
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if h.pool == nil || h.calendar == nil || h.approvals == nil {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "needs attention unavailable: no database")
 		return
@@ -136,7 +145,30 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			ranked = Rank(items, ForAll, mine)
 		}
 	}
-	httpresp.WriteJSON(w, http.StatusOK, Page(ranked, view, limit, offset))
+	resp := Page(FilterTypes(ranked, types), view, limit, offset)
+	resp.TypeCounts = CountTypes(ranked)
+	httpresp.WriteJSON(w, http.StatusOK, resp)
+}
+
+// parseTypes reads `?type=`: repeated, comma-separated, or both. Every
+// value must be one of ItemTypes.
+func parseTypes(values []string) ([]string, error) {
+	var out []string
+	for _, v := range values {
+		for _, t := range strings.Split(v, ",") {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			if !slices.Contains(ItemTypes, t) {
+				return nil, fmt.Errorf("type must be one of %s", strings.Join(ItemTypes, "|"))
+			}
+			if !slices.Contains(out, t) {
+				out = append(out, t)
+			}
+		}
+	}
+	return out, nil
 }
 
 func parsePage(rawLimit, rawOffset string) (int, int, error) {

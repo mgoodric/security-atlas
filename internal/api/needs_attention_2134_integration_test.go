@@ -423,3 +423,47 @@ func TestNeedsAttention2134_NarrowedMemberSeesNoHiddenModule(t *testing.T) {
 		t.Errorf("no Risk access: total %d; want %d (%d less)", after.Total, before.Total-hidden, hidden)
 	}
 }
+
+// #2135: ?type= narrows the page, total and band counts to those types,
+// and type_counts still counts every type in the view, so the full
+// page's filters can show what each holds.
+func TestNeedsAttention2135_TypeFilter(t *testing.T) {
+	e := newNAEnv2134(t)
+	all := e.mustList(t, e.other, "?for=all&limit=100")
+	byType := map[string]int{}
+	for _, it := range all.Items {
+		byType[it.Type]++
+	}
+	if byType["control"] == 0 || byType["risk"] == 0 {
+		t.Fatalf("fixture view has no controls or risks: %v", byType)
+	}
+
+	got := e.do(t, http.MethodGet, "/v1/needs-attention?for=all&limit=100&type=control,risk", e.other, nil)
+	if got.status != http.StatusOK {
+		t.Fatalf("type=control,risk: status %d body=%s", got.status, got.body)
+	}
+	var page struct {
+		naResponse2134
+		TypeCounts map[string]int `json:"type_counts"`
+	}
+	if err := json.Unmarshal([]byte(got.body), &page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if want := byType["control"] + byType["risk"]; page.Total != want || len(page.Items) != want {
+		t.Errorf("type=control,risk: total %d, %d items; want %d", page.Total, len(page.Items), want)
+	}
+	for _, it := range page.Items {
+		if it.Type != "control" && it.Type != "risk" {
+			t.Errorf("type=control,risk listed a %s", it.Type)
+		}
+	}
+	for typ, n := range byType {
+		if page.TypeCounts[typ] != n {
+			t.Errorf("type_counts[%s] = %d; want %d (the unfiltered view)", typ, page.TypeCounts[typ], n)
+		}
+	}
+
+	if st, _ := e.list(t, e.other, "?type=bogus"); st != http.StatusBadRequest {
+		t.Errorf("type=bogus: status %d; want 400", st)
+	}
+}
