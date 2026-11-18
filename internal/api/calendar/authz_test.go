@@ -6,6 +6,7 @@ package calendar
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -123,6 +124,70 @@ func TestWithoutTypes(t *testing.T) {
 	}
 	if _, ok := withoutTypes("risk", gatedEventTypes); ok {
 		t.Error("only a gated type requested: want nothing left")
+	}
+}
+
+type failingRoles struct{}
+
+func (failingRoles) RolesFor(context.Context, string, string) ([]authz.Role, error) {
+	return nil, errors.New("user_roles unreachable")
+}
+
+func mustEngine(t *testing.T, r authz.RolesResolver) *authz.Engine {
+	t.Helper()
+	e, err := authz.NewEngine(context.Background(), r)
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	return e
+}
+
+// #2331: the ICS feed decides gated types as its subscriber. Each role
+// gets what OPA gives it; no engine, no subscriber, no live role or a
+// failed role lookup leaves every gated type out (the error is returned
+// for the caller to log).
+func TestReadableTypesFor(t *testing.T) {
+	const tenant = "11111111-1111-1111-1111-111111111111"
+	const user = "22222222-2222-2222-2222-222222222222"
+	const ungated = "audit,policy,control,policy_ack"
+	ctx := context.Background()
+	for _, tc := range []struct {
+		role authz.Role
+		want string
+	}{
+		{authz.RoleAdmin, ""}, // nothing denied: "" is every type
+		{authz.RoleGRCEngineer, ""},
+		{authz.RoleViewer, "audit,policy,vendor,control,risk,policy_ack"},
+		{authz.RoleAuditor, "audit,exception,policy,control,policy_ack"},
+		{authz.RoleControlOwner, ungated},
+	} {
+		got, left, err := ReadableTypesFor(ctx, mustEngine(t, fixedRoles{tc.role}), tenant, user, "")
+		if err != nil || !left || got != tc.want {
+			t.Errorf("%s: ReadableTypesFor = %q, %v, %v; want %q", tc.role, got, left, err, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		engine  *authz.Engine
+		user    string
+		wantErr bool
+	}{
+		{"no engine", nil, user, false},
+		{"no subscriber", mustEngine(t, fixedRoles{authz.RoleAdmin}), "", false},
+		{"no live role", mustEngine(t, fixedRoles{}), user, false},
+		{"role lookup fails", mustEngine(t, failingRoles{}), user, true},
+	} {
+		got, left, err := ReadableTypesFor(ctx, tc.engine, tenant, tc.user, "")
+		if got != ungated || !left || (err != nil) != tc.wantErr {
+			t.Errorf("%s: ReadableTypesFor = %q, %v, %v; want %q, err=%v", tc.name, got, left, err, ungated, tc.wantErr)
+		}
+	}
+
+	// Asking only for gated types the role cannot read leaves nothing.
+	co := mustEngine(t, fixedRoles{authz.RoleControlOwner})
+	if got, left, _ := ReadableTypesFor(ctx, co, tenant, user, "risk,vendor"); left || got != "" {
+		t.Errorf("control_owner asking risk,vendor = %q, %v; want none", got, left)
 	}
 }
 

@@ -190,6 +190,12 @@ function CalendarPageInner() {
               {subscribeM.isPending ? "Generating…" : "Subscribe in calendar"}
             </Button>
           </div>
+          <p className="text-xs text-muted-foreground max-w-xs text-right">
+            Your feed shows what your role can see each time it refreshes. An
+            older feed URL leaves out risk, action-plan, vendor, exception and
+            offboarding events: if yours is missing them, re-subscribe to
+            include them.
+          </p>
           {subscribeMsg && (
             <p
               role="status"
