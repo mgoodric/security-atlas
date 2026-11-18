@@ -31,6 +31,9 @@ export type Sentence = {
   href: string | null;
   // Trailing qualifier, e.g. the evidence intake outcome.
   suffix: string;
+  // The target is a person: the page renders targetId with <Person>,
+  // not as a short id (#2466).
+  person?: boolean;
 };
 
 type Template = (row: SentenceRow) => Sentence;
@@ -202,9 +205,12 @@ export const KIND_TEMPLATES: Record<AuditLogKind, Template | typeof GENERIC> = {
         : "set the posture target for",
       "framework version",
     ),
-  // #2172: the one action is `set`; the target is the member.
-  module_access: (row) =>
-    sentence(row, "changed the module access of", "member"),
+  // #2172: the one action is `set`; the target is the member, named
+  // by <Person> (#2466).
+  module_access: (row) => ({
+    ...sentence(row, "changed the module access of", ""),
+    person: true,
+  }),
   // #2450: the one action is `owner_changed`; the target is the vendor.
   vendor: (row) =>
     sentence(

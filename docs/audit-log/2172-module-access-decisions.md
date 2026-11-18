@@ -103,8 +103,8 @@ A switched-on module outside access reads `no_access`, and its features read
   the web app's own. A super-admin's cross-tenant rows in another tenant show
   the value read-only, since the PUT acts inside the caller's tenant.
 - Activity reads a `module_access` row as "<Person> changed the module access
-  of member <id>". Module switch changes were already there as
-  `feature_flag` rows ("enabled / disabled feature flag <key>").
+  of <Person>" (D11; "member <id>" before #2466). Module switch changes
+  were already there as `feature_flag` rows ("enabled / disabled feature flag <key>").
 
 ### D8 — the Playwright tenant and the cross-tenant list
 
@@ -113,3 +113,30 @@ one, paged by tenant id. The spec reads the real BFF with `limit=200` and
 narrows it to its own tenant (a `page.route` that fetches the real response),
 so other specs' users cannot push the member off the first page. The save
 goes through the real BFF and API unmocked.
+
+### D9 — unbound API keys are not narrowable (#2466)
+
+Module access is per tenant membership, keyed by the `user_roles` key.
+A key issued to a user carries that user's uuid, so it reads that member's
+access. An unbound key (`UserID` is its own `key_...` id) is not a member:
+the `PUT` targets `users` rows only, so no access row can be stored for
+it, and the gate reads it as "all". Its role is its only limit. Narrowing
+a machine credential to modules would be a property of the key, not of a
+membership, and nothing in #2166 asks for it.
+
+### D10 — a module-access 403 writes a decision_audit_log row (#2466)
+
+The access gate answers before `authzmw`, which audits every decision it
+makes, so a refused request left no trace. It now writes one row in the
+module gate's shape (#2339): `result` deny, `resource_type` `module`,
+`resource_id` the module key, `reason` `module_no_access`, `policy_hits`
+`["module_access:<key>"]`. It shares the module gate's dedupe (one row per
+tenant, actor and module per five-minute window), so a polling client
+writes one row, not one per request. The 403 is written first; a failed
+audit write is logged and the response stands, as with the module gate.
+
+### D11 — Activity names the member (#2466)
+
+A `module_access` row reads "<Person> changed the module access of
+<Person>": the target is a `users` id, so the page resolves it through the
+people directory like the actor, instead of "member <short id>".
