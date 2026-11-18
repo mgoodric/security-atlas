@@ -2942,7 +2942,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/exceptions */
+        /** GET /v1/exceptions — the tenant's exceptions, filterable by ?status= and ?control_id= (#2140) */
         get: operations["get-v1-exceptions"];
         put?: never;
         /** POST /v1/exceptions */
