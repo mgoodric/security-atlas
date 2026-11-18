@@ -185,6 +185,9 @@ jobs:
               - 'scripts/**'
               # #2148 — the exported lifecycles the help diagram check reads.
               - 'docs/lifecycles/**'
+              # #2394 — the spec web/lib/api/generated/openapi.d.ts is
+              # generated from.
+              - 'docs/openapi.yaml'
 
       # #2099 — tier classification. A separate step because
       # `predicate-quantifier` is per step, and the `code` filter above must
@@ -259,6 +262,9 @@ jobs:
               # #2148: exported by cmd/atlas-lifecycles (Go) and checked
               # against the help diagrams by web/lib/help/diagrams.test.ts.
               - 'docs/lifecycles/**'
+              # #2394: written by cmd/atlas-openapi (Go); the web client's
+              # types are generated from it and checked in Frontend build.
+              - 'docs/openapi.yaml'
               - 'migrations/**'
               - 'sql/**'
               - 'atlas.hcl'
@@ -1197,6 +1203,14 @@ jobs:
           cache: "npm"
       - name: Install workspaces
         run: npm ci --no-audit --no-fund
+      # #2394 — the committed client types must be what openapi-typescript
+      # writes from docs/openapi.yaml, so a platform shape change reaches
+      # the typecheck below.
+      # The generator is its own package (web/tools/openapi-types/README.md).
+      - name: Install the OpenAPI types generator
+        run: npm ci --prefix web/tools/openapi-types --no-audit --no-fund
+      - name: Generated API types match docs/openapi.yaml
+        run: npm run openapi:check --workspace @security-atlas/web
       # `next build` typechecks tsconfig.json only, which excludes
       # **/*.test.ts (slice 450). `typecheck` also runs tsconfig.test.json,
       # so a type error in a vitest file reddens this job, and merge-gate

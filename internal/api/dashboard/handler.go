@@ -31,6 +31,7 @@ const trendWindow = 90 * 24 * time.Hour
 type reader interface {
 	FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error)
 	PostureTargets(ctx context.Context) ([]dbx.FrameworkPostureTarget, error)
+	PriorFrameworkVersions(ctx context.Context) (map[uuid.UUID]uuid.UUID, error)
 	ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error)
 }
 
@@ -81,6 +82,12 @@ type postureWire struct {
 	// or null when none is set. Tiles colour coverage against it and stay
 	// neutral without one.
 	Target *posturetargets.Target `json:"target"`
+	// PriorTarget (#2406) is the target on the version the
+	// version-migration queue leads into this one from, when this version
+	// has none and that one does; otherwise null. The Set target dialog
+	// prefills from it. Activation carries it forward, so this covers
+	// versions activated before the carry-over existed.
+	PriorTarget *posturetargets.Target `json:"prior_target"`
 }
 
 // postureWireFromRow projects one posture row onto the wire, leaving the
@@ -146,12 +153,23 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 		pt := posturetargets.FromRow(t)
 		byVersion[pt.FrameworkVersionID] = pt
 	}
+	prior, err := h.store.PriorFrameworkVersions(ctx)
+	if err != nil {
+		httperr.WriteInternal(w, r, "dashboard", err)
+		return
+	}
 
 	out := make([]postureWire, len(rows))
 	for i, p := range rows {
 		out[i] = postureWireFromRow(p)
 		if t, ok := byVersion[out[i].FrameworkVersionID]; ok {
 			out[i].Target = &t
+			continue
+		}
+		if from, ok := prior[uuid.UUID(p.FrameworkVersionID.Bytes)]; ok {
+			if t, ok := byVersion[from.String()]; ok {
+				out[i].PriorTarget = &t
+			}
 		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{

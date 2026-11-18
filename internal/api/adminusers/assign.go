@@ -380,6 +380,10 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 
 var errOriginNotFound = errors.New("origin user not found")
 
+// errTargetNotMember is returned when a within-tenant role change or revoke
+// names a user who is not a member of the tenant (#2503). It maps to 404.
+var errTargetNotMember = errors.New("target user not in tenant")
+
 type assignParams struct {
 	originUserID  uuid.UUID
 	destTenant    uuid.UUID
@@ -595,6 +599,23 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	if !useAuthPool {
 		if aerr := tenancy.ApplyTenant(r.Context(), tx); aerr != nil {
 			httperr.WriteInternal(w, r, "apply tenant", aerr)
+			return
+		}
+	}
+
+	// #2503: within the caller's tenant the target must be a member. An id
+	// from another tenant matches no row under RLS and is a 404, not a 204.
+	if !crossTenant {
+		var member bool
+		if merr := tx.QueryRow(r.Context(),
+			`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND tenant_id = $2)`,
+			targetUserID, destTenant,
+		).Scan(&member); merr != nil {
+			httperr.WriteInternal(w, r, "lookup target", merr)
+			return
+		}
+		if !member {
+			httpresp.WriteError(w, http.StatusNotFound, "user not found")
 			return
 		}
 	}

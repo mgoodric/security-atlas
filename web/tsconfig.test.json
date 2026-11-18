@@ -5,5 +5,5 @@
     "noEmit": true
   },
   "include": ["vitest.config.ts", "**/*.test.ts", "help/markdown.d.ts"],
-  "exclude": ["node_modules", "e2e", ".next"]
+  "exclude": ["node_modules", "tools", "e2e", ".next"]
 }

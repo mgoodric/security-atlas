@@ -573,7 +573,7 @@ mappings:
     scf_anchor: DCH-27
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Data Retention defines when confidential info should be disposed."
+    rationale: "Media & Data Retention defines when confidential info should be disposed."
 
   # =====================================================================
   # PI1 — Processing Integrity — anchors to SEA-* + governance
@@ -602,7 +602,12 @@ mappings:
     scf_anchor: DCH-27
     relationship_type: intersects_with
     strength: 0.4
-    rationale: "Storage integrity overlaps data retention; partial fit. LOW CONFIDENCE — review."
+    rationale: "Storing and retaining system records overlaps Media & Data Retention (DCH-27); the retention half of storage integrity. LOW CONFIDENCE — partial fit."
+  - tsc_code: PI1.5
+    scf_anchor: MON-27
+    relationship_type: intersects_with
+    strength: 0.4
+    rationale: "File Integrity Monitoring (FIM) (MON-27) detects unauthorized modification of stored data, the detection half of storage integrity; it does not protect or retain. Secondary edge added by #2387 (Matt's call). LOW CONFIDENCE — partial fit."
 
   # =====================================================================
   # P1-P8 — Privacy — anchors to PRI-* (+ IRO-22 for breaches)

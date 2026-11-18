@@ -307,8 +307,8 @@ func DefaultSeed() []KindVersion {
 		//     Anchor MON-02 (continuous monitoring — same anchor as
 		//     github.audit_event.v1).
 		//   - retention_settings: data-retention evidence (message/file
-		//     retention durations + policy flags). Anchors DCH-04 (data
-		//     & asset classification) + DCH-27 (retention).
+		//     retention durations + policy flags). Anchor DCH-27 (media &
+		//     data retention; was DCH-04 + DCH-27 until #2387).
 		{Kind: "slack.workspace_member.v1", Version: "1.0.0"},
 		{Kind: "slack.admin_audit_event.v1", Version: "1.0.0"},
 		{Kind: "slack.retention_settings.v1", Version: "1.0.0"},

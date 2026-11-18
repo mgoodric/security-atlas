@@ -181,6 +181,7 @@ function PostureTile({
           frameworkVersionId={row.framework_version_id}
           frameworkLabel={label}
           current={target}
+          prior={row.prior_target ?? null}
         />
       ) : null}
     </div>

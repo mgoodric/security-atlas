@@ -88,7 +88,7 @@ func okRunFlags() runFlags {
 		slackToken:         "xoxb-test-token",
 		memberControlID:    "scf:IAC-01",
 		auditControlID:     "scf:MON-02",
-		retentionControlID: "scf:DCH-04",
+		retentionControlID: "scf:DCH-27",
 	}
 }
 
@@ -264,5 +264,18 @@ func TestMapResult(t *testing.T) {
 		if got := mapResult(in); got != want {
 			t.Errorf("mapResult(%q) = %v; want %v", in, got, want)
 		}
+	}
+}
+
+// TestRunCmd_RetentionDefaultIsRetentionControl pins the retention record's
+// default control id to SCF 2026.3 DCH-27 Media & Data Retention (#2387).
+func TestRunCmd_RetentionDefaultIsRetentionControl(t *testing.T) {
+	t.Parallel()
+	fl := newRunCmd().Flags().Lookup("retention-control-id")
+	if fl == nil {
+		t.Fatal("--retention-control-id flag not registered")
+	}
+	if fl.DefValue != "scf:DCH-27" {
+		t.Errorf("--retention-control-id default = %q, want %q", fl.DefValue, "scf:DCH-27")
 	}
 }

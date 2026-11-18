@@ -56,6 +56,21 @@ describe("describeEvent", () => {
     );
   });
 
+  it("tells a carried posture target from one set by hand (#2406)", () => {
+    expect(
+      describeEvent(row("posture_target", "set", "framework_version")),
+    ).toMatchObject({
+      phrase: "set the posture target for",
+      noun: "framework version",
+    });
+    expect(
+      describeEvent(row("posture_target", "carry_over", "framework_version")),
+    ).toMatchObject({
+      phrase: "carried the previous version's posture target forward to",
+      noun: "framework version",
+    });
+  });
+
   it("keeps a dotted action's prefix as a qualifier", () => {
     const s = describeEvent(row("framework_scope", "predicate.update"));
     expect(s.phrase).toBe("updated");
