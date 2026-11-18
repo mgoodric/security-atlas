@@ -127,9 +127,9 @@ export function credentialOptions(
  * process or client ID as the hint so two of them stay apart. Anything
  * that is not a machine actor is dropped, and duplicates collapse.
  */
-export function machineActorOptions(actors: readonly string[]): EntityOption[] {
+export function machineActorOptions(refs: readonly string[]): EntityOption[] {
   const out = new Map<string, EntityOption>();
-  for (const raw of actors) {
+  for (const raw of refs) {
     const a = raw.trim();
     if (!isMachineActor(a) || out.has(a)) continue;
     const colon = a.indexOf(":");
