@@ -8,6 +8,7 @@ import type { Exception } from "@/lib/api/exceptions";
 
 import {
   activeExceptions,
+  exceptionsForControl,
   isExcepted,
   openActionPlans,
   worstFreshness,
@@ -59,6 +60,20 @@ describe("isExcepted", () => {
     );
     expect(isExcepted([cell("pass", "fresh")])).toBe(false);
     expect(isExcepted(undefined)).toBe(false);
+  });
+});
+
+describe("exceptionsForControl", () => {
+  it("keeps only this control's exceptions, case-insensitively", () => {
+    const ex = (id: string, control_id: string) =>
+      ({ id, control_id }) as Exception;
+    expect(
+      exceptionsForControl(
+        [ex("a", "AAAA-1"), ex("b", "bbbb-2"), ex("c", "aaaa-1")],
+        "aaaa-1",
+      ).map((e) => e.id),
+    ).toEqual(["a", "c"]);
+    expect(exceptionsForControl(undefined, "aaaa-1")).toEqual([]);
   });
 });
 

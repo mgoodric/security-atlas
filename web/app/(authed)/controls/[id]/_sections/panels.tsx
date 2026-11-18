@@ -219,7 +219,7 @@ export function OverviewPanel({
                 <CardTitle>Exceptions</CardTitle>
               </CardHeader>
               <CardContent>
-                <ExceptionsBody exceptionsQ={exceptionsQ} />
+                <ExceptionsBody controlId={id} exceptionsQ={exceptionsQ} />
               </CardContent>
             </Card>
           ) : null}

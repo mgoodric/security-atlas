@@ -31,6 +31,8 @@ const REQ_CC61 = "00000000-0000-4000-8000-0000000021d1";
 const REQ_A8 = "00000000-0000-4000-8000-0000000021d2";
 const EVIDENCE_ID = "00000000-0000-4000-8000-0000000021e1";
 const EXCEPTION_ID = "00000000-0000-4000-8000-0000000021f1";
+const OTHER_EXCEPTION_ID = "00000000-0000-4000-8000-0000000021f6";
+const OTHER_CONTROL_ID = "00000000-0000-4000-8000-0000000021f7";
 const RISK_ID = "00000000-0000-4000-8000-0000000021f2";
 const PLAN_ID = "00000000-0000-4000-8000-0000000021f3";
 const POLICY_ID = "00000000-0000-4000-8000-0000000021f4";
@@ -137,6 +139,9 @@ type Opts = {
   exceptionsRefused?: boolean;
   failEvidence?: boolean;
   failRisks?: boolean;
+  // The control passes and has no exception of its own; only another
+  // control's active exception comes back from the list.
+  passing?: boolean;
 };
 
 async function mockPage(page: Page, opts: Opts) {
@@ -180,10 +185,9 @@ async function mockPage(page: Page, opts: Opts) {
     route.fulfill(
       json({
         control_id: CONTROL_ID,
-        states: [
-          stateCell("excepted", "fresh"),
-          stateCell("excepted", "stale"),
-        ],
+        states: opts.passing
+          ? [stateCell("pass", "fresh")]
+          : [stateCell("excepted", "fresh"), stateCell("excepted", "stale")],
         count: 2,
       }),
     ),
@@ -343,8 +347,23 @@ async function mockPage(page: Page, opts: Opts) {
                 created_at: "2026-10-01T00:00:00Z",
                 updated_at: "2026-10-02T00:00:00Z",
               },
-            ],
-            count: 1,
+              // Another control's exception: the page must not list it even
+              // when a list comes back unfiltered.
+              {
+                id: OTHER_EXCEPTION_ID,
+                control_id: OTHER_CONTROL_ID,
+                scope_cell_predicate: { op: "true" },
+                justification: "Other control's waiver",
+                compensating_controls: [],
+                requested_by: OWNER,
+                requested_at: "2026-10-01T00:00:00Z",
+                expires_at: "2027-03-31T00:00:00Z",
+                status: "active",
+                created_at: "2026-10-01T00:00:00Z",
+                updated_at: "2026-10-02T00:00:00Z",
+              },
+            ].filter((e) => !(opts.passing && e.control_id === CONTROL_ID)),
+            count: opts.passing ? 1 : 2,
           }),
         ),
   );
@@ -418,8 +437,11 @@ test.describe("/controls/[id] layout (#2140)", () => {
     await expect(page.getByTestId("risk-row")).toContainText(
       "Stale administrator access",
     );
+    // Only this control's exception: the page asks for its own, and drops
+    // the other control's row the mock returns beside it.
     const exception = page.getByTestId("exception-row");
     await expect(exception).toHaveCount(1);
+    await expect(page.getByText("Other control's waiver")).toHaveCount(0);
     await expect(exception.getByTestId("exception-row-link")).toHaveText(
       "Legacy directory retires in Q1",
     );
@@ -541,6 +563,29 @@ test.describe("/controls/[id] layout (#2140)", () => {
       page.getByTestId("control-action-download-bundle"),
     ).toBeVisible();
     await expectNoRawValues(page);
+  });
+
+  test("another control's active exception raises no marker and is not listed", async ({
+    authedPage: page,
+  }) => {
+    await mockPage(page, { approver: true, passing: true });
+    const asked = page.waitForRequest((r) =>
+      /\/api\/exceptions\?/.test(r.url()),
+    );
+    await openPage(page);
+    // The page asks for this control's exceptions only.
+    expect(new URL((await asked).url()).searchParams.get("control_id")).toBe(
+      CONTROL_ID,
+    );
+
+    await expect(page.getByTestId("control-state-result-value")).toHaveText(
+      "Pass",
+    );
+    await expect(page.getByTestId("exceptions-empty")).toBeVisible();
+    await expect(page.getByTestId("exception-row")).toHaveCount(0);
+    await expect(page.getByText("Other control's waiver")).toHaveCount(0);
+    await expect(page.getByTestId("control-strip-exception")).toHaveCount(0);
+    await expect(page.getByTestId("coverage-excepted")).toHaveCount(0);
   });
 
   test("a failing section shows its own error and the rest renders", async ({

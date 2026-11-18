@@ -75,6 +75,8 @@ import { normaliseUserId } from "@/lib/person";
 import { statusPillClass } from "@/app/(authed)/exceptions/lifecycle";
 import { formatResidualScore } from "@/app/(authed)/risks/filters";
 
+import { exceptionsForControl } from "../strip";
+
 export function EvidenceStreamBody({
   id,
   evidenceQ,
@@ -463,10 +465,14 @@ const EXCEPTION_STATUS_LABEL: Record<string, string> = {
 // ExceptionsBody (#2140) lists the exceptions filed against the control,
 // read through GET /v1/exceptions?control_id=. Each row opens the
 // exception; the justification is shown as a one-line preview, as the
-// exceptions list shows it (slice 138 P0-A-Ledger-3).
+// exceptions list shows it (slice 138 P0-A-Ledger-3). Rows on any other
+// control are dropped as well, so a list the server did not narrow never
+// shows another control's exception.
 export function ExceptionsBody({
+  controlId,
   exceptionsQ,
 }: {
+  controlId: string;
   exceptionsQ: ReturnType<typeof useQuery<ExceptionsListResponse>>;
 }) {
   if (exceptionsQ.isLoading) return <Skeleton className="h-16 w-full" />;
@@ -477,7 +483,7 @@ export function ExceptionsBody({
       </p>
     );
   }
-  const rows = exceptionsQ.data?.exceptions ?? [];
+  const rows = exceptionsForControl(exceptionsQ.data?.exceptions, controlId);
   if (rows.length === 0) {
     return (
       <p

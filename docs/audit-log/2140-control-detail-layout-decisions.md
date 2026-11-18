@@ -7,10 +7,18 @@ per-section errors, `<Person>`, `enumLabel`, the raw-value scan). Builds
 on #2137 (evidence detail), #1800 (org mappings), #1788 (SoA exclusions)
 and #2174 (module-aware link sections).
 
-detection_tier_actual: none
-detection_tier_target: playwright
+detection_tier_actual: manual_review
+detection_tier_target: integration
 
-No bug surfaced during the work. Two raw values the new raw-value scan
+The bug: `GET /v1/exceptions?control_id=` filtered nothing. The BFF
+forwarded the parameter, but `ListExceptions` read only `?status=`, so
+every control page listed every tenant exception and showed the
+exception marker whenever any exception was active. The PR review caught
+it; the hermetic Playwright mock had returned only the page's own
+exception, so nothing below review could. D4 records the fix and the
+integration test that now fails without it.
+
+Two raw values the new raw-value scan
 targets were fixed while building it rather than caught by it: the
 evidence row printed the result key (`pass`) and an attesting user's id
 (`user/<uuid>`), and the header printed the rolled-up result key.
@@ -55,6 +63,16 @@ and control_owner are refused. The page does not guess from roles: it
 asks, and a 403 removes the part with no error. Any other failure shows
 the part's own error. The part is also left out, and never fetched, when
 the Exceptions module is off for the caller (`useSeesPage`, #2174).
+
+The handler did not filter on `control_id` before this PR (see the bug
+above). `exception.ListFilter` now carries `ControlID`, applied in
+memory beside the status filter, as that store already does for status;
+the handler parses it and answers 400 `control_id must be a UUID` on a
+malformed one. RLS still bounds the list to the caller's tenant, so
+another tenant's control id reads as no exceptions. The page also keeps
+only rows whose `control_id` is this control (`exceptionsForControl`),
+for both the Exceptions part and the strip's marker, so a list the server
+did not narrow can never show or count another control's exception.
 
 ## D5. SoA exclusions come from the control coverage read
 

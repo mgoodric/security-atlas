@@ -88,6 +88,7 @@ import { useSeesPage } from "@/components/modules-context";
 import { CONTROL_TABS, isTabKey, type TabKey } from "./tabs";
 import {
   activeExceptions,
+  exceptionsForControl,
   isExcepted,
   openActionPlans,
   worstFreshness,
@@ -339,7 +340,7 @@ function ControlDetailPageInner() {
   const excepted = isExcepted(states);
   const active = exceptionsRefused
     ? []
-    : activeExceptions(exceptionsQ.data?.exceptions);
+    : activeExceptions(exceptionsForControl(exceptionsQ.data?.exceptions, id));
   const openPlans = seesActionPlans
     ? openActionPlans(actionPlansQ.data?.action_plans)
     : [];

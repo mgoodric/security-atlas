@@ -45,6 +45,19 @@ export function isExcepted(
   return (entries ?? []).some((e) => e.result === "excepted");
 }
 
+/**
+ * exceptionsForControl keeps only the exceptions filed against this
+ * control. The platform already filters `?control_id=`; this guard keeps
+ * a page from listing another control's exception if it ever does not.
+ */
+export function exceptionsForControl(
+  exceptions: readonly Exception[] | undefined,
+  controlId: string,
+): Exception[] {
+  const want = controlId.toLowerCase();
+  return (exceptions ?? []).filter((e) => e.control_id.toLowerCase() === want);
+}
+
 /** activeExceptions are the exceptions that cover the control now. */
 export function activeExceptions(
   exceptions: readonly Exception[] | undefined,
