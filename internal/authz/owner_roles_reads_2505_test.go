@@ -41,6 +41,7 @@ var ownerRolesReads2505 = map[string]string{
 	"internal/auth/apikeystore/apikeystore.go Store.Rotate":      "a rotated key's successor inherits its label",
 	"internal/auth/apikeystore/apikeystore.go Store.insert":      "persists a new key's label",
 	"internal/auth/apikeystore/apikeystore.go credentialFromRow": "loads a key's stored label onto its credential",
+	"internal/auth/apikeystore/audit.go keyAuditOf":              "records a key's stored label in its audit row (#2609)",
 	"internal/auth/apikeystore/persister.go Persister.insertRow": "persists an issued key's label",
 
 	"internal/demoseed/writers.go writeRoleUsers": "seeds a demo user's api_keys label; fixture data",
