@@ -120,7 +120,7 @@
       "people_only": true,
       "second_person": true,
       "self_approval_opt_in": false,
-      "note": "A person verifies only a plan with no linked controls, and never the plan's owner, whatever the self-approval setting. A plan with linked controls the system verifies after a control evaluation, once every linked control passes its latest evaluation (#2109)."
+      "note": "A person verifies only a plan with no linked controls, and never its owner, whoever moved it to completed, or anyone who owned it since (#2434), whatever the self-approval setting. A plan with linked controls the system verifies after a control evaluation, once every linked control passes its latest evaluation (#2109)."
     },
     {
       "from": "completed",

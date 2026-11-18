@@ -499,6 +499,7 @@ function ScopeTable({
                 </pre>
               ) : (
                 <PredicateEditor
+                  scopeName={s.name}
                   initial={s.predicate}
                   onSave={(predicate) => onPatchPredicate(s.id, predicate)}
                 />
@@ -538,9 +539,11 @@ function StateBadge({ state }: { state: FrameworkScopeState }) {
 }
 
 function PredicateEditor({
+  scopeName,
   initial,
   onSave,
 }: {
+  scopeName: string;
   initial: unknown;
   onSave: (predicate: unknown) => void;
 }) {
@@ -549,6 +552,9 @@ function PredicateEditor({
   return (
     <div className="space-y-2">
       <textarea
+        // #2433: axe (label) — the editor sits in a table cell with no
+        // visible label of its own.
+        aria-label={`Predicate for ${scopeName} (JSON)`}
         className="w-full rounded border bg-background p-2 font-mono text-xs"
         rows={4}
         value={text}

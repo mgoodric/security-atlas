@@ -53,6 +53,25 @@ const OBSERVATIONS = {
   count: 2,
 };
 
+// The viewer's /api/me, served from a fixture. Fetching the real profile
+// and rewriting it raced test teardown (#2589).
+const VIEWER_ME = {
+  user_id: "00000000-0000-4000-8000-000000002341",
+  tenant_id: "e5e5e5e5-0000-4000-8000-000000002341",
+  display_name: "Vera Viewer",
+  email: "viewer@example.test",
+  idp_subject: "",
+  tenant_role: "viewer",
+  time_zone: null,
+  theme: null,
+  is_admin: false,
+  is_tenant_admin: false,
+  is_approver: false,
+  has_tenant_role: true,
+  owner_roles: ["viewer"],
+  roles: ["viewer"],
+};
+
 function json(body: unknown, status = 200) {
   return {
     status,
@@ -97,6 +116,12 @@ async function mockMetric(page: Page): Promise<unknown[]> {
 }
 
 test.describe("metric targets (#2341)", () => {
+  // A route handler still in flight when the test ends fails the whole
+  // run outside any test, where retries cannot reach it (#2589).
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
   test("an admin sets a target below the value and the badge is not red", async ({
     authedPage: page,
   }) => {
@@ -161,21 +186,9 @@ test.describe("metric targets (#2341)", () => {
     authedPage: page,
   }) => {
     await mockMetric(page);
-    // The real profile with the role fields swapped, so the shell renders
-    // as usual and only the target guard sees a viewer.
-    await page.route("**/api/me", async (route) => {
-      if (route.request().method() !== "GET") return route.continue();
-      const res = await route.fetch();
-      const me = (await res.json()) as Record<string, unknown>;
-      return route.fulfill(
-        json({
-          ...me,
-          is_admin: false,
-          is_tenant_admin: false,
-          is_approver: false,
-          owner_roles: ["viewer"],
-        }),
-      );
+    await page.route("**/api/me", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      return route.fulfill(json(VIEWER_ME));
     });
     await page.route("**/api/admin/me", (route) =>
       route.fulfill(json({ is_admin: false })),

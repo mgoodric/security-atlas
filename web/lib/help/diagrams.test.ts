@@ -28,6 +28,7 @@ import {
   parseStateDiagram,
   type LifecycleExport,
 } from "./lifecycle-diagram";
+import { UNSAFE_SVG_FIXTURES } from "./unsafe-svg-fixtures";
 import { HELP_MODULES } from "./modules";
 
 const WEB_ROOT = resolve(__dirname, "../..");
@@ -117,6 +118,14 @@ describe("parseStateDiagram", () => {
     ["a label that is not an action", "stateDiagram-v2\n  a --> b: Go now"],
     ["[*] to [*]", "stateDiagram-v2\n  [*] --> [*]"],
     ["a click directive", 'stateDiagram-v2\n  click a "javascript:alert(1)"'],
+    [
+      "an init directive",
+      "%%{init: {'securityLevel': 'loose'}}%%\nstateDiagram-v2\n  a --> b: go",
+    ],
+    [
+      "a spaced init directive",
+      "stateDiagram-v2\n  %% {init: {}}%%\n  a --> b: go",
+    ],
   ])("rejects %s", (_, src) => {
     expect(() => parseStateDiagram(src)).toThrow();
   });
@@ -281,6 +290,37 @@ describe("assertSafeSvg", () => {
     ["HTML labels", "<svg><foreignObject/></svg>", "<foreignObject>"],
   ])("refuses %s", (_, svg, why) => {
     expect(() => assertSafeSvg(svg)).toThrow(why);
+  });
+
+  // #2429 — the same fixtures the browser strip is tested on.
+  it.each(UNSAFE_SVG_FIXTURES.map((f) => [f.name, f] as const))(
+    "refuses %s",
+    (_, f) => {
+      expect(unsafeSvgParts(f.svg).join(", ")).toContain(f.why);
+    },
+  );
+
+  it("passes fragment links, fragment url()s and plain style sheets", () => {
+    const svg =
+      '<?xml version="1.0"?>\n<!-- stamp -->\n' +
+      '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">' +
+      "<style><![CDATA[@keyframes dash{to{stroke-dashoffset:0;}}" +
+      "#l .a{fill:url(#g);font-family:'Segoe UI'}]]></style>" +
+      '<defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs>' +
+      '<path d="M0 0" marker-end="url(#m)" style="fill: url(\'#g\')"/>' +
+      '<use xlink:href="#g"/><a href=" #g"><text>a &amp; b &#x3c; c</text></a></svg>';
+    expect(unsafeSvgParts(svg)).toEqual([]);
+  });
+
+  it.each([
+    ["an unclosed element", "<svg><g></svg>"],
+    ["two roots", "<svg/><svg/>"],
+    ["a bare ampersand", "<svg><text>a & b</text></svg>"],
+    ["an unknown entity", "<svg><text>&nbsp;</text></svg>"],
+    ["a duplicate attribute", '<svg><g id="a" id="b"/></svg>'],
+    ["an unquoted attribute", "<svg><g id=a/></svg>"],
+  ])("refuses %s as not well-formed", (_, svg) => {
+    expect(unsafeSvgParts(svg).join(", ")).toContain("not well-formed XML");
   });
 
   it("stamps and reads back a rendered file", () => {

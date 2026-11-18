@@ -63,6 +63,21 @@ describe("framework-scope errors", () => {
     ).rejects.toThrow("scope is frozen");
   });
 
+  it("a 5xx shows the status line, never its {error} body (#2433)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: "pq: relation framework_scopes_x missing" }),
+        { status: 500, statusText: "Internal Server Error" },
+      ),
+    );
+    const err = await transitionFrameworkScope("b", ID, "approve").catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(APIError);
+    expect((err as APIError).status).toBe(500);
+    expect((err as APIError).message).toBe("500 Internal Server Error");
+  });
+
   it("falls back to the status line for a body that is not JSON", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response("<html>", { status: 403, statusText: "Forbidden" }),

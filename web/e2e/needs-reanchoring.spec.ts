@@ -133,9 +133,13 @@ test.describe("SCF re-anchoring warning", () => {
     await mockList(page, 500, { error: "upstream error" });
     await page.goto("/dashboard");
     await expect(page.getByTestId("reanchoring-banner-error")).toBeVisible();
+    // #2433: a 5xx shows the status line, never the body's text.
     await expect(page.getByTestId("reanchoring-banner-error")).toContainText(
-      "upstream error",
+      "500 Internal Server Error",
     );
+    await expect(
+      page.getByTestId("reanchoring-banner-error"),
+    ).not.toContainText("upstream error");
     await expect(page.getByTestId("reanchoring-banner")).toHaveCount(0);
 
     await page.goto("/controls/needs-reanchoring");

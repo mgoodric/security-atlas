@@ -546,6 +546,9 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op strin
 	case errors.Is(err, actionplan.ErrOwnerCannotVerify),
 		errors.Is(err, actionplan.ErrVerifierNotPerson):
 		httpresp.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, actionplan.ErrVerifierInvolved):
+		// The sentinel only: a wrapped audit-read failure stays server-side.
+		httpresp.WriteError(w, http.StatusForbidden, actionplan.ErrVerifierInvolved.Error())
 	case errors.Is(err, actionplan.ErrLimitExceeded):
 		httpresp.WriteError(w, http.StatusUnprocessableEntity, "limit_exceeded")
 	case errors.Is(err, actionplan.ErrTitleRequired),
