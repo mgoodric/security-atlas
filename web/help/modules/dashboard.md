@@ -20,7 +20,9 @@ controls, risks, policies, vendors and approvals you already keep.
   organisation, plus controls and open risks that have no owner yet.
   **See all** opens the full list, which you can filter by type.
 - **Posture** shows each framework's coverage and your five highest open
-  risks by residual risk, with their owners and treatments.
+  risks by residual risk, with their owners and treatments. When you
+  activate a scope on a new framework version, the previous version's
+  posture target comes with it unless the new version already has one.
 - **Coming up** shows the next 14 days of the compliance calendar.
 - **Recent activity** shows the last ten things that happened, as
   sentences.

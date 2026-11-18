@@ -157,6 +157,11 @@ type Querier interface {
 	// The COALESCE start chain mirrors the lifecycle: effective_from is set at
 	// activation, approved_at at approval, requested_at always.
 	BoardBriefExceptionAggregate(ctx context.Context, arg BoardBriefExceptionAggregateParams) (BoardBriefExceptionAggregateRow, error)
+	// #2406: copy the tenant's target on the source version to the destination
+	// version, only when the destination has none. No row back means nothing
+	// was copied: the source has no target, or the destination already has
+	// one (left alone, so a re-run writes nothing).
+	CarryFrameworkPostureTarget(ctx context.Context, arg CarryFrameworkPostureTargetParams) (FrameworkPostureTarget, error)
 	// #1803: copy every tenant's active overlay edges from an approved exact_code
 	// migration's N requirement to its N+1 requirement, each in its own tenant,
 	// one audit row per copy. Returns the number copied. See the function's
@@ -1356,6 +1361,9 @@ type Querier interface {
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFrameworkPostureTargetAudit(ctx context.Context, arg InsertFrameworkPostureTargetAuditParams) error
+	// #2406: the audit row of a carried target. before is NULL: the version
+	// had no target.
+	InsertFrameworkPostureTargetCarryAudit(ctx context.Context, arg InsertFrameworkPostureTargetCarryAuditParams) error
 	// ===== framework_scope_workflow_log (issue #1786) =====
 	//
 	// Append-only history of framework_scopes changes. Written by
@@ -2520,6 +2528,9 @@ type Querier interface {
 	// "active control" rule are the ones ListFrameworkScopeContradictions uses,
 	// so an exported contradiction always lists the control behind it.
 	ListFrameworkVersionLinkedControls(ctx context.Context, arg ListFrameworkVersionLinkedControlsParams) ([]ListFrameworkVersionLinkedControlsRow, error)
+	// #2406: the distinct (to, from) version pairs of the version-migration
+	// queue (ADR 0019), for the prior-target prefill. Catalog rows: no tenant.
+	ListFrameworkVersionMigrationSources(ctx context.Context) ([]ListFrameworkVersionMigrationSourcesRow, error)
 	// The review queue for one version pair, oldest first. Admin-scoped read.
 	ListFrameworkVersionMigrations(ctx context.Context, arg ListFrameworkVersionMigrationsParams) ([]FrameworkVersionMigration, error)
 	// Every version-migration queue row (ADR 0019) whose target is one framework

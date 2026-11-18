@@ -7,7 +7,7 @@
       "frameworks": []
     },
     "populated": {
-      "count": 2,
+      "count": 3,
       "frameworks": [
         {
           "coverage_pct": 87.5,
@@ -17,6 +17,7 @@
           "framework_version": "2017",
           "framework_version_id": "44444444-4444-4444-8444-444444444444",
           "freshness_composite": 0.92,
+          "prior_target": null,
           "scope_set": true,
           "target": {
             "critical_threshold": 60,
@@ -37,9 +38,31 @@
           "framework_version": "4.0",
           "framework_version_id": "55555555-5555-4555-8555-555555555555",
           "freshness_composite": null,
+          "prior_target": null,
           "scope_set": false,
           "target": null,
           "trend_delta_90d": null
+        },
+        {
+          "coverage_pct": 50,
+          "covered_by_exception_pct": 0,
+          "framework_id": "11111111-1111-4111-8111-111111111111",
+          "framework_name": "SOC 2",
+          "framework_version": "2024",
+          "framework_version_id": "66666666-6666-4666-8666-666666666666",
+          "freshness_composite": 0.5,
+          "prior_target": {
+            "critical_threshold": 60,
+            "direction": "higher_is_better",
+            "framework_version_id": "44444444-4444-4444-8444-444444444444",
+            "target_value": 90,
+            "updated_at": "2026-11-15T12:00:00Z",
+            "updated_by": "contract-recorder",
+            "warning_threshold": 80
+          },
+          "scope_set": true,
+          "target": null,
+          "trend_delta_90d": 0
         }
       ]
     }
