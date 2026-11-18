@@ -18,7 +18,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { DetailHeader } from "@/components/detail/detail-header";
 import { Markdown } from "@/components/markdown";
@@ -52,6 +52,8 @@ export default function ActionPlanDetailPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [confirming, setConfirming] = useState<PlanTransition | null>(null);
+  const primaryRef = useRef<HTMLButtonElement>(null);
+  const overflowRef = useRef<HTMLButtonElement>(null);
 
   const planQ = useQuery<ActionPlanDetailResponse>({
     queryKey: ["action-plans", "detail", id],
@@ -128,6 +130,7 @@ export default function ActionPlanDetailPage() {
       }
       title={plan.title}
       edit={{ href: `${base}/edit`, "data-testid": "action-plan-detail-edit" }}
+      primaryActionRef={primaryRef}
       primaryAction={
         primary
           ? {
@@ -138,6 +141,7 @@ export default function ActionPlanDetailPage() {
             }
           : undefined
       }
+      overflowRef={overflowRef}
       overflow={transitions
         .filter((t) => !t.primary)
         .map((t) => ({
@@ -174,6 +178,9 @@ export default function ActionPlanDetailPage() {
           ariaLabel={`Confirm: ${confirming.label.toLowerCase()}`}
           busy={transition.isPending}
           onCancel={() => setConfirming(null)}
+          returnFocus={() =>
+            confirming.primary ? primaryRef.current : overflowRef.current
+          }
           onConfirm={() => transition.mutate(confirming)}
           data-testid="action-plan-transition-confirm"
         />

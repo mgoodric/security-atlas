@@ -38,7 +38,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 
 import { AnnotationDraftProvider } from "@/components/audit/annotation-draft-store";
 import { ControlWorkspace } from "@/components/audit/control-workspace";
@@ -126,6 +126,7 @@ export default function AuditPeriodDetailPage({
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [confirming, setConfirming] = useState(false);
+  const freezeRef = useRef<HTMLButtonElement>(null);
 
   const periodQ = useQuery<AuditPeriodResponse>({
     queryKey: ["audits", id],
@@ -240,6 +241,7 @@ export default function AuditPeriodDetailPage({
         </p>
       }
       back={<BackLink />}
+      primaryActionRef={freezeRef}
       primaryAction={
         frozen
           ? undefined
@@ -258,6 +260,7 @@ export default function AuditPeriodDetailPage({
           ariaLabel="Confirm: freeze audit period"
           busy={freeze.isPending}
           onCancel={() => setConfirming(false)}
+          returnFocus={() => freezeRef.current}
           onConfirm={() => freeze.mutate()}
           data-testid="audit-period-freeze-confirm"
         >

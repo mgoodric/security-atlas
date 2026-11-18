@@ -25,7 +25,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { CloudRoutingBanner } from "@/components/llm/cloud-routing-banner";
 import type { Question } from "@/components/questionnaire/types";
@@ -70,6 +70,7 @@ export function ReviewQueue({
   // #2280: Reject fires at once, so it asks first. Holds the answer id, so
   // stepping to another draft never carries an open confirm with it.
   const [confirmingReject, setConfirmingReject] = useState<string | null>(null);
+  const rejectRef = useRef<HTMLButtonElement>(null);
 
   const drafts = useMemo(() => pendingDrafts(questions), [questions]);
   const clamped = drafts.length === 0 ? 0 : Math.min(index, drafts.length - 1);
@@ -359,6 +360,7 @@ export function ReviewQueue({
                   ariaLabel={`Confirm: reject draft for ${current.questionCode}`}
                   busy={busy}
                   onCancel={() => setConfirmingReject(null)}
+                  returnFocus={() => rejectRef.current}
                   onConfirm={() => {
                     void submitOne(
                       "reject",
@@ -371,6 +373,7 @@ export function ReviewQueue({
               ) : (
                 <button
                   type="button"
+                  ref={rejectRef}
                   data-testid="review-reject"
                   disabled={busy}
                   onClick={() => setConfirmingReject(current.answerId)}

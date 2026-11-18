@@ -38,7 +38,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
 import { DetailHeader } from "@/components/detail/detail-header";
 import { PageShell } from "@/components/shell/page-shell";
@@ -111,6 +111,7 @@ export default function PolicyDetailPage({
   const [confirming, setConfirming] = useState<"submit" | "approve" | null>(
     null,
   );
+  const primaryRef = useRef<HTMLButtonElement>(null);
 
   const transition = useMutation({
     mutationFn: (t: "submit" | "approve") => transitionPolicy(id, t),
@@ -237,6 +238,7 @@ export default function PolicyDetailPage({
           ? { href: `${base}/edit`, "data-testid": "policy-detail-edit" }
           : undefined
       }
+      primaryActionRef={primaryRef}
       primaryAction={
         primary
           ? {
@@ -426,6 +428,7 @@ export default function PolicyDetailPage({
           confirmLabel={confirming === "submit" ? "Submit" : "Approve"}
           busy={transition.isPending}
           onCancel={() => setConfirming(null)}
+          returnFocus={() => primaryRef.current}
           onConfirm={() => transition.mutate(confirming)}
           data-testid="policy-action-confirm"
         />
