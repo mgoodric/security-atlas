@@ -7,12 +7,13 @@
 // Timeline seeded through the real framework-scope workflow (create, decide,
 // submit, approve, activate) on the app pool (RLS enforced):
 //
-//	rev A  effective frozen_at-1h   excludes A.8.25
-//	--- audit period frozen_at ---
-//	rev B  effective frozen_at+1h   excludes A.8.25 and A.5.1
+//	rev A  activated, effective frozen_at-1h   excludes A.8.25
+//	--- audit period frozen_at (rev A's activated_at) ---
+//	rev B  activated, effective frozen_at+1h   excludes A.8.25 and A.5.1
 //
 // A.8.25 was excluded at the freeze and must reach the SSP; A.5.1 was
-// excluded only after it and must not.
+// excluded only after it and must not. Rev A is backdated but activated
+// before the freeze, so it is in force at the freeze (#2078).
 //
 // Run with: go test -tags=integration -p 1 ./internal/oscal/...
 
@@ -21,6 +22,7 @@ package oscal_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -45,6 +47,11 @@ type exclusionFixture struct {
 	tenant    string
 	periodID  uuid.UUID
 	namespace string // framework slug + "-" + version
+	frozenAt  time.Time
+	store     *frameworkscope.Store
+	ctx       context.Context
+	// approved takes a new revision with these exclusions to `approved`.
+	approved func(name string, excluded map[string]string) uuid.UUID
 }
 
 func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixture {
@@ -82,13 +89,14 @@ func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixt
 		req[code] = id
 	}
 
-	// The control keeps the SSP non-empty; the period is frozen 24h ago.
+	// The control keeps the SSP non-empty. The period is frozen below, once
+	// rev A exists.
 	_ = seedControl(t, admin, tenant, "IAC")
-	periodID, frozenAt := seedPeriod(t, admin, tenant, fvID, true)
+	periodID, _ := seedPeriod(t, admin, tenant, fvID, false)
 
 	store := frameworkscope.NewStore(app)
 	tctx := dbtest.WithTenantCtx(t, tenant)
-	revision := func(name string, effective time.Time, excluded map[string]string) {
+	approved := func(name string, excluded map[string]string) uuid.UUID {
 		t.Helper()
 		sc, err := store.Create(tctx, frameworkscope.CreateRequest{
 			FrameworkVersionID: fvID,
@@ -107,11 +115,13 @@ func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixt
 				t.Fatalf("exclude %s on %s: %v", code, name, err)
 			}
 		}
-		if _, _, _, err := store.SetDecision(tctx, frameworkscope.SetDecisionRequest{
-			ScopeID: sc.ID, RequirementID: req["A.8.28"],
-			Decision: frameworkscope.DecisionApplicable, Actor: "tester",
-		}); err != nil {
-			t.Fatalf("applicable A.8.28 on %s: %v", name, err)
+		if _, ok := excluded["A.8.28"]; !ok {
+			if _, _, _, err := store.SetDecision(tctx, frameworkscope.SetDecisionRequest{
+				ScopeID: sc.ID, RequirementID: req["A.8.28"],
+				Decision: frameworkscope.DecisionApplicable, Actor: "tester",
+			}); err != nil {
+				t.Fatalf("applicable A.8.28 on %s: %v", name, err)
+			}
 		}
 		if _, err := store.Submit(tctx, sc.ID, "tester", "tester"); err != nil {
 			t.Fatalf("submit %s: %v", name, err)
@@ -121,19 +131,44 @@ func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixt
 		}); err != nil {
 			t.Fatalf("approve %s: %v", name, err)
 		}
-		if _, err := store.Activate(tctx, sc.ID, "tester", effective); err != nil {
-			t.Fatalf("activate %s: %v", name, err)
+		return sc.ID
+	}
+	activate := func(id uuid.UUID, effective time.Time) {
+		t.Helper()
+		if _, err := store.Activate(tctx, id, "tester", effective); err != nil {
+			t.Fatalf("activate %s: %v", id, err)
 		}
 	}
-	revision("ISMS rev A", frozenAt.Add(-time.Hour), map[string]string{
+
+	// Rev A: effective a day back, activated now while the period is open.
+	revA := approved("ISMS rev A", map[string]string{
 		"A.8.25": excludedAtFreezeJustification,
 	})
-	revision("ISMS rev B", frozenAt.Add(time.Hour), map[string]string{
+	activate(revA, time.Now().UTC().Add(-25*time.Hour))
+
+	// Freeze the period at rev A's activation, so rev A existed at the freeze.
+	var frozenAt time.Time
+	if err := admin.QueryRow(ctx,
+		`SELECT activated_at FROM framework_scopes WHERE id = $1`, revA,
+	).Scan(&frozenAt); err != nil {
+		t.Fatalf("read rev A activated_at: %v", err)
+	}
+	if _, err := admin.Exec(ctx,
+		`UPDATE audit_periods SET status='frozen', frozen_at=$2, frozen_by='tester',
+		        frozen_hash=decode('00','hex') WHERE id=$1`,
+		periodID, frozenAt); err != nil {
+		t.Fatalf("freeze audit period: %v", err)
+	}
+
+	activate(approved("ISMS rev B", map[string]string{
 		"A.8.25": excludedAtFreezeJustification,
 		"A.5.1":  excludedAfterFreezeJustif,
-	})
+	}), frozenAt.Add(time.Hour))
 
-	return exclusionFixture{tenant: tenant, periodID: periodID, namespace: slug + "-" + version}
+	return exclusionFixture{
+		tenant: tenant, periodID: periodID, namespace: slug + "-" + version,
+		frozenAt: frozenAt, store: store, ctx: tctx, approved: approved,
+	}
 }
 
 // The DB read path, no Python needed: the SSP input carries the requirement
@@ -239,5 +274,67 @@ func TestSSP_ExcludedRequirements_RealBridgeNotApplicable(t *testing.T) {
 	}
 	if len(doc.SSP.CI.IRs) != 2 {
 		t.Fatalf("implemented-requirements = %d, want 2 (one control, one exclusion)", len(doc.SSP.CI.IRs))
+	}
+}
+
+// sspExcluded maps each requirement the frozen-period SSP input carries as
+// excluded to its justification.
+func sspExcluded(t *testing.T, app *pgxpool.Pool, f exclusionFixture) map[string]string {
+	t.Helper()
+	var in struct {
+		ExcludedRequirements []struct {
+			RequirementCode string `json:"requirementCode"`
+			Justification   string `json:"justification"`
+		} `json:"excludedRequirements"`
+	}
+	if err := json.Unmarshal(exportSSPJSONFake(t, app, f.tenant, f.periodID), &in); err != nil {
+		t.Fatalf("parse ssp input: %v", err)
+	}
+	out := map[string]string{}
+	for _, r := range in.ExcludedRequirements {
+		out[r.RequirementCode] = r.Justification
+	}
+	return out
+}
+
+// #2078: once the period is frozen, an activation whose effective_from is
+// earlier than the freeze is refused, and the frozen export is unchanged.
+func TestSSP_ExcludedRequirements_BackdatedActivationAfterFreezeRefused(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	f := seedExclusionTimeline(t, admin, app)
+	before := sspExcluded(t, app, f)
+
+	revC := f.approved("ISMS rev C", map[string]string{"A.8.28": "Backdated across the freeze."})
+	_, err := f.store.Activate(f.ctx, revC, "tester", f.frozenAt.Add(-time.Hour))
+	if !errors.Is(err, frameworkscope.ErrEffectiveBeforeFreeze) {
+		t.Fatalf("Activate with effective_from = freeze-1h: err = %v, want ErrEffectiveBeforeFreeze", err)
+	}
+
+	if after := sspExcluded(t, app, f); fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Fatalf("frozen export changed: before %v, after %v", before, after)
+	}
+}
+
+// #2078: a revision activated after the freeze with effective_from at the
+// freeze itself (not earlier, so Activate accepts it) did not exist at the
+// freeze. A re-export of the frozen period still reports rev A's exclusions;
+// selecting by effective_from alone, rev D would win the as-of pick.
+func TestSSP_ExcludedRequirements_ReExportUnchangedAfterLaterActivation(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	f := seedExclusionTimeline(t, admin, app)
+	before := sspExcluded(t, app, f)
+	if len(before) != 1 || before["A.8.25"] != excludedAtFreezeJustification {
+		t.Fatalf("export before = %v, want only A.8.25", before)
+	}
+
+	revD := f.approved("ISMS rev D", map[string]string{"A.8.28": "Activated after the freeze."})
+	if _, err := f.store.Activate(f.ctx, revD, "tester", f.frozenAt); err != nil {
+		t.Fatalf("Activate with effective_from = freeze: %v", err)
+	}
+
+	if after := sspExcluded(t, app, f); fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Fatalf("frozen export changed after a later activation: before %v, after %v", before, after)
 	}
 }

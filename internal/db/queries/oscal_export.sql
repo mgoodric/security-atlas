@@ -210,7 +210,7 @@ ORDER BY cmp.title ASC, cmp.component_uuid ASC, cc.control_id ASC, cc.requiremen
 -- The requirements excluded in the framework-scope revision that was in
 -- force for a framework version at the audit period's frozen_at. The
 -- revision is chosen exactly as GetFrameworkScopeAsOf chooses it (the
--- revision active at that time); decisions on an activated or superseded
+-- revision active at that time, activated by then, #2078); decisions on an activated or superseded
 -- revision are frozen, so its rows are exactly what applied at the freeze.
 -- A requirement excluded only after the freeze lives on a later revision
 -- and is not returned. RLS scopes every table to the caller tenant; the
@@ -222,6 +222,7 @@ WITH in_force AS (
       AND fs.framework_version_id = @framework_version_id
       AND fs.effective_from IS NOT NULL
       AND fs.effective_from <= @frozen_at
+      AND fs.activated_at <= @frozen_at
       AND (fs.superseded_at IS NULL OR fs.superseded_at > @frozen_at)
     ORDER BY fs.effective_from DESC, fs.id ASC
     LIMIT 1

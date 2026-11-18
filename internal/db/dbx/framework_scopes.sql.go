@@ -17,7 +17,7 @@ SET state = 'activated',
     effective_from = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND state = 'approved'
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 `
 
 type ActivateFrameworkScopeParams struct {
@@ -30,7 +30,8 @@ type ActivateFrameworkScopeParams struct {
 // (timestamptz). The application supersedes the prior `activated` row in
 // the same transaction by calling SupersedePreviousActivated below; both
 // statements run inside one tx so the partial unique index never sees
-// two `activated` rows at once.
+// two `activated` rows at once. activated_at is stamped by the
+// framework_scopes_stamp_activated_at trigger (#2078).
 func (q *Queries) ActivateFrameworkScope(ctx context.Context, arg ActivateFrameworkScopeParams) (FrameworkScope, error) {
 	row := q.db.QueryRow(ctx, activateFrameworkScope, arg.TenantID, arg.ID, arg.EffectiveFrom)
 	var i FrameworkScope
@@ -54,6 +55,7 @@ func (q *Queries) ActivateFrameworkScope(ctx context.Context, arg ActivateFramew
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
@@ -69,7 +71,7 @@ SET state = 'approved',
     self_approved = $6,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND state = 'review'
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 `
 
 type ApproveFrameworkScopeParams struct {
@@ -115,6 +117,7 @@ func (q *Queries) ApproveFrameworkScope(ctx context.Context, arg ApproveFramewor
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
@@ -129,7 +132,7 @@ VALUES (
     $1, $2, $3, $4,
     'draft', $5, $6
 )
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 `
 
 type CreateFrameworkScopeParams struct {
@@ -186,6 +189,7 @@ func (q *Queries) CreateFrameworkScope(ctx context.Context, arg CreateFrameworkS
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
@@ -252,7 +256,7 @@ func (q *Queries) GetActivatedExclusionForRequirement(ctx context.Context, arg G
 }
 
 const getActivatedFrameworkScope = `-- name: GetActivatedFrameworkScope :one
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 FROM framework_scopes
 WHERE tenant_id = $1
   AND framework_version_id = $2
@@ -290,6 +294,7 @@ func (q *Queries) GetActivatedFrameworkScope(ctx context.Context, arg GetActivat
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
@@ -355,7 +360,7 @@ func (q *Queries) GetFrameworkScopeApplicability(ctx context.Context, arg GetFra
 }
 
 const getFrameworkScopeAsOf = `-- name: GetFrameworkScopeAsOf :one
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 FROM framework_scopes
 WHERE tenant_id = $1
   AND framework_version_id = $2
@@ -376,6 +381,9 @@ type GetFrameworkScopeAsOfParams struct {
 // supplied timestamp. The row whose effective_from <= as_of AND (the row was
 // not yet superseded at as_of OR was never superseded).
 // ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
+// A backdated effective_from counts here, for planning. A read pinned to a
+// frozen audit period also requires activated_at <= frozen_at (#2078; see
+// ListExcludedRequirementsAsOfForExport).
 func (q *Queries) GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error) {
 	row := q.db.QueryRow(ctx, getFrameworkScopeAsOf, arg.TenantID, arg.FrameworkVersionID, arg.EffectiveFrom)
 	var i FrameworkScope
@@ -399,12 +407,13 @@ func (q *Queries) GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkSco
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
 
 const getFrameworkScopeByID = `-- name: GetFrameworkScopeByID :one
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2
 `
@@ -437,6 +446,7 @@ func (q *Queries) GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkSco
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
@@ -494,6 +504,29 @@ func (q *Queries) GetFrameworkVersionLabel(ctx context.Context, arg GetFramework
 	var i GetFrameworkVersionLabelRow
 	err := row.Scan(&i.FrameworkName, &i.FrameworkSlug, &i.FrameworkVersion)
 	return i, err
+}
+
+const getLatestFrozenAtForFrameworkVersion = `-- name: GetLatestFrozenAtForFrameworkVersion :one
+SELECT max(frozen_at)::timestamptz AS frozen_at
+FROM audit_periods
+WHERE tenant_id = $1
+  AND framework_version_id = $2
+  AND status = 'frozen'
+`
+
+type GetLatestFrozenAtForFrameworkVersionParams struct {
+	TenantID           pgtype.UUID `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+}
+
+// The latest frozen_at of the tenant's frozen audit periods on a framework
+// version, or NULL when none is frozen. Activate refuses an effective_from
+// earlier than it (#2078).
+func (q *Queries) GetLatestFrozenAtForFrameworkVersion(ctx context.Context, arg GetLatestFrozenAtForFrameworkVersionParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLatestFrozenAtForFrameworkVersion, arg.TenantID, arg.FrameworkVersionID)
+	var frozen_at pgtype.Timestamptz
+	err := row.Scan(&frozen_at)
+	return frozen_at, err
 }
 
 const insertFrameworkScopeWorkflowLog = `-- name: InsertFrameworkScopeWorkflowLog :exec
@@ -713,7 +746,7 @@ func (q *Queries) ListFrameworkScopeWorkflowLog(ctx context.Context, arg ListFra
 }
 
 const listFrameworkScopes = `-- name: ListFrameworkScopes :many
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 FROM framework_scopes
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -752,6 +785,7 @@ func (q *Queries) ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID)
 			&i.SupersededAt,
 			&i.SelfApproved,
 			&i.SubmittedBy,
+			&i.ActivatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -764,7 +798,7 @@ func (q *Queries) ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID)
 }
 
 const listFrameworkScopesByFrameworkVersion = `-- name: ListFrameworkScopesByFrameworkVersion :many
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 FROM framework_scopes
 WHERE tenant_id = $1 AND framework_version_id = $2
 ORDER BY created_at DESC, id ASC
@@ -804,6 +838,7 @@ func (q *Queries) ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg
 			&i.SupersededAt,
 			&i.SelfApproved,
 			&i.SubmittedBy,
+			&i.ActivatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -910,7 +945,7 @@ func (q *Queries) ListFrameworkVersionMigrationsInto(ctx context.Context, toVers
 }
 
 const lockOpenFrameworkScope = `-- name: LockOpenFrameworkScope :one
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2
   AND state IN ('draft', 'review')
@@ -948,6 +983,7 @@ func (q *Queries) LockOpenFrameworkScope(ctx context.Context, arg LockOpenFramew
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
@@ -960,7 +996,7 @@ SET state = 'review',
 WHERE tenant_id = $1 AND id = $2
   AND (state = 'draft'
        OR (state = 'review' AND (submitted_by IS NULL OR submitted_by LIKE 'jwt:%')))
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 `
 
 type SubmitFrameworkScopeParams struct {
@@ -997,6 +1033,7 @@ func (q *Queries) SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkS
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
@@ -1034,7 +1071,7 @@ SET predicate = $3,
     predicate_hash = $4,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
 `
 
 type UpdateFrameworkScopePredicateParams struct {
@@ -1077,6 +1114,7 @@ func (q *Queries) UpdateFrameworkScopePredicate(ctx context.Context, arg UpdateF
 		&i.SupersededAt,
 		&i.SelfApproved,
 		&i.SubmittedBy,
+		&i.ActivatedAt,
 	)
 	return i, err
 }
