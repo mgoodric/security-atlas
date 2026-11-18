@@ -135,6 +135,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			"per-control evidence list (#2470): narrows a period-scoped caller to control_id resolution; never a refusal"),
 		"controlimports/settings.go requireTenantAdmin":     notRoute(adm, preRoute+" (control import LLM settings)"),
 		"controls/handlers.go Handler.UploadBundle":         site(adm, r2447(post, "/v1/controls:upload-bundle")),
+		"controls/heldback.go HeldBackHandler.List":         site(adm, r2447(get, "/v1/admin/controls/held-back")),
 		"controlstate/evaluate.go EvaluateHandler.Evaluate": site(adm, r2447(post, "/v1/controls/"+id+"/evaluate")),
 		"csfassessment/handler.go Handler.editContext": site(apr,
 			r2447(put, "/v1/csf/tier"),

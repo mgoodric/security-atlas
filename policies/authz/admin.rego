@@ -18,3 +18,21 @@ allow if {
     has_role("admin")
     not super_admin_only_resource
 }
+
+# #2358: tenant-admin-only surfaces under /v1/admin/<resource>/..., which
+# BuildInput resolves to resource.type="admin", resource.id=<resource>.
+# The rule above admits a tenant admin; grc_engineer.rego's blanket read
+# excludes these (`not tenant_admin_only_resource`), so no other role
+# reads them. The handler checks authz.IsTenantAdmin as the second leg.
+#
+#   controls   GET /v1/admin/controls/held-back, the stock controls whose
+#              shipped update the boot seed holds back behind a reviewed
+#              SCF re-anchor.
+tenant_admin_only_resource if {
+    input.resource.type == "admin"
+    tenant_admin_only_segments[input.resource.id]
+}
+
+tenant_admin_only_segments := {
+    "controls",
+}

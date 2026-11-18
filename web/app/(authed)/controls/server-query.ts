@@ -6,6 +6,8 @@
 //
 // No React, no fetch. Data-in, data-out, vitest-pinned.
 
+import { ENUM_LABELS } from "@/lib/labels/enum-labels";
+
 import { ALL, FILTER_KEYS, type ControlFilters } from "./filters";
 
 /**
@@ -76,7 +78,14 @@ const LEGACY_RESULT: Record<string, string> = {
   not_applicable: "na",
 };
 
-const FRESHNESS_VALUES = new Set(["fresh", "stale", "expired", "no_evidence"]);
+/**
+ * The `freshness` values the platform accepts: the FreshnessState labels,
+ * which the label test holds equal to the freshness_status CHECK (#2359).
+ * An old link's `freshness=expired` is not one, so it reads as `ALL`.
+ */
+export const FRESHNESS_VALUES: ReadonlySet<string> = new Set(
+  Object.keys(ENUM_LABELS.FreshnessState),
+);
 const ANCHOR_FIT_VALUES = new Set(["exact", "partial", "none"]);
 
 /**

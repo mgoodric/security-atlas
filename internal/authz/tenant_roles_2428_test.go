@@ -125,6 +125,9 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/metrics/" + id2428 + "/inputs", tenantAdminGate},
 	{http.MethodPut, "/v1/metrics/" + id2428 + "/target", tenantAdminGate},
 	{http.MethodPost, "/v1/controls:upload-bundle", tenantAdminGate},
+	// #2358: stock controls the boot seed holds back behind a reviewed
+	// re-anchor.
+	{http.MethodGet, "/v1/admin/controls/held-back", tenantAdminGate},
 	// #2110: Evaluate now. The role gate is tenant admin; the handler also
 	// admits the control's assigned owner (owner_user_id), whatever their
 	// role, which this role-only table cannot express.
