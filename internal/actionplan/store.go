@@ -1,10 +1,12 @@
 package actionplan
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -645,9 +647,21 @@ func (s *Store) update(ctx context.Context, id uuid.UUID, in UpdateInput, guard 
 
 // Tombstone soft-deletes the plan (P0-384-6 — never hard-deleted) and writes
 // a `tombstoned` audit row. A subsequent GET returns ErrNotFound (AC-14).
+//
+// A live plan can be what keeps a mitigate risk valid (a linked control or
+// a live linked action plan, #1746). Tombstone refuses with
+// ErrMitigationRequired (409) when any linked open risk would be left with
+// neither, and then tombstones nothing (#2449).
+//
+// Lock order: the plan row (FOR UPDATE, so no risk link can be added
+// while the risk set is read), then each linked risk row (LockRiskByID)
+// in ascending id order, so two writes over overlapping risk sets lock in
+// the same order. The risk row is the last step of the #2335 order; this
+// path takes no rule or category lock, because neither the plan nor its
+// links are an aggregation input.
 func (s *Store) Tombstone(ctx context.Context, id uuid.UUID, actor uuid.UUID) error {
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		before, err := q.GetActionPlanByID(ctx, dbx.GetActionPlanByIDParams{
+		before, err := q.GetActionPlanByIDForUpdate(ctx, dbx.GetActionPlanByIDForUpdateParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
 		})
@@ -658,6 +672,20 @@ func (s *Store) Tombstone(ctx context.Context, id uuid.UUID, actor uuid.UUID) er
 			return fmt.Errorf("get action plan (tombstone): %w", err)
 		}
 		cur := planFromRow(before)
+		riskRows, err := q.ListActionPlanRisks(ctx, dbx.ListActionPlanRisksParams{
+			TenantID: pgUUID(tenantID), ActionPlanID: pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("list action plan risks (tombstone): %w", err)
+		}
+		riskIDs := make([]uuid.UUID, len(riskRows))
+		for i, r := range riskRows {
+			riskIDs[i] = uuid.UUID(r.RiskID.Bytes)
+		}
+		locked, err := lockRisks(ctx, q, tenantID, riskIDs)
+		if err != nil {
+			return err
+		}
 		row, err := q.TombstoneActionPlan(ctx, dbx.TombstoneActionPlanParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
@@ -667,6 +695,9 @@ func (s *Store) Tombstone(ctx context.Context, id uuid.UUID, actor uuid.UUID) er
 				return ErrNotFound
 			}
 			return fmt.Errorf("tombstone action plan: %w", err)
+		}
+		if err := checkMitigation(ctx, q, tenantID, locked); err != nil {
+			return err
 		}
 		after := planFromRow(row)
 		beforeJSON, _ := json.Marshal(planSnapshot(cur))
@@ -710,11 +741,26 @@ func (s *Store) LinkRisk(ctx context.Context, planID, riskID, actor uuid.UUID) e
 }
 
 // UnlinkRisk removes a risk link (AC-18). ErrNotLinked (404) if absent.
+// It refuses with ErrMitigationRequired (409) when the risk is mitigate
+// and this plan is the last of its linked controls and live plans (#2449).
+//
+// Lock order: the risk row only (LockRiskByID), the last step of the
+// #2335 order, as the risk-side control unlink takes it. A concurrent
+// unlink or tombstone that would remove the risk's other mitigation waits
+// on the same row and re-counts after this one commits.
 func (s *Store) UnlinkRisk(ctx context.Context, planID, riskID, actor uuid.UUID) error {
 	return s.unlink(ctx, planID, actor, ActionRiskUnlinked, riskID, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (int64, error) {
-		return q.UnlinkActionPlanRisk(ctx, dbx.UnlinkActionPlanRiskParams{
+		locked, err := lockRisks(ctx, q, tenantID, []uuid.UUID{riskID})
+		if err != nil {
+			return 0, err
+		}
+		n, err := q.UnlinkActionPlanRisk(ctx, dbx.UnlinkActionPlanRiskParams{
 			TenantID: pgUUID(tenantID), ActionPlanID: pgUUID(planID), RiskID: pgUUID(riskID),
 		})
+		if err != nil || n == 0 {
+			return n, err
+		}
+		return n, checkMitigation(ctx, q, tenantID, locked)
 	})
 }
 
@@ -914,6 +960,76 @@ func (s *Store) unlink(ctx context.Context, planID, actor uuid.UUID, action stri
 		detail, _ := json.Marshal(map[string]string{"target_id": targetID.String()})
 		return s.writeAudit(ctx, q, tenantID, planID, actor, action, detail, nil)
 	})
+}
+
+// MitigationRequiredError names the mitigate risk a write would leave with
+// no linked control and no live action plan. errors.Is matches
+// ErrMitigationRequired.
+type MitigationRequiredError struct {
+	RiskID uuid.UUID
+}
+
+func (e *MitigationRequiredError) Error() string {
+	return fmt.Sprintf("risk %s is mitigate and would be left with no linked control or live action plan; link a control or another action plan to it, or change its treatment, first", e.RiskID)
+}
+
+func (e *MitigationRequiredError) Unwrap() error { return ErrMitigationRequired }
+
+// MitigationHeld reports whether a risk with this treatment and these link
+// counts meets the mitigate rule: a mitigate risk keeps at least one linked
+// control or live action plan; other treatments do not count links. It
+// mirrors the mitigate case of risk.ValidateTreatment, which this package
+// cannot import (risk imports eval, which imports actionplan). A test in
+// internal/risk checks the two agree.
+func MitigationHeld(t dbx.RiskTreatment, controls, plans int) bool {
+	return t != dbx.RiskTreatmentMitigate || controls > 0 || plans > 0
+}
+
+// lockRisks locks each risk row (LockRiskByID) in ascending id order and
+// returns the locked rows. A risk not visible in the tenant is skipped:
+// a linked risk always resolves (composite FK), and an unlink of an absent
+// risk falls through to ErrNotLinked.
+func lockRisks(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ids []uuid.UUID) ([]dbx.Risk, error) {
+	sorted := slices.Clone(ids)
+	slices.SortFunc(sorted, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	sorted = slices.Compact(sorted)
+	out := make([]dbx.Risk, 0, len(sorted))
+	for _, id := range sorted {
+		row, err := q.LockRiskByID(ctx, dbx.LockRiskByIDParams{TenantID: pgUUID(tenantID), ID: pgUUID(id)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("lock risk %s: %w", id, err)
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// checkMitigation re-counts, after the caller's write and under the risk
+// row locks, the links of every locked open mitigate risk, and refuses the
+// first one left with neither a linked control nor a live action plan. A
+// closed risk is exempt: it is retired, so it does not block a plan
+// tombstone or unlink.
+func checkMitigation(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, risks []dbx.Risk) error {
+	for _, r := range risks {
+		if r.Treatment != dbx.RiskTreatmentMitigate || r.Status == dbx.RiskStatusClosed {
+			continue
+		}
+		controls, err := q.CountRiskControlLinks(ctx, dbx.CountRiskControlLinksParams{TenantID: pgUUID(tenantID), RiskID: r.ID})
+		if err != nil {
+			return fmt.Errorf("count risk control links: %w", err)
+		}
+		plans, err := q.CountRiskActionPlanLinks(ctx, dbx.CountRiskActionPlanLinksParams{TenantID: pgUUID(tenantID), RiskID: r.ID})
+		if err != nil {
+			return fmt.Errorf("count risk action plan links: %w", err)
+		}
+		if !MitigationHeld(r.Treatment, int(controls), int(plans)) {
+			return &MitigationRequiredError{RiskID: uuid.UUID(r.ID.Bytes)}
+		}
+	}
+	return nil
 }
 
 func loadLinkage(ctx context.Context, q *dbx.Queries, tenantID, planID uuid.UUID) (Linkage, error) {
