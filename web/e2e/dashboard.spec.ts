@@ -86,6 +86,7 @@ test.describe("dashboard view", () => {
   }) => {
     await page.goto("/dashboard");
     await expect(page.getByTestId("program-dashboard")).toBeVisible();
+    await expect(page.getByTestId("needs-attention-panel")).toBeVisible();
     await expect(page.getByTestId("framework-posture-panel")).toBeVisible();
     await expect(page.getByTestId("top-risks-panel")).toBeVisible();
     await expect(page.getByTestId("evidence-freshness-panel")).toBeVisible();
@@ -125,7 +126,7 @@ test.describe("dashboard view", () => {
     await expect(tiles.or(emptyState).first()).toBeVisible();
   });
 
-  test("AC-3: top risks panel binds to /v1/risks?treatment=mitigate&sort=residual,age (slice 157)", async ({
+  test("AC-3: top risks panel binds to the dashboard risks BFF (slice 157, #2135)", async ({
     authedPage: page,
   }) => {
     // Slice 157: the top-risks panel was wired by slice 040 to the
@@ -135,7 +136,9 @@ test.describe("dashboard view", () => {
     // panel onto it and drops the gap footer.
     //
     // P0-148-3: the `top-risks-sort-gap` testid MUST NOT render after
-    // slice 157.
+    // slice 157. #2135 re-pointed the BFF at the 5 open, non-roll-up
+    // risks by residual; the card's content is pinned in
+    // dashboard-front-door-2135.spec.ts.
     const requests: string[] = [];
     page.on("request", (r) => requests.push(r.url()));
     await page.goto("/dashboard");
@@ -222,7 +225,7 @@ test.describe("dashboard view", () => {
     ).toBeVisible();
   });
 
-  test("AC-6: activity feed binds to /v1/activity (slice 147)", async ({
+  test("AC-6: activity feed binds to the unified activity log (slice 147, #2135)", async ({
     authedPage: page,
   }) => {
     // Slice 147: the activity feed panel was originally a
@@ -242,8 +245,12 @@ test.describe("dashboard view", () => {
     await expect(page.getByTestId("activity-feed-panel")).not.toContainText(
       "does not exist on main yet",
     );
+    // #2135: the panel reads the unified log the /activity page reads,
+    // 10 rows at a time.
     expect(
-      requests.filter((u) => u.includes("/api/dashboard/activity")).length,
+      requests.filter(
+        (u) => u.includes("/api/activity?") && u.includes("limit=10"),
+      ).length,
     ).toBeGreaterThan(0);
     // Real rows render (or empty-state, never a placeholder):
     const rows = page.getByTestId("activity-feed-row");
@@ -254,26 +261,6 @@ test.describe("dashboard view", () => {
   test("slice 232: activity feed footer navigates to the real /activity ledger", async ({
     authedPage: page,
   }) => {
-    await page.route("**/api/dashboard/activity", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          activity: [
-            {
-              ts: "2026-07-25T12:00:00Z",
-              event_type: "evidence.ingested",
-              actor: "test-user",
-              resource_type: "evidence",
-              resource_id: "test-evidence-001",
-              summary: { filename: "policy.pdf" },
-            },
-          ],
-          count: 1,
-          next_cursor: "",
-        }),
-      });
-    });
     await page.route("**/api/activity?**", async (route) => {
       await route.fulfill({
         status: 200,

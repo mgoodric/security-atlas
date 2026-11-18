@@ -1,24 +1,18 @@
-import { getMitigateRisks } from "@/lib/api/dashboard";
+import { getTopRisks } from "@/lib/api/dashboard";
 import { dashboardProxy } from "../proxy";
 
-// Slice 157 — server-side proxy for GET /v1/risks?treatment=mitigate
-// &sort=residual,age (slice 066 AC-3 — ListRisks gained the
-// residual,age sort capability).
+// #2135 — server-side proxy for the dashboard top-risks card:
+// GET /v1/risks?status=open&include_rollups=false&sort=-residual&limit=5
+// (TOP_RISKS_QUERY). Slice 157 had pointed it at treatment=mitigate with
+// the residual,age sort; the card now lists open risks in any treatment,
+// ranked as the register ranks them.
 //
-// Slice 040 wired this BFF to the unsorted `?treatment=mitigate` list
-// and surfaced the ranking gap as a labelled `top-risks-sort-gap`
-// footer because the residual,age sort had not yet shipped. Slice 066
-// shipped the server-side sort; this slice (the spillover from slice
-// 147) re-points the dashboard onto it.
-//
-// `getMitigateRisks` in lib/api.ts now appends `&sort=residual,age` to
-// the upstream URL; this route stays a thin proxy that forwards the
-// bearer and packs the result back into the legacy
-// `{risks, count}` envelope the dashboard panel expects.
+// The route stays a thin proxy that forwards the bearer and packs the
+// result back into the `{risks, count}` envelope the panel expects.
 
 export function GET() {
   return dashboardProxy(async (bearer) => {
-    const risks = await getMitigateRisks(bearer);
+    const risks = await getTopRisks(bearer);
     return { risks, count: risks.length };
   });
 }
