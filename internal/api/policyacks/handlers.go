@@ -374,8 +374,9 @@ func ackCallerFromCred(c credstore.Credential) policy.AckCaller {
 	return policy.AckCaller{
 		UserID: userID,
 		// #2505: live tenant roles plus a key's own label, never a JWT
-		// session's role claim.
-		OwnerRoles: authz.AckRoleLabels(c),
+		// session's role claim. #2524: a member, one holding a live role
+		// (authz.TenantRoleLabels), also matches a policy aimed at everyone.
+		OwnerRoles: policy.WithEveryone(authz.AckRoleLabels(c), len(authz.TenantRoleLabels(c)) > 0),
 		IsAdmin:    c.IsAdmin,
 	}
 }

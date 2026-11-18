@@ -9,8 +9,7 @@ linked_control_ids:
   - GOV-05
   - RSK-02
 acknowledgment_required_roles:
-  - employee
-  - contractor
+  - everyone
 source_attribution: community_draft
 ---
 

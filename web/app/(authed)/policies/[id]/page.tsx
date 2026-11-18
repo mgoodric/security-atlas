@@ -54,10 +54,12 @@ import {
 import { Markdown } from "@/components/markdown";
 
 import {
+  audienceLabel,
   isDraft,
   needsControlsWarning,
   NO_CONTROLS_WARNING,
   primaryAction,
+  unrecognisedAudiences,
 } from "../lifecycle";
 
 function statusPillVariant(
@@ -275,6 +277,34 @@ export default function PolicyDetailPage({
                 {policy.owner_role}
               </dd>
             </div>
+            {policy.acknowledgment_required_roles.length > 0 ? (
+              <div>
+                {/* #2524 — who is asked to acknowledge. A free-text value
+                    from before the audience enum is flagged: no one holds
+                    it as a role. */}
+                <dt className="inline text-muted-foreground">Audience </dt>
+                <dd
+                  className="inline text-foreground"
+                  data-testid="policy-detail-audience"
+                >
+                  {policy.acknowledgment_required_roles.map((a, i) => (
+                    <span key={a}>
+                      {i > 0 ? ", " : null}
+                      {audienceLabel(a)}
+                      {unrecognisedAudiences([a]).length > 0 ? (
+                        <span
+                          className="text-xs text-destructive"
+                          data-testid={`policy-detail-audience-unrecognised-${a}`}
+                        >
+                          {" "}
+                          (unrecognised audience)
+                        </span>
+                      ) : null}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt className="inline text-muted-foreground">Effective </dt>
               <dd className="inline font-mono text-foreground">

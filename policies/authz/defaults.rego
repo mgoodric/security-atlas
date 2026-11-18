@@ -181,3 +181,21 @@ me_self_id_write if {
     parts[4] != ""
     parts[5] == "read"
 }
+
+# #2524 — POST /v1/policies/{uuid}/acknowledge, a member acknowledging a
+# policy aimed at them.
+#
+# Any signed-in member with a live role acknowledges, not only admin and
+# grc_engineer. The ack is self-only: the handler records it for the
+# credential's own user and takes no user id from the request, and it
+# refuses a policy whose audience the caller is not in (403). An ack grants
+# nothing else: this rule admits the one path, and every other policies
+# write keeps its role rule. Default-deny still applies to a roleless
+# credential.
+allow if {
+    input.action == "write"
+    input.resource.type == "policies"
+    input.request.method == "POST"
+    regex.match(`^/v1/policies/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/acknowledge$`, input.request.path)
+    count(input.user.roles) > 0
+}
