@@ -24,17 +24,20 @@ ON CONFLICT DO NOTHING;
 BEGIN;
 SET LOCAL app.current_tenant = '00000000-0000-0000-0000-000000002141';
 
+-- users.id is global, not per tenant: the second member is ...2141b2, not
+-- ...2142, which is theme.sql's (#2142) user. Sharing it moved that user
+-- into this tenant and its PATCH /api/me answered 404.
 INSERT INTO users (id, tenant_id, email, display_name, status, idp_issuer, idp_subject)
 VALUES
     ('44444444-4444-4444-4444-444444442141', '00000000-0000-0000-0000-000000002141',
      'controls-bulk-admin-e2e@example.invalid', 'Bulk Admin E2E', 'active', '', ''),
-    ('44444444-4444-4444-4444-444444442142', '00000000-0000-0000-0000-000000002141',
+    ('44444444-4444-4444-4444-4444442141b2', '00000000-0000-0000-0000-000000002141',
      'controls-bulk-owner-e2e@example.invalid', 'Bulk Owner E2E', 'active', '', '')
 ON CONFLICT (id) DO UPDATE SET status = 'active';
 
 INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
 VALUES ('00000000-0000-0000-0000-000000002141', '44444444-4444-4444-4444-444444442141', 'admin', 'e2e:controls-bulk'),
-       ('00000000-0000-0000-0000-000000002141', '44444444-4444-4444-4444-444444442142', 'grc_engineer', 'e2e:controls-bulk')
+       ('00000000-0000-0000-0000-000000002141', '44444444-4444-4444-4444-4444442141b2', 'grc_engineer', 'e2e:controls-bulk')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO controls (id, tenant_id, title, control_family, implementation_type,
