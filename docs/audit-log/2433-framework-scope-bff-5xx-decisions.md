@@ -5,10 +5,14 @@ Issue: mgoodric/security-atlas#2433, a follow-up from the review of #2419
 
 ## Detection-tier classification
 
-- **detection_tier_actual:** none. No bug surfaced: the 5xx pass-through is
-  latent (every current 5xx goes through `httperr.WriteInternal`, whose text
-  is generic), and the new e2e and axe sweep found nothing at write time.
-- **detection_tier_target:** unit.
+- **detection_tier_actual:** playwright. The 5xx pass-through is latent
+  (every current 5xx goes through `httperr.WriteInternal`, whose text is
+  generic). The new axe sweep found one real violation on the scope page:
+  the draft's predicate editor, a `<textarea>` in a table cell, had no
+  label (axe `label`, critical). It now carries an `aria-label` naming its
+  scope.
+- **detection_tier_target:** playwright (an axe finding needs the rendered
+  page; the route sweep sees the page with no draft scope).
 
 ## Decisions
 
@@ -93,3 +97,10 @@ the refusal and the second person's approval on the scope page.
 The second person opens the Activate panel, axe runs with it open
 (`expectNoSeriousAxe`, the #2613 pattern), then Confirm. It runs against the
 real page, so the panel's markup is the shipped one, not a mock's.
+
+### D5 — one existing spec asserted the old behaviour
+
+`needs-reanchoring.spec.ts` mocked a 500 with `{error: "upstream error"}`
+and expected that text in the dashboard banner. It read through
+`bffControlFetch`, so it now shows `500 Internal Server Error`; the spec
+asserts that, and that the body's text is absent.
