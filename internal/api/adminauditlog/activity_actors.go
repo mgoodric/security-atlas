@@ -13,6 +13,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
@@ -50,7 +51,7 @@ func (h *Handler) ActivityActors(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
-	privileged, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, cred.IsAdmin)
+	privileged, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, authz.IsTenantAdmin(cred))
 	if err != nil {
 		httperr.WriteInternal(w, r, "role probe", err)
 		return
