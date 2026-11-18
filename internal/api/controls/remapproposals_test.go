@@ -36,7 +36,7 @@ func remapRow(bundle string, at time.Time) dbx.ListSCFRemapProposalsRow {
 	}
 }
 
-func listRemapProposals(t *testing.T, f *fakeRemapLister, query string) (*httptest.ResponseRecorder, remapProposalsResp) {
+func listRemapProposals(t *testing.T, f *fakeRemapLister, query string) (*httptest.ResponseRecorder, RemapProposalsResponse) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/controls/remap-proposals"+query, nil)
 	ctx, err := tenancy.WithTenant(req.Context(), remapTestTenant)
@@ -45,7 +45,7 @@ func listRemapProposals(t *testing.T, f *fakeRemapLister, query string) (*httpte
 	}
 	rr := httptest.NewRecorder()
 	NewRemapProposalsHandler(f).List(rr, req.WithContext(ctx))
-	var out remapProposalsResp
+	var out RemapProposalsResponse
 	if rr.Code == http.StatusOK {
 		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 			t.Fatalf("decode: %v", err)

@@ -1,0 +1,11 @@
+{
+  "name": "@security-atlas/openapi-types-tool",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Generates web/lib/api/generated/openapi.d.ts from docs/openapi.yaml (#2394). Isolated from the web workspace; see README.md.",
+  "type": "module",
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}
