@@ -34,7 +34,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ConfirmInline } from "@/components/ui/row-actions";
+import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { Anchor } from "@/lib/api/anchors";
@@ -85,6 +85,7 @@ export default function ComponentDefinitionDetailPage({
   const [actionError, setActionError] = useState<string | null>(null);
   // #2280: Reject fires at once, so it asks first. Holds the claim id.
   const [confirmingReject, setConfirmingReject] = useState<string | null>(null);
+  const rejectTriggers = useTriggerRefs();
   // Per-claim SCF-anchor picker search term (only used for unmapped claims).
   const [anchorQuery, setAnchorQuery] = useState<Record<string, string>>({});
 
@@ -323,6 +324,7 @@ export default function ComponentDefinitionDetailPage({
                     ariaLabel={`Confirm: reject claim ${c.control_id}`}
                     busy={dispositionM.isPending}
                     onCancel={() => setConfirmingReject(null)}
+                    returnFocus={() => rejectTriggers.get(c.id)}
                     onConfirm={() =>
                       dispositionM.mutate({
                         claimId: c.id,
@@ -336,6 +338,7 @@ export default function ComponentDefinitionDetailPage({
                     size="sm"
                     variant="outline"
                     data-testid="claim-reject"
+                    ref={rejectTriggers.ref(c.id)}
                     disabled={dispositionM.isPending}
                     onClick={() => setConfirmingReject(c.id)}
                   >

@@ -12,7 +12,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ConfirmInline, RowActions } from "./row-actions";
 import {
+  confirmCloseFocus,
   confirmingItem,
+  confirmOpenFocus,
   confirmPromptFor,
   IDLE,
   reduceConfirm,
@@ -226,5 +228,53 @@ describe("ConfirmInline", () => {
     expect(html).toMatch(
       /<button[^>]*disabled=""[^>]*data-testid="confirm-inline-ok"/,
     );
+  });
+});
+
+// #2518 — the focus rules ConfirmInline's effects apply. Effects never
+// run under renderToStaticMarkup, so the rules are tested directly.
+describe("ConfirmInline focus", () => {
+  const el = () => ({ focus: vi.fn() });
+
+  it("focuses its own Cancel when the caller manages no focus", () => {
+    const ownCancel = el();
+    expect(confirmOpenFocus({ callerManagesCancel: false, ownCancel })).toBe(
+      ownCancel,
+    );
+  });
+
+  it("leaves focus alone when the caller passes its own cancelRef", () => {
+    expect(
+      confirmOpenFocus({ callerManagesCancel: true, ownCancel: el() }),
+    ).toBeNull();
+  });
+
+  it("focuses the caller's initialFocus field over Cancel", () => {
+    const field = el();
+    expect(
+      confirmOpenFocus({
+        initialFocus: field,
+        callerManagesCancel: false,
+        ownCancel: el(),
+      }),
+    ).toBe(field);
+  });
+
+  it("returns focus to the trigger after a cancel", () => {
+    const trigger = el();
+    expect(
+      confirmCloseFocus({ cancelled: true, returnFocus: () => trigger }),
+    ).toBe(trigger);
+  });
+
+  it("leaves focus alone after a confirm, or with no trigger", () => {
+    const trigger = el();
+    const returnFocus = vi.fn(() => trigger);
+    expect(confirmCloseFocus({ cancelled: false, returnFocus })).toBeNull();
+    expect(returnFocus).not.toHaveBeenCalled();
+    expect(confirmCloseFocus({ cancelled: true })).toBeNull();
+    expect(
+      confirmCloseFocus({ cancelled: true, returnFocus: () => null }),
+    ).toBeNull();
   });
 });

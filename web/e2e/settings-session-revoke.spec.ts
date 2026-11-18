@@ -75,17 +75,20 @@ test.describe("/settings Sessions revoke -- inline confirm", () => {
     await expect(confirm).toContainText("That device is signed out");
     await expect(cancel).toBeFocused();
 
-    // Cancel: nothing sent, the session stays.
+    // Cancel: nothing sent, the session stays, and focus is back on
+    // Revoke rather than lost to <body> (#2518).
     await cancel.click();
     await expect(confirm).toHaveCount(0);
     await expect(rows).toHaveCount(2);
+    await expect(revoke).toBeFocused();
     expect(deleted).toEqual([]);
 
-    // Escape cancels too.
+    // Escape cancels too, and also hands focus back.
     await revoke.click();
     await expect(confirm).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(confirm).toHaveCount(0);
+    await expect(revoke).toBeFocused();
     expect(deleted).toEqual([]);
 
     // Confirm: the DELETE goes out and the row leaves the list.

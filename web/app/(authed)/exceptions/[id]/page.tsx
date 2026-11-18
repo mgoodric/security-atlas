@@ -26,7 +26,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
 import { DetailHeader } from "@/components/detail/detail-header";
 import { Markdown } from "@/components/markdown";
@@ -82,6 +82,7 @@ export default function ExceptionDetailPage({
   const qc = useQueryClient();
   const { toast } = useToast();
   const [confirming, setConfirming] = useState(false);
+  const approveRef = useRef<HTMLButtonElement>(null);
 
   const exQ = useQuery({
     queryKey: ["exceptions", id],
@@ -195,6 +196,7 @@ export default function ExceptionDetailPage({
         </p>
       }
       back={<BackLink />}
+      primaryActionRef={approveRef}
       primaryAction={
         next?.kind === "approve"
           ? {
@@ -231,6 +233,7 @@ export default function ExceptionDetailPage({
           ariaLabel="Confirm: approve exception"
           busy={approve.isPending}
           onCancel={() => setConfirming(false)}
+          returnFocus={() => approveRef.current}
           onConfirm={() => approve.mutate()}
           data-testid="exception-approve-confirm"
         >
