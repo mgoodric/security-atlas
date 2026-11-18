@@ -3,9 +3,9 @@
 //
 // #2503: two variants. `section` is the whole /admin section, for a caller
 // who is neither a super-admin nor a tenant admin. `platform` is a
-// platform page (API keys, features, tenants, super admins, demo) reached
-// by a tenant admin, who manages only the tenant-scoped pages (SSO, Users,
-// Audit). See docs/audit-log/2503-tenant-admin-pages-decisions.md.
+// platform page (API keys, tenants, super admins, demo) reached by a
+// tenant admin, who manages only the tenant-scoped pages (SSO, Users,
+// Features, Audit). See docs/audit-log/2503-tenant-admin-pages-decisions.md.
 
 import Link from "next/link";
 
@@ -41,9 +41,9 @@ export function AdminForbiddenPanel({
           <AlertTitle>This page is for platform super-admins</AlertTitle>
           <AlertDescription>
             You administer this organisation, which covers its sign-in, its
-            users and their roles, and its audit log. This page changes platform
-            settings and needs a platform super-admin. Contact your platform
-            operator.
+            users and their roles, its modules, and its audit log. This page
+            changes platform settings and needs a platform super-admin. Contact
+            your platform operator.
           </AlertDescription>
         </Alert>
       )}

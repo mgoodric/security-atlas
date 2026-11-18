@@ -19,7 +19,7 @@ export function AdminSectionNav({
   const tenantChrome = showTenantChrome(useTenancy());
   if (!platform) {
     // #2503: a tenant admin sees only the tenant-scoped pages (SSO, Users,
-    // Audit). The platform pages are gated server-side by PlatformAdminGate.
+    // Features, Audit). The platform pages are gated server-side by PlatformAdminGate.
     return (
       <nav
         aria-label="Admin sections"
@@ -34,6 +34,9 @@ export function AdminSectionNav({
         </Link>
         <Link href="/admin/users" className="hover:text-foreground">
           Users
+        </Link>
+        <Link href="/admin/features" className="hover:text-foreground">
+          Features
         </Link>
         <Link href="/audit-log" className="hover:text-foreground">
           Audit

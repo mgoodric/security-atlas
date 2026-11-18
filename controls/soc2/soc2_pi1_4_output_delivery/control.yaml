@@ -9,7 +9,7 @@ description: |
   documented status-page workflow.
 
 scf_anchor_id: TDA-05
-control_family: SEA
+control_family: TDA
 implementation_type: manual_attested
 owner_role: product-engineering
 lifecycle_state: active

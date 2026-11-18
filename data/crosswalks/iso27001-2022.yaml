@@ -397,7 +397,7 @@ mappings:
     scf_anchor: HRS-12
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Asset return on departure is a step within the Personnel Termination (HRS-12)."
+    rationale: "Asset return on departure is a step in Personnel Termination (HRS-12)."
   - requirement_code: A.5.12
     scf_anchor: DCH-04
     relationship_type: equal
@@ -583,7 +583,7 @@ mappings:
     scf_anchor: HRS-12
     relationship_type: equal
     strength: 0.9
-    rationale: "Responsibilities after termination maps to SCF Personnel Termination."
+    rationale: "Responsibilities after termination maps to SCF Personnel Termination (HRS-12)."
   - requirement_code: A.6.6
     scf_anchor: HRS-02
     relationship_type: subset_of
