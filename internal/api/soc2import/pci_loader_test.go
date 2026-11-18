@@ -120,3 +120,36 @@ func TestLoad_PCICodesDistinctFromISOandSOC2(t *testing.T) {
 		}
 	}
 }
+
+// #2396 — PCI 1.4.1 (controls between trusted and untrusted networks) is
+// anchored on SCF 2026.3 NET-06 Network Segmentation, which its rationale
+// names and which the SCF workbook's PCI DSS 4.0.1 column lists for it. It
+// was on NET-24 Wireless Networking, a carry-over from the old NET-08 code.
+// 5.3.1's rationale quotes END-03's current title.
+func TestLoad_PCINetworkAndEndpointAnchorsMatchSCF2026_3(t *testing.T) {
+	t.Parallel()
+	cw, err := soc2import.Load(filepath.Join("..", "..", "..", "data", "crosswalks", "pci-dss-4.0.yaml"))
+	if err != nil {
+		t.Fatalf("Load PCI: %v", err)
+	}
+	want := map[string]struct{ anchor, title string }{
+		"1.4.1": {"NET-06", "Network Segmentation"},
+		"5.3.1": {"END-03", "Endpoint Protection Mechanisms"},
+	}
+	for _, m := range cw.Mappings {
+		w, ok := want[m.RequirementCode]
+		if !ok {
+			continue
+		}
+		delete(want, m.RequirementCode)
+		if m.SCFAnchor != w.anchor {
+			t.Errorf("%s scf_anchor = %q; want %q", m.RequirementCode, m.SCFAnchor, w.anchor)
+		}
+		if !strings.Contains(m.Rationale, w.title) {
+			t.Errorf("%s rationale %q does not quote %q", m.RequirementCode, m.Rationale, w.title)
+		}
+	}
+	for code := range want {
+		t.Errorf("no mapping for PCI %s", code)
+	}
+}
