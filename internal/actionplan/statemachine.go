@@ -176,6 +176,11 @@ var (
 	// ErrLimitExceeded — the per-plan 50-risk / 50-control cap is hit
 	// (P0-384-7). 422 with code limit_exceeded.
 	ErrLimitExceeded = errors.New("actionplan: linkage limit exceeded")
+	// ErrMitigationRequired — a tombstone or risk unlink would leave a
+	// mitigate risk with no linked control and no live action plan
+	// (#2449). 409. The store returns it wrapped in MitigationRequiredError,
+	// which names the risk.
+	ErrMitigationRequired = errors.New("actionplan: a mitigate risk would be left with no linked control or live action plan")
 )
 
 // ValidateTitle enforces the title length bounds (AC-1 / threat-model T).

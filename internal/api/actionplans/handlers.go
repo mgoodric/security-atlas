@@ -521,7 +521,7 @@ func (h *Handler) plansForTarget(w http.ResponseWriter, r *http.Request, canRead
 // writeStoreErr maps actionplan.Store errors to HTTP status codes.
 //
 //	ErrNotFound / ErrLinkTargetNotFound / ErrNotLinked -> 404
-//	ErrAlreadyLinked                                   -> 409
+//	ErrAlreadyLinked / ErrMitigationRequired           -> 409
 //	ErrIllegalTransition / ErrLimitExceeded            -> 422
 //	validation errors                                  -> 400
 //	anything else                                      -> 500
@@ -537,6 +537,14 @@ func (h *Handler) writeStoreErr(w http.ResponseWriter, r *http.Request, op strin
 		httpresp.WriteError(w, http.StatusNotFound, "link does not exist")
 	case errors.Is(err, actionplan.ErrAlreadyLinked):
 		httpresp.WriteError(w, http.StatusConflict, "already linked")
+	case errors.Is(err, actionplan.ErrMitigationRequired):
+		// #2449: name the risk, without the store's wrapping.
+		var mr *actionplan.MitigationRequiredError
+		if errors.As(err, &mr) {
+			httpresp.WriteError(w, http.StatusConflict, mr.Error())
+		} else {
+			httpresp.WriteError(w, http.StatusConflict, actionplan.ErrMitigationRequired.Error())
+		}
 	case errors.Is(err, actionplan.ErrIllegalTransition):
 		httpresp.WriteError(w, http.StatusUnprocessableEntity, "illegal status transition")
 	case errors.Is(err, actionplan.ErrVerifyThroughVerify):
