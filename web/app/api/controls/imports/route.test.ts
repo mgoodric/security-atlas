@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { mockNextServer } from "../../../../lib/test-utils/next-mocks";
 import { TEST_BEARER_DEFAULT } from "../../../../lib/test-utils/test-tokens";
+import { multipartRequest } from "../../../../lib/test-utils/upload-requests";
 
 vi.mock("next/server", () => mockNextServer());
 
@@ -49,17 +50,12 @@ function jsonReq(body: string) {
   return { json: async () => JSON.parse(body) } as never;
 }
 
-function uploadReq(
-  form: FormData,
-  headers: Record<string, string> = {
-    "content-type": "multipart/form-data; boundary=x",
-  },
-) {
-  const h = new Headers(headers);
-  return {
-    headers: h,
-    formData: async () => form,
-  } as never;
+function rawReq(body: string, headers: Record<string, string>) {
+  return new Request("http://t/", {
+    method: "POST",
+    headers: { "content-length": String(body.length), ...headers },
+    body,
+  }) as never;
 }
 
 describe("control import BFF routes", () => {
@@ -106,7 +102,7 @@ describe("control import BFF routes", () => {
     const spy = upstream(201, { id: B });
     const form = new FormData();
     form.append("framework", "soc2");
-    const res = await upload(uploadReq(form));
+    const res = await upload((await multipartRequest(form)) as never);
     expect(res.status).toBe(201);
     const { url, init } = call(spy);
     expect(url).toBe("http://atlas:8080/v1/controls/imports");
@@ -145,15 +141,14 @@ describe("control import BFF routes", () => {
   test("upload refuses a non-multipart or unparseable body with 400", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
     const json = await upload(
-      uploadReq(new FormData(), { "content-type": "application/json" }),
+      rawReq("{}", { "content-type": "application/json" }),
     );
     expect(json.status).toBe(400);
-    const broken = await upload({
-      headers: new Headers({ "content-type": "multipart/form-data; b=x" }),
-      formData: async () => {
-        throw new TypeError("bad multipart");
-      },
-    } as never);
+    const broken = await upload(
+      rawReq("not multipart", {
+        "content-type": "multipart/form-data; boundary=x",
+      }),
+    );
     expect(broken.status).toBe(400);
     expect(spy).not.toHaveBeenCalled();
   });

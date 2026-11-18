@@ -141,6 +141,14 @@ describe("evidence filters", () => {
       "na",
       "inconclusive",
     ]);
+    // #2328: the values stay raw (URL + API param); the text is the label.
+    expect(opts.map((o) => o.label)).toEqual([
+      "All results",
+      "Pass",
+      "Fail",
+      "Not applicable",
+      "Inconclusive",
+    ]);
   });
 
   test("buildKindOptions sorts unique kinds + prepends ALL", () => {

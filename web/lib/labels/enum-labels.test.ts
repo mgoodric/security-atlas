@@ -19,11 +19,25 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AUDIT_LOG_KINDS } from "../api/audit-log";
-import { ENUM_LABELS, enumLabel, humanizeEnum } from "./enum-labels";
+import {
+  ENUM_LABELS,
+  enumLabel,
+  humanizeEnum,
+  lookupLabel,
+} from "./enum-labels";
 
 const REPO_ROOT = join(__dirname, "..", "..", "..");
 const MODELS_GO = join(REPO_ROOT, "internal", "db", "dbx", "models.go");
 const FLAG_SEED_GO = join(REPO_ROOT, "internal", "featureflag", "seed.go");
+const CHECKLIST_GO = join(REPO_ROOT, "internal", "checklist", "checklist.go");
+// #2328: CHECK-constrained text columns, recorded from the migrated
+// database by internal/db/check_enums_integration_test.go.
+const CHECK_ENUMS_GOLDEN = join(
+  __dirname,
+  "..",
+  "contracts",
+  "check-enums.golden.json",
+);
 
 // parseSqlcEnums reads sqlc's enum declarations:
 //
@@ -98,6 +112,35 @@ describe("backend enum label coverage (#2083)", () => {
     expect(missing).toEqual([]);
   });
 
+  it("labels every value of every CHECK-constrained status (#2328)", () => {
+    const golden = JSON.parse(readFileSync(CHECK_ENUMS_GOLDEN, "utf8")) as {
+      enums: Record<string, string[]>;
+    };
+    const names = Object.keys(golden.enums);
+    expect(names).toEqual(
+      expect.arrayContaining(["ActionPlanStatus", "AuditPeriodStatus"]),
+    );
+    const missing: string[] = [];
+    for (const name of names) {
+      for (const v of golden.enums[name]) {
+        if (!labels[name] || !Object.hasOwn(labels[name], v)) {
+          missing.push(`${name}.${v}`);
+        }
+      }
+    }
+    expect(missing, "add these to ENUM_LABELS in enum-labels.ts").toEqual([]);
+  });
+
+  it("labels every checklist citation kind (#2328)", () => {
+    const src = readFileSync(CHECKLIST_GO, "utf8");
+    const kinds = [
+      ...src.matchAll(/^\s+\w+\s+CitationKind\s*=\s*"([^"]+)"/gm),
+    ].map((m) => m[1]);
+    expect(kinds).toContain("scf_anchor");
+    const missing = kinds.filter((k) => !labels.ChecklistItemKind[k]);
+    expect(missing).toEqual([]);
+  });
+
   it("fails for an unlabelled value", () => {
     // The check above, run against a models.go that gained a value.
     const src = `type RiskMethodology string
@@ -133,6 +176,12 @@ describe("enumLabel", () => {
     expect(enumLabel("RiskMethodology", "octave_allegro")).toBe(
       "Octave allegro",
     );
+  });
+
+  it("does not resolve a value to an Object.prototype member", () => {
+    expect(enumLabel("ActivityKind", "constructor")).toBe("Constructor");
+    expect(enumLabel("EvidenceResult", "toString")).toBe("ToString");
+    expect(lookupLabel("ActionPlanStatus", "hasOwnProperty")).toBeUndefined();
   });
 
   it("renders empty as an em dash", () => {

@@ -7,6 +7,7 @@
 // Constitutional commitment: no React, no DOM. Pure data → strings.
 
 import type { AuditPeriod } from "@/lib/api/audit-periods";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 /**
  * Threshold (in days) for the "amber dot" in-progress cue per AC-6.
@@ -263,7 +264,7 @@ export function statusTallyLabel(periods: AuditPeriod[]): string {
   for (const status of TALLY_STATUS_ORDER) {
     const n = counts.get(status);
     if (n && n > 0) {
-      canonical.push(`${n} ${status}`);
+      canonical.push(`${n} ${enumLabel("AuditPeriodStatus", status)}`);
       counts.delete(status);
     }
   }
@@ -273,7 +274,7 @@ export function statusTallyLabel(periods: AuditPeriod[]): string {
   // only insert into the map when we see a period.
   const remaining = [...counts.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([status, n]) => `${n} ${status}`);
+    .map(([status, n]) => `${n} ${enumLabel("AuditPeriodStatus", status)}`);
 
   return [...canonical, ...remaining].join(" · ");
 }
