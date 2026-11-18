@@ -850,6 +850,57 @@ func (q *Queries) ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg
 	return items, nil
 }
 
+const listFrameworkScopesInReview = `-- name: ListFrameworkScopesInReview :many
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by, activated_at
+FROM framework_scopes
+WHERE tenant_id = $1
+  AND state = 'review'
+ORDER BY created_at DESC, id ASC
+`
+
+// #2457: the framework scopes waiting for approval, for GET /v1/approvals
+// and its sidebar badge.
+func (q *Queries) ListFrameworkScopesInReview(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error) {
+	rows, err := q.db.Query(ctx, listFrameworkScopesInReview, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FrameworkScope
+	for rows.Next() {
+		var i FrameworkScope
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.FrameworkVersionID,
+			&i.Name,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.State,
+			&i.Predicate,
+			&i.PredicateHash,
+			&i.ApproverUserID,
+			&i.ApprovedAt,
+			&i.PredicateHashAtApproval,
+			&i.ApprovalEvidenceFileUrl,
+			&i.ApprovalEvidenceFileHash,
+			&i.EffectiveFrom,
+			&i.SupersededBy,
+			&i.SupersededAt,
+			&i.SelfApproved,
+			&i.SubmittedBy,
+			&i.ActivatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFrameworkVersionLinkedControls = `-- name: ListFrameworkVersionLinkedControls :many
 SELECT DISTINCT e.framework_requirement_id AS requirement_id,
        c.bundle_id

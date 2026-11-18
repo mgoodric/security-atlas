@@ -31,7 +31,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import Link from "next/link";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -51,7 +51,11 @@ import {
 
 import { describeEvent, groupByDay } from "@/lib/activity-sentences";
 import { enumLabel } from "@/lib/labels/enum-labels";
-import type { EntityKind, EntityOption } from "@/lib/entity-picker";
+import {
+  machineActorOptions,
+  type EntityKind,
+  type EntityOption,
+} from "@/lib/entity-picker";
 import {
   ACTIVITY_KINDS,
   ACTOR_ME_SENTINEL,
@@ -61,6 +65,7 @@ import {
   ActivityListResponse,
   MAX_WINDOW_DAYS,
   fetchActivity,
+  fetchActivityActors,
   renderActorLabel,
 } from "@/lib/api/activity";
 import {
@@ -350,6 +355,7 @@ function FilterBar({
   onToChange,
   onKindToggle,
   onIncludeReadsToggle,
+  windowValid,
 }: FilterBarProps) {
   return (
     <div
@@ -391,6 +397,12 @@ function FilterBar({
           <ActorFilterInput
             key={filters.actor}
             initial={filters.actor}
+            actorWindow={{
+              from: filters.from,
+              to: filters.to,
+              includeReads: filters.includeReads,
+            }}
+            windowValid={windowValid}
             onApply={onActorApply}
             onClear={onActorClear}
             hasCommittedValue={Boolean(filters.actor)}
@@ -464,6 +476,13 @@ function FilterBar({
 // or "You". Picking one applies the filter; a pasted user or API key ID
 // is checked on entry and applied when valid.
 //
+// #2414: the machine and system actors in the window's activity are
+// listed too ("System", "OAuth client", the process or client ID as the
+// hint), from GET /api/activity/actors. A deep-linked machine actor
+// (`?actor=system`, `?actor=oauth_client:<id>`) is listed even when the
+// window holds none of its rows, so it keeps its label and survives a
+// blur. Free text for other values is not accepted.
+//
 // Slice 270 D5: "You" is the literal `me` sentinel the BFF resolves
 // server-side to the caller's user_id, so the operator never sees a UUID
 // they did not type.
@@ -474,16 +493,39 @@ const ACTOR_ME_OPTION: readonly EntityOption[] = [
 
 function ActorFilterInput({
   initial,
+  actorWindow,
+  windowValid,
   onApply,
   onClear,
   hasCommittedValue,
 }: {
   initial: string;
+  actorWindow: { from: string; to: string; includeReads: boolean };
+  windowValid: boolean;
   onApply: (actor: string) => void;
   onClear: () => void;
   hasCommittedValue: boolean;
 }) {
   const isMeSentinel = initial === ACTOR_ME_SENTINEL;
+  const machineActors = useQuery({
+    queryKey: [
+      "activity-actors",
+      actorWindow.from,
+      actorWindow.to,
+      actorWindow.includeReads,
+    ],
+    enabled: windowValid,
+    queryFn: ({ signal }) => fetchActivityActors(actorWindow, signal),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const actorOptions = useMemo<readonly EntityOption[]>(
+    () => [
+      ...ACTOR_ME_OPTION,
+      ...machineActorOptions([...(machineActors.data ?? []), initial]),
+    ],
+    [machineActors.data, initial],
+  );
   return (
     <div>
       <label
@@ -506,9 +548,9 @@ function ActorFilterInput({
             kinds={ACTOR_KINDS}
             id="activity-actor"
             testId="activity-actor"
-            placeholder="Search people and API keys, or paste an ID"
+            placeholder="Search people, API keys and system actors, or paste an ID"
             value={initial}
-            extraOptions={ACTOR_ME_OPTION}
+            extraOptions={actorOptions}
             onChange={(actor) => (actor ? onApply(actor) : onClear())}
           />
         </div>

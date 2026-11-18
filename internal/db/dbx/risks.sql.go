@@ -1209,6 +1209,71 @@ func (q *Queries) ListRisksPage(ctx context.Context, arg ListRisksPageParams) ([
 	return items, nil
 }
 
+const listRisksWithProposedAcceptance = `-- name: ListRisksWithProposedAcceptance :many
+SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
+FROM risks
+WHERE tenant_id = $1
+  AND status = 'open'
+  AND acceptance_status = 'proposed'
+ORDER BY created_at DESC, id ASC
+`
+
+// #2457: the open risks whose acceptance waits for approval, for GET
+// /v1/approvals and its sidebar badge. A closed risk's acceptance cannot
+// be approved until it is reopened, so it is not read.
+func (q *Queries) ListRisksWithProposedAcceptance(ctx context.Context, tenantID pgtype.UUID) ([]Risk, error) {
+	rows, err := q.db.Query(ctx, listRisksWithProposedAcceptance, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Risk
+	for rows.Next() {
+		var i Risk
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Description,
+			&i.Methodology,
+			&i.InherentScore,
+			&i.Treatment,
+			&i.TreatmentOwner,
+			&i.ResidualScore,
+			&i.ReviewDueAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AcceptedUntil,
+			&i.Accepter,
+			&i.InstrumentReference,
+			&i.Level,
+			&i.OrgUnitID,
+			&i.Themes,
+			&i.AcceptanceStatus,
+			&i.CategoryID,
+			&i.AcceptanceJustification,
+			&i.AcceptanceProposedUntil,
+			&i.AcceptanceProposedBy,
+			&i.AcceptanceProposedAt,
+			&i.AcceptanceApprovedAt,
+			&i.SelfApproved,
+			&i.Status,
+			&i.ClosureReason,
+			&i.ClosureNote,
+			&i.ClosedAt,
+			&i.ClosedBy,
+			&i.OwnerUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockRiskByID = `-- name: LockRiskByID :one
 SELECT id, tenant_id, title, description, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id, acceptance_justification, acceptance_proposed_until, acceptance_proposed_by, acceptance_proposed_at, acceptance_approved_at, self_approved, status, closure_reason, closure_note, closed_at, closed_by, owner_user_id
 FROM risks

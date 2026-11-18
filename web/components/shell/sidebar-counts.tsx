@@ -47,10 +47,11 @@
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  APPROVALS_QUERY_KEY,
+  approvalsQuery,
   fetchApprovals,
   type ApprovalsResponse,
 } from "@/lib/api/approvals";
+import { useSessionTenant } from "@/components/session-tenant-context";
 import { fetchMyControlsTotal } from "@/lib/api/controls-list";
 // The Risks badge counts the open, non-roll-up risks in the High severity
 // band (slice 214 D1: the mockup's rose count is the high tier). Since
@@ -183,12 +184,13 @@ export function approvalsBadgeLabel(count: number): string {
 
 // #2119 — the Approvals row's badge: how many records the caller can
 // approve now. It reads the platform's server-side `total` through the
-// same query as the /approvals page (APPROVALS_QUERY_KEY), so the badge
+// same query as the /approvals page (approvalsQuery, keyed by tenant), so the badge
 // and the page cannot disagree, and every approval flow invalidates it.
 // Renders nothing on loading, error or zero, like the other badges.
 export function ApprovalsCountBadge() {
+  const tenantId = useSessionTenant();
   const q = useQuery<ApprovalsResponse>({
-    queryKey: APPROVALS_QUERY_KEY,
+    ...approvalsQuery(tenantId),
     queryFn: fetchApprovals,
     staleTime: 60_000,
     refetchInterval: 60_000,

@@ -32,6 +32,16 @@ FROM exceptions
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: ListRequestedExceptions :many
+-- #2457: the exceptions waiting for approval, for GET /v1/approvals and
+-- its sidebar badge. Served by idx_exceptions_tenant_status_expires's
+-- (tenant_id, status) prefix.
+SELECT *
+FROM exceptions
+WHERE tenant_id = $1
+  AND status = 'requested'
+ORDER BY created_at DESC, id ASC;
+
 -- name: ListExceptionsByControl :many
 -- AC-4 read accessor: every active row for a given control. Downstream
 -- evaluation engine (slice 020/012) intersects scope_cell_predicate with
