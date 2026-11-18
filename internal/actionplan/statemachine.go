@@ -167,6 +167,10 @@ var (
 	// never verifies their own plan, whatever the self-approval setting
 	// (#2108). 403.
 	ErrOwnerCannotVerify = errors.New("actionplan: the plan's owner cannot verify it")
+	// ErrVerifierInvolved — the verifier moved the plan to completed, or
+	// owned it at some point since, per its audit trail; or the trail
+	// could not be read, and the rule fails closed (#2434). 403.
+	ErrVerifierInvolved = errors.New("actionplan: whoever completed the plan, or owned it since, cannot verify it")
 	// ErrVerifierNotPerson — the verifying credential belongs to no user. 403.
 	ErrVerifierNotPerson = errors.New("actionplan: only a person can verify a plan")
 	// ErrLimitExceeded — the per-plan 50-risk / 50-control cap is hit

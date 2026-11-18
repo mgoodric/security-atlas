@@ -131,6 +131,11 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"adminscim/http.go requireAdmin": site(adm,
 			r2447(get, "/v1/admin/scim-credentials"),
 			r2447(del, "/v1/admin/scim-credentials/"+id)),
+		// #2503: the tenant's IdP group-to-role map. POST shares the gate with
+		// GET on the same path, which handlerNarrower2428 keys on.
+		"admingroupmappings/http.go requireAdmin": site(adm,
+			r2447(get, "/v1/admin/group-role-mappings"),
+			r2447(del, "/v1/admin/group-role-mappings/"+id)),
 		// #2503 D5: the tenant's feature-flag flip log.
 		"adminauditlog/handler.go requireAdmin": site(adm, r2447(get, "/v1/admin/audit-log")),
 		// #2503 D5: the unified read and its export admit IsTenantAdmin or a

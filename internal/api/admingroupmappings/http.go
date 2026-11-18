@@ -1,8 +1,9 @@
 // Package admingroupmappings is the admin HTTP surface for managing IdP
 // group-to-role mappings (slice 509): /v1/admin/group-role-mappings.
 //
-// These routes live on the /v1 tree and require an ADMIN atlas credential
-// (cred.IsAdmin) — editing a mapping is a privilege-granting action (AC-8 /
+// These routes live on the /v1 tree and require an admin of the caller's
+// tenant (authz.IsTenantAdmin, #2503) — editing a mapping is a
+// privilege-granting action (AC-8 /
 // STRIDE-T). A non-admin caller gets 403. The handler validates that a mapping
 // only ever targets an EXISTING canonical atlas role (P0-509-4) before the
 // write; a non-existent role is a 400, never an auto-created role.
@@ -26,6 +27,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 const maxBody = 16 * 1024
@@ -160,7 +162,9 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return adminCred{}, false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles maps its own tenant's IdP
+	// groups to canonical roles; the store runs under that tenant's RLS.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return adminCred{}, false
 	}
