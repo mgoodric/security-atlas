@@ -31,6 +31,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
+	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
@@ -40,6 +41,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
 
@@ -53,7 +55,6 @@ const (
 var platformRoutes2503 = []struct{ method, path string }{
 	{http.MethodGet, "/v1/admin/credentials"},
 	{http.MethodPost, "/v1/admin/credentials"},
-	{http.MethodGet, "/v1/admin/features"},
 	{http.MethodGet, "/v1/admin/tenants"},
 	{http.MethodPost, "/v1/admin/tenants"},
 	{http.MethodGet, "/v1/admin/super-admins"},
@@ -120,6 +121,10 @@ func newStack2503(t *testing.T) stack2503 {
 	r.Post("/v1/admin/group-role-mappings", groupMap.Create)
 	r.Get("/v1/admin/group-role-mappings", groupMap.List)
 	r.Delete("/v1/admin/group-role-mappings/{id}", groupMap.Delete)
+	// #2503: the tenant's module and feature switches.
+	feats := featuresapi.New(featureflag.NewStore(appPool))
+	r.Get("/v1/admin/features", feats.List)
+	r.Patch("/v1/admin/features/{key}", feats.Patch)
 	auditLog := adminauditlog.New(appPool)
 	r.Get("/v1/admin/audit-log", auditLog.List)
 	r.Get("/v1/admin/audit-log/unified", auditLog.UnifiedList)
@@ -453,6 +458,54 @@ func TestTenantAdmin2503_GroupRoleMappings(t *testing.T) {
 	}
 	if rr, _ := s.do(t, tok, http.MethodDelete, "/v1/admin/group-role-mappings/"+created.ID, nil); rr.Code != http.StatusNoContent {
 		t.Errorf("own delete = %d %s, want 204", rr.Code, rr.Body.String())
+	}
+}
+
+// #2503: a tenant admin by role switches its own tenant's modules. The switch
+// does not reach another tenant, and spine flags stay refused.
+func TestTenantAdmin2503_Features(t *testing.T) {
+	skipIfNoAdminPool(t)
+	s := newStack2503(t)
+	own := seedTenant478(t, "test-2503-feat-"+uuid.NewString()[:8])
+	other := seedTenant478(t, "test-2503-feat-other-"+uuid.NewString()[:8])
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = adminPool.Exec(ctx, `DELETE FROM feature_flag_audit_log WHERE tenant_id = ANY($1)`, []uuid.UUID{own, other})
+		_, _ = adminPool.Exec(ctx, `DELETE FROM feature_flags WHERE tenant_id = ANY($1)`, []uuid.UUID{own, other})
+	})
+	tok := s.mint(t, own, seedMember2261(t, own, "active", "admin"), authz.RoleAdmin)
+	otherTok := s.mint(t, other, seedMember2261(t, other, "active", "admin"), authz.RoleAdmin)
+
+	if rr, _ := s.do(t, tok, http.MethodGet, "/v1/admin/features", nil); rr.Code != http.StatusOK {
+		t.Fatalf("list features = %d %s, want 200", rr.Code, rr.Body.String())
+	}
+	rr, _ := s.do(t, tok, http.MethodPatch, "/v1/admin/features/vendor.enabled",
+		map[string]any{"enabled": false, "reason": "#2503 e2e"})
+	if rr.Code != http.StatusOK || !bytes.Contains(rr.Body.Bytes(), []byte(`"enabled":false`)) {
+		t.Fatalf("switch vendor.enabled off = %d %s, want 200 enabled=false", rr.Code, rr.Body.String())
+	}
+	enabledIn := func(tenant uuid.UUID) bool {
+		var on bool
+		err := adminPool.QueryRow(context.Background(),
+			`SELECT COALESCE((SELECT enabled FROM feature_flags WHERE tenant_id = $1 AND flag_key = 'vendor.enabled'), true)`,
+			tenant).Scan(&on)
+		if err != nil {
+			t.Fatalf("read flag: %v", err)
+		}
+		return on
+	}
+	if enabledIn(own) {
+		t.Errorf("own tenant's vendor.enabled still on after the switch")
+	}
+	if !enabledIn(other) {
+		t.Errorf("another tenant's vendor.enabled changed")
+	}
+	if rr, _ := s.do(t, otherTok, http.MethodGet, "/v1/admin/features", nil); rr.Code != http.StatusOK {
+		t.Errorf("other tenant's list = %d, want 200", rr.Code)
+	}
+	if rr, _ := s.do(t, tok, http.MethodPatch, "/v1/admin/features/rls.policies",
+		map[string]any{"enabled": false, "reason": "#2503 e2e"}); rr.Code != http.StatusBadRequest && rr.Code != http.StatusNotFound {
+		t.Errorf("switch spine flag rls.policies = %d, want 400 or 404", rr.Code)
 	}
 }
 

@@ -136,6 +136,10 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"admingroupmappings/http.go requireAdmin": site(adm,
 			r2447(get, "/v1/admin/group-role-mappings"),
 			r2447(del, "/v1/admin/group-role-mappings/"+id)),
+		// #2503: the tenant's module and feature switches.
+		"features/handler.go requireAdmin": site(adm,
+			r2447(get, "/v1/admin/features"),
+			r2447(patch, "/v1/admin/features/policy.enabled")),
 		// #2503 D5: the tenant's feature-flag flip log.
 		"adminauditlog/handler.go requireAdmin": site(adm, r2447(get, "/v1/admin/audit-log")),
 		// #2503 D5: the unified read and its export admit IsTenantAdmin or a
