@@ -15,9 +15,11 @@
 -- request's `app.current_tenant` GUC set by tenancy.Middleware; RLS does
 -- the filtering. Catalog tables (`framework_requirements`,
 -- `fw_to_scf_edges`, `scf_anchors`, `framework_versions`) have no
--- tenant_id and no RLS — global, platform-bundled. No app-level
--- `WHERE tenant_id = ?` clause is permitted on the controls reads
--- (constitutional invariant 6 per CLAUDE.md / canvas §5.4).
+-- tenant_id and no RLS — global, platform-bundled. These traversals take
+-- no tenant parameter and rely on RLS alone for the controls reads
+-- (constitutional invariant 6 per CLAUDE.md / canvas §5.4). An explicit
+-- `tenant_id = $n` predicate would be an allowed second leg that only
+-- narrows, never the boundary (ADR 0026).
 
 -- name: ListAnchorsForRequirementWithEdges :many
 -- AC-1 (anchors arm). Given a framework_requirement id, return every
