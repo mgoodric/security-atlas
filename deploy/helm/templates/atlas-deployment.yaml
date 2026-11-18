@@ -30,8 +30,19 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /*
+      #2609: the OIDC key Secret is mounted root-owned, mode 0440. The atlas
+      image runs as distroless nonroot (uid/gid 65532), so the pod needs that
+      fsGroup to read it; without it the read fails and the boot is fatal.
+      Added on this pod only, and only with the mount, so MinIO and NATS
+      PVCs are not re-chowned. An explicit podSecurityContext.fsGroup wins.
+      */}}
+      {{- $podSecurityContext := deepCopy .Values.podSecurityContext }}
+      {{- if .Values.oidc.secretKey.existingSecret }}
+      {{- $podSecurityContext = merge $podSecurityContext (dict "fsGroup" 65532) }}
+      {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- toYaml $podSecurityContext | nindent 8 }}
       containers:
         - name: atlas
           image: "{{ .Values.image.registry }}/{{ $imageRepo }}:{{ $imageTag }}"
@@ -84,7 +95,8 @@ spec:
         - name: oidc-secret-key
           secret:
             secretName: {{ .Values.oidc.secretKey.existingSecret }}
-            defaultMode: 0400
+            # Owner root, group the pod's fsGroup (65532 by default, above).
+            defaultMode: 0440
             items:
               - key: {{ .Values.oidc.secretKey.secretKey }}
                 path: {{ .Values.oidc.secretKey.secretKey }}

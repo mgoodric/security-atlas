@@ -129,7 +129,9 @@ oidc:
     secretKey: oidc-secret-key # the key inside that Secret
 ```
 
-The chart mounts it read-only at `/etc/security-atlas/oidc/` and sets
+The chart mounts it read-only (mode 0440) at `/etc/security-atlas/oidc/`,
+gives the atlas pod `fsGroup: 65532` so the nonroot server can read it (an
+explicit `podSecurityContext.fsGroup` wins), and sets
 `ATLAS_OIDC_SECRET_KEY_FILE`. Keep the same key across upgrades and on every
 replica: changing it means re-entering the client secret on the SSO page.
 Unset, the SSO page cannot save a client secret; local login is unaffected.

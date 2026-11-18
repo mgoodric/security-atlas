@@ -195,13 +195,35 @@ says cmd/atlas refuses to boot on a malformed key, is now true in every mode.
 ## D13. Helm: the key is a mounted file
 
 `oidc.secretKey.existingSecret` names a Secret the chart mounts read-only
-(mode 0400) at `/etc/security-atlas/oidc/`, and the chart sets
+at `/etc/security-atlas/oidc/`, and the chart sets
 `ATLAS_OIDC_SECRET_KEY_FILE`. The key is kept apart from
 `secrets.existingSecret`, which the chart feeds to the pod as environment
 variables through `envFrom`, so that it never sits in the environment.
-`secrets.oidcSecretKey` renders it into the inline dev Secret instead;
-`values-production.yaml` shows the existingSecret form. The compose
-`.env.example` already carried the key; it now notes the every-mode check.
+`secrets.oidcSecretKey` renders it into the inline dev Secret instead. The
+compose `.env.example` already carried the key; it now notes the every-mode
+check.
+
+**Review fix: the file must be readable by the server.** The first version
+mounted the file root-owned, mode 0400, with no `fsGroup`. The atlas image
+runs as distroless `nonroot` (uid/gid 65532), so the read failed, D12 made
+that a fatal boot error, and `values-production.yaml` turned the mount on by
+default: every production install would crash-loop. Now:
+
+- the volume is mode 0440 (owner root, group the pod's `fsGroup`);
+- the atlas pod gets `fsGroup: 65532` whenever the key is mounted, merged
+  into `podSecurityContext` so an explicit `podSecurityContext.fsGroup`
+  wins. It is added to the atlas pod only, not to the chart-wide
+  `podSecurityContext` default, because that default is shared with the
+  MinIO and NATS pods, whose PVCs `fsGroup` would recursively re-chown on
+  every mount;
+- `values-production.yaml` leaves `existingSecret` empty and shows the
+  Secret name as a commented example, so an upgrade without a pre-created
+  Secret does not hang in ContainerCreating;
+- `scripts/test-helm-oidc-key.sh`, run by the `Helm chart · lint + template`
+  CI job, asserts on every render that a key volume implies an `fsGroup`,
+  and checks the mode, the override, the production values and that NATS
+  is untouched. The repo has no kind / cluster smoke job, so this is a
+  render assertion, not a boot check.
 
 ## D14. SSO page wording
 
