@@ -31,6 +31,7 @@
 // `next.config.ts`, and a matching plugin in `vitest.config.ts`.
 
 import actionPlansSource from "@/help/modules/action-plans.md";
+import activitySource from "@/help/modules/activity.md";
 import adminSource from "@/help/modules/admin.md";
 import adminApiKeysSource from "@/help/modules/admin-api-keys.md";
 import adminDemoSource from "@/help/modules/admin-demo.md";
@@ -39,14 +40,18 @@ import adminSsoSource from "@/help/modules/admin-sso.md";
 import adminSuperAdminsSource from "@/help/modules/admin-super-admins.md";
 import adminTenantsSource from "@/help/modules/admin-tenants.md";
 import adminUsersSource from "@/help/modules/admin-users.md";
+import approvalsSource from "@/help/modules/approvals.md";
 import auditsSource from "@/help/modules/audits.md";
 import boardPacksSource from "@/help/modules/board-packs.md";
+import calendarSource from "@/help/modules/calendar.md";
 import controlsSource from "@/help/modules/controls.md";
 import controlsChecklistSource from "@/help/modules/controls-checklist.md";
 import csfSource from "@/help/modules/csf.md";
+import dashboardSource from "@/help/modules/dashboard.md";
 import evidenceSource from "@/help/modules/evidence.md";
 import exceptionsSource from "@/help/modules/exceptions.md";
 import frameworkScopesSource from "@/help/modules/framework-scopes.md";
+import metricsSource from "@/help/modules/metrics.md";
 import personnelSecuritySource from "@/help/modules/personnel-security.md";
 import policiesSource from "@/help/modules/policies.md";
 import questionnairesSource from "@/help/modules/questionnaires.md";
@@ -112,6 +117,12 @@ export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "risks.md": risksSource,
   "risks-hierarchy.md": risksHierarchySource,
   "action-plans.md": actionPlansSource,
+  // #2149: Program.
+  "dashboard.md": dashboardSource,
+  "approvals.md": approvalsSource,
+  "calendar.md": calendarSource,
+  "metrics.md": metricsSource,
+  "activity.md": activitySource,
   // #2155: Settings & admin.
   "settings.md": settingsSource,
   "admin.md": adminSource,

@@ -24,6 +24,7 @@ import { treatmentBadge } from "@/components/dashboard/treatment-badge";
 import { Badge } from "@/components/ui/badge";
 import { Person } from "@/components/ui/person";
 import type { DashboardRisk } from "@/lib/api/dashboard";
+import { Term } from "@/components/help/term";
 
 // ResidualBand shows the residual and its band. A FAIR residual is a
 // dollar exposure with no 5x5 band; an unscored risk shows a dash.
@@ -67,7 +68,11 @@ export function TopRisksPanel({
 }) {
   return (
     <PanelCard
-      title="Top risks"
+      title={
+        <>
+          Top risks by <Term id="residual-risk">residual</Term>
+        </>
+      }
       description="The 5 open risks with the highest residual"
       action={
         <Link href="/risks" className="text-xs text-primary hover:underline">

@@ -101,6 +101,11 @@ test.describe("global ⌘K search — real endpoint (OE-398c)", () => {
     );
 
     // 1. Open with the keyboard shortcut.
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
+    );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();
 
@@ -220,6 +225,11 @@ test.describe("global ⌘K search — real endpoint (OE-398c)", () => {
     const searchResponse = page.waitForResponse(
       (r) => r.url().includes("/api/search") && r.status() === 200,
       { timeout: 30_000 },
+    );
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
     );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();

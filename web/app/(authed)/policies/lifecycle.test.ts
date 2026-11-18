@@ -6,6 +6,8 @@ import { describe, expect, test } from "vitest";
 import type { Policy } from "@/lib/api/policies";
 
 import {
+  AUDIENCE_OPTIONS,
+  audienceLabel,
   createInput,
   EMPTY_FORM,
   formFromPolicy,
@@ -13,6 +15,7 @@ import {
   needsControlsWarning,
   nextVersion,
   primaryAction,
+  unrecognisedAudiences,
   validatePolicyForm,
 } from "./lifecycle";
 
@@ -133,5 +136,51 @@ describe("new version", () => {
     ["", "1.0"],
   ])("nextVersion(%j) = %j", (from, to) => {
     expect(nextVersion(from)).toBe(to);
+  });
+});
+
+// #2524 — a policy's audience is the roles plus everyone; a free-text value
+// from before shows flagged, may stay on an edit, and blocks a create.
+describe("audience", () => {
+  test("options are the roles plus everyone", () => {
+    expect(AUDIENCE_OPTIONS).toEqual([
+      "admin",
+      "grc_engineer",
+      "control_owner",
+      "auditor",
+      "viewer",
+      "everyone",
+    ]);
+    expect(audienceLabel("everyone")).toBe("Everyone (all members)");
+    expect(audienceLabel("viewer")).toBe("viewer");
+  });
+
+  test("free-text values are unrecognised", () => {
+    expect(unrecognisedAudiences(["viewer", "employee", "everyone"])).toEqual([
+      "employee",
+    ]);
+  });
+
+  test("a create with a free-text audience is refused; an edit keeps it", () => {
+    const v = {
+      ...EMPTY_FORM,
+      title: "T",
+      owner_role: "o",
+      approver_role: "a",
+      body_md: "b",
+      acknowledgment_required_roles: ["employee"],
+    };
+    expect(
+      validatePolicyForm(v, "create").acknowledgment_required_roles,
+    ).toContain("employee");
+    expect(
+      validatePolicyForm(v, "edit").acknowledgment_required_roles,
+    ).toBeUndefined();
+    expect(
+      validatePolicyForm(
+        { ...v, acknowledgment_required_roles: ["everyone"] },
+        "create",
+      ).acknowledgment_required_roles,
+    ).toBeUndefined();
   });
 });

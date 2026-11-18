@@ -48,6 +48,20 @@ import {
   fetchCalendarEvents,
 } from "@/lib/api/calendar";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
+
+// #2149 — the header names the page's key terms, so each definition is one
+// hover away. Shared by the Suspense fallback, so it shows while loading.
+const CALENDAR_SUBTITLE = (
+  <>
+    Upcoming <Term id="audit-period">audits</Term>,{" "}
+    <Term id="exception">exception</Term> expirations, policy reviews, vendor
+    reviews on their <Term id="review-cadence">cadence</Term>, periodic control
+    reviews, risk reviews, action-plan due dates and offboarding deadlines — one
+    place for the whole team. <Term id="calendar-subscription">Subscribe</Term>{" "}
+    to see them in your own calendar.
+  </>
+);
 
 const ALL_TYPES = [
   "audit",
@@ -162,7 +176,7 @@ function CalendarPageInner() {
   return (
     <PageShell
       title={pageTitle("/calendar")}
-      subtitle="Upcoming audits, exception expirations, policy reviews, vendor reviews, periodic control reviews, risk reviews, action-plan due dates and offboarding deadlines — one place for the whole team."
+      subtitle={CALENDAR_SUBTITLE}
       actions={
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">
@@ -264,7 +278,7 @@ export default function CalendarPage() {
   return (
     <Suspense
       fallback={
-        <PageShell title={pageTitle("/calendar")}>
+        <PageShell title={pageTitle("/calendar")} subtitle={CALENDAR_SUBTITLE}>
           <Skeleton className="h-32 w-full" />
         </PageShell>
       }
