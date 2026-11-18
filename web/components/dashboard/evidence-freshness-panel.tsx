@@ -22,6 +22,7 @@
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import type { FreshnessReport } from "@/lib/api/dashboard";
+import { Term } from "@/components/help/term";
 
 function freshFraction(fresh: number, total: number): number {
   if (total <= 0) return 0;
@@ -45,7 +46,7 @@ export function EvidenceFreshnessPanel({
 }) {
   return (
     <PanelCard
-      title="Evidence freshness"
+      title={<Term id="evidence-freshness">Evidence freshness</Term>}
       description="Per-control freshness verdict (latest evidence per control) by freshness class"
       state={state}
       skeletonClassName="h-48 w-full"

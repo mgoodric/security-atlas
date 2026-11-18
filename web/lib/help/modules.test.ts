@@ -167,7 +167,7 @@ describe("the real help files", () => {
 
   it("covers Controls, and leaves an unmapped page without help", () => {
     expect(helpModuleForPath("/controls")?.id).toBe("controls");
-    expect(helpModuleForPath("/calendar")).toBeUndefined();
+    expect(helpModuleForPath("/requirements/abc")).toBeUndefined();
     expect(helpDocsHref("controls")).toBe(
       "https://mgoodric.github.io/security-atlas/help/controls/",
     );
@@ -298,6 +298,31 @@ describe("the real help files", () => {
     const mod = HELP_MODULES.find((m) => m.id === id);
     expect(mod?.lifecycles.map((l) => l.lifecycle)).toEqual(lifecycles);
   });
+
+  // #2149 — every Program page resolves to its own module; the full
+  // needs-attention list stays on the dashboard help, and a metric's page on
+  // the metrics help.
+  it.each([
+    ["/dashboard", "dashboard"],
+    ["/needs-attention", "dashboard"],
+    ["/approvals", "approvals"],
+    ["/calendar", "calendar"],
+    ["/dashboards/metrics", "metrics"],
+    ["/dashboards/metrics/abc", "metrics"],
+    ["/activity", "activity"],
+  ])("covers %s with the %s help", (route, id) => {
+    expect(helpModuleForPath(route)?.id).toBe(id);
+  });
+
+  // #2149 — no Program page owns an exported lifecycle, so none embeds one.
+  it.each(["dashboard", "approvals", "calendar", "metrics", "activity"])(
+    "embeds no lifecycle diagram in the %s help",
+    (id) => {
+      const mod = HELP_MODULES.find((m) => m.id === id);
+      expect(mod).toBeDefined();
+      expect(mod?.lifecycles).toEqual([]);
+    },
+  );
 
   // #2145 — a module's hint dismissal is refused unless its id is in
   // userprefs.HintModules and the migration's CHECK, so the three lists

@@ -155,9 +155,9 @@ test.describe("How this works panel (#2143)", () => {
   test("a page with no help module shows no ?", async ({
     authedPage: page,
   }) => {
-    await page.goto("/calendar");
+    await page.goto("/requirements/00000000-0000-0000-0000-000000000000");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Calendar" }),
+      page.getByRole("heading", { level: 1, name: "Requirement" }),
     ).toBeVisible();
     await expect(page.getByTestId("help-button")).toHaveCount(0);
   });

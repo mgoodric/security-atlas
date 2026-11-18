@@ -119,6 +119,11 @@ nav:
       - Risk register: help/risks.md
       - Risk hierarchy: help/risks-hierarchy.md
       - Action plans: help/action-plans.md
+      - Dashboard: help/dashboard.md
+      - Approvals: help/approvals.md
+      - Calendar: help/calendar.md
+      - Metrics: help/metrics.md
+      - Activity: help/activity.md
       - Settings: help/settings.md
       - Admin: help/admin.md
       - Users: help/admin-users.md
