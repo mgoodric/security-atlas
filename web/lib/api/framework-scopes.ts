@@ -2,7 +2,7 @@
 // `web/lib/api.ts` god-file.
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 
 export type FrameworkScopeState =
   | "draft"
@@ -56,15 +56,9 @@ export type FrameworkScopePatchResponse = {
 // #2115: the platform's `{"error": "..."}` message, so a refusal (the
 // approval rule's "the submitter cannot approve their own scope", a frozen
 // revision) reaches the page as the platform words it, else the status line.
+// A 5xx always gets the status line (#2433).
 async function upstreamError(res: Response): Promise<APIError> {
-  let msg = `${res.status} ${res.statusText}`;
-  try {
-    const j = (await res.json()) as { error?: string };
-    if (j.error) msg = j.error;
-  } catch {
-    // body not JSON — keep the status line
-  }
-  return new APIError(res.status, msg);
+  return new APIError(res.status, await upstreamErrorMessage(res));
 }
 
 export async function listFrameworkScopes(
