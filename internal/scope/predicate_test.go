@@ -123,3 +123,21 @@ func TestNormalizeCredentialPredicate(t *testing.T) {
 		}
 	}
 }
+
+// #2343: ValidateExpr is the strict grammar check exception create uses.
+func TestValidateExpr(t *testing.T) {
+	t.Parallel()
+	for in, ok := range map[string]bool{
+		`{"op":"true"}`: true,
+		`{"op":"in","dim":"environment","values":["prod"]}`: true,
+		`{"op":"bogus"}`:      false,
+		`{}`:                  false,
+		`{"op":"true","x":1}`: false,
+		`{"op":"in","dim":"environment","values":[]}`: false,
+	} {
+		err := ValidateExpr([]byte(in))
+		if (err == nil) != ok || (err != nil && !errors.Is(err, ErrBadPredicate)) {
+			t.Errorf("ValidateExpr(%s) = %v, want ok=%v", in, err, ok)
+		}
+	}
+}

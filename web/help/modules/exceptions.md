@@ -55,4 +55,4 @@ export the list as CSV, JSON or a spreadsheet.
   and GRC engineers. The approver must be a different person from the
   requester, unless an admin has turned on self-approval; a self-approved
   exception is marked as such. Nobody can deny their own request, and
-  only a person approves, never an API key.
+  only a person approves, denies, activates or revokes, never an API key.

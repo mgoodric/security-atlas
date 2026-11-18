@@ -17,7 +17,8 @@
 // applies the tenant GUC.
 //
 // AC-3 + segregation of duties: approve/deny/activate/revoke require IsApprover
-// (with IsAdmin implying IsApprover). approve/deny also reject when the
+// (with IsAdmin implying IsApprover) and a person, never a machine
+// credential (#2343). approve/deny also reject when the
 // caller's credential id equals the row's requested_by (defense in depth
 // against same-user filing + adjudicating).
 package exceptions
@@ -42,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -305,6 +307,9 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
+	if !requirePerson(w, cred, "approve") {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
@@ -334,6 +339,9 @@ func (h *Handler) Deny(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
+	if !requirePerson(w, cred, "deny") {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
@@ -360,6 +368,9 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	}
 	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+		return
+	}
+	if !requirePerson(w, cred, "activate") {
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -395,6 +406,9 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
+	if !requirePerson(w, cred, "revoke") {
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
@@ -419,6 +433,19 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 // ----- helpers -----
 
+// requirePerson refuses a lifecycle move from a machine credential (#2343).
+// Approve, deny, activate and revoke are ActorPerson moves in Lifecycle:
+// MinterUserID is empty for an unbound API key, an OAuth client and the
+// bootstrap admin, so those get 403 whatever their roles. Writes the 403
+// and returns false when the caller is not a person.
+func requirePerson(w http.ResponseWriter, cred credstore.Credential, verb string) bool {
+	if credstore.MinterUserID(cred) != "" {
+		return true
+	}
+	httpresp.WriteError(w, http.StatusForbidden, "only a person can "+verb+" an exception; use your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
+	return false
+}
+
 // checkPredicate refuses a scope_cell_predicate the evaluator would read
 // as something the requester did not mean. A JSON null, or anything that
 // is not an object, is refused: internal/scope reads a stored null as
@@ -436,6 +463,15 @@ func checkPredicate(raw json.RawMessage) string {
 	}
 	if !strings.HasPrefix(trimmed, "{") {
 		return "scope_cell_predicate must be a JSON object"
+	}
+	// {} is the stored spelling of the omitted field. Anything else must be
+	// a well-formed expression in the scope grammar (#2343): {"op":"bogus"}
+	// would otherwise be stored and fail every evaluation of the control.
+	if trimmed == "{}" {
+		return ""
+	}
+	if err := scope.ValidateExpr([]byte(trimmed)); err != nil {
+		return "scope_cell_predicate is not a valid scope expression: " + strings.TrimPrefix(err.Error(), scope.ErrBadPredicate.Error()+": ")
 	}
 	return ""
 }

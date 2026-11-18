@@ -8,6 +8,7 @@
       "completed",
       "verified"
     ],
-    "AuditPeriodStatus": ["open", "frozen"]
+    "AuditPeriodStatus": ["open", "frozen"],
+    "FreshnessState": ["fresh", "stale", "no_evidence"]
   }
 }

@@ -61,7 +61,7 @@
         "grc_engineer"
       ],
       "requires_approver": true,
-      "people_only": false,
+      "people_only": true,
       "second_person": true,
       "self_approval_opt_in": false,
       "note": "Allow self-approval does not extend to denial: the requester never denies their own exception."
@@ -79,7 +79,7 @@
         "grc_engineer"
       ],
       "requires_approver": true,
-      "people_only": false,
+      "people_only": true,
       "second_person": false,
       "self_approval_opt_in": false
     },
@@ -107,7 +107,7 @@
         "grc_engineer"
       ],
       "requires_approver": true,
-      "people_only": false,
+      "people_only": true,
       "second_person": false,
       "self_approval_opt_in": false,
       "note": "An approver ends an active exception before it expires, with a reason (#2113). The control is re-evaluated as soon as the revocation commits (#2269)."
