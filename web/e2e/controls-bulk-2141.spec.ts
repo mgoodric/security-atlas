@@ -243,7 +243,11 @@ test.describe("#2141 — bulk actions (route-mocked)", () => {
     await expect(row(page, "Many control 200")).toBeVisible({
       timeout: 30_000,
     });
-    await page.getByTestId("controls-select-all").click();
+    // The table's header checkbox; each row card repeats the header.
+    await page
+      .getByTestId("list-table-wrap")
+      .getByTestId("controls-select-all")
+      .click();
     await expect(page.getByTestId("controls-selection-count")).toHaveText(
       "201 selected",
     );
