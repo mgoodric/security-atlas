@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,7 @@ import (
 // slice 030 reads from.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
+	sweepGlobalFrameworks(t, admin)
 	tenant := uuid.NewString()
 	t.Cleanup(func() {
 		ctx := context.Background()
@@ -76,8 +78,46 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	return tenant
 }
 
+// globalFrameworks records, per test, the global (tenant_id IS NULL)
+// frameworks seedFrameworkVersion inserted, for sweepGlobalFrameworks to
+// delete. Left behind, they show up in every other package's framework
+// listings on a shared DB (#2525).
+var globalFrameworks = struct {
+	sync.Mutex
+	byTest map[*testing.T][]uuid.UUID
+}{byTest: map[*testing.T][]uuid.UUID{}}
+
+// sweepGlobalFrameworks registers, once per test, the cleanup that deletes
+// the test's global frameworks (versions and requirements cascade). The
+// audit_periods that reference a version do so ON DELETE RESTRICT, so the
+// sweep must run after every freshTenant cleanup in the test. Cleanups run
+// last-registered first, so it is registered by the first freshTenant
+// call, ahead of every tenant cleanup.
+func sweepGlobalFrameworks(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	globalFrameworks.Lock()
+	defer globalFrameworks.Unlock()
+	if _, ok := globalFrameworks.byTest[t]; ok {
+		return
+	}
+	globalFrameworks.byTest[t] = nil
+	t.Cleanup(func() {
+		globalFrameworks.Lock()
+		ids := globalFrameworks.byTest[t]
+		delete(globalFrameworks.byTest, t)
+		globalFrameworks.Unlock()
+		for _, id := range ids {
+			if _, err := admin.Exec(context.Background(),
+				`DELETE FROM frameworks WHERE id = $1 AND tenant_id IS NULL`, id); err != nil {
+				t.Errorf("cleanup global framework %s: %v", id, err)
+			}
+		}
+	})
+}
+
 func seedFrameworkVersion(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
+	sweepGlobalFrameworks(t, admin)
 	fwID, versionID := uuid.New(), uuid.New()
 	slug := fmt.Sprintf("slice030-%s", uuid.NewString()[:8])
 	if _, err := admin.Exec(context.Background(),
@@ -85,6 +125,9 @@ func seedFrameworkVersion(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 		 VALUES ($1, NULL, 'Slice 030 test framework', $2, 'test')`, fwID, slug); err != nil {
 		t.Fatalf("seed framework: %v", err)
 	}
+	globalFrameworks.Lock()
+	globalFrameworks.byTest[t] = append(globalFrameworks.byTest[t], fwID)
+	globalFrameworks.Unlock()
 	if _, err := admin.Exec(context.Background(),
 		`INSERT INTO framework_versions (id, tenant_id, framework_id, version)
 		 VALUES ($1, NULL, $2, '1.0')`, versionID, fwID); err != nil {
