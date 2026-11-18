@@ -52,7 +52,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { use, useEffect, useState, type ReactNode } from "react";
+import { use, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -115,6 +115,7 @@ export default function RiskDetailPage({
   const qc = useQueryClient();
   const { toast } = useToast();
   const [confirmingReopen, setConfirmingReopen] = useState(false);
+  const reopenRef = useRef<HTMLButtonElement>(null);
 
   // #2107: reopen is one click, confirmed inline.
   const reopen = useMutation({
@@ -237,6 +238,7 @@ export default function RiskDetailPage({
           ? { href: `${base}/edit`, "data-testid": "risk-detail-edit" }
           : undefined
       }
+      primaryActionRef={reopenRef}
       primaryAction={
         !canEdit
           ? undefined
@@ -326,6 +328,7 @@ export default function RiskDetailPage({
           ariaLabel="Confirm: reopen risk"
           busy={reopen.isPending}
           onCancel={() => setConfirmingReopen(false)}
+          returnFocus={() => reopenRef.current}
           onConfirm={() => reopen.mutate()}
           data-testid="risk-detail-reopen-confirm"
         >

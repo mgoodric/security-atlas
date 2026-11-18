@@ -24,7 +24,7 @@ import { useId, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ConfirmInline } from "@/components/ui/row-actions";
+import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
 import { Select } from "@/components/ui/select";
 import {
   attachChildRisks,
@@ -50,6 +50,7 @@ export function RiskHierarchyLinks({ risk, canEdit }: Props) {
   const [actionError, setActionError] = useState<string | null>(null);
   // #2280: Detach fires at once, so it asks first. Holds the child id.
   const [confirmingDetach, setConfirmingDetach] = useState<string | null>(null);
+  const detachTriggers = useTriggerRefs();
 
   const children = useQuery({
     queryKey: ["risk-children", risk.id],
@@ -170,6 +171,7 @@ export function RiskHierarchyLinks({ risk, canEdit }: Props) {
                       ariaLabel={`Confirm: detach ${c.title}`}
                       busy={detach.isPending}
                       onCancel={() => setConfirmingDetach(null)}
+                      returnFocus={() => detachTriggers.get(c.id)}
                       onConfirm={() => detach.mutate(c.id)}
                       data-testid={`risk-detail-child-detach-${c.id}-confirm`}
                     />
@@ -179,6 +181,7 @@ export function RiskHierarchyLinks({ risk, canEdit }: Props) {
                       size="xs"
                       disabled={detach.isPending}
                       onClick={() => setConfirmingDetach(c.id)}
+                      ref={detachTriggers.ref(c.id)}
                       data-testid={`risk-detail-child-detach-${c.id}`}
                       aria-label={`Detach ${c.title}`}
                     >

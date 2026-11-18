@@ -18,7 +18,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -237,6 +237,7 @@ function CategoryRow({
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(c.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteRef = useRef<HTMLButtonElement>(null);
   const blocked = deleteBlockedReason(c);
 
   return (
@@ -378,6 +379,7 @@ function CategoryRow({
               aria-describedby={
                 blocked ? `category-delete-reason-${c.slug}` : undefined
               }
+              ref={deleteRef}
               onClick={() => setConfirmDelete(true)}
               data-testid={`category-delete-${c.slug}`}
             >
@@ -400,6 +402,7 @@ function CategoryRow({
                 confirmLabel="Delete"
                 busy={busy}
                 onCancel={() => setConfirmDelete(false)}
+                returnFocus={() => deleteRef.current}
                 onConfirm={() => {
                   setConfirmDelete(false);
                   onRun(
@@ -550,6 +553,7 @@ function ThemeRow({
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(t.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteRef = useRef<HTMLButtonElement>(null);
   const builtIn = t.source === "default";
   const blocked = deleteBlockedReason(t);
 
@@ -637,6 +641,7 @@ function ThemeRow({
                   aria-describedby={
                     blocked ? `theme-delete-reason-${t.name}` : undefined
                   }
+                  ref={deleteRef}
                   onClick={() => setConfirmDelete(true)}
                   data-testid={`theme-delete-${t.name}`}
                 >
@@ -659,6 +664,7 @@ function ThemeRow({
                     confirmLabel="Delete"
                     busy={busy}
                     onCancel={() => setConfirmDelete(false)}
+                    returnFocus={() => deleteRef.current}
                     onConfirm={() => {
                       setConfirmDelete(false);
                       onRun(
