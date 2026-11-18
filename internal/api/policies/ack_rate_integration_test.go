@@ -394,7 +394,7 @@ func createAndPublishPolicy(t *testing.T, s setupResult, title, version string, 
 // key on the row). Additive guarantee — existing callers cannot break.
 func TestListPolicies_OmittedIncludeReturnsV1Shape(t *testing.T) {
 	s := setup(t)
-	_ = createAndPublishPolicy(t, s, "Pinned-Shape", "1", []string{"all_staff"})
+	_ = createAndPublishPolicy(t, s, "Pinned-Shape", "1", []string{"everyone"})
 
 	raw := s.do(t, http.MethodGet, "/v1/policies", nil, s.adminBear, http.StatusOK)
 	var got struct {
@@ -416,8 +416,8 @@ func TestListPolicies_OmittedIncludeReturnsV1Shape(t *testing.T) {
 // branch did not fire.
 func TestListPolicies_IncludeAckRate_DraftOnly_AllNull(t *testing.T) {
 	s := setup(t)
-	_ = createDraftPolicy(t, s, "Draft-1", "1", []string{"all_staff"})
-	_ = createDraftPolicy(t, s, "Draft-2", "2", []string{"engineering"})
+	_ = createDraftPolicy(t, s, "Draft-1", "1", []string{"everyone"})
+	_ = createDraftPolicy(t, s, "Draft-2", "2", []string{"grc_engineer"})
 
 	raw := s.do(t, http.MethodGet, "/v1/policies?include=ack_rate", nil, s.adminBear, http.StatusOK)
 	var got struct {
@@ -623,13 +623,13 @@ func TestListPolicies_IncludeAckRate_WireShape_PinsNullVsNumber(t *testing.T) {
 	s := setup(t)
 
 	// One draft policy: ack_rate columns MUST be JSON null.
-	draftID := createDraftPolicy(t, s, "Draft-Policy-WireShape", "1", []string{"employee"})
+	draftID := createDraftPolicy(t, s, "Draft-Policy-WireShape", "1", []string{"everyone"})
 
 	// One published-with-no-acks policy: ack_rate cell MUST be populated
 	// with denominator >= 0 (the API key the bootstrap-admin holds may
 	// or may not match the required role; either way, both columns
 	// MUST be JSON numbers, not null).
-	publishedID := createAndPublishPolicy(t, s, "Published-No-Ack-WireShape", "1", []string{"employee"})
+	publishedID := createAndPublishPolicy(t, s, "Published-No-Ack-WireShape", "1", []string{"everyone"})
 
 	raw := s.do(t, http.MethodGet, "/v1/policies?include=ack_rate", nil, s.adminBear, http.StatusOK)
 

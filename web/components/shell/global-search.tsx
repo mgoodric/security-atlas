@@ -358,8 +358,14 @@ export function GlobalSearch() {
       }
     };
     document.addEventListener("keydown", onKey);
+    // #2356 — the SSR'd input is visible before hydration attaches this
+    // listener, so a ⌘K pressed in that window is dropped. Mark the
+    // container once the shortcut is live; e2e waits on this attribute.
+    const container = containerRef.current;
+    container?.setAttribute("data-shortcut-ready", "true");
     return () => {
       document.removeEventListener("keydown", onKey);
+      container?.removeAttribute("data-shortcut-ready");
     };
   }, []);
 

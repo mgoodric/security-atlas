@@ -206,6 +206,10 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	if ackRoles == nil {
 		ackRoles = []string{}
 	}
+	if err := validateAudience(ackRoles, nil); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	var predecessor *uuid.UUID
 	if s := strings.TrimSpace(req.PredecessorID); s != "" {
 		u, err := uuid.Parse(s)
@@ -766,6 +770,21 @@ func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
 	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids contains invalid UUID: "+err.Error())
+		return
+	}
+	// #2524: a free-text audience the draft already carries may stay; a
+	// new value must be a role or everyone.
+	current, err := h.store.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, policy.ErrNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "load policy draft", err)
+		return
+	}
+	if err := validateAudience(req.AcknowledgmentRequiredRoles, current.AcknowledgmentRequiredRoles); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	updated, err := h.store.UpdateDraft(ctx, id, policy.UpdateDraftInput{

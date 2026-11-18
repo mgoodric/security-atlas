@@ -29,6 +29,7 @@ import {
   type ApprovalsResponse,
 } from "@/lib/api/approvals";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 export default function ApprovalsPage() {
   const q = useQuery<ApprovalsResponse>({
@@ -41,7 +42,16 @@ export default function ApprovalsPage() {
   return (
     <PageShell
       title={pageTitle("/approvals")}
-      subtitle="Records waiting for your approval: requested exceptions, proposed risk acceptances, policies under review and framework scopes in review. Open one to approve it."
+      subtitle={
+        <>
+          Records waiting for your approval as an{" "}
+          <Term id="approver">approver</Term>: requested exceptions, proposed
+          risk acceptances, policies under review and framework scopes in
+          review. Each needs a{" "}
+          <Term id="second-person-rule">second person</Term>, not the one who
+          asked. Open one to approve it.
+        </>
+      }
       bodyClassName="space-y-6"
     >
       {q.isLoading ? (
