@@ -746,9 +746,14 @@ function ResultGroup({
           <span
             data-testid={`global-search-group-count-${type}`}
             className="ml-1 rounded bg-muted px-1 font-mono normal-case tabular-nums"
-            aria-label={`${total} ${total === 1 ? "match" : "matches"}`}
+            aria-hidden
           >
             {total}
+          </span>
+          {/* Plain text, not an aria-label: a labelled span inside the
+              listbox fails axe aria-required-children (#2397). */}
+          <span className="sr-only">
+            {`${total} ${total === 1 ? "match" : "matches"}`}
           </span>
         </span>
         {canShowAll ? (
