@@ -53,6 +53,8 @@ import { type EvidenceListResponse } from "@/lib/api/evidence";
 import { type ExceptionsListResponse } from "@/lib/api/exceptions";
 
 import {
+  AnchorHistoryBody,
+  type AnchorHistoryQuery,
   EffectiveScopeRows,
   EvidenceStreamBody,
   ExceptionsBody,
@@ -273,12 +275,15 @@ export function MapPanel({
 }
 
 // HistoryPanel — the control's evaluation history, and the freshness
-// clock that reads the same evaluated state.
+// clock that reads the same evaluated state, and (#2392) the SCF anchor
+// history: every remap decision on the control's bundle.
 export function HistoryPanel({
   historyQ,
+  anchorHistoryQ,
   stateQ,
 }: {
   historyQ: ReturnType<typeof useQuery<ControlHistoryResponse>>;
+  anchorHistoryQ: AnchorHistoryQuery;
   stateQ: ReturnType<typeof useQuery<ControlStateResponse>>;
 }) {
   return (
@@ -294,6 +299,18 @@ export function HistoryPanel({
           <div data-testid="audit-log-section">
             <HistoryBody historyQ={historyQ} />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card data-testid="anchor-history-section" className="lg:col-span-2">
+        <CardHeader className="border-b">
+          <CardTitle>Anchor history</CardTitle>
+          <CardDescription>
+            SCF remap decisions on every revision of this control.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AnchorHistoryBody anchorHistoryQ={anchorHistoryQ} />
         </CardContent>
       </Card>
 

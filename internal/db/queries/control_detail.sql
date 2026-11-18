@@ -170,3 +170,38 @@ WHERE tenant_id = $1
       )
 ORDER BY evaluated_at DESC, id DESC
 LIMIT sqlc.arg(row_limit);
+
+-- name: GetControlBundleForDetail :one
+-- Issue #2392: the bundle a control row belongs to, for the anchor-history
+-- read. No row (pgx.ErrNoRows) for an id that is not this tenant's control,
+-- which the handler maps to 404; RLS and the explicit tenant id both bind.
+SELECT bundle_id
+FROM controls
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListControlAnchorHistoryPaged :many
+-- Issue #2392: GET /v1/controls/{id}/anchor-history. Every SCF remap
+-- decision (#1776, scf_remap_decisions) on any revision of the control's
+-- bundle, newest first, keyset paged on (decided_at, id) as the evaluation
+-- history is. new_version is the version of the superseding revision an
+-- approval created; NULL on a reject or keep-legacy. A pure read of an
+-- append-only table.
+SELECT d.id, d.decision, d.bulk,
+       d.legacy_control_id, lc.version AS legacy_version,
+       d.legacy_scf_id, d.legacy_release,
+       d.new_control_id, nc.version AS new_version,
+       d.new_scf_id, d.new_release,
+       d.reason, d.decided_by, d.decided_at
+FROM scf_remap_decisions d
+JOIN controls lc
+  ON lc.tenant_id = d.tenant_id AND lc.id = d.legacy_control_id
+LEFT JOIN controls nc
+  ON nc.tenant_id = d.tenant_id AND nc.id = d.new_control_id
+WHERE d.tenant_id = sqlc.arg(tenant_id)
+  AND lc.bundle_id = sqlc.arg(bundle_id)
+  AND (
+        d.decided_at < sqlc.arg(cursor_ts)
+        OR (d.decided_at = sqlc.arg(cursor_ts) AND d.id < sqlc.arg(cursor_id))
+      )
+ORDER BY d.decided_at DESC, d.id DESC
+LIMIT sqlc.arg(row_limit);
