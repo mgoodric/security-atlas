@@ -30,6 +30,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardAction,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -42,7 +43,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { MetricTargetDialog } from "@/components/dashboards-metrics/metric-target-dialog";
 import {
+  canSetMetricTarget,
   fetchMetric,
   fetchObservations,
   fetchTarget,
@@ -51,6 +54,7 @@ import {
   type Observation,
 } from "@/lib/api/metrics";
 import { getSessionMe } from "@/lib/api/board";
+import { getMe } from "@/lib/api/me";
 
 export default function MetricDetailPage({
   params,
@@ -86,6 +90,13 @@ export default function MetricDetailPage({
     staleTime: 60_000,
   });
   const canSubmit = meQuery.data?.is_admin === true;
+  // #2341: setting a target is admin-only on the platform too. /v1/me
+  // echoes the live tenant roles, which the admin probe above does not.
+  const profileQuery = useQuery({
+    queryKey: ["dashboard", "me"],
+    queryFn: getMe,
+  });
+  const canSetTarget = canSetMetricTarget(profileQuery.data);
 
   if (detailQuery.isLoading) {
     return (
@@ -214,6 +225,16 @@ export default function MetricDetailPage({
             <CardDescription>
               How the threshold badge is computed.
             </CardDescription>
+            {canSetTarget ? (
+              <CardAction>
+                <MetricTargetDialog
+                  metricID={metric.id}
+                  metricName={metric.name}
+                  unit={metric.unit}
+                  current={target}
+                />
+              </CardAction>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-1.5 px-4 text-sm">
             {targetQuery.isLoading ? (
@@ -253,6 +274,7 @@ export default function MetricDetailPage({
                 No target set. The threshold badge stays neutral (&quot;no
                 target&quot;) until a target is configured — it is never shown
                 green without a target to measure against.
+                {canSetTarget ? " Use Set target to add one." : ""}
               </p>
             )}
           </CardContent>
