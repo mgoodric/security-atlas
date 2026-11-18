@@ -1,0 +1,33 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p6_1_third_party_disclosure
+title: "Disclosures of personal information to third parties are authorised"
+description: |
+  Personal information goes to outside parties only for the purposes on
+  record, and with the person's agreement where that is needed (TSC P6.1).
+  The owner attests annually to the register of third parties receiving
+  personal information: the categories shared, the purpose, and the basis
+  that permits each disclosure.
+
+scf_anchor_id: PRI-16
+control_family: PRI
+implementation_type: manual_attested
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+manual_evidence_schema:
+  type: object
+  required: [attested_at, attestor, recipients]
+  properties:
+    attested_at: { type: string, format: date-time }
+    attestor: { type: string, minLength: 1 }
+    recipients:
+      type: array
+      items:
+        type: object
+        required: [recipient, data_categories, purpose, basis]
+        properties:
+          recipient: { type: string }
+          data_categories: { type: array, items: { type: string } }
+          purpose: { type: string }
+          basis: { type: string }

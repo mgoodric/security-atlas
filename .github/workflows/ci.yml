@@ -1058,6 +1058,15 @@ jobs:
       - name: Go · duphelper (slice 369 H-1 guard)
         run: go run ./cmd/scripts/duphelper-lint ./internal/api/...
 
+      # #2426 — SOC 2 stock control kit gate. Every controls/soc2/ bundle
+      # parses and anchors to a catalog SCF id, at least half carry an
+      # evidence query, and the bundles cover at least 80% of the TSC codes
+      # in data/crosswalks/soc2-tsc-2017.yaml. #2422 added 18 Privacy
+      # criteria with no stock control and coverage fell to 72% unnoticed,
+      # because nothing ran this check.
+      - name: Go · SOC 2 control kit coverage (#2426)
+        run: go run ./cmd/scripts/coverage-check
+
   lint-go-stub:
     name: Go · lint
     needs: changes

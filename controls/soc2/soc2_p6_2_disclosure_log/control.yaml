@@ -1,0 +1,60 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p6_2_disclosure_log
+title: "Disclosures of personal information are logged and reportable on request"
+description: |
+  Every permitted release of personal information is recorded (TSC
+  P6.2), so a person can be told on request what of theirs was released
+  and to whom (TSC P6.7). The owner uploads the disclosure log quarterly:
+  each disclosure with its date, recipient, data categories, and the
+  request or agreement that authorised it.
+
+scf_anchor_id: PRI-17.1
+control_family: PRI
+implementation_type: semi_automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: quarterly
+
+evidence_queries:
+  - id: disclosure_log_uploaded_within_quarter
+    language: rego
+    evidence_kind: manual.upload.v1
+    description: "A disclosure-log upload exists within the last 90 days"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
+
+manual_evidence_schema:
+  type: object
+  required: [period_start, period_end, disclosures]
+  properties:
+    period_start: { type: string, format: date }
+    period_end: { type: string, format: date }
+    disclosures:
+      type: array
+      items:
+        type: object
+        required: [disclosed_at, recipient, data_categories, authorisation]
+        properties:
+          disclosed_at: { type: string, format: date }
+          recipient: { type: string }
+          data_categories: { type: array, items: { type: string } }
+          authorisation: { type: string }

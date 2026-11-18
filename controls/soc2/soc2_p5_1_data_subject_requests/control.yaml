@@ -1,0 +1,43 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p5_1_data_subject_requests
+title: "Data subject access and correction requests are fulfilled on time"
+description: |
+  A person whose identity has been confirmed can see, and ask to correct,
+  the personal information held about them (TSC P5.1, P5.2). Each request
+  is filed as a Jira ticket tagged `privacy-dsr`, records how identity was
+  verified, and is closed within the committed response window; a refused
+  correction carries the reason given to the requester.
+
+scf_anchor_id: PRI-39
+control_family: PRI
+implementation_type: automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: weekly
+
+evidence_queries:
+  - id: dsr_tickets_closed_within_sla
+    language: rego
+    evidence_kind: jira.ticket_evidence.v1
+    description: "Every privacy-dsr ticket is closed within the response window with identity verification recorded"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

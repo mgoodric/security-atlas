@@ -18,7 +18,7 @@
 #   3. import the SCF catalog + the bundled SOC 2 crosswalk, and re-import
 #      every other bundled crosswalk already imported (#2014)
 #   4. wait for the atlas server's /health to return 200
-#   5. ensure an OAuth client + upload the 50 SOC 2 control bundles
+#   5. ensure an OAuth client + upload the 63 SOC 2 control bundles
 #
 # Why the split (confirmed production incident, 2026-06-05): the old
 # bootstrap was the ONLY migrate path AND was one-shot/un-labelled, so
@@ -278,7 +278,7 @@ fi
 # rather than uploading into the wrong tenant.
 atlas-cli oauth bind-client "$OAUTH_CLIENT_ID" --tenant "$ATLAS_BOOTSTRAP_TENANT" >/dev/null
 
-# ----- Phase 5b: upload the 50 SOC 2 control bundles -----
+# ----- Phase 5b: upload the 63 SOC 2 control bundles -----
 log "uploading control bundles from $CONTROLS_DIR ..."
 uploaded=0
 for dir in "$CONTROLS_DIR"/*/; do
