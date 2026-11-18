@@ -163,7 +163,8 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Slice 270: the slice 124 admin endpoint is admit-gated to
-	// {admin, auditor, grc_engineer}. Every caller that reaches this
+	// {admin, grc_engineer} by OPA (#2378) and to {admin, auditor,
+	// grc_engineer} by the probe below. Every caller that reaches this
 	// point is privileged; the SQL-layer row-visibility predicate
 	// short-circuits and behavior matches pre-slice-270.
 	params.queryParams.CallerIsPrivileged = true
