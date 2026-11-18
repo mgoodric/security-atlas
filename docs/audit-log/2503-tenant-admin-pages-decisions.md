@@ -302,3 +302,40 @@ before, and it is pinned in `handlerNarrower2428`.
   a 404.
 
 It fails on part 2's code: the issue is a 403.
+
+## Part 4 — IdP group-to-role mappings
+
+### D15 — group-role mappings are tenant-scoped
+
+`POST/GET /v1/admin/group-role-mappings` and `DELETE …/{id}` now admit
+`authz.IsTenantAdmin`, and `group-role-mappings` joins
+`tenant_admin_segments`.
+
+- A mapping can only target one of the five canonical roles. That is
+  `grouprole.ValidateMappingRole`, plus the table's role CHECK. So a tenant
+  admin cannot map a group to `super_admin`; that request is a 400. Mapping
+  a group to `admin` is allowed. It grants what the admin can already grant
+  through Users.
+- The store runs every operation under the caller's tenant RLS. Another
+  tenant's mapping id is a 404.
+- `idp_config_id` is optional and has no foreign key. A tenant admin could
+  type another tenant's config id into its own mapping. The resolver reads
+  mappings for the signing-in tenant only, under that tenant's RLS, so such
+  a row can never apply to the other tenant's sign-ins. It is inert, not a
+  cross-tenant write.
+- No web page manages mappings, so nothing changes in the web app.
+
+grc_engineer's blanket read still admits `GET /v1/admin/group-role-mappings`
+in OPA. The handler refuses it, as before, and it is pinned in
+`handlerNarrower2428`.
+
+### D16 — tests
+
+`TestTenantAdmin2503_GroupRoleMappings` checks four things:
+
+- A tenant admin by role creates a mapping, lists it and deletes it.
+- Mapping a group to `super_admin` is a 400.
+- Another tenant's admin doesn't see the mapping in its list.
+- Another tenant's admin gets a 404 when it tries to delete the mapping.
+
+On part 3's code the test fails, because both creates are refused with 403.
