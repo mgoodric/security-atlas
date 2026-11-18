@@ -19,9 +19,8 @@ Grafana and Datadog connectors. Slice 488 reads which alerts are **configured**
 (CC7.2); this reads what actually **fired** and resolved (CC7.3/CC7.4). One record
 per alert-instance state transition: `rule_id` (rule UID), `source_vendor`,
 `state` (alerting / resolved / no_data / pending), `fired_at`, `resolved_at`, and
-the routing-target **contact-point handle**. Anchors: SCF `MON-02` + `IRO-16`
-(the spec candidate IRO-02 is absent from the bundled SCF fixture; IRO-16 is the
-closest present incident anchor — see slice-535 decisions log D3).
+the routing-target **contact-point handle**. Anchors: SCF `MON-02` + `IRO-06`
+(Incident Handling: a firing is where handling an incident starts; #2413).
 
 The `grafana.access_config.v1` kind (slice 534) is the authn/authz surface 488
 deferred (P0-488-7): it proves SSO is enforced and access is role-based for SOC 2
@@ -109,7 +108,7 @@ atlas-grafana permissions
 | `--environment`             | `run`      | yes      | —                             | environment scope tag; records are never emitted un-scoped  |
 | `--rule-control`            | `run`      | no       | `scf:MON-02`                  | control id attached to `monitoring.alert_config.v1` records |
 | `--access-control`          | `run`      | no       | `scf:IAC-37`                  | control id attached to `grafana.access_config.v1` records   |
-| `--firing-control`          | `run`      | no       | `scf:IRO-16`                  | control id attached to `monitoring.alert_firing.v1` records |
+| `--firing-control`          | `run`      | no       | `scf:IRO-06`                  | control id attached to `monitoring.alert_firing.v1` records |
 | `--grafana-firing-lookback` | `run`      | no       | `24h`                         | bounded look-back window for the alert-firing-history pull  |
 | `--grafana-url`             | `run`      | no       | env `GRAFANA_URL`             | Grafana base URL override                                   |
 

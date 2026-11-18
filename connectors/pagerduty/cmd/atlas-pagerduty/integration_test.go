@@ -247,7 +247,7 @@ func TestEmittedRecords_NoPIIorFreeText(t *testing.T) {
 		},
 	}}
 	pms, _ := postmortems.Collect(context.Background(), pmAPI, now.AddDate(0, 0, -90), now)
-	pmRec, _ := pdrecord.BuildPostmortem(pms[0], "scf:IRO-13", actorID("postmortems"), "pagerduty", "prod", now)
+	pmRec, _ := pdrecord.BuildPostmortem(pms[0], "scf:IRO-14", actorID("postmortems"), "pagerduty", "prod", now)
 
 	pmAllowed := map[string]bool{
 		"postmortem_id": true, "incident_id": true, "status": true, "created_at": true,

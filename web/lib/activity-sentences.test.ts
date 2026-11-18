@@ -71,6 +71,21 @@ describe("describeEvent", () => {
     });
   });
 
+  it("names the member whose module access changed as a person (#2466)", () => {
+    const id = "6f1c2d3e-4b5a-4c6d-8e7f-901234567890";
+    const s = describeEvent(
+      row("module_access", "module_access.set", "user", id),
+    );
+    expect(s).toMatchObject({
+      phrase: "changed the module access of",
+      noun: "",
+      targetId: id,
+      href: null,
+      person: true,
+    });
+    expect(describeEvent(row("risk", "update")).person).toBeFalsy();
+  });
+
   it("names a vendor owner change (#2450)", () => {
     expect(
       describeEvent(row("vendor", "owner_changed", "vendor")),

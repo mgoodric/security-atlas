@@ -3,8 +3,8 @@
 // look-back window via the read-only PagerDuty REST API, and emits one
 // pagerduty.response_metrics.v1 record per service. It proves incidents are
 // acknowledged and resolved within target windows (SOC 2 CC7.4 "responds to
-// identified security incidents"; SCF IRO-02 Incident Handling, MON-02
-// Continuous Monitoring) at the PROGRAM level — not a per-engineer scorecard.
+// identified security incidents"; SCF IRO-02 Incident Response Operations,
+// MON-02 Continuous Monitoring) at the PROGRAM level — not a per-engineer scorecard.
 //
 // The load-bearing guard (P0-539 / threat-model I — DOMINANT): per-responder
 // timing data profiles named individuals (a privacy + works-council concern in
