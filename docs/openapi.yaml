@@ -606,6 +606,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/controls/held-back:
+    get:
+      summary: GET /v1/admin/controls/held-back — the tenant's stock controls whose shipped update the boot seed holds back behind a reviewed SCF re-anchor, each with the approved revision and the shipped manifest it is missing (tenant admin; #2358)
+      tags: [controls]
+      operationId: get-v1-admin-controls-held-back
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/credentials:
     get:
       summary: GET /v1/admin/credentials

@@ -11,6 +11,46 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const approvedRemapLineageRevision = `-- name: ApprovedRemapLineageRevision :one
+WITH RECURSIVE lineage AS (
+    SELECT c.id, 0 AS depth
+    FROM controls c
+    WHERE c.tenant_id = $1 AND c.id = $2
+    UNION ALL
+    SELECT p.id, l.depth + 1
+    FROM controls p
+    JOIN lineage l ON p.superseded_by = l.id
+    WHERE p.tenant_id = $1 AND l.depth < 10000
+)
+SELECT l.id
+FROM lineage l
+JOIN scf_remap_decisions d
+  ON d.tenant_id = $1
+ AND d.new_control_id = l.id
+ AND d.decision = 'approved'
+ORDER BY l.depth
+LIMIT 1
+`
+
+type ApprovedRemapLineageRevisionParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ControlID pgtype.UUID `json:"control_id"`
+}
+
+// Issues #1776, #2358: the approved SCF remap revision a control row is, or
+// descends from. The walk follows superseded_by back from the row through
+// its earlier revisions and returns the nearest one that a person's approved
+// remap decision created. The upload path keeps such a lineage when the
+// boot seed re-uploads the stock manifest it replaced, so neither a
+// reviewed re-anchor nor a person's later edit on top of it is undone
+// silently. No row when the lineage holds no approved revision.
+func (q *Queries) ApprovedRemapLineageRevision(ctx context.Context, arg ApprovedRemapLineageRevisionParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, approvedRemapLineageRevision, arg.TenantID, arg.ControlID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const countActiveControls = `-- name: CountActiveControls :one
 WITH latest_eval AS (
     SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
@@ -516,31 +556,6 @@ func (q *Queries) InsertSCFRemapProposal(ctx context.Context, arg InsertSCFRemap
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const isApprovedRemapRevision = `-- name: IsApprovedRemapRevision :one
-SELECT EXISTS (
-    SELECT 1 FROM scf_remap_decisions
-    WHERE tenant_id = $1
-      AND new_control_id = $2
-      AND decision = 'approved'
-) AS approved
-`
-
-type IsApprovedRemapRevisionParams struct {
-	TenantID  pgtype.UUID `json:"tenant_id"`
-	ControlID pgtype.UUID `json:"control_id"`
-}
-
-// Issue #1776: whether a control row is the revision a person's approved SCF
-// remap decision created. The upload path keeps such a revision when the
-// boot seed re-uploads the stock manifest it replaced, so a reviewed
-// re-anchor is never undone silently.
-func (q *Queries) IsApprovedRemapRevision(ctx context.Context, arg IsApprovedRemapRevisionParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isApprovedRemapRevision, arg.TenantID, arg.ControlID)
-	var approved bool
-	err := row.Scan(&approved)
-	return approved, err
 }
 
 const listActiveControlFamilies = `-- name: ListActiveControlFamilies :many
@@ -1604,6 +1619,101 @@ func (q *Queries) ListSCFRemapProposals(ctx context.Context, arg ListSCFRemapPro
 	return items, nil
 }
 
+const listStockControlHoldbacks = `-- name: ListStockControlHoldbacks :many
+SELECT h.bundle_id,
+       a.id              AS active_control_id,
+       a.version         AS active_version,
+       a.title           AS title,
+       a.bundle_manifest_hash AS active_manifest_hash,
+       a.bundle_uploaded_at   AS active_uploaded_at,
+       ap.id             AS approved_control_id,
+       ap.version        AS approved_version,
+       d.new_scf_id      AS approved_scf_id,
+       d.new_release     AS approved_release,
+       d.decided_at      AS approved_at,
+       lg.bundle_manifest_hash AS replaced_manifest_hash,
+       h.shipped_manifest_hash,
+       h.first_held_at,
+       h.last_held_at
+FROM stock_control_holdbacks h
+JOIN controls a
+  ON a.tenant_id = h.tenant_id AND a.bundle_id = h.bundle_id AND a.superseded_by IS NULL
+JOIN controls ap
+  ON ap.tenant_id = h.tenant_id AND ap.id = h.approved_control_id
+JOIN LATERAL (
+    SELECT dd.new_scf_id, dd.new_release, dd.decided_at, dd.legacy_control_id
+    FROM scf_remap_decisions dd
+    WHERE dd.tenant_id = h.tenant_id
+      AND dd.new_control_id = h.approved_control_id
+      AND dd.decision = 'approved'
+    ORDER BY dd.decided_at DESC
+    LIMIT 1
+) d ON true
+JOIN controls lg
+  ON lg.tenant_id = h.tenant_id AND lg.id = d.legacy_control_id
+WHERE h.tenant_id = $1
+ORDER BY h.bundle_id
+`
+
+type ListStockControlHoldbacksRow struct {
+	BundleID             string             `json:"bundle_id"`
+	ActiveControlID      pgtype.UUID        `json:"active_control_id"`
+	ActiveVersion        int32              `json:"active_version"`
+	Title                string             `json:"title"`
+	ActiveManifestHash   string             `json:"active_manifest_hash"`
+	ActiveUploadedAt     pgtype.Timestamptz `json:"active_uploaded_at"`
+	ApprovedControlID    pgtype.UUID        `json:"approved_control_id"`
+	ApprovedVersion      int32              `json:"approved_version"`
+	ApprovedScfID        *string            `json:"approved_scf_id"`
+	ApprovedRelease      *string            `json:"approved_release"`
+	ApprovedAt           pgtype.Timestamptz `json:"approved_at"`
+	ReplacedManifestHash string             `json:"replaced_manifest_hash"`
+	ShippedManifestHash  string             `json:"shipped_manifest_hash"`
+	FirstHeldAt          pgtype.Timestamptz `json:"first_held_at"`
+	LastHeldAt           pgtype.Timestamptz `json:"last_held_at"`
+}
+
+// Issue #2358: the tenant's stock controls whose shipped update the boot
+// seed holds back. Each row names the active revision, the approved
+// re-anchor that caused the hold, the shipped manifest being missed, and
+// the stock manifest the approval replaced; the shipped manifest is an
+// update the tenant has not received when the two hashes differ.
+func (q *Queries) ListStockControlHoldbacks(ctx context.Context, tenantID pgtype.UUID) ([]ListStockControlHoldbacksRow, error) {
+	rows, err := q.db.Query(ctx, listStockControlHoldbacks, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStockControlHoldbacksRow
+	for rows.Next() {
+		var i ListStockControlHoldbacksRow
+		if err := rows.Scan(
+			&i.BundleID,
+			&i.ActiveControlID,
+			&i.ActiveVersion,
+			&i.Title,
+			&i.ActiveManifestHash,
+			&i.ActiveUploadedAt,
+			&i.ApprovedControlID,
+			&i.ApprovedVersion,
+			&i.ApprovedScfID,
+			&i.ApprovedRelease,
+			&i.ApprovedAt,
+			&i.ReplacedManifestHash,
+			&i.ShippedManifestHash,
+			&i.FirstHeldAt,
+			&i.LastHeldAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockActiveControlByBundleID = `-- name: LockActiveControlByBundleID :one
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, description, control_family, implementation_type,
@@ -1737,6 +1847,41 @@ func (q *Queries) RebindControlAnchorInPlace(ctx context.Context, arg RebindCont
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const recordStockControlHoldback = `-- name: RecordStockControlHoldback :exec
+INSERT INTO stock_control_holdbacks
+    (tenant_id, bundle_id, approved_control_id, shipped_manifest_hash)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, bundle_id) DO UPDATE
+SET approved_control_id   = EXCLUDED.approved_control_id,
+    first_held_at         = CASE
+                                WHEN stock_control_holdbacks.shipped_manifest_hash = EXCLUDED.shipped_manifest_hash
+                                THEN stock_control_holdbacks.first_held_at
+                                ELSE now()
+                            END,
+    shipped_manifest_hash = EXCLUDED.shipped_manifest_hash,
+    last_held_at          = now()
+`
+
+type RecordStockControlHoldbackParams struct {
+	TenantID            pgtype.UUID `json:"tenant_id"`
+	BundleID            string      `json:"bundle_id"`
+	ApprovedControlID   pgtype.UUID `json:"approved_control_id"`
+	ShippedManifestHash string      `json:"shipped_manifest_hash"`
+}
+
+// Issue #2358: the boot seed kept a reviewed lineage (keepReviewedAnchor)
+// instead of applying a shipped manifest. One row per tenant and bundle;
+// first_held_at restarts when a different shipped manifest is held back.
+func (q *Queries) RecordStockControlHoldback(ctx context.Context, arg RecordStockControlHoldbackParams) error {
+	_, err := q.db.Exec(ctx, recordStockControlHoldback,
+		arg.TenantID,
+		arg.BundleID,
+		arg.ApprovedControlID,
+		arg.ShippedManifestHash,
+	)
+	return err
 }
 
 const updateControlMetadataInPlace = `-- name: UpdateControlMetadataInPlace :execrows

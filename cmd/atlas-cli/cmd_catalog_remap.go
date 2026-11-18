@@ -28,7 +28,69 @@ func newCatalogRemapCmd() *cobra.Command {
 		"reject a proposal; the control stays on its legacy anchor and the proposal can be revisited"))
 	cmd.AddCommand(newCatalogRemapCloseCmd("keep-legacy",
 		"keep the control on its legacy anchor for good; the proposal is closed"))
+	cmd.AddCommand(newCatalogRemapHeldBackCmd())
 	return cmd
+}
+
+// newCatalogRemapHeldBackCmd registers `catalog remap held-back` (#2358):
+// the stock controls whose shipped update the boot seed holds back because
+// a person re-anchored them, read from GET /v1/admin/controls/held-back.
+func newCatalogRemapHeldBackCmd() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "held-back",
+		Short: "list stock controls whose shipped update is held back by a reviewed SCF re-anchor",
+		Long: "List the stock controls the boot seed did not update because a person approved an " +
+			"SCF re-anchor of them, or edited one after approving it. Each line names the active " +
+			"revision, the approved revision behind the hold, and the shipped manifest that was not " +
+			"applied. \"shipped update\" marks a control the platform changed after the re-anchor: " +
+			"the tenant is missing that change until a person uploads a bundle carrying it. " +
+			"Needs a tenant admin.",
+		Args:    cobra.NoArgs,
+		PreRunE: func(_ *cobra.Command, _ []string) error { return resolveCommon() },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			raw, err := getControlImport("/v1/admin/controls/held-back")
+			if err != nil {
+				return err
+			}
+			if jsonOutput {
+				return printIndented(cmd.OutOrStdout(), raw)
+			}
+			var list struct {
+				Controls []control.HeldBackStockControl `json:"controls"`
+			}
+			if err := json.Unmarshal(raw, &list); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+			out := cmd.OutOrStdout()
+			if len(list.Controls) == 0 {
+				_, _ = fmt.Fprintln(out, "no held-back stock controls")
+				return nil
+			}
+			for _, c := range list.Controls {
+				state := "no shipped update"
+				if c.ShippedUpdate {
+					state = "shipped update"
+				}
+				_, _ = fmt.Fprintf(out, "%s  v%d  approved v%d on %s@%s  %s %s  held since %s\n",
+					printable(c.BundleID), c.ActiveVersion, c.ApprovedVersion,
+					printable(c.ApprovedSCFID), printable(c.ApprovedRelease),
+					state, printable(shortHash(c.ShippedManifestHash)), printable(c.FirstHeldAt))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print the API response as JSON")
+	return cmd
+}
+
+// shortHash is the first 12 hex digits of a manifest sha256, enough to tell
+// shipped revisions apart on one line.
+func shortHash(h string) string {
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
 }
 
 // remapListEntry is one proposal as GET /v1/controls/remap-proposals

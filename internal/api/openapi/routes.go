@@ -68,6 +68,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/admin/features", Tag: "admin-feature-flags", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/features"},
 	{Method: "GET", Path: "/v1/admin/framework-versions/migrations", Tag: "admin-framework-versions", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/framework-versions/migrations — list the version-migration review queue (slice 484)"},
 	{Method: "GET", Path: "/v1/admin/group-role-mappings", Tag: "admin-group-role-mappings", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/group-role-mappings"},
+	{Method: "GET", Path: "/v1/admin/controls/held-back", Tag: "controls", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/controls/held-back — the tenant's stock controls whose shipped update the boot seed holds back behind a reviewed SCF re-anchor, each with the approved revision and the shipped manifest it is missing (tenant admin; #2358)"},
 	{Method: "GET", Path: "/v1/admin/llm-routing", Tag: "admin-llm-routing", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/llm-routing — read the tenant's cloud-LLM routing config (masked; slice 499)"},
 	{Method: "GET", Path: "/v1/admin/policies/export", Tag: "admin-policies", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/policies/export"},
 	{Method: "GET", Path: "/v1/admin/samples/export", Tag: "admin-samples", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/samples/export"},

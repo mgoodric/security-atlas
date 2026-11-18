@@ -205,10 +205,12 @@ export const ENUM_LABELS = {
     excepted: "Excepted",
     na: "Not applicable",
   },
+  // #2359: FreshnessState is the freshness_status CHECK on
+  // control_evaluations, recorded in check-enums.golden.json; the label
+  // test holds these keys equal to it. There is no "expired" state.
   FreshnessState: {
     fresh: "Fresh",
     stale: "Stale",
-    expired: "Expired",
     no_evidence: "No evidence",
   },
   // Statuses held in CHECK-constrained text columns, not Postgres enums.

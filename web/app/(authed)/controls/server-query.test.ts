@@ -2,12 +2,18 @@
 // the column-to-sort-key map, the header sort cycle, and the query each
 // page sends.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, test } from "vitest";
+
+import { enumOptions } from "@/lib/labels/enum-labels";
 
 import { ALL, DEFAULT_FILTERS, setFilter } from "./filters";
 import {
   ariaSort,
   clampedPage,
+  FRESHNESS_VALUES,
   myControlsQuery,
   nextSort,
   normalizeFilterValue,
@@ -17,6 +23,46 @@ import {
 } from "./server-query";
 
 const CELL = "00000000-0000-4000-8000-000000002131";
+
+// #2359: the freshness_status CHECK values, recorded from the migrated
+// database by internal/db/check_enums_integration_test.go.
+const BACKEND_FRESHNESS = (
+  JSON.parse(
+    readFileSync(
+      join(
+        __dirname,
+        "..",
+        "..",
+        "..",
+        "lib",
+        "contracts",
+        "check-enums.golden.json",
+      ),
+      "utf8",
+    ),
+  ) as { enums: Record<string, string[]> }
+).enums.FreshnessState;
+
+describe("freshness filter values (#2359)", () => {
+  test("the golden records the backend's freshness states", () => {
+    expect(BACKEND_FRESHNESS).toEqual(
+      expect.arrayContaining(["fresh", "stale", "no_evidence"]),
+    );
+  });
+
+  test("every Freshness option the page offers is a backend state", () => {
+    // page.tsx builds FRESHNESS_OPTIONS from enumOptions("FreshnessState").
+    const offered = enumOptions("FreshnessState").map((o) => o.value);
+    expect([...offered].sort()).toEqual([...BACKEND_FRESHNESS].sort());
+  });
+
+  test("the query accepts exactly the backend states", () => {
+    expect([...FRESHNESS_VALUES].sort()).toEqual([...BACKEND_FRESHNESS].sort());
+    for (const v of BACKEND_FRESHNESS) {
+      expect(normalizeFilterValue("freshness", v)).toBe(v);
+    }
+  });
+});
 
 describe("parseSort / nextSort / ariaSort", () => {
   test("reads key and -key, and nothing else", () => {
@@ -72,6 +118,8 @@ describe("normalizeFilterValue", () => {
     ["result", "bogus", ALL],
     ["freshness", "no_evidence", "no_evidence"],
     ["freshness", "old", ALL],
+    // #2359: the filter once offered "expired"; an old link shows all.
+    ["freshness", "expired", ALL],
     ["anchor_fit", "partial", "partial"],
     ["anchor_fit", "loose", ALL],
     ["scope", CELL, CELL],

@@ -429,6 +429,7 @@ func TestListWithState_RefusesUnknownSortAndFilterValues(t *testing.T) {
 		"sort=evaluated_at",
 		"result=insufficient_evidence",
 		"freshness=old",
+		"freshness=expired", // #2359: the filter once offered it; no evaluation has it
 		"owner=nobody",
 	} {
 		status, raw := getBody(t, ts+"/v1/controls?include=state&"+q)
