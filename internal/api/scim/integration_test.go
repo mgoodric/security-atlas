@@ -105,7 +105,7 @@ func newHarness(t *testing.T, tenantName string) *harness {
 	credStore.SetPrefix(bearer.PrefixTest)
 
 	ctx, _ := contextWithTenant(t, tenant)
-	cred, plain, err := credStore.Issue(ctx, tenant.String(), "test-idp", nil)
+	cred, plain, err := credStore.Issue(ctx, tenant.String(), "test-idp", scim.Actor{})
 	if err != nil {
 		t.Fatalf("issue cred: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestHTTP_AuthGate(t *testing.T) {
 func TestHTTP_RevokedTokenRejected(t *testing.T) {
 	h := newHarness(t, "scim-http-revoke")
 	ctx, _ := contextWithTenant(t, h.tenant)
-	if err := h.store.Revoke(ctx, h.tenant.String(), h.cred.ID); err != nil {
+	if err := h.store.Revoke(ctx, h.tenant.String(), h.cred.ID, scim.Actor{}); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	resp := h.do(t, http.MethodGet, "/scim/v2/Users", h.bearer, "")

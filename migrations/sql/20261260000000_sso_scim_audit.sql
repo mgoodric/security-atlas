@@ -1,21 +1,26 @@
--- security-atlas -- #2609: PATCH /v1/admin/sso is audited.
+-- security-atlas -- #2609: SSO config changes and SCIM credential issue /
+-- revoke are audited.
 --
--- The tenant's SSO config decides who can sign in, and since #2632 an
--- organisation admin can change it. Each change writes one me_audit_log row
--- in the same transaction as the change, with the actor
--- (user_id + actor_principal) and the before and after value of every field:
+-- The tenant's SSO config decides who can sign in, and a SCIM credential
+-- provisions its users; since #2632 / #2636 an organisation admin can change
+-- both. Each change writes one me_audit_log row in the same transaction as
+-- the change, with the actor (user_id + actor_principal) and the before and
+-- after value:
 --
---   'tenant_sso_config_update'   PATCH /v1/admin/sso
+--   'tenant_sso_config_update'   PATCH  /v1/admin/sso
+--   'scim_credential_issue'      POST   /v1/admin/scim-credentials
+--   'scim_credential_revoke'     DELETE /v1/admin/scim-credentials/{id}
 --
--- The client secret is recorded only as secret_changed true/false: never its
--- value, ciphertext, hash or length.
+-- The SSO client secret is recorded only as secret_changed true/false: never
+-- its value, ciphertext, hash or length. A SCIM credential is recorded by id
+-- and last4: never its token or token hash.
 --
 -- The CHECK is rewritten in full from the latest definition
 -- (20261226000000_risk_vendor_owner_users.sql): every existing value is kept
--- and the new one is appended. internal/db/sso_config_audit_integration_test.go
+-- and the new ones are appended. internal/db/sso_scim_audit_integration_test.go
 -- inserts every value to prove none was dropped.
 --
--- Reversible via 20261260000000_sso_config_audit.down.sql.
+-- Reversible via 20261260000000_sso_scim_audit.down.sql.
 
 ALTER TABLE me_audit_log
     DROP CONSTRAINT IF EXISTS me_audit_log_action_check;
@@ -60,5 +65,7 @@ ALTER TABLE me_audit_log
         'tenant_llm_routing_clear',
         'control_import_settings_update',
         'vendor_owner_update',
-        'tenant_sso_config_update'
+        'tenant_sso_config_update',
+        'scim_credential_issue',
+        'scim_credential_revoke'
     ));
