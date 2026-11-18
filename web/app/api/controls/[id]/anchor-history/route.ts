@@ -9,9 +9,11 @@ import { rejectNonUUID } from "@/lib/api/bff";
 // SCF remap decisions on the control's bundle, for the History tab. Reads
 // the httpOnly bearer cookie and forwards it as Authorization; the
 // platform's status (404 for another tenant's control) passes through.
+// ?cursor= (a next_cursor the platform returned) is forwarded; the platform
+// refuses a malformed one with a 400.
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
@@ -23,7 +25,8 @@ export async function GET(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   try {
-    return NextResponse.json(await getControlAnchorHistory(bearer, id));
+    const cursor = new URL(req.url).searchParams.get("cursor") ?? undefined;
+    return NextResponse.json(await getControlAnchorHistory(bearer, id, cursor));
   } catch (err) {
     const e = err as { status?: number; message?: string };
     return NextResponse.json(

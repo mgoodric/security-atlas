@@ -12,6 +12,8 @@ Split out of #1778 (its D1). No migration: both features read `scf_remap_decisio
 - the live-role gate (`requireControlRead`, `authz.HasAnyTenantRole`, #2507);
 - the opaque `(timestamp, id)` keyset cursor and the 1..200 limit (default 50).
 
+The History tab pages it too: the BFF forwards `?cursor=`, and the tab loads one page and offers "Show older decisions" while `next_cursor` is set (`useInfiniteQuery`).
+
 The route has a row in `routes2428` and in the controldetail site of `gateSites2447`, so the handler gate is checked against the real OPA bundle. OPA maps the path to `controls` / `read`, which viewer.rego admits. The integration test reads it as a live viewer.
 
 ## D2 — The whole bundle, across revisions

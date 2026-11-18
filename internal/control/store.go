@@ -713,8 +713,8 @@ type ListFilter struct {
 	Family string
 	// Framework is a catalog framework slug the control's anchor satisfies.
 	Framework string
-	// LegacyAnchorOnly keeps the controls an undecided SCF remap proposal
-	// (open or rejected) still flags (#2392).
+	// LegacyAnchorOnly keeps only controls with an open or rejected SCF
+	// remap proposal (#2392).
 	LegacyAnchorOnly bool
 	Sort             ListSortKey
 	SortDesc         bool

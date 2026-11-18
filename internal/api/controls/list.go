@@ -236,8 +236,8 @@ func parseListFilter(r *http.Request) (control.ListFilter, string) {
 	// The framework filter matches the catalog framework slugs the list's
 	// frameworks column shows; an unknown slug matches nothing.
 	f.Framework = q.Get("framework")
-	// #2392: ?legacy_anchor=true keeps the controls an undecided remap
-	// proposal flags.
+	// #2392: ?legacy_anchor=true keeps only controls with an open or
+	// rejected remap proposal.
 	switch q.Get("legacy_anchor") {
 	case "", "false":
 	case "true":

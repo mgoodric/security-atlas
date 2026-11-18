@@ -43,7 +43,6 @@ import { EvidenceSummaryCard } from "@/components/control/evidence-summary";
 import { UcfMiniViz } from "@/components/control/ucf-mini-viz";
 
 import {
-  type ControlAnchorHistoryResponse,
   type ControlCoverage,
   type ControlHistoryResponse,
   type ControlLinkedPoliciesResponse,
@@ -55,6 +54,7 @@ import { type ExceptionsListResponse } from "@/lib/api/exceptions";
 
 import {
   AnchorHistoryBody,
+  type AnchorHistoryQuery,
   EffectiveScopeRows,
   EvidenceStreamBody,
   ExceptionsBody,
@@ -283,7 +283,7 @@ export function HistoryPanel({
   stateQ,
 }: {
   historyQ: ReturnType<typeof useQuery<ControlHistoryResponse>>;
-  anchorHistoryQ: ReturnType<typeof useQuery<ControlAnchorHistoryResponse>>;
+  anchorHistoryQ: AnchorHistoryQuery;
   stateQ: ReturnType<typeof useQuery<ControlStateResponse>>;
 }) {
   return (

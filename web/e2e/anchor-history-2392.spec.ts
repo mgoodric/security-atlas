@@ -33,7 +33,11 @@ const REVIEWER = "00000000-0000-0000-0000-0000000023b1";
 const CTRL_OPEN = "00000000-0000-4000-8000-000000002391";
 const CTRL_REJECTED = "00000000-0000-4000-8000-000000002392";
 const CTRL_SETTLED = "00000000-0000-4000-8000-000000002393";
+// The #2140 raw-value scan (control-detail-layout-2140.spec.ts): no UUID,
+// hash prefix or snake_case enum key is page text.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const HASH_RE = /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,}\b/i;
+const ENUM_KEY_RE = /\b[a-z0-9]+_[a-z0-9_]+\b/;
 
 type Fixture = {
   proposals: RemapProposal[];
@@ -252,6 +256,9 @@ async function mockAll(page: Page, fx: Fixture) {
 
 async function keepLegacy(page: Page, title: string) {
   await page.goto("/controls/remap");
+  // The page opens on the unchanged tab; the fixture's proposals are
+  // no_successor.
+  await page.getByTestId("remap-tab-no_successor").click({ timeout: 30_000 });
   const card = page.getByTestId("remap-proposal").filter({ hasText: title });
   await expect(card).toBeVisible({ timeout: 30_000 });
   await card.getByTestId("remap-keep-legacy").click();
@@ -292,10 +299,10 @@ test.describe("anchor history and the legacy-anchor flag (#2392)", () => {
     await expect(older.getByTestId("anchor-history-reason")).toHaveText(
       "Waiting on the new release notes",
     );
-    expect(
-      await section.innerText(),
-      "anchor history shows a UUID",
-    ).not.toMatch(UUID_RE);
+    const text = await section.innerText();
+    expect(text, "anchor history shows a hash prefix").not.toMatch(HASH_RE);
+    expect(text, "anchor history shows an enum key").not.toMatch(ENUM_KEY_RE);
+    expect(text, "anchor history shows a UUID").not.toMatch(UUID_RE);
   });
 
   test("the controls list flags undecided controls and clears a decided one", async ({

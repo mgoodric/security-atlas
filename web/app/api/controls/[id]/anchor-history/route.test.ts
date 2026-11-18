@@ -85,6 +85,31 @@ describe("GET /api/controls/[id]/anchor-history", () => {
     expect(headers?.Authorization).toBe("Bearer test-bearer-2392");
   });
 
+  test("forwards ?cursor= to the platform", async () => {
+    cookieStore.set("atlas_jwt", "test-bearer-2392");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          control_id: CONTROL_ID,
+          decisions: [],
+          count: 0,
+          next_cursor: "",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const req = new Request(
+      `http://localhost/api/controls/${CONTROL_ID}/anchor-history?cursor=page-two`,
+    );
+    const res = await GET(req as unknown as Parameters<typeof GET>[0], {
+      params: Promise.resolve({ id: CONTROL_ID }),
+    });
+    expect(res.status).toBe(200);
+    expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain(
+      `/v1/controls/${CONTROL_ID}/anchor-history?cursor=page-two`,
+    );
+  });
+
   test("passes the platform's 404 through for another tenant's control", async () => {
     cookieStore.set("atlas_jwt", "test-bearer-2392");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

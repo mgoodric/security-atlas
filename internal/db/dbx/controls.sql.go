@@ -1174,8 +1174,11 @@ type ListActiveControlsWithStateRow struct {
 // narrows the rollup exactly as slice 224 does on the anchor list.
 //
 // #2131: filters on state, freshness, family, framework, anchor fit and
-// owner (a person, or unowned), and an allow-listed sort. #2392: and
-// legacy_anchor_only keeps the controls an undecided remap proposal flags. sort_key is one
+// owner (a person, or unowned), and an allow-listed sort. #2392:
+// legacy_anchor_only keeps only controls with an open or rejected remap
+// proposal, the same predicate as the legacy_anchor column; the WHERE
+// here and in CountActiveControls repeat it and must stay in step with
+// it (and with isPending in web/lib/remap-review.ts). sort_key is one
 // of the fixed keys in the ORDER BY; the handler refuses any other value
 // before it gets here, and a key this query does not name falls through
 // to the tiebreakers. The default order is failing first (worst state

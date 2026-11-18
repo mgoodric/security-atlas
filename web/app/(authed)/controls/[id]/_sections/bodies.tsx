@@ -48,12 +48,17 @@
 // single useEffect is the 401 -> /login redirect, matching the
 // `catalog/scf/[id]` precedent exactly.
 
-import { useQuery } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  type UseInfiniteQueryResult,
+  useQuery,
+} from "@tanstack/react-query";
 import Link from "next/link";
 
 import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Person } from "@/components/ui/person";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -368,10 +373,14 @@ function anchorAt(code: string, release: string): string {
 // #2392 — the control's SCF anchor history: every remap decision on any
 // revision of its bundle, newest first. Codes read as code@release and the
 // decider through <Person> (a system principal reads "System"); no ids.
+export type AnchorHistoryQuery = UseInfiniteQueryResult<
+  InfiniteData<ControlAnchorHistoryResponse, unknown>
+>;
+
 export function AnchorHistoryBody({
   anchorHistoryQ,
 }: {
-  anchorHistoryQ: ReturnType<typeof useQuery<ControlAnchorHistoryResponse>>;
+  anchorHistoryQ: AnchorHistoryQuery;
 }) {
   if (anchorHistoryQ.isLoading) return <Skeleton className="h-16 w-full" />;
   if (anchorHistoryQ.error) {
@@ -384,7 +393,8 @@ export function AnchorHistoryBody({
       </p>
     );
   }
-  const decisions = anchorHistoryQ.data?.decisions ?? [];
+  const decisions =
+    anchorHistoryQ.data?.pages.flatMap((p) => p.decisions ?? []) ?? [];
   if (decisions.length === 0) {
     return (
       <p
@@ -396,44 +406,61 @@ export function AnchorHistoryBody({
     );
   }
   return (
-    <ul className="space-y-2 text-xs" data-testid="anchor-history-list">
-      {decisions.map((d) => (
-        <li
-          key={d.id}
-          className="text-muted-foreground"
-          data-testid="anchor-history-entry"
-          data-decision={d.decision}
-        >
-          <Timestamp value={d.decided_at} className="text-muted-foreground" /> ·{" "}
-          <span className="text-foreground">
-            {ANCHOR_DECISION_LABELS[d.decision] ?? d.decision}
-          </span>{" "}
-          <span className="font-mono" data-testid="anchor-history-legacy">
-            {anchorAt(d.legacy_scf_id, d.legacy_release)}
-          </span>
-          {d.new_scf_id && d.new_release ? (
-            <>
-              {" → "}
-              <span className="font-mono" data-testid="anchor-history-new">
-                {anchorAt(d.new_scf_id, d.new_release)}
-              </span>
-              {d.new_version !== null ? ` (revision ${d.new_version})` : null}
-            </>
-          ) : null}
-          {d.bulk ? " · bulk approval" : null} · by{" "}
-          <Person
-            id={d.decided_by}
-            className="text-foreground"
-            testId="anchor-history-decided-by"
-          />
-          {d.reason ? (
-            <span className="block pl-4" data-testid="anchor-history-reason">
-              {d.reason}
+    <>
+      <ul className="space-y-2 text-xs" data-testid="anchor-history-list">
+        {decisions.map((d) => (
+          <li
+            key={d.id}
+            className="text-muted-foreground"
+            data-testid="anchor-history-entry"
+            data-decision={d.decision}
+          >
+            <Timestamp value={d.decided_at} className="text-muted-foreground" />{" "}
+            ·{" "}
+            <span className="text-foreground">
+              {ANCHOR_DECISION_LABELS[d.decision] ?? d.decision}
+            </span>{" "}
+            <span className="font-mono" data-testid="anchor-history-legacy">
+              {anchorAt(d.legacy_scf_id, d.legacy_release)}
             </span>
-          ) : null}
-        </li>
-      ))}
-    </ul>
+            {d.new_scf_id && d.new_release ? (
+              <>
+                {" → "}
+                <span className="font-mono" data-testid="anchor-history-new">
+                  {anchorAt(d.new_scf_id, d.new_release)}
+                </span>
+                {d.new_version !== null ? ` (revision ${d.new_version})` : null}
+              </>
+            ) : null}
+            {d.bulk ? " · bulk approval" : null} · by{" "}
+            <Person
+              id={d.decided_by}
+              className="text-foreground"
+              testId="anchor-history-decided-by"
+            />
+            {d.reason ? (
+              <span className="block pl-4" data-testid="anchor-history-reason">
+                {d.reason}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {anchorHistoryQ.hasNextPage ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          data-testid="anchor-history-more"
+          disabled={anchorHistoryQ.isFetchingNextPage}
+          onClick={() => anchorHistoryQ.fetchNextPage()}
+        >
+          {anchorHistoryQ.isFetchingNextPage
+            ? "Loading…"
+            : "Show older decisions"}
+        </Button>
+      ) : null}
+    </>
   );
 }
 

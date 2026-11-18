@@ -481,14 +481,16 @@ export async function getControlHistory(
   return (await res.json()) as ControlHistoryResponse;
 }
 
-// #2392 — the first page (the platform's default 50) of the control's
-// anchor history; the History tab shows it whole.
+// #2392 — one page (the platform's default 50) of the control's anchor
+// history; cursor is a next_cursor from the page before.
 export async function getControlAnchorHistory(
   bearer: string,
   controlID: string,
+  cursor?: string,
 ): Promise<ControlAnchorHistoryResponse> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
   const res = await apiFetch(
-    `/v1/controls/${encodeURIComponent(controlID)}/anchor-history`,
+    `/v1/controls/${encodeURIComponent(controlID)}/anchor-history${qs}`,
     bearer,
   );
   return (await res.json()) as ControlAnchorHistoryResponse;
@@ -574,9 +576,11 @@ export function fetchControlHistory(
 
 export function fetchControlAnchorHistory(
   controlID: string,
+  cursor?: string,
 ): Promise<ControlAnchorHistoryResponse> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
   return bffControlFetch<ControlAnchorHistoryResponse>(
-    `/api/controls/${encodeURIComponent(controlID)}/anchor-history`,
+    `/api/controls/${encodeURIComponent(controlID)}/anchor-history${qs}`,
   );
 }
 

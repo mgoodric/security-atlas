@@ -37,7 +37,7 @@
 // redirect are unchanged. Server values live only in the TanStack Query
 // cache; the one useEffect is the redirect.
 
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect } from "react";
@@ -204,10 +204,12 @@ function ControlDetailPageInner() {
     enabled: Boolean(id) && activeTab === "history",
   });
 
-  // #2392 — the SCF anchor history, on the History tab.
-  const anchorHistoryQ = useQuery({
+  // #2392 — the SCF anchor history, on the History tab, a page at a time.
+  const anchorHistoryQ = useInfiniteQuery({
     queryKey: ["control", id, "anchor-history"],
-    queryFn: () => fetchControlAnchorHistory(id),
+    queryFn: ({ pageParam }) => fetchControlAnchorHistory(id, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: Boolean(id) && activeTab === "history",
   });
 
