@@ -74,6 +74,27 @@ updates:
       prefix-development: "deps"
       include: "scope"
 
+  # #2394 — the OpenAPI types generator, isolated from the workspaces above
+  # for its TypeScript 5 peer (web/tools/openapi-types/README.md). The
+  # TypeScript major is held at 5 until openapi-typescript accepts 6.
+  - package-ecosystem: "npm"
+    directory: "/web/tools/openapi-types"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+    groups:
+      openapi-types:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps"
+      include: "scope"
+
   # Python (uv / pyproject.toml at root + oscal-bridge/)
   - package-ecosystem: "pip"
     directory: "/"
