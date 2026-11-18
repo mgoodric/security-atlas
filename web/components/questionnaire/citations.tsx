@@ -3,7 +3,8 @@
 //
 // The picker is the shared entity picker (`<EntityPicker>`) over the
 // tenant's controls and evidence, in place of slice 263's own search
-// palette. Each pick adds one citation and clears the field for the
+// palette. Evidence is searched server-side as the operator types, so a
+// record older than the suggested newest ones can still be cited. Each pick adds one citation and clears the field for the
 // next. It is list-only: a pasted ID it cannot find has no kind, so it
 // cannot become a citation. When the server refuses the evidence list
 // (a viewer, an auditor not assigned), controls still list and the field

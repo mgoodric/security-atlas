@@ -62,9 +62,64 @@ async function json(route: Route, status: number, body: unknown) {
   });
 }
 
-// mockCiteLists serves the cite picker's two lists. `evidenceStatus` 403
-// is what the platform answers a role that cannot read evidence.
-async function mockCiteLists(page: Page, evidenceStatus = 200) {
+// An evidence record older than the newest 200 the picker suggests:
+// only the server-side search finds it.
+const OLD_EVIDENCE_ID = "e8e8e8e8-0000-4000-8000-000000002432";
+const OLD_EVIDENCE_TITLE = "legacy.backup_restore_test · BCD-11";
+
+// newestEvidence is a full first page: 200 records, none of them the
+// old one.
+function newestEvidence(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    evidence_id: `e9e9e9e9-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    evidence_kind: "aws.iam.mfa_status",
+    observed_at: "2026-11-17T09:00:00Z",
+    source: null,
+    content_hash: "sha256:test",
+    scope_cell: null,
+    result: "pass",
+  }));
+}
+
+// mockCiteLists serves the cite picker's two lists and the evidence
+// search. `evidenceStatus` 403 is what the platform answers a role that
+// cannot read evidence; search then lists evidence in partial_types.
+async function mockCiteLists(
+  page: Page,
+  evidenceStatus = 200,
+  evidence: unknown[] | null = null,
+) {
+  await page.route(
+    (url) => url.pathname === "/api/search",
+    (route, req) => {
+      const q = new URL(req.url()).searchParams.get("q") ?? "";
+      if (evidenceStatus !== 200) {
+        return json(route, 200, {
+          hits: [],
+          count: 0,
+          groups: [],
+          partial_types: ["evidence"],
+        });
+      }
+      const hits = q.toLowerCase().startsWith("leg")
+        ? [
+            {
+              id: OLD_EVIDENCE_ID,
+              type: "evidence",
+              title: OLD_EVIDENCE_TITLE,
+              snippet: OLD_EVIDENCE_TITLE,
+              relevance_score: 1,
+            },
+          ]
+        : [];
+      return json(route, 200, {
+        hits,
+        count: hits.length,
+        groups: [{ type: "evidence", count: hits.length }],
+        partial_types: [],
+      });
+    },
+  );
   await page.route(
     (url) => url.pathname === "/api/controls-list",
     (route) =>
@@ -88,7 +143,7 @@ async function mockCiteLists(page: Page, evidenceStatus = 200) {
       evidenceStatus === 200
         ? json(route, 200, {
             control_id: "",
-            evidence: [
+            evidence: evidence ?? [
               {
                 evidence_id: CITE_EVIDENCE_ID,
                 evidence_kind: EVIDENCE_KIND,
@@ -99,9 +154,9 @@ async function mockCiteLists(page: Page, evidenceStatus = 200) {
                 result: "pass",
               },
             ],
-            count: 1,
-            total: 1,
-            next_cursor: "",
+            count: evidence?.length ?? 1,
+            total: evidence ? evidence.length + 1 : 1,
+            next_cursor: evidence ? "next" : "",
           })
         : json(route, evidenceStatus, { error: "forbidden" }),
   );
@@ -618,7 +673,11 @@ test.describe("questionnaires (slice 263)", () => {
     await expect(page.getByTestId("cloud-routing-banner")).toHaveCount(0);
   });
   // #2432 — the cite field on a saved answer.
-  async function openSavedAnswer(page: Page, evidenceStatus: number) {
+  async function openSavedAnswer(
+    page: Page,
+    evidenceStatus: number,
+    evidence: unknown[] | null = null,
+  ) {
     await page.route(`**/api/questionnaires/${Q_ID}`, (route) =>
       json(
         route,
@@ -635,12 +694,52 @@ test.describe("questionnaires (slice 263)", () => {
     await page.route(`**/api/questionnaires/${Q_ID}/suggestions**`, (route) =>
       json(route, 200, { suggestions: [] }),
     );
-    await mockCiteLists(page, evidenceStatus);
+    await mockCiteLists(page, evidenceStatus, evidence);
     await page.goto(`/questionnaires/${Q_ID}`);
     await expect(page.getByTestId("answer-editor")).toBeVisible({
       timeout: 30_000,
     });
   }
+
+  test("#2432: evidence older than the newest 200 is found by server search and cited", async ({
+    authedPage: page,
+  }) => {
+    await page.route(
+      `**/api/questionnaires/${Q_ID}/answers/${QUESTION_ID}`,
+      (route, req) =>
+        json(route, 200, { id: "answ-1", ...(req.postDataJSON() as object) }),
+    );
+    // A full first page of 200 newer records; the old one is not on it.
+    await openSavedAnswer(page, 200, newestEvidence(200));
+
+    const searched = page.waitForRequest(
+      (r) =>
+        new URL(r.url()).pathname === "/api/search" &&
+        new URL(r.url()).searchParams.get("types") === "evidence",
+    );
+    const saved = page.waitForRequest(
+      (r) =>
+        r.method() === "PATCH" &&
+        ((r.postDataJSON() as { citations?: unknown[] }).citations ?? [])
+          .length === 2,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("citation-picker").fill("legacy");
+    expect(new URL((await searched).url()).searchParams.get("q")).toBe(
+      "legacy",
+    );
+    await page
+      .getByTestId("citation-picker-option")
+      .filter({ hasText: OLD_EVIDENCE_TITLE })
+      .click();
+    expect(
+      ((await saved).postDataJSON() as { citations: unknown[] }).citations,
+    ).toEqual([
+      { id: CITE_CONTROL_ID, type: "controls", title: CONTROL_TITLE },
+      { id: OLD_EVIDENCE_ID, type: "evidence", title: OLD_EVIDENCE_TITLE },
+    ]);
+    await expect(page.getByTestId("citation-chip")).toHaveCount(2);
+  });
 
   test("#2432: a saved citation renders; picks are labelled, never raw values", async ({
     authedPage: page,

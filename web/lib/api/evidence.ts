@@ -133,6 +133,42 @@ export async function fetchEvidenceList(
   return (await res.json()) as EvidenceListResponse;
 }
 
+// ----- #2432: evidence search for the entity picker -----
+//
+// `/v1/evidence` has no text filter (and a 30-day default window), so a
+// picker searching the whole ledger asks the unified search
+// (`/api/search?types=evidence`, slice 268): an RLS-scoped ILIKE over
+// `evidence_kind` and `control_ref`, newest first. Search refuses a type
+// by listing it in `partial_types` with a 200; that is surfaced here as
+// the 403 it means, so the picker treats it like any refused list.
+
+export type EvidenceSearchHit = { id: string; title: string };
+
+// The most hits one search returns (the endpoint's hard cap).
+export const EVIDENCE_SEARCH_LIMIT = 50;
+
+export async function searchEvidence(q: string): Promise<EvidenceSearchHit[]> {
+  const qs = new URLSearchParams({
+    q: q.trim(),
+    types: "evidence",
+    limit: String(EVIDENCE_SEARCH_LIMIT),
+  });
+  const res = await fetch(`/api/search?${qs.toString()}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new APIError(res.status, `${res.status}`);
+  const body = (await res.json()) as {
+    hits?: { id: string; type: string; title: string }[];
+    partial_types?: string[];
+  };
+  if ((body.partial_types ?? []).includes("evidence")) {
+    throw new APIError(403, "evidence is not readable");
+  }
+  return (body.hits ?? [])
+    .filter((h) => h.type === "evidence")
+    .map((h) => ({ id: h.id, title: h.title }));
+}
+
 // ----- #2137: /evidence/[id] detail view -----
 //
 // Row source: `evidenceDetailWire` in

@@ -10,7 +10,7 @@
 // (`components/ui/entity-picker.tsx`) are the only render paths.
 
 import type { TenantControl } from "./api/controls-list";
-import type { EvidenceRecord } from "./api/evidence";
+import type { EvidenceRecord, EvidenceSearchHit } from "./api/evidence";
 import type { Policy } from "./api/policies";
 import type { Risk } from "./api/risks";
 import { enumLabel } from "./labels/enum-labels";
@@ -222,6 +222,39 @@ export function evidenceOptions(
       kind: "evidence" as const,
       hint: r.result ? enumLabel("EvidenceResult", r.result) : undefined,
     };
+  });
+}
+
+/**
+ * Evidence the server search matched for `query`. The search title
+ * ("<kind> · <control_ref>") is the label. The search matched each hit
+ * per token, server-side, so the query is a keyword: the client filter
+ * keeps every hit the server returned for it.
+ */
+export function evidenceSearchOptions(
+  hits: readonly EvidenceSearchHit[],
+  query: string,
+): EntityOption[] {
+  return hits.map((h) => ({
+    value: h.id.toLowerCase(),
+    label: h.title,
+    kind: "evidence" as const,
+    keywords: [query.trim()],
+  }));
+}
+
+/**
+ * Options from several sources, the first of each value kept, so a
+ * record listed and also found by search appears once.
+ */
+export function uniqueOptions(
+  options: readonly EntityOption[],
+): EntityOption[] {
+  const seen = new Set<string>();
+  return options.filter((o) => {
+    if (seen.has(o.value)) return false;
+    seen.add(o.value);
+    return true;
   });
 }
 

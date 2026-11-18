@@ -22,15 +22,17 @@
 // "not available" in place, never an error page. The picker is UI only:
 // the server still checks link caps and tenant ownership.
 //
-// #2432 adds evidence (`/api/evidence`, the tenant's newest records) for
-// the questionnaire citation picker. Every record list is cached under
+// #2432 adds evidence for the questionnaire citation picker: the
+// tenant's newest records (`/api/evidence`) as suggestions, and once two
+// characters are typed, a debounced server-side search of the whole
+// ledger (`/api/search?types=evidence`). Every record list is cached under
 // the session's tenant, so one tenant's titles never show under another.
 // When a picker lists several kinds and the server refuses one (a viewer
 // asking for evidence), the others still list and the refused one is
 // named "not available"; nothing from its list is shown.
 
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Combobox,
@@ -44,13 +46,14 @@ import { useSessionTenant } from "@/components/session-tenant-context";
 import { usePeopleDirectory } from "@/components/ui/person";
 import { APIError } from "@/lib/api/base";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
-import { fetchEvidenceList } from "@/lib/api/evidence";
+import { fetchEvidenceList, searchEvidence } from "@/lib/api/evidence";
 import { fetchPoliciesList } from "@/lib/api/policies";
 import { fetchRisksListWithRollUps } from "@/lib/api/risks";
 import {
   controlOptions,
   credentialOptions,
   evidenceOptions,
+  evidenceSearchOptions,
   frameworkOptions,
   KIND_PLURAL,
   matchesQuery,
@@ -59,6 +62,7 @@ import {
   policyOptions,
   riskOptions,
   toggleSelection,
+  uniqueOptions,
   userOptions,
   type EntityKind,
   type EntityOption,
@@ -80,14 +84,35 @@ function isUnavailable(err: unknown): boolean {
   return err instanceof APIError && (err.status === 403 || err.status === 404);
 }
 
-// The newest evidence records the picker lists: the endpoint's page cap.
+// The newest evidence records the picker suggests before a search: the
+// endpoint's page cap.
 const EVIDENCE_LIMIT = 200;
+// Typed text searches evidence server-side once it is this long (the
+// search endpoint's minimum), after this pause.
+const SEARCH_MIN_CHARS = 2;
+const SEARCH_DEBOUNCE_MS = 250;
 
 async function fetchEvidenceForPicker() {
   return (await fetchEvidenceList({ limit: EVIDENCE_LIMIT })).evidence;
 }
 
-function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
+// useDebounced returns `value` once it has stopped changing for `ms`.
+function useDebounced(value: string, ms: number): string {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
+// The evidence list holds only the newest records, so once the caller
+// types, the whole ledger is searched server-side (searchEvidence).
+function useEntityOptions(
+  kinds: readonly EntityKind[],
+  module?: string,
+  query = "",
+) {
   const wantsFrameworks = kinds.includes("framework");
   const wantsPeople = kinds.includes("user") || kinds.includes("credential");
   const wantsControls = kinds.includes("control");
@@ -133,6 +158,19 @@ function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
     enabled: wantsEvidence && tenantId !== "",
     retry,
   });
+  const searchFor = useDebounced(query.trim(), SEARCH_DEBOUNCE_MS);
+  const evidenceSearch = useQuery({
+    queryKey: ["entity-picker", "evidence-search", tenantId, searchFor],
+    queryFn: () => searchEvidence(searchFor),
+    staleTime: 30_000,
+    enabled:
+      wantsEvidence &&
+      tenantId !== "" &&
+      searchFor.length >= SEARCH_MIN_CHARS &&
+      // A refused list is not searched either.
+      !isUnavailable(evidence.error),
+    retry,
+  });
 
   const options = useMemo(() => {
     const out: EntityOption[] = [];
@@ -151,8 +189,16 @@ function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
     if (wantsPolicies) {
       out.push(...policyOptions(policies.data?.policies ?? []));
     }
-    if (wantsEvidence) out.push(...evidenceOptions(evidence.data ?? []));
-    return out;
+    if (wantsEvidence) {
+      out.push(...evidenceOptions(evidence.data ?? []));
+      out.push(
+        ...evidenceSearchOptions(
+          evidenceSearch.data ?? [],
+          evidenceSearch.data ? searchFor : "",
+        ),
+      );
+    }
+    return uniqueOptions(out);
   }, [
     kinds,
     wantsFrameworks,
@@ -167,24 +213,31 @@ function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
     risks.data,
     policies.data,
     evidence.data,
+    evidenceSearch.data,
+    searchFor,
   ]);
 
+  // Evidence is refused when either its list or its search is.
+  const evidenceError =
+    [evidence.error, evidenceSearch.error].find(isUnavailable) ??
+    evidence.error ??
+    evidenceSearch.error;
   const records = (
     [
-      ["control", wantsControls, controls],
-      ["risk", wantsRisks, risks],
-      ["policy", wantsPolicies, policies],
-      ["evidence", wantsEvidence, evidence],
+      ["control", wantsControls, controls.isPending, controls.error],
+      ["risk", wantsRisks, risks.isPending, risks.error],
+      ["policy", wantsPolicies, policies.isPending, policies.error],
+      ["evidence", wantsEvidence, evidence.isPending, evidenceError],
     ] as const
   ).filter(([, wanted]) => wanted);
   const isLoading =
     (wantsFrameworks && frameworks.isPending) ||
     (wantsPeople && people.isPending) ||
-    records.some(([, , q]) => q.isPending);
+    records.some(([, , pending]) => pending);
   // The kinds the server refused (403 or 404). Decided from the answer,
   // never from the caller's role as the browser sees it.
   const unavailableKinds: EntityKind[] = records
-    .filter(([, , q]) => isUnavailable(q.error))
+    .filter(([, , , error]) => isUnavailable(error))
     .map(([kind]) => kind);
   const unavailable =
     records.length > 0 && unavailableKinds.length === records.length;
@@ -193,8 +246,21 @@ function useEntityOptions(kinds: readonly EntityKind[], module?: string) {
     !unavailable &&
     ((wantsFrameworks && frameworks.isError) ||
       (wantsPeople && !people.isPending && !people.data) ||
-      records.some(([, , q]) => q.isError && !isUnavailable(q.error)));
-  return { options, isLoading, isError, unavailable, unavailableKinds };
+      records.some(([, , , error]) => error && !isUnavailable(error)));
+  // A search is due (still debouncing) or on its way.
+  const isSearching =
+    wantsEvidence &&
+    !unavailable &&
+    query.trim().length >= SEARCH_MIN_CHARS &&
+    (searchFor !== query.trim() || evidenceSearch.isFetching);
+  return {
+    options,
+    isLoading,
+    isError,
+    unavailable,
+    unavailableKinds,
+    isSearching,
+  };
 }
 
 export function EntityPicker({
@@ -238,7 +304,9 @@ export function EntityPicker({
   // an inline error rather than a selection.
   listedOnly?: boolean;
 }) {
-  const fetched = useEntityOptions(kinds, module);
+  // What the caller has typed, which an evidence picker searches for.
+  const [typed, setTyped] = useState("");
+  const fetched = useEntityOptions(kinds, module, typed);
   const options = useMemo(
     () => [...(extraOptions ?? []), ...fetched.options],
     [extraOptions, fetched.options],
@@ -320,6 +388,7 @@ export function EntityPicker({
         inputValue={input}
         onInputValueChange={(next: string) => {
           setInput(next);
+          setTyped(next);
           setPasteError(null);
         }}
         filter={(item: EntityOption, query: string) =>
@@ -367,11 +436,13 @@ export function EntityPicker({
           <ComboboxEmpty>
             {fetched.isLoading
               ? "Loading…"
-              : fetched.unavailable
-                ? unavailableText(kinds)
-                : fetched.isError
-                  ? "The list could not be loaded. Paste an ID instead."
-                  : "No matches. Paste an ID to use one not listed."}
+              : fetched.isSearching
+                ? "Searching…"
+                : fetched.unavailable
+                  ? unavailableText(kinds)
+                  : fetched.isError
+                    ? "The list could not be loaded. Paste an ID instead."
+                    : "No matches. Paste an ID to use one not listed."}
           </ComboboxEmpty>
           <ComboboxList>
             {(o: EntityOption) => (
@@ -477,8 +548,8 @@ export function EntityMultiPicker({
   error?: string;
   errorId?: string;
 }) {
-  const fetched = useEntityOptions(kinds);
   const [filter, setFilter] = useState("");
+  const fetched = useEntityOptions(kinds, undefined, filter);
   const filtered = useMemo(
     () => fetched.options.filter((o) => matchesQuery(o, filter)),
     [fetched.options, filter],

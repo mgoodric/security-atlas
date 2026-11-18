@@ -4,6 +4,7 @@ import {
   controlOptions,
   credentialOptions,
   evidenceOptions,
+  evidenceSearchOptions,
   frameworkOptions,
   matchesQuery,
   notListedError,
@@ -11,6 +12,7 @@ import {
   policyOptions,
   riskOptions,
   toggleSelection,
+  uniqueOptions,
   machineActorOptions,
   userOptions,
 } from "./entity-picker";
@@ -280,6 +282,36 @@ describe("evidenceOptions (#2432)", () => {
     expect(notListedError(["control", "evidence"], ` ${U1} `)).toBe(
       `"${U1}" is not in the list. Pick a control or evidence record from the list.`,
     );
+  });
+});
+
+describe("evidenceSearchOptions / uniqueOptions (#2432)", () => {
+  test("a search hit is labelled by its title and kept by the query that found it", () => {
+    const [o] = evidenceSearchOptions(
+      [{ id: U1.toUpperCase(), title: "legacy.backup · BCD-11" }],
+      " legacy backup ",
+    );
+    expect(o).toEqual({
+      value: U1,
+      label: "legacy.backup · BCD-11",
+      kind: "evidence",
+      keywords: ["legacy backup"],
+    });
+    // The server matched it per token; the client filter keeps it.
+    expect(matchesQuery(o, "legacy backup")).toBe(true);
+  });
+
+  test("a record both listed and found appears once, the first kept", () => {
+    expect(
+      uniqueOptions([
+        { value: U1, label: "listed" },
+        { value: U2, label: "other" },
+        { value: U1, label: "found" },
+      ]),
+    ).toEqual([
+      { value: U1, label: "listed" },
+      { value: U2, label: "other" },
+    ]);
   });
 });
 
