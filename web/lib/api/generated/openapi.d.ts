@@ -383,6 +383,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/activity/actors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/activity/actors — the machine and system actors (system, system:<process>, oauth_client:<id>) in the caller's activity for a from/to window (#2414) */
+        get: operations["get-v1-activity-actors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/activity/unified": {
         parameters: {
             query?: never;
@@ -3337,7 +3354,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/frameworks — the global framework catalog; ?include=versions adds each framework's versions (#2086) */
+        /** GET /v1/frameworks — the global framework catalog; ?include=versions adds each framework's versions plus the caller's own tenant-private frameworks and versions (#2086, */
         get: operations["get-v1-frameworks"];
         put?: never;
         post?: never;
@@ -6517,6 +6534,26 @@ export interface operations {
         };
     };
     "get-v1-activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "get-v1-activity-actors": {
         parameters: {
             query?: never;
             header?: never;
