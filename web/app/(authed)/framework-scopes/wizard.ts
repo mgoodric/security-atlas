@@ -16,6 +16,7 @@ import type {
   FrameworkScope,
   FrameworkScopeState,
 } from "@/lib/api/framework-scopes";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 export type ScopeDraft = {
   frameworkVersionId: string;
@@ -148,13 +149,10 @@ export function newScopeHref(frameworkVersionId?: string): string {
     : "/framework-scopes/new";
 }
 
-/** The platform's `{"error": "..."}` message, else the status line. */
+/**
+ * The platform's `{"error": "..."}` message, else the status line. A 5xx
+ * always gets the status line (#2433).
+ */
 export async function errorMessage(res: Response): Promise<string> {
-  try {
-    const j = (await res.json()) as { error?: string };
-    if (j.error) return j.error;
-  } catch {
-    // body not JSON — keep the status line
-  }
-  return `${res.status} ${res.statusText}`;
+  return upstreamErrorMessage(res);
 }

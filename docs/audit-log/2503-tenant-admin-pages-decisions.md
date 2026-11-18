@@ -266,3 +266,39 @@ The other D1 rows are unchanged.
   rows. The unified read, export and activity gates are listed with no route
   row: the unified pair adds a live DB role lookup a cred-only row cannot
   express, and the activity call only picks the view.
+
+## Part 3 — SCIM credentials
+
+Matt (2026-11-18): org admins keep `trust_unverified_email_for_link` in the
+SSO config (D8 stands), and #2609 (auditing SSO changes) lands before the
+last PR of this split, the one that closes #2503.
+
+### D13 — SCIM credentials are tenant-scoped
+
+`POST/GET /v1/admin/scim-credentials` and `DELETE …/{id}` admit
+`authz.IsTenantAdmin`, and `scim-credentials` joins `tenant_admin_segments`.
+
+- The handler takes the tenant from the credential and accepts no
+  `tenant_id`. The store runs list and revoke under that tenant's RLS, so
+  another tenant's credential id is a 404.
+- The token it mints drives only `/scim/v2` for that tenant. It provisions
+  members and their group-derived roles there. That is the same authority
+  the admin already has through Users. Which group maps to which role is
+  set at `/v1/admin/group-role-mappings`, which stays platform until its
+  own PR.
+- There is no SCIM page in the web app, so nothing changes there.
+
+grc_engineer's blanket read still admits `GET /v1/admin/scim-credentials`
+(ids and descriptions, never a token) in OPA. The handler refuses it, as
+before, and it is pinned in `handlerNarrower2428`.
+
+### D14 — tests
+
+`TestTenantAdmin2503_SCIMCredentials`:
+
+- A tenant admin by role issues a credential for its own tenant, lists it
+  and revokes it.
+- Another tenant's admin does not see it in its list, and its revoke is
+  a 404.
+
+It fails on part 2's code: the issue is a 403.
