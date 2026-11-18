@@ -474,3 +474,96 @@ WHERE unified.occurred_at >= sqlc.arg('from_ts')::timestamptz
            AND (unified.kind, unified.row_id::text) > (sqlc.arg('cursor_kind')::text, sqlc.arg('cursor_row_id')::text)))
 ORDER BY unified.occurred_at DESC, unified.kind ASC, unified.row_id ASC
 LIMIT sqlc.arg('limit_n')::integer;
+
+-- name: ListUnifiedAuditMachineActors :many
+-- #2414 — the machine and system actors (`system`, `system:<process>`,
+-- `oauth_client:<id>`) that appear in the tenant's activity in a window,
+-- for the Activity page's actor picker. A person or API key is listed
+-- from /v1/people instead, so only these shapes are returned.
+--
+-- The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+-- what the visibility rules read: the same window, the slice 270
+-- non-privileged predicate and the slice 669 read-telemetry predicate.
+-- One row per (actor, kind, target_type, request_path), so the handler
+-- applies the #2173 module filter exactly as it does to the feed, and an
+-- actor seen only in rows the caller may not see is not listed.
+-- `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
+-- to one query and not the other.
+--
+-- RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
+-- atlas_app and takes no tenant parameter.
+WITH unified AS (
+    SELECT occurred_at, user_id AS actor_id, 'decision'::text AS kind,
+           action, resource_type AS target_type, request_path
+    FROM decision_audit_log
+    UNION ALL
+    SELECT received_at, credential_id, 'evidence', decision, '', ''
+    FROM evidence_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'exception', action, '', ''
+    FROM exception_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'sample', action, '', ''
+    FROM sample_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'audit_period', action, '', ''
+    FROM audit_period_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'aggregation_rule', event, '', ''
+    FROM aggregation_rule_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'feature_flag', '', '', ''
+    FROM feature_flag_audit_log
+    UNION ALL
+    SELECT occurred_at, user_id::text, 'me', action, '', ''
+    FROM me_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'walkthrough', action, '', ''
+    FROM walkthrough_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'framework_scope', action, '', ''
+    FROM framework_scope_workflow_log
+    UNION ALL
+    SELECT occurred_at, actor, 'taxonomy', action, '', ''
+    FROM taxonomy_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'mapping_overlay', action, '', ''
+    FROM fw_to_scf_overlay_edge_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'control_import', action, '', ''
+    FROM control_import_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'risk', action_type, '', ''
+    FROM risk_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'posture_target', action, '', ''
+    FROM framework_posture_target_audit_log
+    UNION ALL
+    SELECT occurred_at, actor, 'module_access', '', '', ''
+    FROM member_module_access_audit_log
+)
+SELECT DISTINCT
+    unified.actor_id::text     AS actor_id,
+    unified.kind::text         AS kind,
+    unified.target_type::text  AS target_type,
+    unified.request_path::text AS request_path
+FROM unified
+WHERE unified.occurred_at >= sqlc.arg('from_ts')::timestamptz
+  AND unified.occurred_at <  sqlc.arg('to_ts')::timestamptz
+  AND (unified.actor_id = 'system'
+       OR starts_with(unified.actor_id, 'system:')
+       OR starts_with(unified.actor_id, 'oauth_client:'))
+  AND (
+      sqlc.arg('caller_is_privileged')::boolean = true
+      OR (
+          unified.kind <> 'feature_flag'
+          AND unified.kind <> 'module_access'
+          AND unified.kind <> 'me'
+      )
+  )
+  AND (
+      sqlc.arg('exclude_read_telemetry')::boolean = false
+      OR NOT (unified.kind = 'decision' AND unified.action = 'read')
+  )
+ORDER BY 1, 2, 3, 4
+LIMIT 1000;

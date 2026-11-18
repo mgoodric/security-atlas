@@ -316,6 +316,10 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// `surface="activity"` tagging (slice 270 D7) — no new action value,
 	// no migration.
 	root.Get("/v1/activity/unified", auditLogH.ActivityList)
+	// #2414: the machine and system actors in that feed, for the Activity
+	// page's actor picker. Same admit, privilege predicate and module
+	// filter as /v1/activity/unified.
+	root.Get("/v1/activity/actors", auditLogH.ActivityActors)
 	// Slice 139: per-entity data exports for audit_periods + vendors.
 	// Both reuse the slice-135 export library; both go through the
 	// slice-145 per-(tenant, user) concurrency cap; both emit a

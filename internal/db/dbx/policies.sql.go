@@ -560,6 +560,68 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 	return items, nil
 }
 
+const listPoliciesUnderReview = `-- name: ListPoliciesUnderReview :many
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+FROM policies
+WHERE tenant_id = $1
+  AND status = 'under_review'
+ORDER BY created_at DESC, id ASC
+`
+
+// #2457: the policies waiting for approval, for GET /v1/approvals and its
+// sidebar badge. Served by the (tenant_id, status, created_at DESC) index.
+func (q *Queries) ListPoliciesUnderReview(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listPoliciesUnderReview, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPoliciesWithAckRate = `-- name: ListPoliciesWithAckRate :many
 WITH ack_cells AS (
     SELECT

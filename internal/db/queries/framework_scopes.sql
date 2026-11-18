@@ -49,6 +49,15 @@ FROM framework_scopes
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: ListFrameworkScopesInReview :many
+-- #2457: the framework scopes waiting for approval, for GET /v1/approvals
+-- and its sidebar badge.
+SELECT *
+FROM framework_scopes
+WHERE tenant_id = $1
+  AND state = 'review'
+ORDER BY created_at DESC, id ASC;
+
 -- name: ListFrameworkScopesByFrameworkVersion :many
 SELECT *
 FROM framework_scopes
