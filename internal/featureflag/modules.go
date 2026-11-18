@@ -438,7 +438,10 @@ func WithAttemptRecorder(record func(*http.Request, GatedAttempt)) GateOption {
 // {"error":"module_state_unavailable"}: the gate does not guess the
 // tenant's switch from the Seed default, since serving the module could
 // expose one the tenant switched off, and a 404 would claim the tenant
-// switched it off (#2339). An unknown FlagKey is a code bug and answers 500.
+// switched it off (#2339). A path the registry cannot place (Resolve's
+// ErrNoModule or ErrAmbiguousModule) answers the same 503: the gate cannot
+// tell which switch governs it, so it never passes it to chi (#2352). An
+// unknown FlagKey is a code bug and answers 500.
 func ModuleGate(looker Looker, opts ...GateOption) func(http.Handler) http.Handler {
 	var cfg gateConfig
 	for _, o := range opts {
@@ -453,10 +456,11 @@ func ModuleGate(looker Looker, opts ...GateOption) func(http.Handler) http.Handl
 			for _, p := range paths {
 				o, err := Resolve(p)
 				if err != nil {
-					// A path the registry cannot place is no route chi
-					// serves (the guard test holds every registered route
-					// to a module); chi answers it.
-					continue
+					// The gate does not know which module's switch
+					// governs a path it cannot place, so it refuses
+					// rather than passing it to chi unchecked (#2352).
+					writeModuleStateUnavailable(w, r, unresolvedModule, err)
+					return
 				}
 				off, err := switchedOffKey(r, looker, o)
 				if errors.Is(err, ErrNotFound) {
@@ -464,7 +468,7 @@ func ModuleGate(looker Looker, opts ...GateOption) func(http.Handler) http.Handl
 					return
 				}
 				if err != nil {
-					writeModuleStateUnavailable(w, r, o, err)
+					writeModuleStateUnavailable(w, r, o.Module.Key, err)
 					return
 				}
 				if off != "" {
@@ -482,13 +486,13 @@ func ModuleGate(looker Looker, opts ...GateOption) func(http.Handler) http.Handl
 
 // RouteOn reports whether ModuleGate would let a request to path through:
 // false when the module or feature owning it is switched off for the
-// request's tenant. A path the registry cannot place is on, as ModuleGate
-// passes it to chi. GET /v1/approvals (#2119) uses it to list only what
+// request's tenant. A path the registry cannot place returns Resolve's
+// error, as ModuleGate refuses it. GET /v1/approvals (#2119) uses it to list only what
 // the caller could approve, so a switched-off module lists nothing.
 func RouteOn(r *http.Request, looker Looker, path string) (bool, error) {
 	o, err := Resolve(path)
 	if err != nil {
-		return true, nil
+		return false, err
 	}
 	off, err := switchedOffKey(r, looker, o)
 	if err != nil {
@@ -525,13 +529,18 @@ func switchedOffKey(r *http.Request, looker Looker, o Owner) (string, error) {
 // database_unavailable.
 const moduleStateRetryAfterSeconds = 5
 
+// unresolvedModule is the module label on a 503 for a path the registry
+// cannot place.
+const unresolvedModule = "unresolved"
+
 // writeModuleStateUnavailable answers a request whose module switch could
-// not be read: logged, counted (atlas.module_gate.state_errors), and 503
+// not be read, or whose module could not be resolved: logged, counted
+// (atlas.module_gate.state_errors), and 503
 // {"error":"module_state_unavailable"}.
-func writeModuleStateUnavailable(w http.ResponseWriter, r *http.Request, o Owner, err error) {
-	countModuleStateError(r.Context(), o.Module.Key)
-	slog.Error("module gate: module state read failed",
-		slog.String("module", o.Module.Key),
+func writeModuleStateUnavailable(w http.ResponseWriter, r *http.Request, module string, err error) {
+	countModuleStateError(r.Context(), module)
+	slog.Error("module gate: module state unavailable",
+		slog.String("module", module),
 		slog.String("method", r.Method),
 		slog.String("path", r.URL.Path),
 		slog.Int("status", http.StatusServiceUnavailable),

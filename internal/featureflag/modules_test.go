@@ -159,8 +159,6 @@ func TestModuleGate(t *testing.T) {
 		{"/v1/oscal/component-definitions", http.StatusNotFound, "vendor.claims"},
 		{"/v1/vendors", http.StatusTeapot, ""},
 		{"/v1/audit-periods/abc/oscal-export", http.StatusTeapot, ""},
-		// A path the registry cannot place falls through to chi's 404.
-		{"/v1/nope", http.StatusTeapot, ""},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
@@ -230,6 +228,46 @@ func TestModuleGateFailsClosedOnStoreError(t *testing.T) {
 	}
 	if got := ModuleStateErrors() - before; got != 2 {
 		t.Errorf("ModuleStateErrors grew by %d; want 2", got)
+	}
+}
+
+// A path the registry cannot place answers 503 module_state_unavailable
+// and never reaches chi: the gate cannot tell which switch governs it
+// (#2352). Both the decoded and the raw path are checked, so a placeable
+// decoded path with an unplaceable raw form is refused too.
+func TestModuleGateRefusesUnresolvablePath(t *testing.T) {
+	looker := &fakeLooker{answers: map[string]Flag{
+		"risk.enabled": {Key: "risk.enabled", Enabled: true},
+	}}
+	h := ModuleGate(looker)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	before := ModuleStateErrors()
+	targets := []string{"/v1/nope", "/", "/v1/questionnaires-x", "/v1/risks%2Fx"}
+	for _, target := range targets {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s: status %d; want 503", target, rec.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"] != "module_state_unavailable" {
+			t.Errorf("%s: body %q; want error module_state_unavailable", target, rec.Body.String())
+		}
+		if got := rec.Header().Get("X-Feature-Disabled"); got != "" {
+			t.Errorf("%s: marker %q; an unplaceable path is not a switch-off", target, got)
+		}
+	}
+	if got := ModuleStateErrors() - before; got != uint64(len(targets)) {
+		t.Errorf("ModuleStateErrors grew by %d; want %d", got, len(targets))
+	}
+}
+
+func TestRouteOnUnresolvablePath(t *testing.T) {
+	t.Parallel()
+	on, err := RouteOn(httptest.NewRequest(http.MethodGet, "/", nil), &fakeLooker{}, "/v1/nope")
+	if on || !errors.Is(err, ErrNoModule) {
+		t.Fatalf("RouteOn(/v1/nope) = %v, %v; want false, ErrNoModule", on, err)
 	}
 }
 
