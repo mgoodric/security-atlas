@@ -155,6 +155,29 @@ func TestNonMitigateRiskUnaffected(t *testing.T) {
 	}
 }
 
+// A closed mitigate risk is exempt: it blocks neither a tombstone nor an
+// unlink of its last plan.
+func TestClosedMitigateRiskDoesNotBlock(t *testing.T) {
+	e := newMitigationEnv(t)
+	unlinkRisk := e.riskWith(t, "mitigate")
+	tombstoneRisk := e.riskWith(t, "mitigate")
+	unlinkPlan := e.planLinkedTo(t, unlinkRisk)
+	tombstonePlan := e.planLinkedTo(t, tombstoneRisk)
+	if _, err := e.admin.Exec(context.Background(), `
+		UPDATE risks SET status = 'closed', closure_reason = 'not_applicable',
+		       closed_at = now(), closed_by = 'test'
+		WHERE id = ANY($1)`, []uuid.UUID{unlinkRisk, tombstoneRisk}); err != nil {
+		t.Fatalf("close risks: %v", err)
+	}
+
+	if err := e.store.UnlinkRisk(e.ctx, unlinkPlan, unlinkRisk, e.owner); err != nil {
+		t.Fatalf("UnlinkRisk on closed mitigate risk: %v", err)
+	}
+	if err := e.store.Tombstone(e.ctx, tombstonePlan, e.owner); err != nil {
+		t.Fatalf("Tombstone over closed mitigate risk: %v", err)
+	}
+}
+
 // A tombstone over several risks refuses as a whole when any one would
 // break: the plan stays live and every link stays.
 func TestTombstone_MultiRiskRefusesWhole(t *testing.T) {

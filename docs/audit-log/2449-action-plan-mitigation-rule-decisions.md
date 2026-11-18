@@ -57,12 +57,15 @@ asked (the ticket allowed 400 or 409). `MitigationRequiredError` names the
 first risk, in id order, that would be left with neither. A refused
 tombstone rolls back entirely: the plan stays live and every link stays.
 
-### D5 — closed risks are checked too
+### D5 — closed risks are exempt
 
-The rule is checked whatever the risk's status. The risk side refuses any
-link change on a closed risk, because its links stand as they were until it
-is reopened (#2106); refusing to strip a closed mitigate risk of its last
-plan is consistent with that, and less strict than refusing every change.
+The rule protects open risks only. A closed mitigate risk does not block a
+plan tombstone or a risk unlink, per Matt in the review of #2646
+(2026-11-18): a closed risk is retired, so a plan that no longer backs it
+can still be removed. `checkMitigation` skips a risk whose status is
+`closed`, and `TestClosedMitigateRiskDoesNotBlock` covers both paths. The
+first cut checked closed risks too, by analogy with the risk side freezing
+a closed risk's links; the review overruled that.
 
 ### D6 — existing data is not repaired
 

@@ -650,7 +650,7 @@ func (s *Store) update(ctx context.Context, id uuid.UUID, in UpdateInput, guard 
 //
 // A live plan can be what keeps a mitigate risk valid (a linked control or
 // a live linked action plan, #1746). Tombstone refuses with
-// ErrMitigationRequired (409) when any linked risk would be left with
+// ErrMitigationRequired (409) when any linked open risk would be left with
 // neither, and then tombstones nothing (#2449).
 //
 // Lock order: the plan row (FOR UPDATE, so no risk link can be added
@@ -1008,11 +1008,13 @@ func lockRisks(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ids []uu
 }
 
 // checkMitigation re-counts, after the caller's write and under the risk
-// row locks, the links of every locked mitigate risk, and refuses the first
-// one left with neither a linked control nor a live action plan.
+// row locks, the links of every locked open mitigate risk, and refuses the
+// first one left with neither a linked control nor a live action plan. A
+// closed risk is exempt: it is retired, so it does not block a plan
+// tombstone or unlink.
 func checkMitigation(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, risks []dbx.Risk) error {
 	for _, r := range risks {
-		if r.Treatment != dbx.RiskTreatmentMitigate {
+		if r.Treatment != dbx.RiskTreatmentMitigate || r.Status == dbx.RiskStatusClosed {
 			continue
 		}
 		controls, err := q.CountRiskControlLinks(ctx, dbx.CountRiskControlLinksParams{TenantID: pgUUID(tenantID), RiskID: r.ID})
