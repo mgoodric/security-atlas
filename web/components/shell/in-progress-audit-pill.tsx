@@ -1,3 +1,6 @@
+// #2135 — the pill is the audit banner: "Audit ends in N days", counted
+// to the open period's end date, linking to the period's detail page.
+//
 // Slice 213 — in-progress audit pill, rendered in the shared authed-shell
 // topbar. Closes the audits-page header chrome parity gap surfaced by
 // slice 204's audit fleet (and visible on every authed page, since the
@@ -30,6 +33,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 
 import {
   fetchAuditPeriods,
@@ -69,6 +73,27 @@ export function pickMostRecentInProgress(
   return best;
 }
 
+// auditDaysRemaining is the whole calendar days from `now`'s date to the
+// period's end date (#2135). Both are read as calendar dates in the
+// viewer's own timezone: the end date is a date with no time, and "today"
+// is the browser's local date, so the count changes at the viewer's
+// midnight. 0 is the last day; negative is past the end.
+export function auditDaysRemaining(periodEnd: string, now: Date): number {
+  const [y, m, d] = periodEnd.slice(0, 10).split("-").map(Number);
+  const end = Date.UTC(y, m - 1, d);
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((end - today) / 86_400_000);
+}
+
+// auditCountdownText is the banner's copy for a day count.
+export function auditCountdownText(days: number): string {
+  if (days > 1) return `Audit ends in ${days} days`;
+  if (days === 1) return "Audit ends in 1 day";
+  if (days === 0) return "Audit ends today";
+  if (days === -1) return "Audit ended 1 day ago";
+  return `Audit ended ${-days} days ago`;
+}
+
 export function InProgressAuditPill() {
   const q = useQuery<AuditPeriodsListResponse>({
     queryKey: ["audits", "list"],
@@ -84,20 +109,30 @@ export function InProgressAuditPill() {
   const pick = pickMostRecentInProgress(q.data.audit_periods ?? []);
   if (!pick) return null;
 
+  // #2135: the banner counts down to the open period's end and links to
+  // the period's detail page (#2117).
+  const days = auditDaysRemaining(pick.period_end, new Date());
+  const text = auditCountdownText(days);
+
   return (
-    <div
+    <Link
+      href={`/audits/${encodeURIComponent(pick.id)}`}
       data-testid="in-progress-audit-pill"
-      className="flex items-center gap-2 px-2 py-2 lg:px-2.5 lg:py-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-full"
-      title={`${pick.name} in progress`}
-      aria-label={`${pick.name} in progress`}
+      data-days-remaining={days}
+      className="flex items-center gap-2 px-2 py-2 lg:px-2.5 lg:py-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-full hover:bg-amber-100 dark:hover:bg-amber-950/70"
+      title={`${pick.name}: ${text.toLowerCase()}`}
+      aria-label={`${pick.name}: ${text.toLowerCase()}`}
     >
       <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-      {/* #2213 — below `lg` the pill shows only its dot; the name is
+      {/* #2213 — below `lg` the pill shows only its dot; the text is
           visually hidden there, not removed, so it is still read out
           and still in the hover title. */}
-      <span className="sr-only text-xs font-medium text-amber-800 dark:text-amber-200 lg:not-sr-only">
-        {pick.name} in progress
+      <span
+        className="sr-only text-xs font-medium text-amber-800 dark:text-amber-200 lg:not-sr-only"
+        data-testid="in-progress-audit-countdown"
+      >
+        {text}
       </span>
-    </div>
+    </Link>
   );
 }

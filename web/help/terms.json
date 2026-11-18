@@ -292,7 +292,7 @@
       "id": "evaluation",
       "name": "Control evaluation",
       "short": "The check that reads a control's current evidence and works out its result: pass, fail, not applicable, inconclusive or excepted.",
-      "long": "Evaluation runs when new evidence arrives, on a schedule, and when someone chooses Evaluate now on a control. It only reads evidence and never changes it, and every run is kept, so you can see what a control's result was on any past date. A control with no current evidence is inconclusive, which is not the same as failing.",
+      "long": "Evaluation runs when new evidence arrives, on a schedule, when someone chooses Evaluate now on a control, and when an exception on the control starts, ends or is revoked. It only reads evidence and never changes it, and every run is kept, so you can see what a control's result was on any past date. A control with no current evidence is inconclusive, which is not the same as failing.",
       "glossary": "GLOSSARY.md#control-evaluation-slice-012"
     },
     {

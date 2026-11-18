@@ -186,14 +186,14 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 		// UnifiedList — the aggregator returns up to Limit rows, and
 		// the handler asks for one more than the page size to detect
 		// "more available" without an extra round-trip).
-		if len(got) > unifiedPageSize {
-			anchor := got[unifiedPageSize-1]
+		if len(got) > params.pageSize {
+			anchor := got[params.pageSize-1]
 			nextCursor = &unifiedlog.Cursor{
 				OccurredAt: anchor.OccurredAt,
 				Kind:       anchor.Kind,
 				RowID:      anchor.RowID,
 			}
-			got = got[:unifiedPageSize]
+			got = got[:params.pageSize]
 		}
 		// #2477: filter by module before the payload gate, which can
 		// clear the request path a decision row is placed by.
