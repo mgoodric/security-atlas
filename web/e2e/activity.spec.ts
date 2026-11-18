@@ -132,6 +132,16 @@ test.describe("/activity (#2093)", () => {
     await expect(first.getByTestId("activity-row-payload")).toContainText(
       "test-payload-visible",
     );
+    // Still expanded once the click has settled: a row handler that also
+    // toggled (no stopPropagation) would flip it straight back.
+    await page.waitForLoadState("networkidle");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // A second click collapses it: each click is exactly one flip.
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(first.getByTestId("activity-row-payload")).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     // A withheld payload says so rather than rendering "null".
     const second = page.getByTestId("activity-row").nth(1);

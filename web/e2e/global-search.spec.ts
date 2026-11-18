@@ -42,6 +42,7 @@
 //   npx playwright install chromium     # once per machine
 //   npx playwright test e2e/global-search.spec.ts
 
+import { expectNoSeriousAxe, seriousAxeViolations } from "./axe-gate";
 import { expect, test } from "./fixtures";
 
 import { seedFromFixture } from "./seed";
@@ -147,6 +148,12 @@ test.describe("global ⌘K search — real endpoint (OE-398c)", () => {
     // is what makes the control the first flat row (see the header).
     await expect(page.getByTestId("global-search-group-anchors")).toHaveCount(
       0,
+    );
+    // The open popover is swept too (#2397): the route sweep only sees
+    // the page in its initial, closed state.
+    expectNoSeriousAxe(
+      await seriousAxeViolations(page),
+      "global search popover open",
     );
 
     // #2067 — each group shows the real endpoint's match count for this
