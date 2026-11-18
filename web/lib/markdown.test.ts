@@ -100,9 +100,9 @@ describe("renderMarkdown — block grammar", () => {
     expect(renderMarkdown("")).toBe("");
   });
 
-  test("multi-line paragraph joins with a soft break", () => {
+  test("multi-line paragraph joins a soft break with a space (#2455)", () => {
     const html = renderMarkdown("line one\nline two");
-    expect(html).toContain("line one<br/>line two");
+    expect(html).toBe("<p>line one line two</p>");
   });
 
   test("inline code is not re-interpreted as emphasis", () => {
@@ -438,6 +438,95 @@ describe("renderMarkdown — definitions inside block quotes (#2316)", () => {
   });
 });
 
+describe("renderMarkdown — soft and hard line breaks (#2455)", () => {
+  test("a soft break inside a paragraph is a space", () => {
+    expect(renderMarkdown("one\ntwo\nthree")).toBe("<p>one two three</p>");
+  });
+
+  test("CRLF soft breaks are spaces too", () => {
+    expect(renderMarkdown("one\r\ntwo")).toBe("<p>one two</p>");
+  });
+
+  test("two trailing spaces make a hard break", () => {
+    expect(renderMarkdown("one  \ntwo")).toBe("<p>one<br/>two</p>");
+  });
+
+  test("more than two trailing spaces still make one hard break", () => {
+    expect(renderMarkdown("one     \ntwo")).toBe("<p>one<br/>two</p>");
+  });
+
+  test("one trailing space is a soft break", () => {
+    expect(renderMarkdown("one \ntwo")).toBe("<p>one two</p>");
+  });
+
+  test("a trailing backslash makes a hard break and is consumed", () => {
+    expect(renderMarkdown("one\\\ntwo")).toBe("<p>one<br/>two</p>");
+  });
+
+  test("a hard break at the end of a paragraph is dropped", () => {
+    expect(renderMarkdown("one  ")).toBe("<p>one</p>");
+    expect(renderMarkdown("one  \n\ntwo")).toBe("<p>one</p>\n<p>two</p>");
+    // CommonMark: a trailing backslash on the last line is literal text.
+    expect(renderMarkdown("one\\")).toBe("<p>one\\</p>");
+  });
+
+  test("leading indentation of a continuation line is dropped", () => {
+    expect(renderMarkdown("one\n   two")).toBe("<p>one two</p>");
+  });
+
+  test("breaks inside a list item's lazy continuation", () => {
+    expect(renderMarkdown("- one\ntwo\n- three  \nfour")).toBe(
+      "<ul>\n<li>one two</li>\n<li>three<br/>four</li>\n</ul>",
+    );
+    expect(renderMarkdown("1. one\\\ntwo")).toBe(
+      "<ol>\n<li>one<br/>two</li>\n</ol>",
+    );
+  });
+
+  test("a hard break at the end of a list item is dropped", () => {
+    expect(renderMarkdown("- one  \n- two")).toBe(
+      "<ul>\n<li>one</li>\n<li>two</li>\n</ul>",
+    );
+  });
+
+  test("breaks inside a block quote", () => {
+    expect(renderMarkdown("> one\n> two")).toBe(
+      "<blockquote><p>one two</p></blockquote>",
+    );
+    expect(renderMarkdown("> one  \n> two")).toBe(
+      "<blockquote><p>one<br/>two</p></blockquote>",
+    );
+    expect(renderMarkdown("> - a\\\n> b")).toBe(
+      "<blockquote><ul>\n<li>a<br/>b</li>\n</ul></blockquote>",
+    );
+  });
+
+  test("fenced code keeps its newlines and its trailing spaces", () => {
+    expect(renderMarkdown("```\na  \nb\\\nc\n```")).toBe(
+      "<pre><code>a  \nb\\\nc</code></pre>",
+    );
+  });
+
+  test("inline code on a line before a soft break is untouched", () => {
+    expect(renderMarkdown("`a  b`\nc")).toBe("<p><code>a  b</code> c</p>");
+  });
+
+  test("a <br> in the input is escaped, not a break", () => {
+    expect(renderMarkdown("one<br/>two\nthree")).toBe(
+      "<p>one&lt;br/&gt;two three</p>",
+    );
+  });
+
+  test("raw HTML on a hard-break line stays escaped", () => {
+    const html = renderMarkdown(
+      "<script>alert(1)</script>  \n<img src=x onerror=y>\\\nz",
+    );
+    expect(html).toBe(
+      "<p>&lt;script&gt;alert(1)&lt;/script&gt;<br/>&lt;img src=x onerror=y&gt;<br/>z</p>",
+    );
+  });
+});
+
 describe("renderMarkdown — random input emits only the safe grammar (#2316)", () => {
   // A seeded generator over markdown- and HTML-significant fragments. In
   // every output, each tag is one the renderer may emit and every href is
@@ -478,6 +567,8 @@ describe("renderMarkdown — random input emits only the safe grammar (#2316)", 
     "data:",
     "//",
     "\t",
+    "\\", // a hard break before a newline (#2455)
+    "  ", // two trailing spaces: the other hard-break form (#2455)
   ];
   const TAG =
     /^<\/?(p|br\/|strong|em|code|pre|ul|ol|li|h[1-6]|hr\/|blockquote|table|thead|tbody|tr|th|td|a)( href="[^"]*" rel="noopener noreferrer" target="_blank")?>$/;

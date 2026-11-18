@@ -41,8 +41,8 @@ async function fetchFeatures(): Promise<FeatureFlag[]> {
 }
 
 // #2503: the layout admits a tenant admin too, who manages only the
-// tenant-scoped pages (SSO, Users, Audit log). The platform tiles, and their
-// count fetches, are for a super-admin (`is_admin`). Fail-closed: a failed
+// tenant-scoped pages (SSO, Users, Features, Audit log). The platform tiles,
+// and the API key count fetch, are for a super-admin (`is_admin`). Fail-closed: a failed
 // read shows the tenant-scoped tiles only.
 async function fetchIsPlatformAdmin(): Promise<boolean> {
   const res = await fetch(`/api/admin/me`, { cache: "no-store" });
@@ -62,17 +62,28 @@ export default function AdminOverviewPage() {
     queryFn: fetchCreds,
     enabled: platform,
   });
+  // #2503: features are tenant-scoped, so every admin the layout admits
+  // reads them.
   const flags = useQuery({
     queryKey: ["admin-features"],
     queryFn: fetchFeatures,
-    enabled: platform,
   });
+
+  const flagsSummary = flags.isLoading
+    ? "loading…"
+    : flags.error
+      ? "unavailable"
+      : (() => {
+          const total = flags.data?.length ?? 0;
+          const on = (flags.data ?? []).filter((f) => f.enabled).length;
+          return `${on} of ${total} enabled`;
+        })();
 
   if (!platform) {
     return (
       <PageShell
         title={pageTitle("/admin")}
-        subtitle="Manage your organisation's sign-in, members and their roles, and read its audit log."
+        subtitle="Manage your organisation's sign-in, members and their roles, and modules, and read its audit log."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <AdminTile
@@ -84,6 +95,14 @@ export default function AdminOverviewPage() {
             href="/admin/users"
             title="Users"
             description="List users, assign roles, manage local + SSO-provisioned accounts."
+          />
+          <AdminTile
+            href="/admin/features"
+            title="Features"
+            summary={
+              flags.isLoading ? <Skeleton className="h-4 w-24" /> : flagsSummary
+            }
+            description="Toggle feature flags per tenant. Disabling a module hides routes; data is preserved."
           />
           <AdminTile
             href="/admin/audit"
@@ -100,16 +119,6 @@ export default function AdminOverviewPage() {
     : creds.error
       ? "unavailable"
       : `${creds.data?.length ?? 0} active`;
-
-  const flagsSummary = flags.isLoading
-    ? "loading…"
-    : flags.error
-      ? "unavailable"
-      : (() => {
-          const total = flags.data?.length ?? 0;
-          const on = (flags.data ?? []).filter((f) => f.enabled).length;
-          return `${on} of ${total} enabled`;
-        })();
 
   return (
     <PageShell

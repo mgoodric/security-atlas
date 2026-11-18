@@ -263,6 +263,35 @@ export function renderMarkdown(md: string): string {
   return renderBlocks(lines, refs, 0);
 }
 
+// A hard line break: two or more trailing spaces, or a trailing
+// backslash (CommonMark 6.7). Checked on the raw source line; the `<br/>`
+// it yields is emitted here, never taken from input.
+const HARD_BREAK_SPACES = / {2,}$/;
+const HARD_BREAK_BACKSLASH = /\\$/;
+
+// Join a paragraph's (or list item's) source lines per CommonMark: a soft
+// break (a plain newline) renders as a space, a hard break as `<br/>`. The
+// last line carries no break: its trailing spaces are dropped and a
+// trailing backslash stays literal text, as CommonMark has it. Fenced code
+// never reaches here, and a code span cannot cross lines in this
+// renderer, so a break is never inside code.
+function joinLines(lines: string[], inline: (s: string) => string): string {
+  const last = lines.length - 1;
+  return lines
+    .map((raw, n) => {
+      const line = raw.trimStart();
+      if (n === last) return inline(line.trimEnd());
+      if (HARD_BREAK_BACKSLASH.test(line)) {
+        return `${inline(line.slice(0, -1).trimEnd())}<br/>`;
+      }
+      if (HARD_BREAK_SPACES.test(line)) {
+        return `${inline(line.trimEnd())}<br/>`;
+      }
+      return `${inline(line.trimEnd())} `;
+    })
+    .join("");
+}
+
 function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
   const html: string[] = [];
   const inline = (s: string) => renderInline(escapeHtml(s), refs);
@@ -271,14 +300,23 @@ function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
   let inUl = false;
   let inOl = false;
   let paragraph: string[] = [];
+  // The open list item's source lines; a lazy continuation line joins it.
+  let item: string[] = [];
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
-      html.push(`<p>${paragraph.map(inline).join("<br/>")}</p>`);
+      html.push(`<p>${joinLines(paragraph, inline)}</p>`);
       paragraph = [];
     }
   };
+  const flushItem = () => {
+    if (item.length > 0) {
+      html.push(`<li>${joinLines(item, inline)}</li>`);
+      item = [];
+    }
+  };
   const closeLists = () => {
+    flushItem();
     if (inUl) {
       html.push("</ul>");
       inUl = false;
@@ -382,6 +420,7 @@ function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
     const ul = line.match(/^\s*[-*+]\s+(.*)$/);
     if (ul) {
       flushParagraph();
+      flushItem();
       if (inOl) {
         html.push("</ol>");
         inOl = false;
@@ -390,7 +429,7 @@ function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
         html.push("<ul>");
         inUl = true;
       }
-      html.push(`<li>${inline(ul[1].trim())}</li>`);
+      item = [ul[1]];
       i++;
       continue;
     }
@@ -399,6 +438,7 @@ function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
     const ol = line.match(/^\s*\d+\.\s+(.*)$/);
     if (ol) {
       flushParagraph();
+      flushItem();
       if (inUl) {
         html.push("</ul>");
         inUl = false;
@@ -407,14 +447,20 @@ function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
         html.push("<ol>");
         inOl = true;
       }
-      html.push(`<li>${inline(ol[1].trim())}</li>`);
+      item = [ol[1]];
       i++;
       continue;
     }
 
-    // Otherwise — accumulate into the current paragraph.
+    // Otherwise — a lazy continuation of the open list item (CommonMark
+    // 5.2), or a paragraph line.
+    if (item.length > 0) {
+      item.push(line);
+      i++;
+      continue;
+    }
     closeLists();
-    paragraph.push(line.trim());
+    paragraph.push(line);
     i++;
   }
 

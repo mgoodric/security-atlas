@@ -2,7 +2,7 @@
 //
 // The /admin layout admits a super-admin (`is_admin`) and a tenant admin
 // (`is_tenant_admin`). The tenant admin manages only the tenant-scoped
-// pages (SSO, Users, Audit); every other page wraps its children in this gate, which
+// pages (SSO, Users, Features, Audit); every other page wraps its children in this gate, which
 // renders the platform 403 panel unless the caller is a super-admin. The
 // platform's handlers and OPA refuse a tenant admin on those routes
 // anyway; this keeps the page from rendering a screen of 403s.
