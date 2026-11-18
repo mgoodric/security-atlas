@@ -139,6 +139,12 @@ async function api(
 test.describe("#2172 — module access for each member", () => {
   test.describe.configure({ mode: "serial" });
 
+  // onlySpecTenant's handler awaits route.fetch; one still in flight when
+  // the test ends fails the run outside any test (#2589).
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  });
+
   test.beforeAll(() => {
     seedFromFixture("module-access");
   });
