@@ -95,15 +95,72 @@ allow if {
     count(input.user.roles) > 0
 }
 
+# #2085 — GET /v1/people, the tenant's users and API keys as names.
+#
+# Every signed-in role reads it so pages show a person in place of an ID.
+# The handler returns id, display name, status and key owner only (no
+# email, token or last4) and reads under the caller's RLS tenant, so a
+# super-admin sees only the tenant it is signed in to. Exact path: any
+# sub-path stays denied. Default-deny still applies to a roleless
+# credential.
+allow if {
+    is_read
+    input.resource.type == "people"
+    input.request.path == "/v1/people"
+    count(input.user.roles) > 0
+}
+
+# #2119 — GET /v1/approvals, what the caller can approve right now.
+#
+# Every signed-in role reads it so the sidebar can ask without knowing the
+# caller's roles first. The handler answers per caller: it lists only the
+# rows each type's approve handler would accept from this credential
+# (authz.IsTenantApprover, then that type's own approver check), so a
+# viewer, an auditor or a machine credential gets an empty list. Exact
+# path: any sub-path stays denied. Default-deny still applies to a
+# roleless credential.
+allow if {
+    is_read
+    input.resource.type == "approvals"
+    input.request.path == "/v1/approvals"
+    count(input.user.roles) > 0
+}
+
 # #2134 — GET /v1/needs-attention, the dashboard's ranked list of what
-# needs attention. Mirrors internal/authz/rego_bundle/defaults.rego (#2410).
-# Every signed-in role reads it; for=all is refused in the handler to
-# anyone but an admin or GRC lead (authz.IsTenantApprover). Exact path.
+# needs attention.
+#
+# Every signed-in role reads it: for=me lists only the caller's own items
+# (records they own, policies whose owner role they hold, approvals waiting
+# for them), each under the calendar's per-type read check. for=all is
+# refused in the handler to anyone but an admin or GRC lead
+# (authz.IsTenantApprover), which this rule cannot see because the view is
+# a query parameter. Exact path: any sub-path stays denied. Default-deny
+# still applies to a roleless credential.
 allow if {
     is_read
     input.resource.type == "needs-attention"
     input.request.path == "/v1/needs-attention"
     count(input.user.roles) > 0
+}
+
+# #2494 — a signed-in user with no role in the current tenant reads its
+# own profile and its tenant list, so the web shows "You don't have a role
+# in <tenant>" with a switcher instead of a dashboard of 403s. GET /v1/me
+# carries has_tenant_role; GET /v1/me/tenants lists the tenants in the
+# caller's own token. Both answer from the verified credential alone.
+# Exact paths, reads only, and only for a credential that names a user in
+# a tenant; every other path still needs a role.
+allow if {
+    is_read
+    input.resource.type == "me"
+    roleless_self_read_paths[input.request.path]
+    input.tenant_id != ""
+    input.user.id != ""
+}
+
+roleless_self_read_paths := {
+    "/v1/me",
+    "/v1/me/tenants",
 }
 
 me_self_read_paths := {
