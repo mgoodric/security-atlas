@@ -60,15 +60,17 @@
 //
 // # Role gate
 //
-// Slice 269 D3: narrow admit — admin OR approver only. The dashboard
-// EXPORT is the bulk-handoff variant of the dashboard READ, and bulk
-// handoff is a more sensitive surface than the in-app view. Mirrors
-// the slice 138 evidence-export pattern (`IsAdmin || IsApprover`)
-// rather than the slice 066 dashboard `requireProgramRead` pattern
-// (which also admits `control_owner`). The defense-in-depth gate is
-// the handler-level predicate `hasDashboardExportAccess`; the
-// production gate is the slice 035 OPA admit on `dashboard_export`
-// (added in the same slice).
+// #2350 (Matt, 2026-11-15): the export is gated by OPA, on read of
+// the `dashboard` resource, the decision the slice 035 middleware
+// makes for the route. admin.rego, grc_engineer.rego and auditor.rego
+// admit it; control_owner and viewer are refused. The handler asks
+// the engine itself (ExportDashboard, mayExport) so the gate holds
+// where the middleware is not mounted, and keeps the defense-in-depth
+// twin `hasDashboardExportAccess` over the same three roles. Slice 269
+// D3's admin-OR-approver gate refused an auditor, whom OPA admits,
+// and, before #2428, a tenant admin signed in by browser. Each
+// panel's content stays filtered per role: the upcoming panel by
+// calendar.ReadableTypes (#2342), hidden modules by moduleaccess.
 //
 // # Meta-audit
 //
@@ -259,7 +261,7 @@ func (h *Handler) WithSource(s PanelSource) *Handler {
 //	400 result=denied:bad_request   (unknown format)
 //	401 result=denied:unauthenticated   (no credential / bad tenant)
 //	403 result=denied:forbidden      (role lacks export admit)
-//	500 result=error:snapshot|encoder  (downstream / streaming err)
+//	500 result=error:authz|snapshot|encoder  (OPA / downstream / streaming err)
 func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -295,7 +297,17 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !hasDashboardExportAccess(cred) {
+	admitted, authzErr := h.mayExport(r, cred)
+	if authzErr != nil {
+		h.writeMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
+			Format: string(format),
+			Result: "error:authz",
+			Reason: authzErr.Error(),
+		})
+		httperr.WriteInternal(w, r, "authorize dashboard export", authzErr)
+		return
+	}
+	if !admitted {
 		h.writeMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format),
 			Result: "denied:forbidden",
@@ -411,17 +423,42 @@ func buildFilename(entity, ext string) string {
 
 // ===== Role gate =====
 
-// hasDashboardExportAccess reports whether the credential grants
-// dashboard-export access. Slice 269 D3: narrower than the slice 066
-// dashboard-read admit (which also accepts `control_owner`) — the
-// export is a bulk-handoff surface, so we limit it to admin +
-// approver (auditor-level). Pins the AC-6 contract.
-//
-// authz.IsTenantApprover admits the admin and approver flags and the
-// live tenant admin / grc_engineer roles (#2428). A bare push
-// credential or a control-owner credential is denied.
+// dashboardResource is the OPA resource type the export is read under:
+// BuildInput derives it from the leading /v1/dashboard/ segment, and
+// auditor.rego admits it by that name.
+const dashboardResource = "dashboard"
+
+// mayExport reports whether the caller of r may export the dashboard
+// (#2350): the defense-in-depth twin admits it and, when an engine is
+// wired, OPA allows read of the dashboard resource. A Decide error is
+// returned for a 500, never read as an admit.
+func (h *Handler) mayExport(r *http.Request, cred credstore.Credential) (bool, error) {
+	if !hasDashboardExportAccess(cred) {
+		return false, nil
+	}
+	if h.engine == nil {
+		return true, nil
+	}
+	in := authz.BuildInput(r, nil)
+	in.Resource.Type = dashboardResource
+	in.Resource.ID = ""
+	in.Action = "read"
+	d, err := h.engine.Decide(r.Context(), in)
+	if err != nil {
+		return false, fmt.Errorf("decide dashboard export: %w", err)
+	}
+	return d.Allow, nil
+}
+
+// hasDashboardExportAccess is the handler-level twin of OPA's admit on
+// the dashboard resource (#2350), authz.IsTenantAuditReader: the admin
+// and approver flags, or the live admin, grc_engineer or auditor role.
+// control_owner, viewer, a bare push credential and a session's role
+// claim are refused. It matters where no engine is wired (unit and
+// integration test servers), and keeps out a bare push key, for which
+// OPA derives grc_engineer.
 func hasDashboardExportAccess(c credstore.Credential) bool {
-	return authz.IsTenantApprover(c)
+	return authz.IsTenantAuditReader(c)
 }
 
 // ===== Meta-audit =====
