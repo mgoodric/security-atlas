@@ -11,6 +11,7 @@ import type { FrameworkScope } from "@/lib/api/framework-scopes";
 
 import {
   advancedText,
+  errorMessage,
   headerAction,
   newScopeHref,
   parseAdvanced,
@@ -181,4 +182,23 @@ test("newScopeHref pre-fills the framework version", () => {
     `/framework-scopes/new?framework_version_id=${FV}`,
   );
   expect(newScopeHref()).toBe("/framework-scopes/new");
+});
+
+describe("errorMessage (#2433)", () => {
+  const res = (body: unknown, status: number, statusText: string) =>
+    new Response(JSON.stringify(body), { status, statusText });
+
+  test("a refusal shows the platform's words", async () => {
+    await expect(
+      errorMessage(res({ error: "scope is frozen" }, 409, "Conflict")),
+    ).resolves.toBe("scope is frozen");
+  });
+
+  test("a 5xx shows the status line, never its body", async () => {
+    await expect(
+      errorMessage(
+        res({ error: "pq: deadlock detected" }, 500, "Internal Server Error"),
+      ),
+    ).resolves.toBe("500 Internal Server Error");
+  });
 });

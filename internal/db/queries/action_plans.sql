@@ -20,6 +20,16 @@ SELECT *
 FROM action_plans
 WHERE tenant_id = $1 AND id = $2 AND tombstoned_at IS NULL;
 
+-- name: GetActionPlanByIDForUpdate :one
+-- GetActionPlanByID under a row lock, for a write that guards on the plan
+-- (#2434). A control link or owner change in flight finishes first, so
+-- the guard and the UPDATE see the same plan. The link tables' FK takes
+-- KEY SHARE on this row, which FOR UPDATE conflicts with.
+SELECT *
+FROM action_plans
+WHERE tenant_id = $1 AND id = $2 AND tombstoned_at IS NULL
+FOR UPDATE;
+
 -- name: ListActionPlans :many
 -- Cursor pagination on created_at DESC, id DESC. The cursor is the
 -- (created_at, id) of the last row of the previous page; when the cursor

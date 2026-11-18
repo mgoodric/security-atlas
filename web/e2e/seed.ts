@@ -153,6 +153,10 @@ export type FixtureName =
   // #2115 — a framework version with no scope (reset each run) and an
   // admin approver user, for framework-scope-wizard.spec.ts.
   | "framework-scope-wizard"
+  // #2433 — a tenant with Allow self-approval off, two tenant admins and
+  // a framework version with no scope (reset each run), for
+  // framework-scope-self-approval.spec.ts.
+  | "framework-scope-self-approval"
   // #2116 — an admin approver user, for policy-lifecycle.spec.ts.
   | "policy-lifecycle"
   // #2172 — a tenant with one grc_engineer member whose module access
