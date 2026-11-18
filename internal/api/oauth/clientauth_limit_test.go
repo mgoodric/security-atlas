@@ -19,7 +19,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
@@ -291,43 +290,6 @@ func TestClientAuthLimit_OversizedFormBodyRejected(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest || body["error_description"] != "malformed form body" {
 			t.Fatalf("%s: status = %d body = %v, want 400 malformed form body", path, resp.StatusCode, body)
 		}
-	}
-}
-
-// TestTokenBucketLimiter_PrunesRefilledBuckets: once the map reaches
-// the prune floor, buckets that have refilled to full are dropped on
-// the next new key; buckets still draining survive.
-func TestTokenBucketLimiter_PrunesRefilledBuckets(t *testing.T) {
-	t.Parallel()
-	now := pinnedNow()
-	lim := oauth.ExportNewTokenBucketLimiter(60, func() time.Time { return now })
-	for i := 0; i < oauth.ExportTokenBucketPruneFloor; i++ {
-		oauth.ExportLimiterAllow(lim, fmt.Sprintf("k%d", i))
-	}
-	// Still draining: nothing is dropped.
-	oauth.ExportLimiterAllow(lim, "live")
-	if got := oauth.ExportLimiterLen(lim); got != oauth.ExportTokenBucketPruneFloor+1 {
-		t.Fatalf("len before refill = %d, want %d", got, oauth.ExportTokenBucketPruneFloor+1)
-	}
-	// After a full refill window the first floor+1 buckets are full
-	// again. Keys added from here on are draining, so when the next
-	// sweep fires (at twice the surviving count) only they remain.
-	now = now.Add(61 * time.Second)
-	added := 0
-	for prev := oauth.ExportLimiterLen(lim); ; added++ {
-		oauth.ExportLimiterAllow(lim, fmt.Sprintf("n%d", added))
-		got := oauth.ExportLimiterLen(lim)
-		if got < prev {
-			added++
-			if got != added {
-				t.Fatalf("len after prune = %d, want %d (only post-refill keys)", got, added)
-			}
-			return
-		}
-		if added > 4*oauth.ExportTokenBucketPruneFloor {
-			t.Fatalf("no prune after %d new keys", added)
-		}
-		prev = got
 	}
 }
 

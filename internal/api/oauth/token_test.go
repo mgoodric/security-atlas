@@ -611,8 +611,9 @@ func TestTokenEndpoint_RateLimit(t *testing.T) {
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("call 3 status = %d body = %s; want 429", resp.StatusCode, body)
 	}
-	if resp.Header.Get("Retry-After") == "" {
-		t.Errorf("missing Retry-After header on 429")
+	// The fixed one-token window, 60/rate, not the actual wait (#2497).
+	if got := resp.Header.Get("Retry-After"); got != "30" {
+		t.Errorf("Retry-After = %q on 429; want 30", got)
 	}
 }
 

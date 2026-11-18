@@ -224,6 +224,7 @@
     "internal/api/policies": 49,
     "internal/api/questionnaires": 54,
     "internal/api/ratekey": 88,
+    "internal/api/ratelimit": 98,
     "internal/api/admingroupmappings": 72,
     "internal/api/adminscim": 58,
     "internal/api/scim": 68,

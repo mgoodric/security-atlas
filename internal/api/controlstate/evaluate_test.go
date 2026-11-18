@@ -246,7 +246,7 @@ func TestEvaluate_PerPrincipalRateLimit(t *testing.T) {
 	r := &stubRunner{}
 	h := newEvalTestHandler(r, evalOwnerID)
 	now := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
-	h.limiter = newPrincipalLimiter(2, func() time.Time { return now })
+	h.limiter = newEvaluateLimiter(2, func() time.Time { return now })
 	owner := credstore.Credential{ID: "jwt:o", UserID: "user:" + evalOwnerID, TenantID: evalTenantID, TenantRoles: []string{"control_owner"}}
 	admin := credstore.Credential{ID: "key_admin", UserID: "key_admin", TenantID: evalTenantID, IsAdmin: true}
 
