@@ -203,16 +203,22 @@ func (s *Server) buildRouter() *chi.Mux {
 	// tenant, actor and switch), since the OPA step that audits every
 	// other decision never sees it; a failed module-state read answers 503.
 	var gateOpts []featureflag.GateOption
+	var accessOpts []moduleaccess.GateOption
 	if s.authzAudit != nil {
-		gateOpts = append(gateOpts, featureflag.WithAttemptRecorder(newGatedAttemptAuditor(s.authzAudit).Record))
+		gated := newGatedAttemptAuditor(s.authzAudit)
+		gateOpts = append(gateOpts, featureflag.WithAttemptRecorder(gated.Record))
+		accessOpts = append(accessOpts, moduleaccess.WithDenyRecorder(gated.RecordNoAccess))
 	}
 	root.Use(featureflag.ModuleGate(featureFlagStore, gateOpts...))
 	// #2172: the module access step. A switched-on optional module outside
 	// the caller's module access answers 403 naming the module, before the
 	// OPA role decision; admins, auditors and members with "all" fall
 	// through. After the module gate, so switched off (404) wins.
+	// #2466: a refused request writes a decision_audit_log row too, the
+	// same shape and dedupe as the module gate's (reason
+	// "module_no_access").
 	moduleAccessStore := moduleaccess.NewStore(s.dbPool)
-	root.Use(moduleaccess.Gate(moduleAccessStore))
+	root.Use(moduleaccess.Gate(moduleAccessStore, accessOpts...))
 	// #2173: the combined views (Upcoming, Calendar and ICS, Activity,
 	// search, the dashboard export, Metrics, Approvals) show only the
 	// modules the viewer may see, from the same two stores the gates read.

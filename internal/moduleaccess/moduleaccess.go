@@ -244,6 +244,21 @@ type NoAccessBody struct {
 	ModuleName string `json:"module_name"`
 }
 
+// GateOption configures Gate.
+type GateOption func(*gateConfig)
+
+type gateConfig struct {
+	record func(*http.Request, featureflag.Module)
+}
+
+// WithDenyRecorder has Gate call record for every request it refuses as
+// outside the caller's module access, after the 403 is written (#2466).
+// Gate runs before the OPA step, which audits every decision it makes, so
+// this is how a refused request leaves a trace.
+func WithDenyRecorder(record func(*http.Request, featureflag.Module)) GateOption {
+	return func(c *gateConfig) { c.record = record }
+}
+
 // Gate is the module access step of the authorization chain. It resolves
 // the request path's owning module from the registry and, for an optional
 // module outside the caller's access, answers 403 naming the module
@@ -255,7 +270,11 @@ type NoAccessBody struct {
 // the module gate it checks the raw path too, so an encoded "/" cannot
 // route past it. A store error fails closed (500): unlike a module switch,
 // access is a narrowing of who may see what.
-func Gate(store *Store) func(http.Handler) http.Handler {
+func Gate(store *Store, opts ...GateOption) func(http.Handler) http.Handler {
+	var cfg gateConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var owned []featureflag.Module
@@ -283,6 +302,9 @@ func Gate(store *Store) func(http.Handler) http.Handler {
 						Module:     m.Key,
 						ModuleName: m.Name,
 					})
+					if cfg.record != nil {
+						cfg.record(r, m)
+					}
 					return
 				}
 			}

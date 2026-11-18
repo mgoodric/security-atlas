@@ -74,6 +74,42 @@ func (a *gatedAttemptAuditor) Record(r *http.Request, at featureflag.GatedAttemp
 	}
 }
 
+// RecordNoAccess is a moduleaccess.WithDenyRecorder recorder (#2466): a
+// request the access gate refused as outside the caller's module access.
+// It writes the same row shape as Record, with reason "module_no_access"
+// and policy_hits naming the module, deduped per tenant, actor and module.
+// The 403 is already written, so a failed write is logged and stands.
+func (a *gatedAttemptAuditor) RecordNoAccess(r *http.Request, m featureflag.Module) {
+	in := authz.BuildInput(r, nil)
+	if in.TenantID == "" {
+		return
+	}
+	if !a.first(in.TenantID + "\x00" + in.User.ID + "\x00access:" + m.Key) {
+		return
+	}
+	_, err := a.audit.Write(r.Context(), authz.AuditRecord{
+		TenantID:      in.TenantID,
+		UserID:        in.User.ID,
+		UserRoles:     in.User.Roles,
+		Action:        in.Action,
+		ResourceType:  "module",
+		ResourceID:    m.Key,
+		Result:        "deny",
+		Reason:        "module_no_access",
+		PolicyHits:    []string{"module_access:" + m.Key},
+		RequestPath:   r.URL.Path,
+		RequestMethod: r.Method,
+	})
+	if err != nil {
+		slog.Error("module access: audit write failed",
+			slog.String("module", m.Key),
+			slog.String("tenant_id", in.TenantID),
+			slog.String("path", r.URL.Path),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
 // first reports whether key has no row inside the current window, and
 // starts a window for it when so.
 func (a *gatedAttemptAuditor) first(key string) bool {

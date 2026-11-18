@@ -824,7 +824,12 @@ function SentenceRow({ row }: { row: ActivityEntry }) {
         <p data-testid="activity-sentence" className="flex-1 text-sm">
           <Person id={row.actor_id} className="font-medium" /> {s.phrase}
           {s.noun ? ` ${s.noun}` : ""}
-          {s.targetId ? (
+          {s.targetId && s.person ? (
+            <>
+              {" "}
+              <Person id={s.targetId} testId="activity-sentence-target" />
+            </>
+          ) : s.targetId ? (
             <>
               {" "}
               {s.href ? (

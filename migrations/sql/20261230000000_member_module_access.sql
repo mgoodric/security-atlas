@@ -12,8 +12,8 @@
 --
 -- Module access applies to grc_engineer, control_owner and viewer only; an
 -- admin always has every switched-on module and an auditor is unaffected.
--- That rule lives in the access gate (internal/featureflag/access.go), not
--- here: a stored narrowed value on an admin is kept and ignored.
+-- That rule lives in the access gate (internal/moduleaccess/moduleaccess.go),
+-- not here: a stored narrowed value on an admin is kept and ignored.
 --
 -- Constitutional invariant #6: tenant isolation by RLS. FORCE RLS with
 -- SELECT / INSERT / UPDATE policies and no DELETE (setting "all" stores
