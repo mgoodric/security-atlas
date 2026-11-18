@@ -252,10 +252,34 @@
     },
 
     {
+      "scf_id": "IRO-02",
+      "family": "IRO",
+      "title": "Incident Response Operations",
+      "description": "The organization runs an incident response capability that prepares for, detects, analyzes, contains, recovers from and reviews security incidents."
+    },
+    {
+      "scf_id": "IRO-06",
+      "family": "IRO",
+      "title": "Incident Handling",
+      "description": "Each incident is worked through a defined handling process, from the first alert through triage, containment and recovery."
+    },
+    {
       "scf_id": "IRO-08",
       "family": "IRO",
       "title": "Incident Response Plan (IRP)",
       "description": "A written incident response plan is kept up to date and available to everyone who has a part in it."
+    },
+    {
+      "scf_id": "IRO-13",
+      "family": "IRO",
+      "title": "Chain of Custody & Forensics",
+      "description": "Evidence from an incident is collected and preserved so its integrity can be shown, with a record of who held it and when."
+    },
+    {
+      "scf_id": "IRO-14",
+      "family": "IRO",
+      "title": "Root Cause Analysis (RCA) & Lessons Learned",
+      "description": "After an incident, its root cause is found and what was learned feeds back into controls and the response process."
     },
     {
       "scf_id": "IRO-16",

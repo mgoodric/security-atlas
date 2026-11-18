@@ -191,9 +191,8 @@ func DefaultSeed() []KindVersion {
 		// monitoring.alert_config.v1. Slice 488 reads which alerts are CONFIGURED
 		// (CC7.2); this reads what actually FIRED and resolved (CC7.3/CC7.4): one
 		// record per firing event (rule_id, vendor, fired_at, resolved_at, state,
-		// routing-target HANDLE). Anchors MON-02 + IRO-16 (the spec candidate
-		// IRO-02 is absent from the bundled SCF fixture; IRO-16 is the closest
-		// present incident anchor — decisions-log D3). Read-only (Datadog
+		// routing-target HANDLE). Anchors MON-02 + IRO-06 Incident Handling
+		// (#2413). Read-only (Datadog
 		// events_read GET /api/v1/events; Grafana Viewer GET /api/v1/rules/history),
 		// bounded PULL over a look-back window (NOT continuous monitoring, NOT
 		// event-driven). Firing METADATA only — never the alert message body, the
@@ -213,7 +212,7 @@ func DefaultSeed() []KindVersion {
 		// slice-533 CC7.3 sibling. Slice 533 reads detection-rule CONFIGURATION
 		// (CC7.2: which rules exist); this reads what FIRED and how it was TRIAGED
 		// (CC7.3 incident response: rules fired + were triaged over the audit
-		// period, when, by whom): THR-02 + IRO-16. Read-only
+		// period, when, by whom): THR-02 + IRO-06. Read-only
 		// (security_monitoring_signals_read), bounded PULL over a look-back window
 		// (NOT continuous monitoring, NOT event-driven). Triage METADATA only —
 		// never the signal message body, matched log/event samples, the
@@ -240,8 +239,8 @@ func DefaultSeed() []KindVersion {
 		// Slice 538: PagerDuty connector postmortem / retrospective METADATA —
 		// the deliberate slice-489 over-collection follow-on (P0-489-7). Proves
 		// incidents are reviewed + corrective actions tracked (SOC 2 CC7.5; the
-		// slice-372 IR continuous-improvement loop): SCF IRO-13 Root-Cause
-		// Analysis / IRO-16 Incident Stakeholder Reporting. META-ONLY — existence, status,
+		// slice-372 IR continuous-improvement loop): SCF IRO-14 Root Cause
+		// Analysis (RCA) & Lessons Learned. META-ONLY — existence, status,
 		// timestamps, and the corrective-action COUNT + completed/open rollup;
 		// NEVER the postmortem narrative / timeline / root-cause prose, an
 		// action-item title, customer data, or responder PII (the struct has no
@@ -253,7 +252,7 @@ func DefaultSeed() []KindVersion {
 		// bounded look-back window — the deliberate slice-489 over-collection
 		// follow-on (P0-489-7). Proves incidents are acknowledged + resolved within
 		// target windows at the PROGRAM level (SOC 2 CC7.4): SCF IRO-02 Incident
-		// Handling / MON-02 Continuous Monitoring. AGGREGATE-ONLY — the grain is the
+		// Response Operations / MON-02 Continuous Monitoring. AGGREGATE-ONLY — the grain is the
 		// service, NEVER a named responder; the connector never decodes which
 		// individual acknowledged or resolved an incident (the record struct has no
 		// field that can hold a responder identity; a reflection guard fails the

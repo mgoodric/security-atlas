@@ -97,7 +97,7 @@ func TestBuildPostmortem(t *testing.T) {
 		PublishedAt:     time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC),
 		ActionItemCount: 3, ActionItemsDone: 2, ActionItemsOpen: 1,
 	}
-	rec, err := BuildPostmortem(p, "scf:IRO-13", "connector:pagerduty:postmortems@dev", "pagerduty", "prod", fixedNow)
+	rec, err := BuildPostmortem(p, "scf:IRO-14", "connector:pagerduty:postmortems@dev", "pagerduty", "prod", fixedNow)
 	if err != nil {
 		t.Fatalf("BuildPostmortem: %v", err)
 	}

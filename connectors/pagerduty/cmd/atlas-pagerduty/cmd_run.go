@@ -106,7 +106,7 @@ per-engineer scorecard).`,
 	cmd.Flags().StringVar(&f.service, "service", "pagerduty", "service scope tag")
 	cmd.Flags().StringVar(&f.onCallControl, "oncall-control", "scf:IRO-08", "control_id to attach to pagerduty.oncall_coverage.v1 records")
 	cmd.Flags().StringVar(&f.incidentControl, "incident-control", "scf:IRO-02", "control_id to attach to pagerduty.incident_summary.v1 records")
-	cmd.Flags().StringVar(&f.postmortemControl, "postmortem-control", "scf:IRO-13", "control_id to attach to pagerduty.postmortem_summary.v1 records")
+	cmd.Flags().StringVar(&f.postmortemControl, "postmortem-control", "scf:IRO-14", "control_id to attach to pagerduty.postmortem_summary.v1 records")
 	cmd.Flags().StringVar(&f.metricsControl, "metrics-control", "scf:IRO-02", "control_id to attach to pagerduty.response_metrics.v1 records")
 	cmd.Flags().IntVar(&f.lookbackDays, "lookback-days", 90, "bounded incident + postmortem + response-metrics look-back window in days")
 	return cmd
