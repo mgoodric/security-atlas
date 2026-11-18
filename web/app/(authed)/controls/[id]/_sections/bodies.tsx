@@ -67,9 +67,12 @@ import {
   type EffectiveScopeResponse,
 } from "@/lib/api/control-detail";
 import { type EvidenceListResponse } from "@/lib/api/evidence";
+import { type ExceptionsListResponse } from "@/lib/api/exceptions";
 import { enumLabel } from "@/lib/labels/enum-labels";
 import { frameworkLabel } from "@/lib/labels/framework-label";
+import { normaliseUserId } from "@/lib/person";
 
+import { statusPillClass } from "@/app/(authed)/exceptions/lifecycle";
 import { formatResidualScore } from "@/app/(authed)/risks/filters";
 
 export function EvidenceStreamBody({
@@ -314,11 +317,11 @@ export function HistoryBody({
             />{" "}
             ·{" "}
             <span className="text-foreground">
-              evaluated <span className="font-mono">{h.computed_state}</span>
+              evaluated {enumLabel("EvaluationState", h.computed_state)}
             </span>{" "}
             <span className="text-muted-foreground">
               ({h.evidence_count} evidence ·{" "}
-              <span className="font-mono">{h.freshness_status}</span>)
+              {enumLabel("FreshnessState", h.freshness_status)})
             </span>
             {h.trigger === "manual" && h.triggered_by ? (
               <>
@@ -395,12 +398,15 @@ export function EvidenceStreamRow({
           {kind ?? evidenceID}
           {demo ? <DemoBadge testId="evidence-stream-row-demo" /> : null}
         </div>
-        <div className="truncate font-mono text-[11px] text-muted-foreground">
-          {formatEvidenceSource(source)}
+        <div className="truncate text-[11px] text-muted-foreground">
+          <EvidenceSource source={source} />
         </div>
       </div>
-      <div className={`col-span-2 text-right font-mono text-xs ${resultClass}`}>
-        {result}
+      <div
+        className={`col-span-2 text-right text-xs ${resultClass}`}
+        data-testid="evidence-stream-row-result"
+      >
+        {enumLabel("EvidenceResult", result)}
       </div>
     </Link>
   );
@@ -422,4 +428,96 @@ export function formatEvidenceSource(
   if (typeof actorID === "string") return actorID;
   if (typeof actorType === "string") return actorType;
   return "—";
+}
+
+// EvidenceSource (#2140) names who or what observed a record: a person or
+// key by name through <Person>, never their id, and a connector's own
+// actor tag as written.
+function EvidenceSource({
+  source,
+}: {
+  source: Record<string, unknown> | null;
+}) {
+  const actorID =
+    source && typeof source.actor_id === "string" ? source.actor_id : "";
+  if (actorID && (normaliseUserId(actorID) || actorID.startsWith("system"))) {
+    return <Person id={actorID} testId="evidence-stream-row-source" />;
+  }
+  return (
+    <span data-testid="evidence-stream-row-source">
+      {formatEvidenceSource(source)}
+    </span>
+  );
+}
+
+// EXCEPTION_STATUS_LABEL is each exception status in words (#2140).
+const EXCEPTION_STATUS_LABEL: Record<string, string> = {
+  requested: "Requested",
+  approved: "Approved",
+  denied: "Denied",
+  active: "Active",
+  expired: "Expired",
+  revoked: "Revoked",
+};
+
+// ExceptionsBody (#2140) lists the exceptions filed against the control,
+// read through GET /v1/exceptions?control_id=. Each row opens the
+// exception; the justification is shown as a one-line preview, as the
+// exceptions list shows it (slice 138 P0-A-Ledger-3).
+export function ExceptionsBody({
+  exceptionsQ,
+}: {
+  exceptionsQ: ReturnType<typeof useQuery<ExceptionsListResponse>>;
+}) {
+  if (exceptionsQ.isLoading) return <Skeleton className="h-16 w-full" />;
+  if (exceptionsQ.error) {
+    return (
+      <p className="text-sm text-destructive" data-testid="exceptions-error">
+        Could not load exceptions: {(exceptionsQ.error as Error).message}
+      </p>
+    );
+  }
+  const rows = exceptionsQ.data?.exceptions ?? [];
+  if (rows.length === 0) {
+    return (
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="exceptions-empty"
+      >
+        No exceptions have been filed against this control.
+      </p>
+    );
+  }
+  return (
+    <ul
+      className="divide-y divide-border text-sm"
+      data-testid="exceptions-list"
+    >
+      {rows.map((e) => (
+        <li key={e.id} className="py-2" data-testid="exception-row">
+          <div className="flex items-center justify-between gap-3">
+            <Link
+              href={`/exceptions/${encodeURIComponent(e.id)}`}
+              className="min-w-0 truncate text-foreground hover:underline"
+              title={e.justification}
+              data-testid="exception-row-link"
+            >
+              {e.justification.trim() || "Exception"}
+            </Link>
+            <span
+              className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusPillClass(
+                e.status,
+              )}`}
+              data-testid="exception-row-status"
+            >
+              {EXCEPTION_STATUS_LABEL[e.status] ?? "Unknown"}
+            </span>
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            Expires <Timestamp value={e.expires_at} style="date" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 }

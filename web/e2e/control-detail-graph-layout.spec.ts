@@ -154,7 +154,7 @@ test.describe("control detail layout (#2096)", () => {
   test("graph: long labels wrap in full inside their nodes; edge labels clear every node", async ({
     authedPage: page,
   }) => {
-    await gotoControl(page, "mappings");
+    await gotoControl(page, "map");
     const viz = page.getByTestId("ucf-mini-viz");
     await expect(viz).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("ucf-viz-requirement")).toHaveCount(
@@ -231,7 +231,7 @@ test.describe("control detail layout (#2096)", () => {
     authedPage: page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 640 });
-    await gotoControl(page, "mappings");
+    await gotoControl(page);
     await expect(page.getByTestId("coverage-row")).toHaveCount(
       REQUIREMENTS.length,
       { timeout: 30_000 },

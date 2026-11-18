@@ -451,6 +451,11 @@ type requirementForAnchorWire struct {
 	// Overlay is the org mapping's source, author and date (#1800). Set
 	// only when Origin is "overlay".
 	Overlay *overlayWire `json:"overlay,omitempty"`
+	// Exclusion is the caller tenant's activated Statement of
+	// Applicability exclusion of this requirement (#2140), set on the
+	// control coverage read only. Omitted when the requirement is
+	// applicable, undecided, or no revision is activated.
+	Exclusion *exclusionWire `json:"exclusion,omitempty"`
 }
 
 // ===== shared write helpers =====

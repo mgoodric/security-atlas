@@ -50,6 +50,7 @@ type soaCoverageFixture struct {
 	frameworkID        uuid.UUID
 	frameworkVersionID uuid.UUID
 	req                map[string]uuid.UUID
+	control            map[string]uuid.UUID
 }
 
 func soaCoverageTenant(t *testing.T, admin *pgxpool.Pool) string {
@@ -72,6 +73,7 @@ func seedSoACoverageFixture(t *testing.T, admin *pgxpool.Pool, tenant string) so
 		frameworkID:        uuid.New(),
 		frameworkVersionID: uuid.New(),
 		req:                map[string]uuid.UUID{},
+		control:            map[string]uuid.UUID{},
 	}
 	scfFVID := uuid.New()
 	exec := func(what, sql string, args ...any) {
@@ -113,6 +115,7 @@ func seedSoACoverageFixture(t *testing.T, admin *pgxpool.Pool, tenant string) so
 		{"C1", "A1", "fail", "pass"}, {"C2", "A2", "pass", "pass"}, {"C3", "A3", "fail", "fail"},
 	} {
 		id := seedControlOnAnchor(t, admin, tenant, anchors[c.anchor])
+		f.control[c.name] = id
 		seedEvaluation(t, admin, tenant, id, c.then, old)
 		seedEvaluation(t, admin, tenant, id, c.now, time.Now().UTC())
 	}
@@ -425,5 +428,69 @@ func TestSoACoverage_RequirementCoverageReportsExcluded(t *testing.T) {
 		if c := read(code); c.Band == "excluded" || c.Exclusion != nil {
 			t.Errorf("%s: %+v, want not excluded", code, c)
 		}
+	}
+}
+
+// #2140: the control coverage read marks each requirement the activated
+// revision excludes, with its justification, so the control page's
+// Coverage can say so. C1 reaches R-01 (excluded) and R-06 (applicable).
+// A draft revision marks nothing.
+func TestSoACoverage_ControlCoverageMarksExcludedRequirements(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaCoverageTenant(t, admin)
+	f := seedSoACoverageFixture(t, admin, tenant)
+	env := soaEnv(t, tenant)
+
+	type row struct {
+		RequirementID string `json:"requirement_id"`
+		Exclusion     *struct {
+			FrameworkScopeID string `json:"framework_scope_id"`
+			Justification    string `json:"justification"`
+		} `json:"exclusion"`
+	}
+	read := func() map[string]row {
+		t.Helper()
+		resp, body := get(t, env, "/v1/controls/"+f.control["C1"].String()+"/coverage")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET control coverage: status %d", resp.StatusCode)
+		}
+		raw, _ := json.Marshal(body)
+		var out struct {
+			Requirements []row `json:"requirements"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("decode control coverage: %v", err)
+		}
+		byID := map[string]row{}
+		for _, r := range out.Requirements {
+			byID[r.RequirementID] = r
+		}
+		return byID
+	}
+
+	draft := seedScopeRevision(t, admin, tenant, f, false)
+	if r := read()[f.req["R-01"].String()]; r.Exclusion != nil {
+		t.Fatalf("draft: R-01 exclusion = %+v, want none", r.Exclusion)
+	}
+	if _, err := admin.Exec(context.Background(), `DELETE FROM framework_scopes WHERE id = $1`, draft); err != nil {
+		t.Fatalf("delete draft: %v", err)
+	}
+
+	scopeID := seedScopeRevision(t, admin, tenant, f, true)
+	rows := read()
+	r01, ok := rows[f.req["R-01"].String()]
+	if !ok {
+		t.Fatalf("R-01 missing from C1 coverage: %+v", rows)
+	}
+	if r01.Exclusion == nil || r01.Exclusion.Justification != "No in-house software development" ||
+		r01.Exclusion.FrameworkScopeID != scopeID.String() {
+		t.Errorf("R-01 exclusion = %+v, want the activated revision's justification", r01.Exclusion)
+	}
+	r06, ok := rows[f.req["R-06"].String()]
+	if !ok {
+		t.Fatalf("R-06 missing from C1 coverage: %+v", rows)
+	}
+	if r06.Exclusion != nil {
+		t.Errorf("R-06 exclusion = %+v, want none (applicable)", r06.Exclusion)
 	}
 }

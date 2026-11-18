@@ -49,6 +49,11 @@
 // evaluate (owner or admin) and upload (admin) is the platform's check;
 // a refusal shows inline rather than hiding the button.
 //
+// #2140: the rolled-up result, "last evaluated" and the attestation wait
+// moved into ControlStateStrip below, the strip that leads the page. The
+// header keeps the buttons, which show per the live /v1/me (canWrite,
+// canEvaluate); Download bundle is a read and always shows.
+//
 // #2111: manually attested controls get an Attest link, and the header
 // shows the control's rolled-up result. Back from an attestation
 // (`?attested=<ingested_at>`), the result reads "Evaluating…" and the
@@ -59,10 +64,11 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   bundleDownloadHref,
   evaluateControl,
@@ -81,6 +87,7 @@ import {
   isManualImplementation,
   rollupResult,
 } from "@/lib/attest-evaluation";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { relativeTimeOrNever } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 
@@ -204,25 +211,25 @@ function useNow(intervalMs = 60_000): number | null {
 
 export interface ControlHeaderActionsProps {
   controlID: string;
-  // The state response may be undefined while the query is loading or if
-  // it errored. The header sub-line renders "—" in that case rather
-  // than a flash of "never".
-  state: ControlStateResponse | undefined;
   // The control's implementation_type; manual controls get Attest (#2111).
   implementationType?: string;
+  // #2140: write affordances follow the live /v1/me, and the page passes
+  // false until it answers. canWrite gates the controls and exceptions
+  // writes OPA admits to admin and grc_engineer (Upload new version,
+  // Request exception); canEvaluate also admits a control_owner, whom
+  // OPA lets run Evaluate now and Attest (the handler then checks the
+  // assignment).
+  canWrite: boolean;
+  canEvaluate: boolean;
 }
 
 export function ControlHeaderActions({
   controlID,
-  state,
   implementationType,
+  canWrite,
+  canEvaluate,
 }: ControlHeaderActionsProps) {
-  const now = useNow();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const attestedAt = searchParams.get(ATTESTED_PARAM);
-  const attestation = useAttestationEvaluation(controlID, attestedAt, state);
-  const result = rollupResult(state?.states);
   const queryClient = useQueryClient();
   const fileInputID = useId();
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -253,29 +260,16 @@ export function ControlHeaderActions({
     },
   });
 
-  // Resolve the freshest `last_observed_at` across cells. Three branches:
-  //   1. state is undefined        → undefined  → "—"
-  //   2. state exists, no entries  → null       → "never"
-  //   3. state exists, has entries → ISO string → "8 minutes ago"
-  const latestISO: string | null | undefined = state
-    ? mostRecentObservedAt(state.states)
-    : undefined;
-
-  // Render "—" until the client clock has seeded (`now === null`).
-  // After the first 0ms timeout in `useNow` fires, `now` becomes a
-  // real ms value and the relative-time string renders honestly.
-  const display = now === null ? "—" : relativeTimeOrNever(latestISO, now);
-
   return (
     <div
       className="flex flex-col items-end gap-2"
       data-testid="control-header-actions"
     >
       <div
-        className="flex items-center gap-2"
+        className="flex flex-wrap items-center justify-end gap-2"
         data-testid="control-header-action-buttons"
       >
-        {isManualImplementation(implementationType) && (
+        {canEvaluate && isManualImplementation(implementationType) && (
           <Link
             href={`/controls/${encodeURIComponent(controlID)}/attest`}
             className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
@@ -284,17 +278,19 @@ export function ControlHeaderActions({
             Attest
           </Link>
         )}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => evaluate.mutate()}
-          disabled={evaluate.isPending}
-          aria-busy={evaluate.isPending}
-          data-testid="control-action-evaluate"
-        >
-          {evaluate.isPending ? "Evaluating…" : "Evaluate now"}
-        </Button>
+        {canEvaluate && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => evaluate.mutate()}
+            disabled={evaluate.isPending}
+            aria-busy={evaluate.isPending}
+            data-testid="control-action-evaluate"
+          >
+            {evaluate.isPending ? "Evaluating…" : "Evaluate now"}
+          </Button>
+        )}
         <a
           href={bundleDownloadHref(controlID)}
           download
@@ -303,26 +299,30 @@ export function ControlHeaderActions({
         >
           Download bundle
         </a>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setUploadOpen((o) => !o)}
-          aria-expanded={uploadOpen}
-          data-testid="control-action-upload-toggle"
-        >
-          Upload new version
-        </Button>
-        <Link
-          href={`/exceptions/new?control_id=${encodeURIComponent(controlID)}`}
-          className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-          data-testid="control-action-request-exception"
-        >
-          Request exception
-        </Link>
+        {canWrite && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setUploadOpen((o) => !o)}
+            aria-expanded={uploadOpen}
+            data-testid="control-action-upload-toggle"
+          >
+            Upload new version
+          </Button>
+        )}
+        {canWrite && (
+          <Link
+            href={`/exceptions/new?control_id=${encodeURIComponent(controlID)}`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            data-testid="control-action-request-exception"
+          >
+            Request exception
+          </Link>
+        )}
       </div>
 
-      {uploadOpen && (
+      {canWrite && uploadOpen && (
         <form
           className="flex items-center gap-2 text-xs"
           data-testid="control-upload-form"
@@ -370,78 +370,122 @@ export function ControlHeaderActions({
           {upload.error.message}
         </p>
       )}
+    </div>
+  );
+}
 
-      <div
-        className="flex items-center gap-1.5 text-xs"
-        data-testid="control-state-result"
-        aria-live="polite"
-      >
-        <span className="text-muted-foreground">Result</span>
-        {attestation.waiting ? (
-          <Badge
-            variant="outline"
-            aria-busy="true"
-            data-testid="control-state-result-value"
-            data-result="evaluating"
+export interface ControlStateStripProps {
+  controlID: string;
+  // The state response may be undefined while the query is loading or if
+  // it errored. Last evaluated reads "—" in that case rather than a
+  // flash of "never".
+  state: ControlStateResponse | undefined;
+  stateError?: boolean;
+  /** The strip's further cells (freshness, owner, markers). */
+  children?: ReactNode;
+}
+
+// ControlStateStrip (#2140) leads the control page: the rolled-up result
+// and when the control was last evaluated, then the caller's cells. The
+// result and last evaluated moved here from the header actions; the
+// attestation wait (#2111) moved with them, so "Evaluating…" still shows
+// while an attestation's evaluation lands.
+export function ControlStateStrip({
+  controlID,
+  state,
+  stateError = false,
+  children,
+}: ControlStateStripProps) {
+  const now = useNow();
+  const searchParams = useSearchParams();
+  const attestedAt = searchParams.get(ATTESTED_PARAM);
+  const attestation = useAttestationEvaluation(controlID, attestedAt, state);
+  const result = rollupResult(state?.states);
+
+  // Resolve the freshest `last_observed_at` across cells. Three branches:
+  //   1. state is undefined        → undefined  → "—"
+  //   2. state exists, no entries  → null       → "never"
+  //   3. state exists, has entries → ISO string → "8 minutes ago"
+  const latestISO: string | null | undefined = state
+    ? mostRecentObservedAt(state.states)
+    : undefined;
+
+  // Render "—" until the client clock has seeded (`now === null`).
+  const display = now === null ? "—" : relativeTimeOrNever(latestISO, now);
+
+  return (
+    <Card size="sm" data-testid="control-state-strip">
+      <CardContent className="space-y-3">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
+          <StripCell label="State">
+            <div data-testid="control-state-result" aria-live="polite">
+              {attestation.waiting ? (
+                <Badge
+                  variant="outline"
+                  aria-busy="true"
+                  data-testid="control-state-result-value"
+                  data-result="evaluating"
+                >
+                  Evaluating…
+                </Badge>
+              ) : result ? (
+                <Badge
+                  variant={RESULT_VARIANT[result] ?? "outline"}
+                  data-testid="control-state-result-value"
+                  data-result={result}
+                >
+                  {enumLabel("EvaluationState", result)}
+                </Badge>
+              ) : (
+                <span
+                  className="text-muted-foreground"
+                  data-testid="control-state-result-value"
+                  data-result="none"
+                >
+                  {stateError ? "State unavailable" : "Not evaluated"}
+                </span>
+              )}
+            </div>
+          </StripCell>
+          <StripCell label="Last evaluated">
+            <span data-testid="control-last-evaluated">
+              <span data-testid="control-last-evaluated-value">{display}</span>
+            </span>
+          </StripCell>
+          {children}
+        </dl>
+        {attestation.timedOut && (
+          <p
+            role="alert"
+            className="text-xs text-destructive"
+            data-testid="control-attest-evaluation-timeout"
           >
-            Evaluating…
-          </Badge>
-        ) : result ? (
-          <Badge
-            variant={RESULT_VARIANT[result] ?? "outline"}
-            data-testid="control-state-result-value"
-            data-result={result}
-          >
-            {result}
-          </Badge>
-        ) : (
-          <span
-            className="font-mono text-foreground"
-            data-testid="control-state-result-value"
-            data-result="none"
-          >
-            —
-          </span>
+            The attestation is recorded, but its evaluation has not landed after
+            30 seconds. Use Evaluate now, or check back after the next scheduled
+            run.
+          </p>
         )}
-      </div>
-      {attestation.timedOut && (
-        <p
-          role="alert"
-          className="text-xs text-destructive"
-          data-testid="control-attest-evaluation-timeout"
-        >
-          The attestation is recorded, but its evaluation has not landed after
-          30 seconds. Use Evaluate now, or check back after the next scheduled
-          run.
-        </p>
-      )}
+      </CardContent>
+    </Card>
+  );
+}
 
-      <div
-        className="flex items-center gap-1.5 text-xs text-muted-foreground"
-        data-testid="control-last-evaluated"
-      >
-        <svg
-          className="h-3.5 w-3.5"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm.93-12.518A1 1 0 0010 4a1 1 0 00-.93.518L5.4 11.482A1 1 0 006.291 13H8v3a1 1 0 102 0v-3h1.71a1 1 0 00.89-1.518L10.93 5.482z"
-            clipRule="evenodd"
-          />
-        </svg>
-        <span>
-          last evaluated{" "}
-          <span
-            className="font-mono text-foreground"
-            data-testid="control-last-evaluated-value"
-          >
-            {display}
-          </span>
-        </span>
-      </div>
+/** One labelled value of the state strip. */
+export function StripCell({
+  label,
+  testId,
+  children,
+}: {
+  label: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0" data-testid={testId}>
+      <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm">{children}</dd>
     </div>
   );
 }

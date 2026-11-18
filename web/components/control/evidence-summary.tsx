@@ -6,9 +6,10 @@
 // NON-BINDING, cited, local-default-Ollama summary of that evidence when the
 // backend returns one (AC-6). The summary is a comprehension aid — there is NO
 // approve/publish/export affordance anywhere in this component (AC-5,
-// P0-502-3). When the summary is suppressed (generation unavailable, no
-// evidence, or a citation failed to verify) the evidence list still renders with
-// a short honest note (graceful degradation, AC-7).
+// P0-502-3). #2140 changed the degraded case: when the summary is suppressed
+// (generation unavailable, no evidence, or a citation failed to verify), still
+// loading, or the read failed, the card renders nothing; the control page's
+// Evidence section lists the records itself.
 //
 // When the tenant is on a cloud provider (slice 499 opt-in) the shared
 // CloudRoutingBanner renders the "your data leaves this deployment" affordance —
@@ -30,7 +31,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { CloudRoutingBanner } from "@/components/llm/cloud-routing-banner";
 import {
   buildEvidenceSummaryView,
@@ -47,6 +47,12 @@ export function EvidenceSummaryCard({ id }: { id: string }) {
     refetchOnWindowFocus: false,
   });
 
+  // #2140: shown only when there is a summary. Loading, a failed read and a
+  // suppressed generation render nothing, never an "unavailable" notice.
+  if (!summaryQ.data || !buildEvidenceSummaryView(summaryQ.data).showSummary) {
+    return null;
+  }
+
   return (
     <Card data-testid="evidence-summary-section">
       <CardHeader>
@@ -59,15 +65,7 @@ export function EvidenceSummaryCard({ id }: { id: string }) {
         {/* P0-502-6: cloud-routing honesty affordance (renders only when the
             tenant opted into a cloud provider; nothing for the local default). */}
         <CloudRoutingBanner />
-        {summaryQ.isLoading ? (
-          <Skeleton className="h-20 w-full" />
-        ) : summaryQ.error || !summaryQ.data ? (
-          <p className="text-sm text-muted-foreground">
-            Evidence summary is unavailable for this control right now.
-          </p>
-        ) : (
-          <SummaryBody data={summaryQ.data} />
-        )}
+        <SummaryBody data={summaryQ.data} />
       </CardContent>
     </Card>
   );

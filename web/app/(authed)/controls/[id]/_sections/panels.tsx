@@ -1,55 +1,31 @@
 "use client";
 
-// Slice 041 — control detail view (`/controls/[id]`).
-// Slice 253 — re-pointed the four endpoint-pending placeholders.
-// Slice 254 — re-foldered the page behind a sticky seven-tab strip
-//   (Overview / Evidence / Mappings / Effective scope / Policies /
-//   Risks / History). Tab state is URL-bound via `?tab=<name>` so
-//   deep links resolve to the right tab; default is Overview when
-//   the param is missing or unrecognised. The tab strip mirrors
-//   `Plans/_archive/mockups/control.html` lines 139-152.
+// The control-detail tab panels (`/controls/[id]`).
 //
-// Built per `Plans/_archive/mockups/control.html`. Renders, in mockup order:
-//   - control header: CTRL id, SCF anchor pill, lifecycle badge, family,
-//     title, owner/implementation/freshness-class meta
-//   - KPI strip: effectiveness 30d, frameworks satisfied, evidence
-//     records 30d (slice 253 — bound to GET /v1/evidence?control_id=…),
-//     effective-scope cells
-//   - tab strip: Overview / Evidence / Mappings / Effective scope /
-//     Policies / Risks / History (slice 254)
-//   - per-tab panels — see the Tabs / panel components below
+// #2140 (front door, #2072): the Overview panel is the page's main
+// reading path, three `control-detail-section`s in order, each with its
+// `data-section` name:
 //
-// Slice 253 backstory: slice 041 shipped five "endpoint not on main yet"
-// placeholders for the evidence-list KPI, the evidence-stream card, and
-// the three right-rail Policies / Risks / Audit-log cards. Each named a
-// specific upstream that DID land later (slice 106 for the evidence
-// list; slice 064 for per-control history / policies / risks). The
-// placeholders were not re-walked when the backends shipped, so the
-// page denied real platform capability. Slice 253 binds all four to
-// their live upstreams; empty states still render when the response is
-// genuinely empty (fresh-install tenant, no linked policies, etc.) —
-// the empty-state copy now reflects "no data" honestly, not "endpoint
-// pending". No fabricated rows anywhere (anti-criterion P0-253-2).
+//   - evidence: the recent records, each row opening its evidence detail
+//     (#2137), and the AI evidence summary when one is available;
+//   - coverage: the frameworks and requirements reached, with the org
+//     mapping (#1800), Statement of Applicability exclusion and
+//     covered-by-exception markers, and the effective scope per framework;
+//   - linked: risks, action plans, exceptions (new here) and policies.
 //
-// Slice 254 backstory: the page previously inlined every section on a
-// single scroll. The mockup's information density assumes a tabbed
-// view (each tab's content is page-sized once #253 wired real
-// backends). The slice re-folders the rendered sections behind seven
-// tabs without changing any data path or backend contract — anti-
-// criterion P0-254-3: the Overview tab's data layout is preserved
-// verbatim. All TanStack Query keys, fetchers, error branches, and
-// data-testids from slices 152 / 253 / 255 / 256 / 257 are unchanged
-// — slices that touched the page recently keep working because the
-// re-folder is purely a render-shape change.
+// The framework graph is on the Framework map tab (MapPanel) and nowhere
+// on the overview. History holds the evaluation history and the
+// freshness clock.
 //
-// Data sync: server values live ONLY in TanStack Query cache and are read
-// during render — there is NO useEffect that seeds state from a server
-// value (React 19 set-state-in-effect lint, slice 063 learned this). The
-// single useEffect is the 401 -> /login redirect, matching the
-// `catalog/scf/[id]` precedent exactly.
+// Each section reads its own queries and shows its own error, so one
+// failing read never blanks the rest. A Linked part into a module the
+// caller cannot see (switched off, or outside their module access) is
+// left out and never fetched (#2174); the exceptions part is also left
+// out when the platform refuses the caller the exceptions read.
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import {
   Card,
@@ -58,12 +34,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { CoverageTable } from "@/components/control/coverage-table";
 import { FreshnessClock } from "@/components/control/freshness-clock";
 import { EvidenceSummaryCard } from "@/components/control/evidence-summary";
-import { GapExplanationCard } from "@/components/control/gap-explanation";
-
 import { UcfMiniViz } from "@/components/control/ucf-mini-viz";
 
 import {
@@ -74,66 +50,131 @@ import {
   type ControlStateResponse,
 } from "@/lib/api/control-detail";
 import { type EvidenceListResponse } from "@/lib/api/evidence";
+import { type ExceptionsListResponse } from "@/lib/api/exceptions";
 
 import {
   EffectiveScopeRows,
   EvidenceStreamBody,
+  ExceptionsBody,
   HistoryBody,
   PoliciesBody,
   RisksBody,
 } from "./bodies";
+
+type ScopeQueries = ReadonlyArray<{
+  data?: unknown;
+  isLoading: boolean;
+  error: unknown;
+}>;
+
+/** One named section of the overview (#2140), the risk page's pattern. */
+function ControlSection({
+  name,
+  label,
+  children,
+}: {
+  name: string;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      data-testid="control-detail-section"
+      data-section={name}
+      aria-label={label}
+      className="space-y-4"
+    >
+      <h2 className="text-lg font-semibold">{label}</h2>
+      {children}
+    </section>
+  );
+}
 
 export function OverviewPanel({
   id,
   coverage,
   outOfScopeFvIds,
   evidenceQ,
-  stateQ,
-  state,
+  excepted,
   fvIds,
   scopeQueries,
-  requirements,
   policiesQ,
   risksQ,
-  historyQ,
-  anchorSCF,
+  exceptionsQ,
+  showActionPlans,
 }: {
   id: string;
   coverage: ControlCoverage;
   outOfScopeFvIds: Set<string>;
   evidenceQ: ReturnType<typeof useQuery<EvidenceListResponse>>;
-  stateQ: ReturnType<typeof useQuery<ControlStateResponse>>;
-  state: ControlStateResponse | undefined;
+  // Some scope cell's evaluated result is `excepted`: an active exception
+  // covers it, so its credit stands on the exception.
+  excepted: boolean;
   fvIds: string[];
-  scopeQueries: ReadonlyArray<{
-    data?: unknown;
-    isLoading: boolean;
-    error: unknown;
-  }>;
-  requirements: ControlCoverage["requirements"];
-  // #2174: null when the caller cannot see the Policies (or Risk) module;
-  // the card is then left out entirely.
+  scopeQueries: ScopeQueries;
+  // null when the caller cannot see that module (#2174), or, for
+  // exceptions, may not read them: the part is then left out entirely.
   policiesQ: ReturnType<typeof useQuery<ControlLinkedPoliciesResponse>> | null;
   risksQ: ReturnType<typeof useQuery<ControlLinkedRisksResponse>> | null;
-  historyQ: ReturnType<typeof useQuery<ControlHistoryResponse>>;
-  anchorSCF: string | null;
+  exceptionsQ: ReturnType<typeof useQuery<ExceptionsListResponse>> | null;
+  showActionPlans: boolean;
 }) {
+  const { anchor, requirements } = coverage;
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-      {/* LEFT 2/3 */}
-      <div className="space-y-5 lg:col-span-2">
-        {/* COVERAGE BY FRAMEWORK */}
-        <Card data-testid="coverage-section">
+    <div className="space-y-8">
+      {/* ============ EVIDENCE ============ */}
+      <ControlSection name="evidence" label="Evidence">
+        <Card data-testid="evidence-stream-section">
           <CardHeader className="border-b">
-            <CardTitle>Coverage by framework</CardTitle>
+            <CardTitle>Recent evidence</CardTitle>
             <CardDescription>
-              Routed through{" "}
-              <span className="font-mono">{anchorSCF ?? "no anchor"}</span> ·
-              weighted by STRM strength × 30-day effectiveness, intersected with
-              FrameworkScope
+              Append-only ledger, last 30 days. Open a record to see what it
+              says.{" "}
+              <Link
+                href={`/evidence?control_id=${encodeURIComponent(id)}`}
+                className="underline"
+                data-testid="evidence-list-link"
+              >
+                All evidence for this control
+              </Link>
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <EvidenceStreamBody id={id} evidenceQ={evidenceQ} />
+          </CardContent>
+        </Card>
+        {/* AI evidence summary (slice 502): renders only when available. */}
+        <EvidenceSummaryCard id={id} />
+      </ControlSection>
+
+      {/* ============ COVERAGE ============ */}
+      <ControlSection name="coverage" label="Coverage">
+        <Card data-testid="coverage-section">
+          <CardHeader className="border-b">
+            <CardTitle>Frameworks and requirements</CardTitle>
+            <CardDescription>
+              Routed through{" "}
+              <span className="font-mono">
+                {anchor ? anchor.scf_id : "no anchor"}
+              </span>{" "}
+              · weighted by STRM strength × 30-day effectiveness, intersected
+              with FrameworkScope
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {excepted ? (
+              <div
+                className="flex flex-wrap items-center gap-2 text-sm"
+                data-testid="coverage-excepted"
+              >
+                <Badge variant="info">Covered by exception</Badge>
+                <span className="text-muted-foreground">
+                  An active exception covers part of this control&apos;s scope,
+                  so that part&apos;s credit stands on the exception, not on
+                  evidence.
+                </span>
+              </div>
+            ) : null}
             <CoverageTable
               requirements={requirements}
               outOfScopeFvIds={outOfScopeFvIds}
@@ -141,67 +182,6 @@ export function OverviewPanel({
           </CardContent>
         </Card>
 
-        {/* UCF GRAPH MINI VIEW */}
-        <Card data-testid="ucf-viz-section">
-          <CardHeader className="border-b">
-            <CardTitle>UCF graph · neighborhood</CardTitle>
-            <CardDescription>
-              This control through the SCF anchor to the framework requirements
-              it satisfies
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <UcfMiniViz coverage={coverage} outOfScopeFvIds={outOfScopeFvIds} />
-          </CardContent>
-        </Card>
-
-        {/* EVIDENCE STREAM — slice 253: bound to GET /v1/evidence?control_id=… */}
-        <Card data-testid="evidence-stream-section">
-          <CardHeader className="border-b">
-            <CardTitle>Evidence stream · recent</CardTitle>
-            <CardDescription>Append-only ledger · last 30 days</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <EvidenceStreamBody id={id} evidenceQ={evidenceQ} />
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* RIGHT 1/3 */}
-      <aside className="space-y-5 lg:col-span-1">
-        {/* FRESHNESS CLOCK */}
-        <Card data-testid="freshness-section">
-          <CardHeader>
-            <CardTitle>Freshness</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {stateQ.isLoading ? (
-              <Skeleton className="h-24 w-full" />
-            ) : state ? (
-              <FreshnessClock state={state} />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No evaluation state available for this control yet.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* AI GAP-EXPLANATION — slice 444: non-binding, cited, local-Ollama
-            plain-language explanation of the deterministic freshness rollup.
-            Self-contained card (own query); renders the rollup always and the
-            explanation when available + non-suppressed (AC-6/AC-7). */}
-        <GapExplanationCard id={id} />
-
-        {/* AI EVIDENCE-SUMMARY — slice 502: non-binding, cited,
-            local-default-Ollama plain-language summary of the control's bounded
-            CURRENT LIVE evidence set. Sibling of slice 444's gap-explanation.
-            Self-contained card (own query); renders the bounded evidence label
-            always and the summary when available + non-suppressed (AC-6/AC-7);
-            no approve/publish/export affordance (AC-5/P0-502-3). */}
-        <EvidenceSummaryCard id={id} />
-
-        {/* EFFECTIVE SCOPE */}
         <Card data-testid="effective-scope-section">
           <CardHeader>
             <CardTitle>Effective scope</CardTitle>
@@ -217,241 +197,122 @@ export function OverviewPanel({
             />
           </CardContent>
         </Card>
+      </ControlSection>
 
-        {/* LINKED POLICIES — slice 253: GET /v1/controls/{id}/policies */}
-        {policiesQ ? (
-          <Card data-testid="policies-section">
-            <CardHeader>
-              <CardTitle>Policies</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <PoliciesBody policiesQ={policiesQ} />
-            </CardContent>
-          </Card>
+      {/* ============ LINKED ============ */}
+      <ControlSection name="linked" label="Linked">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+          {risksQ ? (
+            <Card data-testid="risks-section">
+              <CardHeader>
+                <CardTitle>Risks treated</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RisksBody risksQ={risksQ} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {exceptionsQ ? (
+            <Card data-testid="exceptions-section">
+              <CardHeader>
+                <CardTitle>Exceptions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ExceptionsBody exceptionsQ={exceptionsQ} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {policiesQ ? (
+            <Card data-testid="policies-section">
+              <CardHeader>
+                <CardTitle>Policies</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PoliciesBody policiesQ={policiesQ} />
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+
+        {/* Slice 384 (AC-26): the linked action plans. #2174: hidden with
+            Risk. */}
+        {showActionPlans ? (
+          <LinkedActionPlans target="control" targetId={id} />
         ) : null}
-
-        {/* LINKED RISKS — slice 253: GET /v1/controls/{id}/risks */}
-        {risksQ ? (
-          <Card data-testid="risks-section">
-            <CardHeader>
-              <CardTitle>Risks treated</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RisksBody risksQ={risksQ} />
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {/* AUDIT LOG — slice 253: GET /v1/controls/{id}/history */}
-        <Card data-testid="audit-log-section">
-          <CardHeader>
-            <CardTitle>Audit log</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <HistoryBody historyQ={historyQ} />
-          </CardContent>
-        </Card>
-      </aside>
+      </ControlSection>
     </div>
   );
 }
 
-// EvidencePanel — slice 254 AC-4: the Evidence tab is the full evidence-
-// stream pane. Today the Overview's stream and the Evidence tab share
-// the same TanStack query (EVIDENCE_STREAM_LIMIT = 5 rows); the full
-// paginated browse experience lives at `/evidence?control_id=<id>`,
-// which the panel surfaces prominently. When a future slice paginates
-// in-line on the Evidence tab, the panel grows here without touching
-// Overview.
-export function EvidencePanel({
-  id,
-  evidenceQ,
-}: {
-  id: string;
-  evidenceQ: ReturnType<typeof useQuery<EvidenceListResponse>>;
-}) {
-  return (
-    <Card data-testid="evidence-tab-panel">
-      <CardHeader className="border-b">
-        <CardTitle>Evidence stream</CardTitle>
-        <CardDescription>
-          Append-only ledger · last 30 days · the dedicated{" "}
-          <Link
-            href={`/evidence?control_id=${encodeURIComponent(id)}`}
-            className="underline"
-            data-testid="evidence-tab-list-link"
-          >
-            /evidence
-          </Link>{" "}
-          list page is the full paginated browse surface.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <EvidenceStreamBody id={id} evidenceQ={evidenceQ} />
-      </CardContent>
-    </Card>
-  );
-}
-
-// MappingsPanel — slice 254 AC-5: the deep-dive view for the
-// control's STRM edges. Today the surface is the same coverage table +
-// UCF mini-viz that shipped on Overview pre-tab-strip; the per-
-// requirement inspector + edge-level drilldown lands in a follow-up
-// slice (the chevron in the coverage table is already wired as
-// non-interactive per slice 256 D2).
-export function MappingsPanel({
+// MapPanel — the Framework map tab (#2140): the control through its SCF
+// anchor to the framework requirements it satisfies. It is the only place
+// the graph renders.
+export function MapPanel({
   coverage,
   outOfScopeFvIds,
-  anchorSCF,
 }: {
   coverage: ControlCoverage;
   outOfScopeFvIds: Set<string>;
-  anchorSCF: string | null;
 }) {
   return (
-    <div className="space-y-5" data-testid="mappings-tab-panel">
-      <Card>
+    <Card data-testid="ucf-viz-section">
+      <CardHeader className="border-b">
+        <CardTitle>Framework map</CardTitle>
+        <CardDescription>
+          This control through the SCF anchor to the framework requirements it
+          satisfies
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <UcfMiniViz coverage={coverage} outOfScopeFvIds={outOfScopeFvIds} />
+      </CardContent>
+    </Card>
+  );
+}
+
+// HistoryPanel — the control's evaluation history, and the freshness
+// clock that reads the same evaluated state.
+export function HistoryPanel({
+  historyQ,
+  stateQ,
+}: {
+  historyQ: ReturnType<typeof useQuery<ControlHistoryResponse>>;
+  stateQ: ReturnType<typeof useQuery<ControlStateResponse>>;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <Card data-testid="history-tab-panel" className="lg:col-span-2">
         <CardHeader className="border-b">
-          <CardTitle>Coverage by framework</CardTitle>
+          <CardTitle>Evaluation history</CardTitle>
           <CardDescription>
-            Routed through{" "}
-            <span className="font-mono">{anchorSCF ?? "no anchor"}</span> ·
-            weighted by STRM strength × 30-day effectiveness, intersected with
-            FrameworkScope
+            One entry per scope cell per evaluation pass.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <CoverageTable
-            requirements={coverage.requirements}
-            outOfScopeFvIds={outOfScopeFvIds}
-          />
+          <div data-testid="audit-log-section">
+            <HistoryBody historyQ={historyQ} />
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="border-b">
-          <CardTitle>UCF graph · neighborhood</CardTitle>
-          <CardDescription>
-            This control through the SCF anchor to the framework requirements it
-            satisfies
-          </CardDescription>
+      <Card data-testid="freshness-section">
+        <CardHeader>
+          <CardTitle>Freshness</CardTitle>
         </CardHeader>
         <CardContent>
-          <UcfMiniViz coverage={coverage} outOfScopeFvIds={outOfScopeFvIds} />
+          {stateQ.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : stateQ.data ? (
+            <FreshnessClock state={stateQ.data} />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No evaluation state available for this control yet.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
   );
 }
-
-// ScopePanel — slice 254 AC-6: per-framework effective-scope
-// breakdown. Same fan-out the Overview right-rail consumes, here
-// rendered as a full-width card so each framework's row has room for
-// the cells/applicable totals + the out-of-scope reason copy.
-export function ScopePanel({
-  fvIds,
-  scopeQueries,
-  requirements,
-}: {
-  fvIds: string[];
-  scopeQueries: ReadonlyArray<{
-    data?: unknown;
-    isLoading: boolean;
-    error: unknown;
-  }>;
-  requirements: ControlCoverage["requirements"];
-}) {
-  return (
-    <Card data-testid="scope-tab-panel">
-      <CardHeader className="border-b">
-        <CardTitle>Effective scope · per framework</CardTitle>
-        <CardDescription>
-          applicability ∩ FrameworkScope — one call per framework version
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <EffectiveScopeRows
-          fvIds={fvIds}
-          scopeQueries={scopeQueries}
-          requirements={requirements}
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
-// PoliciesPanel — slice 254 AC-7: full Policies list. Shares the same
-// query the Overview right-rail card consumes; renders the same rows
-// in a wider full-width layout.
-export function PoliciesPanel({
-  policiesQ,
-}: {
-  policiesQ: ReturnType<typeof useQuery<ControlLinkedPoliciesResponse>>;
-}) {
-  return (
-    <Card data-testid="policies-tab-panel">
-      <CardHeader className="border-b">
-        <CardTitle>Linked policies</CardTitle>
-        <CardDescription>Policies linked to this control.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <PoliciesBody policiesQ={policiesQ} />
-      </CardContent>
-    </Card>
-  );
-}
-
-// RisksPanel — slice 254 AC-7: full Risks list. Same query as the
-// right-rail; renders the link-weight detail per row that the
-// right-rail card already surfaces.
-export function RisksPanel({
-  risksQ,
-}: {
-  risksQ: ReturnType<typeof useQuery<ControlLinkedRisksResponse>>;
-}) {
-  return (
-    <Card data-testid="risks-tab-panel">
-      <CardHeader className="border-b">
-        <CardTitle>Risks treated</CardTitle>
-        <CardDescription>
-          Risks this control is linked to as a treatment.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <RisksBody risksQ={risksQ} />
-      </CardContent>
-    </Card>
-  );
-}
-
-// HistoryPanel — slice 254 AC-7: full evaluation history. Same query
-// as the right-rail audit-log card; the tab gives the list room to
-// breathe + makes deep-linking to the History tab trivial. Paginated
-// keyset history is a follow-up slice (the BFF returns one page; the
-// dedicated tab makes that paged surface easy to extend without
-// touching Overview).
-export function HistoryPanel({
-  historyQ,
-}: {
-  historyQ: ReturnType<typeof useQuery<ControlHistoryResponse>>;
-}) {
-  return (
-    <Card data-testid="history-tab-panel">
-      <CardHeader className="border-b">
-        <CardTitle>Evaluation history</CardTitle>
-        <CardDescription>
-          Per-evaluation history rows — one entry per scope cell per evaluation
-          pass.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <HistoryBody historyQ={historyQ} />
-      </CardContent>
-    </Card>
-  );
-}
-
-// =================== SHARED PANEL BODIES ===================
-
-// EvidenceStreamBody — extracted so the Overview card and the
-// Evidence tab render identical content from the same query.

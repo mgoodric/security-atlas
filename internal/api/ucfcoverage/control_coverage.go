@@ -234,8 +234,55 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		}
 	}
 
+	// #2140: mark each requirement the activated SoA excludes, so the
+	// control page's Coverage says which credit the scope removed.
+	if err := h.applyExclusions(ctx, reqs); err != nil {
+		return coverageView{}, false, fmt.Errorf("lookup requirement exclusions: %w", err)
+	}
+
 	view.Requirements = reqs
 	return view, true, nil
+}
+
+// applyExclusions sets `exclusion` on each requirement the caller
+// tenant's activated framework-scope revision excludes (#2140). One
+// lookup per distinct requirement, in one tenant transaction: an anchor
+// reaches tens of requirements, not thousands.
+func (h *Handler) applyExclusions(ctx context.Context, reqs []requirementForAnchorWire) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+	return h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		seen := map[string]*exclusionWire{}
+		for i := range reqs {
+			id := reqs[i].RequirementID
+			ex, done := seen[id]
+			if !done {
+				rid, err := uuid.Parse(id)
+				if err != nil {
+					return fmt.Errorf("requirement id %q: %w", id, err)
+				}
+				row, err := q.GetActivatedExclusionForRequirement(ctx, dbx.GetActivatedExclusionForRequirementParams{
+					TenantID:               pgUUIDFromTenantCtx(ctx),
+					FrameworkRequirementID: pgtype.UUID{Bytes: rid, Valid: true},
+				})
+				switch {
+				case err == nil:
+					ex = &exclusionWire{
+						FrameworkScopeID:  uuidStr(row.FrameworkScopeID),
+						Justification:     row.Justification,
+						ImplementationRef: row.ImplementationRef,
+						DecidedAt:         row.UpdatedAt.Time.UTC(),
+					}
+				case !errors.Is(err, pgx.ErrNoRows):
+					return err
+				}
+				seen[id] = ex
+			}
+			reqs[i].Exclusion = ex
+		}
+		return nil
+	})
 }
 
 // applyCoverage fills the `coverage` field on each requirement in `reqs`.
