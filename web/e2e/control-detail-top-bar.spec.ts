@@ -117,6 +117,11 @@ test.describe("control-detail header chrome (slice 257)", () => {
     await page.goto(`/controls/${seeded.controlId}`);
     const input = page.getByTestId("global-search-input");
     await expect(input).not.toBeFocused();
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
+    );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();
   });

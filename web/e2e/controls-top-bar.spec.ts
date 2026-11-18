@@ -85,6 +85,11 @@ test.describe("topbar header chrome (slice 223)", () => {
     // The input should NOT have focus by default — establishes the
     // baseline before the shortcut fires.
     await expect(input).not.toBeFocused();
+    // #2356 — wait for hydration to attach the ⌘K listener before pressing.
+    await expect(page.getByTestId("global-search")).toHaveAttribute(
+      "data-shortcut-ready",
+      "true",
+    );
     await page.keyboard.press("Meta+K");
     await expect(input).toBeFocused();
   });
