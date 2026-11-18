@@ -17,6 +17,7 @@ import { enumLabel } from "./labels/enum-labels";
 import { frameworkLabel } from "./labels/framework-label";
 import { exactUTC } from "./relative-time";
 import {
+  apiKeyText,
   isMachineActor,
   normaliseUserId,
   resolvePerson,
@@ -126,7 +127,7 @@ export function credentialOptions(
     const owner = ownerId ? names.get(ownerId) : undefined;
     return {
       value: k.id.trim().toLowerCase(),
-      label: owner ? `API key (owner: ${owner})` : "API key",
+      label: apiKeyText(k.label, owner),
     };
   });
 }

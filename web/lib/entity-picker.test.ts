@@ -119,12 +119,17 @@ describe("credentialOptions", () => {
   test("labels a key by its owner, or plainly when it has none", () => {
     expect(
       credentialOptions(
-        [{ id: K1.toUpperCase(), owner_id: U1 }, { id: "key-2" }],
+        [
+          { id: K1.toUpperCase(), owner_id: U1 },
+          { id: "key-2" },
+          { id: "key-3", owner_id: U1, label: "CI deploy" },
+        ],
         [{ id: U1, display_name: "Alice", status: "active" }],
       ),
     ).toEqual([
       { value: K1, label: "API key (owner: Alice)" },
       { value: "key-2", label: "API key" },
+      { value: "key-3", label: "API key 'CI deploy' (owner: Alice)" },
     ]);
   });
 });

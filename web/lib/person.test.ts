@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  apiKeyText,
   buildDirectory,
   isMachineActor,
   normaliseUserId,
@@ -15,13 +16,20 @@ const BOB = "22222222-2222-4222-8222-222222222222";
 const KEY = "33333333-3333-4333-8333-333333333333";
 const ORPHAN_KEY = "44444444-4444-4444-8444-444444444444";
 const STRANGER = "55555555-5555-4555-8555-555555555555";
+const LABELLED_KEY = "66666666-6666-4666-8666-666666666666";
+const LABELLED_ORPHAN = "77777777-7777-4777-8777-777777777777";
 
 const dir = buildDirectory(
   [
     { id: ALICE, display_name: "Alice Admin", status: "active" },
     { id: BOB, display_name: "Bob Former", status: "disabled" },
   ],
-  [{ id: KEY, owner_id: ALICE }, { id: ORPHAN_KEY }],
+  [
+    { id: KEY, owner_id: ALICE },
+    { id: ORPHAN_KEY },
+    { id: LABELLED_KEY, owner_id: ALICE, label: "CI deploy" },
+    { id: LABELLED_ORPHAN, label: "Nightly sync" },
+  ],
 );
 
 describe("normaliseUserId", () => {
@@ -61,6 +69,20 @@ describe("resolvePerson", () => {
 
   it("renders an API key without a resolvable owner as 'API key'", () => {
     expect(resolvePerson(ORPHAN_KEY, dir).text).toBe("API key");
+  });
+
+  it("renders a labelled API key with its label and owner (#2384)", () => {
+    const p = resolvePerson(LABELLED_KEY, dir);
+    expect(p.kind).toBe("api_key");
+    expect(p.text).toBe("API key 'CI deploy' (owner: Alice Admin)");
+    expect(p.title).toBe(p.text);
+    expect(p.title).not.toContain(LABELLED_KEY);
+  });
+
+  it("renders a labelled API key with no owner as its label (#2384)", () => {
+    expect(resolvePerson(LABELLED_ORPHAN, dir).text).toBe(
+      "API key 'Nightly sync'",
+    );
   });
 
   it("renders a disabled user as Former user", () => {
@@ -127,5 +149,17 @@ describe("resolvePerson", () => {
       title: "Unknown",
     });
     expect(resolvePerson(undefined, dir).text).toBe("Unknown");
+  });
+});
+
+describe("apiKeyText (#2384)", () => {
+  it.each([
+    [undefined, undefined, "API key"],
+    ["", "Alice", "API key (owner: Alice)"],
+    ["  ", "Alice", "API key (owner: Alice)"],
+    [" CI ", "Alice", "API key 'CI' (owner: Alice)"],
+    ["CI", "", "API key 'CI'"],
+  ])("label %j owner %j reads %j", (label, owner, want) => {
+    expect(apiKeyText(label, owner)).toBe(want);
   });
 });

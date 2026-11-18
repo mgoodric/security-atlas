@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -61,6 +63,36 @@ type IssueRequest struct {
 	// the approver-only routes that do not require a person.
 	IsApprover bool     `json:"is_approver"`
 	OwnerRoles []string `json:"owner_roles"`
+	// Label is an optional name for the key (#2384), shown in place of its
+	// id: <Person> reads "API key '<label>' (owner: <user>)". Trimmed;
+	// empty or all-space means no label.
+	Label string `json:"label,omitempty"`
+}
+
+// maxLabelLen is the longest label, in characters (api_keys_label_chk).
+const maxLabelLen = 100
+
+// normalizeLabel trims a requested label and reports why it is refused,
+// or "" when it is accepted. An empty result is no label.
+func normalizeLabel(raw string) (string, string) {
+	label := strings.TrimSpace(raw)
+	if utf8.RuneCountInString(label) > maxLabelLen {
+		return "", "label must be at most 100 characters"
+	}
+	for _, r := range label {
+		// Cf covers the bidi overrides and isolates (U+202E, U+2066-2069)
+		// and zero-width characters, which would make a label render as
+		// something else.
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return "", "label must not contain control or formatting characters"
+		}
+		// A quote would let a label close its own quotes in "API key
+		// '<label>' (owner: <user>)" and fake a different owner.
+		if r == '\'' {
+			return "", "label must not contain '"
+		}
+	}
+	return label, ""
 }
 
 // maxTTLSeconds is the largest ttl_seconds whose Duration does not
@@ -76,6 +108,7 @@ type IssueResponse struct {
 	Last4       string    `json:"last4"`
 	IssuedAt    time.Time `json:"issued_at"`
 	ExpiresAt   string    `json:"expires_at,omitempty"`
+	Label       string    `json:"label,omitempty"`
 }
 
 // Issue handles POST /v1/admin/credentials.
@@ -112,6 +145,11 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	label, msg := normalizeLabel(req.Label)
+	if msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
 	// requireAdmin returning true guarantees the credential is in context.
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	if msg := mintWithinCaller(cred, req.IsAdmin, req.IsApprover, req.OwnerRoles); msg != "" {
@@ -125,6 +163,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		IsAdmin:        req.IsAdmin,
 		IsApprover:     req.IsApprover,
 		OwnerRoles:     req.OwnerRoles,
+		Label:          label,
 	}
 	// The minting admin is attribution only (#1947): the key is a machine
 	// key, not the admin's, and keeps working after the admin is disabled.
@@ -142,6 +181,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		BearerToken: plain,
 		Last4:       issued.Last4,
 		IssuedAt:    issued.IssuedAt,
+		Label:       issued.Label,
 	}
 	if !issued.IssuedAt.IsZero() && issued.TTL > 0 {
 		resp.ExpiresAt = issued.IssuedAt.Add(issued.TTL).Format(time.RFC3339)
@@ -169,6 +209,9 @@ type ListItem struct {
 	// MintedBy is the users(id) of the admin who minted the key, for
 	// attribution only (#1947). Absent when no user minted it.
 	MintedBy string `json:"minted_by,omitempty"`
+	// Label is the admin-chosen name for the key (#2384). Absent when the
+	// key has none.
+	Label string `json:"label,omitempty"`
 }
 
 // ListResponse is the GET /v1/admin/credentials shape.
@@ -227,6 +270,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			OwnerRoles:     c.OwnerRoles,
 			RotatedFrom:    c.RotatedFrom,
 			MintedBy:       c.MintedBy,
+			Label:          c.Label,
 		}
 		if !c.LastUsedAt.IsZero() {
 			lu := c.LastUsedAt
