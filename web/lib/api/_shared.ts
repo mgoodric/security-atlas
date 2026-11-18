@@ -35,20 +35,33 @@ export async function apiFetch(
   return res;
 }
 
+// upstreamErrorMessage is the text an error response shows the user. A 4xx
+// is a refusal the platform words for the user (the approval rule, a frozen
+// revision, "reason is required"), so its `{error}` body passes through. A
+// 5xx never does: its body is the server's own failure, and a handler that
+// wrote `err.Error()` there would leak internals. It gets `generic`, the
+// status line unless the caller names another (#2433).
+export async function upstreamErrorMessage(
+  res: Response,
+  generic = `${res.status} ${res.statusText}`,
+): Promise<string> {
+  if (res.status >= 500) return generic;
+  try {
+    const j = (await res.json()) as { error?: unknown } | null;
+    if (typeof j?.error === "string" && j.error) return j.error;
+  } catch {
+    // body not JSON — keep the generic text
+  }
+  return generic;
+}
+
 // bffControlFetch is the browser-side fetch against the BFF routes under
-// `/api/**`. It unwraps an upstream `{error}` JSON body into the thrown
-// APIError message when present, otherwise falls back to the status line.
+// `/api/**`. It unwraps a 4xx `{error}` JSON body into the thrown APIError
+// message when present, otherwise falls back to the status line.
 export async function bffControlFetch<T>(path: string): Promise<T> {
   const res = await fetch(path);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
-    throw new APIError(res.status, msg);
+    throw new APIError(res.status, await upstreamErrorMessage(res));
   }
   return (await res.json()) as T;
 }
@@ -64,12 +77,11 @@ export async function bffPostJSON<T>(path: string, body?: unknown): Promise<T> {
       body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const parsed = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) {
     throw new APIError(
       res.status,
-      parsed.error ?? `request failed (${res.status})`,
+      await upstreamErrorMessage(res, `request failed (${res.status})`),
     );
   }
-  return parsed as T;
+  return (await res.json().catch(() => ({}))) as T;
 }
