@@ -65,10 +65,12 @@ test.describe("evidence header chrome (slice 235)", () => {
     // Same period name the audits-header fixture seeds + the slice
     // 213 spec pins on /audits. Asserting on /evidence proves the
     // shared-chrome wiring is intact for this route.
-    await expect(pill).toContainText("SOC 2 Type II · Q2 2026 in progress");
+    // #2135: the pill is the audit banner, counting down to the
+    // period's end; the period name stays in its accessible label.
+    await expect(pill).toContainText(/Audit (ends|ended)/);
     await expect(pill).toHaveAttribute(
       "aria-label",
-      "SOC 2 Type II · Q2 2026 in progress",
+      /^SOC 2 Type II · Q2 2026: audit (ends|ended)/,
     );
   });
 

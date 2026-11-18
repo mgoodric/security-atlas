@@ -3,9 +3,8 @@
 // The route guarantees:
 //   * 401 when the bearer cookie is missing.
 //   * Forwards the bearer as `Authorization: Bearer <token>` to upstream
-//     and hits `/v1/risks?treatment=mitigate&sort=residual,age`
-//     (slice 066 AC-3 — the residual,age ranking that slice 157
-//     re-points the dashboard onto).
+//     and hits `/v1/risks?status=open&include_rollups=false&sort=-residual&limit=5`
+//     (#2135 — the 5 open, non-roll-up risks by residual).
 //   * Upstream `{risks, count}` envelope is unpacked: `risks` array is
 //     forwarded; `count` is re-derived from `risks.length` so the BFF
 //     envelope is consistent even if the upstream omits count.
@@ -54,7 +53,7 @@ describe("GET /api/dashboard/risks", () => {
     expect(body.error).toBe("unauthenticated");
   });
 
-  test("forwards bearer + appends sort=residual,age + returns {risks, count}", async () => {
+  test("forwards bearer + asks for the top 5 open risks + returns {risks, count}", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-157" });
 
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -95,14 +94,15 @@ describe("GET /api/dashboard/risks", () => {
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    // The slice-157 contract: BFF must forward both filters together —
-    // treatment=mitigate AND the residual,age sort. If either is
-    // missing, the dashboard regresses to the slice-040 unsorted shape.
-    expect(calledURL).toContain("/v1/risks");
-    expect(calledURL).toContain("treatment=mitigate");
-    // The sort key passes the comma through literally — the slice-066
-    // ParseListSort handler accepts `residual,age` (slice 066 AC-3).
-    expect(calledURL).toMatch(/sort=residual(?:,|%2C)age/);
+    // #2135: open only, roll-ups out, the register's residual order, 5
+    // rows. Every narrowing is the platform's; no treatment filter.
+    const u = new URL(calledURL);
+    expect(u.pathname).toBe("/v1/risks");
+    expect(u.searchParams.get("status")).toBe("open");
+    expect(u.searchParams.get("include_rollups")).toBe("false");
+    expect(u.searchParams.get("sort")).toBe("-residual");
+    expect(u.searchParams.get("limit")).toBe("5");
+    expect(u.searchParams.has("treatment")).toBe(false);
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.Authorization).toBe("Bearer test-bearer-157");

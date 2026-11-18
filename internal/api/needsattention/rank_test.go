@@ -218,3 +218,40 @@ func TestControlItems(t *testing.T) {
 		t.Fatalf("bands = %v; want 2 failing, 2 gaps", bands)
 	}
 }
+
+func TestFilterTypesAndCountTypes(t *testing.T) {
+	t.Parallel()
+	ranked := []Item{
+		{Band: BandFailing, Type: "control", ID: "1"},
+		{Band: BandApproval, Type: "exception", ID: "2"},
+		{Band: BandOverdue, Type: "risk", ID: "3"},
+		{Band: BandOverdue, Type: "control", ID: "4"},
+	}
+	if got := ids(FilterTypes(ranked, nil)); len(got) != 4 {
+		t.Fatalf("no filter kept %v; want every item", got)
+	}
+	if got := ids(FilterTypes(ranked, []string{"control"})); !equal(got, []string{"failing/1", "overdue/4"}) {
+		t.Fatalf("type=control kept %v", got)
+	}
+	if got := ids(FilterTypes(ranked, []string{"risk", "exception"})); !equal(got, []string{"approval/2", "overdue/3"}) {
+		t.Fatalf("type=risk,exception kept %v", got)
+	}
+	c := CountTypes(ranked)
+	if c["control"] != 2 || c["exception"] != 1 || c["risk"] != 1 || len(c) != 3 {
+		t.Fatalf("type counts = %v", c)
+	}
+}
+
+func TestParseTypes(t *testing.T) {
+	t.Parallel()
+	got, err := parseTypes([]string{"control,risk", " policy ", "control", ""})
+	if err != nil || !equal(got, []string{"control", "risk", "policy"}) {
+		t.Fatalf("parseTypes = %v, %v", got, err)
+	}
+	if got, err := parseTypes(nil); err != nil || len(got) != 0 {
+		t.Fatalf("parseTypes(nil) = %v, %v", got, err)
+	}
+	if _, err := parseTypes([]string{"control,bogus"}); err == nil {
+		t.Fatal("an unknown type must be refused")
+	}
+}

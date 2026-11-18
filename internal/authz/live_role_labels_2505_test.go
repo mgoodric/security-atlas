@@ -11,8 +11,9 @@ import (
 // TestLiveRoleLabels2505 pins which roles a handler gate counts per
 // credential shape (#2505). A user's session and a bound key count their
 // live roles alone; a credential that names no user counts its own label.
-// AckRoleLabels also counts a bound key's label, the only place a user holds
-// a free-text ack role.
+// AckRoleLabels also counts a bound key's free-text label, the only place a
+// user holds a free-text ack role; a bound key's label naming a canonical role
+// counts only as the owner's live role (#2541).
 func TestLiveRoleLabels2505(t *testing.T) {
 	t.Parallel()
 	const owner = "11111111-1111-1111-1111-111111111111"
@@ -44,12 +45,16 @@ func TestLiveRoleLabels2505(t *testing.T) {
 		{
 			name:   "bound key, stale label, live viewer",
 			cred:   credstore.Credential{ID: "key_k", UserID: owner, OwnerRoles: []string{"grc_engineer", "employee"}, TenantRoles: []string{"viewer"}},
-			labels: []string{"viewer"}, ack: []string{"viewer", "grc_engineer", "employee"},
+			labels: []string{"viewer"}, ack: []string{"viewer", "employee"},
 		},
 		{
 			name: "bound key, owner holds no live role",
 			cred: credstore.Credential{ID: "key_k", UserID: owner, OwnerRoles: []string{"control_owner"}},
-			ack:  []string{"control_owner"},
+		},
+		{
+			name:   "bound key, canonical label the owner holds live",
+			cred:   credstore.Credential{ID: "key_k", UserID: owner, OwnerRoles: []string{"control_owner"}, TenantRoles: []string{"control_owner"}},
+			labels: []string{"control_owner"}, ack: []string{"control_owner"},
 		},
 		{
 			name:   "in-memory credential, label counts",
