@@ -43,6 +43,30 @@ export {
 export const ACTOR_ME_SENTINEL = "me";
 
 /**
+ * #2414: the machine and system actors (`system`, `system:<process>`,
+ * `oauth_client:<id>`) in the caller's activity for a window, from
+ * `GET /api/activity/actors`. The platform applies the feed's own
+ * visibility rules, so a caller is never offered an actor whose rows they
+ * cannot see.
+ */
+export async function fetchActivityActors(
+  params: { from: string; to: string; includeReads?: boolean },
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const q = new URLSearchParams({ from: params.from, to: params.to });
+  if (params.includeReads) q.set("include_reads", "true");
+  const res = await fetch(`/api/activity/actors?${q.toString()}`, {
+    cache: "no-store",
+    signal,
+  });
+  if (!res.ok) throw new AuditLogFetchError(res.status, "");
+  const body = (await res.json()) as { actors?: unknown };
+  return Array.isArray(body.actors)
+    ? body.actors.filter((a): a is string => typeof a === "string")
+    : [];
+}
+
+/**
  * Browser-side fetch helper for the slice 270 BFF. Returns the parsed
  * JSON envelope or throws on non-2xx with the upstream error message
  * attached.

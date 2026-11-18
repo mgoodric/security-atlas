@@ -444,6 +444,49 @@ func (q *Queries) ListFrameworkVersionsBySlug(ctx context.Context, slug string) 
 	return items, nil
 }
 
+const listFrameworkVersionsForTenant = `-- name: ListFrameworkVersionsForTenant :many
+SELECT fv.id, fv.tenant_id, fv.framework_id, fv.version, fv.effective_from, fv.effective_to, fv.status, fv.requirement_count, fv.oscal_catalog_uri, fv.created_at
+FROM framework_versions fv
+WHERE fv.tenant_id IS NULL OR fv.tenant_id = $1
+ORDER BY fv.framework_id, fv.effective_from DESC NULLS LAST, fv.version DESC
+`
+
+// #2414: every catalog version plus the caller's own tenant-private
+// versions, for `GET /v1/frameworks?include=versions`, newest first within
+// each framework. RLS (tenant_or_catalog) is the boundary; the tenant_id
+// predicate is the ADR 0026 second leg. Pairs with ListFrameworksForTenant
+// (board_briefs.sql).
+func (q *Queries) ListFrameworkVersionsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkVersion, error) {
+	rows, err := q.db.Query(ctx, listFrameworkVersionsForTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FrameworkVersion
+	for rows.Next() {
+		var i FrameworkVersion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.FrameworkID,
+			&i.Version,
+			&i.EffectiveFrom,
+			&i.EffectiveTo,
+			&i.Status,
+			&i.RequirementCount,
+			&i.OscalCatalogUri,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFrameworks = `-- name: ListFrameworks :many
 SELECT id, tenant_id, name, slug, issuer, description, latest_version_id, created_at FROM frameworks
 WHERE tenant_id IS NULL
