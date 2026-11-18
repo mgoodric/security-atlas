@@ -26,16 +26,19 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
+	"github.com/mgoodric/security-atlas/internal/api/adminscim"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/scim"
 )
 
 const (
@@ -48,7 +51,6 @@ const (
 var platformRoutes2503 = []struct{ method, path string }{
 	{http.MethodGet, "/v1/admin/credentials"},
 	{http.MethodPost, "/v1/admin/credentials"},
-	{http.MethodGet, "/v1/admin/scim-credentials"},
 	{http.MethodGet, "/v1/admin/group-role-mappings"},
 	{http.MethodGet, "/v1/admin/features"},
 	{http.MethodGet, "/v1/admin/tenants"},
@@ -101,6 +103,17 @@ func newStack2503(t *testing.T) stack2503 {
 	sso := adminsso.New(appPool).WithSecretCrypter(crypter)
 	r.Get("/v1/admin/sso", sso.Get)
 	r.Patch("/v1/admin/sso", sso.Patch)
+	// #2503: the tenant's SCIM bearer.
+	hasher, err := bearer.NewHasher([]byte("test-2503-bearer-hash-key-at-least-32-bytes"))
+	if err != nil {
+		t.Fatalf("hasher: %v", err)
+	}
+	scimStore := scim.NewCredentialStore(appPool, adminPool, hasher)
+	scimStore.SetPrefix(bearer.PrefixTest)
+	scimH := adminscim.New(scimStore)
+	r.Post("/v1/admin/scim-credentials", scimH.Issue)
+	r.Get("/v1/admin/scim-credentials", scimH.List)
+	r.Delete("/v1/admin/scim-credentials/{id}", scimH.Revoke)
 	auditLog := adminauditlog.New(appPool)
 	r.Get("/v1/admin/audit-log", auditLog.List)
 	r.Get("/v1/admin/audit-log/unified", auditLog.UnifiedList)
@@ -341,6 +354,52 @@ func TestTenantAdmin2503_SSOAndAuditLog(t *testing.T) {
 		if rr, _ := s.do(t, bearer, http.MethodGet, path, nil); rr.Code != http.StatusOK {
 			t.Errorf("tenant admin GET %s = %d %s, want 200", path, rr.Code, rr.Body.String())
 		}
+	}
+}
+
+// #2503: a tenant admin by role issues, lists and revokes its own tenant's
+// SCIM bearer. Another tenant's admin neither lists nor revokes it (404).
+func TestTenantAdmin2503_SCIMCredentials(t *testing.T) {
+	skipIfNoAdminPool(t)
+	s := newStack2503(t)
+	own := seedTenant478(t, "test-2503-scim-"+uuid.NewString()[:8])
+	other := seedTenant478(t, "test-2503-scim-other-"+uuid.NewString()[:8])
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(),
+			`DELETE FROM scim_credentials WHERE tenant_id = ANY($1)`, []uuid.UUID{own, other})
+	})
+	bearerTok := s.mint(t, own, seedMember2261(t, own, "active", "admin"), authz.RoleAdmin)
+	otherTok := s.mint(t, other, seedMember2261(t, other, "active", "admin"), authz.RoleAdmin)
+
+	rr, _ := s.do(t, bearerTok, http.MethodPost, "/v1/admin/scim-credentials",
+		map[string]any{"description": "2503 e2e"})
+	if rr.Code != http.StatusCreated && rr.Code != http.StatusOK {
+		t.Fatalf("issue scim credential = %d %s, want 200/201", rr.Code, rr.Body.String())
+	}
+	var issued struct {
+		ID       string `json:"id"`
+		TenantID string `json:"tenant_id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&issued); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	if issued.TenantID != own.String() {
+		t.Errorf("issued tenant_id = %s, want the caller's tenant %s", issued.TenantID, own)
+	}
+
+	if rr, _ := s.do(t, bearerTok, http.MethodGet, "/v1/admin/scim-credentials", nil); rr.Code != http.StatusOK ||
+		!bytes.Contains(rr.Body.Bytes(), []byte(issued.ID)) {
+		t.Errorf("own list = %d %s, want 200 listing %s", rr.Code, rr.Body.String(), issued.ID)
+	}
+	if rr, _ := s.do(t, otherTok, http.MethodGet, "/v1/admin/scim-credentials", nil); rr.Code != http.StatusOK ||
+		bytes.Contains(rr.Body.Bytes(), []byte(issued.ID)) {
+		t.Errorf("other tenant's list = %d %s, want 200 without %s", rr.Code, rr.Body.String(), issued.ID)
+	}
+	if rr, _ := s.do(t, otherTok, http.MethodDelete, "/v1/admin/scim-credentials/"+issued.ID, nil); rr.Code != http.StatusNotFound {
+		t.Errorf("other tenant's revoke = %d, want 404", rr.Code)
+	}
+	if rr, _ := s.do(t, bearerTok, http.MethodDelete, "/v1/admin/scim-credentials/"+issued.ID, nil); rr.Code != http.StatusNoContent {
+		t.Errorf("own revoke = %d %s, want 204", rr.Code, rr.Body.String())
 	}
 }
 

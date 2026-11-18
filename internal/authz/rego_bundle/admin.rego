@@ -57,6 +57,8 @@ is_admin_credential if {
 #                 and revoke stay super_admin in the handler. Also
 #                 tenant-admin-only (below, #2503 D5a).
 #   sso           the tenant's OIDC config and its preflight (#2503).
+#   scim-credentials
+#                 the tenant's SCIM bearer: issue, list, revoke (#2503).
 #   audit-log     the tenant's admin audit log, unified read and export
 #                 (#2503 D5). grc_engineer keeps its blanket read here.
 #   controls      GET /v1/admin/controls/held-back (#2358).
@@ -68,6 +70,7 @@ is_admin_credential if {
 tenant_admin_segments := {
     "users",
     "sso",
+    "scim-credentials",
     "audit-log",
     "controls",
     "llm-routing",
