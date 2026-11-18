@@ -169,7 +169,7 @@ func TestHTTP_ExceptionCreate_RefusesNullPredicate(t *testing.T) {
 			a.ctrl, pred, expires)
 	}
 
-	for _, pred := range []string{`null`, `[]`, `"everything"`} {
+	for _, pred := range []string{`null`, `[]`, `"everything"`, `{"op":"bogus"}`, `{"op":"eq","dim":"environment"}`} {
 		code, raw := a.do(http.MethodPost, "/v1/exceptions", requester, body(pred))
 		if code != http.StatusBadRequest {
 			t.Fatalf("predicate %s: status %d (want 400) body=%s", pred, code, raw)
@@ -188,5 +188,41 @@ func TestHTTP_ExceptionCreate_RefusesNullPredicate(t *testing.T) {
 	var stored map[string]any
 	if err := json.Unmarshal(decodeException(t, raw).Exception.ScopeCellPredicate, &stored); err != nil || stored["op"] != "true" {
 		t.Fatalf("stored predicate = %s, want {\"op\":\"true\"}", decodeException(t, raw).Exception.ScopeCellPredicate)
+	}
+}
+
+// #2343: approve, deny, activate and revoke are people-only moves. A
+// machine credential with the approver role gets 403 on each, and the
+// exception stays where it was.
+func TestHTTP_ExceptionLifecycle_MachineCredentialRefused(t *testing.T) {
+	a, allowSelf := newExceptionAPI(t)
+	allowSelf(false)
+	requester := a.bearer("user:" + uuid.New().String())
+	approver := a.bearer("user:" + uuid.New().String())
+	machine := a.bearer("oauth_client:ci")
+
+	requested := a.request(requester)
+	approved := a.request(requester)
+	if code, raw := a.do(http.MethodPatch, "/v1/exceptions/"+approved+"/approve", approver, ""); code != http.StatusOK {
+		t.Fatalf("approve: status %d body=%s", code, raw)
+	}
+	active := a.activeException(requester, approver)
+
+	for _, tc := range []struct {
+		verb, id, body, state string
+	}{
+		{"approve", requested, "", "requested"},
+		{"deny", requested, `{"reason":"no"}`, "requested"},
+		{"activate", approved, "{}", "approved"},
+		{"revoke", active, `{"reason":"done"}`, "active"},
+	} {
+		code, raw := a.do(http.MethodPatch, "/v1/exceptions/"+tc.id+"/"+tc.verb, machine, tc.body)
+		if code != http.StatusForbidden || !strings.Contains(string(raw), "only a person can "+tc.verb) {
+			t.Fatalf("machine %s: status %d (want 403) body=%s", tc.verb, code, raw)
+		}
+		code, raw = a.do(http.MethodGet, "/v1/exceptions/"+tc.id, approver, "")
+		if code != http.StatusOK || decodeException(t, raw).Exception.Status != tc.state {
+			t.Fatalf("after machine %s: status %d body=%s, want still %s", tc.verb, code, raw, tc.state)
+		}
 	}
 }
