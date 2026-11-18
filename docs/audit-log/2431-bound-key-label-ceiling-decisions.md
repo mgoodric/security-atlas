@@ -6,6 +6,9 @@ bound to a user (`issued_by` set) acted with its owner's full live
 for an admin acted as admin, at OPA and, through `Decision.LiveRoles` ->
 `cred.TenantRoles` (#2428), at the handler gates.
 
+In this log, a key's "label" means its `owner_roles` role label, not the
+`api_keys.label` display name that #2384 added. That name grants nothing.
+
 ## Detection-tier classification
 
 - **detection_tier_actual:** manual_review. Recorded as a known gap in

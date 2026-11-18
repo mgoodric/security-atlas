@@ -30,7 +30,7 @@
 
 BEGIN TRANSACTION READ ONLY;
 
--- 1. Per tenant: in-scope keys by label shape and what the cap leaves them.
+-- 1. Per tenant: in-scope keys by owner_roles shape and what the cap leaves them.
 WITH bound AS (
     SELECT k.tenant_id, k.id, k.issued_by, k.owner_roles
     FROM api_keys k
@@ -60,7 +60,7 @@ WITH bound AS (
                WHEN owner_roles <@ ARRAY['admin', 'grc_engineer', 'control_owner', 'auditor', 'viewer']::text[] THEN 'canonical'
                WHEN owner_roles && ARRAY['admin', 'grc_engineer', 'control_owner', 'auditor', 'viewer']::text[] THEN 'mixed'
                ELSE 'free-text'
-           END AS label,
+           END AS owner_roles_shape,
            ARRAY(SELECT unnest(
                      CASE WHEN owner_roles <@ ARRAY['auditor', 'viewer']::text[]
                           THEN '{}'::text[] ELSE ARRAY['control_owner'] END)
@@ -70,7 +70,7 @@ WITH bound AS (
            END AS after
     FROM owned
 )
-SELECT tenant_id, label,
+SELECT tenant_id, owner_roles_shape,
        CASE
            WHEN cardinality(after) = 0 THEN 'none'
            WHEN after @> before AND before @> after THEN 'unchanged'
