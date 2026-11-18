@@ -216,6 +216,11 @@ test.describe("#2172 — module access for each member", () => {
       '[data-testid="activity-row"][data-kind="module_access"]',
     );
     await expect(access.first()).toContainText("changed the module access of");
+    // #2466: the member is named by <Person>, not "member <id>".
+    await expect(access.first()).not.toContainText("of member");
+    await expect(
+      access.first().getByTestId("activity-sentence-target"),
+    ).toHaveAttribute("data-person-kind", /^(user|unknown)$/);
     const flags = page.locator(
       '[data-testid="activity-row"][data-kind="feature_flag"]',
     );

@@ -484,15 +484,15 @@ mappings:
     strength: 0.7
     rationale: "Response to incidents is a subset of the broader Incident Response Plan (IRP) anchor."
   - requirement_code: A.5.27
-    scf_anchor: IRO-08
-    relationship_type: subset_of
-    strength: 0.7
-    rationale: "Post-incident learning and control improvement is the lessons-learned phase of the Incident Response Plan (IRP) (IRO-08)."
+    scf_anchor: IRO-14
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Post-incident learning and control improvement maps to SCF Root Cause Analysis (RCA) & Lessons Learned (IRO-14)."
   - requirement_code: A.5.28
-    scf_anchor: IRO-08
+    scf_anchor: IRO-13
     relationship_type: subset_of
-    strength: 0.6
-    rationale: "Evidence collection and preservation is the forensic-readiness facet of incident response (IRO-08)."
+    strength: 0.8
+    rationale: "Evidence collection and preservation is forensic readiness, which maps to SCF Chain of Custody & Forensics (IRO-13)."
   - requirement_code: A.5.28
     scf_anchor: MON-04
     relationship_type: intersects_with
