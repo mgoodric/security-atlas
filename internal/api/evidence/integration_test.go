@@ -185,17 +185,20 @@ func assertNoRetryHint(t *testing.T, rr *httptest.ResponseRecorder) {
 
 // readRouter wires the evidence-ledger read handler behind the same
 // credential + tenancy middleware production mounts, with a control_owner
-// credential so the requireControlRead guard admits it.
+// credential so the requireControlRead guard admits it. It is a key bound to
+// a user, so the role is the owner's live one, as authzmw stamps it
+// (TenantRoles); the key's label alone does not count (#2507).
 func readRouter(pool *pgxpool.Pool, tenant string) http.Handler {
 	h := controldetail.New(controldetail.NewStore(pool))
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := authctx.WithCredential(req.Context(), credstore.Credential{
-				ID:         "key_oe426_read",
-				TenantID:   tenant,
-				UserID:     "oe426-reader",
-				OwnerRoles: []string{"control_owner"},
+				ID:          "key_oe426_read",
+				TenantID:    tenant,
+				UserID:      "oe426-reader",
+				OwnerRoles:  []string{"control_owner"},
+				TenantRoles: []string{"control_owner"},
 			})
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})

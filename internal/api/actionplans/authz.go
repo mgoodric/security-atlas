@@ -1,62 +1,48 @@
 // authz.go — handler-level defense-in-depth role guards for the slice-384
 // ActionPlan endpoints.
 //
-// P0-384-9: NO new authz role is introduced. Reads require the same
-// risk/program-read signal the slice-067 decisions list guard uses
-// (IsAdmin / IsApprover / a non-empty OwnerRoles set — auditor +
-// grc_engineer + control_owner, plus admin as a wildcard). Writes require
-// the same program-capable signal: an ActionPlan is a risk-register
-// mutation, gated by the slice-056 risk_register:write role in production
-// via the slice-035 OPA middleware.
+// P0-384-9: NO new authz role is introduced. The OPA middleware is the
+// PRIMARY authz gate in production; these guards are its defense-in-depth
+// twins. #2507 moved them off the `IsAdmin || IsApprover || len(OwnerRoles)
+// > 0` signal, which counted a session's role claim, onto the live-role
+// helpers in internal/authz, each matched to what OPA admits on the route:
 //
-// The OPA middleware is the PRIMARY authz gate in production; these guards
-// are its defense-in-depth twins and the testable enforcement point (the
-// OPA engine is nil in api.New(api.Config{}) test servers, so without these
-// guards a test server would not enforce role separation at all).
+//   - /v1/action-plans reads (type action-plans): admin and grc_engineer,
+//     authz.IsTenantApprover.
+//   - /v1/action-plans writes: admin only (action-plans is not in
+//     grc_engineer's writable set), authz.IsTenantAdmin.
+//   - GET /v1/risks/{id}/action-plans (type risks): the risk readers,
+//     authz.IsTenantRiskReader.
+//   - GET /v1/controls/{id}/action-plans (type controls): any tenant role,
+//     authz.HasAnyTenantRole.
 package actionplans
 
 import (
 	"net/http"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
-	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
-// hasProgramRead reports whether the credential carries a program-read
-// signal. Mirrors the slice-067 decisions guard exactly — a bare push
-// credential has no business reading the risk-register timeline.
-func hasProgramRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
-}
-
-// hasProgramWrite reports whether the credential may mutate risk-register
-// records. v1 surfaces the slice-056 risk_register:write role through the
-// same credential flags; admin / approver / a control-owner role can author
-// a remediation commitment. (The OPA middleware enforces the precise
-// risk_register:write predicate in production.)
-func hasProgramWrite(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
-}
-
-// requireProgramRead guards the read endpoints. On denial it writes 403 and
-// returns false. A missing credential is a denial.
+// requireProgramRead guards the /v1/action-plans read endpoints. On denial
+// it writes 403 and returns false. A missing credential is a denial.
 func requireProgramRead(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || !hasProgramRead(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "role does not grant risk/program-read access")
-		return false
-	}
-	return true
+	return admit(w, ok && authz.IsTenantApprover(cred), "role does not grant risk/program-read access")
 }
 
 // requireProgramWrite guards the mutating endpoints. On denial it writes 403
 // and returns false. A missing credential is a denial.
 func requireProgramWrite(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || !hasProgramWrite(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "role does not grant risk/program-write access")
-		return false
+	return admit(w, ok && authz.IsTenantAdmin(cred), "role does not grant risk/program-write access")
+}
+
+// admit writes 403 with msg when allowed is false, and returns allowed.
+func admit(w http.ResponseWriter, allowed bool, msg string) bool {
+	if !allowed {
+		httpresp.WriteError(w, http.StatusForbidden, msg)
 	}
-	return true
+	return allowed
 }

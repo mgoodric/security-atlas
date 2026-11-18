@@ -2512,6 +2512,7 @@ type FrameworkScope struct {
 	SupersededAt             pgtype.Timestamptz `json:"superseded_at"`
 	SelfApproved             bool               `json:"self_approved"`
 	SubmittedBy              *string            `json:"submitted_by"`
+	ActivatedAt              pgtype.Timestamptz `json:"activated_at"`
 }
 
 type FrameworkScopeApplicability struct {

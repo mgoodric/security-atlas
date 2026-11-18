@@ -29,6 +29,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/gapexplain"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -192,13 +193,14 @@ func explanationWireFrom(exp gapexplain.Explanation) explanationWire {
 
 // ===== authz: control-read role guard (defense-in-depth) =====
 
-// hasControlRead mirrors controldetail.hasControlRead — the control-read role
-// set is admin (wildcard) OR grc_engineer (IsApprover) OR control_owner
-// (OwnerRoles). The slice-035 OPA middleware is the primary gate in
-// production; this handler-level guard is the testable enforcement point when
-// OPA is not wired (unit/integration servers).
+// hasControlRead reports whether the credential holds a tenant role: any of
+// the five, by its live user_roles (authz.HasAnyTenantRole). OPA reads a
+// control's gap explanation for every role, so the defense-in-depth gate
+// admits the same set. A bare push credential, or a session whose role claim
+// names a role it no longer holds (#2381), is refused. #2507 moved it off
+// `IsAdmin || IsApprover || len(OwnerRoles) > 0`, which counted that claim.
 func hasControlRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // requireControlRead is the guard the handler calls FIRST. It returns true

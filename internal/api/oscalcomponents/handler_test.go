@@ -93,6 +93,12 @@ func ownerCred(tenant string) credstore.Credential {
 	return credstore.Credential{ID: "owner-1", TenantID: tenant, OwnerRoles: []string{"control_owner"}}
 }
 
+// readerCred holds grc_engineer live: OPA reads oscal for admin and
+// grc_engineer only (#2507).
+func readerCred(tenant string) credstore.Credential {
+	return credstore.Credential{ID: "jwt:grc-2", UserID: "grc-2", TenantID: tenant, TenantRoles: []string{"grc_engineer"}}
+}
+
 func approverCred(tenant string) credstore.Credential {
 	return credstore.Credential{ID: "grc-1", TenantID: tenant, IsAdmin: true}
 }
@@ -149,7 +155,7 @@ func TestListDefinitions_OK(t *testing.T) {
 		ImportedBy: "op", ImportedAt: nowTs(),
 	}}}
 	h := newHandlerWithStore(st)
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions", "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions", "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions", "/v1/oscal/component-definitions", r)
 
 	if rec.Code != http.StatusOK {
@@ -199,7 +205,7 @@ func TestGetDefinition_OK_UnmappedFlag(t *testing.T) {
 		},
 	}}
 	h := newHandlerWithStore(st)
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions/{id}", "/v1/oscal/component-definitions/"+defID.String(), r)
 
 	if rec.Code != http.StatusOK {
@@ -229,7 +235,7 @@ func TestGetDefinition_NotFound(t *testing.T) {
 	defID := uuid.New()
 	st := &stubStore{detailErr: pgx.ErrNoRows}
 	h := newHandlerWithStore(st)
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/"+defID.String(), "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions/{id}", "/v1/oscal/component-definitions/"+defID.String(), r)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -239,7 +245,7 @@ func TestGetDefinition_NotFound(t *testing.T) {
 func TestGetDefinition_BadUUID(t *testing.T) {
 	t.Parallel()
 	h := newHandlerWithStore(&stubStore{})
-	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/not-a-uuid", "", ownerCred(testTenant))
+	r := reqWithCred(http.MethodGet, "/v1/oscal/component-definitions/not-a-uuid", "", readerCred(testTenant))
 	rec := route(h, http.MethodGet, "/v1/oscal/component-definitions/{id}", "/v1/oscal/component-definitions/not-a-uuid", r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)

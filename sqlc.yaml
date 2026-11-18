@@ -162,6 +162,8 @@ sql:
       - "migrations/sql/20261252000000_me_audit_log_actor_principal.sql"
       # #2358: stock controls the boot seed held back behind a reviewed re-anchor.
       - "migrations/sql/20261256000000_stock_control_holdbacks.sql"
+      # #2078: framework_scopes.activated_at, read by the as-of queries.
+      - "migrations/sql/20261258000000_framework_scope_activated_at.sql"
     queries: "internal/db/queries"
     gen:
       go:

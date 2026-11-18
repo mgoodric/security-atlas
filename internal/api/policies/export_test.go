@@ -129,8 +129,16 @@ func TestSlice138_PoliciesHasProgramRead(t *testing.T) {
 	if !policiesHasProgramRead(credstore.Credential{IsApprover: true}) {
 		t.Errorf("approver should be allowed")
 	}
-	if !policiesHasProgramRead(credstore.Credential{OwnerRoles: []string{"x"}}) {
-		t.Errorf("owner should be allowed")
+	if !policiesHasProgramRead(credstore.Credential{ID: "jwt:1", UserID: "u1", TenantRoles: []string{"grc_engineer"}}) {
+		t.Errorf("live grc_engineer should be allowed")
+	}
+	// #2507: OPA reads /v1/admin/* exports for admin and grc_engineer only,
+	// and a session's role claim does not count.
+	if policiesHasProgramRead(credstore.Credential{ID: "jwt:2", UserID: "u2", TenantRoles: []string{"control_owner"}}) {
+		t.Errorf("live control_owner should be denied")
+	}
+	if policiesHasProgramRead(credstore.Credential{ID: "jwt:3", UserID: "u3", OwnerRoles: []string{"grc_engineer"}}) {
+		t.Errorf("grc_engineer claim with no live role should be denied")
 	}
 }
 

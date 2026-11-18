@@ -266,9 +266,13 @@ func TestSlice137_ControlsHasProgramRead(t *testing.T) {
 		{"bare", credstore.Credential{}, false},
 		{"admin", credstore.Credential{IsAdmin: true}, true},
 		{"approver", credstore.Credential{IsApprover: true}, true},
-		{"owner", credstore.Credential{OwnerRoles: []string{"control-owner"}}, true},
+		{"live control_owner", credstore.Credential{ID: "jwt:1", UserID: "u1", TenantRoles: []string{"control_owner"}}, true},
+		{"live auditor", credstore.Credential{ID: "jwt:2", UserID: "u2", TenantRoles: []string{"auditor"}}, true},
 		{"admin+owner", credstore.Credential{IsAdmin: true, OwnerRoles: []string{"x"}}, true},
 		{"empty owner roles", credstore.Credential{OwnerRoles: []string{}}, false},
+		// #2507: a session's role claim outlives a revoke; it does not count.
+		{"role claim, no live role", credstore.Credential{ID: "jwt:3", UserID: "u3", OwnerRoles: []string{"control_owner"}}, false},
+		{"non-canonical label", credstore.Credential{OwnerRoles: []string{"control-owner"}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
