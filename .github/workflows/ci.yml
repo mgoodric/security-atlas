@@ -256,6 +256,9 @@ jobs:
               # fails when a backend enum value has no display label (#2083).
               - 'internal/db/dbx/models.go'
               - 'internal/featureflag/seed.go'
+              # #2430: web/lib/api/audit-log.test.ts checks AUDIT_LOG_KINDS
+              # against unifiedlog.AllKinds.
+              - 'internal/audit/unifiedlog/unifiedlog.go'
               # #2148: exported by cmd/atlas-lifecycles (Go) and checked
               # against the help diagrams by web/lib/help/diagrams.test.ts.
               - 'docs/lifecycles/**'
