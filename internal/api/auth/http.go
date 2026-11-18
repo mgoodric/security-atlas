@@ -303,6 +303,12 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 			writeOIDCProviderUnavailable(w)
 			return
 		}
+		// #2609: the reason is in the server log (idpconfig.Resolver); the
+		// caller is not signed in, so the wire gets a generic message.
+		if errors.Is(err, oidc.ErrIdpConfigUnusable) {
+			writeAuthError(w, http.StatusServiceUnavailable, ErrMsgSSOConfigUnusable)
+			return
+		}
 		writeAuthError(w, http.StatusBadRequest, "OIDC begin: "+err.Error())
 		return
 	}
@@ -311,6 +317,13 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, result.AuthURL, http.StatusFound)
 }
+
+// ErrMsgSSOConfigUnusable is the 503 body when the tenant's saved SSO config
+// cannot be used (#2609). Why it cannot (a non-https issuer, a secret that
+// does not decrypt) goes to the server log only: the caller has not signed
+// in, and the reason describes the organisation's configuration.
+const ErrMsgSSOConfigUnusable = "single sign-on is not available for this organisation; " +
+	"ask an administrator to check its SSO settings"
 
 // ErrMsgBootstrapAmbiguousTenant is the 409 body for an OIDC first login on
 // an install with several tenants and no user. It names no tenant: the
@@ -370,6 +383,12 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, oidc.ErrEmailDomainNotAllowed) {
 			oidc.ClearFlowCookies(w, h.secureCookies)
 			writeAuthError(w, http.StatusForbidden, "email domain not allowed for this organisation")
+			return
+		}
+		// #2609: as at /auth/oidc/login, the reason stays in the server log.
+		if errors.Is(err, oidc.ErrIdpConfigUnusable) {
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusServiceUnavailable, ErrMsgSSOConfigUnusable)
 			return
 		}
 		writeAuthError(w, http.StatusBadGateway, "OIDC callback: "+err.Error())

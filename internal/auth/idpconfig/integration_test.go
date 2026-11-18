@@ -23,8 +23,13 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
+
+// devIssuerPolicy is the private-issuer opt-in (oidc.AllowPrivateIssuersEnv),
+// so a fake IdP on 127.0.0.1 can be saved and used.
+var devIssuerPolicy = netguard.Policy{AllowLoopback: true, AllowPrivate: true}
 
 type fixture struct {
 	app, admin *pgxpool.Pool
@@ -119,7 +124,7 @@ func TestResolver_ReturnsSavedConfig(t *testing.T) {
 	want := goodRow(f, t, tenant)
 	id := f.insert(t, tenant, "primary", want)
 
-	got, err := idpconfig.NewResolver(f.app, f.crypter, false).ResolveIdp(tenantCtx(t, tenant), tenant, "primary")
+	got, err := idpconfig.NewResolver(f.app, f.crypter, netguard.Policy{}).ResolveIdp(tenantCtx(t, tenant), tenant, "primary")
 	if err != nil {
 		t.Fatalf("ResolveIdp: %v", err)
 	}
@@ -138,7 +143,7 @@ func TestResolver_CrossTenantRefused(t *testing.T) {
 	f := newFixture(t)
 	a, b := uuid.New(), uuid.New()
 	f.insert(t, b, "okta", goodRow(f, t, b))
-	r := idpconfig.NewResolver(f.app, f.crypter, false)
+	r := idpconfig.NewResolver(f.app, f.crypter, netguard.Policy{})
 
 	if _, err := r.ResolveIdp(tenantCtx(t, a), a, "okta"); !errors.Is(err, oidc.ErrUnknownIdp) {
 		t.Errorf("tenant A asking for B's IdP name: err = %v, want ErrUnknownIdp", err)
@@ -162,7 +167,7 @@ func TestResolver_UnknownIdpRefused(t *testing.T) {
 	f := newFixture(t)
 	tenant := uuid.New()
 	f.insert(t, tenant, "primary", goodRow(f, t, tenant))
-	r := idpconfig.NewResolver(f.app, f.crypter, false)
+	r := idpconfig.NewResolver(f.app, f.crypter, netguard.Policy{})
 	for _, name := range []string{"secondary", "", "PRIMARY", "primary "} {
 		if _, err := r.ResolveIdp(tenantCtx(t, tenant), tenant, name); !errors.Is(err, oidc.ErrUnknownIdp) {
 			t.Errorf("name %q: err = %v, want ErrUnknownIdp", name, err)
@@ -198,7 +203,7 @@ func TestResolver_UnusableConfigRefused(t *testing.T) {
 			if tc.crypter {
 				c = f.crypter
 			}
-			_, err := idpconfig.NewResolver(f.app, c, tc.dev).ResolveIdp(tenantCtx(t, tenant), tenant, "primary")
+			_, err := idpconfig.NewResolver(f.app, c, netguard.Policy{AllowLoopback: tc.dev, AllowPrivate: tc.dev}).ResolveIdp(tenantCtx(t, tenant), tenant, "primary")
 			if !errors.Is(err, idpconfig.ErrConfigUnusable) {
 				t.Fatalf("err = %v, want ErrConfigUnusable", err)
 			}
@@ -216,7 +221,7 @@ func TestResolver_LoopbackHTTPWithDevOptIn(t *testing.T) {
 	r := goodRow(f, t, tenant)
 	r.issuer = "http://127.0.0.1:9"
 	f.insert(t, tenant, "primary", r)
-	if _, err := idpconfig.NewResolver(f.app, f.crypter, true).ResolveIdp(tenantCtx(t, tenant), tenant, "primary"); err != nil {
+	if _, err := idpconfig.NewResolver(f.app, f.crypter, devIssuerPolicy).ResolveIdp(tenantCtx(t, tenant), tenant, "primary"); err != nil {
 		t.Errorf("loopback http issuer with the dev opt-in: %v", err)
 	}
 }

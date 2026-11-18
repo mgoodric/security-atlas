@@ -110,6 +110,26 @@ The client secret is the sensitive credential in this flow.
     existing secret unchanged.
 <!-- prettier-ignore-end -->
 
+The server seals the client secret with a key you set once per deployment,
+`ATLAS_OIDC_SECRET_KEY`: base64 of 32 random bytes, the same on every replica.
+
+```sh
+openssl rand -base64 32
+```
+
+- **docker-compose:** set `ATLAS_OIDC_SECRET_KEY` in `.env`, or
+  `ATLAS_OIDC_SECRET_KEY_FILE` to a 0600 file holding the value
+  (see `deploy/docker/.env.example`).
+- **Helm:** pre-create a Secret holding the key and set
+  `oidc.secretKey.existingSecret`. The chart mounts it read-only and sets
+  `ATLAS_OIDC_SECRET_KEY_FILE` (see the chart README, "The OIDC client-secret
+  key").
+
+Without the key, the SSO form cannot save a client secret and sign-in through
+a saved configuration is refused; local login still works. A key that is set
+but malformed stops the server at boot. Changing the key means entering the
+client secret again.
+
 ### Allowed email domains
 
 `allowed_email_domains` is the principal restriction: which IdP-authenticated
@@ -150,6 +170,12 @@ not report email_verified** in the admin form (API field
 claim links too; an IdP that says `email_verified: false` is still refused. A
 sign-in that is refused gets the same "invalid credentials" response as any
 failed sign-in.
+
+The setting also changes [allowed email domains](#allowed-email-domains):
+with it on, an email whose ID token carries no `email_verified` claim counts
+as verified for the domain check too, so the IdP alone vouches that the
+address is the user's. Turn it on only for an IdP you trust to send real
+addresses.
 
 <!-- prettier-ignore-start -->
 !!! warning "One IdP per tenant when you use SCIM"

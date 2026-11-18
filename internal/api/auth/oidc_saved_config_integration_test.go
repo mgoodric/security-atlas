@@ -35,7 +35,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
+
+// devIssuerPolicy is the private-issuer opt-in (oidc.AllowPrivateIssuersEnv),
+// so a fake IdP on 127.0.0.1 can be saved and used.
+var devIssuerPolicy = netguard.Policy{AllowLoopback: true, AllowPrivate: true}
 
 var testSecretKey = bytes.Repeat([]byte{0x5a}, 32)
 
@@ -75,7 +80,7 @@ func (h harness) saveSSO(t *testing.T, tenant uuid.UUID, s ssoSettings) *httptes
 		_, _ = h.admin.Exec(context.Background(), `DELETE FROM oidc_idp_configs WHERE tenant_id = $1`, tenant)
 	})
 	sso := adminsso.New(h.app).
-		WithPreflightOptions(adminsso.PreflightOptions{AllowPrivateIPs: true}).
+		WithPreflightOptions(adminsso.PreflightOptions{IssuerPolicy: devIssuerPolicy}).
 		WithSecretCrypter(testSecretCrypter(t))
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
@@ -99,7 +104,7 @@ func (h harness) saveSSO(t *testing.T, tenant uuid.UUID, s ssoSettings) *httptes
 
 func (h harness) dbResolverAuthn(t *testing.T) *oidc.Authenticator {
 	t.Helper()
-	return oidc.New(idpconfig.NewResolver(h.app, testSecretCrypter(t), true), testStateKey, loopbackIdP)
+	return oidc.New(idpconfig.NewResolver(h.app, testSecretCrypter(t), devIssuerPolicy), testStateKey, loopbackIdP)
 }
 
 // signIn runs GET /auth/oidc/login then GET /auth/oidc/callback for tenant

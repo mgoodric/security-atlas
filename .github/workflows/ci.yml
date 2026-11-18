@@ -1614,6 +1614,8 @@ jobs:
         run: helm template ci-prod deploy/helm -f deploy/helm/values-production.yaml > /dev/null
       - name: helm template test (artifact store wiring, #1939)
         run: bash scripts/test-helm-artifacts.sh
+      - name: helm template test (OIDC key mount and fsGroup, #2609)
+        run: bash scripts/test-helm-oidc-key.sh
 
   helm-lint-stub:
     name: Helm chart · lint + template
