@@ -298,3 +298,64 @@ export async function transitionPolicy(
     ),
   );
 }
+
+// ----- #2465: acknowledging a policy -----
+//
+// Wire shapes: `pendingResponse` and `ackResponse` in
+// `internal/api/policyacks/handlers.go`. The pending list holds the
+// published policies whose audience includes the caller and that the
+// caller has not acknowledged for this version within the year.
+
+export type PendingAcknowledgment = {
+  policy_id: string;
+  policy_version_id: string;
+  title: string;
+  version: string;
+  effective_date?: string | null;
+  required_roles: string[];
+  /** An earlier acknowledgment: of an older version, or over a year ago. */
+  last_acknowledged_at?: string | null;
+};
+
+export type MyAcknowledgmentsResponse = {
+  pending: PendingAcknowledgment[];
+  count: number;
+  window_seconds: number;
+};
+
+export type PolicyAcknowledgment = {
+  id: string;
+  policy_id: string;
+  policy_version_id: string;
+  acknowledged_at: string;
+  deduplicated: boolean;
+};
+
+async function parseOrThrow<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as T;
+}
+
+export async function fetchMyAcknowledgments(): Promise<MyAcknowledgmentsResponse> {
+  return parseOrThrow(await fetch("/api/me/acknowledgments"));
+}
+
+// The platform records the ack for the caller only; no body is sent.
+export async function acknowledgePolicy(
+  id: string,
+): Promise<PolicyAcknowledgment> {
+  return parseOrThrow(
+    await fetch(`/api/policies/${encodeURIComponent(id)}/acknowledge`, {
+      method: "POST",
+    }),
+  );
+}

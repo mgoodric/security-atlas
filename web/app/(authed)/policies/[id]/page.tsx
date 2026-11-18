@@ -28,6 +28,12 @@
 // discard, and the publish block on a policy with no linked control.
 // The PDF link (`/v1/policies/{id}/pdf`) is a same-origin link the
 // reverse proxy routes to the platform's chromedp renderer.
+//
+// #2465 — a published policy on the caller's pending list (their role is
+// in its audience and they have not acknowledged this version within the
+// year) shows a "Your acknowledgment" card with an Acknowledge button. The
+// card states what the click attests, so it records on one click. The
+// platform admits the ack and records it for the caller only.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -39,6 +45,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -47,7 +54,9 @@ import { useToast } from "@/components/ui/toast";
 import { invalidateApprovals } from "@/lib/api/approvals";
 import { APIError } from "@/lib/api/base";
 import {
+  acknowledgePolicy,
   discardPolicyDraft,
+  fetchMyAcknowledgments,
   fetchPolicyDetail,
   transitionPolicy,
 } from "@/lib/api/policies";
@@ -56,6 +65,7 @@ import { Markdown } from "@/components/markdown";
 import {
   audienceLabel,
   isDraft,
+  myAckState,
   needsControlsWarning,
   NO_CONTROLS_WARNING,
   primaryAction,
@@ -133,6 +143,26 @@ export default function PolicyDetailPage({
     },
   });
 
+  const acknowledge = useMutation({
+    mutationFn: () => acknowledgePolicy(id),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: MY_ACKS_KEY });
+      void qc.invalidateQueries({ queryKey: ["policy", id] });
+      void qc.invalidateQueries({ queryKey: ["policies"] });
+      toast("Policy acknowledged");
+    },
+    onError: (err) => {
+      toast(`Could not acknowledge policy: ${(err as Error).message}`);
+    },
+  });
+  // The caller's own pending acknowledgments. A failure here only hides
+  // the card; the policy itself still renders.
+  const myAcks = useQuery({
+    queryKey: MY_ACKS_KEY,
+    queryFn: fetchMyAcknowledgments,
+    retry: false,
+  });
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["policy", id],
     queryFn: () => fetchPolicyDetail(id),
@@ -193,6 +223,7 @@ export default function PolicyDetailPage({
   const draft = isDraft(policy);
   const busy = confirming !== null || transition.isPending || discard.isPending;
   const base = `/policies/${encodeURIComponent(id)}`;
+  const ackState = myAckState(policy, myAcks.data?.pending, acknowledge.data);
 
   return (
     <DetailHeader
@@ -437,6 +468,49 @@ export default function PolicyDetailPage({
             ))}
       </p>
 
+      {ackState ? (
+        <Card size="sm" data-testid="policy-detail-my-ack">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            {ackState.kind === "pending" ? (
+              <>
+                <div className="text-sm">
+                  <div className="font-medium">
+                    Your acknowledgment is needed
+                  </div>
+                  <div className="text-muted-foreground">
+                    Acknowledging confirms you have read version{" "}
+                    {policy.version} of this policy.
+                    {ackState.lastAcknowledgedAt ? (
+                      <>
+                        {" "}
+                        You last acknowledged it on{" "}
+                        <Timestamp
+                          value={ackState.lastAcknowledgedAt}
+                          style="date"
+                        />
+                        ; that no longer counts.
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                <Button
+                  onClick={() => acknowledge.mutate()}
+                  disabled={acknowledge.isPending}
+                  data-testid="policy-action-acknowledge"
+                >
+                  Acknowledge
+                </Button>
+              </>
+            ) : (
+              <div className="text-sm" data-testid="policy-detail-my-ack-done">
+                You acknowledged version {policy.version} on{" "}
+                <Timestamp value={ackState.acknowledgedAt} style="date" />.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {/* ============ ACK RATE (published only) ============ */}
       {ack_rate ? (
         <Card size="sm" data-testid="policy-detail-ack-rate">
@@ -494,6 +568,8 @@ export default function PolicyDetailPage({
     </DetailHeader>
   );
 }
+
+const MY_ACKS_KEY = ["me", "acknowledgments"] as const;
 
 function BackLink() {
   return (
