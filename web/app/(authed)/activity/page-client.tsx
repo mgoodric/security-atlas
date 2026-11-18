@@ -115,14 +115,23 @@ type Filters = {
   view: View;
 };
 
-export function ActivityPageClient({ canExport }: { canExport: boolean }) {
+export function ActivityPageClient({
+  canExport,
+  openedAt,
+}: {
+  canExport: boolean;
+  openedAt: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // #2464: the default window ends at the moment the page opened. It is
-  // fixed for the life of the page so the query key does not move on
-  // every render.
-  const [defaults] = useState(() => defaultActivityWindow());
+  // #2464: the default window ends at the moment the page opened. The
+  // server shell supplies that moment, so the server render and the
+  // hydrated client agree on it (a clock read on each side would leave
+  // the server-rendered export href on a different `to` than the feed).
+  // It is fixed for the life of the page so the query key does not move
+  // on every render.
+  const [defaults] = useState(() => defaultActivityWindow(new Date(openedAt)));
   const filters = useMemo<Filters>(
     () => parseFilters(searchParams, defaults),
     [searchParams, defaults],
