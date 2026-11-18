@@ -1934,7 +1934,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/controls — the organisation's active controls; with ?include=state, one page of them with their state and the unpaged total, filtered by ?result, ?freshness, ?owner (a user id, or none), ?family, ?framework, ?anchor_fit and ?scope, sorted by ?sort=[-]scf_id|name|family|state|freshness|last_observed_at|owner|frameworks (by default failing first, then stalest evidence; */
+        /** GET /v1/controls — the organisation's active controls; with ?include=state, one page of them with their state and the unpaged total, filtered by ?result, ?freshness, ?owner (a user id, or none), ?family, ?framework, ?anchor_fit, ?legacy_anchor=true (an undecided SCF remap proposal; each row carries legacy_anchor, */
         get: operations["get-v1-controls"];
         put?: never;
         post?: never;
@@ -2311,6 +2311,23 @@ export interface paths {
         };
         /** GET /v1/controls/{id}/action-plans */
         get: operations["get-v1-controls-id-action-plans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/controls/{id}/anchor-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/controls/{id}/anchor-history — every SCF remap decision on any revision of the control's bundle (decision, bulk, legacy code@release, new code@release, new revision, reason, decided_by, decided_at), newest first, keyset paged by limit and cursor; 404 for a control that is not the caller's tenant's (#2392) */
+        get: operations["get-v1-controls-id-anchor-history"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9285,6 +9302,28 @@ export interface operations {
         };
     };
     "get-v1-controls-id-action-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "get-v1-controls-id-anchor-history": {
         parameters: {
             query?: never;
             header?: never;
