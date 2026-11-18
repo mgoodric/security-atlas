@@ -46,6 +46,27 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 	unifiedlog.KindModuleAccess: "admin",
 }
 
+// kindSourceAdminSegment names, for a kind whose source resource is
+// "admin", the /v1/admin/<segment> its rows are read at. admin.rego decides
+// per segment (#2503): a tenant admin by role reaches only the
+// tenant-scoped ones, and `users` is tenant-admin only, so one shared
+// "admin" answer would be wrong for every kind but one.
+var kindSourceAdminSegment = map[unifiedlog.Kind]string{
+	unifiedlog.KindDecision:     "audit-log",
+	unifiedlog.KindFeatureFlag:  "features",
+	unifiedlog.KindModuleAccess: "users",
+}
+
+// sourceKey is the cache key and decision target for kind: its resource
+// type, plus its /v1/admin segment when the type is "admin".
+func sourceKey(kind unifiedlog.Kind) (resource, segment string, ok bool) {
+	resource, ok = kindSourceResource[kind]
+	if !ok {
+		return "", "", false
+	}
+	return resource, kindSourceAdminSegment[kind], true
+}
+
 // payloadGate decides, per row, whether the caller sees payload_json. It
 // evaluates the caller's OPA read once per source resource when it is
 // built, before the handler opens its transaction, so the engine's role
@@ -67,13 +88,16 @@ func (h *Handler) newPayloadGate(r *http.Request, self string) *payloadGate {
 	// user_id does not.
 	g := &payloadGate{r: r, engine: h.engine, self: jwtmw.SubjectUserID(self), allowed: map[string]bool{}}
 	cred, _ := authctx.CredentialFromContext(r.Context())
-	g.admin = cred.IsAdmin || g.decide("write", "admin")
+	// An admin is a caller who may manage the tenant's users (#2503).
+	g.admin = cred.IsAdmin || g.decide("write", "admin", "users")
 	if g.admin {
 		return g
 	}
-	for _, resource := range kindSourceResource {
-		if _, seen := g.allowed[resource]; !seen {
-			g.allowed[resource] = g.decide("read", resource)
+	for kind := range kindSourceResource {
+		resource, segment, _ := sourceKey(kind)
+		key := resource + "/" + segment
+		if _, seen := g.allowed[key]; !seen {
+			g.allowed[key] = g.decide("read", resource, segment)
 		}
 	}
 	return g
@@ -89,11 +113,11 @@ func (g *payloadGate) keep(e unifiedlog.Entry) bool {
 		// that user (or an admin, above) sees its before/after.
 		return g.self != "" && e.ActorID == g.self
 	}
-	resource, ok := kindSourceResource[e.Kind]
+	resource, segment, ok := sourceKey(e.Kind)
 	if !ok {
 		return false
 	}
-	return g.allowed[resource]
+	return g.allowed[resource+"/"+segment]
 }
 
 // apply nulls the payload of every entry the caller may not see.
@@ -105,22 +129,17 @@ func (g *payloadGate) apply(entries []unifiedlog.Entry) {
 	}
 }
 
-// decide runs one OPA decision for the caller against a resource type.
-// A nil engine or an engine error denies.
-func (g *payloadGate) decide(action, resource string) bool {
+// decide runs one OPA decision for the caller against a resource type and,
+// for "admin", its /v1/admin segment. A nil engine or an engine error
+// denies.
+func (g *payloadGate) decide(action, resource, segment string) bool {
 	if g.engine == nil {
 		return false
 	}
 	in := authz.BuildInput(g.r, nil)
 	in.Action = action
 	in.Resource.Type = resource
-	in.Resource.ID = ""
-	if resource == "admin" {
-		// #2503: admin.rego admits a tenant admin by role only to the
-		// tenant-scoped /v1/admin segments. Module-access rows and the
-		// admin check both stand for managing the tenant's users.
-		in.Resource.ID = "users"
-	}
+	in.Resource.ID = segment
 	d, err := g.engine.Decide(g.r.Context(), in)
 	return err == nil && d.Allow
 }
