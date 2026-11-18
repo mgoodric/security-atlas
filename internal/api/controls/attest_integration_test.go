@@ -1066,13 +1066,6 @@ func TestAttest_FutureObservedAt_Refused(t *testing.T) {
 	}
 }
 
-// #2523: the attest gate reads the caller's live user_roles, not the role
-// claim in its session. One session, minted while the user held
-// control_owner, is held across a revoke and a re-grant; its claim says
-// control_owner throughout. With control_owner revoked (the user also holds
-// grc_engineer, so the authz middleware lets the write through to the handler)
-// the owner_role gate refuses the attest with no re-login. Granted back, it
-// is allowed.
 // #2523: the attest route through the real authz middleware, per role. A
 // user whose only role is control_owner attests a control whose owner_role
 // is control_owner (OPA's narrow control_owner attestations rule). A viewer
@@ -1098,6 +1091,13 @@ func TestAttest2523_RoleMatrix(t *testing.T) {
 	}
 }
 
+// #2523: the attest gate reads the caller's live user_roles, not the role
+// claim in its session. One session, minted while the user held
+// control_owner, is held across a revoke and a re-grant; its claim says
+// control_owner throughout. With control_owner revoked (the user also holds
+// grc_engineer, so the authz middleware lets the write through to the handler)
+// the owner_role gate refuses the attest with no re-login. Granted back, it
+// is allowed.
 func TestAttest2523_RevokedOwnerRole_RefusedWithoutRelogin(t *testing.T) {
 	s := setupHTTP(t)
 	controlID := uploadBundle(t, s, "attest_2523_revoke")

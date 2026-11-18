@@ -10,7 +10,9 @@ import (
 // TestHasOwnerRole2523 pins who may attest a control with a given owner_role
 // per credential shape (#2523). A user's session counts its live roles, never
 // its role claim, which outlives a revoke. A key, bound or not, and a machine
-// token count their label, as AckRoleLabels does. The admin flag is a
+// token count their label, as AckRoleLabels does, except that a bound key's
+// label naming a canonical role counts only while the owner holds it live
+// (#2541). The admin flag is a
 // wildcard, and an empty owner_role admits only it.
 func TestHasOwnerRole2523(t *testing.T) {
 	t.Parallel()
@@ -36,6 +38,8 @@ func TestHasOwnerRole2523(t *testing.T) {
 		{"unbound key, label matches", credstore.Credential{ID: "key_k", UserID: "key_k", OwnerRoles: co}, "control_owner", true},
 		{"unbound key, label differs", credstore.Credential{ID: "key_k", UserID: "key_k", OwnerRoles: []string{"other_role"}}, "control_owner", false},
 		{"bound key, free-text label matches", credstore.Credential{ID: "key_k", UserID: owner, OwnerRoles: []string{"security-engineering"}}, "security-engineering", true},
+		{"bound key, canonical label, owner's role revoked", credstore.Credential{ID: "key_k", UserID: owner, OwnerRoles: co, TenantRoles: []string{"grc_engineer"}}, "control_owner", false},
+		{"bound key, canonical label, owner holds it live", credstore.Credential{ID: "key_k", UserID: owner, OwnerRoles: co, TenantRoles: co}, "control_owner", true},
 		{"bound key, no label, live role matches", credstore.Credential{ID: "key_k", UserID: owner, TenantRoles: co}, "control_owner", true},
 		{"bare credential", credstore.Credential{ID: "key_p", UserID: "key_p"}, "control_owner", false},
 	}
