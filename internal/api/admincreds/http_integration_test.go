@@ -339,7 +339,7 @@ func TestList_MintedByFiltersLiveKeys(t *testing.T) {
 	minter, other := uuid.New(), uuid.New()
 	issue := func(in apikeystore.IssueInput) credstore.Credential {
 		t.Helper()
-		c, _, err := store.Issue(ctx, tenantID.String(), in)
+		c, _, err := store.Issue(ctx, tenantID.String(), in, apikeystore.Actor{})
 		if err != nil {
 			t.Fatalf("Issue: %v", err)
 		}
@@ -350,7 +350,7 @@ func TestList_MintedByFiltersLiveKeys(t *testing.T) {
 	_ = issue(apikeystore.IssueInput{MintedBy: &other})
 	_ = issue(apikeystore.IssueInput{})
 	revUUID, _ := uuid.Parse(strings.TrimPrefix(revoked.ID, "key_"))
-	if err := store.Revoke(ctx, tenantID.String(), revUUID); err != nil {
+	if err := store.Revoke(ctx, tenantID.String(), revUUID, apikeystore.Actor{}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 
@@ -402,12 +402,12 @@ func TestList_MintedByDropsKeysPastRotationGrace(t *testing.T) {
 	minter := uuid.New()
 	rotate := func(store *apikeystore.Store) (pred, succ string) {
 		t.Helper()
-		c, _, err := store.Issue(ctx, tenantID.String(), apikeystore.IssueInput{MintedBy: &minter})
+		c, _, err := store.Issue(ctx, tenantID.String(), apikeystore.IssueInput{MintedBy: &minter}, apikeystore.Actor{})
 		if err != nil {
 			t.Fatalf("Issue: %v", err)
 		}
 		id, _ := uuid.Parse(strings.TrimPrefix(c.ID, "key_"))
-		s, _, _, err := store.Rotate(ctx, tenantID.String(), id)
+		s, _, _, err := store.Rotate(ctx, tenantID.String(), id, apikeystore.Actor{})
 		if err != nil {
 			t.Fatalf("Rotate: %v", err)
 		}

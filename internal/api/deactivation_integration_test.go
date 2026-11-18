@@ -97,7 +97,7 @@ func newDeactivationFixture(t *testing.T) *deactivationFixture {
 	keys := apikeystore.NewStore(app, admin, hasher, 0)
 	tctx := f.tenantCtx(t)
 	issue := func(owner *uuid.UUID) string {
-		_, tok, ierr := keys.Issue(tctx, f.tenant.String(), apikeystore.IssueInput{IssuedBy: owner})
+		_, tok, ierr := keys.Issue(tctx, f.tenant.String(), apikeystore.IssueInput{IssuedBy: owner}, apikeystore.Actor{})
 		if ierr != nil {
 			t.Fatalf("issue key: %v", ierr)
 		}

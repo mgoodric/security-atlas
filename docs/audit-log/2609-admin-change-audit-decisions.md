@@ -113,3 +113,39 @@ on leg A, which no package writing the new actions shares, so CI was not
 affected. Other older tests of the same shape (for example
 `vendor_initial_review`, `risk_review_cadence`) still need a fresh local
 database; they are left as they are.
+
+## D9. The gRPC admin key service is not audited here, and an org admin cannot reach it
+
+`AdminCredentialsService` (`internal/api/admin/service.go`) issues, rotates
+and revokes keys through the in-memory `credstore.Store` and its
+`apikeystore.Persister`, which take no context or actor. A same-transaction
+audit row there means replumbing that path, so it is a separate ticket
+(filed by the dispatcher). It does not block #2503, because no organisation
+admin can call it:
+
+- The gRPC server authenticates with `authInterceptor`
+  (`internal/api/server.go`), which calls `credstore.Store.Authenticate`
+  only: an API bearer key. A JWT session (password, OIDC, PKCE, device
+  grant) is not accepted there at all.
+- Every RPC gates on `admin.RequireAdmin`, which checks `cred.IsAdmin`, not
+  `authz.IsTenantAdmin`. A tenant admin by role does not carry `IsAdmin`.
+- Only two kinds of key carry `IsAdmin`: the bootstrap admin credential
+  (`credstore.IssueFixedAdmin`, `IssueAdmin` and the bootstrap-token file;
+  outside tests only the first-install bootstrap mints them) and an
+  `api_keys` row with `is_admin = true`. A key whose `owner_roles` label
+  holds `admin` passes `authz.IsTenantAdmin` but not `cred.IsAdmin`, so it
+  is refused too.
+  At boot `Persister.LoadActive` loads every active `api_keys` row into the
+  in-memory store, so such a row does reach gRPC. Those rows are minted by
+  `POST /v1/admin/credentials`. The gRPC `Issue` (`IssueMinted`) never sets
+  `IsAdmin`.
+- #2655 opened `/v1/admin/credentials` to tenant admins, but its guard keeps
+  them from creating such a key. `mintWithinCaller` refuses an `is_admin` or
+  `is_approver` key on issue for any caller without `cred.IsAdmin`, and
+  `callerMayHandle` applies the same check to rotate and revoke, so a tenant
+  admin cannot rotate an existing admin key into a fresh plaintext either.
+
+So reaching the gRPC admin service needs a credential that already holds
+`IsAdmin`. If a later change lets a tenant admin set `is_admin` on a key, or
+removes the rotate check, this stops holding and the gRPC path must be
+audited before that lands.
