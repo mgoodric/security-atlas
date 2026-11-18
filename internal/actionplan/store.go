@@ -401,6 +401,8 @@ func controlsFailing(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID
 // approver is the person verifying, and the role check is the caller's.
 // The plan's owner never verifies it, whatever the organisation's
 // self-approval setting: the rule is approval.Check with self-approval off.
+// Nor does whoever completed it, or anyone who owned it since, per its
+// audit trail (involvedSinceCompletion, #2434).
 // A plan with linked controls is refused with ErrVerifyHasControls; its
 // controls' evaluations verify it. The status change writes one
 // status_changed audit row, in the same transaction, actor the approver.
@@ -431,8 +433,88 @@ func (s *Store) Verify(ctx context.Context, id uuid.UUID, approver approval.Appr
 			}
 			return ErrOwnerCannotVerify
 		}
+		trail, err := q.ListActionPlanAuditLog(ctx, dbx.ListActionPlanAuditLogParams{
+			TenantID:     pgUUID(tenantID),
+			ActionPlanID: pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("%w: read audit trail: %w", ErrVerifierInvolved, err)
+		}
+		involved, err := involvedSinceCompletion(trail)
+		if err != nil {
+			return err
+		}
+		if involved[actor] {
+			return ErrVerifierInvolved
+		}
 		return nil
 	})
+}
+
+// involvedSinceCompletion returns the people the owner rule refuses as a
+// plan's verifier, read from its audit trail (#2434): everyone who moved
+// it to completed, and everyone who owned it at any point from its first
+// completion onwards. Checking only the owner at verification time let an
+// owner hand the plan to a colleague, verify, and take it back.
+//
+// The window opens at the first completion, not the latest, so a plan
+// reopened and completed again keeps everyone from its first round: the
+// wider set is the safe side to be wrong on. It fails closed: a trail
+// with no person's completion row, or a row whose state does not parse,
+// is ErrVerifierInvolved. trail is in ListActionPlanAuditLog order.
+func involvedSinceCompletion(trail []dbx.ActionPlanAuditLog) (map[uuid.UUID]bool, error) {
+	type state struct {
+		Status  string `json:"status"`
+		OwnerID string `json:"owner_id"`
+	}
+	parse := func(raw []byte) (state, error) {
+		var st state
+		if len(raw) == 0 {
+			return st, nil
+		}
+		err := json.Unmarshal(raw, &st)
+		return st, err
+	}
+	involved := map[uuid.UUID]bool{}
+	completed := false
+	for _, row := range trail {
+		rowID := uuid.UUID(row.ID.Bytes)
+		before, err := parse(row.BeforeState)
+		if err != nil {
+			return nil, fmt.Errorf("%w: audit row %s: %w", ErrVerifierInvolved, rowID, err)
+		}
+		after, err := parse(row.AfterState)
+		if err != nil {
+			return nil, fmt.Errorf("%w: audit row %s: %w", ErrVerifierInvolved, rowID, err)
+		}
+		// A person's move into completed. verified -> completed is the
+		// system's (ReconcileVerification), and names no person.
+		if row.ActionType == ActionStatusChanged && after.Status == StatusCompleted && before.Status != StatusVerified {
+			if !row.ActorID.Valid {
+				return nil, fmt.Errorf("%w: completion row %s names no person", ErrVerifierInvolved, rowID)
+			}
+			involved[uuid.UUID(row.ActorID.Bytes)] = true
+			completed = true
+		}
+		if !completed {
+			continue
+		}
+		// Link and unlink rows carry a target, not a plan state: no owner.
+		for _, o := range []string{before.OwnerID, after.OwnerID} {
+			if o == "" {
+				continue
+			}
+			owner, err := uuid.Parse(o)
+			if err != nil {
+				return nil, fmt.Errorf("%w: audit row %s owner: %w", ErrVerifierInvolved, rowID, err)
+			}
+			involved[owner] = true
+		}
+	}
+	if !completed {
+		return nil, fmt.Errorf("%w: no completion in the audit trail", ErrVerifierInvolved)
+	}
+	return involved, nil
 }
 
 // update applies in, after guard (when set) accepts the current row inside
@@ -462,7 +544,9 @@ func (s *Store) update(ctx context.Context, id uuid.UUID, in UpdateInput, guard 
 
 	var out ActionPlan
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		before, err := q.GetActionPlanByID(ctx, dbx.GetActionPlanByIDParams{
+		// FOR UPDATE (#2434): guard reads the plan, its links and its
+		// audit trail under the row lock held until the UPDATE commits.
+		before, err := q.GetActionPlanByIDForUpdate(ctx, dbx.GetActionPlanByIDForUpdateParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
 		})

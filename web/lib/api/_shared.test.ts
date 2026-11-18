@@ -5,7 +5,12 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { apiFetch, bffControlFetch, bffPostJSON } from "./_shared";
+import {
+  apiFetch,
+  bffControlFetch,
+  bffPostJSON,
+  upstreamErrorMessage,
+} from "./_shared";
 import { APIError } from "./base";
 
 const json = (body: unknown, status = 200, statusText = "") =>
@@ -72,6 +77,53 @@ describe("internal fetch helpers", () => {
         message: "502 Bad Gateway",
       });
     });
+
+    test("a 5xx {error} body never reaches the message (#2433)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        json(
+          { error: "pq: relation internal_secret does not exist" },
+          500,
+          "Internal Server Error",
+        ),
+      );
+      await expect(bffControlFetch("/api/x")).rejects.toMatchObject({
+        status: 500,
+        message: "500 Internal Server Error",
+      });
+    });
+  });
+
+  describe("upstreamErrorMessage (#2433)", () => {
+    test("passes a 4xx {error} through", async () => {
+      await expect(
+        upstreamErrorMessage(json({ error: "reason is required" }, 400)),
+      ).resolves.toBe("reason is required");
+    });
+
+    test("a 5xx gets the status line, whatever its body says", async () => {
+      for (const status of [500, 502, 503, 504]) {
+        await expect(
+          upstreamErrorMessage(
+            json({ error: "dial tcp 10.0.0.5:5432" }, status, "Down"),
+          ),
+        ).resolves.toBe(`${status} Down`);
+      }
+    });
+
+    test("the caller's generic text replaces the status line", async () => {
+      await expect(
+        upstreamErrorMessage(json({ error: "secret" }, 500), "try again"),
+      ).resolves.toBe("try again");
+      await expect(
+        upstreamErrorMessage(json({}, 404), "try again"),
+      ).resolves.toBe("try again");
+    });
+
+    test("an {error} that is not a string is ignored", async () => {
+      await expect(
+        upstreamErrorMessage(json({ error: { at: "x" } }, 409, "Conflict")),
+      ).resolves.toBe("409 Conflict");
+    });
   });
 
   describe("bffPostJSON", () => {
@@ -113,6 +165,16 @@ describe("internal fetch helpers", () => {
     test("a non-JSON error body falls back to the status", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         new Response("oops", { status: 500 }),
+      );
+      await expect(bffPostJSON("/api/x", {})).rejects.toMatchObject({
+        status: 500,
+        message: "request failed (500)",
+      });
+    });
+
+    test("a 5xx {error} body never reaches the message (#2433)", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        json({ error: "pq: password authentication failed" }, 500),
       );
       await expect(bffPostJSON("/api/x", {})).rejects.toMatchObject({
         status: 500,
