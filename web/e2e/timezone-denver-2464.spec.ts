@@ -9,7 +9,7 @@
 //
 // HERMETIC: route-mocks `/api/activity` and `/api/people` (slice 594
 // convention) and checks the window the page asks for, plus that the
-// export bar carries the same window.
+// export bar and the actors picker carry the same window.
 
 import { expect, test } from "./fixtures";
 
@@ -52,6 +52,19 @@ test.describe("Activity default window includes now (#2464)", () => {
         }),
       });
     });
+    const actorWindows: { from: string; to: string }[] = [];
+    await page.route(/\/api\/activity\/actors(\?.*)?$/, async (route) => {
+      const u = new URL(route.request().url());
+      actorWindows.push({
+        from: u.searchParams.get("from") ?? "",
+        to: u.searchParams.get("to") ?? "",
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ actors: [] }),
+      });
+    });
     await page.route(/\/api\/people(\?.*)?$/, async (route) => {
       await route.fulfill({
         status: 200,
@@ -82,5 +95,9 @@ test.describe("Activity default window includes now (#2464)", () => {
     const e = new URL(exportHref ?? "", "http://x");
     expect(e.searchParams.get("from")).toBe(from);
     expect(e.searchParams.get("to")).toBe(to);
+
+    // The actors picker (#2414) asks for the same window.
+    await expect.poll(() => actorWindows.length).toBeGreaterThan(0);
+    expect(actorWindows[0]).toEqual({ from, to });
   });
 });
