@@ -116,6 +116,12 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"actionplans/handlers.go Handler.VerifyActionPlan": site(adm, r2447(post, "/v1/action-plans/"+id+"/verify")),
 		"adminusers/moduleaccess.go Handler.moduleAccessTarget": site(adm,
 			r2447(put, "/v1/admin/users/"+id+"/module-access")),
+		// #2503: the tenant's own users. Assign and revoke also run it, for
+		// the within-tenant path; their routes need a body this table
+		// cannot send, so the two GETs and PATCH stand for the gate.
+		"adminusers/handler.go requireAdmin": site(adm,
+			r2447(get, "/v1/admin/users/"+id),
+			r2447(patch, "/v1/admin/users/"+id+"/roles")),
 		"approvals/handler.go Handler.Pending":           notRoute(apr, "approvals list (#2119, and the needs-attention approvals band, #2134): filters what the caller can approve; a non-approver gets an empty 200, never a refusal"),
 		"needsattention/handler.go Handler.List":         site(apr, r2447(get, "/v1/needs-attention?for=all")),
 		"auditperiods/auditors.go AuditorsHandler.admit": notRoute(adm, preRoute+" (period auditors, #2118)"),

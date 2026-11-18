@@ -140,6 +140,15 @@ access, settings, keys, SCIM/OIDC". It stays platform for a tenant admin and
 unchanged for the others until Matt decides. The same goes for the
 audit-periods and vendors exports.
 
+## D5a — grc_engineer still reads `admin/users` in OPA (for Matt)
+
+`grc_engineer.rego`'s blanket read admits `GET /v1/admin/users` and
+`GET /v1/admin/users/{id}`. The handler refused grc_engineer there before
+(`cred.IsAdmin`) and still does (`IsTenantAdmin`), so access is unchanged.
+It is pinned in `handlerNarrower2428`. Adding `users` to
+`tenant_admin_only_segments` would make the layers agree, but it changes a
+grc_engineer OPA answer, which this ticket leaves alone.
+
 ## D6 — what the later PRs carry
 
 Each adds its segment to `tenant_admin_segments` and switches its handler to
