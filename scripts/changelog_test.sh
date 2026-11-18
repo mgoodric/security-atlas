@@ -5,6 +5,7 @@
 # Synthetic fixtures plus a real-tree `check`.
 
 set -euo pipefail
+export LC_ALL=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/changelog.sh"
@@ -155,6 +156,32 @@ assert_eq "$got" "$want" "assemble writes the sections under the release heading
 assert_eq "$(find "$asm" -type f | sed 's|.*/||' | sort | tr '\n' ' ')" "README.md " \
   "assemble deletes the fragments and keeps the README"
 
+# An invalid fragment stops assemble: CHANGELOG.md is untouched and no
+# file is deleted (#2366).
+inv="$tmp/inv"
+cp -R "$good" "$inv"
+printf '%s\n' 'prose, not a bullet' >"$inv/77.fixed.md"
+cp "$tmp/CHANGELOG.md" "$tmp/before.md"
+inv_before="$(cd "$inv" && find . -type f | sort | tr '\n' ' ')"
+run "$inv" assemble 1.2.0
+assert_eq "$rc" "1" "assemble fails on an invalid fragment"
+assert_contains "$out" "77.fixed.md" "the assemble failure names the bad file"
+assert_eq "$(cd "$inv" && find . -type f | sort | tr '\n' ' ')" "$inv_before" \
+  "a failed assemble deletes nothing"
+assert_eq "$(cat "$tmp/CHANGELOG.md")" "$(cat "$tmp/before.md")" \
+  "a failed assemble leaves CHANGELOG.md untouched"
+
+# A valid run deletes exactly the rendered files; a file in a
+# subdirectory is not a fragment and survives.
+exact="$tmp/exact"
+cp -R "$good" "$exact"
+mkdir -p "$exact/notes"
+printf '%s\n' '- not at depth 1' >"$exact/notes/9.fixed.md"
+run "$exact" assemble 1.2.0
+assert_eq "$rc" "0" "assemble with a subdirectory file exits 0"
+assert_eq "$(cd "$exact" && find . -type f | sort | tr '\n' ' ')" "./README.md ./notes/9.fixed.md " \
+  "assemble deletes only the rendered fragments"
+
 # --- require ---------------------------------------------------------------
 
 req() {
@@ -177,8 +204,32 @@ assert_contains "$out" "no-changelog" "the failure names the opt-out label"
 req $'internal/api/x.go\nchangelog.d/README.md\n'
 assert_eq "$rc" "1" "editing the README is not a fragment"
 
-req $'docs/x.md\nPlans/canvas/01-vision.md\ndocs-site/docs/a.png\nisa/probes/p.sh\nREADME.md\n'
+req $'docs/x.md\nPlans/canvas/01-vision.md\ndocs-site/docs/a.png\nisa/foo.md\nREADME.md\n'
 assert_eq "$rc" "0" "require exempts a docs-only PR"
+
+req $'isa/probes/p.sh\n'
+assert_eq "$rc" "1" "an isa/ probe script is code, not docs"
+
+req $'isa/run-probes.sh\n'
+assert_eq "$rc" "1" "isa/run-probes.sh is code, not docs"
+
+req $'modified\tinternal/api/x.go\nadded\tchangelog.d/2366.fixed.md\n'
+assert_eq "$rc" "0" "require passes an added fragment (status-tagged input)"
+
+req $'modified\tinternal/api/x.go\nmodified\tchangelog.d/2366.fixed.md\n'
+assert_eq "$rc" "0" "require passes a modified fragment"
+
+req $'modified\tinternal/api/x.go\nremoved\tchangelog.d/2357.fixed.md\n'
+assert_eq "$rc" "1" "a deleted fragment does not satisfy require"
+
+req $'modified\tinternal/api/x.go\nadded\tchangelog.d/notes/2366.fixed.md\n'
+assert_eq "$rc" "1" "a subdirectory file does not satisfy require"
+
+req $'modified\tinternal/api/x.go\nadded\tchangelog.d/2366.feature.md\n'
+assert_eq "$rc" "1" "a misnamed fragment does not satisfy require"
+
+req $'removed\tinternal/api/x.go\n'
+assert_eq "$rc" "1" "deleting code still needs a fragment"
 
 req $'internal/api/x.go\n' PR_LABELS=$'bug\nno-changelog'
 assert_eq "$rc" "0" "require exempts the no-changelog label"
