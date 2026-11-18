@@ -36,6 +36,7 @@ import {
 import {
   extractLifecycleBlocks,
   lifecycleDiagramFile,
+  parseStateDiagram,
 } from "../lib/help/lifecycle-diagram.ts";
 import { stripActiveSvg } from "../lib/help/svg-strip.ts";
 
@@ -70,6 +71,9 @@ for (const file of (await readdir(MODULES))
     body(await readFile(join(MODULES, file), "utf8")),
   );
   for (const block of blocks) {
+    // Mermaid only ever sees the subset the check understands: no init
+    // directive, no click, no HTML (#2429).
+    parseStateDiagram(block.source);
     for (const theme of ["light", "dark"]) {
       jobs.push({
         from: `web/help/modules/${file}`,

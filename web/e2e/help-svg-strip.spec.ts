@@ -7,8 +7,9 @@
 
 import { expect, test } from "@playwright/test";
 
-import { unsafeSvgParts } from "../lib/help/diagram-build";
+import { SVG_ELEMENTS, unsafeSvgParts } from "../lib/help/diagram-build";
 import { stripActiveSvg } from "../lib/help/svg-strip";
+import { UNSAFE_SVG_FIXTURES } from "../lib/help/unsafe-svg-fixtures";
 
 const NS = 'xmlns="http://www.w3.org/2000/svg"';
 const XLINK = 'xmlns:xlink="http://www.w3.org/1999/xlink"';
@@ -38,6 +39,40 @@ test.describe("help diagram SVG stripping (#2148)", () => {
     const clean = await page.evaluate(stripActiveSvg, dirty);
     expect(unsafeSvgParts(clean)).toEqual([]);
     expect(clean).not.toMatch(/alert/);
+  });
+
+  // #2429 — the fixtures the Node gate refuses in diagrams.test.ts.
+  for (const f of UNSAFE_SVG_FIXTURES) {
+    test(`strips ${f.name}`, async ({ page }) => {
+      const run = page.evaluate(stripActiveSvg, f.svg);
+      if (f.browserThrows) {
+        await expect(run).rejects.toThrow(f.browserThrows);
+        return;
+      }
+      const clean = await run;
+      expect(unsafeSvgParts(clean)).toEqual([]);
+      expect(clean).not.toMatch(/evil/i);
+    });
+  }
+
+  test("keeps every allow-listed element and fragment reference", async ({
+    page,
+  }) => {
+    const body = SVG_ELEMENTS.filter((e) => e !== "svg")
+      .map((e) => `<${e} id="${e}-x"/>`)
+      .join("");
+    const dirty =
+      `<svg ${NS} ${XLINK}><style>@keyframes d{to{opacity:0}}#l{fill:url(#g)}</style>` +
+      `${body}<rect fill="url(#g)" style="stroke: url('#g')"/><use xlink:href="#g"/></svg>`;
+    const clean = await page.evaluate(stripActiveSvg, dirty);
+    expect(unsafeSvgParts(clean)).toEqual([]);
+    for (const e of SVG_ELEMENTS.filter((e) => e !== "svg")) {
+      expect(clean).toContain(`<${e} id="${e}-x"`);
+    }
+    expect(clean).toContain("@keyframes d");
+    expect(clean).toContain('fill="url(#g)"');
+    expect(clean).toContain("stroke: url('#g')");
+    expect(clean).toContain('xlink:href="#g"');
   });
 
   test("refuses input that is not well-formed XML", async ({ page }) => {
