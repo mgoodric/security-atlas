@@ -56,12 +56,12 @@ SELECT
     cfv.version,
     ca.id IS NOT NULL,
     ca.title,
-    COALESCE(ca.legacy_scf_id, '')::text,
+    COALESCE(btrim(ca.legacy_scf_id), '')::text,
     ARRAY(SELECT s.scf_id FROM scf_anchors s
-      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
       ORDER BY s.scf_id)::text[],
     ARRAY(SELECT s.title FROM scf_anchors s
-      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
       ORDER BY s.scf_id)::text[],
     EXISTS (SELECT 1 FROM scf_anchors s
       WHERE s.framework_version_id = cfv.id
