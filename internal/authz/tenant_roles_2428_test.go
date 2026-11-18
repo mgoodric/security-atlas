@@ -187,6 +187,7 @@ var routes2428 = []route2428{
 	{http.MethodGet, "/v1/controls/" + id2428 + "/policies", anyRoleGate},
 	{http.MethodGet, "/v1/controls/" + id2428 + "/risks", anyRoleGate},
 	{http.MethodGet, "/v1/controls/" + id2428 + "/history", anyRoleGate},
+	{http.MethodGet, "/v1/controls/" + id2428 + "/anchor-history", anyRoleGate},
 	{http.MethodGet, "/v1/controls/export", anyRoleGate},
 	{http.MethodGet, "/v1/controls/history/export", anyRoleGate},
 	{http.MethodGet, "/v1/controls/" + id2428 + "/evidence-summary", anyRoleGate},

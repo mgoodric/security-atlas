@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { VersionFooter } from "@/components/version-footer";
 import { FirstInstallCard } from "@/components/first-install-card";
+import { ForgetPreviousSession } from "@/components/auth/forget-previous-session";
 import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
 
 import { cookies } from "next/headers";
@@ -83,6 +84,8 @@ export default async function LoginPage({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
+      {/* #2399: the previous session's cached data never reaches the next. */}
+      <ForgetPreviousSession />
       <div className="w-full max-w-md space-y-4">
         {/* Slice 075 — logo header above the sign-in card. AC-5 of slice
           075 specifies the logo renders identically on /login (where
