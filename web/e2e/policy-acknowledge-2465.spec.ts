@@ -53,7 +53,8 @@ const PENDING_BODY = {
   pending: [
     {
       policy_id: PENDING_ID,
-      policy_version_id: "00000000-0000-0000-0000-00000000a465",
+      // The platform keys a version by its policy row (`policy_version_id = p.id`).
+      policy_version_id: PENDING_ID,
       title: "Acceptable Use Policy",
       version: "2.0",
       effective_date: "2026-11-01",

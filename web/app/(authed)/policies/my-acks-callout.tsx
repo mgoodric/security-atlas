@@ -10,11 +10,11 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
-import { fetchMyAcknowledgments } from "@/lib/api/policies";
+import { fetchMyAcknowledgments, MY_ACKS_QUERY_KEY } from "@/lib/api/policies";
 
 export function MyAcksCallout() {
   const { data } = useQuery({
-    queryKey: ["me", "acknowledgments"],
+    queryKey: MY_ACKS_QUERY_KEY,
     queryFn: fetchMyAcknowledgments,
     retry: false,
   });

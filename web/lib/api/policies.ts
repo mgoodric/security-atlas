@@ -2,7 +2,7 @@
 // from the former `web/lib/api.ts` god-file.
 
 import { APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, bffControlFetch, bffPostJSON } from "./_shared";
 
 // ----- Slice 101: /policies list view -----
 //
@@ -331,31 +331,19 @@ export type PolicyAcknowledgment = {
   deduplicated: boolean;
 };
 
-async function parseOrThrow<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
-    throw new APIError(res.status, msg);
-  }
-  return (await res.json()) as T;
-}
+/** The one query key for the caller's pending list, shared by the policy
+ *  list's callout and the detail page so an ack refreshes both. */
+export const MY_ACKS_QUERY_KEY = ["me", "acknowledgments"] as const;
 
 export async function fetchMyAcknowledgments(): Promise<MyAcknowledgmentsResponse> {
-  return parseOrThrow(await fetch("/api/me/acknowledgments"));
+  return bffControlFetch<MyAcknowledgmentsResponse>("/api/me/acknowledgments");
 }
 
 // The platform records the ack for the caller only; no body is sent.
 export async function acknowledgePolicy(
   id: string,
 ): Promise<PolicyAcknowledgment> {
-  return parseOrThrow(
-    await fetch(`/api/policies/${encodeURIComponent(id)}/acknowledge`, {
-      method: "POST",
-    }),
+  return bffPostJSON<PolicyAcknowledgment>(
+    `/api/policies/${encodeURIComponent(id)}/acknowledge`,
   );
 }

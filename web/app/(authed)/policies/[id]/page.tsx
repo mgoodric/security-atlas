@@ -57,6 +57,7 @@ import {
   acknowledgePolicy,
   discardPolicyDraft,
   fetchMyAcknowledgments,
+  MY_ACKS_QUERY_KEY,
   fetchPolicyDetail,
   transitionPolicy,
 } from "@/lib/api/policies";
@@ -146,7 +147,7 @@ export default function PolicyDetailPage({
   const acknowledge = useMutation({
     mutationFn: () => acknowledgePolicy(id),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: MY_ACKS_KEY });
+      await qc.invalidateQueries({ queryKey: MY_ACKS_QUERY_KEY });
       void qc.invalidateQueries({ queryKey: ["policy", id] });
       void qc.invalidateQueries({ queryKey: ["policies"] });
       toast("Policy acknowledged");
@@ -158,7 +159,7 @@ export default function PolicyDetailPage({
   // The caller's own pending acknowledgments. A failure here only hides
   // the card; the policy itself still renders.
   const myAcks = useQuery({
-    queryKey: MY_ACKS_KEY,
+    queryKey: MY_ACKS_QUERY_KEY,
     queryFn: fetchMyAcknowledgments,
     retry: false,
   });
@@ -503,7 +504,9 @@ export default function PolicyDetailPage({
               </>
             ) : (
               <div className="text-sm" data-testid="policy-detail-my-ack-done">
-                You acknowledged version {policy.version} on{" "}
+                {ackState.version
+                  ? `You acknowledged version ${ackState.version} on `
+                  : "You acknowledged this policy on "}
                 <Timestamp value={ackState.acknowledgedAt} style="date" />.
               </div>
             )}
@@ -568,8 +571,6 @@ export default function PolicyDetailPage({
     </DetailHeader>
   );
 }
-
-const MY_ACKS_KEY = ["me", "acknowledgments"] as const;
 
 function BackLink() {
   return (

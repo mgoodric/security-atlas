@@ -74,17 +74,22 @@ export function needsControlsWarning(
  *  decides who may acknowledge; this only mirrors its pending list. */
 export type MyAckState =
   | { kind: "pending"; lastAcknowledgedAt: string | null }
-  | { kind: "acknowledged"; acknowledgedAt: string };
+  | { kind: "acknowledged"; acknowledgedAt: string; version: string | null };
 
 export function myAckState(
-  p: Pick<Policy, "id" | "status">,
+  p: Pick<Policy, "id" | "status" | "version">,
   pending: readonly PendingAcknowledgment[] | undefined,
   justAcknowledged: PolicyAcknowledgment | undefined,
 ): MyAckState | null {
   if (justAcknowledged && justAcknowledged.policy_id === p.id) {
+    // The version comes from the ack response: `policy_version_id` is the
+    // policy row the platform recorded, and a published row's version
+    // never changes. If it names another row, the label is omitted rather
+    // than shown from this page's cached policy.
     return {
       kind: "acknowledged",
       acknowledgedAt: justAcknowledged.acknowledged_at,
+      version: justAcknowledged.policy_version_id === p.id ? p.version : null,
     };
   }
   if (p.status !== "published" || !pending) return null;
