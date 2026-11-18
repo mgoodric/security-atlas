@@ -487,7 +487,7 @@ export default function RiskDetailPage({
               </span>
             </SummaryCell>
 
-            <SummaryCell label="Owner">
+            <SummaryCell label="Owner" testId="risk-detail-summary-owner">
               <RiskOwner risk={risk} canEdit={canEdit} />
             </SummaryCell>
 
