@@ -70,6 +70,8 @@ const OVERDUE_VENDOR: Vendor = {
 // The post-review state: a fresh `last_review_date` flips the derived
 // status to on time.
 const REVIEW_DATE = "2026-06-11";
+// #2365 — how <Timestamp style="date"> renders REVIEW_DATE (en-US).
+const REVIEW_DATE_TEXT = "Jun 11, 2026";
 const REVIEWED_VENDOR: Vendor = {
   ...OVERDUE_VENDOR,
   last_review_date: REVIEW_DATE,
@@ -340,7 +342,7 @@ test.describe("vendor-review workflow (slice 424)", () => {
     );
     // slice 691 AC-1: the Last-review field reflects the just-saved date.
     await expect(page.getByTestId("vendor-detail-last-review")).toHaveText(
-      REVIEW_DATE,
+      REVIEW_DATE_TEXT,
     );
   });
 
@@ -400,12 +402,12 @@ test.describe("vendor-review workflow (slice 424)", () => {
       "on time",
     );
     await expect(page.getByTestId("vendor-detail-last-review")).toHaveText(
-      REVIEW_DATE,
+      REVIEW_DATE_TEXT,
     );
     // The recorded review is now a row in the history timeline.
     await expect(page.getByTestId("vendor-detail-review-row")).toHaveCount(1);
     await expect(page.getByTestId("vendor-detail-review-date")).toHaveText(
-      REVIEW_DATE,
+      REVIEW_DATE_TEXT,
     );
   });
 });

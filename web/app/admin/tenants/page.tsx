@@ -63,18 +63,11 @@ import {
 import type { CreateTenantResponse, TenantRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 import { Term } from "@/components/help/term";
+import { Timestamp } from "@/components/ui/timestamp";
 
 type TenantListResponse = { items: TenantRow[]; error?: string };
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
-
-function formatCreatedAt(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
 
 export default function AdminTenantsPage() {
   const queryClient = useQueryClient();
@@ -332,7 +325,7 @@ export default function AdminTenantsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatCreatedAt(t.created_at)}
+                      <Timestamp value={t.created_at} style="datetime" />
                     </TableCell>
                   </TableRow>
                 ))}
