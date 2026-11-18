@@ -269,7 +269,7 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid tenant in credential")
 		return
 	}
-	if !h.callerMayHandle(w, r, cred, uid) {
+	if !h.callerMayHandle(w, r, cred, uid, true) {
 		return
 	}
 	successor, plain, predExp, err := h.store.Rotate(ctx, cred.TenantID, uid)
@@ -309,7 +309,7 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid tenant in credential")
 		return
 	}
-	if !h.callerMayHandle(w, r, cred, uid) {
+	if !h.callerMayHandle(w, r, cred, uid, false) {
 		return
 	}
 	if err := h.store.Revoke(ctx, cred.TenantID, uid); err != nil {
@@ -397,9 +397,11 @@ func mintWithinCaller(cred credstore.Credential, isAdmin, isApprover bool, owner
 // callerMayHandle refuses a rotate or revoke of a key the caller could not
 // have minted (mintWithinCaller), writing the 403. A rotate hands back a new
 // plaintext with the same flags, so a tenant admin rotating an is_admin key
-// would get an admin credential. An unknown id passes here and the store
-// answers 404.
-func (h *Handler) callerMayHandle(w http.ResponseWriter, r *http.Request, cred credstore.Credential, id uuid.UUID) bool {
+// would get an admin credential. A rotate of another user's personal
+// (user-bound) key is refused too: the plaintext would let the caller act as
+// that user, and the user's own token would retire. Revoking one stays
+// allowed. An unknown id passes here and the store answers 404.
+func (h *Handler) callerMayHandle(w http.ResponseWriter, r *http.Request, cred credstore.Credential, id uuid.UUID, rotate bool) bool {
 	if cred.IsAdmin {
 		return true
 	}
@@ -415,6 +417,14 @@ func (h *Handler) callerMayHandle(w http.ResponseWriter, r *http.Request, cred c
 		if msg := mintWithinCaller(cred, c.IsAdmin, c.IsApprover, c.OwnerRoles); msg != "" {
 			httpresp.WriteError(w, http.StatusForbidden, "this key is outside what a tenant admin manages: "+msg)
 			return false
+		}
+		if rotate && credstore.OwnedByUser(c) {
+			owner, _ := credstore.CallerUserID(c)
+			self, isUser := credstore.CallerUserID(cred)
+			if !isUser || owner != self {
+				httpresp.WriteError(w, http.StatusForbidden, "a tenant admin cannot rotate another user's personal key; revoke it instead")
+				return false
+			}
 		}
 		return true
 	}

@@ -414,6 +414,33 @@ grc_engineer's blanket read still admits `GET /v1/admin/credentials` (the
 list carries no plaintext) in OPA. The handler refuses it, as before, and
 it is pinned in `handlerNarrower2428`.
 
+### D19a — personal keys: no rotate by another user, and rotate keeps the owner
+
+The #2655 review found a gap in D19's guard. The list shows user-bound keys
+(a user's personal token, `issued_by` set). Before this fix:
+
+- A tenant admin could rotate another user's personal token.
+- `Store.Rotate` dropped `issued_by`, so the successor came back unbound.
+- An unbound key's copied `owner_roles` label counts as its own grant
+  (`ownerLabelIsGrant`).
+
+So the admin received a bearer acting with the user's labels, and the
+user's own token retired.
+
+Two fixes:
+
+- `callerMayHandle` refuses a tenant admin (no admin credential) rotating
+  a user-bound key it does not own. It may still revoke one.
+- `Store.Rotate` now carries `issued_by` to the successor for every
+  caller, so a rotated personal token stays bound to its owner.
+
+`TestTenantAdmin2503_CredentialsMintGuard` covers both. A tenant admin
+rotating a member's bound key gets 403, and revoking it is a 204. Rotating
+its own bound key is a 200, and the successor's `issued_by` is the owner.
+
+On the previous head the test fails: the rotate is a 200 with the member's
+bearer, and the successor's `issued_by` is null.
+
 ### D20 — web
 
 - `/admin/api-keys` is no longer behind `PlatformAdminGate`.

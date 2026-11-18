@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -532,7 +533,8 @@ func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
 		_, _ = adminPool.Exec(context.Background(),
 			`DELETE FROM api_keys WHERE tenant_id = ANY($1)`, []uuid.UUID{own, other})
 	})
-	tok := s.mint(t, own, seedMember2261(t, own, "active", "admin"), authz.RoleAdmin)
+	admin := seedMember2261(t, own, "active", "admin")
+	tok := s.mint(t, own, admin, authz.RoleAdmin)
 	otherTok := s.mint(t, other, seedMember2261(t, other, "active", "admin"), authz.RoleAdmin)
 
 	issue := func(body map[string]any) (int, string) {
@@ -570,6 +572,46 @@ func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
 		if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+privileged.ID+"/"+verb, nil); rr.Code != http.StatusForbidden {
 			t.Errorf("tenant admin %s of an is_admin key = %d %s, want 403", verb, rr.Code, rr.Body.String())
 		}
+	}
+
+	// A member's personal (user-bound) token: a tenant admin may revoke it
+	// but not rotate it, which would hand it the member's bearer and retire
+	// the member's own token.
+	member := seedMember2261(t, own, "active", "viewer")
+	memberKey, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IssuedBy: &member})
+	if err != nil {
+		t.Fatalf("seed member key: %v", err)
+	}
+	if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+memberKey.ID+"/rotate", nil); rr.Code != http.StatusForbidden {
+		t.Errorf("tenant admin rotate of another user's bound key = %d %s, want 403", rr.Code, rr.Body.String())
+	}
+	if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+memberKey.ID+"/revoke", nil); rr.Code != http.StatusNoContent {
+		t.Errorf("tenant admin revoke of another user's bound key = %d %s, want 204", rr.Code, rr.Body.String())
+	}
+
+	// Its own bound key rotates, and the successor stays bound to it.
+	ownKey, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IssuedBy: &admin})
+	if err != nil {
+		t.Fatalf("seed own key: %v", err)
+	}
+	rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+ownKey.ID+"/rotate", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tenant admin rotate of its own bound key = %d %s, want 200", rr.Code, rr.Body.String())
+	}
+	var rotated struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&rotated); err != nil {
+		t.Fatalf("decode rotate: %v", err)
+	}
+	var issuedBy *uuid.UUID
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT issued_by FROM api_keys WHERE id = $1`,
+		uuid.MustParse(strings.TrimPrefix(rotated.ID, "key_"))).Scan(&issuedBy); err != nil {
+		t.Fatalf("read successor: %v", err)
+	}
+	if issuedBy == nil || *issuedBy != admin {
+		t.Errorf("rotated successor issued_by = %v, want the owner %s", issuedBy, admin)
 	}
 
 	if rr, _ := s.do(t, otherTok, http.MethodPost, "/v1/admin/credentials/"+plainID+"/revoke", nil); rr.Code != http.StatusNotFound {
