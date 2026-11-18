@@ -21,7 +21,7 @@
 -- from reading the table at all, and the guard checks it first.
 --
 -- See docs/audit-log/2458-action-plan-system-move-guard-decisions.md.
--- Reversible via 20261263000000_action_plan_system_move_nonce.down.sql.
+-- Reversible via 20261264000000_action_plan_system_move_nonce.down.sql.
 
 -- No tenant_id: a nonce belongs to one call, not a tenant, and no role but
 -- the owner can see the table. Rows live only inside the function.

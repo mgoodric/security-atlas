@@ -31,7 +31,7 @@ advancing, while its evidence keeps arriving.
   `action_plans_status_transition_guard` admits `verified -> completed` only
   through `action_plan_in_system_move()`, which checks the function's owner
   and the per-call nonce in `action_plan_system_move_nonces` (#2458). A
-  half-applied up/down of `20261223000000` or `20261263000000` produces
+  half-applied up/down of `20261223000000` or `20261264000000` produces
   `illegal action_plan status transition: verified -> completed`
   (SQLSTATE 23514) or `relation "action_plan_system_move_nonces" does not exist`.
 - **The function lost its owner.** Ownership moved off the migrate role

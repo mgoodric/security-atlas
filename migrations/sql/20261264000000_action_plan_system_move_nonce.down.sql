@@ -1,4 +1,4 @@
--- Reverse of 20261263000000_action_plan_system_move_nonce.sql (#2458).
+-- Reverse of 20261264000000_action_plan_system_move_nonce.sql (#2458).
 -- Restores #2109's reconcile function and guard (owner role + GUC 'on')
 -- and drops the nonce table, which never holds a committed row.
 
