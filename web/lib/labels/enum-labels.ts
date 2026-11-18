@@ -212,6 +212,10 @@ export const ENUM_LABELS = {
     no_evidence: "No evidence",
   },
   // Statuses held in CHECK-constrained text columns, not Postgres enums.
+  // enum-labels.test.ts reads their values from check-enums.golden.json,
+  // which internal/db/check_enums_integration_test.go records from the
+  // migrated database. AuditPeriodStatus also labels the statuses the
+  // audits page offers ahead of the constraint.
   ActionPlanStatus: {
     draft: "Draft",
     in_progress: "In progress",
@@ -245,8 +249,8 @@ export const ENUM_LABELS = {
     posture_target: "Posture target",
     module_access: "Module access",
   },
-  // Checklist item kinds are CHECK-constrained text, not a Postgres enum,
-  // so models.go cannot see them and the coverage test does not check them.
+  // Checklist citation kinds: the CitationKind constants in
+  // internal/checklist/checklist.go, which the coverage test reads.
   ChecklistItemKind: {
     control: "Control",
     scf_anchor: "SCF anchor",
@@ -286,8 +290,15 @@ export function enumLabel(
   value: string | null | undefined,
 ): string {
   if (value === null || value === undefined || value === "") return "—";
+  return lookupLabel(name, value) ?? humanizeEnum(value);
+}
+
+// lookupLabel returns the label for a value, or undefined when the enum
+// has none. It reads own keys only, so a value such as `constructor`
+// cannot resolve to an Object.prototype member.
+export function lookupLabel(name: EnumName, value: string): string | undefined {
   const labels: Record<string, string> = ENUM_LABELS[name];
-  return labels[value] ?? humanizeEnum(value);
+  return Object.hasOwn(labels, value) ? labels[value] : undefined;
 }
 
 // enumOptions lists an enum's values as select options, in the order the

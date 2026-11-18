@@ -99,6 +99,7 @@ import {
   statusTallyLabel,
 } from "./format";
 import { pageTitle } from "@/lib/page-titles";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { Person } from "@/components/ui/person";
 import { Term } from "@/components/help/term";
 
@@ -118,11 +119,10 @@ const FILTER_KEYS: (keyof AuditFilters)[] = ["framework", "status", "year"];
 // when the backend lifts the constraint, with no page rework.
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All statuses" },
-  { value: "open", label: "open" },
-  { value: "in_progress", label: "in_progress" },
-  { value: "frozen", label: "frozen" },
-  { value: "closed", label: "closed" },
-  { value: "planned", label: "planned" },
+  ...["open", "in_progress", "frozen", "closed", "planned"].map((s) => ({
+    value: s,
+    label: enumLabel("AuditPeriodStatus", s),
+  })),
 ];
 
 // Framework pill is a no-op in v1 (periodWire has only the UUID — no
@@ -336,7 +336,7 @@ function AuditsPageInner() {
                   p.status,
                 )}`}
               />
-              {p.status}
+              {enumLabel("AuditPeriodStatus", p.status)}
             </span>
             {isFrozen(p) ? (
               <span

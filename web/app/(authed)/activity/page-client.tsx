@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/table";
 
 import { describeEvent, groupByDay } from "@/lib/activity-sentences";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import type { EntityKind, EntityOption } from "@/lib/entity-picker";
 import {
   ACTIVITY_KINDS,
@@ -421,7 +422,7 @@ function FilterBar({
                     : "border-input bg-background hover:bg-muted")
                 }
               >
-                {k}
+                {enumLabel("ActivityKind", k)}
               </button>
             );
           })}
@@ -897,7 +898,7 @@ function LedgerRow({ row }: { row: ActivityEntry }) {
         </TableCell>
         <TableCell>
           <Badge variant="secondary" data-testid="activity-row-kind">
-            {row.kind}
+            {enumLabel("ActivityKind", row.kind)}
           </Badge>
         </TableCell>
         <TableCell>

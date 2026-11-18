@@ -60,8 +60,8 @@ test.describe("/evidence list view", () => {
     //    await page.goto("/evidence");
     //    const resultCell = page.getByTestId("evidence-row-result").first();
     //    const text = await resultCell.innerText();
-    //    // The cell renders one of pass / fail / na / inconclusive.
-    //    expect(["pass", "fail", "na", "inconclusive"]).toContain(text.trim());
+    //    // The cell renders the label of one of pass / fail / na / inconclusive.
+    //    expect(["Pass", "Fail", "Not applicable", "Inconclusive"]).toContain(text.trim());
   });
 
   test("AC-3 hash: hash cell renders as 8-char prefix only", async () => {

@@ -7,6 +7,8 @@
 // isolation is enforced by RLS at the DB layer (invariant 6); the UI never
 // passes tenant_id.
 
+import { ENUM_LABELS } from "@/lib/labels/enum-labels";
+
 import { APIError } from "./base";
 
 /**
@@ -31,14 +33,9 @@ export const ACTION_PLAN_STATUSES: ActionPlanStatus[] = [
   "verified",
 ];
 
-/** Human labels for the lifecycle statuses. */
-export const ACTION_PLAN_STATUS_LABELS: Record<ActionPlanStatus, string> = {
-  draft: "Draft",
-  in_progress: "In progress",
-  blocked: "Blocked",
-  completed: "Completed",
-  verified: "Verified",
-};
+/** Human labels for the lifecycle statuses, from the shared label module. */
+export const ACTION_PLAN_STATUS_LABELS: Record<ActionPlanStatus, string> =
+  ENUM_LABELS.ActionPlanStatus;
 
 /** ActionPlan is the canonical wire shape. Mirrors `planWire`. */
 export type ActionPlan = {

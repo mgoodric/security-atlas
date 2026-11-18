@@ -72,6 +72,7 @@ import {
   type TenantControl,
 } from "@/lib/api/controls-list";
 
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { resultBadgeVariant } from "../../evidence/[id]/view";
 import {
   frameworkVersionLabel,
@@ -219,7 +220,7 @@ export default function AuditPeriodDetailPage({
               period.status,
             )}`}
           />
-          {period.status}
+          {enumLabel("AuditPeriodStatus", period.status)}
         </span>
       }
       subtitle={
@@ -649,7 +650,7 @@ function ControlStateRow({
       <td className="py-2 pr-3" data-testid="audit-period-control-result">
         {summary?.latestResult ? (
           <Badge variant={resultBadgeVariant(summary.latestResult)}>
-            {summary.latestResult}
+            {enumLabel("EvidenceResult", summary.latestResult)}
           </Badge>
         ) : stateQ.isError ? (
           <span className="text-xs text-muted-foreground">
