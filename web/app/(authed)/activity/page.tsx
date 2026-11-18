@@ -27,6 +27,7 @@ import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { pageTitle } from "@/lib/page-titles";
 
 import { ActivityPageClient } from "./page-client";
+import { Term } from "@/components/help/term";
 
 export default async function ActivityPage() {
   const jar = await cookies();
@@ -37,7 +38,15 @@ export default async function ActivityPage() {
   return (
     <PageShell
       title={pageTitle("/activity")}
-      subtitle="What happened in this tenant: state changes, evidence ingestion, audit milestones, and your own account activity. Filter by time window, actor, or event kind; switch to the raw ledger for kinds, targets and IDs. Read-only."
+      subtitle={
+        <>
+          The <Term id="activity-log">activity log</Term>: what happened in this{" "}
+          <Term id="tenant">tenant</Term> — state changes, evidence ingestion,
+          audit milestones, and your own account activity. Filter by time
+          window, actor, or event kind; switch to the raw ledger for kinds,
+          targets and IDs. Read-only.
+        </>
+      }
       bodyClassName="space-y-4"
     >
       <ActivityPageClient canExport={canExport} />

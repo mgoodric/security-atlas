@@ -32,6 +32,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchMetricsCatalog } from "@/lib/api/metrics";
 import { pageTitle } from "@/lib/page-titles";
+import { Term } from "@/components/help/term";
 
 export default function MetricsDashboardPage() {
   const boardQuery = useQuery({
@@ -47,7 +48,14 @@ export default function MetricsDashboardPage() {
   return (
     <PageShell
       title={pageTitle("/dashboards/metrics")}
-      subtitle="Board-level KPIs and the cascading program and team metrics that feed them. Click a card to walk its cascade."
+      subtitle={
+        <>
+          <Term id="board-kpi">Board-level KPIs</Term> and the cascading program
+          and team metrics that feed them, each against its{" "}
+          <Term id="metric-target">target</Term>. Click a card to walk its{" "}
+          <Term id="metric-cascade">cascade</Term>.
+        </>
+      }
       data-testid="metrics-dashboard"
     >
       {boardQuery.isLoading ? (

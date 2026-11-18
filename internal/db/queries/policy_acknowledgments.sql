@@ -101,6 +101,8 @@ WHERE k.tenant_id = $1
   AND (
       k.is_admin = true
       OR k.owner_roles && sqlc.arg('required_roles')::text[]
+      -- #2524: an "everyone" audience counts every live key holder.
+      OR 'everyone' = ANY(sqlc.arg('required_roles')::text[])
   );
 
 -- name: CountFreshAcksForVersion :one
@@ -124,5 +126,6 @@ WHERE pa.tenant_id = $1
         AND (
             k.is_admin = true
             OR k.owner_roles && sqlc.arg('required_roles')::text[]
+            OR 'everyone' = ANY(sqlc.arg('required_roles')::text[])
         )
   );

@@ -26,6 +26,7 @@ WHERE pa.tenant_id = $1
         AND (
             k.is_admin = true
             OR k.owner_roles && $4::text[]
+            OR 'everyone' = ANY($4::text[])
         )
   )
 `
@@ -64,6 +65,8 @@ WHERE k.tenant_id = $1
   AND (
       k.is_admin = true
       OR k.owner_roles && $2::text[]
+      -- #2524: an "everyone" audience counts every live key holder.
+      OR 'everyone' = ANY($2::text[])
   )
 `
 

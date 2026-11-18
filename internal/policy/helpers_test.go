@@ -387,6 +387,31 @@ func TestRolesIntersect(t *testing.T) {
 	}
 }
 
+// TestWithEveryone2524 pins that a member matches a policy aimed at
+// everyone and a non-member does not, and that the input is not mutated.
+func TestWithEveryone2524(t *testing.T) {
+	t.Parallel()
+	in := []string{"viewer"}
+	if got := WithEveryone(in, true); len(got) != 2 || got[1] != AudienceEveryone {
+		t.Errorf("member: %v; want [viewer everyone]", got)
+	}
+	if len(in) != 1 {
+		t.Errorf("input mutated: %v", in)
+	}
+	if got := WithEveryone([]string{"employee"}, false); len(got) != 1 {
+		t.Errorf("non-member: %v; want [employee]", got)
+	}
+	if got := WithEveryone([]string{AudienceEveryone}, true); len(got) != 1 {
+		t.Errorf("already present: %v; want one entry", got)
+	}
+	if !rolesIntersect(AckCaller{OwnerRoles: WithEveryone([]string{"auditor"}, true)}, []string{AudienceEveryone}) {
+		t.Error("member does not intersect an everyone policy")
+	}
+	if rolesIntersect(AckCaller{OwnerRoles: WithEveryone(nil, false)}, []string{AudienceEveryone}) {
+		t.Error("non-member intersects an everyone policy")
+	}
+}
+
 // TestAckStore_PreTxGuards asserts the AckStore rejects malformed identity
 // BEFORE opening a transaction. A nil pool proves no DB call is made: if any
 // of these reached s.inTx → pool.Begin it would panic on the nil pool. This
