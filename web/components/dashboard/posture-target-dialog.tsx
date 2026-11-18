@@ -39,7 +39,13 @@ type Fields = {
   direction: PostureDirection;
 };
 
-function initialFields(current: PostureTarget | null): Fields {
+// #2406: with no target of its own, the dialog starts from the prior
+// framework version's target when there is one, else from the defaults.
+function initialFields(
+  current: PostureTarget | null,
+  prior: PostureTarget | null = null,
+): Fields {
+  current = current ?? prior;
   if (!current) {
     return {
       target: "90",
@@ -60,13 +66,18 @@ export function PostureTargetDialog({
   frameworkVersionId,
   frameworkLabel,
   current,
+  prior = null,
 }: {
   frameworkVersionId: string;
   frameworkLabel: string;
   current: PostureTarget | null;
+  prior?: PostureTarget | null;
 }) {
   const [open, setOpen] = useState(false);
-  const [fields, setFields] = useState<Fields>(() => initialFields(current));
+  const [fields, setFields] = useState<Fields>(() =>
+    initialFields(current, prior),
+  );
+  const prefilled = !current && prior !== null;
   const queryClient = useQueryClient();
   const ids = {
     target: useId(),
@@ -103,7 +114,7 @@ export function PostureTargetDialog({
       open={open}
       onOpenChange={(next) => {
         // Re-seed from the saved target each time the dialog opens.
-        if (next) setFields(initialFields(current));
+        if (next) setFields(initialFields(current, prior));
         mutation.reset();
         setOpen(next);
       }}
@@ -129,6 +140,14 @@ export function PostureTargetDialog({
               The coverage your organisation aims for. The tile turns amber at
               the warning threshold and red at the critical one.
             </DialogDescription>
+            {prefilled ? (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="posture-target-prefilled"
+              >
+                Prefilled from the previous framework version&apos;s target.
+              </p>
+            ) : null}
           </DialogHeader>
 
           <form

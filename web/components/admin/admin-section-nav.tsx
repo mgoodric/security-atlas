@@ -9,8 +9,32 @@ import Link from "next/link";
 
 import { showTenantChrome, useTenancy } from "@/lib/tenancy";
 
-export function AdminSectionNav({ demoEnabled }: { demoEnabled: boolean }) {
+export function AdminSectionNav({
+  demoEnabled,
+  platform,
+}: {
+  demoEnabled: boolean;
+  platform: boolean;
+}) {
   const tenantChrome = showTenantChrome(useTenancy());
+  if (!platform) {
+    // #2503: a tenant admin sees only the tenant-scoped pages. The
+    // platform pages are gated server-side by PlatformAdminGate.
+    return (
+      <nav
+        aria-label="Admin sections"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+      >
+        <Link href="/admin" className="hover:text-foreground">
+          Admin
+        </Link>
+        <span>·</span>
+        <Link href="/admin/users" className="hover:text-foreground">
+          Users
+        </Link>
+      </nav>
+    );
+  }
   return (
     <nav
       aria-label="Admin sections"

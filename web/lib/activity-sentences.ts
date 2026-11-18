@@ -192,9 +192,16 @@ export const KIND_TEMPLATES: Record<AuditLogKind, Template | typeof GENERIC> = {
   mapping_overlay: lifecycle("mapping overlay edge"),
   control_import: lifecycle("imported control row"),
   risk: (row) => sentence(row, RISK_PHRASES[row.action] ?? "changed", "risk"),
-  // #2136: the one action is `set`; the target is the framework version.
+  // #2136: `set`; #2406: `carry_over`, the prior version's target brought
+  // forward on activation. The target is the framework version.
   posture_target: (row) =>
-    sentence(row, "set the posture target for", "framework version"),
+    sentence(
+      row,
+      row.action === "carry_over"
+        ? "carried the previous version's posture target forward to"
+        : "set the posture target for",
+      "framework version",
+    ),
   // #2172: the one action is `set`; the target is the member.
   module_access: (row) =>
     sentence(row, "changed the module access of", "member"),

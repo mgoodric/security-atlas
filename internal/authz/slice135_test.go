@@ -23,17 +23,22 @@ import (
 
 // slice135RolePairs are the canonical roles plus the "no-role" baseline
 // that exercises the default-deny path.
+//
+// #2503: "admin" is an admin credential (cred.IsAdmin); a tenant admin by
+// role alone is refused, as the handler's callerAllowedUnified refuses it.
 var slice135RolePairs = []struct {
-	name  string
-	roles []authz.Role
-	want  bool
+	name      string
+	roles     []authz.Role
+	adminCred bool
+	want      bool
 }{
-	{"admin", []authz.Role{authz.RoleAdmin}, true},
-	{"auditor", []authz.Role{authz.RoleAuditor}, false},
-	{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}, true},
-	{"viewer", []authz.Role{authz.RoleViewer}, false},
-	{"control_owner", []authz.Role{authz.RoleControlOwner}, false},
-	{"no_roles", nil, false},
+	{"admin", []authz.Role{authz.RoleAdmin}, true, true},
+	{"tenant_admin_by_role", []authz.Role{authz.RoleAdmin}, false, false},
+	{"auditor", []authz.Role{authz.RoleAuditor}, false, false},
+	{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}, false, true},
+	{"viewer", []authz.Role{authz.RoleViewer}, false, false},
+	{"control_owner", []authz.Role{authz.RoleControlOwner}, false, false},
+	{"no_roles", nil, false, false},
 }
 
 // TestSlice135_UnifiedAuditLogExportAccess pins the per-role admit
@@ -46,8 +51,9 @@ func TestSlice135_UnifiedAuditLogExportAccess(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d, err := e.Decide(context.Background(),
-				unifiedAuditLogInput(t, http.MethodGet, "/v1/admin/audit-log/export?format=csv", tc.roles))
+			in := unifiedAuditLogInput(t, http.MethodGet, "/v1/admin/audit-log/export?format=csv", tc.roles)
+			in.User.Attrs["is_admin_credential"] = tc.adminCred
+			d, err := e.Decide(context.Background(), in)
 			if err != nil {
 				t.Fatalf("Decide: %v", err)
 			}
