@@ -1,67 +1,21 @@
 // Slice 254 — vitest coverage for the control-detail tab helpers.
 //
-// Pure-helper coverage per the established `coverage.ts/test.ts`
-// sibling pattern (slice 256). The page-level renderer delegates to
-// these helpers so the literal-union math + chip-formatting rules
-// don't need to be re-derived in render-shape tests.
+// #2140 cut the tabs to Overview, Framework map and History.
 
 import { describe, expect, it } from "vitest";
 
-import {
-  CONTROL_TABS,
-  formatTabCount,
-  isTabKey,
-  visibleControlTabs,
-} from "./tabs";
-
-// #2174: a link tab into a module the caller cannot see is gone entirely.
-describe("visibleControlTabs", () => {
-  const keys = (sees: { policies: boolean; risks: boolean }) =>
-    visibleControlTabs(sees).map((t) => t.key);
-
-  it("keeps every tab when both modules are seen", () => {
-    expect(keys({ policies: true, risks: true })).toEqual(
-      CONTROL_TABS.map((t) => t.key),
-    );
-  });
-
-  it("drops Policies and Risks independently", () => {
-    expect(keys({ policies: false, risks: true })).not.toContain("policies");
-    expect(keys({ policies: false, risks: true })).toContain("risks");
-    expect(keys({ policies: true, risks: false })).not.toContain("risks");
-    expect(keys({ policies: false, risks: false })).toEqual([
-      "overview",
-      "evidence",
-      "mappings",
-      "scope",
-      "history",
-    ]);
-  });
-});
+import { CONTROL_TABS, isTabKey } from "./tabs";
 
 describe("CONTROL_TABS", () => {
-  it("renders the seven mockup tabs in mockup order", () => {
-    // Plans/_archive/mockups/control.html lines 143-149: Overview, Evidence,
-    // Mappings, Effective scope, Policies, Risks, History.
+  it("is the overview, the framework map and history, in that order", () => {
     expect(CONTROL_TABS.map((t) => t.key)).toEqual([
       "overview",
-      "evidence",
-      "mappings",
-      "scope",
-      "policies",
-      "risks",
+      "map",
       "history",
     ]);
-  });
-
-  it("tab labels match the mockup copy", () => {
     expect(CONTROL_TABS.map((t) => t.label)).toEqual([
       "Overview",
-      "Evidence",
-      "Mappings",
-      "Effective scope",
-      "Policies",
-      "Risks",
+      "Framework map",
       "History",
     ]);
   });
@@ -74,61 +28,22 @@ describe("isTabKey", () => {
     }
   });
 
-  it("rejects null", () => {
+  it("rejects null, undefined and the empty string", () => {
     expect(isTabKey(null)).toBe(false);
-  });
-
-  it("rejects undefined", () => {
     expect(isTabKey(undefined)).toBe(false);
-  });
-
-  it("rejects the empty string", () => {
     expect(isTabKey("")).toBe(false);
   });
 
   it("rejects unrecognised strings", () => {
     expect(isTabKey("foo")).toBe(false);
     expect(isTabKey("Overview")).toBe(false); // case-sensitive
-    expect(isTabKey("settings")).toBe(false);
-  });
-});
-
-describe("formatTabCount", () => {
-  it("renders zero as `0` (not `—`) — zero is real data", () => {
-    expect(formatTabCount(0)).toBe("0");
   });
 
-  it("renders small counts verbatim", () => {
-    expect(formatTabCount(1)).toBe("1");
-    expect(formatTabCount(11)).toBe("11");
-    expect(formatTabCount(847)).toBe("847");
-  });
-
-  it("inserts comma thousands separators for large counts (D3)", () => {
-    expect(formatTabCount(1247)).toBe("1,247");
-    expect(formatTabCount(12345)).toBe("12,345");
-    expect(formatTabCount(1234567)).toBe("1,234,567");
-  });
-
-  it("renders `—` for null (loading / unknown)", () => {
-    expect(formatTabCount(null)).toBe("—");
-  });
-
-  it("renders `—` for undefined", () => {
-    expect(formatTabCount(undefined)).toBe("—");
-  });
-
-  it("renders `—` for NaN / Infinity (defensive)", () => {
-    expect(formatTabCount(Number.NaN)).toBe("—");
-    expect(formatTabCount(Number.POSITIVE_INFINITY)).toBe("—");
-    expect(formatTabCount(Number.NEGATIVE_INFINITY)).toBe("—");
-  });
-
-  it("renders `—` for negative counts (defensive — backend never returns)", () => {
-    expect(formatTabCount(-1)).toBe("—");
-  });
-
-  it("truncates fractional counts (backend never returns, but defensive)", () => {
-    expect(formatTabCount(847.9)).toBe("847");
+  // #2140: an old deep link to a retired tab lands on the overview,
+  // which now holds that content.
+  it("rejects the retired tab keys", () => {
+    for (const key of ["evidence", "mappings", "scope", "policies", "risks"]) {
+      expect(isTabKey(key)).toBe(false);
+    }
   });
 });

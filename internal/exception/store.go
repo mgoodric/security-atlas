@@ -502,10 +502,14 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Exception, error) {
 // ListFilter narrows the result set of List. Empty fields are ignored.
 type ListFilter struct {
 	Status string
+	// ControlID narrows the list to one control's exceptions (#2140);
+	// uuid.Nil lists every control's.
+	ControlID uuid.UUID
 }
 
 // List returns every exception for the active tenant, newest first.
-// Status filter is applied in-memory; cardinality is small for v1.
+// The status and control filters are applied in-memory; cardinality is
+// small for v1.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Exception, error) {
 	var out []Exception
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -516,6 +520,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Exception, error
 		out = make([]Exception, 0, len(rows))
 		for _, r := range rows {
 			if filter.Status != "" && r.Status != filter.Status {
+				continue
+			}
+			if filter.ControlID != uuid.Nil && (!r.ControlID.Valid || uuid.UUID(r.ControlID.Bytes) != filter.ControlID) {
 				continue
 			}
 			out = append(out, exceptionFromRow(r))

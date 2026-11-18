@@ -163,7 +163,10 @@ func TestSlice138_EvidenceHasProgramRead(t *testing.T) {
 		{"bare", credstore.Credential{}, false},
 		{"admin", credstore.Credential{IsAdmin: true}, true},
 		{"approver", credstore.Credential{IsApprover: true}, true},
-		{"owner", credstore.Credential{OwnerRoles: []string{"control-owner"}}, true},
+		{"live grc_engineer", credstore.Credential{ID: "jwt:1", UserID: "u1", TenantRoles: []string{"grc_engineer"}}, true},
+		// #2507: OPA reads /v1/admin/* exports for admin and grc_engineer only.
+		{"live control_owner", credstore.Credential{ID: "jwt:2", UserID: "u2", TenantRoles: []string{"control_owner"}}, false},
+		{"grc_engineer claim, no live role", credstore.Credential{ID: "jwt:3", UserID: "u3", OwnerRoles: []string{"grc_engineer"}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

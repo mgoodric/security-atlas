@@ -2,7 +2,7 @@
 
 // #2556: a viewer reads the risk register and never writes it, through the
 // assembled router with the real OPA bundle and a live user_roles row
-// (liveRoleBearer). The no-DB matrix over every route and role is
+// (liveroletest). The no-DB matrix over every route and role is
 // internal/authz/risk_reads_2556_test.go; this file shows the same answer
 // end to end, handler gates included.
 //
@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -33,7 +34,8 @@ func TestViewerReads2556_ReadsEveryRiskRouteWritesNone(t *testing.T) {
 
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	viewer := liveRoleBearer(t, srv, app, tenant, "viewer")
+	liveroletest.Attach(t, srv, app)
+	viewer := liveroletest.Bearer(t, srv, tenant, "viewer")
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 
