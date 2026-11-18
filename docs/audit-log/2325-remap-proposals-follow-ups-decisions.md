@@ -40,4 +40,4 @@ Rebound rows whose class is not `unchanged` are surfaced with a `class_not` filt
 
 The import trims legacy IDs before storing them (`catalog.go`), so the untrimmed `=` comparisons were correct in practice. They now use `btrim` like the "has legacy IDs" check beside them, so stored whitespace cannot split the queues. The change is in the control query and in the edge (#1777) and overlay (#1804) listings, so the three queues still classify an anchor the same way.
 
-Migration `20261250000000` indexes `scf_remap_proposals.legacy_anchor_id` and `target_framework_version_id`, both `ON DELETE CASCADE` foreign keys, plus `(tenant_id, created_at DESC, bundle_id, id)` for the paged order.
+Migration `20261253000000` indexes `scf_remap_proposals.legacy_anchor_id` and `target_framework_version_id`, both `ON DELETE CASCADE` foreign keys, plus `(tenant_id, created_at DESC, bundle_id, id)` for the paged order.
