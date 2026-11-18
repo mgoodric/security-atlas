@@ -1,5 +1,8 @@
 // Slice 125 — vitest cases for the audit-log typed client helpers.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, test } from "vitest";
 
 import {
@@ -84,26 +87,63 @@ describe("buildUnifiedQuery", () => {
   });
 });
 
+// #2430: the web kind list is checked against the backend's own source,
+// not a copy. parseGoAllKinds reads internal/audit/unifiedlog/unifiedlog.go:
+//
+//   KindDecision Kind = "decision"      (the constants)
+//   var AllKinds = []Kind{ KindDecision, ... }   (the canonical order)
+//
+// A kind added to AllKinds without a web entry (or the reverse) fails here.
+// CI runs this test when that Go file changes (ci.yml's shared tier).
+const UNIFIEDLOG_GO = join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "internal",
+  "audit",
+  "unifiedlog",
+  "unifiedlog.go",
+);
+
+function parseGoAllKinds(src: string): string[] {
+  const values = new Map<string, string>();
+  for (const m of src.matchAll(/^\s*(Kind\w+)\s+Kind\s*=\s*"([^"]*)"/gm)) {
+    values.set(m[1], m[2]);
+  }
+  const block = src.match(/^var AllKinds = \[\]Kind\{([^}]*)\}/m);
+  if (!block) throw new Error("AllKinds not found in unifiedlog.go");
+  return block[1]
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((ident) => {
+      const v = values.get(ident);
+      if (v === undefined) throw new Error(`no Kind constant for ${ident}`);
+      return v;
+    });
+}
+
 describe("AUDIT_LOG_KINDS", () => {
-  test("enumerates exactly the fourteen canonical kinds (matches platform unifiedlog.Kind)", () => {
-    expect(AUDIT_LOG_KINDS).toEqual([
-      "decision",
-      "evidence",
-      "exception",
-      "sample",
-      "audit_period",
-      "aggregation_rule",
-      "feature_flag",
-      "me",
-      "walkthrough",
-      "framework_scope",
-      "taxonomy",
-      "mapping_overlay",
-      "control_import",
-      "risk",
-      "posture_target",
-      "module_access",
-    ]);
+  test("matches the platform's unifiedlog.AllKinds, in order", () => {
+    const goKinds = parseGoAllKinds(readFileSync(UNIFIEDLOG_GO, "utf8"));
+    // Guard against a parser that silently reads nothing.
+    expect(goKinds.length).toBeGreaterThan(10);
+    expect([...AUDIT_LOG_KINDS]).toEqual(goKinds);
+  });
+
+  test("parseGoAllKinds reports a backend-only kind", () => {
+    const src = `
+const (
+\tKindDecision Kind = "decision"
+\tKindNewThing Kind = "new_thing"
+)
+
+var AllKinds = []Kind{
+\tKindDecision,
+\tKindNewThing,
+}
+`;
+    expect(parseGoAllKinds(src)).toEqual(["decision", "new_thing"]);
   });
 });
 
