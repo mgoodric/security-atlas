@@ -65,6 +65,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
@@ -133,7 +134,7 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 	// CallerIsPrivileged=true short-circuits the SQL row-visibility
 	// predicate; CallerIsPrivileged=false enables the predicate
 	// (hides feature_flag rows + restricts me-rows to the caller).
-	privileged, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, cred.IsAdmin)
+	privileged, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, authz.IsTenantAdmin(cred))
 	if err != nil {
 		httperr.WriteInternal(w, r, "role probe", err)
 		return

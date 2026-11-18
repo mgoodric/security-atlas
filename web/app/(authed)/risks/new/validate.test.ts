@@ -221,3 +221,52 @@ describe("hasErrors", () => {
     expect(hasErrors({ title: "" })).toBe(false);
   });
 });
+
+describe("validateRiskForm — proposed acceptance (#2391)", () => {
+  const accept = {
+    ...baseValid,
+    treatment: "accept" as const,
+    linked_control_ids: [],
+  };
+  const inDays = (n: number) =>
+    new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+  test("passes with a justification and a future expiry", () => {
+    expect(
+      validateRiskForm({
+        ...accept,
+        justification: "Compensated by the edge filter.",
+        proposed_until: inDays(30),
+      }),
+    ).toEqual({});
+  });
+
+  test("requires a justification", () => {
+    const e = validateRiskForm({
+      ...accept,
+      justification: "  ",
+      proposed_until: inDays(30),
+    });
+    expect(e.justification).toMatch(/justification is required/i);
+  });
+
+  test("requires a proposed expiry after today", () => {
+    expect(
+      validateRiskForm({ ...accept, justification: "x", proposed_until: "" })
+        .proposed_until,
+    ).toMatch(/required/i);
+    expect(
+      validateRiskForm({
+        ...accept,
+        justification: "x",
+        proposed_until: inDays(0),
+      }).proposed_until,
+    ).toMatch(/after today/i);
+  });
+
+  test("does not apply to other treatments", () => {
+    expect(
+      validateRiskForm({ ...baseValid, justification: "", proposed_until: "" }),
+    ).toEqual({});
+  });
+});

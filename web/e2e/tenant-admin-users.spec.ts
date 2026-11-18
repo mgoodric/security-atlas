@@ -3,12 +3,12 @@
 // read GET /v1/me server-side, so a browser route-mock cannot reach them).
 //
 //   1. A tenant admin (a user_roles 'admin' row, no super_admin) sees the
-//      sidebar Admin entry, and the admin section lists Users and none of
-//      the platform pages.
+//      sidebar Admin entry, and the admin section lists SSO, Users and
+//      Audit and none of the platform pages.
 //   2. In Admin › Users it sees its own tenant's members and grants one of
 //      them a role; the platform writes it.
-//   3. A platform page (/admin/sso) shows the super-admin panel, not the
-//      page.
+//   3. Its SSO page opens (#2503), and a platform page (/admin/api-keys)
+//      shows the super-admin panel, not the page.
 //
 // The tenant and members are the spec's own
 // (fixtures/e2e/tenant-admin-users.sql), reset each run.
@@ -75,7 +75,7 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
     seedFromFixture("tenant-admin-users");
   });
 
-  test("the admin section shows Users and no platform pages", async ({
+  test("the admin section shows SSO, Users and Audit, no platform pages", async ({
     page,
   }) => {
     await signInAs(page, await mintTenantAdminJWT());
@@ -86,8 +86,10 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
 
     await page.goto("/admin");
     const sections = page.getByRole("navigation", { name: "Admin sections" });
-    await expect(sections.getByRole("link", { name: "Users" })).toBeVisible();
-    for (const name of ["SSO", "API keys", "Features", "Audit"]) {
+    for (const name of ["SSO", "Users", "Audit"]) {
+      await expect(sections.getByRole("link", { name })).toBeVisible();
+    }
+    for (const name of ["API keys", "Features", "Tenants", "Super admins"]) {
       await expect(sections.getByRole("link", { name })).toHaveCount(0);
     }
   });
@@ -114,9 +116,15 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
     await expect(row.getByTestId("role-badge-viewer")).toBeVisible();
   });
 
-  test("a platform page shows the super-admin panel", async ({ page }) => {
+  test("its SSO page opens; a platform page shows the super-admin panel", async ({
+    page,
+  }) => {
     await signInAs(page, await mintTenantAdminJWT());
     await page.goto("/admin/sso");
+    await expect(page.getByTestId("sso-config-form")).toBeVisible();
+    await expect(page.getByTestId("admin-platform-forbidden")).toHaveCount(0);
+
+    await page.goto("/admin/api-keys");
     await expect(page.getByTestId("admin-platform-forbidden")).toBeVisible();
   });
 });

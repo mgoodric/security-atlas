@@ -43,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/identity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -173,7 +174,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	// IsAdmin is on the credential; the other two require a user_roles
 	// lookup. The upstream slice-035 OPA middleware is the canonical
 	// gate; this is the second leg.
-	allowed, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, cred.IsAdmin)
+	allowed, err := h.callerAllowedUnified(r.Context(), tenantID, cred.UserID, authz.IsTenantAdmin(cred))
 	if err != nil {
 		httperr.WriteInternal(w, r, "role probe", err)
 		return
@@ -290,8 +291,9 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// callerAllowedUnified is the defense-in-depth role probe. IsAdmin short-circuits
-// (admin always allowed). Otherwise we probe user_roles for either auditor or
+// callerAllowedUnified is the defense-in-depth role probe. isAdmin short-circuits
+// (admin always allowed); callers pass authz.IsTenantAdmin, so a tenant admin
+// by its live roles reads its own tenant's log (#2503 D5). Otherwise we probe user_roles for either auditor or
 // grc_engineer membership under the caller's tenant context. The query goes
 // through ApplyTenant so RLS on user_roles enforces tenant scoping. userID is
 // the raw credential principal; identity.RolesKey reads a "user:<uuid>" JWT

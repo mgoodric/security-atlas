@@ -40,9 +40,10 @@ async function fetchFeatures(): Promise<FeatureFlag[]> {
   return body.items ?? [];
 }
 
-// #2503: the layout admits a tenant admin too, who manages only the Users
-// page. The platform tiles, and their count fetches, are for a
-// super-admin (`is_admin`). Fail-closed: a failed read shows Users only.
+// #2503: the layout admits a tenant admin too, who manages only the
+// tenant-scoped pages (SSO, Users, Audit log). The platform tiles, and their
+// count fetches, are for a super-admin (`is_admin`). Fail-closed: a failed
+// read shows the tenant-scoped tiles only.
 async function fetchIsPlatformAdmin(): Promise<boolean> {
   const res = await fetch(`/api/admin/me`, { cache: "no-store" });
   if (!res.ok) return false;
@@ -71,13 +72,23 @@ export default function AdminOverviewPage() {
     return (
       <PageShell
         title={pageTitle("/admin")}
-        subtitle="Manage your organisation's members and their roles."
+        subtitle="Manage your organisation's sign-in, members and their roles, and read its audit log."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <AdminTile
+            href="/admin/sso"
+            title="SSO"
+            description="OIDC identity-provider configuration · discovery preflight · test login."
+          />
           <AdminTile
             href="/admin/users"
             title="Users"
             description="List users, assign roles, manage local + SSO-provisioned accounts."
+          />
+          <AdminTile
+            href="/admin/audit"
+            title="Audit log"
+            description="Paginated read across the union of audit log tables. Filter by actor, event, time."
           />
         </div>
       </PageShell>

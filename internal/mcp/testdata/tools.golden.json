@@ -254,7 +254,7 @@
         "additionalProperties": false,
         "properties": {
           "acceptance_status": {
-            "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off. A risk cannot be created already approved; approve the acceptance afterwards.",
+            "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off; needs justification and proposed_until. A risk cannot be created already approved; approve the acceptance afterwards.",
             "enum": [
               "proposed"
             ],
@@ -274,8 +274,16 @@
             "description": "Optional methodology-shaped scoring envelope; structure depends on methodology. Omit it to file an unscored risk, as the app's Score later does.",
             "type": "object"
           },
+          "justification": {
+            "description": "Required with acceptance_status=proposed, forbidden otherwise: why the risk should be accepted.",
+            "type": "string"
+          },
           "methodology": {
             "description": "Optional; defaults to nist_800_30. Other valid values: qualitative_5x5, fair.",
+            "type": "string"
+          },
+          "proposed_until": {
+            "description": "Required with acceptance_status=proposed, forbidden otherwise: the proposed expiry, YYYY-MM-DD, after today. The approver sets the approved expiry.",
             "type": "string"
           },
           "title": {

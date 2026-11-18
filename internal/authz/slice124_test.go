@@ -59,10 +59,10 @@ func TestSlice124_UnifiedAuditLogAccess(t *testing.T) {
 			reason:    "an admin credential (cred.IsAdmin) reaches every non-super-admin-only /v1/admin segment (#2503)",
 		},
 		{
-			name:      "tenant-admin-by-role-deny-read",
+			name:      "tenant-admin-by-role-allow-read",
 			roles:     []authz.Role{authz.RoleAdmin},
-			wantAllow: false,
-			reason:    "#2503: audit-log is not a tenant-admin segment; the handler refuses a tenant admin by role too (callerAllowedUnified)",
+			wantAllow: true,
+			reason:    "#2503 D5 (Matt, 2026-11-18): an org admin reads its own tenant's admin audit log",
 		},
 		{
 			name:      "auditor-deny-read",

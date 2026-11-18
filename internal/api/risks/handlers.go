@@ -133,7 +133,11 @@ type createReq struct {
 	InherentScore    json.RawMessage `json:"inherent_score"`
 	Treatment        string          `json:"treatment"`
 	AcceptanceStatus string          `json:"acceptance_status"`
-	TreatmentOwner   string          `json:"treatment_owner"`
+	// Justification and ProposedUntil (YYYY-MM-DD) are required with
+	// acceptance_status=proposed, as on /acceptance/propose (#2391).
+	Justification  string `json:"justification"`
+	ProposedUntil  string `json:"proposed_until"`
+	TreatmentOwner string `json:"treatment_owner"`
 	// OwnerUserID is the owner, an active user of the tenant (#2129).
 	OwnerUserID         *string         `json:"owner_user_id"`
 	ResidualScore       json.RawMessage `json:"residual_score"`
@@ -254,6 +258,11 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "accepted_until must be YYYY-MM-DD")
 		return
 	}
+	proposedUntil, err := parseDate("proposed_until", req.ProposedUntil)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	orgUnitID, err := parseUUIDPtr(req.OrgUnitID)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "org_unit_id must be a UUID")
@@ -266,6 +275,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := risk.CreateInput{
+		Justification:       req.Justification,
+		ProposedUntil:       proposedUntil,
 		Title:               req.Title,
 		Description:         req.Description,
 		CategoryRef:         req.Category,
@@ -301,7 +312,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			})
 		case errors.Is(err, risk.ErrScoreNotNumeric):
 			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
-		case errors.Is(err, risk.ErrInvalidMethodology),
+		case risk.IsTransitionInput(err),
+			errors.Is(err, risk.ErrInvalidMethodology),
 			errors.Is(err, risk.ErrInherentScoreInvalid),
 			risk.IsPlacementValidation(err),
 			risk.IsCategoryRefusal(err):
