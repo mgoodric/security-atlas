@@ -30,6 +30,7 @@ import { Timestamp } from "@/components/ui/timestamp";
 import { APIError } from "@/lib/api/base";
 import { fetchEvidenceDetail, type EvidenceDetail } from "@/lib/api/evidence";
 
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { prettyJSON, scopeLabel, sourceSummary } from "../format";
 import {
   attestationFields,
@@ -107,7 +108,7 @@ export default function EvidenceDetailPage({
             variant={resultBadgeVariant(ev.result)}
             data-testid="evidence-detail-result"
           >
-            {ev.result}
+            {enumLabel("EvidenceResult", ev.result)}
           </Badge>
           {ev.demo ? <DemoBadge testId="evidence-detail-demo" /> : null}
         </div>
