@@ -99,7 +99,9 @@ func TestLLMSettingsAuditMigration_KeepsEveryAction(t *testing.T) {
 		_ = sp.Rollback(ctx)
 	}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM me_audit_log WHERE action = ANY($1)`, llmSettingsActions); err != nil {
+	// Also clear rows with actions later migrations added (#2609), which
+	// the narrowed CHECK refuses too.
+	if _, err := tx.Exec(ctx, `DELETE FROM me_audit_log WHERE NOT (action = ANY($1))`, prior); err != nil {
 		t.Fatalf("clear new-value rows: %v", err)
 	}
 	if _, err := tx.Exec(ctx, string(down)); err != nil {

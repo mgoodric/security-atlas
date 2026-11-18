@@ -78,6 +78,9 @@ type Handler struct {
 	// means the deployment set no ATLAS_OIDC_SECRET_KEY: PATCH then refuses
 	// a new secret rather than store one the sign-in path cannot read.
 	crypter *idpconfig.SecretCrypter
+	// insertAudit writes the PATCH audit row (#2609). Tests replace it to
+	// prove a failed audit write rolls the change back.
+	insertAudit func(context.Context, *dbx.Queries, dbx.InsertMeAuditLogParams) error
 }
 
 // PreflightOptions configures the SSRF defenses for the OIDC discovery
@@ -120,12 +123,16 @@ func (h *Handler) WithPreflightOptions(opts PreflightOptions) *Handler {
 	if opts.MaxBodyBytes == 0 {
 		opts.MaxBodyBytes = h.preflightOpts.MaxBodyBytes
 	}
-	return &Handler{pool: h.pool, preflightOpts: opts, crypter: h.crypter}
+	c := *h
+	c.preflightOpts = opts
+	return &c
 }
 
 // WithSecretCrypter returns a copy of h that seals client secrets with c.
 func (h *Handler) WithSecretCrypter(c *idpconfig.SecretCrypter) *Handler {
-	return &Handler{pool: h.pool, preflightOpts: h.preflightOpts, crypter: c}
+	cp := *h
+	cp.crypter = c
+	return &cp
 }
 
 // --- response shapes ---
@@ -253,33 +260,6 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// First INSERT requires a non-empty client_secret -- the upsert ON
-	// CONFLICT branch tolerates empty (leave-existing). We check by
-	// reading whether a row already exists; if not, secret is required.
-	var exists bool
-	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
-		_, gErr := q.GetAdminSSO(ctx, dbx.GetAdminSSOParams{
-			TenantID: uuidToPgtype(tenantID),
-			Name:     configName,
-		})
-		if gErr == nil {
-			exists = true
-			return nil
-		}
-		if errors.Is(gErr, pgx.ErrNoRows) {
-			return nil
-		}
-		return gErr
-	})
-	if err != nil {
-		httperr.WriteInternal(w, r, "check existing", err)
-		return
-	}
-	if !exists && req.ClientSecret == "" {
-		httpresp.WriteError(w, http.StatusBadRequest, "client_secret is required on first config")
-		return
-	}
-
 	// #2034: the secret is sealed before it is stored; an empty value is
 	// the upsert's leave-existing sentinel and is passed through as such.
 	secretBytes := []byte{}
@@ -305,8 +285,40 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		domains = []string{}
 	}
 
+	// #2609: the change and its audit row commit together or not at all.
+	// The lock serialises SSO writes in the tenant, so the before value is
+	// the state this write replaces, also while the tenant has no row yet.
+	userID, principal := actor(r)
 	var row dbx.UpsertAdminSSORow
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
+		if lErr := q.LockAdminSSO(ctx, uuidToPgtype(tenantID)); lErr != nil {
+			return fmt.Errorf("lock sso: %w", lErr)
+		}
+		before := ssoAuditState{AllowedEmailDomains: []string{}}
+		cur, gErr := q.GetAdminSSOForUpdate(ctx, dbx.GetAdminSSOForUpdateParams{
+			TenantID: uuidToPgtype(tenantID),
+			Name:     configName,
+		})
+		switch {
+		case gErr == nil:
+			before = ssoAuditState{
+				Configured:                  true,
+				IssuerURL:                   cur.IssuerUrl,
+				ClientID:                    cur.ClientID,
+				RedirectURL:                 cur.RedirectUrl,
+				AllowedEmailDomains:         cur.AllowedEmailDomains,
+				TrustUnverifiedEmailForLink: cur.TrustUnverifiedEmailForLink,
+			}
+		case errors.Is(gErr, pgx.ErrNoRows):
+			// First INSERT requires a non-empty client_secret -- the
+			// upsert ON CONFLICT branch tolerates empty (leave-existing).
+			if req.ClientSecret == "" {
+				return errSecretRequired
+			}
+		default:
+			return gErr
+		}
+
 		got, qErr := q.UpsertAdminSSO(ctx, dbx.UpsertAdminSSOParams{
 			ID:                  uuidToPgtype(uuid.New()),
 			TenantID:            uuidToPgtype(tenantID),
@@ -319,9 +331,24 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 
 			TrustUnverifiedEmailForLink: req.TrustUnverifiedEmailForLink,
 		})
+		if qErr != nil {
+			return qErr
+		}
 		row = got
-		return qErr
+		after := ssoAuditState{
+			Configured:                  true,
+			IssuerURL:                   got.IssuerUrl,
+			ClientID:                    got.ClientID,
+			RedirectURL:                 got.RedirectUrl,
+			AllowedEmailDomains:         got.AllowedEmailDomains,
+			TrustUnverifiedEmailForLink: got.TrustUnverifiedEmailForLink,
+		}
+		return h.auditSSOChange(ctx, q, tenantID, userID, principal, before, after, req.ClientSecret != "")
 	})
+	if errors.Is(err, errSecretRequired) {
+		httpresp.WriteError(w, http.StatusBadRequest, "client_secret is required on first config")
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "upsert sso", err)
 		return
