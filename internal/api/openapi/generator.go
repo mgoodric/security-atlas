@@ -98,7 +98,8 @@ func Generate(w io.Writer, routes []RouteSpec) error {
 	if _, err := io.WriteString(w, componentsSection()); err != nil {
 		return err
 	}
-	return nil
+	// Schemas reflected from Go wire structs (#2394).
+	return writeSchemaComponents(w)
 }
 
 // header returns the top-of-file OpenAPI metadata block.
@@ -498,6 +499,12 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 	// GETs) currently document with the Ack placeholder — the
 	// integration is path/method-stable, body shape is documented in
 	// the slice docs until the spec catches up.
+	// An operation in ResponseSchemas documents its 200 body from the Go
+	// wire struct (#2394) and keeps Error as the default.
+	if schema := responseSchemaFor(r); schema != "" {
+		return writeTypedResponses(w, schema)
+	}
+	schema := "Ack"
 	if _, err := io.WriteString(w, "      responses:\n"); err != nil {
 		return err
 	}
@@ -516,10 +523,28 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 	if _, err := io.WriteString(w, "              schema:\n"); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(w, "                $ref: \"#/components/schemas/Ack\"\n"); err != nil {
+	if _, err := fmt.Fprintf(w, "                $ref: \"#/components/schemas/%s\"\n", schema); err != nil {
 		return err
 	}
 	return nil
+}
+
+func writeTypedResponses(w io.Writer, schema string) error {
+	_, err := fmt.Fprintf(w, `      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/%s"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`, schema)
+	return err
 }
 
 func isSearchOperation(r RouteSpec) bool {

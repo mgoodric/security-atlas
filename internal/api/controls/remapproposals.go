@@ -59,7 +59,10 @@ func NewRemapProposalsHandler(store remapProposalLister) *RemapProposalsHandler 
 	return &RemapProposalsHandler{store: store}
 }
 
-type remapProposalWire struct {
+// RemapProposal is one proposal on the wire. It and RemapProposalsResponse
+// are exported so internal/api/openapi can derive their schemas; the web
+// client's types are generated from that spec (#2394).
+type RemapProposal struct {
 	ID              string   `json:"id"`
 	ControlID       string   `json:"control_id"`
 	BundleID        string   `json:"bundle_id"`
@@ -73,8 +76,8 @@ type remapProposalWire struct {
 	CreatedAt       string   `json:"created_at"`
 }
 
-type remapProposalsResp struct {
-	Proposals []remapProposalWire `json:"proposals"`
+type RemapProposalsResponse struct {
+	Proposals []RemapProposal `json:"proposals"`
 	// Count is the proposals on this page; Total every one the filters
 	// match.
 	Count      int    `json:"count"`
@@ -170,9 +173,9 @@ func (h *RemapProposalsHandler) List(w http.ResponseWriter, r *http.Request) {
 		rows = rows[:limit]
 		next = encodeRemapCursor(rows[len(rows)-1])
 	}
-	out := make([]remapProposalWire, len(rows))
+	out := make([]RemapProposal, len(rows))
 	for i, p := range rows {
-		out[i] = remapProposalWire{
+		out[i] = RemapProposal{
 			ID:              uuid.UUID(p.ID.Bytes).String(),
 			ControlID:       uuid.UUID(p.ControlID.Bytes).String(),
 			BundleID:        p.BundleID,
@@ -189,5 +192,5 @@ func (h *RemapProposalsHandler) List(w http.ResponseWriter, r *http.Request) {
 			out[i].SuccessorSCFIDs = []string{}
 		}
 	}
-	httpresp.WriteJSON(w, http.StatusOK, remapProposalsResp{Proposals: out, Count: len(out), Total: total, NextCursor: next})
+	httpresp.WriteJSON(w, http.StatusOK, RemapProposalsResponse{Proposals: out, Count: len(out), Total: total, NextCursor: next})
 }

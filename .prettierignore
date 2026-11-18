@@ -45,3 +45,8 @@ docs/issues/_events.jsonl
 # TestExport_MatchesCommitted compares them byte for byte with the export,
 # so a prettier reflow would fail it. Same reason as the golden files above.
 docs/lifecycles/
+
+# Web client types (#2394), written by `npm run openapi:types` in web/ (tools/openapi-types) from
+# docs/openapi.yaml. `npm run openapi:check` compares them byte for byte with
+# a fresh run, so a prettier reflow would fail it.
+web/lib/api/generated/
