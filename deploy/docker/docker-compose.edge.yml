@@ -248,6 +248,8 @@ services:
       DATABASE_URL: ${DATABASE_URL_MIGRATE_EDGE:?}
       ATLAS_APP_PASSWORD: ${ATLAS_APP_PASSWORD:?}
       ATLAS_HTTP_URL: http://atlas-edge:8080
+      # #2353: the one http:// host bootstrap may send credentials to.
+      ATLAS_BOOTSTRAP_PLAINTEXT_HOST: atlas-edge
       ATLAS_BOOTSTRAP_TENANT: ${ATLAS_BOOTSTRAP_TENANT:-00000000-0000-4000-8000-000000000001}
       ATLAS_DATA_DIR: /var/lib/atlas-bootstrap
       ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}

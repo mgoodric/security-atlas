@@ -152,6 +152,12 @@ Every variable is described in the
 [configuration reference](configuration.md). The compose-only ones
 (`POSTGRES_PASSWORD`, `MINIO_*`, the host-port variables) do not apply here.
 
+`bootstrap.sh` sends an OAuth client secret and a bearer to `ATLAS_HTTP_URL`,
+so it accepts only `https://`, a loopback `http://` URL (as above), or
+`http://` to the one private service host named by
+`ATLAS_BOOTSTRAP_PLAINTEXT_HOST` (default `atlas`, the compose service). Any
+other `http://` host stops the bootstrap before it sends anything.
+
 ```sh
 chmod 600 /path/to/atlas.env
 source /path/to/atlas.env
