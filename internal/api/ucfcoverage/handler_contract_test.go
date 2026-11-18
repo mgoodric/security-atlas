@@ -51,6 +51,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -155,7 +156,15 @@ func TestContract_ControlCoverage(t *testing.T) {
 	// ?framework_version=): control + non-null anchor + a requirements list
 	// carrying BOTH the in-scope (coverage non-null) and out-of-scope
 	// (coverage null) row shapes, pinning the `number | null` coverage typing
-	// the consumer depends on (slice 256: null must NOT degrade to 0).
+	// the consumer depends on (slice 256: null must NOT degrade to 0). The
+	// out-of-scope row also carries the activated SoA's exclusion (#2140),
+	// pinning the object the control page's Coverage marks.
+	excluded := contractRequirement(nil)
+	excluded.Exclusion = &exclusionWire{
+		FrameworkScopeID: "66666666-6666-4666-8666-666666666666",
+		Justification:    "No in-house software development",
+		DecidedAt:        time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
 	anchoredUnpinned := stubCoverageAssembler{
 		found: true,
 		view: coverageView{
@@ -164,7 +173,7 @@ func TestContract_ControlCoverage(t *testing.T) {
 			Anchor:   contractAnchorWire(),
 			Requirements: []requirementForAnchorWire{
 				contractRequirement(&inScope),
-				contractRequirement(nil),
+				excluded,
 			},
 		},
 	}
