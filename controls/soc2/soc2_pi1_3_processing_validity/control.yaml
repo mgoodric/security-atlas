@@ -8,7 +8,7 @@ description: |
   most recent scan of every in-scope repo.
 
 scf_anchor_id: TDA-05
-control_family: SEA
+control_family: TDA
 implementation_type: automated
 owner_role: product-engineering
 lifecycle_state: active
