@@ -297,7 +297,7 @@ mappings:
     scf_anchor: DCH-27
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Physically securing media containing cardholder data overlaps with SCF Media & Physical Storage handling."
+    rationale: "Physically securing media containing cardholder data overlaps with SCF Media & Data Retention."
   # --- Req 10: Log and monitor ---
   - requirement_code: 10.2.1
     scf_anchor: MON-04
