@@ -1,5 +1,5 @@
--- Reverses 20261261000000_group_mapping_api_key_audit.sql: restores the
--- me_audit_log action CHECK of 20261260000000_sso_scim_audit.sql.
+-- Reverses 20261263000000_group_mapping_api_key_audit.sql: restores the
+-- me_audit_log action CHECK of 20261262000000_sso_scim_audit.sql.
 --
 -- Group-role mapping and API key audit rows are audit evidence. They are not
 -- deleted here; archive and remove them deliberately first, or this refuses
@@ -14,7 +14,7 @@ BEGIN
                       'api_key_issue', 'api_key_rotate', 'api_key_revoke');
     IF n > 0 THEN
         RAISE EXCEPTION 'me_audit_log holds % group-role mapping or API key audit row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261261000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261263000000.';
     END IF;
 END
 $$;

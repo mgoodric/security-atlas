@@ -15,7 +15,7 @@ import (
 
 // The me_audit_log actions for API key issue, rotate and revoke (#2609).
 // CHECK constraint extended in migration
-// 20261261000000_group_mapping_api_key_audit.sql.
+// 20261263000000_group_mapping_api_key_audit.sql.
 const (
 	AuditActionKeyIssue  = "api_key_issue"
 	AuditActionKeyRotate = "api_key_rotate"

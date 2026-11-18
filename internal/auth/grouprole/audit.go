@@ -13,7 +13,7 @@ import (
 
 // The me_audit_log actions for group-role mapping create and delete (#2609).
 // CHECK constraint extended in migration
-// 20261261000000_group_mapping_api_key_audit.sql.
+// 20261263000000_group_mapping_api_key_audit.sql.
 const (
 	AuditActionMappingCreate = "group_role_mapping_create"
 	AuditActionMappingDelete = "group_role_mapping_delete"

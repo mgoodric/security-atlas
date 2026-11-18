@@ -4,7 +4,7 @@
 // key audit actions and keeps every value it had.
 //
 // The values before this migration are read from the CHECK in
-// 20261260000000_sso_scim_audit.sql, the definition it replaces, so
+// 20261262000000_sso_scim_audit.sql, the definition it replaces, so
 // a value dropped by the rewrite fails here rather than at the next audit
 // write that uses it. The down migration is checked to refuse the new values
 // again, and to refuse to run while a row with one of them exists.
@@ -19,12 +19,12 @@ import (
 )
 
 const (
-	mappingKeyAuditPrior = "../../migrations/sql/20261260000000_sso_scim_audit.sql"
-	mappingKeyAuditUp    = "../../migrations/sql/20261261000000_group_mapping_api_key_audit.sql"
-	mappingKeyAuditDown  = "../../migrations/sql/20261261000000_group_mapping_api_key_audit.down.sql"
+	mappingKeyAuditPrior = "../../migrations/sql/20261262000000_sso_scim_audit.sql"
+	mappingKeyAuditUp    = "../../migrations/sql/20261263000000_group_mapping_api_key_audit.sql"
+	mappingKeyAuditDown  = "../../migrations/sql/20261263000000_group_mapping_api_key_audit.down.sql"
 )
 
-// mappingKeyAuditActions are the values 20261261000000 adds.
+// mappingKeyAuditActions are the values 20261263000000 adds.
 var mappingKeyAuditActions = []string{
 	"group_role_mapping_create",
 	"group_role_mapping_delete",
@@ -46,16 +46,16 @@ func TestGroupMappingAPIKeyAuditMigration_KeepsEveryAction(t *testing.T) {
 	}
 	for _, a := range prior {
 		if !inCurrent[a] {
-			t.Errorf("action %q from 20261260000000 is missing from 20261261000000", a)
+			t.Errorf("action %q from 20261262000000 is missing from 20261263000000", a)
 		}
 	}
 	for _, a := range mappingKeyAuditActions {
 		if !inCurrent[a] {
-			t.Errorf("20261261000000 does not add %q", a)
+			t.Errorf("20261263000000 does not add %q", a)
 		}
 	}
 	if len(current) != len(prior)+len(mappingKeyAuditActions) {
-		t.Errorf("20261261000000 lists %d actions, want %d", len(current), len(prior)+len(mappingKeyAuditActions))
+		t.Errorf("20261263000000 lists %d actions, want %d", len(current), len(prior)+len(mappingKeyAuditActions))
 	}
 
 	down, err := os.ReadFile(mappingKeyAuditDown)
@@ -79,7 +79,7 @@ func TestGroupMappingAPIKeyAuditMigration_KeepsEveryAction(t *testing.T) {
 
 	for _, a := range current {
 		if !insertsAction(ctx, t, tx, a) {
-			t.Errorf("me_audit_log refuses action %q after 20261261000000", a)
+			t.Errorf("me_audit_log refuses action %q after 20261263000000", a)
 		}
 	}
 

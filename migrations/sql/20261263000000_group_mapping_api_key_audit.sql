@@ -17,11 +17,11 @@
 -- hash.
 --
 -- The CHECK is rewritten in full from the latest definition
--- (20261260000000_sso_scim_audit.sql): every existing value is kept and the
+-- (20261262000000_sso_scim_audit.sql): every existing value is kept and the
 -- new ones are appended. internal/db/group_mapping_api_key_audit_integration_test.go
 -- inserts every value to prove none was dropped.
 --
--- Reversible via 20261261000000_group_mapping_api_key_audit.down.sql.
+-- Reversible via 20261263000000_group_mapping_api_key_audit.down.sql.
 
 ALTER TABLE me_audit_log
     DROP CONSTRAINT IF EXISTS me_audit_log_action_check;
