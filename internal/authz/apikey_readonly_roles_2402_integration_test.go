@@ -14,6 +14,9 @@
 // GET its label's own role grants (D1 in the decisions log). Nothing may
 // gain a write.
 //
+// Keys bound to a user are no longer here: #2431 caps them at their label,
+// and TestDecide2431_BoundKeyRoleMatrix covers them.
+//
 // Run with:  go test -tags=integration -race -run 2402 ./internal/authz/...
 
 package authz_test
@@ -66,9 +69,6 @@ func TestDecide2402_APIKeyRoleMatrix(t *testing.T) {
 		}
 		return id
 	}
-	bound := func(id string, owner uuid.UUID, labels ...string) credstore.Credential {
-		return credstore.Credential{ID: id, TenantID: tenant, UserID: owner.String(), OwnerRoles: labels}
-	}
 	unbound := func(id string, labels ...string) credstore.Credential {
 		return credstore.Credential{ID: id, TenantID: tenant, UserID: id, OwnerRoles: labels}
 	}
@@ -83,16 +83,14 @@ func TestDecide2402_APIKeyRoleMatrix(t *testing.T) {
 	for _, r := range authz.CanonicalRoles() {
 		ro := r == authz.RoleViewer || r == authz.RoleAuditor
 		label := string(r)
+		// Keys bound to a user moved to the #2431 matrix
+		// (bound_key_ceiling_2431_integration_test.go), which caps them.
 		principals = append(principals,
 			principal{"unbound key " + label, unbound("key_u2402_"+label, label), ro, false},
-			principal{"bound key " + label + ", owner holds it", bound("key_b2402_"+label, seedUser(r), label), ro, false},
-			principal{"bound key " + label + ", owner has no roles", bound("key_n2402_"+label, seedUser(), label), ro, false},
-			principal{"bound key " + label + ", owner is admin", bound("key_a2402_"+label, seedUser(authz.RoleAdmin), label), ro, true},
 		)
 	}
 	principals = append(principals,
 		principal{"unbound key viewer+auditor", unbound("key_va2402", "viewer", "auditor"), true, false},
-		principal{"bound key viewer+auditor", bound("key_bva2402", seedUser(authz.RoleViewer), "viewer", "auditor"), true, false},
 		principal{"unbound key viewer+owner label", unbound("key_vl2402", "viewer", "platform-eng"), false, false},
 		principal{"unbound key auditor+control_owner", unbound("key_ac2402", "auditor", "control_owner"), false, false},
 		principal{"unbound key, no label", unbound("key_e2402"), false, false},

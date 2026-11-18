@@ -19,6 +19,10 @@ type Input struct {
 	Action   string        `json:"action"`
 	Resource ResourceInput `json:"resource"`
 	Request  RequestInput  `json:"request"`
+
+	// roleCeiling caps the live user_roles Decide merges for a labelled key
+	// bound to a user (#2431). nil means no cap. It never reaches OPA.
+	roleCeiling []Role
 }
 
 // UserInput is the user half of Input.
@@ -102,6 +106,7 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 	}
 
 	return Input{
+		roleCeiling: boundKeyCeiling(cred),
 		User: UserInput{
 			ID:    cred.UserID,
 			Roles: roles,
@@ -159,6 +164,11 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		// #2381: a machine token whose claim names only viewer and/or
 		// auditor must not derive control_owner below.
 		return nil
+	case boundKeyCeiling(cred) != nil:
+		// #2431: a key bound to a user derives nothing from its label. Its
+		// roles are its owner's live user_roles rows, capped by the label
+		// (boundKeyCeiling), which Decide applies after the resolver.
+		return nil
 	case apiKey(cred) && readOnlyRoleClaim(cred.OwnerRoles):
 		// #2402: an API key whose owner_roles names only viewer and/or
 		// auditor used to derive control_owner below, so a "viewer" key
@@ -185,6 +195,50 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		// admin UI will populate them.
 		return []Role{RoleGRCEngineer}
 	}
+}
+
+// boundKeyCeiling returns the most a labelled API key bound to a user may
+// hold (#2431), or nil when cred is not one. Each label entry gives the role
+// it derives on an unbound key: a canonical role gives itself, and a free-text
+// owner-role label (slice 011, e.g. "platform-eng") gives control_owner.
+// Mixed labels union their entries.
+//
+// Decide intersects the ceiling with the owner's live roles, so a {viewer}
+// key minted for an admin acts as a viewer, not an admin. An owner holding
+// live admin gets the whole ceiling: admin.rego admits everything, so that is
+// still a narrowing.
+//
+// An empty label means no cap (Matt, 2026-11-18): an unlabelled bound key
+// keeps acting as its user. The is_admin and is_approver flags keep their own
+// cases in derivedRolesFor and are not capped here.
+func boundKeyCeiling(cred credstore.Credential) []Role {
+	if cred.IsAdmin || cred.IsApprover || !boundKey(cred) || len(cred.OwnerRoles) == 0 {
+		return nil
+	}
+	var out []Role
+	for _, l := range cred.OwnerRoles {
+		r := Role(l)
+		if !IsCanonical(r) {
+			r = RoleControlOwner
+		}
+		out = mergeRoles(out, []Role{r})
+	}
+	return out
+}
+
+// capRoles is the part of live inside ceiling, in ceiling order. A live admin
+// gets the whole ceiling (#2431).
+func capRoles(ceiling, live []Role) []Role {
+	out := []Role{}
+	for _, r := range ceiling {
+		for _, l := range live {
+			if l == r || l == RoleAdmin {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // jwtSession reports whether cred was synthesized by jwtmw from a verified

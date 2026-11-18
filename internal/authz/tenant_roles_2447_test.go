@@ -6,9 +6,10 @@ package authz_test
 //   - a user who is admin in tenant A and viewer in tenant B, acting in B,
 //     gets what a viewer gets: refused every gate but the #2556 risk-read
 //     gate;
-//   - an API key bound to a user (#2402 D2) gets its owner's live roles, so
-//     a key owned by a tenant admin passes every gate whatever its label
-//     says. That is today's behaviour; #2431 is to cap it at the label;
+//   - an API key bound to a user gets its owner's live roles capped by its
+//     label (#2431), so a viewer key owned by a tenant admin gets what a
+//     viewer gets, at OPA and at the handler gate alike; an unlabelled one
+//     is not capped and passes every gate, as its owner does;
 //   - an unbound key labelled viewer gets what a viewer gets.
 
 import (
@@ -94,15 +95,20 @@ func TestTenantGates2447_APIKeyRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}
-	// Bound: UserID is the owner, not the key id. The viewer label derives
-	// nothing; the owner's live admin role is what OPA and the gate see.
+	// Bound: UserID is the owner, not the key id. The viewer label caps the
+	// owner's live admin role at viewer, for OPA and the gate (#2431).
 	bound := credstore.Credential{ID: "key_bound", TenantID: tenantA2447, UserID: user2447, OwnerRoles: []string{"viewer"}}
+	// Bound with no label: no cap, so the owner's live admin role (#2431).
+	unlabelled := credstore.Credential{ID: "key_unlabelled", TenantID: tenantA2447, UserID: user2447}
 	// Unbound: UserID is the key id, so there are no user_roles to read
 	// and the label is the whole of its roles.
 	unbound := credstore.Credential{ID: "key_unbound", TenantID: tenantA2447, UserID: "key_unbound", OwnerRoles: []string{"viewer"}}
 	for _, rt := range routes2428 {
-		if got := gateStatus2447(t, e, bound, rt); got != http.StatusNoContent {
-			t.Errorf("key bound to a tenant admin (#2402 D2, until #2431): %s %s = %d, want 204", rt.method, rt.path, got)
+		if got, want := gateStatus2447(t, e, bound, rt), viewerStatus2447(rt); got != want {
+			t.Errorf("viewer key bound to a tenant admin (#2431): %s %s = %d, want %d", rt.method, rt.path, got, want)
+		}
+		if got := gateStatus2447(t, e, unlabelled, rt); got != http.StatusNoContent {
+			t.Errorf("unlabelled key bound to a tenant admin: %s %s = %d, want 204", rt.method, rt.path, got)
 		}
 		if got, want := gateStatus2447(t, e, unbound, rt), viewerStatus2447(rt); got != want {
 			t.Errorf("unbound viewer key: %s %s = %d, want %d", rt.method, rt.path, got, want)
