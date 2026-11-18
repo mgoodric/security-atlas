@@ -98,6 +98,7 @@ import {
   PUSH_CTA_SUBTITLE_PREFIX,
 } from "./push-cta";
 import { pageTitle } from "@/lib/page-titles";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { Term } from "@/components/help/term";
 import { Timestamp } from "@/components/ui/timestamp";
 
@@ -546,7 +547,7 @@ function EvidencePageInner() {
           data-testid="evidence-row-result"
           title={row.result}
         >
-          {row.result}
+          {enumLabel("EvidenceResult", row.result)}
         </span>
       ),
     },

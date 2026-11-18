@@ -70,6 +70,29 @@ func TestCatalogRemapList_FiltersAndRenders(t *testing.T) {
 	}
 }
 
+func TestCatalogRemapList_PagesAndNamesTheNextCursor(t *testing.T) {
+	resetControlsAuth(t)
+	api := &remapAPI{status: http.StatusOK, response: map[string]any{
+		"proposals": []map[string]any{{
+			"id": "prop-1", "bundle_id": "acme_logging", "legacy_scf_id": "MON-01", "legacy_release": "2025.1",
+			"target_release": "2025.2", "class": "split", "status": "rebound", "successor_scf_ids": []string{"MON-01", "MON-11"},
+		}},
+		"count": 1, "total": 2, "next_cursor": "cur-1",
+	}}
+	srv := api.server(t)
+	out, err := runImportCmd(t, "--endpoint", srv.URL, "--token", "tok-1",
+		"catalog", "remap", "list", "--status", "rebound", "--class-not", "unchanged", "--limit", "1", "--cursor", "cur-0")
+	if err != nil {
+		t.Fatalf("list: %v\n%s", err, out)
+	}
+	if api.gotQuery != "class_not=unchanged&cursor=cur-0&limit=1&status=rebound" {
+		t.Errorf("query %q", api.gotQuery)
+	}
+	if want := "1 of 2 shown; next page: --cursor cur-1"; !strings.Contains(out, want) {
+		t.Errorf("output %q; want it to contain %q", out, want)
+	}
+}
+
 func TestCatalogRemapApprove_SendsChosenAnchor(t *testing.T) {
 	resetControlsAuth(t)
 	api := &remapAPI{status: http.StatusOK, response: approvedDecision}

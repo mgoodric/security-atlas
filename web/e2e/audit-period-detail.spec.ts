@@ -174,7 +174,7 @@ test.describe("audit-period detail (#2117)", () => {
     await expect(page.getByTestId("audit-period-name")).toHaveText(
       "SOC 2 2026 Q1 (test-2117)",
     );
-    await expect(page.getByTestId("audit-period-status")).toHaveText("open");
+    await expect(page.getByTestId("audit-period-status")).toHaveText("Open");
     await expect(page.getByTestId("audit-period-framework")).toHaveText(
       "SOC 2 2017",
     );
@@ -190,7 +190,7 @@ test.describe("audit-period detail (#2117)", () => {
       "2",
     );
     await expect(rowA.getByTestId("audit-period-control-result")).toHaveText(
-      "fail",
+      "Fail",
     );
     await expect(rowB.getByTestId("audit-period-control-count")).toHaveText(
       "0",
@@ -208,7 +208,7 @@ test.describe("audit-period detail (#2117)", () => {
     await page.getByTestId("audit-period-freeze-confirm-cancel").click();
     await expect(confirm).toBeHidden();
     expect(freezeCalls).toBe(0);
-    await expect(page.getByTestId("audit-period-status")).toHaveText("open");
+    await expect(page.getByTestId("audit-period-status")).toHaveText("Open");
     await expect(page.getByTestId("audit-period-frozen-hash")).toHaveCount(0);
 
     // Confirm: the period freezes and the hash and time are shown.
@@ -220,7 +220,7 @@ test.describe("audit-period detail (#2117)", () => {
     await expect(page.getByTestId("audit-period-frozen-at")).toHaveText(
       FROZEN_AT,
     );
-    await expect(page.getByTestId("audit-period-status")).toHaveText("frozen");
+    await expect(page.getByTestId("audit-period-status")).toHaveText("Frozen");
     await expect(page.getByTestId("audit-period-freeze")).toHaveCount(0);
     expect(freezeCalls).toBe(1);
   });

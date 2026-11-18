@@ -1,5 +1,5 @@
-// #1778 — the remap proposal list BFF forwards only the class and status
-// filters, with the caller's own bearer.
+// #1778 — the remap proposal list BFF forwards only the documented filters
+// and the paging parameters (#2325), with the caller's own bearer.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mockNextServer } from "../../../../lib/test-utils/next-mocks";
@@ -46,6 +46,20 @@ describe("GET /api/controls/remap-proposals", () => {
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
     expect((init.headers as Record<string, string>).Authorization).toBe(
       "Bearer reviewer-bearer",
+    );
+  });
+
+  test("forwards class_not, limit and cursor", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(empty());
+    await GET(
+      new Request(
+        "http://web/api/controls/remap-proposals?status=rebound&class_not=unchanged&limit=50&cursor=abc",
+      ),
+    );
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
+      "http://atlas:8080/v1/controls/remap-proposals?class_not=unchanged&status=rebound&limit=50&cursor=abc",
     );
   });
 

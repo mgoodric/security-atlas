@@ -47,7 +47,10 @@ export interface RemapProposal {
 
 export interface RemapProposalsResponse {
   proposals: RemapProposal[];
+  // count is this page; total every proposal the filters match (#2325).
   count: number;
+  total: number;
+  next_cursor?: string;
 }
 
 export interface RemapDecision {
@@ -107,10 +110,26 @@ export interface EdgeRemapProposalsResponse {
   proposals: EdgeRemapProposal[];
 }
 
-export function fetchRemapProposals(): Promise<RemapProposalsResponse> {
-  return bffControlFetch<RemapProposalsResponse>(
-    "/api/controls/remap-proposals",
-  );
+// The platform pages the list (#2325). The review page groups every
+// pending proposal by class, so this reads every page, at the largest page
+// size the platform allows.
+export const REMAP_PAGE_LIMIT = 500;
+
+export async function fetchRemapProposals(): Promise<RemapProposalsResponse> {
+  const proposals: RemapProposal[] = [];
+  let cursor: string | undefined;
+  let total = 0;
+  do {
+    const qs = new URLSearchParams({ limit: String(REMAP_PAGE_LIMIT) });
+    if (cursor) qs.set("cursor", cursor);
+    const page = await bffControlFetch<RemapProposalsResponse>(
+      `/api/controls/remap-proposals?${qs.toString()}`,
+    );
+    proposals.push(...page.proposals);
+    total = page.total;
+    cursor = page.next_cursor;
+  } while (cursor);
+  return { proposals, count: proposals.length, total };
 }
 
 export function fetchEdgeRemapProposals(): Promise<EdgeRemapProposalsResponse> {

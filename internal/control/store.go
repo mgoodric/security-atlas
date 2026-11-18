@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -161,7 +162,7 @@ func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior
 				"control_id", uuid.UUID(prior.ID.Bytes).String(), "status", status)
 			return nil
 		}
-		_, err := scfimport.RecordRemapProposal(ctx, q, legacy, status, scfimport.SourceUpload)
+		_, _, err := scfimport.RecordRemapProposal(ctx, q, legacy, status, scfimport.SourceUpload)
 		return err
 	}
 	if oldRow.ScfID != newRow.ScfID || oldRow.Title != newRow.Title {
@@ -991,24 +992,63 @@ func coerceStringSlice(s []string) []string {
 	return s
 }
 
-// ListRemapProposals returns the active tenant's SCF remap proposals
-// (#1775), optionally filtered by class and status (nil = any). The query
-// is filtered by the explicit tenant id as well as by RLS.
-func (s *Store) ListRemapProposals(ctx context.Context, class, status *string) ([]dbx.ListSCFRemapProposalsRow, error) {
-	var rows []dbx.ListSCFRemapProposalsRow
+// RemapProposalFilter narrows and pages ListRemapProposals. A nil filter
+// field means any.
+type RemapProposalFilter struct {
+	Class    *string
+	ClassNot *string
+	Status   *string
+	// After is the last row of the previous page; nil for the first page.
+	After *RemapProposalCursor
+	Limit int32
+}
+
+// RemapProposalCursor is a position in the list's order (created_at DESC,
+// bundle_id, id).
+type RemapProposalCursor struct {
+	CreatedAt time.Time
+	BundleID  string
+	ID        uuid.UUID
+}
+
+// ListRemapProposals returns one page of the active tenant's SCF remap
+// proposals (#1775) and the total the filter matches (#2325). The query is
+// filtered by the explicit tenant id as well as by RLS.
+func (s *Store) ListRemapProposals(ctx context.Context, f RemapProposalFilter) ([]dbx.ListSCFRemapProposalsRow, int64, error) {
+	var (
+		rows  []dbx.ListSCFRemapProposalsRow
+		total int64
+	)
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		var err error
-		rows, err = q.ListSCFRemapProposals(ctx, dbx.ListSCFRemapProposalsParams{
+		params := dbx.ListSCFRemapProposalsParams{
 			TenantID: pgUUID(tenantID),
-			Class:    class,
-			Status:   status,
-		})
+			Class:    f.Class,
+			ClassNot: f.ClassNot,
+			Status:   f.Status,
+			RowLimit: f.Limit,
+		}
+		if f.After != nil {
+			params.AfterCreatedAt = pgtype.Timestamptz{Time: f.After.CreatedAt, Valid: true}
+			params.AfterBundleID = &f.After.BundleID
+			params.AfterID = pgUUID(f.After.ID)
+		}
+		var err error
+		rows, err = q.ListSCFRemapProposals(ctx, params)
 		if err != nil {
 			return fmt.Errorf("list scf remap proposals: %w", err)
 		}
+		total, err = q.CountSCFRemapProposals(ctx, dbx.CountSCFRemapProposalsParams{
+			TenantID: pgUUID(tenantID),
+			Class:    f.Class,
+			ClassNot: f.ClassNot,
+			Status:   f.Status,
+		})
+		if err != nil {
+			return fmt.Errorf("count scf remap proposals: %w", err)
+		}
 		return nil
 	})
-	return rows, err
+	return rows, total, err
 }
 
 // ErrControlNotFound is a control id with no row in the caller's tenant.
