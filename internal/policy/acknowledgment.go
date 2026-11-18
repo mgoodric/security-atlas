@@ -63,6 +63,27 @@ var (
 	ErrAckMissingPolicyID = errors.New("policy_ack: policy id is required")
 )
 
+// AudienceEveryone is the acknowledgment_required_roles value that aims a
+// policy at every member of the tenant (#2524). A caller matches it when it
+// is a member, meaning it holds a live role (see WithEveryone).
+const AudienceEveryone = "everyone"
+
+// WithEveryone returns labels plus AudienceEveryone when member is true, so
+// a policy aimed at everyone intersects every member. A caller that is not a
+// member (no live role) gets labels unchanged and matches no "everyone"
+// policy (#2524).
+func WithEveryone(labels []string, member bool) []string {
+	if !member {
+		return labels
+	}
+	for _, l := range labels {
+		if l == AudienceEveryone {
+			return labels
+		}
+	}
+	return append(append([]string(nil), labels...), AudienceEveryone)
+}
+
 // AckCaller is the slice-034 credential subset the ack store needs.
 // Decoupled from the full credstore.Credential so unit tests can build
 // a minimal caller and the API package boundary stays clean (this

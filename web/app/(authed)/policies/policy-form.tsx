@@ -20,8 +20,10 @@ import { Input } from "@/components/ui/input";
 import type { EntityKind } from "@/lib/entity-picker";
 
 import {
-  ACK_ROLES,
+  AUDIENCE_OPTIONS,
+  audienceLabel,
   NO_CONTROLS_WARNING,
+  unrecognisedAudiences,
   validatePolicyForm,
   type PolicyFormErrors,
   type PolicyFormValues,
@@ -142,10 +144,17 @@ export function PolicyForm({
           Acknowledgment roles
         </legend>
         <p className="text-xs text-muted-foreground">
-          People with these roles are asked to acknowledge the published policy.
+          People with these roles, or every member for Everyone, are asked to
+          acknowledge the published policy.
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
-          {ACK_ROLES.map((role) => (
+          {/* #2524: the roles plus Everyone, then any free-text value the
+              policy carries from before, flagged. Unticking one drops it;
+              the form never adds one. */}
+          {[
+            ...AUDIENCE_OPTIONS,
+            ...unrecognisedAudiences(v.acknowledgment_required_roles),
+          ].map((role) => (
             <label key={role} className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -161,10 +170,26 @@ export function PolicyForm({
                 }
                 data-testid={`policy-ack-role-${role}`}
               />
-              {role}
+              {audienceLabel(role)}
+              {AUDIENCE_OPTIONS.includes(role) ? null : (
+                <span
+                  className="text-xs text-destructive"
+                  data-testid={`policy-ack-role-unrecognised-${role}`}
+                >
+                  unrecognised audience
+                </span>
+              )}
             </label>
           ))}
         </div>
+        {errors.acknowledgment_required_roles ? (
+          <p
+            className="text-xs text-destructive"
+            data-testid="policy-ack-roles-error"
+          >
+            {errors.acknowledgment_required_roles}
+          </p>
+        ) : null}
       </fieldset>
 
       <div className="space-y-1">
