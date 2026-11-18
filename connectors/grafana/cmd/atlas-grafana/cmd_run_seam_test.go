@@ -107,7 +107,7 @@ func okFlags() runFlags {
 		environment:    "prod",
 		ruleControl:    "scf:MON-02",
 		accessControl:  "scf:IAC-37",
-		firingControl:  "scf:IRO-16",
+		firingControl:  "scf:IRO-06",
 		firingLookback: 24 * time.Hour,
 	}
 }

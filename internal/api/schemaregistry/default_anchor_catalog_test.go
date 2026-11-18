@@ -148,12 +148,14 @@ func TestAnchorExistsInCatalog_RejectsDanglingAnchor(t *testing.T) {
 		// Present anchors (sanity that the helper resolves real ones).
 		{"present_MON-02", "MON-02", true},
 		{"present_IRO-16", "IRO-16", true},
+		{"present_IRO-02", "IRO-02", true},
 		{"present_CFG-04", "CFG-04", true},
 		// Deliberately-dangling fake anchor — MUST be rejected.
 		{"dangling_ZZZ-99", "ZZZ-99", false},
-		// The historical real-but-absent anchors this slice remapped away.
+		// Real SCF codes absent from the sample. IRO-02 was in this list
+		// until #2413 added it; IRO-04 left the sample in #1980.
 		{"dangling_MON-01", "MON-01", false},
-		{"dangling_IRO-02", "IRO-02", false},
+		{"dangling_IRO-04", "IRO-04", false},
 		{"empty", "", false},
 	}
 	for _, tc := range cases {

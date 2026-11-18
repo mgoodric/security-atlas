@@ -207,7 +207,7 @@ atlas-pagerduty run --environment prod --lookback-days 90
 ```
 
 The `run` subcommand emits all four kinds in one pass. Override the postmortem
-control mapping with `--postmortem-control` (default `scf:IRO-13`) and the
+control mapping with `--postmortem-control` (default `scf:IRO-14`) and the
 response-metrics control mapping with `--metrics-control` (default `scf:IRO-02`).
 
 ## Scope minimums
@@ -224,12 +224,11 @@ accuracy recheck:
 
 - `pagerduty.oncall_coverage.v1` → `IRO-08` (Incident Response Plan (IRP)), `IRO-07`
   (Incident Response Team) — proves an IR capability exists and is staffed.
-- `pagerduty.incident_summary.v1` → `IRO-02` (Incident Handling), `IRO-16`
-  (Incident Stakeholder Reporting) — proves incidents are detected, handled, and resolved.
-- `pagerduty.postmortem_summary.v1` → `IRO-13` (Root-Cause Analysis), `IRO-16`
-  (Incident Stakeholder Reporting) — proves incidents are reviewed and corrective actions
+- `pagerduty.incident_summary.v1` → `IRO-02` (Incident Response Operations) — proves incidents are detected, handled, and resolved.
+- `pagerduty.postmortem_summary.v1` → `IRO-14` (Root Cause Analysis (RCA) & Lessons
+  Learned) — proves incidents are reviewed and corrective actions
   tracked (SOC 2 CC7.5; the slice-372 IR continuous-improvement loop).
-- `pagerduty.response_metrics.v1` → `IRO-02` (Incident Handling), `MON-02`
+- `pagerduty.response_metrics.v1` → `IRO-02` (Incident Response Operations), `MON-02`
   (Continuous Monitoring) — proves incidents are acknowledged and resolved within
   target windows at the program level (SOC 2 CC7.4). Service-level aggregates,
   never a per-engineer scorecard.
