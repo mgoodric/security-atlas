@@ -308,6 +308,26 @@ WITH unified AS (
         (to_jsonb(ma) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'user_id' - 'subject_module')::jsonb AS payload_json
     FROM member_module_access_audit_log ma
+
+    UNION ALL
+
+    -- 17. vendor_audit_log (#2450): a vendor's owner changed. The payload
+    -- holds the before and after owner (owner_user_id and the unlinked
+    -- text); the payload gate shows it only to a caller who can read
+    -- vendors.
+    SELECT
+        created_at     AS occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'vendor'::text AS kind,
+        'vendor'::text AS target_type,
+        vendor_id::text AS target_id,
+        action_type    AS action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(va) - 'tenant_id' - 'created_at' - 'actor'
+            - 'action_type' - 'vendor_id' - 'subject_module')::jsonb AS payload_json
+    FROM vendor_audit_log va
 )
 SELECT
     unified.occurred_at,
@@ -597,6 +617,9 @@ WITH unified AS (
     UNION ALL
     SELECT occurred_at, actor, 'module_access', '', '', ''
     FROM member_module_access_audit_log
+    UNION ALL
+    SELECT created_at, actor, 'vendor', action_type, '', ''
+    FROM vendor_audit_log
 )
 SELECT DISTINCT
     unified.actor_id::text     AS actor_id,
@@ -644,7 +667,7 @@ type ListUnifiedAuditMachineActorsRow struct {
 // for the Activity page's actor picker. A person or API key is listed
 // from /v1/people instead, so only these shapes are returned.
 //
-// The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+// The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
 // what the visibility rules read: the same window, the slice 270
 // non-privileged predicate and the slice 669 read-telemetry predicate.
 // One row per (actor, kind, target_type, request_path), so the handler

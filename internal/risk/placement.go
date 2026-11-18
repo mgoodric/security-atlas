@@ -218,7 +218,7 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 		// Record fields are checked before any write, so a refused field
 		// leaves placement and category untouched too.
 		if in.Fields.OwnerUserSet && !sameUserID(in.Fields.OwnerUserID, current.OwnerUserID) {
-			if err := checkOwnerUser(ctx, q, tenantID, in.Fields.OwnerUserID); err != nil {
+			if err := CheckOwnerUser(ctx, q, tenantID, in.Fields.OwnerUserID); err != nil {
 				return err
 			}
 		}

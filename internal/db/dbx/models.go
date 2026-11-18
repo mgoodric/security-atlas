@@ -3627,6 +3627,18 @@ type Vendor struct {
 	OwnerUserID      pgtype.UUID            `json:"owner_user_id"`
 }
 
+type VendorAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	VendorID      pgtype.UUID        `json:"vendor_id"`
+	Actor         string             `json:"actor"`
+	ActionType    string             `json:"action_type"`
+	BeforeState   []byte             `json:"before_state"`
+	AfterState    []byte             `json:"after_state"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
 type VendorReview struct {
 	ID         pgtype.UUID         `json:"id"`
 	TenantID   pgtype.UUID         `json:"tenant_id"`

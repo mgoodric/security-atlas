@@ -26,6 +26,8 @@ var kindModuleRoute = map[unifiedlog.Kind]string{
 	// Taxonomy rows are risk categories.
 	unifiedlog.KindTaxonomy: "/v1/risks",
 	unifiedlog.KindRisk:     "/v1/risks",
+	// Vendor owner changes (#2450) belong to the vendors module.
+	unifiedlog.KindVendor: "/v1/vendors",
 }
 
 // visibleEntries drops the rows whose module the caller may not see: a

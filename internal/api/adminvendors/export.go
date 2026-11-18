@@ -34,7 +34,13 @@
 //	id, name, domain, criticality, contract_start, contract_end,
 //	dpa_signed, dpa_signed_at, review_cadence, last_review_date,
 //	overdue, owner_user_masked, linked_sow_uri, notes, scope_cell_ids,
-//	created_at, updated_at
+//	created_at, updated_at, owner_user_id, owner_name
+//
+// `owner_user_id` and `owner_name` (#2450) name the vendor's owner user
+// (#2129) beside the masked free text. `owner_name` is the user's
+// display_name only (people.ExportNamesByID): GET /v1/people falls back to
+// the email's local-part, which no export emits (D1 above), so a user with
+// no display name exports an empty name and their id.
 //
 // `scope_cell_ids` renders as a `;`-separated UUID list (mirroring the
 // CSV-friendly join the slice-135 reference uses for repeated-column
@@ -81,6 +87,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
@@ -254,6 +261,17 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	names, err := h.ownerNames(ctx, tenantID)
+	if err != nil {
+		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
+			Format: string(format),
+			Result: "error:db",
+			Reason: err.Error(),
+		})
+		httperr.WriteInternal(w, r, "list vendor owner names", err)
+		return
+	}
+
 	header := vendorsExportHeader()
 	filename := export.BuildFilename(exportEntity, encoder.FileExt(), nil)
 	w.Header().Set("Content-Type", encoder.ContentType())
@@ -263,7 +281,7 @@ func (h *Handler) ExportVendors(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	cw := &countingWriter{w: w}
-	if err := encoder.WriteRows(cw, header, vendorsToRowIter(vendors, h.now())); err != nil {
+	if err := encoder.WriteRows(cw, header, vendorsToRowIter(vendors, names, h.now())); err != nil {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format:    string(format),
 			Result:    "error:encode",
@@ -351,6 +369,9 @@ func vendorsExportHeader() []string {
 		"scope_cell_ids",
 		"created_at",
 		"updated_at",
+		// #2450: appended, so existing column positions hold.
+		"owner_user_id",
+		"owner_name",
 	}
 }
 
@@ -361,10 +382,15 @@ func vendorsExportHeader() []string {
 //
 // `owner_user_masked` runs the raw `OwnerUser` field through
 // [MaskEmail]. Non-email values pass through unchanged; email-shaped
-// values render as `*@domain.tld` (slice 139 D1).
-func vendorsToRowIter(vendors []vendor.Vendor, asOf time.Time) iter.Seq[[]string] {
+// values render as `*@domain.tld` (slice 139 D1). `owner_name` is the
+// owner user's entry in names, empty when the vendor has no owner user.
+func vendorsToRowIter(vendors []vendor.Vendor, names map[uuid.UUID]string, asOf time.Time) iter.Seq[[]string] {
 	return func(yield func([]string) bool) {
 		for _, v := range vendors {
+			owner, ownerName := "", ""
+			if v.OwnerUserID != nil {
+				owner, ownerName = v.OwnerUserID.String(), names[*v.OwnerUserID]
+			}
 			row := []string{
 				v.ID.String(),
 				v.Name,
@@ -383,6 +409,8 @@ func vendorsToRowIter(vendors []vendor.Vendor, asOf time.Time) iter.Seq[[]string
 				joinUUIDs(v.ScopeCellIDs),
 				v.CreatedAt.UTC().Format(time.RFC3339Nano),
 				v.UpdatedAt.UTC().Format(time.RFC3339Nano),
+				owner,
+				ownerName,
 			}
 			if !yield(row) {
 				return
@@ -454,6 +482,17 @@ func callerAllowedExport(cred credstore.Credential) bool {
 		}
 	}
 	return false
+}
+
+// ownerNames is each tenant user's display name, for owner_name (#2450).
+func (h *Handler) ownerNames(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID]string, error) {
+	var names map[uuid.UUID]string
+	err := h.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		var err error
+		names, err = people.ExportNamesByID(ctx, q, tenantID)
+		return err
+	})
+	return names, err
 }
 
 func (h *Handler) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries) error) error {

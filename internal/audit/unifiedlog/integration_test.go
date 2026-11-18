@@ -37,6 +37,7 @@ package unifiedlog_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -340,6 +341,81 @@ func TestIntegration_Query_ActorFilterMatchesExact(t *testing.T) {
 	for _, e := range gotMiss {
 		if e.ActorID == "seeder-318" {
 			t.Error("ActorFilter mismatch leaked the seeded row")
+		}
+	}
+}
+
+// TestIntegration_Query_VendorKind (#2450): a vendor_audit_log row reads as
+// kind `vendor`, targeting the vendor, with its before/after in the payload
+// and its actor the writer's principal. Another tenant does not see it, and
+// the log is append-only.
+func TestIntegration_Query_VendorKind(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	vendorID := uuid.New()
+
+	ctx, err := tenancy.WithTenant(context.Background(), tenantA.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	tx, err := app.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		t.Fatalf("ApplyTenant: %v", err)
+	}
+	var when time.Time
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO vendor_audit_log
+		    (tenant_id, vendor_id, actor, action_type, before_state, after_state)
+		VALUES ($1, $2, 'key_2450', 'owner_changed',
+		        '{"owner_user_id":null}', '{"owner_user_id":"u-1"}')
+		RETURNING created_at`, tenantA, vendorID).Scan(&when); err != nil {
+		t.Fatalf("seed vendor_audit_log: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+
+	params := unifiedlog.QueryParams{
+		From:       when.Add(-time.Minute),
+		To:         when.Add(time.Minute),
+		KindFilter: []unifiedlog.Kind{unifiedlog.KindVendor},
+		Limit:      100,
+	}
+	entries := queryUnderTenant(t, app, tenantA, params)
+	if len(entries) != 1 {
+		t.Fatalf("got %d vendor entries, want 1: %+v", len(entries), entries)
+	}
+	e := entries[0]
+	if e.TargetType != "vendor" || e.TargetID != vendorID.String() || e.Action != "owner_changed" || e.ActorID != "key_2450" {
+		t.Errorf("entry = %+v", e)
+	}
+	var payload struct {
+		After map[string]any `json:"after_state"`
+	}
+	if err := json.Unmarshal(e.PayloadJSON, &payload); err != nil {
+		t.Fatalf("payload: %v: %s", err, e.PayloadJSON)
+	}
+	if payload.After["owner_user_id"] != "u-1" {
+		t.Errorf("payload = %s, want the after owner", e.PayloadJSON)
+	}
+	if got := queryUnderTenant(t, app, tenantB, params); len(got) != 0 {
+		t.Errorf("RLS leak: tenant B sees %d vendor entries", len(got))
+	}
+
+	// Append-only: the trigger denies UPDATE and DELETE even to the
+	// BYPASSRLS migrate role.
+	for _, stmt := range []string{
+		`UPDATE vendor_audit_log SET actor = 'x' WHERE vendor_id = $1`,
+		`DELETE FROM vendor_audit_log WHERE vendor_id = $1`,
+	} {
+		if _, err := admin.Exec(context.Background(), stmt, vendorID); err == nil {
+			t.Errorf("%s: allowed on an append-only log", stmt)
 		}
 	}
 }

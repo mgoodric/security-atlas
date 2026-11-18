@@ -222,9 +222,34 @@ func SetTreatmentOwnerTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 	return err
 }
 
-// checkOwnerUser refuses an owner that is not an active user of tenantID
-// (#2129). A nil owner clears it and needs no check.
-func checkOwnerUser(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, owner *uuid.UUID) error {
+// SetOwnerUserTx makes owner, an active user of tenantID, the risk's owner
+// inside the caller's transaction, audit-logged as a fields_changed row as
+// PATCH logs it. Picking an owner clears the free-text treatment_owner. The
+// MCP treatment applier uses it for the owner_user_id its proposal names
+// (#2450). The same owner writes nothing and is not re-checked.
+func SetOwnerUserTx(ctx context.Context, q *dbx.Queries, tenantID, id, owner uuid.UUID, actor string) error {
+	current, err := lockRisk(ctx, q, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if sameUserID(current.OwnerUserID, &owner) {
+		return nil
+	}
+	if err := CheckOwnerUser(ctx, q, tenantID, &owner); err != nil {
+		return err
+	}
+	next, before, after, err := applyRecordFields(current, RecordFields{OwnerUserSet: true, OwnerUserID: &owner})
+	if err != nil {
+		return err
+	}
+	_, err = updateRecordTx(ctx, q, tenantID, next, actor, before, after)
+	return err
+}
+
+// CheckOwnerUser refuses an owner that is not an active user of tenantID
+// (#2129). A nil owner clears it and needs no check. REST and the MCP risk
+// appliers (#2450) share it, so both refuse the same owners.
+func CheckOwnerUser(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, owner *uuid.UUID) error {
 	if owner == nil {
 		return nil
 	}

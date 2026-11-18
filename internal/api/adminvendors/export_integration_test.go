@@ -355,3 +355,69 @@ func contains(row []string, s string) bool {
 	}
 	return false
 }
+
+// #2450: a vendor owned by a user exports the owner's id and display name
+// beside the masked free text. A user with no display name exports their
+// id and an empty name: the email's local-part never appears (D1).
+func TestVendorsExport_OwnerUserAndName(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ts, bearer := setupHTTPServer(t, tenant)
+	named, unnamed := uuid.NewString(), uuid.NewString()
+	for _, u := range [][3]string{
+		{named, "Alice Owner", "alice-2450@operator.example.com"},
+		{unnamed, "", "bob-2450@operator.example.com"},
+	} {
+		if _, err := admin.Exec(context.Background(), `
+			INSERT INTO users (id, tenant_id, email, display_name, status)
+			VALUES ($1, $2, $3, $4, 'active')`, u[0], tenant, u[2], u[1]); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM users WHERE tenant_id = $1`, tenant)
+	})
+	want := map[string][3]string{}
+	for name, owner := range map[string]string{"Named": named, "Unnamed": unnamed} {
+		id := seedVendor(t, ts, bearer, name, "")
+		if _, err := admin.Exec(context.Background(),
+			`UPDATE vendors SET owner_user_id = $1 WHERE id = $2`, owner, id); err != nil {
+			t.Fatalf("set owner: %v", err)
+		}
+		display := "Alice Owner"
+		if owner == unnamed {
+			display = ""
+		}
+		want[id] = [3]string{"", owner, display}
+	}
+	unowned := seedVendor(t, ts, bearer, "Unowned", "carol@operator.example.com")
+	want[unowned] = [3]string{"*@operator.example.com", "", ""}
+
+	resp, body := doGet(t, ts.URL+"/v1/admin/vendors/export?format=csv", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "bob-2450") {
+		t.Errorf("export leaks an owner's email local-part: %s", body)
+	}
+	rows := mustParseCSV(t, string(body))
+	idx := map[string]int{}
+	for i, h := range rows[0] {
+		idx[h] = i
+	}
+	seen := 0
+	for _, row := range rows[1:] {
+		w, ok := want[row[0]]
+		if !ok {
+			continue
+		}
+		seen++
+		got := [3]string{row[idx["owner_user_masked"]], row[idx["owner_user_id"]], row[idx["owner_name"]]}
+		if got != w {
+			t.Errorf("vendor %s owner_user_masked, owner_user_id, owner_name = %v; want %v", row[0], got, w)
+		}
+	}
+	if seen != len(want) {
+		t.Errorf("found %d of %d seeded vendors in the export", seen, len(want))
+	}
+}

@@ -23,6 +23,20 @@ func TestKindModuleRoute_OptionalModules(t *testing.T) {
 	}
 }
 
+// #2450: vendor rows belong to the vendors module, so a member whose
+// module access leaves vendors out does not see them in Activity.
+func TestKindModuleRoute_VendorIsTheVendorsModule(t *testing.T) {
+	t.Parallel()
+	route, ok := kindModuleRoute[unifiedlog.KindVendor]
+	if !ok {
+		t.Fatal("kind vendor has no module route; it would show as core")
+	}
+	o, err := featureflag.Resolve(route)
+	if err != nil || o.Module.FlagKey != "vendor.enabled" {
+		t.Errorf("kind vendor: route %s resolves to %+v (%v); want the vendor.enabled module", route, o.Module, err)
+	}
+}
+
 // #2477: a decision is placed by its recorded request path; only a row
 // with no recorded path falls back to "/v1/"+target_type.
 func TestDecisionRoute(t *testing.T) {

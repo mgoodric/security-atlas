@@ -167,3 +167,10 @@ ON CONFLICT (tenant_id, vendor_id, scope_cell_id) DO NOTHING;
 -- Used before re-binding the full cell set on an update.
 DELETE FROM vendor_scope_cells
 WHERE tenant_id = $1 AND vendor_id = $2;
+
+-- name: InsertVendorAuditLog :exec
+-- #2450: one append-only row per vendor owner change, in the write's tx.
+INSERT INTO vendor_audit_log (
+    tenant_id, vendor_id, actor, action_type, before_state, after_state
+)
+VALUES ($1, $2, $3, $4, $5, $6);

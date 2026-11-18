@@ -88,6 +88,8 @@ const (
 	// KindModuleAccess is member_module_access_audit_log (#2172): a
 	// member's module access set.
 	KindModuleAccess Kind = "module_access"
+	// KindVendor is vendor_audit_log (#2450): a vendor's owner changes.
+	KindVendor Kind = "vendor"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -123,6 +125,7 @@ var AllKinds = []Kind{
 	KindRisk,
 	KindPostureTarget,
 	KindModuleAccess,
+	KindVendor,
 }
 
 // IsCanonical reports whether k is one of the canonical kinds in [AllKinds].

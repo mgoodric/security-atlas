@@ -102,6 +102,8 @@ func TestVendorsExportHeader_StableOrder(t *testing.T) {
 		"scope_cell_ids",
 		"created_at",
 		"updated_at",
+		"owner_user_id",
+		"owner_name",
 	}
 	got := vendorsExportHeader()
 	if len(got) != len(want) {
@@ -165,7 +167,7 @@ func TestVendorsToRowIter_PopulatedAndNullable(t *testing.T) {
 	}
 
 	var got [][]string
-	for row := range vendorsToRowIter(vendors, asOf) {
+	for row := range vendorsToRowIter(vendors, nil, asOf) {
 		got = append(got, append([]string(nil), row...))
 	}
 	if len(got) != 2 {
@@ -230,7 +232,7 @@ func TestVendorsToRowIter_EarlyStop(t *testing.T) {
 		{ID: uuid.New(), Name: "C", Criticality: vendor.CriticalityLow, ReviewCadence: vendor.CadenceQuarterly},
 	}
 	count := 0
-	for range vendorsToRowIter(vendors, asOf) {
+	for range vendorsToRowIter(vendors, nil, asOf) {
 		count++
 		if count >= 1 {
 			break
@@ -243,7 +245,7 @@ func TestVendorsToRowIter_EarlyStop(t *testing.T) {
 
 func TestVendorsToRowIter_EmptySlice(t *testing.T) {
 	count := 0
-	for range vendorsToRowIter(nil, time.Now()) {
+	for range vendorsToRowIter(nil, nil, time.Now()) {
 		count++
 	}
 	if count != 0 {

@@ -44,6 +44,9 @@ var kindSourceResource = map[unifiedlog.Kind]string{
 	unifiedlog.KindPostureTarget: "framework-scopes",
 	// Module access (#2172) is set at /v1/admin/users/{id}/module-access.
 	unifiedlog.KindModuleAccess: "admin",
+	// Vendor owner changes (#2450) are read with the vendor at
+	// /v1/vendors.
+	unifiedlog.KindVendor: "vendors",
 }
 
 // kindSourceAdminSegment names, for a kind whose source resource is

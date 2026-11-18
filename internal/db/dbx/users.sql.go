@@ -204,6 +204,42 @@ func (q *Queries) LinkUserIdpByEmail(ctx context.Context, arg LinkUserIdpByEmail
 	return i, err
 }
 
+const listTenantUserNames = `-- name: ListTenantUserNames :many
+SELECT id, btrim(display_name)::text AS display_name
+FROM users
+WHERE tenant_id = $1 AND btrim(display_name) <> ''
+ORDER BY id
+`
+
+type ListTenantUserNamesRow struct {
+	ID          pgtype.UUID `json:"id"`
+	DisplayName string      `json:"display_name"`
+}
+
+// #2450: the tenant's users that have a display name, for the risk and
+// vendor exports' owner_name. Email is not read: an export never names a
+// user by their email or its local-part (slice 139 D1). Disabled users
+// stay listed: they still name the owner of older records.
+func (q *Queries) ListTenantUserNames(ctx context.Context, tenantID pgtype.UUID) ([]ListTenantUserNamesRow, error) {
+	rows, err := q.db.Query(ctx, listTenantUserNames, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTenantUserNamesRow
+	for rows.Next() {
+		var i ListTenantUserNamesRow
+		if err := rows.Scan(&i.ID, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const oIDCFirstSignInEmailTaken = `-- name: OIDCFirstSignInEmailTaken :one
 SELECT (
     EXISTS (
