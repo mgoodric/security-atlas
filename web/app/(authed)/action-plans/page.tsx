@@ -29,6 +29,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { Person } from "@/components/ui/person";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   ACTION_PLAN_STATUSES,
   fetchActionPlansList,
@@ -36,7 +37,7 @@ import {
   type ActionPlansListResponse,
 } from "@/lib/api/action-plans";
 
-import { dateLabel, statusLabel, statusPillClass } from "./status";
+import { statusLabel, statusPillClass } from "./status";
 import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
 
@@ -135,7 +136,7 @@ function ActionPlansPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="action-plans-row-due-date"
         >
-          {dateLabel(row.due_date)}
+          <Timestamp value={row.due_date} style="date" />
         </span>
       ),
     },

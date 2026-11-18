@@ -91,7 +91,7 @@ test.describe("read-only vendor detail (slice 686)", () => {
       "quarterly",
     );
     await expect(page.getByTestId("vendor-detail-last-review")).toHaveText(
-      "2026-03-15",
+      "Mar 15, 2026",
     );
     await expect(page.getByTestId("vendor-detail-dpa")).toHaveText(
       "Signed (2026-01-05)",

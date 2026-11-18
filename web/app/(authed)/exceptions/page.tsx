@@ -74,6 +74,7 @@ import {
 } from "./filters";
 import { statusPillClass } from "./lifecycle";
 import { pageTitle } from "@/lib/page-titles";
+import { Timestamp } from "@/components/ui/timestamp";
 import { Term } from "@/components/help/term";
 
 // #2150 — the header names the page's key term, so its definition is one
@@ -108,19 +109,6 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
 function truncate(s: string, max = 80): string {
   if (s.length <= max) return s;
   return s.slice(0, max).trimEnd() + "…";
-}
-
-/**
- * Format an ISO timestamp as a short YYYY-MM-DD date label. Same
- * shorthand the slice 099 evidence list uses.
- */
-function dateLabel(iso?: string | null): string {
-  if (!iso) return "—";
-  // Defensive — if upstream ever returns a malformed string, fall back
-  // to the raw string rather than throwing.
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toISOString().slice(0, 10);
 }
 
 /**
@@ -294,7 +282,7 @@ function ExceptionsPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="exceptions-row-requested-at"
         >
-          {dateLabel(row.requested_at)}
+          <Timestamp value={row.requested_at} />
         </span>
       ),
     },
@@ -306,7 +294,7 @@ function ExceptionsPageInner() {
           className="font-mono text-xs text-muted-foreground"
           data-testid="exceptions-row-expires-at"
         >
-          {dateLabel(row.expires_at)}
+          <Timestamp value={row.expires_at} style="date" />
         </span>
       ),
     },

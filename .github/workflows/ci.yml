@@ -3712,7 +3712,7 @@ jobs:
           set -euo pipefail
           PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
           export PR_LABELS
-          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' >"$RUNNER_TEMP/files.txt"
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | "\(.status)\t\(.filename)"' >"$RUNNER_TEMP/files.txt"
           bash scripts/changelog.sh require <"$RUNNER_TEMP/files.txt"
 
   # ====================================================================

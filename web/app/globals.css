@@ -199,3 +199,21 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* #2365 — <Timestamp>'s exact UTC value for assistive tech. The `title`
+   tooltip shows only on mouse hover, so the exact value is also carried as
+   generated content: screen readers read it after the visible text, it is
+   visually hidden, and it is not part of the element's textContent (so the
+   visible text stays the only text tests and copy-paste see). */
+.timestamp-exact::after {
+  content: " (" attr(data-exact) ")";
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

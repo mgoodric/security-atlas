@@ -18,7 +18,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { DetailHeader } from "@/components/detail/detail-header";
 import { Markdown } from "@/components/markdown";
@@ -27,6 +27,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { OwnerAccessFlag } from "@/components/ui/owner-access-flag";
 import { Person } from "@/components/ui/person";
 import { ConfirmInline } from "@/components/ui/row-actions";
+import { Timestamp } from "@/components/ui/timestamp";
 import { useToast } from "@/components/ui/toast";
 import {
   ACTION_PLAN_STATUSES,
@@ -43,12 +44,7 @@ import {
   viewerCanVerify,
   type PlanTransition,
 } from "../lifecycle";
-import {
-  dateLabel,
-  planStatusLabel,
-  statusLabel,
-  statusPillClass,
-} from "../status";
+import { planStatusLabel, statusLabel, statusPillClass } from "../status";
 
 export default function ActionPlanDetailPage() {
   const params = useParams<{ id: string }>();
@@ -165,7 +161,7 @@ export default function ActionPlanDetailPage() {
             {planStatusLabel(plan.status, plan.controls_failing)}
           </span>
           <span className="text-xs text-muted-foreground">
-            Due {dateLabel(plan.due_date)}
+            Due <Timestamp value={plan.due_date} style="date" />
           </span>
         </>
       }
@@ -210,8 +206,8 @@ export default function ActionPlanDetailPage() {
             </span>
           </dd>
         </div>
-        <Field label="Created" value={dateLabel(plan.created_at)} />
-        <Field label="Updated" value={dateLabel(plan.updated_at)} />
+        <Field label="Created" value={<Timestamp value={plan.created_at} />} />
+        <Field label="Updated" value={<Timestamp value={plan.updated_at} />} />
         <Field
           label="Audit period"
           value={plan.audit_period_id ?? "—"}
@@ -320,7 +316,7 @@ function Field({
   mono,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mono?: boolean;
 }) {
   return (
