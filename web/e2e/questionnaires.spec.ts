@@ -794,9 +794,23 @@ test.describe("questionnaires (slice 263)", () => {
     const body = await page.locator("body").innerText();
     expect(body).not.toContain(EVIDENCE_KIND);
     expect(body).not.toContain(CITE_EVIDENCE_ID);
-    // A pasted evidence ID is not cited behind the refusal.
-    await page.getByTestId("citation-picker").fill(CITE_EVIDENCE_ID);
-    await page.getByTestId("citation-picker").press("Enter");
+    // A pasted evidence ID is not cited behind the refusal. A real paste
+    // event, as entity-picker.spec.ts sends: the picker checks a pasted
+    // ID on paste.
+    const input = page.getByTestId("citation-picker");
+    await input.fill("");
+    await input.focus();
+    await input.evaluate((el, t) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", t);
+      el.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, CITE_EVIDENCE_ID);
     await expect(page.getByTestId("citation-picker-error")).toContainText(
       "is not in the list",
     );
