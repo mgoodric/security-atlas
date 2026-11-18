@@ -20,11 +20,11 @@ import (
 
 const (
 	ssoSCIMAuditPrior = "../../migrations/sql/20261226000000_risk_vendor_owner_users.sql"
-	ssoSCIMAuditUp    = "../../migrations/sql/20261260000000_sso_scim_audit.sql"
-	ssoSCIMAuditDown  = "../../migrations/sql/20261260000000_sso_scim_audit.down.sql"
+	ssoSCIMAuditUp    = "../../migrations/sql/20261262000000_sso_scim_audit.sql"
+	ssoSCIMAuditDown  = "../../migrations/sql/20261262000000_sso_scim_audit.down.sql"
 )
 
-// ssoSCIMAuditActions are the values 20261260000000 adds.
+// ssoSCIMAuditActions are the values 20261262000000 adds.
 var ssoSCIMAuditActions = []string{
 	"tenant_sso_config_update",
 	"scim_credential_issue",
@@ -44,16 +44,16 @@ func TestSSOSCIMAuditMigration_KeepsEveryAction(t *testing.T) {
 	}
 	for _, a := range prior {
 		if !inCurrent[a] {
-			t.Errorf("action %q from 20261226000000 is missing from 20261260000000", a)
+			t.Errorf("action %q from 20261226000000 is missing from 20261262000000", a)
 		}
 	}
 	for _, a := range ssoSCIMAuditActions {
 		if !inCurrent[a] {
-			t.Errorf("20261260000000 does not add %q", a)
+			t.Errorf("20261262000000 does not add %q", a)
 		}
 	}
 	if len(current) != len(prior)+len(ssoSCIMAuditActions) {
-		t.Errorf("20261260000000 lists %d actions, want %d", len(current), len(prior)+len(ssoSCIMAuditActions))
+		t.Errorf("20261262000000 lists %d actions, want %d", len(current), len(prior)+len(ssoSCIMAuditActions))
 	}
 
 	down, err := os.ReadFile(ssoSCIMAuditDown)
@@ -77,7 +77,7 @@ func TestSSOSCIMAuditMigration_KeepsEveryAction(t *testing.T) {
 
 	for _, a := range current {
 		if !insertsAction(ctx, t, tx, a) {
-			t.Errorf("me_audit_log refuses action %q after 20261260000000", a)
+			t.Errorf("me_audit_log refuses action %q after 20261262000000", a)
 		}
 	}
 
