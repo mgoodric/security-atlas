@@ -20,7 +20,7 @@ const ROUTES = [
     route: "/risks",
     id: "risks",
     title: "Risk register",
-    // One source line: the renderer joins a paragraph's lines with <br/>.
+    // One source line, so the match holds however the .md wraps (#2455).
     body: "A risk is something that could go wrong and hurt your organisation",
     term: "treatment",
     lifecycles: ["risk_treatment", "risk_status"],
