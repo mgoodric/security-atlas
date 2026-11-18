@@ -476,9 +476,19 @@ function IssueForm({
             maxLength={100}
             placeholder="e.g. CI deploy"
             onChange={(e) => setLabel(e.target.value)}
-            aria-describedby={errorId}
+            aria-describedby={
+              errorId ? `issue-label-hint ${errorId}` : "issue-label-hint"
+            }
             data-testid="issue-label"
           />
+          <p
+            id="issue-label-hint"
+            className="text-xs text-muted-foreground"
+            data-testid="issue-label-hint"
+          >
+            Every member of your organisation can see this label wherever the
+            key is named.
+          </p>
         </Field>
 
         <KindsPicker value={allowedKinds} onChange={setAllowedKinds} />

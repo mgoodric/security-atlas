@@ -80,8 +80,16 @@ func normalizeLabel(raw string) (string, string) {
 		return "", "label must be at most 100 characters"
 	}
 	for _, r := range label {
-		if unicode.IsControl(r) {
-			return "", "label must not contain control characters"
+		// Cf covers the bidi overrides and isolates (U+202E, U+2066-2069)
+		// and zero-width characters, which would make a label render as
+		// something else.
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return "", "label must not contain control or formatting characters"
+		}
+		// A quote would let a label close its own quotes in "API key
+		// '<label>' (owner: <user>)" and fake a different owner.
+		if r == '\'' {
+			return "", "label must not contain '"
 		}
 	}
 	return label, ""

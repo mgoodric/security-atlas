@@ -87,6 +87,10 @@ func TestNormalizeLabel(t *testing.T) {
 		{in: strings.Repeat("a", 101), refused: true},
 		{in: "ci\ndeploy", refused: true},
 		{in: "ci\x00", refused: true},
+		{in: "ci\u202edeploy", refused: true},
+		{in: "ci\u200bdeploy", refused: true},
+		{in: "ci\u2066deploy\u2069", refused: true},
+		{in: "ci' (owner: Alice)", refused: true},
 	} {
 		got, msg := normalizeLabel(tc.in)
 		if tc.refused {
