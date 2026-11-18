@@ -67,6 +67,9 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// revision), rejects or keeps legacy a proposal, or bulk-approves the
 	// open unchanged ones.
 	controlsapi.NewRemapDecisionsHandler(controlsStore).RegisterRoutes(root)
+	// #2358: stock controls whose shipped update the boot seed holds back
+	// behind a reviewed re-anchor (tenant admin only).
+	controlsapi.NewHeldBackHandler(controlsStore).RegisterRoutes(root)
 	// #2176: controls left on a legacy SCF release's anchor that the #1971
 	// D3 rule flags for re-anchoring, with remap notes, for the dashboard
 	// warning. Literal segment, ahead of the /v1/controls/{id}/... patterns.

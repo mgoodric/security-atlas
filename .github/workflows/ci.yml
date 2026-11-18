@@ -1633,6 +1633,11 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # #2156: `issues: read` lets lib/help/coverage.test.ts confirm each
+    # help-pending route's ticket is still open.
+    permissions:
+      contents: read
+      issues: read
     defaults:
       run:
         working-directory: web
@@ -1652,6 +1657,8 @@ jobs:
         working-directory: .
         run: npm ci --no-audit --no-fund
       - name: Run vitest (with coverage)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run test:coverage
       - name: Upload coverage summary as workflow artifact
         if: always()

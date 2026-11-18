@@ -42,6 +42,8 @@ var checkEnumColumns = []struct {
 }{
 	{"ActionPlanStatus", "action_plans", "status"},
 	{"AuditPeriodStatus", "audit_periods", "status"},
+	// #2359: the /controls Freshness filter offers these values.
+	{"FreshnessState", "control_evaluations", "freshness_status"},
 }
 
 // checkLiteral matches one value in a rendered IN-list:

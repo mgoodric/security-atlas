@@ -45,6 +45,7 @@ func TestParseListFilter(t *testing.T) {
 		"sort=name%20desc",
 		"result=insufficient_evidence",
 		"freshness=old",
+		"freshness=expired", // #2359: never a freshness state
 		"owner=me",
 		"scope=not-a-uuid",
 		"anchor_fit=loose",

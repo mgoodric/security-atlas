@@ -97,6 +97,14 @@ type Querier interface {
 	// approver (the service rejects that before the round-trip via
 	// llm.EnforceApproval). Tenant-scoped by RLS + the explicit tenant_id guard.
 	ApproveQuestionnaireAnswer(ctx context.Context, arg ApproveQuestionnaireAnswerParams) (QuestionnaireAnswer, error)
+	// Issues #1776, #2358: the approved SCF remap revision a control row is, or
+	// descends from. The walk follows superseded_by back from the row through
+	// its earlier revisions and returns the nearest one that a person's approved
+	// remap decision created. The upload path keeps such a lineage when the
+	// boot seed re-uploads the stock manifest it replaced, so neither a
+	// reviewed re-anchor nor a person's later edit on top of it is undone
+	// silently. No row when the lineage holds no approved revision.
+	ApprovedRemapLineageRevision(ctx context.Context, arg ApprovedRemapLineageRevisionParams) (pgtype.UUID, error)
 	// Slice 025 — auditor assignments + audit notes.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -1534,11 +1542,6 @@ type Querier interface {
 	// #2118: whether user_id is an active user of this tenant holding the
 	// auditor role. The assign route refuses anyone else.
 	IsActiveTenantAuditor(ctx context.Context, arg IsActiveTenantAuditorParams) (bool, error)
-	// Issue #1776: whether a control row is the revision a person's approved SCF
-	// remap decision created. The upload path keeps such a revision when the
-	// boot seed re-uploads the stock manifest it replaced, so a reviewed
-	// re-anchor is never undone silently.
-	IsApprovedRemapRevision(ctx context.Context, arg IsApprovedRemapRevisionParams) (bool, error)
 	// The most recent successful backup run — what restore-verification restores.
 	LatestSucceededBackup(ctx context.Context) (BackupRun, error)
 	// The most-recent reviewed_at for a vendor, used to keep vendors.last_review_date
@@ -3117,6 +3120,12 @@ type Querier interface {
 	// user's own tenant GUC (RLS). enabled = false / no-row excluded (default
 	// opted-OUT, P0-543-3). Returns only the (tenant, user) keys — no PII.
 	ListSlackOptInUsers(ctx context.Context) ([]ListSlackOptInUsersRow, error)
+	// Issue #2358: the tenant's stock controls whose shipped update the boot
+	// seed holds back. Each row names the active revision, the approved
+	// re-anchor that caused the hold, the shipped manifest being missed, and
+	// the stock manifest the approval replaced; the shipped manifest is an
+	// update the tenant has not received when the two hashes differ.
+	ListStockControlHoldbacks(ctx context.Context, tenantID pgtype.UUID) ([]ListStockControlHoldbacksRow, error)
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
@@ -3505,6 +3514,10 @@ type Querier interface {
 	// system moves completed <-> verified for the plans linked to it. The
 	// function reads the tenant from app.current_tenant and refuses without it.
 	ReconcileActionPlanVerification(ctx context.Context, controlID pgtype.UUID) (int32, error)
+	// Issue #2358: the boot seed kept a reviewed lineage (keepReviewedAnchor)
+	// instead of applying a shipped manifest. One row per tenant and bundle;
+	// first_held_at restarts when a different shipped manifest is held back.
+	RecordStockControlHoldback(ctx context.Context, arg RecordStockControlHoldbackParams) error
 	// Clears every member of a group (Replace `members`, or Delete soft-disable).
 	// Returns affected-row count.
 	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)

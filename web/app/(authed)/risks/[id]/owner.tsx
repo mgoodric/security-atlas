@@ -5,7 +5,8 @@
 // shows that text as "Owner (unlinked)" with a picker to choose the user
 // it names; a risk with no owner gets the same picker. Picking saves at
 // once through PATCH /v1/risks/{id} (`owner_user_id`), which clears the
-// unlinked text. The text renders as React text only.
+// unlinked text. The text renders as React text only. #2138: a caller who
+// may not write risks (canEdit false) sees the owner without the picker.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -17,7 +18,7 @@ import { Person } from "@/components/ui/person";
 import { useToast } from "@/components/ui/toast";
 import { type Risk, updateRisk } from "@/lib/api/risks";
 
-export function RiskOwner({ risk }: { risk: Risk }) {
+export function RiskOwner({ risk, canEdit }: { risk: Risk; canEdit: boolean }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [picking, setPicking] = useState(false);
@@ -62,7 +63,7 @@ export function RiskOwner({ risk }: { risk: Risk }) {
           unassigned
         </span>
       )}
-      {picking ? (
+      {!canEdit ? null : picking ? (
         <span className="inline-flex items-center gap-2">
           <span className="w-64">
             <EntityPicker

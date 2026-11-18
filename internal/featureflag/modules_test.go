@@ -159,7 +159,7 @@ func TestModuleGate(t *testing.T) {
 		{"/v1/oscal/component-definitions", http.StatusNotFound, "vendor.claims"},
 		{"/v1/vendors", http.StatusTeapot, ""},
 		{"/v1/audit-periods/abc/oscal-export", http.StatusTeapot, ""},
-		// A path the registry cannot place falls through to chi's 404.
+		// A path no module owns falls through to chi's 404.
 		{"/v1/nope", http.StatusTeapot, ""},
 	}
 	for _, c := range cases {
@@ -230,6 +230,102 @@ func TestModuleGateFailsClosedOnStoreError(t *testing.T) {
 	}
 	if got := ModuleStateErrors() - before; got != 2 {
 		t.Errorf("ModuleStateErrors grew by %d; want 2", got)
+	}
+}
+
+// A path no module owns is no registered route: the gate passes it to
+// chi's 404 with no 503, no metric and no audit row (#2352).
+func TestModuleGatePassesUnownedPathToChi(t *testing.T) {
+	looker := &fakeLooker{answers: map[string]Flag{
+		"risk.enabled": {Key: "risk.enabled", Enabled: true},
+	}}
+	var recorded []GatedAttempt
+	h := ModuleGate(looker, WithAttemptRecorder(func(_ *http.Request, a GatedAttempt) {
+		recorded = append(recorded, a)
+	}))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	before := ModuleStateErrors()
+	for _, target := range []string{"/v1/nope", "/", "/v1/questionnaires-x"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status %d; want chi's 404", target, rec.Code)
+		}
+		if got := rec.Header().Get("X-Feature-Disabled"); got != "" {
+			t.Errorf("%s: marker %q; an unowned path is not a switch-off", target, got)
+		}
+	}
+	if got := ModuleStateErrors() - before; got != 0 {
+		t.Errorf("ModuleStateErrors grew by %d; want 0", got)
+	}
+	if len(recorded) != 0 {
+		t.Errorf("recorded %v; want no audit row", recorded)
+	}
+}
+
+// Two owners tied, or any other failure to place a path, is a registry
+// bug: the gate answers 503 module_state_unavailable and never reaches
+// chi (#2352). A registered route under a switched-off module still gets
+// the module 404 and its audit row (#2339).
+func TestModuleGateRefusesOnResolveError(t *testing.T) {
+	looker := &fakeLooker{answers: map[string]Flag{
+		"risk.enabled": {Key: "risk.enabled", Enabled: false},
+	}}
+	var recorded []GatedAttempt
+	resolve := func(p string) (Owner, error) {
+		switch p {
+		case "/v1/tied":
+			return Owner{}, ErrAmbiguousModule
+		case "/v1/broken":
+			return Owner{}, errors.New("registry corrupt")
+		}
+		return Resolve(p)
+	}
+	h := ModuleGate(looker,
+		WithAttemptRecorder(func(_ *http.Request, a GatedAttempt) { recorded = append(recorded, a) }),
+		func(c *gateConfig) { c.resolve = resolve },
+	)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	before := ModuleStateErrors()
+	for _, target := range []string{"/v1/tied", "/v1/broken"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s: status %d; want 503", target, rec.Code)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"] != "module_state_unavailable" {
+			t.Errorf("%s: body %q; want error module_state_unavailable", target, rec.Body.String())
+		}
+		if got := rec.Header().Get("X-Feature-Disabled"); got != "" {
+			t.Errorf("%s: marker %q; a registry bug is not a switch-off", target, got)
+		}
+	}
+	if got := ModuleStateErrors() - before; got != 2 {
+		t.Errorf("ModuleStateErrors grew by %d; want 2", got)
+	}
+	if len(recorded) != 0 {
+		t.Errorf("recorded %v on a 503; want none", recorded)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/risks", nil))
+	if rec.Code != http.StatusNotFound || rec.Header().Get("X-Feature-Disabled") != "risk.enabled" {
+		t.Errorf("/v1/risks: status %d marker %q; want 404 risk.enabled", rec.Code, rec.Header().Get("X-Feature-Disabled"))
+	}
+	want := GatedAttempt{Module: "risk", FlagKey: "risk.enabled"}
+	if len(recorded) != 1 || recorded[0] != want {
+		t.Errorf("recorded %v; want [%v]", recorded, want)
+	}
+}
+
+func TestRouteOnUnownedPath(t *testing.T) {
+	t.Parallel()
+	on, err := RouteOn(httptest.NewRequest(http.MethodGet, "/", nil), &fakeLooker{}, "/v1/nope")
+	if !on || err != nil {
+		t.Fatalf("RouteOn(/v1/nope) = %v, %v; want true, nil (chi 404s it)", on, err)
 	}
 }
 
