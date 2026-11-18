@@ -101,6 +101,8 @@ WITH ack_cells AS (
            AND (
                k.is_admin = true
                OR k.owner_roles && p.acknowledgment_required_roles
+               -- #2524: an "everyone" audience counts every live key holder.
+               OR 'everyone' = ANY(p.acknowledgment_required_roles)
            )
         ) AS ack_denominator,
         (SELECT COUNT(DISTINCT pa.user_id)::bigint
@@ -117,6 +119,7 @@ WITH ack_cells AS (
                  AND (
                      k.is_admin = true
                      OR k.owner_roles && p.acknowledgment_required_roles
+                     OR 'everyone' = ANY(p.acknowledgment_required_roles)
                  )
            )
         ) AS ack_numerator

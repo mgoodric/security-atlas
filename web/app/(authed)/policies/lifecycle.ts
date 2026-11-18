@@ -6,6 +6,7 @@
 // this module only decides which action the header offers and what the
 // form says before the operator submits.
 
+import { ROLES } from "@/components/admin/roles";
 import type {
   CreatePolicyInput,
   Policy,
@@ -65,7 +66,29 @@ export function needsControlsWarning(
 
 /** The roles a policy can require to acknowledge it: the platform's RBAC
  *  roles, which acknowledgment matches against the user's own. */
-export { ROLES as ACK_ROLES } from "@/components/admin/roles";
+export { ROLES as ACK_ROLES };
+
+/** #2524 — the audience value that aims a policy at every member. */
+export const AUDIENCE_EVERYONE = "everyone";
+
+/** The audiences a policy is chosen from: the roles plus everyone. The
+ *  platform refuses any other value on a new policy. */
+export const AUDIENCE_OPTIONS: readonly string[] = [
+  ...ROLES,
+  AUDIENCE_EVERYONE,
+];
+
+/** The label the form and detail page show for an audience value. */
+export function audienceLabel(value: string): string {
+  return value === AUDIENCE_EVERYONE ? "Everyone (all members)" : value;
+}
+
+/** The values a policy carries that are not an audience: free text from
+ *  before #2524 ("employee", "all_staff"). They still show, flagged, and
+ *  no one holds them as a role. */
+export function unrecognisedAudiences(values: readonly string[]): string[] {
+  return values.filter((v) => !AUDIENCE_OPTIONS.includes(v));
+}
 
 export type PolicyFormValues = {
   title: string;
@@ -105,6 +128,17 @@ export function validatePolicyForm(
     errs.approver_role = "Approver role is required.";
   }
   if (!v.body_md.trim()) errs.body_md = "Policy text is required.";
+  // #2524: a new policy (or version) names roles or everyone. An edit may
+  // keep a free-text value the draft already carries; the form never adds
+  // one.
+  const unknown = unrecognisedAudiences(v.acknowledgment_required_roles);
+  if (mode === "create" && unknown.length > 0) {
+    const names = unknown.join(", ");
+    errs.acknowledgment_required_roles =
+      "Replace the unrecognised audience " +
+      names +
+      " with a role or Everyone.";
+  }
   return errs;
 }
 
