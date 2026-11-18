@@ -100,10 +100,11 @@ describe("the app's routes", () => {
 
   // A closed ticket with its entries still here means the help was never
   // written, or was and the entry was left behind. Needs a token to read
-  // the private repo's issues; CI passes GH_TOKEN to this job.
+  // the private repo's issues; CI passes GH_TOKEN to this job. It skips
+  // only outside CI: in CI a missing token fails the request, not skips.
   const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
   const tickets = [...new Set(HELP_PENDING.map((p) => p.ticket))];
-  it.skipIf(!token).each(tickets)(
+  it.skipIf(!token && !process.env.CI).each(tickets)(
     "pending ticket #%i is open",
     async (ticket) => {
       const res = await fetch(
