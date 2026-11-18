@@ -75,11 +75,11 @@ func TestSlice269_ValidFormatsSet(t *testing.T) {
 	}
 }
 
-// AC-6: role gate. admin OR approver only; control_owner is NOT
-// admitted (the slice 066 dashboard `requireProgramRead` admits
-// control_owner — slice 269 deliberately narrows that for the
-// bulk-export surface).
-func TestSlice269_RoleGate_PermitsAdminAndApproverOnly(t *testing.T) {
+// AC-6 / #2350: the handler twin admits OPA's set on the dashboard
+// resource: admin, approver (grc_engineer) and auditor. control_owner,
+// viewer and a bare push credential are refused, and a session's role
+// claim counts for nothing (#2381).
+func TestSlice269_RoleGate_PermitsAdminApproverAndAuditor(t *testing.T) {
 	cases := []struct {
 		name string
 		cred credstore.Credential
@@ -88,6 +88,13 @@ func TestSlice269_RoleGate_PermitsAdminAndApproverOnly(t *testing.T) {
 		{"admin", credstore.Credential{IsAdmin: true}, true},
 		{"approver", credstore.Credential{IsApprover: true}, true},
 		{"admin_plus_approver", credstore.Credential{IsAdmin: true, IsApprover: true}, true},
+		{"live_tenant_admin", credstore.Credential{ID: "jwt:a", UserID: "u", TenantRoles: []string{"admin"}}, true},
+		{"live_grc_engineer", credstore.Credential{ID: "jwt:a", UserID: "u", TenantRoles: []string{"grc_engineer"}}, true},
+		{"live_auditor", credstore.Credential{ID: "jwt:a", UserID: "u", TenantRoles: []string{"auditor"}}, true},
+		{"unbound_auditor_key", credstore.Credential{OwnerRoles: []string{"auditor"}}, true},
+		{"live_viewer", credstore.Credential{ID: "jwt:a", UserID: "u", TenantRoles: []string{"viewer"}}, false},
+		{"live_control_owner", credstore.Credential{ID: "jwt:a", UserID: "u", TenantRoles: []string{"control_owner"}}, false},
+		{"session_auditor_claim", credstore.Credential{ID: "jwt:a", UserID: "u", OwnerRoles: []string{"auditor"}}, false},
 		{"control_owner_only", credstore.Credential{OwnerRoles: []string{"platform-eng"}}, false},
 		{"bare_push", credstore.Credential{}, false},
 	}

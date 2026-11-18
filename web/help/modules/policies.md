@@ -38,14 +38,17 @@ stateDiagram-v2
 ## Acknowledgments
 
 The people in a policy's acknowledgment roles confirm they have read its
-published version. An acknowledgment counts for one version and lasts a
-year, so a new version or the passing of a year asks them again. The
-list shows each policy's acknowledgment rate, and you can filter for
-policies below 95% or past their review date.
+published version. If a policy is waiting for you, the policy list says
+so; open the policy and click **Acknowledge**. An acknowledgment counts
+for one version and lasts a year, so a new version or the passing of a
+year asks you again. The list shows each policy's acknowledgment rate,
+and you can filter for policies below 95% or past their review date.
 
 ## Who can do this
 
 Admins and GRC engineers write, submit, discard, approve and publish
 policies. The approver must be a person other than the one who submitted
 the policy or edited its draft, unless your organisation allows
-self-approval. Everyone else can read policies.
+self-approval. Everyone else can read policies. Anyone whose role is in
+a published policy's acknowledgment roles can acknowledge it, for
+themselves only.

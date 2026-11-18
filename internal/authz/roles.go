@@ -65,6 +65,17 @@ func IsTenantApprover(cred credstore.Credential) bool {
 	return ownerLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
 }
 
+// IsTenantAuditReader reports whether cred may read what OPA admits an
+// auditor to alongside admin and grc_engineer, the dashboard export
+// (#2350): a tenant approver (IsTenantApprover) or the live auditor role,
+// or, for a credential naming no user, its auditor label
+// (TenantRoleLabels). control_owner and viewer are refused, as OPA refuses
+// them there. As in IsTenantApprover, a JWT session's role claim does not
+// count (#2381).
+func IsTenantAuditReader(cred credstore.Credential) bool {
+	return IsTenantApprover(cred) || containsLabel(TenantRoleLabels(cred), string(RoleAuditor))
+}
+
 // IsTenantRiskReader reports whether cred may read the risk register, the
 // decision log and the org units the risk hierarchy draws (#2556): a tenant
 // approver (IsTenantApprover), or a viewer by its live tenant role or, for a
