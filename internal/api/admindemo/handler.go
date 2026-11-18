@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +22,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/api/ratekey"
+	"github.com/mgoodric/security-atlas/internal/api/ratelimit"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
@@ -106,14 +106,15 @@ func DefaultEnabledFunc() bool {
 //   - allowMultiTenant — test-injectable ATLAS_ALLOW_MULTI_TENANT opt-in
 //     (#2043): without it, Seed never creates the demo tenant beside an
 //     existing one.
-//   - limiter  — per-IP token bucket (1 token, 60s replenish).
+//   - limiter  — per-IP token bucket (1 token, 60s replenish), shared by
+//     Seed and Teardown. It reads clock, so WithClock drives it too.
 //   - clock    — test-injectable clock.
 type Handler struct {
 	authPool         *pgxpool.Pool
 	appPool          *pgxpool.Pool
 	isEnabled        isEnabledFunc
 	allowMultiTenant func() bool
-	limiter          *ipBucketLimiter
+	limiter          *ratelimit.Limiter
 	clock            func() time.Time
 }
 
@@ -125,13 +126,14 @@ func New(authPool *pgxpool.Pool, enabled isEnabledFunc) *Handler {
 	if enabled == nil {
 		enabled = DefaultEnabledFunc
 	}
-	return &Handler{
+	h := &Handler{
 		authPool:         authPool,
 		isEnabled:        enabled,
 		allowMultiTenant: admintenants.DefaultAllowMultiTenant,
-		limiter:          newIPBucketLimiter(rateLimitWindow),
 		clock:            time.Now,
 	}
+	h.limiter = ratelimit.New(rateLimitWindow, 1, func() time.Time { return h.clock() })
+	return h
 }
 
 // WithAllowMultiTenant overrides the multi-tenant opt-in. Test-only.
@@ -153,7 +155,6 @@ func (h *Handler) SetAppPool(appPool *pgxpool.Pool) *Handler {
 // WithClock overrides the clock. Test-only.
 func (h *Handler) WithClock(fn func() time.Time) *Handler {
 	h.clock = fn
-	h.limiter.clock = fn
 	return h
 }
 
@@ -235,9 +236,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(ratekey.IP(clientIP(r)), h.clock()) {
-		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+	if !h.allowInvocation(w, r) {
 		return
 	}
 	if h.authPool == nil {
@@ -359,9 +358,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(ratekey.IP(clientIP(r)), h.clock()) {
-		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
-		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+	if !h.allowInvocation(w, r) {
 		return
 	}
 	if h.authPool == nil {
@@ -558,42 +555,15 @@ func clientIP(r *http.Request) string {
 	return authapi.ClientIP(r)
 }
 
-// --- in-memory per-IP token bucket ---
-//
-// One token per bucket, replenished after `window`. Memory grows
-// unbounded if attackers spam unique IPs, but the upstream OPA gate
-// requires admin role first — so only authenticated admins can
-// reach this limiter. v1 is fine; a future slice could swap this
-// for a TTL map.
-
-type ipBucketLimiter struct {
-	mu      sync.Mutex
-	window  time.Duration
-	clock   func() time.Time
-	buckets map[string]time.Time // ip -> next-allowed
-}
-
-func newIPBucketLimiter(window time.Duration) *ipBucketLimiter {
-	return &ipBucketLimiter{
-		window:  window,
-		clock:   time.Now,
-		buckets: map[string]time.Time{},
+// allowInvocation spends the caller's per-IP token for a seed or teardown.
+// When it is spent it writes the 429 and returns false.
+func (h *Handler) allowInvocation(w http.ResponseWriter, r *http.Request) bool {
+	if ok, _ := h.limiter.Allow(ratekey.IP(clientIP(r))); ok {
+		return true
 	}
-}
-
-// allow returns true when the IP may proceed and records the next
-// allowed timestamp. Returns false when the IP is still inside its
-// cooldown window.
-func (l *ipBucketLimiter) allow(ip string, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if next, ok := l.buckets[ip]; ok {
-		if now.Before(next) {
-			return false
-		}
-	}
-	l.buckets[ip] = now.Add(l.window)
-	return true
+	ratelimit.SetRetryAfter(w, int(rateLimitWindow.Seconds()))
+	httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
+	return false
 }
 
 // --- helpers ---

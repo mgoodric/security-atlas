@@ -385,6 +385,37 @@ func TestSeed_RateLimitPerIPIndependent(t *testing.T) {
 	}
 }
 
+// #2497: the window is exactly 60s, and Seed and Teardown spend one shared
+// per-IP token (a teardown right after a seed is refused).
+func TestSeedTeardown_RateLimitWindowAndSharedBucket(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	h := New(nil, func() bool { return true }).WithClock(func() time.Time { return now })
+	call := func(path string, fn http.HandlerFunc) int {
+		r := requestWithAdmin(http.MethodPost, path)
+		r.RemoteAddr = "192.0.2.30:1"
+		w := httptest.NewRecorder()
+		fn(w, r)
+		return w.Code
+	}
+
+	if got := call("/v1/admin/demo/seed", h.Seed); got == http.StatusTooManyRequests {
+		t.Fatal("first seed rate-limited")
+	}
+	if got := call("/v1/admin/demo/teardown", h.Teardown); got != http.StatusTooManyRequests {
+		t.Fatalf("teardown right after seed = %d; want 429 (one shared bucket)", got)
+	}
+	now = now.Add(59 * time.Second)
+	if got := call("/v1/admin/demo/seed", h.Seed); got != http.StatusTooManyRequests {
+		t.Fatalf("seed at +59s = %d; want 429", got)
+	}
+	now = now.Add(time.Second)
+	if got := call("/v1/admin/demo/teardown", h.Teardown); got == http.StatusTooManyRequests {
+		t.Fatal("teardown at +60s rate-limited; the window has passed")
+	}
+}
+
 // ISC-11: Status route is NOT rate-limited.
 func TestStatus_NotRateLimited(t *testing.T) {
 	t.Parallel()

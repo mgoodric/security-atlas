@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +19,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/ratelimit"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
@@ -39,7 +38,7 @@ type HTTPHandler struct {
 	pub Publisher
 	svc *ingest.Service
 
-	limiter *tokenBucketRegistry
+	limiter *ratelimit.Limiter
 	// maxBatch caps the batch size at 100 per EVIDENCE_SDK §4.1.
 	maxBatch int
 	// maxBodyBytes caps the inbound body. The push profile inline limit
@@ -69,7 +68,7 @@ type Publisher interface {
 func NewHTTPHandler(svc *ingest.Service, limiterPerSecond float64) *HTTPHandler {
 	return &HTTPHandler{
 		svc:          svc,
-		limiter:      newTokenBucketRegistry(limiterPerSecond, limiterPerSecond*2),
+		limiter:      newPushLimiter(limiterPerSecond, nil),
 		maxBatch:     100,
 		maxBodyBytes: 100 << 20, // 100 MiB
 	}
@@ -156,8 +155,11 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// AC-5: rate limit per credential. Honors Retry-After.
 	if h.limiter != nil {
-		if wait := h.limiter.take(cred.ID); wait > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds()+0.5)))
+		if ok, wait := h.limiter.Allow(cred.ID); !ok {
+			// Rounded to the nearest second, unlike the shared
+			// RetryAfterSeconds (which rounds up): kept as it was
+			// before #2497.
+			ratelimit.SetRetryAfter(w, int(wait.Seconds()+0.5))
 			httpresp.WriteJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate limit exceeded", Code: "rate_limited"})
 			return
 		}
@@ -386,59 +388,11 @@ func wireResultToProto(s string) (evidencev1.Result, bool) {
 	return evidencev1.Result_RESULT_UNSPECIFIED, false
 }
 
-// ---- token bucket rate limiter ----
-//
-// Per-credential token bucket. The bucket holds `burst` tokens and
-// refills at `ratePerSecond`. take() returns the duration the caller
-// would need to wait if the bucket is empty; zero means proceed.
-
-type tokenBucketRegistry struct {
-	mu       sync.Mutex
-	buckets  map[string]*tokenBucket
-	rate     float64
-	capacity float64
-	now      func() time.Time
-}
-
-type tokenBucket struct {
-	tokens float64
-	last   time.Time
-}
-
-func newTokenBucketRegistry(rate, capacity float64) *tokenBucketRegistry {
-	if rate <= 0 || capacity <= 0 {
+// newPushLimiter builds the per-credential push limiter: ratePerSecond
+// tokens a second, burst twice that. A non-positive rate disables it.
+func newPushLimiter(ratePerSecond float64, now func() time.Time) *ratelimit.Limiter {
+	if ratePerSecond <= 0 {
 		return nil
 	}
-	return &tokenBucketRegistry{
-		buckets:  map[string]*tokenBucket{},
-		rate:     rate,
-		capacity: capacity,
-		now:      func() time.Time { return time.Now() },
-	}
-}
-
-// take returns 0 on success, or the duration the caller should wait
-// (Retry-After) when the bucket is empty.
-func (r *tokenBucketRegistry) take(key string) time.Duration {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := r.now()
-	b, ok := r.buckets[key]
-	if !ok {
-		b = &tokenBucket{tokens: r.capacity, last: now}
-		r.buckets[key] = b
-	}
-	elapsed := now.Sub(b.last).Seconds()
-	b.tokens += elapsed * r.rate
-	if b.tokens > r.capacity {
-		b.tokens = r.capacity
-	}
-	b.last = now
-	if b.tokens >= 1 {
-		b.tokens--
-		return 0
-	}
-	// Tokens needed: 1 - b.tokens; at r.rate tokens/sec.
-	wait := (1 - b.tokens) / r.rate
-	return time.Duration(wait * float64(time.Second))
+	return ratelimit.PerSecond(ratePerSecond, ratePerSecond*2, now)
 }
