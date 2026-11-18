@@ -194,3 +194,13 @@ func expandCells(dims map[string][]string) ([]Cell, error) {
 	}
 	return out, nil
 }
+
+// ValidateExpr checks that b is a well-formed expression in the scope
+// grammar, by the strict rules credential predicates use: no unknown
+// fields, no unknown op, no empty and/or/in. It does not accept the empty
+// forms ("", null, {}); a caller that allows those checks for them first.
+// The error wraps ErrBadPredicate (#2343).
+func ValidateExpr(b []byte) error {
+	_, err := parsePredicate(b)
+	return err
+}

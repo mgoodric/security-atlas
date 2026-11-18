@@ -35,7 +35,7 @@ var Lifecycle = lifecycle.Table{
 			Actor:            lifecycle.ActorPerson,
 			Routes:           []string{"PATCH /v1/exceptions/{id}/deny"},
 			Roles:            []string{"admin", "grc_engineer"},
-			RequiresApprover: true, SecondPerson: true,
+			RequiresApprover: true, PeopleOnly: true, SecondPerson: true,
 			Note: "Allow self-approval does not extend to denial: the requester never denies their own exception.",
 		},
 		{
@@ -43,7 +43,7 @@ var Lifecycle = lifecycle.Table{
 			Actor:            lifecycle.ActorPerson,
 			Routes:           []string{"PATCH /v1/exceptions/{id}/activate"},
 			Roles:            []string{"admin", "grc_engineer"},
-			RequiresApprover: true,
+			RequiresApprover: true, PeopleOnly: true,
 		},
 		{
 			From: StateActive, To: StateExpired, Action: "expire",
@@ -55,8 +55,8 @@ var Lifecycle = lifecycle.Table{
 			Actor:            lifecycle.ActorPerson,
 			Routes:           []string{"PATCH /v1/exceptions/{id}/revoke"},
 			Roles:            []string{"admin", "grc_engineer"},
-			RequiresApprover: true,
-			Note:             "An approver ends an active exception before it expires, with a reason (#2113). The control is re-evaluated as soon as the revocation commits (#2269).",
+			RequiresApprover: true, PeopleOnly: true,
+			Note: "An approver ends an active exception before it expires, with a reason (#2113). The control is re-evaluated as soon as the revocation commits (#2269).",
 		},
 	},
 }
