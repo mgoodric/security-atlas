@@ -38,7 +38,7 @@ var Lifecycle = lifecycle.Table{
 			RequiresApprover: true,
 			PeopleOnly:       true,
 			SecondPerson:     true,
-			Note:             "A person verifies only a plan with no linked controls, and never the plan's owner, whatever the self-approval setting. A plan with linked controls the system verifies after a control evaluation, once every linked control passes its latest evaluation (#2109).",
+			Note:             "A person verifies only a plan with no linked controls, and never its owner, whoever moved it to completed, or anyone who owned it since (#2434), whatever the self-approval setting. A plan with linked controls the system verifies after a control evaluation, once every linked control passes its latest evaluation (#2109).",
 		},
 		planMove(StatusCompleted, StatusInProgress, "reopen", "Reopened when verification fails."),
 		{

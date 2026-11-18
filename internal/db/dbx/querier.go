@@ -772,6 +772,11 @@ type Querier interface {
 	// Live (non-tombstoned) plan by id. A tombstoned plan reads as absent
 	// (AC-14: subsequent GET returns 404).
 	GetActionPlanByID(ctx context.Context, arg GetActionPlanByIDParams) (ActionPlan, error)
+	// GetActionPlanByID under a row lock, for a write that guards on the plan
+	// (#2434). A control link or owner change in flight finishes first, so
+	// the guard and the UPDATE see the same plan. The link tables' FK takes
+	// KEY SHARE on this row, which FOR UPDATE conflicts with.
+	GetActionPlanByIDForUpdate(ctx context.Context, arg GetActionPlanByIDForUpdateParams) (ActionPlan, error)
 	// The exclusion, if any, the tenant's ACTIVATED scope revision records for a
 	// requirement (#1788). Per-requirement coverage reads report such a
 	// requirement as `excluded` instead of uncovered. No row means the
