@@ -125,14 +125,16 @@ async function upload(page: Page, archive: Buffer) {
   return (await res.json()) as { control_id: string; superseded_id?: string };
 }
 
-// evaluationCount reads the Effectiveness KPI's "<pass>/<total> evaluations".
-async function evaluationCount(page: Page): Promise<number> {
-  const text = await page
-    .getByTestId("kpi-card")
-    .filter({ hasText: "Effectiveness" })
-    .textContent();
-  const m = /\d+\/(\d+) evaluations/.exec(text ?? "");
-  return m ? Number(m[1]) : -1;
+// evaluationCount reads the control's 30-day evaluation total. #2140
+// retired the page's Effectiveness KPI, so it reads the same BFF the KPI
+// read, with the page's own session.
+async function evaluationCount(page: Page, controlID: string): Promise<number> {
+  const res = await page.request.get(
+    `/api/controls/${encodeURIComponent(controlID)}/effectiveness`,
+  );
+  if (!res.ok()) return -1;
+  const body = (await res.json()) as { total_count?: number };
+  return typeof body.total_count === "number" ? body.total_count : -1;
 }
 
 test.describe("control page actions (#2110)", () => {
@@ -161,9 +163,11 @@ test.describe("control page actions (#2110)", () => {
     // Evaluate now: the platform appends an evaluation and the page's
     // state moves with it.
     await expect
-      .poll(() => evaluationCount(page), { timeout: 30_000 })
+      .poll(() => evaluationCount(page, created.control_id), {
+        timeout: 30_000,
+      })
       .toBeGreaterThanOrEqual(0);
-    const before = await evaluationCount(page);
+    const before = await evaluationCount(page, created.control_id);
     // Hold the request briefly (it still reaches the platform) so the
     // pending label is observable.
     await page.route(
@@ -193,7 +197,9 @@ test.describe("control page actions (#2110)", () => {
       "Evaluate now",
     );
     await expect
-      .poll(() => evaluationCount(page), { timeout: 30_000 })
+      .poll(() => evaluationCount(page, created.control_id), {
+        timeout: 30_000,
+      })
       .toBeGreaterThan(before);
 
     // Download bundle: a gzip-tar with control.yaml at the root, the

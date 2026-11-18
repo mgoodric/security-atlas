@@ -1,9 +1,10 @@
 -- #2174 — Playwright e2e seed for `web/e2e/module-links.spec.ts`.
 --
 -- A tenant of the spec's own with one control, one policy linked to it,
--- and one active grc_engineer member whose module access is every
--- optional module except Policies (reset each run). No feature_flags
--- rows: every module reads its seed default (Policies on).
+-- and two active grc_engineer members: one whose module access is every
+-- optional module except Policies, one with every optional module except
+-- Risk and Exceptions (#2140). Both reset each run. No feature_flags
+-- rows: every module reads its seed default.
 --
 -- Tenant UUID matches TENANT in the spec; the `2174` suffix carries the
 -- ticket.
@@ -31,6 +32,27 @@ ON CONFLICT DO NOTHING;
 INSERT INTO member_module_access (tenant_id, user_id, modules, updated_by)
 VALUES ('00000000-0000-0000-0000-000000002174', '44444444-4444-4444-4444-444444442174',
         ARRAY['risk', 'third_party_risk', 'questionnaires', 'personnel_security', 'exceptions', 'board_reporting'],
+        'e2e:module-links')
+ON CONFLICT (tenant_id, user_id) DO UPDATE SET modules = EXCLUDED.modules;
+
+-- #2140: a second grc_engineer member with every optional module except
+-- Risk (which owns action plans) and Exceptions, so the control page's
+-- Linked section leaves out the action plans and exceptions parts.
+INSERT INTO users (id, tenant_id, email, display_name, status, idp_issuer, idp_subject)
+VALUES (
+    '44444444-4444-4444-4444-444444442140',
+    '00000000-0000-0000-0000-000000002174',
+    'module-links-member-b-e2e@example.invalid',
+    'Module Links Member B E2E',
+    'active', '', ''
+)
+ON CONFLICT (id) DO UPDATE SET status = 'active';
+INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
+VALUES ('00000000-0000-0000-0000-000000002174', '44444444-4444-4444-4444-444444442140', 'grc_engineer', 'e2e:module-links')
+ON CONFLICT DO NOTHING;
+INSERT INTO member_module_access (tenant_id, user_id, modules, updated_by)
+VALUES ('00000000-0000-0000-0000-000000002174', '44444444-4444-4444-4444-444444442140',
+        ARRAY['third_party_risk', 'policies', 'questionnaires', 'personnel_security', 'board_reporting'],
         'e2e:module-links')
 ON CONFLICT (tenant_id, user_id) DO UPDATE SET modules = EXCLUDED.modules;
 

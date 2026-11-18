@@ -44,6 +44,7 @@ import {
   OrgMappingBadge,
   OrgMappingDetails,
 } from "@/components/mappings/org-mapping";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -122,6 +123,7 @@ export function CoverageTable({
                 data-testid="coverage-row"
                 data-out-of-scope={outOfScope ? "true" : "false"}
                 data-origin={orgMapping ? "overlay" : "catalog"}
+                data-excluded={req.exclusion ? "true" : "false"}
                 className={cn(
                   outOfScope &&
                     "border-dashed text-muted-foreground opacity-60",
@@ -163,6 +165,21 @@ export function CoverageTable({
                         rationale={req.rationale}
                         overlay={req.overlay}
                       />
+                    </div>
+                  ) : null}
+                  {/* #2140 — the activated Statement of Applicability
+                      excludes this requirement: it earns no credit here. */}
+                  {req.exclusion ? (
+                    <div
+                      className="mt-1 flex flex-wrap items-center gap-2 text-xs"
+                      data-testid="coverage-soa-exclusion"
+                    >
+                      <Badge variant="outline">Excluded by SoA</Badge>
+                      {req.exclusion.justification ? (
+                        <span className="text-muted-foreground">
+                          {req.exclusion.justification}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </TableCell>
