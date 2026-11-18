@@ -45,6 +45,7 @@ GET /v1/admin/audit-log settings_admin
 GET /v1/admin/audit-log/export settings_admin
 GET /v1/admin/audit-log/unified settings_admin
 GET /v1/admin/audit-periods/export audit_periods
+GET /v1/admin/controls/held-back settings_admin
 GET /v1/admin/credentials settings_admin
 GET /v1/admin/crosswalk-edge-remap-proposals settings_admin
 GET /v1/admin/demo/status settings_admin

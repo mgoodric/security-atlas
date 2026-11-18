@@ -24,6 +24,9 @@
 //     `route-sweep-axe-report` artifact) and attaches the same JSON to
 //     the test, pass or fail.
 //
+// ENFORCED once, statically: every route has a help module, or an
+// exemption or a pending ticket in `lib/help/coverage.ts` (#2156).
+//
 // Waits are web-first (`toBeVisible`, `toHaveTitle`, `expect.poll`) plus
 // `networkidle` so client pages have rendered their data before the
 // width is measured. No fixed sleeps.
@@ -33,15 +36,26 @@ import path from "node:path";
 
 import type { Page } from "@playwright/test";
 
+import {
+  discoverAuthedRoutes,
+  helpCoverageProblems,
+  readHelpModules,
+} from "../lib/help/coverage";
 import { expectNoSeriousAxe, seriousAxeViolations } from "./axe-gate";
 import { expect, seeded, test } from "./fixtures";
 
 const APP_DIR = path.join(__dirname, "..", "app");
-
-// The authenticated trees. `(authed)` is the route group; `/admin`,
-// `/audit` and `/audit-log` live outside it because their paths are
-// literal, but render the same shell.
-const AUTHED_ROOTS = ["(authed)", "admin", "audit", "audit-log"];
+const HELP_DIR = path.join(__dirname, "..", "help", "modules");
+// A tree holding one route a module covers and one deliberate route
+// with no help, for the help check's self-test.
+const FIXTURE_APP_DIR = path.join(
+  __dirname,
+  "..",
+  "lib",
+  "help",
+  "__fixtures__",
+  "app",
+);
 
 // A well-formed id that matches no row: detail routes without a seeded
 // row render their not-found or error state, which must still sit in the
@@ -82,25 +96,13 @@ const WIDTHS = [1316, 1200] as const;
 
 type Route = { pattern: string; url: string };
 
+// The walk lives in `lib/help/coverage.ts`, so the help-coverage check
+// below sees exactly the routes this sweep visits.
 function discoverRoutes(): Route[] {
-  const patterns: string[] = [];
-  const walk = (dir: string, segments: string[]) => {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    if (entries.some((e) => e.isFile() && e.name === "page.tsx")) {
-      patterns.push("/" + segments.join("/"));
-    }
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith("_")) continue;
-      // Route groups `(x)` add no path segment.
-      const seg = /^\(.*\)$/.test(e.name) ? [] : [e.name];
-      walk(path.join(dir, e.name), [...segments, ...seg]);
-    }
-  };
-  for (const root of AUTHED_ROOTS) {
-    const seg = /^\(.*\)$/.test(root) ? [] : [root];
-    walk(path.join(APP_DIR, root), seg);
-  }
-  return patterns.sort().map((pattern) => ({ pattern, url: resolve(pattern) }));
+  return discoverAuthedRoutes(APP_DIR).map((pattern) => ({
+    pattern,
+    url: resolve(pattern),
+  }));
 }
 
 function resolve(pattern: string): string {
@@ -224,6 +226,35 @@ test.describe("route sweep (#2080)", () => {
     ]) {
       expect(patterns).toContain(expected);
     }
+  });
+
+  // #2156 — every route has help: a module covers it, or
+  // `lib/help/coverage.ts` lists it as exempt (with its reason) or
+  // pending (with its open ticket). A stale list entry fails too.
+  test("every route has a help module (#2156)", () => {
+    const routes = ROUTES.map((r) => r.pattern).filter(
+      (p) => p !== NOT_FOUND_ROUTE,
+    );
+    expect(helpCoverageProblems(routes, readHelpModules(HELP_DIR))).toEqual([]);
+  });
+
+  // The same check fails on a deliberate fixture route with no help.
+  test("the help check fails on a route with no help (#2156)", () => {
+    const routes = discoverAuthedRoutes(FIXTURE_APP_DIR, ["(authed)"]);
+    expect(
+      helpCoverageProblems(routes, readHelpModules(HELP_DIR), [], []),
+    ).toEqual([
+      "/no-help-fixture: no help module covers this route; add it to the routes of a file in web/help/modules/",
+    ]);
+  });
+
+  // /audit-log is exempt from help because it only redirects. If it ever
+  // renders a page of its own, this fails and the exemption goes.
+  test("/audit-log still redirects to /activity (#2156)", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/audit-log");
+    await expect(page).toHaveURL(/\/activity(\?|$)/);
   });
 
   for (const route of ROUTES) {

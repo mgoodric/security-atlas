@@ -9,11 +9,13 @@
 
 package authz
 
-# Read access to all tenant-scoped resources.
+# Read access to all tenant-scoped resources, except the tenant-admin-only
+# surfaces (#2358, admin.rego).
 allow if {
     has_role("grc_engineer")
     input.action == "read"
     not super_admin_only_resource
+    not tenant_admin_only_resource
 }
 
 # Write + state transitions on the GRC operator surface.

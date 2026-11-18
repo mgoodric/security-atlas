@@ -3484,6 +3484,15 @@ type StalenessRollupLog struct {
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
 }
 
+type StockControlHoldback struct {
+	TenantID            pgtype.UUID        `json:"tenant_id"`
+	BundleID            string             `json:"bundle_id"`
+	ApprovedControlID   pgtype.UUID        `json:"approved_control_id"`
+	ShippedManifestHash string             `json:"shipped_manifest_hash"`
+	FirstHeldAt         pgtype.Timestamptz `json:"first_held_at"`
+	LastHeldAt          pgtype.Timestamptz `json:"last_held_at"`
+}
+
 // Slice 198: platform-global super_admin identity rows. NOT tenant-scoped (no RLS). The DBUserResolver (slice 192) consults this table when populating the `atlas:super_admin` JWT claim. Write surface: exactly one — the bootstrap branch in users.Store.BootstrapFirstInstallOrUpsert (slice 198), which writes via the BYPASSRLS atlas_migrate pool during first install.
 type SuperAdmin struct {
 	UserID    pgtype.UUID        `json:"user_id"`

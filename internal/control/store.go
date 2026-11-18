@@ -43,7 +43,7 @@ const SCFReleaseDeprecationWarning = "control.yaml has no scf_release, so scf_an
 
 // KeptReviewedAnchorWarning is returned on an upload of a stock manifest
 // that was not applied because a person re-anchored the control through an
-// approved SCF remap proposal (#1776).
+// approved SCF remap proposal (#1776), or edited it after one (#2358).
 const KeptReviewedAnchorWarning = "kept the reviewed SCF re-anchor of this stock control: a person approved its remap, so the shipped manifest was not applied; update the bundle to change the anchor"
 
 // ErrControlChangedConcurrently is returned when the active version a
@@ -83,7 +83,8 @@ type UploadResult struct {
 	NeedsReanchoring bool
 	// KeptReviewedAnchor is true when the upload was the shipped stock
 	// manifest of a control whose active revision is a person's approved SCF
-	// re-anchor (#1776): nothing changed, and Warnings says why.
+	// re-anchor (#1776), or descends from one (#2358): nothing changed, and
+	// Warnings says why. The hold is recorded in stock_control_holdbacks.
 	KeptReviewedAnchor bool
 	// AnchorID is the SCF anchor the bundle's scf_anchor_id resolved to;
 	// zero for an unanchored (anchor_fit: none) control.
@@ -273,12 +274,14 @@ func UploadTx(ctx context.Context, tx pgx.Tx, b *Bundle, uploadedBy string) (Upl
 // keepReviewedAnchor guards the boot seed (#1776). Bootstrap re-uploads
 // every stock manifest under controls/soc2/ on each boot. When a person
 // approved an SCF remap of that stock control, its active revision is the
-// approved re-anchor, and superseding it with the shipped manifest would
-// silently undo the decision every boot, or fail outright when the shipped
-// code is gone from the current release (a split or withdrawn anchor). The
-// upload is kept as a no-op with a warning instead. It runs before the
-// manifest's anchor is resolved for that reason. ok is false for every other
-// upload, which proceeds as before.
+// approved re-anchor, or a person's later edit on top of it (#2358), and
+// superseding it with the shipped manifest would silently undo that work
+// every boot, or fail outright when the shipped code is gone from the
+// current release (a split or withdrawn anchor). The upload is kept as a
+// no-op with a warning instead, and the hold is recorded so an admin can
+// list the shipped updates the tenant is not receiving (#2358). It runs
+// before the manifest's anchor is resolved for that reason. ok is false for
+// every other upload, which proceeds as before.
 func keepReviewedAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle) (UploadResult, bool, error) {
 	if !scfimport.IsStockManifest(b.Manifest.BundleID, string(b.ManifestYAMLRaw)) {
 		return UploadResult{}, false, nil
@@ -296,15 +299,23 @@ func keepReviewedAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID,
 	if prior.BundleManifestHash == b.ManifestHashHex {
 		return UploadResult{}, false, nil
 	}
-	approved, err := q.IsApprovedRemapRevision(ctx, dbx.IsApprovedRemapRevisionParams{
+	approved, err := q.ApprovedRemapLineageRevision(ctx, dbx.ApprovedRemapLineageRevisionParams{
 		TenantID:  pgUUID(tenantID),
 		ControlID: prior.ID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UploadResult{}, false, nil
+	}
 	if err != nil {
 		return UploadResult{}, false, fmt.Errorf("check approved SCF remap: %w", err)
 	}
-	if !approved {
-		return UploadResult{}, false, nil
+	if err := q.RecordStockControlHoldback(ctx, dbx.RecordStockControlHoldbackParams{
+		TenantID:            pgUUID(tenantID),
+		BundleID:            b.Manifest.BundleID,
+		ApprovedControlID:   approved,
+		ShippedManifestHash: b.ManifestHashHex,
+	}); err != nil {
+		return UploadResult{}, false, fmt.Errorf("record held-back stock control: %w", err)
 	}
 	return UploadResult{
 		ControlID:          uuid.UUID(prior.ID.Bytes),
