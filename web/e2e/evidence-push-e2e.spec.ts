@@ -200,7 +200,7 @@ test.describe("evidence push end-to-end (slice 351 AC-3)", () => {
       page.getByTestId("evidence-row-evidence-kind").first(),
     ).toContainText(PUSHED_KIND);
     await expect(page.getByTestId("evidence-row-result").first()).toContainText(
-      "pass",
+      "Pass",
     );
   });
 });

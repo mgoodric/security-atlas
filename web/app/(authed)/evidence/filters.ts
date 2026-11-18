@@ -32,6 +32,7 @@
 import type { Anchor } from "@/lib/api/anchors";
 import type { ScopeCell } from "@/lib/api/controls-list";
 import type { EvidenceResultEnum } from "@/lib/api/evidence";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 /**
  * The "all values" sentinel. Used as the default filter value on the
@@ -163,7 +164,10 @@ export const RESULT_VALUES: EvidenceResultEnum[] = [
 export function buildResultOptions(): { value: string; label: string }[] {
   return [
     { value: ALL, label: "All results" },
-    ...RESULT_VALUES.map((r) => ({ value: r, label: r })),
+    ...RESULT_VALUES.map((r) => ({
+      value: r,
+      label: enumLabel("EvidenceResult", r),
+    })),
   ];
 }
 

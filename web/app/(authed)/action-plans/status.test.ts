@@ -19,6 +19,7 @@ describe("statusLabel", () => {
   });
   it("falls back to the raw value for unknown statuses", () => {
     expect(statusLabel("bogus")).toBe("bogus");
+    expect(statusLabel("constructor")).toBe("constructor");
   });
 });
 
