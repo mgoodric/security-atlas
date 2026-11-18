@@ -24,8 +24,8 @@ import (
 // slice135RolePairs are the canonical roles plus the "no-role" baseline
 // that exercises the default-deny path.
 //
-// #2503: "admin" is an admin credential (cred.IsAdmin); a tenant admin by
-// role alone is refused, as the handler's callerAllowedUnified refuses it.
+// #2503: "admin" is an admin credential (cred.IsAdmin). D5 (Matt,
+// 2026-11-18): a tenant admin by role exports its own tenant's log too.
 var slice135RolePairs = []struct {
 	name      string
 	roles     []authz.Role
@@ -33,7 +33,7 @@ var slice135RolePairs = []struct {
 	want      bool
 }{
 	{"admin", []authz.Role{authz.RoleAdmin}, true, true},
-	{"tenant_admin_by_role", []authz.Role{authz.RoleAdmin}, false, false},
+	{"tenant_admin_by_role", []authz.Role{authz.RoleAdmin}, false, true},
 	{"auditor", []authz.Role{authz.RoleAuditor}, false, false},
 	{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}, false, true},
 	{"viewer", []authz.Role{authz.RoleViewer}, false, false},

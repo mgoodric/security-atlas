@@ -47,6 +47,11 @@ export type FormState = {
   review_due: string;
   // #2104: edit mode only; create has no input for it.
   instrument_reference: string;
+  // #2391: create with treatment=accept proposes the acceptance, so it
+  // carries the proposal's justification and proposed expiry
+  // (YYYY-MM-DD). The edit form never sends them.
+  justification: string;
+  proposed_until: string;
 };
 
 export function initialState(): FormState {
@@ -68,6 +73,8 @@ export function initialState(): FormState {
     linked_control_ids: [],
     review_due: "",
     instrument_reference: "",
+    justification: "",
+    proposed_until: "",
   };
 }
 

@@ -60,6 +60,11 @@ export type RiskFormForValidation = {
   treatment_owner: string;
   treatment: RiskTreatment;
   linked_control_ids: string[];
+  // #2391: with treatment=accept, the proposal's justification and
+  // proposed expiry (YYYY-MM-DD). Optional so a caller without the
+  // inputs (the edit form) skips the check.
+  justification?: string;
+  proposed_until?: string;
 };
 
 export type FieldErrors = Partial<{
@@ -67,7 +72,15 @@ export type FieldErrors = Partial<{
   category: string;
   owner: string;
   linked_control_ids: string;
+  justification: string;
+  proposed_until: string;
 }>;
+
+// todayUTC is today's calendar day in UTC, YYYY-MM-DD: the day the
+// platform compares a proposed expiry against.
+function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 // validateRiskForm returns a map of field → error message. An empty
 // object means the form is valid client-side and the submit can proceed.
@@ -91,6 +104,19 @@ export function validateRiskForm(s: RiskFormForValidation): FieldErrors {
   if (s.treatment === "mitigate" && s.linked_control_ids.length === 0) {
     errors.linked_control_ids =
       "Select at least one control when treatment is mitigate.";
+  }
+  // #2391: the same rule as the platform's (risk.ValidateProposal).
+  if (s.treatment === "accept") {
+    if (s.justification !== undefined && !s.justification.trim()) {
+      errors.justification = "Justification is required to propose acceptance.";
+    }
+    if (s.proposed_until !== undefined) {
+      if (!s.proposed_until) {
+        errors.proposed_until = "Proposed expiry is required.";
+      } else if (s.proposed_until <= todayUTC()) {
+        errors.proposed_until = "Proposed expiry must be after today.";
+      }
+    }
   }
 
   return errors;

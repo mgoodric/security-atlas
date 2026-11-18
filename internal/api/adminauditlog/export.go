@@ -62,6 +62,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
@@ -158,7 +159,7 @@ func (h *Handler) ExportUnified(w http.ResponseWriter, r *http.Request) {
 	// slice-035 OPA middleware is the canonical gate and admits admin
 	// and grc_engineer; the slice 135 parity test pins that the
 	// unified read and this export admit the same roles (#2378).
-	allowed, err := h.callerAllowedUnified(ctx, tenantID, cred.UserID, cred.IsAdmin)
+	allowed, err := h.callerAllowedUnified(ctx, tenantID, cred.UserID, authz.IsTenantAdmin(cred))
 	if err != nil {
 		h.writeExportMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format), From: params.fromRaw, To: params.toRaw,

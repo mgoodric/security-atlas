@@ -25,9 +25,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
+	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
@@ -43,8 +46,6 @@ const (
 // platformRoutes2503 are platform /v1/admin/* routes. authzmw must refuse a
 // tenant admin by role on each before any handler runs.
 var platformRoutes2503 = []struct{ method, path string }{
-	{http.MethodGet, "/v1/admin/sso"},
-	{http.MethodPatch, "/v1/admin/sso"},
 	{http.MethodGet, "/v1/admin/credentials"},
 	{http.MethodPost, "/v1/admin/credentials"},
 	{http.MethodGet, "/v1/admin/scim-credentials"},
@@ -92,6 +93,18 @@ func newStack2503(t *testing.T) stack2503 {
 	r.Patch("/v1/admin/users/{id}/roles", h.PatchRoles)
 	r.Post("/v1/admin/users/assign", h.Assign)
 	r.Post("/v1/admin/users/revoke", h.Revoke)
+	// #2503: the tenant's SSO config, and (D5) its admin audit log.
+	crypter, err := idpconfig.NewSecretCrypter(bytes.Repeat([]byte{0x25}, 32))
+	if err != nil {
+		t.Fatalf("NewSecretCrypter: %v", err)
+	}
+	sso := adminsso.New(appPool).WithSecretCrypter(crypter)
+	r.Get("/v1/admin/sso", sso.Get)
+	r.Patch("/v1/admin/sso", sso.Patch)
+	auditLog := adminauditlog.New(appPool)
+	r.Get("/v1/admin/audit-log", auditLog.List)
+	r.Get("/v1/admin/audit-log/unified", auditLog.UnifiedList)
+	r.Get("/v1/admin/audit-log/export", auditLog.ExportUnified)
 	// Any platform route that gets past authzmw answers 204, which the
 	// test reads as a failure.
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -282,6 +295,55 @@ func TestTenantAdmin2503_ManagesOwnTenantUsers(t *testing.T) {
 	})
 }
 
+// #2503: a tenant admin by role saves and reads its own tenant's SSO config,
+// and (D5, Matt 2026-11-18) reads and exports its own tenant's admin audit
+// log. Another tenant's admin sees none of it.
+func TestTenantAdmin2503_SSOAndAuditLog(t *testing.T) {
+	skipIfNoAdminPool(t)
+	s := newStack2503(t)
+	own := seedTenant478(t, "test-2503-sso-"+uuid.NewString()[:8])
+	other := seedTenant478(t, "test-2503-sso-other-"+uuid.NewString()[:8])
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(),
+			`DELETE FROM oidc_idp_configs WHERE tenant_id = ANY($1)`, []uuid.UUID{own, other})
+	})
+	bearer := s.mint(t, own, seedMember2261(t, own, "active", "admin"), authz.RoleAdmin)
+	otherBearer := s.mint(t, other, seedMember2261(t, other, "active", "admin"), authz.RoleAdmin)
+
+	if rr, _ := s.do(t, bearer, http.MethodGet, "/v1/admin/sso", nil); rr.Code != http.StatusNotFound {
+		t.Fatalf("GET sso before any config = %d %s, want 404", rr.Code, rr.Body.String())
+	}
+	rr, _ := s.do(t, bearer, http.MethodPatch, "/v1/admin/sso", map[string]any{
+		"issuer_url":            "https://accounts.example.com",
+		"client_id":             "client-2503",
+		"client_secret":         "neutral-test-secret",
+		"redirect_url":          "https://atlas.example.com/auth/oidc/callback",
+		"allowed_email_domains": []string{"example.com"},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PATCH sso = %d %s, want 200", rr.Code, rr.Body.String())
+	}
+	rr, _ = s.do(t, bearer, http.MethodGet, "/v1/admin/sso", nil)
+	if rr.Code != http.StatusOK || !bytes.Contains(rr.Body.Bytes(), []byte("client-2503")) {
+		t.Errorf("GET own sso = %d %s, want 200 with client-2503", rr.Code, rr.Body.String())
+	}
+	if rr, _ := s.do(t, otherBearer, http.MethodGet, "/v1/admin/sso", nil); rr.Code != http.StatusNotFound {
+		t.Errorf("other tenant's admin GET sso = %d, want 404 (no config of its own)", rr.Code)
+	}
+
+	from := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	to := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	for _, path := range []string{
+		"/v1/admin/audit-log",
+		"/v1/admin/audit-log/unified?from=" + from + "&to=" + to,
+		"/v1/admin/audit-log/export?format=csv&from=" + from + "&to=" + to,
+	} {
+		if rr, _ := s.do(t, bearer, http.MethodGet, path, nil); rr.Code != http.StatusOK {
+			t.Errorf("tenant admin GET %s = %d %s, want 200", path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 // A tenant admin by role is refused by OPA on every platform segment.
 func TestTenantAdmin2503_PlatformRoutesRefused(t *testing.T) {
 	skipIfNoAdminPool(t)
@@ -322,5 +384,14 @@ func TestTenantAdmin2503_OtherRolesRefused(t *testing.T) {
 	}
 	if got := liveRoles2503(t, own, target); len(got) != 1 || got[0] != "viewer" {
 		t.Errorf("target roles changed: %v", got)
+	}
+
+	// #2503 D5a (Matt, 2026-11-18): Users is org-admin only, so OPA itself
+	// refuses grc_engineer's read; it no longer reaches the handler.
+	grc := s.mint(t, own, seedMember2261(t, own, "active", "grc_engineer"), authz.RoleGRCEngineer)
+	for _, path := range []string{"/v1/admin/users", "/v1/admin/users/" + target.String()} {
+		if rr, reached := s.do(t, grc, http.MethodGet, path, nil); rr.Code != http.StatusForbidden || reached {
+			t.Errorf("grc_engineer GET %s = %d (reached router=%v), want OPA's 403", path, rr.Code, reached)
+		}
 	}
 }

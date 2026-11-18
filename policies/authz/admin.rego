@@ -54,7 +54,11 @@ is_admin_credential if {
 #
 #   users         list, read, set roles, set module access, assign and
 #                 revoke within the caller's tenant. Cross-tenant assign
-#                 and revoke stay super_admin in the handler.
+#                 and revoke stay super_admin in the handler. Also
+#                 tenant-admin-only (below, #2503 D5a).
+#   sso           the tenant's OIDC config and its preflight (#2503).
+#   audit-log     the tenant's admin audit log, unified read and export
+#                 (#2503 D5). grc_engineer keeps its blanket read here.
 #   controls      GET /v1/admin/controls/held-back (#2358).
 #   llm-routing   the tenant's LLM routing (#2428).
 #   evidence, policies, exceptions, samples
@@ -63,6 +67,8 @@ is_admin_credential if {
 #                 cred.IsAdmin in the handler.
 tenant_admin_segments := {
     "users",
+    "sso",
+    "audit-log",
     "controls",
     "llm-routing",
     "evidence",
@@ -80,6 +86,8 @@ tenant_admin_segments := {
 #   controls   GET /v1/admin/controls/held-back, the stock controls whose
 #              shipped update the boot seed holds back behind a reviewed
 #              SCF re-anchor.
+#   users      the tenant's members and their roles (#2503 D5a, Matt
+#              2026-11-18: Users is org-admin only).
 tenant_admin_only_resource if {
     input.resource.type == "admin"
     tenant_admin_only_segments[input.resource.id]
@@ -87,4 +95,5 @@ tenant_admin_only_resource if {
 
 tenant_admin_only_segments := {
     "controls",
+    "users",
 }

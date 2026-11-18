@@ -5878,7 +5878,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived; inherent_score is optional, and omitting it (or sending null or an empty object) creates an unscored risk, stored with empty inherent and residual scores and read as Unscored; a residual_score without an inherent_score is refused (400); a non-FAIR score field (score, severity, likelihood, impact) that is not a JSON number in range is refused (422), and a non-empty residual_score must carry one
+      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived; inherent_score is optional, and omitting it (or sending null or an empty object) creates an unscored risk, stored with empty inherent and residual scores and read as Unscored; a residual_score without an inherent_score is refused (400); a non-FAIR score field (score, severity, likelihood, impact) that is not a JSON number in range is refused (422), and a non-empty residual_score must carry one; treatment=accept with acceptance_status=proposed needs justification and proposed_until (YYYY-MM-DD, after today), as /acceptance/propose does, else 400
       tags: [risks]
       operationId: post-v1-risks
       security:
