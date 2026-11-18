@@ -116,6 +116,9 @@ type Credential struct {
 	// UserID is. Nothing authorizes on it. Set on recovery keys (#1892);
 	// a Rotate successor inherits it.
 	MintedBy string
+	// Label is the admin-chosen name for an API key (api_keys.label,
+	// #2384). Display only; a Rotate successor inherits it.
+	Label string
 	// RetiresAt is api_keys.retires_at: non-zero on a rotated-out
 	// predecessor, which stops authenticating after it. Set by the
 	// DB-backed list (#1953); the in-memory maps track retirement apart.
@@ -539,6 +542,8 @@ func (s *Store) Rotate(id string) (successor Credential, bearer string, predeces
 	rec.cred.Purpose = pred.cred.Purpose
 	successor.MintedBy = pred.cred.MintedBy
 	rec.cred.MintedBy = pred.cred.MintedBy
+	successor.Label = pred.cred.Label
+	rec.cred.Label = pred.cred.Label
 
 	predecessorExpiresAt = time.Now().UTC().Add(s.rotationGrace)
 	if s.persist != nil {

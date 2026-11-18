@@ -229,6 +229,7 @@ export default function APIKeysPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Label</TableHead>
                   <TableHead>ID</TableHead>
                   <TableHead className="w-24">Last 4</TableHead>
                   <TableHead>Allowed kinds</TableHead>
@@ -240,6 +241,13 @@ export default function APIKeysPage() {
               <TableBody>
                 {list.data.map((c) => (
                   <TableRow key={c.id}>
+                    <TableCell data-testid={`cred-label-${c.id}`}>
+                      {c.label ? (
+                        c.label
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="font-mono text-xs">
                       {c.id.slice(0, 12)}…
                     </TableCell>
@@ -398,6 +406,7 @@ function IssueForm({
   const [rawError, setRawError] = useState<string | null>(null);
   const [ttlDays, setTtlDays] = useState(90);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [label, setLabel] = useState("");
 
   // Slice 363 — form-error association. errorId points every input
   // (via aria-describedby) at the Alert when it's mounted; undefined
@@ -445,6 +454,7 @@ function IssueForm({
       is_admin: allowAdmin && isAdmin,
       is_approver: false,
       owner_roles: [],
+      label: label.trim() || undefined,
     });
   }
 
@@ -458,6 +468,29 @@ function IssueForm({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* #2384: pages name the key by this label instead of its id. */}
+        <Field label="Label (optional)" htmlFor="issue-label">
+          <Input
+            id="issue-label"
+            value={label}
+            maxLength={100}
+            placeholder="e.g. CI deploy"
+            onChange={(e) => setLabel(e.target.value)}
+            aria-describedby={
+              errorId ? `issue-label-hint ${errorId}` : "issue-label-hint"
+            }
+            data-testid="issue-label"
+          />
+          <p
+            id="issue-label-hint"
+            className="text-xs text-muted-foreground"
+            data-testid="issue-label-hint"
+          >
+            Every member of your organisation can see this label wherever the
+            key is named.
+          </p>
+        </Field>
+
         <KindsPicker value={allowedKinds} onChange={setAllowedKinds} />
 
         <div className="space-y-2" data-testid="issue-scope">

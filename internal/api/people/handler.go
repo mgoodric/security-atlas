@@ -61,13 +61,15 @@ type User struct {
 	Status      string `json:"status"`
 }
 
-// APIKey is one API key in the caller's tenant: its id and its owner
-// (api_keys.issued_by), nothing else. A key with no owner has no owner_id;
+// APIKey is one API key in the caller's tenant: its id, its owner
+// (api_keys.issued_by) and its admin-chosen label (#2384), nothing else.
+// A key with no owner has no owner_id and an unlabelled key no label;
 // minted_by (the admin who minted it) is attribution, not ownership
 // (apikeystore.IssueInput), so it is never a fallback.
 type APIKey struct {
 	ID      string `json:"id"`
 	OwnerID string `json:"owner_id,omitempty"`
+	Label   string `json:"label,omitempty"`
 }
 
 // Response is the GET /v1/people shape.
@@ -228,7 +230,7 @@ func list(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID) (Response
 
 	// Revoked keys stay listed: they still name the actor on older records.
 	krows, err := tx.Query(ctx,
-		`SELECT id, issued_by
+		`SELECT id, issued_by, label
 		   FROM api_keys
 		  WHERE tenant_id = $1
 		  ORDER BY id
@@ -240,14 +242,18 @@ func list(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID) (Response
 		var (
 			id       uuid.UUID
 			issuedBy pgtype.UUID
+			label    *string
 		)
-		if err := krows.Scan(&id, &issuedBy); err != nil {
+		if err := krows.Scan(&id, &issuedBy, &label); err != nil {
 			krows.Close()
 			return out, fmt.Errorf("scan api key: %w", err)
 		}
 		k := APIKey{ID: id.String()}
 		if issuedBy.Valid {
 			k.OwnerID = uuid.UUID(issuedBy.Bytes).String()
+		}
+		if label != nil {
+			k.Label = *label
 		}
 		out.APIKeys = append(out.APIKeys, k)
 	}
