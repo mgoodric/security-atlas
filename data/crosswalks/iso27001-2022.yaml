@@ -872,10 +872,10 @@ mappings:
     strength: 0.6
     rationale: "Boundary-level service protection is the Boundary Protection (NET-03) facet."
   - requirement_code: A.8.22
-    scf_anchor: NET-03
+    scf_anchor: NET-06
     relationship_type: equal
     strength: 0.8
-    rationale: "Network segregation/segmentation maps to Boundary Protection (NET-03)."
+    rationale: "Network segregation maps to SCF Network Segmentation (macrosegmentation) (NET-06); the SCF 2026.3 workbook maps A.8.22 to NET-06, not to Boundary Protection."
   - requirement_code: A.8.23
     scf_anchor: NET-03
     relationship_type: intersects_with

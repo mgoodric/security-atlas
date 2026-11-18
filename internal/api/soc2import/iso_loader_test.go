@@ -275,3 +275,24 @@ func TestLoad_CrossFrameworkCodesAreDistinct(t *testing.T) {
 		}
 	}
 }
+
+// #2396 — ISO 27001 A.8.22 (segregation of networks) maps to SCF 2026.3
+// NET-06 Network Segmentation (macrosegmentation) only. The SCF workbook's
+// ISO 27002:2022 column lists NET-06 for A.8.22 and not NET-03, so no
+// Boundary Protection edge remains (Matt's call, 2026-11-18).
+func TestLoad_ISOA822OnNetworkSegmentation(t *testing.T) {
+	t.Parallel()
+	cw, err := soc2import.Load(filepath.Join("..", "..", "..", "data", "crosswalks", "iso27001-2022.yaml"))
+	if err != nil {
+		t.Fatalf("Load ISO: %v", err)
+	}
+	var anchors []string
+	for _, m := range cw.Mappings {
+		if m.RequirementCode == "A.8.22" {
+			anchors = append(anchors, m.SCFAnchor)
+		}
+	}
+	if len(anchors) != 1 || anchors[0] != "NET-06" {
+		t.Errorf("A.8.22 anchors = %v, want [NET-06]", anchors)
+	}
+}
