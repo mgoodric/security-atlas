@@ -241,6 +241,7 @@ func noRoleRouter(t *testing.T, app *pgxpool.Pool, tenant string) http.Handler {
 	r.Get("/v1/controls/{id}/policies", h.Policies)
 	r.Get("/v1/controls/{id}/risks", h.Risks)
 	r.Get("/v1/controls/{id}/history", h.History)
+	r.Get("/v1/controls/{id}/anchor-history", h.AnchorHistory)
 	return r
 }
 

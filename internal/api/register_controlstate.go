@@ -66,6 +66,9 @@ func (s *Server) registerControlState(root *chi.Mux) {
 	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
 	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
 	root.Get("/v1/controls/{id}/history", controlDetailH.History)
+	// #2392: the control's SCF anchor history — every remap decision on
+	// any revision of its bundle.
+	root.Get("/v1/controls/{id}/anchor-history", controlDetailH.AnchorHistory)
 	// Slice 444: AI gap-explanation v0 — the first AI-assist surface, the
 	// lowest-risk one. GET /v1/controls/{id}/gap-explanation returns the
 	// DETERMINISTIC freshness/evidence rollup ALWAYS, plus a plain-language,

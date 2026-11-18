@@ -844,6 +844,10 @@ type Querier interface {
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
+	// Issue #2392: the bundle a control row belongs to, for the anchor-history
+	// read. No row (pgx.ErrNoRows) for an id that is not this tenant's control,
+	// which the handler maps to 404; RLS and the explicit tenant id both bind.
+	GetControlBundleForDetail(ctx context.Context, arg GetControlBundleForDetailParams) (string, error)
 	GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error)
 	// Slice 468: server-backed control owner-assignment + saved filter-views.
 	//
@@ -1758,7 +1762,8 @@ type Querier interface {
 	// narrows the rollup exactly as slice 224 does on the anchor list.
 	//
 	// #2131: filters on state, freshness, family, framework, anchor fit and
-	// owner (a person, or unowned), and an allow-listed sort. sort_key is one
+	// owner (a person, or unowned), and an allow-listed sort. #2392: and
+	// legacy_anchor_only keeps the controls an undecided remap proposal flags. sort_key is one
 	// of the fixed keys in the ORDER BY; the handler refuses any other value
 	// before it gets here, and a key this query does not name falls through
 	// to the tiebreakers. The default order is failing first (worst state
@@ -2116,6 +2121,13 @@ type Querier interface {
 	// Every catalog metric whose compute_strategy is 'computed'. The 15-min
 	// cron iterates this list per tenant.
 	ListComputedCatalog(ctx context.Context) ([]MetricsCatalog, error)
+	// Issue #2392: GET /v1/controls/{id}/anchor-history. Every SCF remap
+	// decision (#1776, scf_remap_decisions) on any revision of the control's
+	// bundle, newest first, keyset paged on (decided_at, id) as the evaluation
+	// history is. new_version is the version of the superseding revision an
+	// approval created; NULL on a reject or keep-legacy. A pure read of an
+	// append-only table.
+	ListControlAnchorHistoryPaged(ctx context.Context, arg ListControlAnchorHistoryPagedParams) ([]ListControlAnchorHistoryPagedRow, error)
 	// AC-4: the control's evaluation history from slice 012's control_eval-
 	// uations append-only ledger, newest-first, keyset-paginated. The keyset
 	// predicate is decomposed (not a ROW(...) comparison) for the same

@@ -160,6 +160,10 @@ type controlWithStateWire struct {
 	// (#2128), or null when nobody is assigned. The manifest owner_role is
 	// the default owner role and is a separate field on the detail view.
 	OwnerUserID *string `json:"owner_user_id"`
+	// LegacyAnchor is true while the control has an undecided SCF remap
+	// proposal (open or rejected): it is still on an older release's
+	// anchor and a reviewer has not settled it (#2392).
+	LegacyAnchor bool `json:"legacy_anchor"`
 }
 
 type listWithStateResp struct {
@@ -232,6 +236,15 @@ func parseListFilter(r *http.Request) (control.ListFilter, string) {
 	// The framework filter matches the catalog framework slugs the list's
 	// frameworks column shows; an unknown slug matches nothing.
 	f.Framework = q.Get("framework")
+	// #2392: ?legacy_anchor=true keeps the controls an undecided remap
+	// proposal flags.
+	switch q.Get("legacy_anchor") {
+	case "", "false":
+	case "true":
+		f.LegacyAnchorOnly = true
+	default:
+		return f, "legacy_anchor must be true or false"
+	}
 	sortKey, desc, err := control.ParseListSort(q.Get("sort"))
 	if err != nil {
 		return f, err.Error()
@@ -295,6 +308,7 @@ func controlWithStateWireFrom(row dbx.ListActiveControlsWithStateRow) controlWit
 		Frameworks:    []string{},
 		AnchorFit:     row.AnchorFit,
 		AnchorFitNote: row.AnchorFitNote,
+		LegacyAnchor:  row.LegacyAnchor,
 	}
 	if row.ScfAnchorID.Valid {
 		id := uuid.UUID(row.ScfAnchorID.Bytes).String()
