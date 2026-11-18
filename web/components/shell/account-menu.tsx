@@ -66,7 +66,6 @@ export function AccountMenu({
         ref={buttonRef}
         type="button"
         data-testid="account-menu-trigger"
-        aria-label={name ? `Account: ${name}` : "Account"}
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
@@ -78,6 +77,10 @@ export function AccountMenu({
         >
           {initials ?? <PersonIcon />}
         </span>
+        {/* The name comes from this text, not an aria-label: an aria-label
+            that left out the visible initials failed axe
+            label-content-name-mismatch (#2397). */}
+        <span className="sr-only">{name ? `Account: ${name}` : "Account"}</span>
       </button>
       <div
         id={panelId}
