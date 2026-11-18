@@ -62,8 +62,9 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	// above), the risks store, and the freshness + drift stores
 	// declared above. The handler runs the slice 035 OPA admit
 	// (`dashboard_export` action — added by the slice 269 OPA admit
-	// extension) PLUS a handler-level `hasDashboardExportAccess`
-	// predicate; admin + approver only (slice 269 D3). Every
+	// extension), which the handler asks again itself, PLUS a
+	// handler-level `hasDashboardExportAccess` twin; admin,
+	// grc_engineer and auditor (#2350). Every
 	// terminal outcome writes one `me_audit_log` row with
 	// action='dashboard_export' (migration
 	// 20260524000000_dashboard_export_meta_audit.sql extends the

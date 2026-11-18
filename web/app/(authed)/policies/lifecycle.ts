@@ -9,7 +9,9 @@
 import { ROLES } from "@/components/admin/roles";
 import type {
   CreatePolicyInput,
+  PendingAcknowledgment,
   Policy,
+  PolicyAcknowledgment,
   PolicyDraftInput,
 } from "@/lib/api/policies";
 
@@ -62,6 +64,39 @@ export function needsControlsWarning(
     ["draft", "under_review", "approved"].includes(p.status) &&
     p.linked_control_ids.length === 0
   );
+}
+
+/** #2465 — where the signed-in person stands on this policy's
+ *  acknowledgment. `pending` when the policy is published and is on the
+ *  caller's pending list (their role is in its audience and they have not
+ *  acknowledged this version within the year); `acknowledged` right after
+ *  they do; otherwise null, and the page offers nothing. The platform
+ *  decides who may acknowledge; this only mirrors its pending list. */
+export type MyAckState =
+  | { kind: "pending"; lastAcknowledgedAt: string | null }
+  | { kind: "acknowledged"; acknowledgedAt: string; version: string | null };
+
+export function myAckState(
+  p: Pick<Policy, "id" | "status" | "version">,
+  pending: readonly PendingAcknowledgment[] | undefined,
+  justAcknowledged: PolicyAcknowledgment | undefined,
+): MyAckState | null {
+  if (justAcknowledged && justAcknowledged.policy_id === p.id) {
+    // The version comes from the ack response: `policy_version_id` is the
+    // policy row the platform recorded, and a published row's version
+    // never changes. If it names another row, the label is omitted rather
+    // than shown from this page's cached policy.
+    return {
+      kind: "acknowledged",
+      acknowledgedAt: justAcknowledged.acknowledged_at,
+      version: justAcknowledged.policy_version_id === p.id ? p.version : null,
+    };
+  }
+  if (p.status !== "published" || !pending) return null;
+  const mine = pending.find((a) => a.policy_id === p.id);
+  return mine
+    ? { kind: "pending", lastAcknowledgedAt: mine.last_acknowledged_at ?? null }
+    : null;
 }
 
 /** The roles a policy can require to acknowledge it: the platform's RBAC

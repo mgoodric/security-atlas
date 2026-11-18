@@ -7,6 +7,11 @@
 // for the approver role or the approval rule (the submitter cannot approve
 // unless self-approval is on), 409 for a wrong state or a publish with no
 // linked control.
+//
+// #2465 — acknowledge (POST upstream) records the caller's own
+// acknowledgment of a published policy. The platform admits any member
+// whose role is in the policy's audience and ignores any body: an ack is
+// always for the caller.
 
 import { NextResponse } from "next/server";
 
@@ -16,6 +21,7 @@ const UPSTREAM_METHOD: Record<string, "PATCH" | "POST"> = {
   submit: "PATCH",
   approve: "PATCH",
   publish: "POST",
+  acknowledge: "POST",
 };
 
 export async function POST(

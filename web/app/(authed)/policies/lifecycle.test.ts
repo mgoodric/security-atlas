@@ -3,7 +3,11 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Policy } from "@/lib/api/policies";
+import type {
+  PendingAcknowledgment,
+  Policy,
+  PolicyAcknowledgment,
+} from "@/lib/api/policies";
 
 import {
   AUDIENCE_OPTIONS,
@@ -12,6 +16,7 @@ import {
   EMPTY_FORM,
   formFromPolicy,
   isDraft,
+  myAckState,
   needsControlsWarning,
   nextVersion,
   primaryAction,
@@ -182,5 +187,97 @@ describe("audience", () => {
         "create",
       ).acknowledgment_required_roles,
     ).toBeUndefined();
+  });
+});
+
+describe("myAckState (#2465)", () => {
+  const ID = "p-2465";
+  const pending = (over: Partial<PendingAcknowledgment> = {}) => ({
+    policy_id: ID,
+    policy_version_id: ID,
+    title: "Access Control",
+    version: "1.0",
+    required_roles: ["viewer"],
+    ...over,
+  });
+  const acked: PolicyAcknowledgment = {
+    id: "a1",
+    policy_id: ID,
+    policy_version_id: ID,
+    acknowledged_at: "2026-11-18T10:00:00Z",
+    deduplicated: false,
+  };
+
+  test("a published policy on the pending list asks for the ack", () => {
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        [pending()],
+        undefined,
+      ),
+    ).toEqual({ kind: "pending", lastAcknowledgedAt: null });
+  });
+
+  test("a lapsed earlier ack is carried for the card to mention", () => {
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        [pending({ last_acknowledged_at: "2025-10-01T00:00:00Z" })],
+        undefined,
+      ),
+    ).toEqual({ kind: "pending", lastAcknowledgedAt: "2025-10-01T00:00:00Z" });
+  });
+
+  test("not on the pending list, or not published, offers nothing", () => {
+    const other = pending({ policy_id: "someone-else" });
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        [other],
+        undefined,
+      ),
+    ).toBeNull();
+    expect(
+      myAckState(
+        { id: ID, status: "draft", version: "1.0" },
+        [pending()],
+        undefined,
+      ),
+    ).toBeNull();
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        undefined,
+        undefined,
+      ),
+    ).toBeNull();
+  });
+
+  test("just acknowledged wins over a stale pending list", () => {
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        [pending()],
+        acked,
+      ),
+    ).toEqual({
+      kind: "acknowledged",
+      acknowledgedAt: acked.acknowledged_at,
+      version: "1.0",
+    });
+  });
+
+  test("the done version comes from the row the ack recorded", () => {
+    // The response names another policy row: no version is claimed.
+    expect(
+      myAckState({ id: ID, status: "published", version: "1.0" }, [], {
+        ...acked,
+        policy_version_id: "another-row",
+      }),
+    ).toEqual({
+      kind: "acknowledged",
+      acknowledgedAt: acked.acknowledged_at,
+      version: null,
+    });
   });
 });
