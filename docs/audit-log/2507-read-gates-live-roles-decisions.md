@@ -34,9 +34,29 @@ the gates here are reached from those.
 `IsTenantApprover(cred)`, or any **canonical** role among
 `TenantRoleLabels(cred)`. So: live `user_roles`, plus the credential's own
 label only when it names no user (unbound key, client_credentials). The old
-gate admitted any non-empty label, including free text; `BuildInput` drops a
-non-canonical role before OPA, so OPA already refused such a caller on every
-route here. Counting only canonical roles makes the gate agree.
+gate admitted any non-empty label, including free text.
+
+**Free-text labels grant nothing at the handler (Matt, 2026-11-17).** The
+first draft of this entry said `BuildInput` drops a non-canonical role before
+OPA, so the layers agree. That was wrong (#2595 review). `derivedRolesFor`
+turns any label that is not viewer/auditor-only into `control_owner`, so OPA
+admits these callers to the control, evidence and activity reads that
+`HasAnyTenantRole` refuses:
+
+- an unbound API key (`key_`, UserID == ID);
+- a client_credentials machine token (`oauth_client:` subject);
+- a legacy credstore credential;
+- a key bound to a user, the **bound-key-label gap**: the handler counts the
+  owner's live roles alone (#2541), but `derivedRolesFor`'s last case still
+  derives `control_owner` from the bound key's label.
+
+Matt's call is to keep the stricter handler and record the split. It is
+pinned by `TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses`, which
+runs `BuildInput` + `Decide` on all four shapes and asserts OPA admits while
+the handler refuses. Bringing the policy layer into line (`derivedRolesFor`)
+is #2596; when it lands, that test flips to agreement. Callers who lose
+access: unbound keys and machine tokens whose only label is free text, on
+the routes `HasAnyTenantRole` gates. The changelog says so.
 
 ## D3 — gate per route
 
@@ -95,8 +115,13 @@ already landed that rule before this work: `ownerLabelIsGrant` excludes a
 bound key's label, so every helper counts a bound key's owner's live roles
 alone. `HasAnyTenantRole` is built from `IsTenantApprover` and
 `TenantRoleLabels`, so it inherits the same rule
-(`TestReadGates2507_HasAnyTenantRole` "bound key, auditor label"). Nothing
-further to reconcile.
+(`TestReadGates2507_HasAnyTenantRole` "bound key, auditor label"). The
+handler helpers agree with each other.
+
+They do not yet agree with OPA for a bound key: `derivedRolesFor` still
+derives `control_owner` from a bound key's non-read-only label (D2, the
+bound-key-label gap). That is the policy-layer half, tracked in #2596, not
+reconciled here.
 
 ## D6 — fixtures moved, and fixtures left
 

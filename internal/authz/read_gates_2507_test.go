@@ -10,13 +10,16 @@ package authz_test
 //     the matrix pins the result of both layers;
 //   - that no routes2428 gate admits a session holding a role in its claim
 //     alone (a revoked user's token, #2381);
-//   - the HasAnyTenantRole helper itself.
+//   - the HasAnyTenantRole helper itself, and the recorded split where OPA
+//     admits a free-text label the handler refuses.
 
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
@@ -112,6 +115,52 @@ func TestReadGates2507_HasAnyTenantRole(t *testing.T) {
 	} {
 		if got := authz.HasAnyTenantRole(c.cred); got != c.want {
 			t.Errorf("%s: HasAnyTenantRole = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses pins a recorded
+// split between the layers (Matt, 2026-11-17: keep the stricter handler).
+// derivedRolesFor turns a free-text owner_roles label into control_owner,
+// so OPA admits these credentials to the control, evidence and activity
+// reads: an unbound API key, a client_credentials machine token and a
+// legacy credential, whose label is their grant, and a key bound to a user,
+// whose label is not. HasAnyTenantRole counts canonical roles only, and a
+// bound key's owner's live roles alone, so the handler refuses all four: a
+// free-text label grants nothing at the handler. The policy layer catching
+// up is #2596; when it does, this test flips to agreement.
+func TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses(t *testing.T) {
+	t.Parallel()
+	e := engine(t)
+	shapes := []struct {
+		name string
+		cred credstore.Credential
+	}{
+		{"unbound key", credstore.Credential{ID: "key_2507", UserID: "key_2507", TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
+		{"machine token", credstore.Credential{ID: "jwt:2507", UserID: "oauth_client:c2507", TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
+		{"legacy credential", credstore.Credential{ID: "cred_2507", TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
+		{"bound key", credstore.Credential{ID: "key_2507b", UserID: user2507, TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
+	}
+	routes := []string{
+		"/v1/controls/" + id2428 + "/policies",
+		"/v1/controls/export",
+		"/v1/evidence",
+		"/v1/activity",
+	}
+	for _, sh := range shapes {
+		if authz.HasAnyTenantRole(sh.cred) {
+			t.Errorf("%s with a free-text label: HasAnyTenantRole admits it", sh.name)
+		}
+		for _, path := range routes {
+			r := httptest.NewRequest(http.MethodGet, path, nil)
+			r = r.WithContext(authctx.WithCredential(r.Context(), sh.cred))
+			d, err := e.Decide(context.Background(), authz.BuildInput(r, nil))
+			if err != nil {
+				t.Fatalf("%s GET %s: Decide: %v", sh.name, path, err)
+			}
+			if !d.Allow {
+				t.Errorf("%s GET %s: OPA refuses; the recorded split is gone, update this test and D2", sh.name, path)
+			}
 		}
 	}
 }
