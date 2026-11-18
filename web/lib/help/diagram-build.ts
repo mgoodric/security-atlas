@@ -181,10 +181,12 @@ function activeValue(value: string, css: boolean): string[] {
   const out: string[] = [];
   if (/(?:java|vb)script:/.test(v)) out.push("javascript: URL");
   if (/url\((?!["']?#)/.test(v)) out.push("non-fragment url()");
+  // A CSS escape can spell any of these without its letters, and a
+  // presentation attribute (`fill`, `mask`, `cursor`) is parsed as CSS too.
+  if (v.includes("\\")) out.push("CSS escape");
   if (css) {
     if (v.includes("@import")) out.push("@import");
-    // A CSS escape can spell any of the above without its letters.
-    if (v.includes("\\")) out.push("CSS escape");
+    if (v.includes("image-set(")) out.push("image-set()");
     if (/expression\(|-moz-binding|behavior:/.test(v)) {
       out.push("CSS script hook");
     }
@@ -312,6 +314,13 @@ export function unsafeSvgParts(svg: string): string[] {
               out.add(`foreign namespace ${value}`);
             }
             continue;
+          }
+          if (
+            attr.startsWith("xml:") &&
+            attr !== "xml:space" &&
+            attr !== "xml:lang"
+          ) {
+            out.add(attr);
           }
           const local = attr.slice(attr.indexOf(":") + 1).toLowerCase();
           if (local.startsWith("on")) out.add("event-handler attribute");

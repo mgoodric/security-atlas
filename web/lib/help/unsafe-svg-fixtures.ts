@@ -84,6 +84,26 @@ export const UNSAFE_SVG_FIXTURES: readonly UnsafeSvgFixture[] = [
     why: "non-fragment url()",
   },
   {
+    name: "a CSS-escaped url() in a presentation attribute",
+    svg: `<svg ${NS}><rect fill="u\\72l(https://evil.example/p.svg#g)" mask="u\\72l(https://evil.example/m.svg#m)"/></svg>`,
+    why: "CSS escape",
+  },
+  {
+    name: "image-set() in a style sheet",
+    svg: `<svg ${NS}><style>rect{fill:image-set("evil.png" 1x)}</style><rect/></svg>`,
+    why: "image-set()",
+  },
+  {
+    name: "image-set() in a style attribute",
+    svg: `<svg ${NS}><rect style='fill: image-set("evil.png" 1x)'/></svg>`,
+    why: "image-set()",
+  },
+  {
+    name: "an xml:base that re-roots fragment links",
+    svg: `<svg ${NS}><a xml:base="https://evil.example/" href="#a"><text>a</text></a></svg>`,
+    why: "xml:base",
+  },
+  {
     name: "a <foreignObject>",
     svg: `<svg ${NS}><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">evil</div></foreignObject></svg>`,
     why: "<foreignObject>",

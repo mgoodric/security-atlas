@@ -8,7 +8,8 @@
 // from `diagram-build.ts` (`SVG_ELEMENTS`).
 //
 // It keeps only allow-listed SVG elements, and drops processing
-// instructions, attributes outside the SVG/XLink namespaces, `on*`
+// instructions, attributes outside the SVG/XLink namespaces, every `xml:`
+// attribute but `xml:space` and `xml:lang`, CSS escapes in any value, `on*`
 // handlers, any attribute whose local name is `href` unless it is a
 // same-document fragment, `javascript:` values and non-fragment `url()`,
 // and style sheets with `@import`, escapes or external `url()`. Node then
@@ -65,9 +66,10 @@ export function stripActiveSvg(svg: string): string {
     return (
       /(?:java|vb)script:/.test(v) ||
       /url\((?!["']?#)/.test(v) ||
+      v.includes("\\") ||
       (css &&
         (v.includes("@import") ||
-          v.includes("\\") ||
+          v.includes("image-set(") ||
           /expression\(|-moz-binding|behavior:/.test(v)))
     );
   };
@@ -110,6 +112,7 @@ export function stripActiveSvg(svg: string): string {
       } else {
         drop =
           (ns !== null && ns !== XLINK_NS && ns !== XML_NS) ||
+          (ns === XML_NS && local !== "space" && local !== "lang") ||
           local.startsWith("on") ||
           (local === "href" && !squash(attr.value).startsWith("#")) ||
           active(attr.value, local === "style");

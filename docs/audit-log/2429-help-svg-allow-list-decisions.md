@@ -40,6 +40,17 @@ and non-fragment `url()` refused anywhere, and `@import`, CSS escapes and
 script hooks refused in `style`. Namespace declarations are limited to SVG
 and XLink, and the browser strip drops attributes in any other namespace.
 
+### D2a — review fold-ins: escapes everywhere, `xml:base`, `image-set()`
+
+Review of #2625 found that `fill="u\72l(https://…)"` passed both sides:
+presentation attributes (`fill`, `mask`, `cursor`, `filter`, `clip-path`)
+are parsed as CSS, so a CSS escape could spell `url(` there. A backslash is
+now refused in every attribute value, not just `style`. Two more were
+closed at the same time: every `xml:` attribute other than `xml:space` and
+`xml:lang` is refused (`xml:base` would re-root a `#fragment` link onto
+another origin), and `image-set(` is refused in style sheets and `style=""`
+next to `@import`. Each has a fixture on both sides.
+
 ### D3 — `<animate>` and `<set>` are refused, not inspected
 
 The ticket asks to refuse them when they target `href`. They are off the
