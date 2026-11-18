@@ -47,14 +47,22 @@ func TestSlice124_UnifiedAuditLogAccess(t *testing.T) {
 	cases := []struct {
 		name      string
 		roles     []authz.Role
+		adminCred bool
 		wantAllow bool
 		reason    string
 	}{
 		{
 			name:      "admin-allow-read",
 			roles:     []authz.Role{authz.RoleAdmin},
+			adminCred: true,
 			wantAllow: true,
-			reason:    "admin.rego wildcard allows every action on every resource within tenant",
+			reason:    "an admin credential (cred.IsAdmin) reaches every non-super-admin-only /v1/admin segment (#2503)",
+		},
+		{
+			name:      "tenant-admin-by-role-deny-read",
+			roles:     []authz.Role{authz.RoleAdmin},
+			wantAllow: false,
+			reason:    "#2503: audit-log is not a tenant-admin segment; the handler refuses a tenant admin by role too (callerAllowedUnified)",
 		},
 		{
 			name:      "auditor-deny-read",
@@ -92,8 +100,9 @@ func TestSlice124_UnifiedAuditLogAccess(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d, err := e.Decide(context.Background(),
-				unifiedAuditLogInput(t, http.MethodGet, "/v1/admin/audit-log/unified", tc.roles))
+			in := unifiedAuditLogInput(t, http.MethodGet, "/v1/admin/audit-log/unified", tc.roles)
+			in.User.Attrs["is_admin_credential"] = tc.adminCred
+			d, err := e.Decide(context.Background(), in)
 			if err != nil {
 				t.Fatalf("Decide: %v", err)
 			}

@@ -91,6 +91,11 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 		// (legacy bearer path; super_admin is JWT-only at v1).
 		"is_super_admin": jwtmw.FromContext(r.Context()) != nil &&
 			jwtmw.FromContext(r.Context()).SuperAdmin,
+		// is_admin_credential: #2503. The cred.IsAdmin flag (the
+		// super_admin claim on a JWT, or an admin-flagged API key), as
+		// distinct from a tenant admin by role. admin.rego admits only an
+		// admin credential to the platform /v1/admin/* segments.
+		"is_admin_credential": cred.IsAdmin,
 	}
 	for k, v := range attrs {
 		userAttrs[k] = v

@@ -34,6 +34,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -106,6 +107,22 @@ func (s *Store) PostureTargets(ctx context.Context) ([]dbx.FrameworkPostureTarge
 		return qerr
 	})
 	return rows, err
+}
+
+// PriorFrameworkVersions maps each framework version to the one version the
+// version-migration queue leads into it from (#2406), by the rule the
+// posture-target carry-over uses.
+func (s *Store) PriorFrameworkVersions(ctx context.Context) (map[uuid.UUID]uuid.UUID, error) {
+	var out map[uuid.UUID]uuid.UUID
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ uuid.UUID) error {
+		rows, qerr := q.ListFrameworkVersionMigrationSources(ctx)
+		if qerr != nil {
+			return qerr
+		}
+		out = frameworkscope.PriorFrameworkVersions(rows)
+		return nil
+	})
+	return out, err
 }
 
 // ActivityFeed reads one page of the evidence-ingest activity feed,
