@@ -715,14 +715,86 @@ WHERE p.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(status)::text IS NULL OR p.status = sqlc.narg(status)::text)
   AND (c.superseded_by IS NULL OR p.status NOT IN ('open', 'rejected'));
 
--- name: IsApprovedRemapRevision :one
--- Issue #1776: whether a control row is the revision a person's approved SCF
--- remap decision created. The upload path keeps such a revision when the
--- boot seed re-uploads the stock manifest it replaced, so a reviewed
--- re-anchor is never undone silently.
-SELECT EXISTS (
-    SELECT 1 FROM scf_remap_decisions
-    WHERE tenant_id = sqlc.arg(tenant_id)
-      AND new_control_id = sqlc.arg(control_id)
-      AND decision = 'approved'
-) AS approved;
+-- name: ApprovedRemapLineageRevision :one
+-- Issues #1776, #2358: the approved SCF remap revision a control row is, or
+-- descends from. The walk follows superseded_by back from the row through
+-- its earlier revisions and returns the nearest one that a person's approved
+-- remap decision created. The upload path keeps such a lineage when the
+-- boot seed re-uploads the stock manifest it replaced, so neither a
+-- reviewed re-anchor nor a person's later edit on top of it is undone
+-- silently. No row when the lineage holds no approved revision.
+WITH RECURSIVE lineage AS (
+    SELECT c.id, 0 AS depth
+    FROM controls c
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.id = sqlc.arg(control_id)
+    UNION ALL
+    SELECT p.id, l.depth + 1
+    FROM controls p
+    JOIN lineage l ON p.superseded_by = l.id
+    WHERE p.tenant_id = sqlc.arg(tenant_id) AND l.depth < 10000
+)
+SELECT l.id
+FROM lineage l
+JOIN scf_remap_decisions d
+  ON d.tenant_id = sqlc.arg(tenant_id)
+ AND d.new_control_id = l.id
+ AND d.decision = 'approved'
+ORDER BY l.depth
+LIMIT 1;
+
+-- name: RecordStockControlHoldback :exec
+-- Issue #2358: the boot seed kept a reviewed lineage (keepReviewedAnchor)
+-- instead of applying a shipped manifest. One row per tenant and bundle;
+-- first_held_at restarts when a different shipped manifest is held back.
+INSERT INTO stock_control_holdbacks
+    (tenant_id, bundle_id, approved_control_id, shipped_manifest_hash)
+VALUES (sqlc.arg(tenant_id), sqlc.arg(bundle_id), sqlc.arg(approved_control_id), sqlc.arg(shipped_manifest_hash))
+ON CONFLICT (tenant_id, bundle_id) DO UPDATE
+SET approved_control_id   = EXCLUDED.approved_control_id,
+    first_held_at         = CASE
+                                WHEN stock_control_holdbacks.shipped_manifest_hash = EXCLUDED.shipped_manifest_hash
+                                THEN stock_control_holdbacks.first_held_at
+                                ELSE now()
+                            END,
+    shipped_manifest_hash = EXCLUDED.shipped_manifest_hash,
+    last_held_at          = now();
+
+-- name: ListStockControlHoldbacks :many
+-- Issue #2358: the tenant's stock controls whose shipped update the boot
+-- seed holds back. Each row names the active revision, the approved
+-- re-anchor that caused the hold, the shipped manifest being missed, and
+-- the stock manifest the approval replaced; the shipped manifest is an
+-- update the tenant has not received when the two hashes differ.
+SELECT h.bundle_id,
+       a.id              AS active_control_id,
+       a.version         AS active_version,
+       a.title           AS title,
+       a.bundle_manifest_hash AS active_manifest_hash,
+       a.bundle_uploaded_at   AS active_uploaded_at,
+       ap.id             AS approved_control_id,
+       ap.version        AS approved_version,
+       d.new_scf_id      AS approved_scf_id,
+       d.new_release     AS approved_release,
+       d.decided_at      AS approved_at,
+       lg.bundle_manifest_hash AS replaced_manifest_hash,
+       h.shipped_manifest_hash,
+       h.first_held_at,
+       h.last_held_at
+FROM stock_control_holdbacks h
+JOIN controls a
+  ON a.tenant_id = h.tenant_id AND a.bundle_id = h.bundle_id AND a.superseded_by IS NULL
+JOIN controls ap
+  ON ap.tenant_id = h.tenant_id AND ap.id = h.approved_control_id
+JOIN LATERAL (
+    SELECT dd.new_scf_id, dd.new_release, dd.decided_at, dd.legacy_control_id
+    FROM scf_remap_decisions dd
+    WHERE dd.tenant_id = h.tenant_id
+      AND dd.new_control_id = h.approved_control_id
+      AND dd.decision = 'approved'
+    ORDER BY dd.decided_at DESC
+    LIMIT 1
+) d ON true
+JOIN controls lg
+  ON lg.tenant_id = h.tenant_id AND lg.id = d.legacy_control_id
+WHERE h.tenant_id = sqlc.arg(tenant_id)
+ORDER BY h.bundle_id;

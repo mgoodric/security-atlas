@@ -31,6 +31,29 @@ After each approval it re-runs the boot seed and the re-bind, then asserts the c
 
 We considered refusing approval of stock controls instead (the alternative), and rejected it. Split and no-successor stock controls are exactly where the human choice matters, and #2321 cannot move them.
 
+### Held-back shipped updates (#2358)
+
+`IsStockManifest` matches every revision the platform ever shipped (`stockManifestHashes`), not only the current one. So once a tenant's stock control is re-anchored, a _later_ shipped update to that control's `control.yaml` is held back too, on every boot, until a person uploads a bundle that carries the change. That is the intended priority: the reviewed anchor wins over the shipped one. But it means a platform fix silently never reaches that tenant.
+
+The hold is no longer visible only as a boot-log warning. Each time the guard keeps a lineage it upserts a row into `stock_control_holdbacks` (one per tenant and bundle): the approved revision behind the hold and the sha256 of the shipped manifest it did not apply. `first_held_at` restarts when a different shipped manifest is held back. `GET /v1/admin/controls/held-back` (tenant admin only) and `atlas-cli catalog remap held-back` list them. Each entry shows:
+
+- the active revision;
+- the approved re-anchor;
+- the shipped manifest being missed;
+- the stock manifest the approval replaced.
+
+`shipped_update` is true when the last two differ. In that case the platform changed the control after the re-anchor, and the tenant does not have that change.
+
+The row is derived state, refreshed on every boot, so it cascades with the controls it names. The platform cannot list a shipped update before the boot seed offers it, because the server holds only the hashes of shipped manifests, not their text. A row appears on the first boot after the approval.
+
+### Edits after approval (#2358)
+
+The guard first keyed on the active revision _being_ the approved one. A person who edited the approved control (v2 approved, v3 a non-stock edit) lost that protection. On the next boot the shipped manifest superseded v3. When the shipped code was gone, as in a split, the boot failed with 404 instead.
+
+The guard now asks whether the active revision **is or descends from** an approved revision. `ApprovedRemapLineageRevision` walks `superseded_by` back from the active row and returns the nearest revision an `approved` decision created. No schema change: the lineage is already the `superseded_by` chain. `TestHeldBack2358_ReviewedStockControlListedAndEditsKept` approves the split case, edits v2 into v3, and re-runs the boot seed. v3 stays active, and the held-back row names v3 held behind the approved v2. With the walk limited to the row itself, the boot seed tries to supersede v3 and fails on the gone code.
+
+detection_tier_actual: manual_review (the #2351 re-review). detection_tier_target: integration.
+
 ## D2 — The history is a separate, append-only table
 
 `scf_remap_decisions` takes one row per decision. A row holds the decision, the legacy control and its anchor, code and release, the new control, anchor, code and release (on an approval only), an optional reason, `decided_by` and `decided_at`. A CHECK ties the four `new_*` columns to `decision = 'approved'`.

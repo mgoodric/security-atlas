@@ -160,6 +160,8 @@ sql:
       - "migrations/sql/20261238000000_control_evaluation_triggered_by.sql"
       # #2329: which credential made a me_audit_log change.
       - "migrations/sql/20261252000000_me_audit_log_actor_principal.sql"
+      # #2358: stock controls the boot seed held back behind a reviewed re-anchor.
+      - "migrations/sql/20261256000000_stock_control_holdbacks.sql"
     queries: "internal/db/queries"
     gen:
       go:
