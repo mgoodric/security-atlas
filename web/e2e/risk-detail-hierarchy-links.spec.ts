@@ -173,8 +173,8 @@ test.describe("/risks/[id] parents and children (#1748)", () => {
     const picker = page.getByTestId("risk-detail-attach-select");
     await expect(picker.locator("option")).toHaveText([
       "Choose a risk",
-      "Team A export gap (team)",
-      "Team B backup gap (team)",
+      "Team A export gap (Team)",
+      "Team B backup gap (Team)",
     ]);
 
     // Attach team B: it appears as a linked child and the roll-up (16)
@@ -195,7 +195,7 @@ test.describe("/risks/[id] parents and children (#1748)", () => {
     // An attached child leaves the picker.
     await expect(picker.locator("option")).toHaveText([
       "Choose a risk",
-      "Team A export gap (team)",
+      "Team A export gap (Team)",
     ]);
 
     // #2280: Detach asks first; Cancel leaves the child attached.
