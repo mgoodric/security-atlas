@@ -197,12 +197,22 @@ func TestRemapQueue_ImportingReleaseBQueuesOneClassifiedProposalPerControl(t *te
 		}
 	}
 
-	// A second run of the same import queues nothing new.
-	if _, err := scfimport.RebindControls(ctx, pool); err != nil {
+	// A second run of the same import queues nothing new, and its summary
+	// says so (#2325): the open proposals are not counted again.
+	again, err := scfimport.RebindControls(ctx, pool)
+	if err != nil {
 		t.Fatalf("repeat RebindControls: %v", err)
 	}
-	if again := queueFor(t, pool, tenant); len(again) != len(got) {
-		t.Fatalf("repeat run left %d proposals; want %d", len(again), len(got))
+	if left := queueFor(t, pool, tenant); len(left) != len(got) {
+		t.Fatalf("repeat run left %d proposals; want %d", len(left), len(got))
+	}
+	if len(again.NeedsReanchoring) == 0 {
+		t.Fatal("repeat run flagged no control; the re-run count check proves nothing")
+	}
+	for _, class := range scfimport.RemapClasses {
+		if n := again.Proposals[class]; n != 0 {
+			t.Errorf("repeat run summary %s = %d; want 0", class, n)
+		}
 	}
 }
 
@@ -247,7 +257,9 @@ type remapListBody struct {
 		Status          string   `json:"status"`
 		SuccessorSCFIDs []string `json:"successor_scf_ids"`
 	} `json:"proposals"`
-	Count int `json:"count"`
+	Count      int    `json:"count"`
+	Total      int    `json:"total"`
+	NextCursor string `json:"next_cursor"`
 }
 
 func listRemap(t *testing.T, app *pgxpool.Pool, tenant, query string, wantStatus int) remapListBody {
@@ -355,4 +367,126 @@ func TestRemapQueue_APIListsOnlyTheCallerTenantFilteredByClassAndStatus(t *testi
 
 	listRemap(t, app, tenant, "?class=moved", http.StatusBadRequest)
 	listRemap(t, app, tenant, "?status=done", http.StatusBadRequest)
+}
+
+// supersedeControl gives a control a version 2, as an upload with a changed
+// manifest does, and returns the new version's id.
+func supersedeControl(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	next := uuid.New()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `UPDATE controls SET superseded_by = $2 WHERE id = $1`, id, next); err != nil {
+		t.Fatalf("supersede %s: %v", id, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO controls
+			(id, tenant_id, bundle_id, version, scf_id, scf_anchor_id,
+			 title, description, control_family, implementation_type, owner_role,
+			 lifecycle_state, applicability_expr, evidence_queries,
+			 manual_evidence_schema, linked_policy_ids,
+			 bundle_manifest_yaml, bundle_manifest_hash, bundle_uploaded_at,
+			 bundle_uploaded_by)
+		SELECT $2, tenant_id, bundle_id, version + 1, scf_id, scf_anchor_id,
+			 title, 'v2', control_family, implementation_type, owner_role,
+			 lifecycle_state, applicability_expr, evidence_queries,
+			 manual_evidence_schema, linked_policy_ids,
+			 bundle_manifest_yaml, bundle_manifest_hash || '-v2', now(),
+			 bundle_uploaded_by
+		FROM controls WHERE id = $1`, id, next); err != nil {
+		t.Fatalf("insert version 2 of %s: %v", id, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return next
+}
+
+func listedCodes(b remapListBody) []string {
+	codes := []string{}
+	for _, p := range b.Proposals {
+		codes = append(codes, p.LegacySCFID)
+	}
+	return codes
+}
+
+// #2325: the list pages by cursor, filters out a class, and leaves out a
+// pending proposal whose control has a newer version.
+func TestRemapQueue_APIPagesFiltersClassNotAndHidesStaleProposals(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	truncateCatalog(t, pool)
+
+	a, b := loadRemapRelease(t, "a"), loadRemapRelease(t, "b")
+	importRelease(t, pool, a)
+	tenant := dbtest.SeedTenant(t, pool, "controls")
+	controls := seedRemapControls(t, pool, tenant, a.ReleaseVersion)
+	importRelease(t, pool, b)
+	if _, err := scfimport.RebindControls(context.Background(), pool); err != nil {
+		t.Fatalf("RebindControls: %v", err)
+	}
+
+	for _, c := range []struct {
+		query string
+		codes []string
+	}{
+		{"?class_not=unchanged", []string{"TRM-02", "TRM-03", "TRM-04", "TRM-05"}},
+		{"?class_not=split&status=open", []string{"TRM-02", "TRM-04", "TRM-05"}},
+		{"?status=rebound&class_not=unchanged", []string{}},
+	} {
+		got := listRemap(t, app, tenant, c.query, http.StatusOK)
+		codes := listedCodes(got)
+		slices.Sort(codes)
+		if !slices.Equal(codes, c.codes) || got.Total != len(c.codes) {
+			t.Errorf("%q: listed %v (total %d); want %v", c.query, codes, got.Total, c.codes)
+		}
+	}
+	listRemap(t, app, tenant, "?class_not=moved", http.StatusBadRequest)
+
+	// Walking two at a time reads every proposal once, in the unpaged
+	// order, and every page reports the same total.
+	all := listedCodes(listRemap(t, app, tenant, "", http.StatusOK))
+	var walked []string
+	pages, cursor := 0, ""
+	for {
+		q := "?limit=2"
+		if cursor != "" {
+			q += "&cursor=" + cursor
+		}
+		page := listRemap(t, app, tenant, q, http.StatusOK)
+		pages++
+		if page.Total != len(remapCodes) || page.Count != len(page.Proposals) || page.Count > 2 {
+			t.Fatalf("page %d: count %d total %d; want at most 2 of %d", pages, page.Count, page.Total, len(remapCodes))
+		}
+		walked = append(walked, listedCodes(page)...)
+		if page.NextCursor == "" {
+			break
+		}
+		if pages > len(remapCodes) {
+			t.Fatal("cursor walk does not end")
+		}
+		cursor = page.NextCursor
+	}
+	if pages != 3 || !slices.Equal(walked, all) {
+		t.Errorf("walked %v in %d pages; want %v in 3", walked, pages, all)
+	}
+	listRemap(t, app, tenant, "?cursor=not-a-cursor", http.StatusBadRequest)
+
+	// A newer version makes TRM-02's open proposal stale, so it leaves the
+	// list. TRM-01's rebound proposal is a record, not a to-do, and stays.
+	supersedeControl(t, pool, controls["TRM-01"])
+	supersedeControl(t, pool, controls["TRM-02"])
+	got := listRemap(t, app, tenant, "", http.StatusOK)
+	codes := listedCodes(got)
+	slices.Sort(codes)
+	if want := []string{"TRM-01", "TRM-03", "TRM-04", "TRM-05"}; !slices.Equal(codes, want) || got.Total != len(want) {
+		t.Errorf("after supersede: listed %v (total %d); want %v", codes, got.Total, want)
+	}
+	if got := listRemap(t, app, tenant, "?status=open", http.StatusOK); got.Total != 3 {
+		t.Errorf("open after supersede: total %d; want 3", got.Total)
+	}
 }

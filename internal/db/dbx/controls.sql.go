@@ -119,6 +119,38 @@ func (q *Queries) CountActiveControls(ctx context.Context, arg CountActiveContro
 	return total, err
 }
 
+const countSCFRemapProposals = `-- name: CountSCFRemapProposals :one
+SELECT count(*)
+FROM scf_remap_proposals p
+JOIN controls c ON c.id = p.control_id
+WHERE p.tenant_id = $1
+  AND ($2::text IS NULL OR p.class = $2::text)
+  AND ($3::text IS NULL OR p.class <> $3::text)
+  AND ($4::text IS NULL OR p.status = $4::text)
+  AND (c.superseded_by IS NULL OR p.status NOT IN ('open', 'rejected'))
+`
+
+type CountSCFRemapProposalsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Class    *string     `json:"class"`
+	ClassNot *string     `json:"class_not"`
+	Status   *string     `json:"status"`
+}
+
+// Issue #2325: the total ListSCFRemapProposals pages through, with the same
+// filters and no cursor.
+func (q *Queries) CountSCFRemapProposals(ctx context.Context, arg CountSCFRemapProposalsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSCFRemapProposals,
+		arg.TenantID,
+		arg.Class,
+		arg.ClassNot,
+		arg.Status,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getActiveControlByBundleID = `-- name: GetActiveControlByBundleID :one
 
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
@@ -1373,7 +1405,7 @@ SELECT
     ca.title              AS current_anchor_title,
     -- '' when SCF lists no current anchor with this legacy code.
     COALESCE((SELECT s.scf_id FROM scf_anchors s
-      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
       ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id,
     -- #1775 remap queue: the current release's id, the legacy ID of the
     -- current anchor with this code ('' when it lists none, or the code is
@@ -1381,12 +1413,12 @@ SELECT
     -- legacy ID of (codes and titles in the same order), and whether the
     -- current release carries any legacy IDs at all.
     cfv.id                AS current_framework_version_id,
-    COALESCE(ca.legacy_scf_id, '')::text AS current_anchor_legacy_scf_id,
+    COALESCE(btrim(ca.legacy_scf_id), '')::text AS current_anchor_legacy_scf_id,
     ARRAY(SELECT s.scf_id FROM scf_anchors s
-      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
       ORDER BY s.scf_id)::text[] AS legacy_successor_scf_ids,
     ARRAY(SELECT s.title FROM scf_anchors s
-      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      WHERE s.framework_version_id = cfv.id AND btrim(s.legacy_scf_id) = la.scf_id
       ORDER BY s.scf_id)::text[] AS legacy_successor_titles,
     EXISTS (SELECT 1 FROM scf_anchors s
       WHERE s.framework_version_id = cfv.id
@@ -1481,14 +1513,26 @@ FROM scf_remap_proposals p
 JOIN controls c ON c.id = p.control_id
 WHERE p.tenant_id = $1
   AND ($2::text IS NULL OR p.class = $2::text)
-  AND ($3::text IS NULL OR p.status = $3::text)
+  AND ($3::text IS NULL OR p.class <> $3::text)
+  AND ($4::text IS NULL OR p.status = $4::text)
+  AND (c.superseded_by IS NULL OR p.status NOT IN ('open', 'rejected'))
+  AND ($5::timestamptz IS NULL
+       OR p.created_at < $5::timestamptz
+       OR (p.created_at = $5::timestamptz
+           AND (p.bundle_id, p.id) > ($6::text, $7::uuid)))
 ORDER BY p.created_at DESC, p.bundle_id, p.id
+LIMIT $8::int
 `
 
 type ListSCFRemapProposalsParams struct {
-	TenantID pgtype.UUID `json:"tenant_id"`
-	Class    *string     `json:"class"`
-	Status   *string     `json:"status"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Class          *string            `json:"class"`
+	ClassNot       *string            `json:"class_not"`
+	Status         *string            `json:"status"`
+	AfterCreatedAt pgtype.Timestamptz `json:"after_created_at"`
+	AfterBundleID  *string            `json:"after_bundle_id"`
+	AfterID        pgtype.UUID        `json:"after_id"`
+	RowLimit       int32              `json:"row_limit"`
 }
 
 type ListSCFRemapProposalsRow struct {
@@ -1506,10 +1550,30 @@ type ListSCFRemapProposalsRow struct {
 }
 
 // Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
-// proposals, newest target release first, optionally filtered by class and
-// status. RLS (tenant_read) and the explicit tenant id both bind the read.
+// proposals, newest first, optionally filtered by class, by a class to
+// leave out (class_not, #2325: rebound rows a person may still review) and
+// by status. RLS (tenant_read) and the explicit tenant id both bind the read.
+//
+// #2325: a pending proposal (open or rejected) whose control has a newer
+// version is stale, so it is left out; decide refuses it anyway
+// (ErrRemapControlChanged). A decided one stays: an approved proposal's
+// control is the version the approval superseded.
+//
+// Keyset paged: the order is (created_at DESC, bundle_id, id), and a page
+// starts after the cursor row (after_created_at, after_bundle_id, after_id,
+// all NULL for the first page). CountSCFRemapProposals takes the same
+// filters.
 func (q *Queries) ListSCFRemapProposals(ctx context.Context, arg ListSCFRemapProposalsParams) ([]ListSCFRemapProposalsRow, error) {
-	rows, err := q.db.Query(ctx, listSCFRemapProposals, arg.TenantID, arg.Class, arg.Status)
+	rows, err := q.db.Query(ctx, listSCFRemapProposals,
+		arg.TenantID,
+		arg.Class,
+		arg.ClassNot,
+		arg.Status,
+		arg.AfterCreatedAt,
+		arg.AfterBundleID,
+		arg.AfterID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

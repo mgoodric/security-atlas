@@ -8,7 +8,15 @@
 // re-bound the control in place ("rebound") or left it for a person
 // ("open"); a reviewer's decision (#1776) makes it approved, rejected or
 // kept_legacy. This endpoint lists the bearer tenant's proposals, filterable
-// by ?class= and ?status=.
+// by ?class=, ?class_not= and ?status=.
+//
+// #2325: the list is keyset paged. ?limit= (default 100, max 500, the
+// controls list's bounds) sizes a page; the response's next_cursor, passed
+// back as ?cursor=, reads the next one, and total counts every proposal the
+// filters match. ?status=rebound&class_not=unchanged lists the controls the
+// upgrade moved that a person may still want to look at (a split, a rename
+// or a reused code). A pending proposal whose control has a newer version is
+// left out: it is stale, and deciding it is refused.
 //
 // Authz: the path resolves to resource "controls", action "read", the same
 // OPA admit as GET /v1/controls. RLS and the query's explicit tenant id
@@ -18,6 +26,8 @@ package controls
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -36,7 +46,7 @@ import (
 // remapProposalLister is the store seam the handler reads through; the
 // control.Store satisfies it.
 type remapProposalLister interface {
-	ListRemapProposals(ctx context.Context, class, status *string) ([]dbx.ListSCFRemapProposalsRow, error)
+	ListRemapProposals(ctx context.Context, f control.RemapProposalFilter) ([]dbx.ListSCFRemapProposalsRow, int64, error)
 }
 
 // RemapProposalsHandler exposes GET /v1/controls/remap-proposals.
@@ -65,7 +75,36 @@ type remapProposalWire struct {
 
 type remapProposalsResp struct {
 	Proposals []remapProposalWire `json:"proposals"`
-	Count     int                 `json:"count"`
+	// Count is the proposals on this page; Total every one the filters
+	// match.
+	Count      int    `json:"count"`
+	Total      int64  `json:"total"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// remapCursorWire is the opaque ?cursor= value: the last row of a page, in
+// the list's order.
+type remapCursorWire struct {
+	CreatedAt time.Time `json:"t"`
+	BundleID  string    `json:"b"`
+	ID        uuid.UUID `json:"i"`
+}
+
+func encodeRemapCursor(p dbx.ListSCFRemapProposalsRow) string {
+	raw, _ := json.Marshal(remapCursorWire{CreatedAt: p.CreatedAt.Time, BundleID: p.BundleID, ID: uuid.UUID(p.ID.Bytes)})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeRemapCursor(s string) (*control.RemapProposalCursor, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return nil, false
+	}
+	var c remapCursorWire
+	if err := json.Unmarshal(raw, &c); err != nil || c.CreatedAt.IsZero() || c.ID == uuid.Nil {
+		return nil, false
+	}
+	return &control.RemapProposalCursor{CreatedAt: c.CreatedAt, BundleID: c.BundleID, ID: c.ID}, true
 }
 
 var remapStatuses = control.RemapStatuses
@@ -84,7 +123,8 @@ func filterParam(r *http.Request, name string, allowed []string) (*string, bool)
 }
 
 // List handles GET /v1/controls/remap-proposals. Always 200 with an
-// envelope; 400 on an unknown class or status.
+// envelope; 400 on an unknown class, class_not or status, or a malformed
+// cursor.
 func (h *RemapProposalsHandler) List(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
@@ -99,15 +139,36 @@ func (h *RemapProposalsHandler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "class must be one of unchanged, renamed, split, reused_id, no_successor")
 		return
 	}
+	classNot, ok := filterParam(r, "class_not", classes)
+	if !ok {
+		httpresp.WriteError(w, http.StatusBadRequest, "class_not must be one of unchanged, renamed, split, reused_id, no_successor")
+		return
+	}
 	status, ok := filterParam(r, "status", remapStatuses)
 	if !ok {
 		httpresp.WriteError(w, http.StatusBadRequest, "status must be one of "+strings.Join(remapStatuses, ", "))
 		return
 	}
-	rows, err := h.store.ListRemapProposals(r.Context(), class, status)
+	limit, _ := listPagination(r)
+	var after *control.RemapProposalCursor
+	if v := r.URL.Query().Get("cursor"); v != "" {
+		if after, ok = decodeRemapCursor(v); !ok {
+			httpresp.WriteError(w, http.StatusBadRequest, "cursor is not a next_cursor this endpoint returned")
+			return
+		}
+	}
+	// One row past the page says whether another page follows.
+	rows, total, err := h.store.ListRemapProposals(r.Context(), control.RemapProposalFilter{
+		Class: class, ClassNot: classNot, Status: status, After: after, Limit: limit + 1,
+	})
 	if err != nil {
 		httperr.WriteInternal(w, r, "list scf remap proposals", err)
 		return
+	}
+	next := ""
+	if len(rows) > int(limit) {
+		rows = rows[:limit]
+		next = encodeRemapCursor(rows[len(rows)-1])
 	}
 	out := make([]remapProposalWire, len(rows))
 	for i, p := range rows {
@@ -128,5 +189,5 @@ func (h *RemapProposalsHandler) List(w http.ResponseWriter, r *http.Request) {
 			out[i].SuccessorSCFIDs = []string{}
 		}
 	}
-	httpresp.WriteJSON(w, http.StatusOK, remapProposalsResp{Proposals: out, Count: len(out)})
+	httpresp.WriteJSON(w, http.StatusOK, remapProposalsResp{Proposals: out, Count: len(out), Total: total, NextCursor: next})
 }

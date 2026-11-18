@@ -16,6 +16,8 @@ So the queue keeps two things apart:
 
 The proposal itself moves nothing. The only control that moves is one D3 moves, and its proposal says so. The integration test checks that every `open` control keeps its release-A anchor.
 
+**`rebound` does not mean nothing is left to do (#2325).** D3 moves a control when its code keeps its title, whatever the lineage class says. So a `rebound` row can carry another class: `split` when SCF also lists the legacy code as the legacy ID of a second anchor, `renamed` for a stock control moved on code alone (#2321), or `reused_id`. The control is on the same-code anchor, but a person may still want to add the second successor or check that the reused code still fits. `GET /v1/controls/remap-proposals?status=rebound&class_not=unchanged` lists exactly those rows (`atlas-cli catalog remap list --status rebound --class-not unchanged`).
+
 ## D2 — How successors are read from legacy IDs
 
 A current anchor continues a legacy anchor `X` when:
