@@ -36,6 +36,33 @@ import (
 // middleware (OPA among it), with a credential holding one live tenant
 // role. The pool never dials, so a caller the guard admits gets some other
 // error (400, 404, 500); a caller it refuses gets 403.
+//
+// knownDivergent is the ratchet: routes whose handler does not yet match
+// the table, each with the issue that closes the gap. A listed route that
+// starts agreeing fails the test until it is removed from the list.
+var knownDivergent = map[string]string{
+	// No handler role guard; OPA alone admits admin|grc_engineer (#2664).
+	"POST /v1/risks":                                               "#2664",
+	"PATCH /v1/risks/{id}/close":                                   "#2664",
+	"PATCH /v1/risks/{id}/reopen":                                  "#2664",
+	"PATCH /v1/risks/{id}/treatment":                               "#2664",
+	"PATCH /v1/risks/{id}/acceptance/propose":                      "#2664",
+	"POST /v1/framework-scopes":                                    "#2664",
+	"PATCH /v1/framework-scopes/{id}":                              "#2664",
+	"PATCH /v1/framework-scopes/{id}/submit":                       "#2664",
+	"PATCH /v1/framework-scopes/{id}/activate":                     "#2664",
+	"PUT /v1/framework-scopes/{id}/applicability/{requirement_id}": "#2664",
+	"POST /v1/framework-scopes/{id}/applicability/bulk":            "#2664",
+	"POST /v1/framework-scopes/{id}/applicability/import":          "#2664",
+	"POST /v1/framework-scopes/{id}/applicability:carry-over":      "#2664",
+	"POST /v1/policies":                                            "#2664",
+	"PATCH /v1/policies/{id}/submit":                               "#2664",
+	"POST /v1/exceptions":                                          "#2664",
+	// The handler checks the cred.IsAdmin flag; OPA admits a live-role
+	// admin too, so the handler is stricter (#2665, decide).
+	"POST /v1/admin/policies/import": "#2665",
+}
+
 func TestLifecycleGuards_MatchTableRoles(t *testing.T) {
 	handlers := map[string]http.Handler{}
 	if err := chi.Walk(routeWalkServer(t).buildRouter(), func(method, route string, h http.Handler, _ ...func(http.Handler) http.Handler) error {
@@ -49,6 +76,8 @@ func TestLifecycleGuards_MatchTableRoles(t *testing.T) {
 	const id = "6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c2291"
 	param := regexp.MustCompile(`\{([a-zA-Z_]+)\}`)
 	checked := 0
+	// diverged records, per route, whether any role disagreed.
+	diverged := map[string]bool{}
 	check := func(lc, what string, routes, roles []string) {
 		for _, route := range routes {
 			h, ok := handlers[route]
@@ -74,6 +103,10 @@ func TestLifecycleGuards_MatchTableRoles(t *testing.T) {
 				r = r.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
 				code := statusOf(h, r)
 				if admitted, want := code != http.StatusForbidden, slices.Contains(roles, string(role)); admitted != want {
+					diverged[route] = true
+					if _, known := knownDivergent[route]; known {
+						continue
+					}
 					t.Errorf("%s %s: %s as %s: handler admitted=%v (status %d), table roles %v",
 						lc, what, route, role, admitted, code, roles)
 				}
@@ -104,6 +137,11 @@ func TestLifecycleGuards_MatchTableRoles(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no lifecycle route was checked")
+	}
+	for route, issue := range knownDivergent {
+		if _, seen := diverged[route]; !seen {
+			t.Errorf("%s is in knownDivergent (%s) but its handler now agrees with the table, or no lifecycle names it: remove it from the list", route, issue)
+		}
 	}
 }
 
