@@ -102,6 +102,7 @@ import {
   type PolicyFilters,
 } from "./filters";
 import { statusCountsLabel } from "./header-counts";
+import { MyAcksCallout } from "./my-acks-callout";
 import {
   POLICIES_ACK_REPORT_FUTURE_REASON,
   POLICIES_ACK_REPORT_FUTURE_TESTID,
@@ -711,6 +712,7 @@ function PoliciesPageInner() {
         />
       }
     >
+      <MyAcksCallout />
       <ListTable<Policy>
         columns={columns}
         rows={pagedRows}
