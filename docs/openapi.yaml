@@ -2283,7 +2283,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/controls:
     get:
-      summary: GET /v1/controls — the organisation's active controls; with ?include=state, one page of them with their state and the unpaged total, filtered by ?result, ?freshness, ?owner (a user id, or none), ?family, ?framework, ?anchor_fit and ?scope, sorted by ?sort=[-]scf_id|name|family|state|freshness|last_observed_at|owner|frameworks (by default failing first, then stalest evidence; #2131)
+      summary: GET /v1/controls — the organisation's active controls; with ?include=state, one page of them with their state and the unpaged total, filtered by ?result, ?freshness, ?owner (a user id, or none), ?family, ?framework, ?anchor_fit, ?legacy_anchor=true (an undecided SCF remap proposal; each row carries legacy_anchor, #2392) and ?scope, sorted by ?sort=[-]scf_id|name|family|state|freshness|last_observed_at|owner|frameworks (by default failing first, then stalest evidence; #2131)
       tags: [controls]
       operationId: get-v1-controls
       security:
@@ -2719,6 +2719,26 @@ paths:
       summary: GET /v1/controls/{id}/action-plans
       tags: [action-plans]
       operationId: get-v1-controls-id-action-plans
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/anchor-history:
+    get:
+      summary: GET /v1/controls/{id}/anchor-history — every SCF remap decision on any revision of the control's bundle (decision, bulk, legacy code@release, new code@release, new revision, reason, decided_by, decided_at), newest first, keyset paged by limit and cursor; 404 for a control that is not the caller's tenant's (#2392)
+      tags: [controls]
+      operationId: get-v1-controls-id-anchor-history
       security:
         - bearer: []
       parameters:

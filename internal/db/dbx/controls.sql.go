@@ -92,7 +92,7 @@ worst_per_control AS (
             WHEN 1 THEN 'fresh'
         END)::text AS freshness_status
     FROM latest_eval le
-    WHERE ($9::uuid IS NULL OR le.scope_cell_id = $9::uuid)
+    WHERE ($10::uuid IS NULL OR le.scope_cell_id = $10::uuid)
     GROUP BY le.control_id
 ),
 anchor_frameworks AS (
@@ -123,18 +123,23 @@ WHERE c.tenant_id = $1 AND c.superseded_by IS NULL
   AND ($6::text IS NULL OR wpc.freshness_status = $6::text)
   AND ($7::text IS NULL OR lower(c.control_family) = lower($7::text))
   AND ($8::text IS NULL OR $8::text = ANY(af.framework_slugs))
+  AND (NOT $9::bool OR EXISTS (
+        SELECT 1 FROM scf_remap_proposals rp
+        WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+          AND rp.status IN ('open', 'rejected')))
 `
 
 type CountActiveControlsParams struct {
-	TenantID    pgtype.UUID `json:"tenant_id"`
-	AnchorFit   *string     `json:"anchor_fit"`
-	OwnerUserID pgtype.UUID `json:"owner_user_id"`
-	Unowned     bool        `json:"unowned"`
-	Result      *string     `json:"result"`
-	Freshness   *string     `json:"freshness"`
-	Family      *string     `json:"family"`
-	Framework   *string     `json:"framework"`
-	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	AnchorFit        *string     `json:"anchor_fit"`
+	OwnerUserID      pgtype.UUID `json:"owner_user_id"`
+	Unowned          bool        `json:"unowned"`
+	Result           *string     `json:"result"`
+	Freshness        *string     `json:"freshness"`
+	Family           *string     `json:"family"`
+	Framework        *string     `json:"framework"`
+	LegacyAnchorOnly bool        `json:"legacy_anchor_only"`
+	ScopeCellID      pgtype.UUID `json:"scope_cell_id"`
 }
 
 // Issue #1741 — total for the paged ListActiveControlsWithState read.
@@ -152,6 +157,7 @@ func (q *Queries) CountActiveControls(ctx context.Context, arg CountActiveContro
 		arg.Freshness,
 		arg.Family,
 		arg.Framework,
+		arg.LegacyAnchorOnly,
 		arg.ScopeCellID,
 	)
 	var total int64
@@ -1016,7 +1022,7 @@ ranked_per_control AS (
         MAX(le.last_observed_at) AS last_observed_at,
         MAX(le.evaluated_at)     AS evaluated_at
     FROM latest_eval le
-    WHERE ($13::uuid IS NULL OR le.scope_cell_id = $13::uuid)
+    WHERE ($14::uuid IS NULL OR le.scope_cell_id = $14::uuid)
     GROUP BY le.control_id
 ),
 worst_per_control AS (
@@ -1063,7 +1069,13 @@ SELECT
     wpc.last_observed_at::timestamptz AS state_last_observed_at,
     wpc.evaluated_at::timestamptz     AS state_evaluated_at,
     af.framework_slugs::text[]        AS framework_slugs,
-    coa.owner_user_id                 AS owner_user_id
+    coa.owner_user_id                 AS owner_user_id,
+    -- #2392: the control still has an undecided SCF remap proposal (open,
+    -- or rejected and so open to revisit). The active row is the one a
+    -- pending proposal names; a proposal on a superseded row is stale.
+    EXISTS (SELECT 1 FROM scf_remap_proposals rp
+            WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+              AND rp.status IN ('open', 'rejected')) AS legacy_anchor
 FROM controls c
 LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
 LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
@@ -1079,45 +1091,50 @@ WHERE c.tenant_id = $1 AND c.superseded_by IS NULL
   AND ($6::text IS NULL OR wpc.freshness_status = $6::text)
   AND ($7::text IS NULL OR lower(c.control_family) = lower($7::text))
   AND ($8::text IS NULL OR $8::text = ANY(af.framework_slugs))
+  AND (NOT $9::bool OR EXISTS (
+        SELECT 1 FROM scf_remap_proposals rp
+        WHERE rp.tenant_id = c.tenant_id AND rp.control_id = c.id
+          AND rp.status IN ('open', 'rejected')))
 ORDER BY
     -- default: failing first, then the stalest evidence.
-    CASE WHEN $9::text = 'default' THEN COALESCE(wpc.result_rank, 0) END DESC,
-    CASE WHEN $9::text = 'default' THEN wpc.last_observed_at END ASC NULLS FIRST,
-    CASE WHEN $9::text = 'scf_id' AND NOT $10::bool THEN c.scf_id COLLATE "C" END ASC NULLS LAST,
-    CASE WHEN $9::text = 'scf_id' AND $10::bool THEN c.scf_id COLLATE "C" END DESC NULLS LAST,
-    CASE WHEN $9::text = 'name' AND NOT $10::bool THEN lower(c.title) COLLATE "C" END ASC,
-    CASE WHEN $9::text = 'name' AND $10::bool THEN lower(c.title) COLLATE "C" END DESC,
-    CASE WHEN $9::text = 'family' AND NOT $10::bool THEN lower(c.control_family) COLLATE "C" END ASC,
-    CASE WHEN $9::text = 'family' AND $10::bool THEN lower(c.control_family) COLLATE "C" END DESC,
-    CASE WHEN $9::text = 'state' AND NOT $10::bool THEN COALESCE(wpc.result_rank, 0) END ASC,
-    CASE WHEN $9::text = 'state' AND $10::bool THEN COALESCE(wpc.result_rank, 0) END DESC,
-    CASE WHEN $9::text = 'freshness' AND NOT $10::bool THEN COALESCE(wpc.freshness_rank, 0) END ASC,
-    CASE WHEN $9::text = 'freshness' AND $10::bool THEN COALESCE(wpc.freshness_rank, 0) END DESC,
-    CASE WHEN $9::text = 'last_observed_at' AND NOT $10::bool THEN wpc.last_observed_at END ASC NULLS FIRST,
-    CASE WHEN $9::text = 'last_observed_at' AND $10::bool THEN wpc.last_observed_at END DESC NULLS LAST,
-    CASE WHEN $9::text = 'owner' AND NOT $10::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END ASC NULLS LAST,
-    CASE WHEN $9::text = 'owner' AND $10::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END DESC NULLS LAST,
-    CASE WHEN $9::text = 'frameworks' AND NOT $10::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END ASC,
-    CASE WHEN $9::text = 'frameworks' AND $10::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END DESC,
+    CASE WHEN $10::text = 'default' THEN COALESCE(wpc.result_rank, 0) END DESC,
+    CASE WHEN $10::text = 'default' THEN wpc.last_observed_at END ASC NULLS FIRST,
+    CASE WHEN $10::text = 'scf_id' AND NOT $11::bool THEN c.scf_id COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $10::text = 'scf_id' AND $11::bool THEN c.scf_id COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $10::text = 'name' AND NOT $11::bool THEN lower(c.title) COLLATE "C" END ASC,
+    CASE WHEN $10::text = 'name' AND $11::bool THEN lower(c.title) COLLATE "C" END DESC,
+    CASE WHEN $10::text = 'family' AND NOT $11::bool THEN lower(c.control_family) COLLATE "C" END ASC,
+    CASE WHEN $10::text = 'family' AND $11::bool THEN lower(c.control_family) COLLATE "C" END DESC,
+    CASE WHEN $10::text = 'state' AND NOT $11::bool THEN COALESCE(wpc.result_rank, 0) END ASC,
+    CASE WHEN $10::text = 'state' AND $11::bool THEN COALESCE(wpc.result_rank, 0) END DESC,
+    CASE WHEN $10::text = 'freshness' AND NOT $11::bool THEN COALESCE(wpc.freshness_rank, 0) END ASC,
+    CASE WHEN $10::text = 'freshness' AND $11::bool THEN COALESCE(wpc.freshness_rank, 0) END DESC,
+    CASE WHEN $10::text = 'last_observed_at' AND NOT $11::bool THEN wpc.last_observed_at END ASC NULLS FIRST,
+    CASE WHEN $10::text = 'last_observed_at' AND $11::bool THEN wpc.last_observed_at END DESC NULLS LAST,
+    CASE WHEN $10::text = 'owner' AND NOT $11::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END ASC NULLS LAST,
+    CASE WHEN $10::text = 'owner' AND $11::bool THEN lower(COALESCE(NULLIF(ou.display_name, ''), ou.email)) COLLATE "C" END DESC NULLS LAST,
+    CASE WHEN $10::text = 'frameworks' AND NOT $11::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END ASC,
+    CASE WHEN $10::text = 'frameworks' AND $11::bool THEN COALESCE(cardinality(af.framework_slugs), 0) END DESC,
     c.scf_id NULLS LAST,
     c.id
-LIMIT $12 OFFSET $11
+LIMIT $13 OFFSET $12
 `
 
 type ListActiveControlsWithStateParams struct {
-	TenantID    pgtype.UUID `json:"tenant_id"`
-	AnchorFit   *string     `json:"anchor_fit"`
-	OwnerUserID pgtype.UUID `json:"owner_user_id"`
-	Unowned     bool        `json:"unowned"`
-	Result      *string     `json:"result"`
-	Freshness   *string     `json:"freshness"`
-	Family      *string     `json:"family"`
-	Framework   *string     `json:"framework"`
-	SortKey     string      `json:"sort_key"`
-	SortDesc    bool        `json:"sort_desc"`
-	RowOffset   int32       `json:"row_offset"`
-	RowLimit    int32       `json:"row_limit"`
-	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	AnchorFit        *string     `json:"anchor_fit"`
+	OwnerUserID      pgtype.UUID `json:"owner_user_id"`
+	Unowned          bool        `json:"unowned"`
+	Result           *string     `json:"result"`
+	Freshness        *string     `json:"freshness"`
+	Family           *string     `json:"family"`
+	Framework        *string     `json:"framework"`
+	LegacyAnchorOnly bool        `json:"legacy_anchor_only"`
+	SortKey          string      `json:"sort_key"`
+	SortDesc         bool        `json:"sort_desc"`
+	RowOffset        int32       `json:"row_offset"`
+	RowLimit         int32       `json:"row_limit"`
+	ScopeCellID      pgtype.UUID `json:"scope_cell_id"`
 }
 
 type ListActiveControlsWithStateRow struct {
@@ -1136,6 +1153,7 @@ type ListActiveControlsWithStateRow struct {
 	StateEvaluatedAt     pgtype.Timestamptz    `json:"state_evaluated_at"`
 	FrameworkSlugs       []string              `json:"framework_slugs"`
 	OwnerUserID          pgtype.UUID           `json:"owner_user_id"`
+	LegacyAnchor         bool                  `json:"legacy_anchor"`
 }
 
 // NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
@@ -1156,7 +1174,11 @@ type ListActiveControlsWithStateRow struct {
 // narrows the rollup exactly as slice 224 does on the anchor list.
 //
 // #2131: filters on state, freshness, family, framework, anchor fit and
-// owner (a person, or unowned), and an allow-listed sort. sort_key is one
+// owner (a person, or unowned), and an allow-listed sort. #2392:
+// legacy_anchor_only keeps only controls with an open or rejected remap
+// proposal, the same predicate as the legacy_anchor column; the WHERE
+// here and in CountActiveControls repeat it and must stay in step with
+// it (and with isPending in web/lib/remap-review.ts). sort_key is one
 // of the fixed keys in the ORDER BY; the handler refuses any other value
 // before it gets here, and a key this query does not name falls through
 // to the tiebreakers. The default order is failing first (worst state
@@ -1180,6 +1202,7 @@ func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiv
 		arg.Freshness,
 		arg.Family,
 		arg.Framework,
+		arg.LegacyAnchorOnly,
 		arg.SortKey,
 		arg.SortDesc,
 		arg.RowOffset,
@@ -1209,6 +1232,7 @@ func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiv
 			&i.StateEvaluatedAt,
 			&i.FrameworkSlugs,
 			&i.OwnerUserID,
+			&i.LegacyAnchor,
 		); err != nil {
 			return nil, err
 		}

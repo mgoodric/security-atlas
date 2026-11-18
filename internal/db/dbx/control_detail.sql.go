@@ -47,6 +47,121 @@ func (q *Queries) CountEvidenceForControlWindow(ctx context.Context, arg CountEv
 	return count, err
 }
 
+const getControlBundleForDetail = `-- name: GetControlBundleForDetail :one
+SELECT bundle_id
+FROM controls
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetControlBundleForDetailParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// Issue #2392: the bundle a control row belongs to, for the anchor-history
+// read. No row (pgx.ErrNoRows) for an id that is not this tenant's control,
+// which the handler maps to 404; RLS and the explicit tenant id both bind.
+func (q *Queries) GetControlBundleForDetail(ctx context.Context, arg GetControlBundleForDetailParams) (string, error) {
+	row := q.db.QueryRow(ctx, getControlBundleForDetail, arg.TenantID, arg.ID)
+	var bundle_id string
+	err := row.Scan(&bundle_id)
+	return bundle_id, err
+}
+
+const listControlAnchorHistoryPaged = `-- name: ListControlAnchorHistoryPaged :many
+SELECT d.id, d.decision, d.bulk,
+       d.legacy_control_id, lc.version AS legacy_version,
+       d.legacy_scf_id, d.legacy_release,
+       d.new_control_id, nc.version AS new_version,
+       d.new_scf_id, d.new_release,
+       d.reason, d.decided_by, d.decided_at
+FROM scf_remap_decisions d
+JOIN controls lc
+  ON lc.tenant_id = d.tenant_id AND lc.id = d.legacy_control_id
+LEFT JOIN controls nc
+  ON nc.tenant_id = d.tenant_id AND nc.id = d.new_control_id
+WHERE d.tenant_id = $1
+  AND lc.bundle_id = $2
+  AND (
+        d.decided_at < $3
+        OR (d.decided_at = $3 AND d.id < $4)
+      )
+ORDER BY d.decided_at DESC, d.id DESC
+LIMIT $5
+`
+
+type ListControlAnchorHistoryPagedParams struct {
+	TenantID pgtype.UUID        `json:"tenant_id"`
+	BundleID string             `json:"bundle_id"`
+	CursorTs pgtype.Timestamptz `json:"cursor_ts"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type ListControlAnchorHistoryPagedRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Decision        string             `json:"decision"`
+	Bulk            bool               `json:"bulk"`
+	LegacyControlID pgtype.UUID        `json:"legacy_control_id"`
+	LegacyVersion   int32              `json:"legacy_version"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	NewControlID    pgtype.UUID        `json:"new_control_id"`
+	NewVersion      *int32             `json:"new_version"`
+	NewScfID        *string            `json:"new_scf_id"`
+	NewRelease      *string            `json:"new_release"`
+	Reason          *string            `json:"reason"`
+	DecidedBy       string             `json:"decided_by"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
+// Issue #2392: GET /v1/controls/{id}/anchor-history. Every SCF remap
+// decision (#1776, scf_remap_decisions) on any revision of the control's
+// bundle, newest first, keyset paged on (decided_at, id) as the evaluation
+// history is. new_version is the version of the superseding revision an
+// approval created; NULL on a reject or keep-legacy. A pure read of an
+// append-only table.
+func (q *Queries) ListControlAnchorHistoryPaged(ctx context.Context, arg ListControlAnchorHistoryPagedParams) ([]ListControlAnchorHistoryPagedRow, error) {
+	rows, err := q.db.Query(ctx, listControlAnchorHistoryPaged,
+		arg.TenantID,
+		arg.BundleID,
+		arg.CursorTs,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListControlAnchorHistoryPagedRow
+	for rows.Next() {
+		var i ListControlAnchorHistoryPagedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Decision,
+			&i.Bulk,
+			&i.LegacyControlID,
+			&i.LegacyVersion,
+			&i.LegacyScfID,
+			&i.LegacyRelease,
+			&i.NewControlID,
+			&i.NewVersion,
+			&i.NewScfID,
+			&i.NewRelease,
+			&i.Reason,
+			&i.DecidedBy,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listControlEvaluationHistoryPaged = `-- name: ListControlEvaluationHistoryPaged :many
 SELECT id, evaluated_at, scope_cell_id, result,
        freshness_status, evidence_count_in_window,
