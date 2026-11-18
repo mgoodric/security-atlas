@@ -73,6 +73,13 @@ log() { echo "[bootstrap] $*"; }
 . "$BOOTSTRAP_DIR/pg-conn.sh"
 pg_conn_split
 
+# security-atlas#2353: decide up front whether ATLAS_HTTP_URL may take the
+# client secret and bearer over plain http://, so a remote http:// URL
+# fails before seeding rather than after a credential has been sent.
+# shellcheck source=deploy/docker/bootstrap/http-endpoint.sh
+. "$BOOTSTRAP_DIR/http-endpoint.sh"
+atlas_http_flag "$ATLAS_HTTP_URL" || exit 1
+
 # security-atlas#1723: the script also runs outside the bundled image (an
 # adopter running it by hand on macOS), so it must not assume busybox wget
 # or a compose stack. in_container gates every `docker compose` hint;
@@ -276,12 +283,13 @@ log "uploading control bundles from $CONTROLS_DIR ..."
 uploaded=0
 for dir in "$CONTROLS_DIR"/*/; do
     [ -f "$dir/control.yaml" ] || continue
-    # --allow-insecure-http: atlas-cli refuses plain http:// to a
-    # non-loopback host (#2257). $ATLAS_HTTP_URL is http://atlas:8080 on
-    # the compose network, which is private to this bundle and never
-    # leaves the host, so the opt-out is deliberate here.
+    # atlas-cli refuses plain http:// to a non-loopback host (#2257).
+    # INSECURE_HTTP_FLAG is --allow-insecure-http only for the compose
+    # service http://atlas:<port>, which never leaves the host, and empty
+    # otherwise (#2353, http-endpoint.sh). Unquoted so empty adds no arg.
+    # shellcheck disable=SC2086
     atlas-cli controls upload "$dir" \
-        --allow-insecure-http \
+        $INSECURE_HTTP_FLAG \
         --endpoint "$ATLAS_HTTP_URL" \
         --issuer "$ATLAS_HTTP_URL" \
         --client-id "$OAUTH_CLIENT_ID" \

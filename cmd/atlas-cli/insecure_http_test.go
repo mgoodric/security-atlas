@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
 )
 
@@ -172,5 +174,119 @@ func TestRootRegistersAllowInsecureHTTP(t *testing.T) {
 	root.PersistentPreRun(root, nil)
 	if !strings.Contains(stderr.String(), "WARNING") {
 		t.Fatalf("PersistentPreRun stderr = %q, want the warning", stderr.String())
+	}
+}
+
+// policy import posts through featuresDoRequest (also driven above), but the
+// docs list it under the guard, so drive the command end to end (#2353).
+func TestPolicyImportRefusesNonLoopbackHTTP(t *testing.T) {
+	withInsecureRemote(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.md"), []byte("---\ntitle: P\n---\nbody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ATLAS_ADMIN_TOKEN", "secret-bearer")
+	root := newRootCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"policy", "import", dir, "--http-endpoint", insecureRemote})
+	wantRefused(t, "policy import", root.Execute())
+}
+
+// noNetwork is the transport under the guard in the hook walk below: a
+// request the guard lets through stops here instead of leaving the process.
+type noNetwork struct{}
+
+var errNoNetwork = errors.New("noNetwork: request passed the guard")
+
+func (noNetwork) RoundTrip(*http.Request) (*http.Response, error) { return nil, errNoNetwork }
+
+// guardVerdict reports what the transport guard does with a request to
+// insecureRemote under the opt-out as it stands now.
+func guardVerdict() error {
+	req, err := http.NewRequest(http.MethodGet, insecureRemote+"/v1/x", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := cmdhttp.Guard(noNetwork{}).RoundTrip(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	return err
+}
+
+// commandPaths lists the args path of every runnable command under cmd.
+func commandPaths(cmd *cobra.Command, prefix []string) [][]string {
+	var out [][]string
+	for _, c := range cmd.Commands() {
+		p := append(append([]string{}, prefix...), c.Name())
+		if c.Runnable() {
+			out = append(out, p)
+		}
+		out = append(out, commandPaths(c, p)...)
+	}
+	return out
+}
+
+// Every subcommand must reach the root hook that applies
+// --allow-insecure-http (#2353). Cobra runs only the nearest
+// PersistentPreRun(E), so a subcommand that defined its own would silently
+// drop the flag. Each runnable command is executed with its body replaced
+// by a probe of the transport guard: with the flag the guard lets a
+// non-loopback http:// request through, without it the guard refuses. A
+// command added later is walked automatically.
+func TestEverySubcommandAppliesAllowInsecureHTTP(t *testing.T) {
+	withInsecureRemote(t)
+	paths := commandPaths(newRootCmd(), nil)
+	if len(paths) < 20 {
+		t.Fatalf("walked %d runnable commands, want the whole tree", len(paths))
+	}
+	for _, path := range paths {
+		for _, withFlag := range []bool{true, false} {
+			// Start from the opposite state so a pass means the hook ran.
+			common.allowInsecureHTTP = !withFlag
+			cmdhttp.SetAllowInsecureHTTP(!withFlag)
+
+			root := newRootCmd()
+			target, _, err := root.Find(path)
+			if err != nil {
+				t.Fatalf("%v: find: %v", path, err)
+			}
+			// Keep the hooks; replace what would need real args, flags or
+			// services. ResetFlags drops local required flags; persistent
+			// ones from ancestors stay, so the root flag still parses.
+			var verdict error
+			ran := false
+			target.Args = cobra.ArbitraryArgs
+			target.PreRun, target.PreRunE, target.Run = nil, nil, nil
+			target.RunE = func(*cobra.Command, []string) error {
+				ran = true
+				verdict = guardVerdict()
+				return nil
+			}
+			target.ResetFlags()
+
+			args := append([]string{}, path...)
+			if withFlag {
+				args = append(args, "--allow-insecure-http")
+			}
+			root.SetArgs(args)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			if err := root.Execute(); err != nil {
+				t.Errorf("%v (flag=%v): execute: %v", path, withFlag, err)
+				continue
+			}
+			if !ran {
+				t.Errorf("%v (flag=%v): command body did not run", path, withFlag)
+				continue
+			}
+			if withFlag && !errors.Is(verdict, errNoNetwork) {
+				t.Errorf("%v --allow-insecure-http: guard verdict = %v, want the request let through (does a subcommand PersistentPreRun hide the root hook?)", path, verdict)
+			}
+			if !withFlag && !errors.Is(verdict, cmdhttp.ErrInsecureHTTP) {
+				t.Errorf("%v without the flag: guard verdict = %v, want cmdhttp.ErrInsecureHTTP", path, verdict)
+			}
+		}
 	}
 }

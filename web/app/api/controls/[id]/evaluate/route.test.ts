@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { mockNextServer } from "../../../../../lib/test-utils/next-mocks";
 import { TEST_BEARER_DEFAULT } from "../../../../../lib/test-utils/test-tokens";
+import { multipartRequest } from "../../../../../lib/test-utils/upload-requests";
 
 vi.mock("next/server", () => mockNextServer());
 
@@ -32,13 +33,16 @@ function upstream(status: number, body: BodyInit, headers = {}) {
   );
 }
 
-function uploadReq(
-  form: FormData,
-  headers: Record<string, string> = {
-    "content-type": "multipart/form-data; boundary=x",
-  },
-) {
-  return { headers: new Headers(headers), formData: async () => form } as never;
+async function uploadReq(form: FormData) {
+  return (await multipartRequest(form)) as never;
+}
+
+function headerReq(headers: Record<string, string>) {
+  return new Request("http://x", {
+    method: "POST",
+    headers: { "content-length": "2", ...headers },
+    body: "{}",
+  }) as never;
 }
 
 describe("control action BFF routes", () => {
@@ -119,7 +123,7 @@ describe("control action BFF routes", () => {
       new Blob([new Uint8Array([1])]),
       "bundle.tar.gz",
     );
-    const res = await uploadBundle(uploadReq(form));
+    const res = await uploadBundle(await uploadReq(form));
     expect(res.status).toBe(200);
     expect(String(spy.mock.calls[0]?.[0])).toBe(
       "http://atlas:8080/v1/controls:upload-bundle",
@@ -128,18 +132,14 @@ describe("control action BFF routes", () => {
 
   test("upload refuses a non-multipart body and an oversized one", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    const form = new FormData();
     expect(
-      (
-        await uploadBundle(
-          uploadReq(form, { "content-type": "application/json" }),
-        )
-      ).status,
+      (await uploadBundle(headerReq({ "content-type": "application/json" })))
+        .status,
     ).toBe(400);
     expect(
       (
         await uploadBundle(
-          uploadReq(form, {
+          headerReq({
             "content-type": "multipart/form-data; boundary=x",
             "content-length": String((8 << 20) + 1),
           }),
