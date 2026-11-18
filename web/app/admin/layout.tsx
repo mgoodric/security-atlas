@@ -3,7 +3,7 @@
 // AC-7: all /admin/* routes are gated on `is_admin` (the JWT middleware
 // maps it from `atlas:super_admin` only) or, since #2503 (Matt,
 // 2026-11-17), `is_tenant_admin`: a tenant admin by its live roles manages
-// its own organisation's tenant-scoped pages (Users). The platform pages
+// its own organisation's tenant-scoped pages (SSO, Users, Audit). The platform pages
 // wrap their children in `<PlatformAdminGate>`, which admits `is_admin`
 // alone. See docs/audit-log/2503-tenant-admin-pages-decisions.md.
 // Non-admin signed-in users see a 403 explanation page, NOT a 404, so

@@ -127,6 +127,15 @@ func TestKindSourceResource_CoversEveryKind(t *testing.T) {
 			t.Errorf("kind %q: mapped to %q but its source route %s resolves to %q", kind, resource, path, in.Resource.Type)
 		}
 		d, err := engine.Decide(r.Context(), in)
+		if kind == unifiedlog.KindModuleAccess {
+			// #2503 D5a (Matt, 2026-11-18): Users is org-admin only, so
+			// grc_engineer no longer reads /v1/admin/users, and with it the
+			// module-access payloads.
+			if err != nil || d.Allow {
+				t.Errorf("kind %q: grc_engineer read of %q allowed (%v); Users is org-admin only", kind, resource, err)
+			}
+			continue
+		}
 		if err != nil || !d.Allow {
 			t.Errorf("kind %q: grc_engineer read of %q denied (%v, %s)", kind, resource, err, d.Reason)
 		}
