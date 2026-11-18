@@ -30,8 +30,10 @@
 //
 //   - Invariant 6 (canvas §5.4, CLAUDE.md): tenant-scoped reads on the
 //     `controls` table run inside the request's `app.current_tenant`
-//     GUC set by tenancy.Middleware; no app-level `WHERE tenant_id = ?`
-//     clause is present anywhere in this package. Cross-tenant queries
+//     GUC set by tenancy.Middleware, and rely on RLS alone: this package
+//     passes no tenant parameter to its queries. (An explicit tenant_id
+//     predicate would be an allowed second leg, never the boundary; ADR
+//     0026.) Cross-tenant queries
 //     return empty controls lists, not 403 — RLS makes the foreign rows
 //     invisible at the database layer.
 //
