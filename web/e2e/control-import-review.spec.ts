@@ -438,13 +438,20 @@ test.describe("control import review (#1785)", () => {
     await expect(monitoring).toHaveAttribute("data-status", "approved");
 
     // Reject ORG-HR-01: the confirm stays disabled until a reason is given.
+    // #2518: focus lands in the required reason, and Cancel hands it back
+    // to Reject.
     const hr = rowCard(page, "ORG-HR-01");
-    await hr.getByTestId("control-import-reject").click();
+    const reject = hr.getByTestId("control-import-reject");
+    const reason = hr.getByTestId("control-import-reject-reason");
+    await reject.click();
+    await expect(reason).toBeFocused();
+    await hr.getByTestId("control-import-reject-confirm-cancel").click();
+    await expect(reason).toHaveCount(0);
+    await expect(reject).toBeFocused();
+    await reject.click();
     const ok = hr.getByTestId("control-import-reject-confirm-ok");
     await expect(ok).toBeDisabled();
-    await hr
-      .getByTestId("control-import-reject-reason")
-      .fill("Covered by the vendor's SOC 2");
+    await reason.fill("Covered by the vendor's SOC 2");
     await ok.click();
     await expect(hr).toHaveAttribute("data-status", "rejected");
     await expect(hr.getByTestId("control-import-row-decision")).toHaveText(

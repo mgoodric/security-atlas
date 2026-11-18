@@ -15,7 +15,7 @@
 // adopting pages keep the selectors their existing specs use.
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { PageShell } from "@/components/shell/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -47,7 +47,13 @@ export type DetailHeaderProps = {
   back?: ReactNode;
   edit?: DetailHeaderLink;
   primaryAction?: DetailHeaderAction;
+  /** The primary action's button, so a page's inline confirm can return
+   *  focus to it (#2518). */
+  primaryActionRef?: RefObject<HTMLButtonElement | null>;
   overflow?: readonly RowActionItem[];
+  /** The overflow trigger, so a page's inline confirm opened from an
+   *  overflow item can return focus to it (#2518). */
+  overflowRef?: RefObject<HTMLButtonElement | null>;
   /** A page's own actions that are not Edit, one lifecycle step or an
    *  overflow item (the control page's Evaluate now and bundle actions,
    *  #2140). Rendered after the back link, before the shared cluster. */
@@ -71,7 +77,9 @@ export function DetailHeader({
   back,
   edit,
   primaryAction,
+  primaryActionRef,
   overflow,
+  overflowRef,
   actions,
   children,
   tabs,
@@ -102,7 +110,9 @@ export function DetailHeader({
           <DetailHeaderActions
             edit={edit}
             primaryAction={primaryAction}
+            primaryActionRef={primaryActionRef}
             overflow={overflow}
+            overflowRef={overflowRef}
           />
         </>
       }
@@ -115,7 +125,7 @@ export function DetailHeader({
 
 export type DetailHeaderActionsProps = Pick<
   DetailHeaderProps,
-  "edit" | "primaryAction" | "overflow"
+  "edit" | "primaryAction" | "primaryActionRef" | "overflow" | "overflowRef"
 >;
 
 /** The header's action cluster on its own, for a page whose title row
@@ -123,11 +133,15 @@ export type DetailHeaderActionsProps = Pick<
 export function DetailHeaderActions({
   edit,
   primaryAction,
+  primaryActionRef,
   overflow = [],
+  overflowRef,
 }: DetailHeaderActionsProps) {
   return (
     <div className="flex items-start gap-2">
-      {primaryAction ? <PrimaryAction action={primaryAction} /> : null}
+      {primaryAction ? (
+        <PrimaryAction action={primaryAction} buttonRef={primaryActionRef} />
+      ) : null}
       {edit ? (
         <Link
           href={edit.href}
@@ -141,12 +155,19 @@ export function DetailHeaderActions({
         items={overflow}
         variant="header"
         data-testid="detail-header-overflow-trigger"
+        triggerRef={overflowRef}
       />
     </div>
   );
 }
 
-function PrimaryAction({ action }: { action: DetailHeaderAction }) {
+function PrimaryAction({
+  action,
+  buttonRef,
+}: {
+  action: DetailHeaderAction;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
+}) {
   const className = buttonVariants({ variant: "secondary" });
   if (action.href && !action.disabled) {
     return (
@@ -163,6 +184,7 @@ function PrimaryAction({ action }: { action: DetailHeaderAction }) {
     <Button
       type="button"
       variant="secondary"
+      ref={buttonRef}
       disabled={action.disabled}
       onClick={action.onClick}
       data-testid={action["data-testid"]}

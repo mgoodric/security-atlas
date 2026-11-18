@@ -13,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ConfirmInline } from "@/components/ui/row-actions";
+import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { listMySessions, MeSession, revokeMySession } from "@/lib/api/me";
@@ -33,6 +33,7 @@ export function SessionsSection() {
   // #2280: Revoke signs another device out at once and can't be undone
   // from there, so it asks first.
   const [confirming, setConfirming] = useState<string | null>(null);
+  const revokeTriggers = useTriggerRefs();
   const sessionsQuery = useQuery({
     queryKey: ["settings-me-sessions"],
     queryFn: listMySessions,
@@ -112,6 +113,7 @@ export function SessionsSection() {
                         ariaLabel={`Confirm: revoke session …${s.last4}`}
                         busy={revokeMut.isPending}
                         onCancel={() => setConfirming(null)}
+                        returnFocus={() => revokeTriggers.get(s.id)}
                         onConfirm={() => revokeMut.mutate(s.id)}
                         data-testid="settings-session-revoke-confirm"
                       />
@@ -119,6 +121,7 @@ export function SessionsSection() {
                       <Button
                         size="sm"
                         variant="outline"
+                        ref={revokeTriggers.ref(s.id)}
                         onClick={() => setConfirming(s.id)}
                         disabled={revokeMut.isPending}
                         data-testid="settings-session-revoke"

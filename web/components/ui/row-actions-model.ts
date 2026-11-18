@@ -111,3 +111,34 @@ export function confirmingItem(
 export function confirmPromptFor(item: RowActionItem): string {
   return item.confirmPrompt ?? `${item.label}? This cannot be undone.`;
 }
+
+/** Anything ConfirmInline can move focus to. */
+export type Focusable = { focus: () => void };
+
+/** #2518 — where ConfirmInline puts focus when it opens. A form field
+ *  the caller names (`initialFocus`) wins, so a confirm that needs a
+ *  reason lands in its textarea; ConfirmInline's own effect runs after
+ *  the field's, so a child `autoFocus` alone would lose to Cancel.
+ *  Otherwise Cancel takes focus, so a second Enter can't fire the
+ *  action, unless the caller passed its own `cancelRef` (RowActions)
+ *  and manages that focus itself. */
+export function confirmOpenFocus(opts: {
+  initialFocus?: Focusable | null;
+  callerManagesCancel: boolean;
+  ownCancel: Focusable | null;
+}): Focusable | null {
+  if (opts.initialFocus) return opts.initialFocus;
+  if (opts.callerManagesCancel) return null;
+  return opts.ownCancel;
+}
+
+/** #2518 — where focus goes when ConfirmInline closes. Only a cancel
+ *  (button or Escape) hands focus back to the trigger: a confirm runs
+ *  the action, whose page owns what comes next. */
+export function confirmCloseFocus(opts: {
+  cancelled: boolean;
+  returnFocus?: () => Focusable | null | undefined;
+}): Focusable | null {
+  if (!opts.cancelled || !opts.returnFocus) return null;
+  return opts.returnFocus() ?? null;
+}

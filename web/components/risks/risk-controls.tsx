@@ -31,7 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EntityMultiPicker } from "@/components/ui/entity-picker";
-import { ConfirmInline } from "@/components/ui/row-actions";
+import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
 import { useToast } from "@/components/ui/toast";
 import { fetchControlState } from "@/lib/api/control-detail";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
@@ -54,6 +54,7 @@ export function RiskControls({ risk, canEdit }: Props) {
   const [picking, setPicking] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const unlinkTriggers = useTriggerRefs();
   const [error, setError] = useState<string | null>(null);
   const closed = risk.status === "closed";
   const editable = canEdit && !closed;
@@ -175,6 +176,7 @@ export function RiskControls({ risk, canEdit }: Props) {
                     ariaLabel="Confirm: unlink control"
                     busy={unlink.isPending}
                     onCancel={() => setConfirming(null)}
+                    returnFocus={() => unlinkTriggers.get(cid)}
                     onConfirm={() => unlink.mutate(cid)}
                     data-testid={`risk-controls-unlink-confirm-${cid}`}
                   />
@@ -187,6 +189,7 @@ export function RiskControls({ risk, canEdit }: Props) {
                       setError(null);
                       setConfirming(cid);
                     }}
+                    ref={unlinkTriggers.ref(cid)}
                     data-testid={`risk-controls-unlink-${cid}`}
                   >
                     Unlink
