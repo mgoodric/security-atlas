@@ -131,4 +131,48 @@ test.describe("#2174 — link sections follow module access", () => {
     await expect(page.getByTestId("risks-section")).toHaveCount(0);
     await expect(page.getByTestId("control-strip-action-plan")).toHaveCount(0);
   });
+
+  // #2141: the controls list's bulk actions follow the same modules. The
+  // member is an approver, so assign owner and evaluate now are offered;
+  // link to a plan (Risk) and request exception (Exceptions) are not.
+  test("a member without the Risk and Exceptions modules gets no link-to-plan or request-exception bulk action (#2141)", async ({
+    page,
+  }) => {
+    await signInAs(page, await mintJWT(MEMBER_B));
+    await page.goto("/controls");
+
+    const row = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "E2E 2174 control" });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.getByTestId("controls-row-select").click();
+
+    await expect(page.getByTestId("controls-selection-bar")).toBeVisible();
+    await expect(page.getByTestId("controls-bulk-assign-owner")).toBeVisible();
+    await expect(page.getByTestId("controls-bulk-evaluate")).toBeVisible();
+    await expect(page.getByTestId("controls-bulk-link-plan")).toHaveCount(0);
+    await expect(
+      page.getByTestId("controls-bulk-request-exception"),
+    ).toHaveCount(0);
+  });
+
+  test("an admin gets every bulk action on the controls list (#2141)", async ({
+    page,
+  }) => {
+    await signInAs(page, await mintJWT());
+    await page.goto("/controls");
+
+    const row = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "E2E 2174 control" });
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.getByTestId("controls-row-select").click();
+
+    await expect(page.getByTestId("controls-bulk-link-plan")).toBeVisible();
+    const request = page.getByTestId("controls-bulk-request-exception");
+    await expect(request).toHaveAttribute(
+      "href",
+      `/exceptions/new?control_id=${CONTROL}`,
+    );
+  });
 });
