@@ -7,51 +7,32 @@
 // through (200/201 with the upload result, 400 with the reason, 403 for a
 // non-admin).
 //
-// Before buffering anything the route checks the bearer, refuses a body
-// that declares more than the platform accepts, and requires
-// multipart/form-data (the controls import route's order).
+// readBoundedUpload (#2344) checks the bearer, the declared and streamed
+// length against the platform's cap, and multipart/form-data before the
+// form is parsed.
 
-import { cookies } from "next/headers";
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 
 import { forwardMultipart } from "@/lib/api/bff";
-import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { parseBoundedForm, readBoundedUpload } from "@/lib/api/upload";
 
 // MAX_UPLOAD_BYTES mirrors the upload handler's maxRequestBytes (8 MiB) in
 // internal/api/controls.
 const MAX_UPLOAD_BYTES = 8 << 20;
 
+const NOT_MULTIPART =
+  "request must be multipart/form-data with a bundle.tar.gz file";
+
 export async function POST(req: NextRequest) {
-  const jar = await cookies();
-  if (!jar.get(ATLAS_JWT_COOKIE)?.value) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-  const declared = Number(req.headers.get("content-length") ?? "0");
-  if (declared > MAX_UPLOAD_BYTES) {
-    return NextResponse.json(
-      { error: "bundle exceeds the 8 MiB upload cap" },
-      { status: 413 },
-    );
-  }
-  const contentType = req.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
-    return NextResponse.json(
-      {
-        error: "request must be multipart/form-data with a bundle.tar.gz file",
-      },
-      { status: 400 },
-    );
-  }
-  let form: FormData;
-  try {
-    form = await req.formData();
-  } catch {
-    return NextResponse.json(
-      {
-        error: "request must be multipart/form-data with a bundle.tar.gz file",
-      },
-      { status: 400 },
-    );
+  const read = await readBoundedUpload(req, {
+    maxBytes: MAX_UPLOAD_BYTES,
+    tooLarge: "bundle exceeds the 8 MiB upload cap",
+    notMultipart: NOT_MULTIPART,
+  });
+  if (!read.ok) return read.response;
+  const form = await parseBoundedForm(read.upload);
+  if (!form) {
+    return NextResponse.json({ error: NOT_MULTIPART }, { status: 400 });
   }
   return forwardMultipart("/v1/controls:upload-bundle", form);
 }
