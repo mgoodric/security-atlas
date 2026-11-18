@@ -88,6 +88,7 @@
 // so future debuggers don't re-diagnose THIS class of bug as a
 // race condition.
 
+import { expectNoSeriousAxe, seriousAxeViolations } from "./axe-gate";
 import { expect, test } from "./fixtures";
 import type { Page } from "@playwright/test";
 
@@ -448,6 +449,12 @@ test.describe("control detail tab strip (slice 254)", () => {
     await page.getByTestId("control-tab-map").click();
     await expect(page).toHaveURL(/\?tab=map$/);
     await expect(page.getByTestId("ucf-viz-section")).toBeVisible();
+    // The map tab is swept too (#2397): the route sweep only sees the
+    // default Overview tab.
+    expectNoSeriousAxe(
+      await seriousAxeViolations(page),
+      "/controls/[id] Framework map tab",
+    );
 
     // Click History — URL updates, the evaluation history renders.
     await page.getByTestId("control-tab-history").click();
