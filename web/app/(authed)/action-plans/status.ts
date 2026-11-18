@@ -41,11 +41,3 @@ export function planStatusLabel(
   }
   return statusLabel(status);
 }
-
-/** Format an ISO date/timestamp as YYYY-MM-DD; "—" for empty/malformed. */
-export function dateLabel(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toISOString().slice(0, 10);
-}

@@ -9,14 +9,6 @@
 
 import { isEmail } from "@/lib/email";
 
-// formatDetailDate trims an ISO timestamp (or a bare date) to its
-// `YYYY-MM-DD` portion for display, and renders an em-dash for an
-// absent value. Mirrors the slice 681 risks/[id] `formatDate` shape.
-export function formatDetailDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return iso.slice(0, 10);
-}
-
 // ownerMailto resolves a `mailto:` href for the owner field when it is a
 // valid email (AC-3), reusing the slice-679 `isEmail` predicate so the
 // detail view and the edit form agree on what "an email" is. A role

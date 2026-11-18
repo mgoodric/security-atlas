@@ -20,6 +20,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Person } from "@/components/ui/person";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   completePersonnelChecklistItem,
   fetchPersonnelChecklist,
@@ -28,7 +29,6 @@ import {
 } from "@/lib/api/personnel-security";
 
 import {
-  dateLabel,
   itemProgress,
   kindLabel,
   statusBadgeClass,
@@ -97,7 +97,7 @@ export default function PersonnelChecklistDetailPage() {
             {statusBadgeLabel(checklist, now)}
           </span>
           <span className="text-xs text-muted-foreground">
-            Due {dateLabel(checklist.due_at)}
+            Due <Timestamp value={checklist.due_at} style="date" />
           </span>
         </div>
       }
@@ -202,7 +202,7 @@ function ItemRow({
             className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
             data-testid="personnel-item-completed"
           >
-            Completed {dateLabel(item.completed_at)}
+            Completed <Timestamp value={item.completed_at} />
           </span>
         ) : (
           <Button

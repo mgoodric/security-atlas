@@ -21,6 +21,7 @@ import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Timestamp } from "@/components/ui/timestamp";
 import { kindsLabel } from "@/app/(authed)/settings/allowed-kinds-display";
 import type {
   AdminCredential,
@@ -47,10 +48,6 @@ async function revokeKey(id: string): Promise<void> {
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`revoke ${id}: ${res.status}`);
-}
-
-function formatTime(ts?: string | null, empty = "never"): string {
-  return ts ? new Date(ts).toLocaleString() : empty;
 }
 
 export function MintedKeysWarning({
@@ -185,8 +182,13 @@ export function MintedKeysWarning({
                 {k.is_admin ? " · admin" : ""}
               </div>
               <div className="text-muted-foreground">
-                Last used: {formatTime(k.last_used_at)} · Expires:{" "}
-                {formatTime(k.expires_at, "never")}
+                Last used: <Timestamp value={k.last_used_at} fallback="never" />{" "}
+                · Expires:{" "}
+                <Timestamp
+                  value={k.expires_at}
+                  style="datetime"
+                  fallback="never"
+                />
               </div>
             </li>
           ))}

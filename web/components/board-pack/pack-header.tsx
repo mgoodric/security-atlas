@@ -14,6 +14,7 @@
 // Honesty > parity.
 
 import { Badge } from "@/components/ui/badge";
+import { exactUTC } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { periodLabel } from "./pack-breadcrumb-segments";
 import { PACK_HEADER_META_LABELS } from "./pack-header-meta";
@@ -69,7 +70,7 @@ export function PackHeader({
         <MetaCell label={PACK_HEADER_META_LABELS[0]} value={periodEnd} mono />
         <MetaCell
           label={PACK_HEADER_META_LABELS[1]}
-          value={formatTimestamp(generatedAt)}
+          value={generatedAt ? exactUTC(generatedAt) || generatedAt : "—"}
           mono
         />
         <MetaCell
@@ -116,11 +117,3 @@ function MetaCell({
 // periodLabel was moved to `./pack-breadcrumb-segments.ts` in slice 218
 // so the breadcrumb (in the sticky export bar) and the cover header
 // share one canonical implementation. Imported above.
-
-function formatTimestamp(ts: string): string {
-  if (!ts) return "—";
-  // RFC3339 → "YYYY-MM-DD HH:MM UTC". Avoid Intl.DateTimeFormat to keep
-  // server / client renders identical (no hydration mismatch).
-  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(ts);
-  return m ? `${m[1]} ${m[2]} UTC` : ts;
-}

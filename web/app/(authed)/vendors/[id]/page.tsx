@@ -40,12 +40,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OwnerAccessFlag } from "@/components/ui/owner-access-flag";
 import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Timestamp } from "@/components/ui/timestamp";
 import { APIError } from "@/lib/api/base";
 import { Vendor, VendorReview } from "@/lib/api/vendors";
 
 import {
   dpaStatusLabel,
-  formatDetailDate,
   ownerMailto,
   reviewOutcomeBadgeVariant,
   reviewOutcomeLabel,
@@ -165,7 +165,8 @@ export default function VendorDetailPage({
             </Badge>
           ) : vendor.first_review_due ? (
             <Badge variant="outline" data-testid="vendor-detail-status">
-              First review due {formatDetailDate(vendor.first_review_due)}
+              First review due{" "}
+              <Timestamp value={vendor.first_review_due} style="date" />
             </Badge>
           ) : (
             <Badge variant="secondary" data-testid="vendor-detail-status">
@@ -240,24 +241,26 @@ export default function VendorDetailPage({
             </Field>
             <Field label="Last review" testid="vendor-detail-last-review">
               <span className="font-mono">
-                {vendor.last_review_date
-                  ? formatDetailDate(vendor.last_review_date)
-                  : "never"}
+                <Timestamp
+                  value={vendor.last_review_date}
+                  style="date"
+                  fallback="never"
+                />
               </span>
             </Field>
             <Field label="Contract start" testid="vendor-detail-contract-start">
               <span className="font-mono">
-                {formatDetailDate(vendor.contract_start)}
+                <Timestamp value={vendor.contract_start} style="date" />
               </span>
             </Field>
             <Field label="Contract end" testid="vendor-detail-contract-end">
               <span className="font-mono">
-                {formatDetailDate(vendor.contract_end)}
+                <Timestamp value={vendor.contract_end} style="date" />
               </span>
             </Field>
             <Field label="Renewal date" testid="vendor-detail-renewal-date">
               <span className="font-mono">
-                {formatDetailDate(vendor.renewal_date)}
+                <Timestamp value={vendor.renewal_date} style="date" />
               </span>
             </Field>
             <Field label="Auto-renew" testid="vendor-detail-auto-renew">
@@ -359,7 +362,7 @@ export default function VendorDetailPage({
                   {" "}
                   (last review on file:{" "}
                   <span className="font-mono">
-                    {formatDetailDate(vendor.last_review_date)}
+                    <Timestamp value={vendor.last_review_date} style="date" />
                   </span>
                   ).
                 </>
@@ -387,7 +390,7 @@ function ReviewRow({ review }: { review: VendorReview }) {
           className="font-mono text-sm text-foreground"
           data-testid="vendor-detail-review-date"
         >
-          {formatDetailDate(review.reviewed_at)}
+          <Timestamp value={review.reviewed_at} style="date" />
         </span>
         <Badge
           variant={reviewOutcomeBadgeVariant(review.outcome)}
