@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getRequirementCoverage } from "@/lib/api/requirement-coverage";
+import { SEGMENT, rejectUnsafeSegment } from "@/lib/api/bff";
 
 // Slice 482 — server-side proxy for GET /v1/requirements/{id}/coverage
 // (slice 008 forward traversal + slice 482 coverage-strength rollup).
@@ -25,12 +26,14 @@ export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await ctx.params;
+  const bad = rejectUnsafeSegment({ id }, SEGMENT.code);
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
   try {
     const coverage = await getRequirementCoverage(bearer, id);
     return NextResponse.json(coverage);

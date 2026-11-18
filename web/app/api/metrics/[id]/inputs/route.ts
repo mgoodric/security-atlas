@@ -11,17 +11,20 @@ import { NextResponse } from "next/server";
 
 import { createInput, type MetricInputCreate } from "@/lib/api/metrics";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { SEGMENT, rejectUnsafeSegment } from "@/lib/api/bff";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params;
+  const bad = rejectUnsafeSegment({ id }, SEGMENT.slug);
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await params;
   let body: MetricInputCreate;
   try {
     body = (await request.json()) as MetricInputCreate;

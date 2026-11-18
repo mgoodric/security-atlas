@@ -10,17 +10,20 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { patchFeatureFlag } from "@/lib/api/admin";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { SEGMENT, rejectUnsafeSegment } from "@/lib/api/bff";
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ key: string }> },
 ) {
+  const { key } = await params;
+  const bad = rejectUnsafeSegment({ key }, SEGMENT.slug);
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { key } = await params;
 
   let body: { enabled: boolean; reason?: string };
   try {

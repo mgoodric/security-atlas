@@ -34,7 +34,10 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
 
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await POST({} as never, paramsFor("q1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -47,11 +50,16 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
         headers: { "Content-Type": "application/pdf" },
       }),
     );
-    const res = await POST({} as never, paramsFor("q1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/q1/export-pdf");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/export-pdf",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
   });
@@ -64,7 +72,10 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    const res = await POST({} as never, paramsFor("q1"));
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
     expect(res.status).toBe(503);
   });
 });

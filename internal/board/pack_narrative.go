@@ -26,6 +26,14 @@ import (
 	"text/template"
 )
 
+// pluralize picks the singular noun when n is 1 and the plural otherwise.
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
 // packSectionFuncs are the per-section template helpers.
 var packSectionFuncs = template.FuncMap{
 	"arrow":      arrowGlyph,
@@ -34,12 +42,7 @@ var packSectionFuncs = template.FuncMap{
 	"pct":        formatPct,
 	"noBaseline": func() string { return noBaselineText },
 	"add1":       func(i int) int { return i + 1 },
-	"pluralize": func(n int, singular, plural string) string {
-		if n == 1 {
-			return singular
-		}
-		return plural
-	},
+	"pluralize":  pluralize,
 	// pluralize64 mirrors pluralize for int64 counts (slice 273 — the
 	// vendor-burndown totals are int64 from the slice-122 surface).
 	"pluralize64": func(n int64, singular, plural string) string {

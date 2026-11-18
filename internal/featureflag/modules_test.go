@@ -2,6 +2,7 @@ package featureflag
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -194,21 +195,73 @@ func TestModuleGateModuleOffWinsOverFeature(t *testing.T) {
 	}
 }
 
-// A flag-store error falls open to each switch's Seed default.
-func TestModuleGateFallsOpenToSeedDefault(t *testing.T) {
-	t.Parallel()
+// A flag-store error answers 503 for an optional module, whatever its Seed
+// default: the gate does not guess the tenant's switch (#2339). A core
+// route reads no switch and is served.
+func TestModuleGateFailsClosedOnStoreError(t *testing.T) {
 	looker := &fakeLooker{err: errors.New("db down")}
 	h := ModuleGate(looker)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
+	before := ModuleStateErrors()
 	for target, want := range map[string]int{
-		"/v1/risks":       http.StatusTeapot,   // default on
-		"/v1/board-packs": http.StatusNotFound, // default off
+		"/v1/risks":       http.StatusServiceUnavailable, // default on
+		"/v1/board-packs": http.StatusServiceUnavailable, // default off
+		"/v1/controls":    http.StatusTeapot,             // core
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil).WithContext(context.Background()))
 		if rec.Code != want {
 			t.Errorf("%s: status %d; want %d", target, rec.Code, want)
+		}
+		if want != http.StatusServiceUnavailable {
+			continue
+		}
+		if got := rec.Header().Get("X-Feature-Disabled"); got != "" {
+			t.Errorf("%s: marker %q on a 503; a read failure is not a switch-off", target, got)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"] != "module_state_unavailable" {
+			t.Errorf("%s: body %q; want error module_state_unavailable", target, rec.Body.String())
+		}
+		if rec.Header().Get("Retry-After") == "" {
+			t.Errorf("%s: no Retry-After on a 503", target)
+		}
+	}
+	if got := ModuleStateErrors() - before; got != 2 {
+		t.Errorf("ModuleStateErrors grew by %d; want 2", got)
+	}
+}
+
+// The recorder sees every request refused as switched off, with the module
+// and the switch, and nothing else.
+func TestModuleGateRecordsGatedAttempts(t *testing.T) {
+	t.Parallel()
+	looker := &fakeLooker{answers: map[string]Flag{
+		"questionnaires.enabled": {Key: "questionnaires.enabled", Enabled: false},
+		"vendor.enabled":         {Key: "vendor.enabled", Enabled: true},
+		"vendor.claims":          {Key: "vendor.claims", Enabled: false},
+		"risk.enabled":           {Key: "risk.enabled", Enabled: true},
+	}}
+	var got []GatedAttempt
+	h := ModuleGate(looker, WithAttemptRecorder(func(_ *http.Request, a GatedAttempt) {
+		got = append(got, a)
+	}))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	for _, target := range []string{"/v1/questionnaires", "/v1/oscal/component-definitions", "/v1/risks", "/v1/controls"} {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, target, nil))
+	}
+	want := []GatedAttempt{
+		{Module: "questionnaires", FlagKey: "questionnaires.enabled"},
+		{Module: "third_party_risk", FlagKey: "vendor.claims"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("recorded %v; want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("attempt %d = %+v; want %+v", i, got[i], want[i])
 		}
 	}
 }

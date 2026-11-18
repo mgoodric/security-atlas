@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getControlHistory } from "@/lib/api/control-detail";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // Slice 253 — server-side proxy for GET /v1/controls/{id}/history
 // (slice 064 control-detail handler — History). Renders the right-rail
@@ -17,12 +18,14 @@ export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
   try {
     const history = await getControlHistory(bearer, id);
     return NextResponse.json(history);

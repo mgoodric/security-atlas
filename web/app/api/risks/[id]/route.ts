@@ -28,7 +28,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { APIError } from "@/lib/api/base";
-import { forwardJSON, noStore } from "@/lib/api/bff";
+import { forwardJSON, noStore, rejectNonUUID } from "@/lib/api/bff";
 import { getRisk } from "@/lib/api/risks";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
@@ -37,6 +37,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   let body: unknown;
   try {
     body = await req.json();
@@ -58,6 +60,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {

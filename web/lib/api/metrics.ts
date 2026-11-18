@@ -453,6 +453,109 @@ export function thresholdBadgeColor(
   return "red";
 }
 
+/**
+ * canSetMetricTarget mirrors the platform's guard on
+ * PUT /v1/metrics/{id}/target (`authz.IsTenantAdmin`): only an admin may
+ * set a metric target. `/v1/me` reports exactly that check, over the
+ * live tenant roles, as `is_tenant_admin`. The JWT's `owner_roles` claim
+ * is not read: it goes stale after a role is revoked. Anything unknown is
+ * view-only.
+ */
+export function canSetMetricTarget(
+  me: { is_tenant_admin?: boolean } | undefined,
+): boolean {
+  return me?.is_tenant_admin === true;
+}
+
+// Rounds away float noise from the x100 / /100 conversion (0.7 * 100 is
+// 70.00000000000001); six places is well below any threshold's precision.
+const roundTiny = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/**
+ * metricTargetInputFromStored turns a stored target number into what the
+ * dialog shows. Percent metrics record fractions (0.9 is 90%), but an
+ * operator thinks in percentages, and typing 0.9 for 90% invites a 100x
+ * mistake, so a percent value is shown as a percentage. Like
+ * `formatValue`, a stored percent value above 1 is already in percentage
+ * points and is shown as it is. Other units pass through.
+ */
+export function metricTargetInputFromStored(
+  stored: string | undefined,
+  unit: string,
+): string {
+  if (stored === undefined || stored === "") return "";
+  const n = Number(stored);
+  if (unit !== "percent" || !Number.isFinite(n)) return stored;
+  return String(n <= 1 ? roundTiny(n * 100) : n);
+}
+
+/**
+ * metricTargetStoredFromInput is the reverse: a percentage typed for a
+ * percent metric is saved as the fraction its observations use, so the
+ * threshold badge compares like with like. Other units pass through.
+ */
+export function metricTargetStoredFromInput(
+  value: number,
+  unit: string,
+): number {
+  return unit === "percent" ? roundTiny(value / 100) : value;
+}
+
+/**
+ * metricTargetError checks a metric target before it is sent: three
+ * finite numbers, ordered the way the direction says, the same order the
+ * posture targets enforce and `thresholdBadgeColor` assumes:
+ *
+ *   higher_is_better   critical <= warning <= target
+ *   lower_is_better    target <= warning <= critical
+ *   target_is_better   |warning - target| <= |critical - target|
+ *
+ * The values are as the operator typed them. For a percent metric that is
+ * a percentage (see `metricTargetInputFromStored`), so each must be
+ * 0..100; other units (count, days) have no range. Returns the first
+ * problem, or null.
+ */
+export function metricTargetError(
+  input: {
+    target_value: number;
+    warning_threshold: number;
+    critical_threshold: number;
+    direction: string;
+  },
+  unit?: string,
+): string | null {
+  const values: [string, number][] = [
+    ["Target", input.target_value],
+    ["Warning", input.warning_threshold],
+    ["Critical", input.critical_threshold],
+  ];
+  for (const [name, v] of values) {
+    if (!Number.isFinite(v)) return `${name} must be a number.`;
+    if (unit === "percent" && (v < 0 || v > 100)) {
+      return `${name} must be between 0 and 100.`;
+    }
+  }
+  const t = input.target_value;
+  const w = input.warning_threshold;
+  const c = input.critical_threshold;
+  switch (input.direction) {
+    case "higher_is_better":
+      return c <= w && w <= t
+        ? null
+        : "Higher is better needs critical ≤ warning ≤ target.";
+    case "lower_is_better":
+      return t <= w && w <= c
+        ? null
+        : "Lower is better needs target ≤ warning ≤ critical.";
+    case "target_is_better":
+      return Math.abs(w - t) <= Math.abs(c - t)
+        ? null
+        : "Closer to target needs the warning band inside the critical band.";
+    default:
+      return "Choose a direction.";
+  }
+}
+
 // neutralBadgeLabel disambiguates the two `neutral` cases (slice 677 /
 // ATLAS-023) so the muted badge tells the operator WHY it is neutral:
 //

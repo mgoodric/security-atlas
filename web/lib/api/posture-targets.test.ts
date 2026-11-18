@@ -19,14 +19,17 @@ const higher: PostureTarget = {
   direction: "higher_is_better",
 };
 
+// #2341: the guard reads /v1/me's is_approver (authz.IsTenantApprover over
+// the live roles), never the JWT's owner_roles claim, which goes stale
+// after a revoke.
 describe("canSetPostureTarget", () => {
   test.each([
-    [{ is_admin: true }, true],
-    [{ owner_roles: ["admin"] }, true],
-    [{ owner_roles: ["grc_engineer"] }, true],
-    [{ owner_roles: ["viewer"] }, false],
-    [{ owner_roles: ["auditor"] }, false],
-    [{ owner_roles: ["control_owner"] }, false],
+    [{ is_approver: true }, true],
+    [{ is_approver: false }, false],
+    // A stale claim still listing admin or grc_engineer is not enough.
+    [{ is_approver: false, owner_roles: ["admin"] }, false],
+    [{ is_approver: false, owner_roles: ["grc_engineer"] }, false],
+    [{ is_approver: false, is_admin: true }, false],
     [{}, false],
     [undefined, false],
   ])("%j -> %s", (me, want) => {

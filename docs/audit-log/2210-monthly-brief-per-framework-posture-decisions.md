@@ -59,9 +59,14 @@ set:
 The tenant-wide coverage integer is no longer in `AllowedNumbers`. Other
 sections keep `VerifyNumbers` unchanged.
 
-Not caught: the model writing the freshness rate's value and calling it
+Not caught here: the model writing the freshness rate's value and calling it
 coverage. The gate checks values, not which noun precedes them; the prompt
-names the two figures apart.
+names the two figures apart. #2338 closed this by position: in the
+section's numbered shape, item 1 may state only the coverage figure as a
+percentage (none when nothing is scoped) and item 2 only the freshness rate.
+The check is skipped when the two render identically, since position then
+carries no signal. A spelled-out "percent" / "per cent" counts as a
+percentage.
 
 ## D6 — no scoped framework
 

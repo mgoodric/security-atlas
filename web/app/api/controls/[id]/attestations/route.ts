@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { submitAttestation, AttestSubmitRequest } from "@/lib/api/attest";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // Slice 011 — server-side proxy for POST /v1/controls/{id}/attestations.
 // The body shape is forwarded verbatim so the upstream's schema
@@ -12,12 +13,14 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
   let body: AttestSubmitRequest;
   try {
     body = (await req.json()) as AttestSubmitRequest;

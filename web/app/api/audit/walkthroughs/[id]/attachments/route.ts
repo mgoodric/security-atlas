@@ -9,13 +9,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { forwardMultipart } from "@/lib/api/bff";
+import { forwardMultipart, rejectNonUUID } from "@/lib/api/bff";
 
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   let form: FormData;
   try {
     form = await req.formData();
