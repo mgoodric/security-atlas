@@ -218,6 +218,21 @@ but a retention record belongs on `DCH-27` Media & Data Retention. The
 install that already registered that schema keeps its stored anchors, because
 the boot import skips a kind and version that is already present.
 
+The SCF NET anchor review (#2396) moved one more default:
+
+| Connector | Flag               | Old default  | New default  |
+| --------- | ------------------ | ------------ | ------------ |
+| k8s       | `--netpol-control` | `scf:NET-03` | `scf:NET-06` |
+
+A NetworkPolicy coverage record is evidence of segmentation between workloads,
+which is `NET-06` Network Segmentation (macrosegmentation), not `NET-03`
+Boundary Protection. The `k8s.networkpolicy_coverage.v1` default SCF anchors
+are now `NET-06`, `NET-02`. The Azure `--nsg-control` and `--firewall-control`
+defaults stay `scf:NET-03`; the `azure.nsg_rules.v1` default anchors gain
+`NET-06` (`NET-03`, `NET-06`, `NET-02`). As above, an install that already
+registered either schema keeps its stored anchors. To keep NetworkPolicy
+records on the old code, pass `--netpol-control scf:NET-03`.
+
 A connector run on its defaults picks up the new code when you upgrade it. If
 you pass one of these flags with the old value, by hand or in a scheduler or
 manifest, change it to the new code: in SCF 2026.3 the old code names a
