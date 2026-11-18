@@ -40,12 +40,49 @@ async function fetchFeatures(): Promise<FeatureFlag[]> {
   return body.items ?? [];
 }
 
+// #2503: the layout admits a tenant admin too, who manages only the Users
+// page. The platform tiles, and their count fetches, are for a
+// super-admin (`is_admin`). Fail-closed: a failed read shows Users only.
+async function fetchIsPlatformAdmin(): Promise<boolean> {
+  const res = await fetch(`/api/admin/me`, { cache: "no-store" });
+  if (!res.ok) return false;
+  const body = (await res.json()) as { is_admin?: unknown };
+  return body.is_admin === true;
+}
+
 export default function AdminOverviewPage() {
-  const creds = useQuery({ queryKey: ["admin-creds"], queryFn: fetchCreds });
+  const platformQ = useQuery({
+    queryKey: ["admin-me", "is-admin"],
+    queryFn: fetchIsPlatformAdmin,
+  });
+  const platform = platformQ.data === true;
+  const creds = useQuery({
+    queryKey: ["admin-creds"],
+    queryFn: fetchCreds,
+    enabled: platform,
+  });
   const flags = useQuery({
     queryKey: ["admin-features"],
     queryFn: fetchFeatures,
+    enabled: platform,
   });
+
+  if (!platform) {
+    return (
+      <PageShell
+        title={pageTitle("/admin")}
+        subtitle="Manage your organisation's members and their roles."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <AdminTile
+            href="/admin/users"
+            title="Users"
+            description="List users, assign roles, manage local + SSO-provisioned accounts."
+          />
+        </div>
+      </PageShell>
+    );
+  }
 
   const credsSummary = creds.isLoading
     ? "loading…"

@@ -155,6 +155,10 @@ export type FrameworkPostureRow = {
   // target (#2136): the organisation's posture target for the version, or
   // null when none is set. The tile colours coverage against it.
   target: PostureTarget | null;
+  // prior_target (#2406): when this version has no target, the target on
+  // the version it migrates from, or null. The Set target dialog prefills
+  // from it.
+  prior_target?: PostureTarget | null;
 };
 
 // FrameworkPostureReport mirrors the FrameworkPosture handler's envelope.

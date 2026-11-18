@@ -46,8 +46,22 @@ describe("shouldShowAdminEntry", () => {
     );
   });
 
-  // #2216: /admin is super-admin only, so a tenant admin grant hides it.
-  test("hide: roles=['admin'] (tenant admin, not super-admin)", () => {
+  // #2503: a tenant admin by its live roles sees the entry through the
+  // server-computed is_tenant_admin flag.
+  test("show: is_tenant_admin true", () => {
+    expect(
+      shouldShowAdminEntry({ is_admin: false, is_tenant_admin: true }),
+    ).toBe(true);
+  });
+
+  test("hide: is_tenant_admin truthy but non-bool (strict equality only)", () => {
+    expect(shouldShowAdminEntry({ is_tenant_admin: "true" })).toBe(false);
+    expect(shouldShowAdminEntry({ is_tenant_admin: 1 })).toBe(false);
+  });
+
+  // #2216: the role string alone does not show it; a session's role claim
+  // is not a live grant. is_tenant_admin is the signal (#2503).
+  test("hide: roles=['admin'] without is_tenant_admin", () => {
     expect(shouldShowAdminEntry({ is_admin: false, roles: ["admin"] })).toBe(
       false,
     );

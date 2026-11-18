@@ -115,6 +115,12 @@ func (g *payloadGate) decide(action, resource string) bool {
 	in.Action = action
 	in.Resource.Type = resource
 	in.Resource.ID = ""
+	if resource == "admin" {
+		// #2503: admin.rego admits a tenant admin by role only to the
+		// tenant-scoped /v1/admin segments. Module-access rows and the
+		// admin check both stand for managing the tenant's users.
+		in.Resource.ID = "users"
+	}
 	d, err := g.engine.Decide(g.r.Context(), in)
 	return err == nil && d.Allow
 }

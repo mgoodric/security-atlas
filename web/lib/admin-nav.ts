@@ -20,8 +20,9 @@
 //                           // upstreams may emit undefined / non-array
 //   }
 //
-// Admit (return true) when EITHER:
+// Admit (return true) when ANY of:
 //   * `is_admin === true`                                  — slice-060/130 cred flag
+//   * `is_tenant_admin === true`                           — #2503 tenant admin
 //   * `roles` contains any of the canonical admin variants — `admin`,
 //                                                            `super_admin`,
 //                                                            `tenant_admin`
@@ -34,12 +35,12 @@
 //   * `roles` contains only non-admin strings (viewer, control_owner,
 //     grc_engineer, auditor, etc.)
 //
-// Why only `super_admin`? Slice 186's AC-2 named three variants
-// (`admin`, `tenant_admin`, `super_admin`), but the /admin layout gate
-// admits on `is_admin`, which is super-admin only. Once /v1/me began
-// returning real roles (#2216), listing the tenant variants would show
-// tenant admins an entry that only leads to the denial page. Do NOT
-// widen this list locally; a change to who /admin is for is a decision.
+// Why only `super_admin` in the role list? The /admin layout admits on
+// `is_admin` (super-admin) or `is_tenant_admin` (#2503: a tenant admin by
+// its live roles, for the tenant-scoped pages). Both are server-computed
+// flags on /v1/me; a role string here would admit on the session's role
+// claim instead. Do NOT widen this list locally; a change to who /admin
+// is for is a decision.
 //
 // Located in `web/lib/` rather than `web/components/shell/` so the
 // existing vitest config (`web/vitest.config.ts` include pattern
@@ -49,9 +50,10 @@
 
 // ADMIN_NAV_ROLES — the canonical set of role strings that grant the
 // sidebar's "Admin" entry. MUST match who the /admin layout gate admits.
-// #2216 (Matt, 2026-11-14): /admin is super-admin only, so a tenant
-// `admin` / `tenant_admin` grant does NOT show the entry; it would only
-// lead to the denial page. See docs/audit-log/2216-admin-gate-decisions.md.
+// #2216 (Matt, 2026-11-14) kept the role list to super-admin; #2503
+// (Matt, 2026-11-17) opens the section to tenant admins through
+// `is_tenant_admin`, not through a role string. See
+// docs/audit-log/2503-tenant-admin-pages-decisions.md.
 const ADMIN_NAV_ROLES = ["super_admin"] as const;
 type AdminNavRole = (typeof ADMIN_NAV_ROLES)[number];
 
@@ -64,9 +66,10 @@ type AdminNavRole = (typeof ADMIN_NAV_ROLES)[number];
  */
 export function shouldShowAdminEntry(body: {
   is_admin?: unknown;
+  is_tenant_admin?: unknown;
   roles?: unknown;
 }): boolean {
-  if (body.is_admin === true) {
+  if (body.is_admin === true || body.is_tenant_admin === true) {
     return true;
   }
   if (!Array.isArray(body.roles)) {
