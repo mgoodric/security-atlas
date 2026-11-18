@@ -713,8 +713,11 @@ type ListFilter struct {
 	Family string
 	// Framework is a catalog framework slug the control's anchor satisfies.
 	Framework string
-	Sort      ListSortKey
-	SortDesc  bool
+	// LegacyAnchorOnly keeps only controls with an open or rejected SCF
+	// remap proposal (#2392).
+	LegacyAnchorOnly bool
+	Sort             ListSortKey
+	SortDesc         bool
 }
 
 func optText(v string) *string {
@@ -740,33 +743,35 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, f ListFi
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var err error
 		rows, err = q.ListActiveControlsWithState(ctx, dbx.ListActiveControlsWithStateParams{
-			TenantID:    pgUUID(tenantID),
-			RowLimit:    limit,
-			RowOffset:   offset,
-			ScopeCellID: f.ScopeCell,
-			AnchorFit:   optText(f.AnchorFit),
-			OwnerUserID: f.Owner,
-			Unowned:     f.Unowned,
-			Result:      optText(f.Result),
-			Freshness:   optText(f.Freshness),
-			Family:      optText(f.Family),
-			Framework:   optText(f.Framework),
-			SortKey:     string(sortKey),
-			SortDesc:    f.SortDesc,
+			TenantID:         pgUUID(tenantID),
+			RowLimit:         limit,
+			RowOffset:        offset,
+			ScopeCellID:      f.ScopeCell,
+			AnchorFit:        optText(f.AnchorFit),
+			OwnerUserID:      f.Owner,
+			Unowned:          f.Unowned,
+			Result:           optText(f.Result),
+			Freshness:        optText(f.Freshness),
+			Family:           optText(f.Family),
+			Framework:        optText(f.Framework),
+			LegacyAnchorOnly: f.LegacyAnchorOnly,
+			SortKey:          string(sortKey),
+			SortDesc:         f.SortDesc,
 		})
 		if err != nil {
 			return fmt.Errorf("list active controls with state: %w", err)
 		}
 		total, err = q.CountActiveControls(ctx, dbx.CountActiveControlsParams{
-			TenantID:    pgUUID(tenantID),
-			ScopeCellID: f.ScopeCell,
-			AnchorFit:   optText(f.AnchorFit),
-			OwnerUserID: f.Owner,
-			Unowned:     f.Unowned,
-			Result:      optText(f.Result),
-			Freshness:   optText(f.Freshness),
-			Family:      optText(f.Family),
-			Framework:   optText(f.Framework),
+			TenantID:         pgUUID(tenantID),
+			ScopeCellID:      f.ScopeCell,
+			AnchorFit:        optText(f.AnchorFit),
+			OwnerUserID:      f.Owner,
+			Unowned:          f.Unowned,
+			Result:           optText(f.Result),
+			Freshness:        optText(f.Freshness),
+			Family:           optText(f.Family),
+			Framework:        optText(f.Framework),
+			LegacyAnchorOnly: f.LegacyAnchorOnly,
 		})
 		if err != nil {
 			return fmt.Errorf("count active controls: %w", err)

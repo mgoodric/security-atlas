@@ -144,6 +144,12 @@ export type AnchorRow = {
   demo?: boolean;
   /** #2128 — the assigned owner's user id; null or absent when unassigned. */
   ownerUserId?: string | null;
+  /**
+   * #2392 — the control still has an undecided SCF remap proposal (open or
+   * rejected), so it sits on an older release's anchor until a reviewer
+   * settles it. Absent on catalog rows.
+   */
+  legacyAnchor?: boolean;
 };
 
 export type AnchorFit = "exact" | "partial" | "none";

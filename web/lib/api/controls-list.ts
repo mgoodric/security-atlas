@@ -240,6 +240,9 @@ export type ControlWithState = TenantControl & {
   // #2128 — the person "assign owner" made this control's owner, as a
   // user id for <Person>; null when nobody is assigned.
   owner_user_id?: string | null;
+  // #2392 — true while the control has an undecided SCF remap proposal
+  // (open or rejected). Optional because hand-rolled fixtures predate it.
+  legacy_anchor?: boolean;
 };
 
 export type ControlsWithStateResponse = {
@@ -265,6 +268,7 @@ export const CONTROLS_WITH_STATE_PARAMS = [
   "family",
   "framework",
   "anchor_fit",
+  "legacy_anchor",
   "sort",
 ] as const;
 
