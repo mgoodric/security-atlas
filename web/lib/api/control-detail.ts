@@ -232,6 +232,35 @@ export type ControlHistoryResponse = {
   next_cursor: string;
 };
 
+// #2392 — anchorHistoryWire, one row of GET /v1/controls/{id}/anchor-history:
+// a reviewer's decision on an SCF remap proposal, for any revision of the
+// control's bundle. Newest first, keyset paged. The new_* fields are set on
+// an approval only.
+export type ControlAnchorDecision = {
+  id: string;
+  decision: "approved" | "rejected" | "kept_legacy";
+  bulk: boolean;
+  legacy_control_id: string;
+  legacy_version: number;
+  legacy_scf_id: string;
+  legacy_release: string;
+  new_control_id: string | null;
+  new_version: number | null;
+  new_scf_id: string | null;
+  new_release: string | null;
+  reason: string | null;
+  // A users(id), or a "system:" principal; render it with <Person>.
+  decided_by: string;
+  decided_at: string;
+};
+
+export type ControlAnchorHistoryResponse = {
+  control_id: string;
+  decisions: ControlAnchorDecision[];
+  count: number;
+  next_cursor: string;
+};
+
 // ----- server-side fns (called by the BFF route handlers) -----
 
 export async function getControlCoverage(
@@ -452,6 +481,19 @@ export async function getControlHistory(
   return (await res.json()) as ControlHistoryResponse;
 }
 
+// #2392 — the first page (the platform's default 50) of the control's
+// anchor history; the History tab shows it whole.
+export async function getControlAnchorHistory(
+  bearer: string,
+  controlID: string,
+): Promise<ControlAnchorHistoryResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/anchor-history`,
+    bearer,
+  );
+  return (await res.json()) as ControlAnchorHistoryResponse;
+}
+
 export async function getControlGapExplanation(
   bearer: string,
   controlID: string,
@@ -527,6 +569,14 @@ export function fetchControlHistory(
 ): Promise<ControlHistoryResponse> {
   return bffControlFetch<ControlHistoryResponse>(
     `/api/controls/${encodeURIComponent(controlID)}/history`,
+  );
+}
+
+export function fetchControlAnchorHistory(
+  controlID: string,
+): Promise<ControlAnchorHistoryResponse> {
+  return bffControlFetch<ControlAnchorHistoryResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/anchor-history`,
   );
 }
 

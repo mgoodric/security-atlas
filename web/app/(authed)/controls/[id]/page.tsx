@@ -67,6 +67,7 @@ import { fetchActionPlansForControl } from "@/lib/api/action-plans";
 import {
   fetchControlCoverage,
   fetchControlEffectiveScope,
+  fetchControlAnchorHistory,
   fetchControlHistory,
   fetchControlPolicies,
   fetchControlRisks,
@@ -200,6 +201,13 @@ function ControlDetailPageInner() {
   const historyQ = useQuery({
     queryKey: ["control", id, "history"],
     queryFn: () => fetchControlHistory(id),
+    enabled: Boolean(id) && activeTab === "history",
+  });
+
+  // #2392 — the SCF anchor history, on the History tab.
+  const anchorHistoryQ = useQuery({
+    queryKey: ["control", id, "anchor-history"],
+    queryFn: () => fetchControlAnchorHistory(id),
     enabled: Boolean(id) && activeTab === "history",
   });
 
@@ -597,7 +605,11 @@ function ControlDetailPageInner() {
         ) : null}
 
         {activeTab === "history" ? (
-          <HistoryPanel historyQ={historyQ} stateQ={stateQ} />
+          <HistoryPanel
+            historyQ={historyQ}
+            anchorHistoryQ={anchorHistoryQ}
+            stateQ={stateQ}
+          />
         ) : null}
       </div>
     </DetailHeader>
