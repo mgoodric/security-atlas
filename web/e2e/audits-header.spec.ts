@@ -133,7 +133,7 @@ test.describe("topbar header chrome (slice 213)", () => {
           controls: [
             {
               id: "00000000-0000-0000-0000-000000000001",
-              scf_id: "CRY-05",
+              scf_id: "CRY-07",
               title: "Encryption at rest",
             },
             {
@@ -169,7 +169,7 @@ test.describe("topbar header chrome (slice 213)", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          controls: [{ id: "x", scf_id: "CRY-05", title: "T" }],
+          controls: [{ id: "x", scf_id: "CRY-07", title: "T" }],
           count: 1,
         }),
       });
