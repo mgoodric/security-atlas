@@ -29,6 +29,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/crosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
@@ -154,6 +155,12 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// error here can only mean strict.
 	if p, err := oidc.IssuerPolicyFromEnv(); err == nil && p.AllowPrivate {
 		ssoH = ssoH.WithPreflightOptions(adminsso.PreflightOptions{AllowPrivateIPs: true})
+	}
+	// #2034: PATCH seals the client secret with the key the sign-in
+	// resolver opens it with. cmd/atlas refuses to boot on a malformed
+	// key, so an error here means none is set and PATCH refuses a secret.
+	if c, err := idpconfig.SecretCrypterFromEnv(); err == nil {
+		ssoH = ssoH.WithSecretCrypter(c)
 	}
 	root.Get("/v1/admin/sso", ssoH.Get)
 	root.Patch("/v1/admin/sso", ssoH.Patch)

@@ -62,6 +62,11 @@ type fakeIdP struct {
 	// trustUnverifiedEmail is the IdP config's
 	// trust_unverified_email_for_link as callbackVia hands it to the RP.
 	trustUnverifiedEmail bool
+	// email, when set, replaces founder@example.com in the ID token.
+	email string
+	// gotClientID and gotClientSecret are the client credentials the last
+	// /token request authenticated with (#2034).
+	gotClientID, gotClientSecret string
 }
 
 func newFakeIdP(t *testing.T) *fakeIdP {
@@ -98,14 +103,24 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 			{Key: f.pub, KeyID: "kid-1", Algorithm: string(jose.RS256), Use: "sig"},
 		}})
 	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		if id, secret, ok := r.BasicAuth(); ok {
+			f.gotClientID, _ = url.QueryUnescape(id)
+			f.gotClientSecret, _ = url.QueryUnescape(secret)
+		} else if err := r.ParseForm(); err == nil {
+			f.gotClientID, f.gotClientSecret = r.PostForm.Get("client_id"), r.PostForm.Get("client_secret")
+		}
+		email := "founder@example.com"
+		if f.email != "" {
+			email = f.email
+		}
 		claims := map[string]any{
 			"iss":   f.srv.URL,
 			"sub":   "oidc-founder",
 			"aud":   fakeClientID,
 			"exp":   time.Now().Add(5 * time.Minute).Unix(),
 			"iat":   time.Now().Unix(),
-			"email": "founder@example.com",
+			"email": email,
 			"name":  "Founder",
 			"nonce": f.nonce,
 		}
