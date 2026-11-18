@@ -3,7 +3,12 @@
 // #2113 — /exceptions/new: request an exception (parent #2071).
 //
 // Opened from a control's "Request exception" with `?control_id=<id>`,
-// which pre-fills the control. The form asks for the scope it covers
+// which pre-fills the control. #2141: the controls list's bulk "Request
+// exception" opens it with one `control_id` per selected control; the
+// form then lists them and files one exception per control, with the
+// same scope, justification and expiry, through the same POST
+// /v1/exceptions the platform gates per request. A refused control is
+// named with its reason and stays on the form for a retry. The form asks for the scope it covers
 // (the #2103 scope picker, starting at Everything, the whole control),
 // the justification, compensating controls and an expiry no more than
 // 365 days out. On success it lands on the new exception with a toast
@@ -27,6 +32,8 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
 import { createException } from "@/lib/api/exceptions";
+
+import { runPerItem, type Refusal } from "../../controls/bulk-actions";
 
 import {
   DEFAULT_DAYS,
@@ -61,6 +68,13 @@ function RequestForm() {
   const [controlId, setControlId] = useState(
     () => params.get("control_id") ?? "",
   );
+  // #2141: more than one control_id is a bulk request for the selection.
+  const [bulkIds, setBulkIds] = useState<string[]>(() => {
+    const ids = Array.from(new Set(params.getAll("control_id")));
+    return ids.length > 1 ? ids : [];
+  });
+  const bulk = bulkIds.length > 0;
+  const [refusals, setRefusals] = useState<Refusal[]>([]);
   const [predicate, setPredicate] = useState<object | null>(EVERYTHING);
   const [justification, setJustification] = useState("");
   const [compensating, setCompensating] = useState("");
@@ -82,7 +96,13 @@ function RequestForm() {
     e.preventDefault();
     setSubmitErr(null);
     const r = validateRequest(
-      { controlId, predicate, justification, compensating, expiresOn },
+      {
+        controlId: bulk ? bulkIds[0] : controlId,
+        predicate,
+        justification,
+        compensating,
+        expiresOn,
+      },
       now,
     );
     if (!r.ok) {
@@ -91,6 +111,26 @@ function RequestForm() {
     }
     setErrors({});
     setSubmitting(true);
+    if (bulk) {
+      const body = r.body;
+      const res = await runPerItem(bulkIds, (id) =>
+        createException({ ...body, control_id: id }),
+      );
+      await qc.invalidateQueries({ queryKey: ["exceptions"] });
+      if (res.refused.length === 0) {
+        const n = res.succeeded.length;
+        toast(`${n} exception${n === 1 ? "" : "s"} requested`);
+        router.push("/exceptions");
+        return;
+      }
+      setSubmitErr(
+        `${res.succeeded.length} requested, ${res.refused.length} refused. The refused controls are still listed; fix the cause and request again.`,
+      );
+      setRefusals(res.refused);
+      setBulkIds(res.refused.map((x) => x.id));
+      setSubmitting(false);
+      return;
+    }
     try {
       const { exception } = await createException(r.body);
       await qc.invalidateQueries({ queryKey: ["exceptions"] });
@@ -109,7 +149,31 @@ function RequestForm() {
       className="space-y-6"
       data-testid="exception-request-form"
     >
-      <div className="space-y-1">
+      {bulk ? (
+        <div className="space-y-1" data-testid="exception-request-controls">
+          <p className="text-sm font-medium">
+            Controls ({bulkIds.length}), one exception each
+          </p>
+          <ul className="list-disc pl-5 text-sm">
+            {bulkIds.map((id) => {
+              const c = controls.find((x) => x.id === id);
+              const refusal = refusals.find((x) => x.id === id);
+              return (
+                <li key={id} data-testid="exception-request-controls-item">
+                  {c ? `${c.scf_id} ${c.title}` : "A selected control"}
+                  {refusal ? (
+                    <span className="text-xs text-rose-600">
+                      {" "}
+                      ({refusal.reason})
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+      <div className={bulk ? "hidden" : "space-y-1"}>
         <label htmlFor="ex-control" className="text-sm font-medium">
           Control
         </label>

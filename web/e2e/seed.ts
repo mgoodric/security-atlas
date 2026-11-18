@@ -172,7 +172,10 @@ export type FixtureName =
   | "module-links"
   // #2494 — a tenant with one member whose roles are cleared each run,
   // for no-tenant-role.spec.ts.
-  | "no-tenant-role";
+  | "no-tenant-role"
+  // #2141 — a tenant with three controls, a second member and an action
+  // plan, for controls-bulk-2141.spec.ts's bulk writes.
+  | "controls-bulk";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
