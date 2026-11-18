@@ -1,4 +1,4 @@
-# ADR 0026: A Calendar Feed Token Reads as Its Subscriber's Live Roles, for the Feed Only
+# ADR 0027: A Calendar Feed Token Reads as Its Subscriber's Live Roles, for the Feed Only
 
 **Status:** Accepted
 

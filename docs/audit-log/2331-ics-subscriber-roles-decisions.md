@@ -2,7 +2,7 @@
 
 Builds on `docs/audit-log/2234-calendar-followups-decisions.md` (D1, which
 deferred this here). The trade-off is recorded in
-[ADR 0026](../adr/0026-calendar-feed-token-reads-as-its-subscriber.md).
+[ADR 0027](../adr/0027-calendar-feed-token-reads-as-its-subscriber.md).
 
 detection_tier_actual: none
 detection_tier_target: none

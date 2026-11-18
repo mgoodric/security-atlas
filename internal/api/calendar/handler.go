@@ -347,7 +347,7 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// #2331: the feed shows the gated types its subscriber may read now,
-	// asked of OPA with their live user_roles (ADR 0026). A token that
+	// asked of OPA with their live user_roles (ADR 0027). A token that
 	// names no subscriber (minted before #2173) leaves them all out, and
 	// so does a failed role lookup: the feed still serves the rest.
 	subscriber := credstore.MinterUserID(cred)
@@ -558,7 +558,7 @@ func ReadableTypes(r *http.Request, engine *authz.Engine, typeFilter string) (st
 // ReadableTypesFor narrows a normalized type filter to the event types
 // the person userID (a bare users(id) uuid) may read in tenantID, for a
 // caller that is not that person: the ICS feed, whose calendar-only token
-// acts for its subscriber on these reads alone (#2331, ADR 0026). OPA
+// acts for its subscriber on these reads alone (#2331, ADR 0027). OPA
 // decides as them with no role but the live user_roles rows the engine
 // resolves in Decide, so a demoted subscriber's feed narrows at the next
 // fetch and a deactivated or removed one reads no gated type.

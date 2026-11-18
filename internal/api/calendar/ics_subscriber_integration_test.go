@@ -1,7 +1,7 @@
 //go:build integration
 
 // #2331 — the ICS feed shows the gated event types its subscriber may read,
-// asked of OPA with their live user_roles at every fetch (ADR 0026). A
+// asked of OPA with their live user_roles at every fetch (ADR 0027). A
 // demoted, disabled or removed subscriber's feed narrows at the next read,
 // a token that names no subscriber shows no gated type, and the token is
 // no bearer for any other route.
