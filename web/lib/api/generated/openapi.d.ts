@@ -305,7 +305,7 @@ export interface paths {
         get: operations["get-v1-action-plans-id"];
         put?: never;
         post?: never;
-        /** DELETE /v1/action-plans/{id} */
+        /** DELETE /v1/action-plans/{id} — tombstone an action plan; 409 when an open mitigate risk it links would be left with no linked control or live action plan (the whole tombstone is refused; the message names the risk) */
         delete: operations["delete-v1-action-plans-id"];
         options?: never;
         head?: never;
@@ -342,7 +342,7 @@ export interface paths {
         put?: never;
         /** POST /v1/action-plans/{id}/risks/{risk_id} */
         post: operations["post-v1-action-plans-id-risks-risk_id"];
-        /** DELETE /v1/action-plans/{id}/risks/{risk_id} */
+        /** DELETE /v1/action-plans/{id}/risks/{risk_id} — unlink a risk from an action plan; 404 when not linked; 409 when the risk is open, mitigate, and this plan is its last linked control or live action plan */
         delete: operations["delete-v1-action-plans-id-risks-risk_id"];
         options?: never;
         head?: never;
