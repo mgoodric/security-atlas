@@ -121,15 +121,223 @@ export function assertSafeSvg(svg: string): string {
   return svg;
 }
 
-/** What makes an SVG unsafe to serve: empty when it is clean. */
-export function unsafeSvgParts(svg: string): string[] {
+/**
+ * The SVG elements a lifecycle diagram may contain, by local name. Anything
+ * else is refused: `<script>`, `<foreignObject>`, `<animate>`, `<set>`,
+ * `<image>` among them. `svg-strip.ts` keeps its own copy, because it runs
+ * alone in the browser; `e2e/help-svg-strip.spec.ts` checks that every
+ * name here survives the strip.
+ */
+export const SVG_ELEMENTS: readonly string[] = [
+  "a",
+  "circle",
+  "clipPath",
+  "defs",
+  "desc",
+  "ellipse",
+  "feBlend",
+  "feColorMatrix",
+  "feComposite",
+  "feDropShadow",
+  "feFlood",
+  "feGaussianBlur",
+  "feMerge",
+  "feMergeNode",
+  "feOffset",
+  "filter",
+  "g",
+  "line",
+  "linearGradient",
+  "marker",
+  "mask",
+  "path",
+  "pattern",
+  "polygon",
+  "polyline",
+  "radialGradient",
+  "rect",
+  "stop",
+  "style",
+  "svg",
+  "symbol",
+  "text",
+  "title",
+  "tspan",
+  "use",
+];
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const XLINK_NS = "http://www.w3.org/1999/xlink";
+
+/** A value as a browser reads it for a scheme or a CSS function:
+ *  whitespace and control characters dropped, lower case. */
+function squash(value: string): string {
+  return value.replace(/[\s\u0000-\u001f\u007f]/g, "").toLowerCase();
+}
+
+/** What is active in a decoded attribute value or style sheet. */
+function activeValue(value: string, css: boolean): string[] {
+  const v = squash(value);
   const out: string[] = [];
-  if (/<script\b/i.test(svg)) out.push("<script>");
-  if (/\son[a-z]+\s*=/i.test(svg)) out.push("event-handler attribute");
-  if (/javascript:/i.test(svg)) out.push("javascript: URL");
-  if (/\s(?:xlink:)?href\s*=\s*["'](?!#)/i.test(svg)) {
-    out.push("external link");
+  if (/(?:java|vb)script:/.test(v)) out.push("javascript: URL");
+  if (/url\((?!["']?#)/.test(v)) out.push("non-fragment url()");
+  // A CSS escape can spell any of these without its letters, and a
+  // presentation attribute (`fill`, `mask`, `cursor`) is parsed as CSS too.
+  if (v.includes("\\")) out.push("CSS escape");
+  if (css) {
+    if (v.includes("@import")) out.push("@import");
+    if (v.includes("image-set(")) out.push("image-set()");
+    if (/expression\(|-moz-binding|behavior:/.test(v)) {
+      out.push("CSS script hook");
+    }
   }
-  if (/<foreignObject\b/i.test(svg)) out.push("<foreignObject>");
   return out;
+}
+
+const ENTITIES: Record<string, string> = {
+  lt: "<",
+  gt: ">",
+  amp: "&",
+  quot: '"',
+  apos: "'",
+};
+
+/** Decode character and predefined entity references. Throws on any other
+ *  entity: with no DOCTYPE (refused below) none can be defined. */
+function decode(text: string): string {
+  return text.replace(/&([^;&\s]*)(;?)/g, (ref, body: string, semi) => {
+    if (!semi) throw new Error(`bare "&" before ${body.slice(0, 20)}`);
+    const num = /^#(?:x([0-9a-f]+)|([0-9]+))$/i.exec(body);
+    if (num) {
+      const code = num[1] ? parseInt(num[1], 16) : parseInt(num[2], 10);
+      if (code < 1 || code > 0x10ffff) throw new Error(`bad reference ${ref}`);
+      return String.fromCodePoint(code);
+    }
+    const named = ENTITIES[body];
+    if (named === undefined) throw new Error(`unknown entity ${ref}`);
+    return named;
+  });
+}
+
+const NAME = "[A-Za-z_][-A-Za-z0-9_.]*(?::[A-Za-z_][-A-Za-z0-9_.]*)?";
+const START_TAG = new RegExp(
+  `^<(${NAME})((?:\\s+${NAME}\\s*=\\s*(?:"[^"<]*"|'[^'<]*'))*)\\s*(/?)>`,
+);
+const ATTR = new RegExp(`(${NAME})\\s*=\\s*(?:"([^"<]*)"|'([^'<]*)')`, "g");
+const END_TAG = new RegExp(`^</(${NAME})\\s*>`);
+
+/**
+ * Walk the SVG as XML, strictly: a DOCTYPE, a processing instruction other
+ * than a leading XML declaration, an unknown entity or anything not well
+ * formed throws rather than being guessed at. Calls `element` for each
+ * start tag, and `text` at each end tag with the element's decoded text
+ * content: every text and CDATA run inside it, descendants included,
+ * joined the way the browser joins them for a style sheet.
+ */
+function walkXml(
+  svg: string,
+  element: (name: string, attrs: [string, string][]) => void,
+  text: (name: string, content: string) => void,
+): void {
+  const open: string[] = [];
+  const texts: string[] = [];
+  let roots = 0;
+  let i = /^\s*<\?xml\s[^?]*\?>/.exec(svg)?.[0].length ?? 0;
+  while (i < svg.length) {
+    const rest = svg.slice(i);
+    if (rest.startsWith("<!--")) {
+      const end = rest.indexOf("-->", 4);
+      if (end < 0) throw new Error("unclosed comment");
+      i += end + 3;
+    } else if (rest.startsWith("<![CDATA[")) {
+      const end = rest.indexOf("]]>");
+      if (end < 0 || open.length === 0) throw new Error("misplaced CDATA");
+      texts[texts.length - 1] += rest.slice(9, end);
+      i += end + 3;
+    } else if (rest.startsWith("<!") || rest.startsWith("<?")) {
+      throw new Error(`declaration or instruction ${rest.slice(0, 20)}`);
+    } else if (rest.startsWith("</")) {
+      const m = END_TAG.exec(rest);
+      if (!m || open.pop() !== m[1]) throw new Error("mismatched end tag");
+      const inner = texts.pop() ?? "";
+      text(m[1], inner);
+      if (texts.length > 0) texts[texts.length - 1] += inner;
+      i += m[0].length;
+    } else if (rest.startsWith("<")) {
+      const m = START_TAG.exec(rest);
+      if (!m) throw new Error(`malformed tag ${rest.slice(0, 40)}`);
+      if (open.length === 0 && ++roots > 1) throw new Error("two roots");
+      const attrs: [string, string][] = [];
+      for (const a of m[2].matchAll(ATTR)) {
+        if (attrs.some(([n]) => n === a[1])) {
+          throw new Error(`duplicate attribute ${a[1]}`);
+        }
+        attrs.push([a[1], decode(a[2] ?? a[3])]);
+      }
+      element(m[1], attrs);
+      if (m[3] !== "/") {
+        open.push(m[1]);
+        texts.push("");
+      }
+      i += m[0].length;
+    } else {
+      const end = rest.indexOf("<");
+      const data = end < 0 ? rest : rest.slice(0, end);
+      if (open.length > 0) {
+        texts[texts.length - 1] += decode(data);
+      } else if (data.trim() !== "") {
+        throw new Error("text outside the root element");
+      }
+      i += data.length;
+    }
+  }
+  if (open.length > 0 || roots !== 1) throw new Error("unclosed element");
+}
+
+/**
+ * What makes an SVG unsafe to serve: empty when it is clean. Parses the
+ * file and allow-lists its elements. Attributes are judged by local name,
+ * so `x:href` is an href whatever `x` is bound to, and on their decoded
+ * value, so `&#106;avascript:` is `javascript:`.
+ */
+export function unsafeSvgParts(svg: string): string[] {
+  const out = new Set<string>();
+  const allowed = new Set(SVG_ELEMENTS);
+  try {
+    walkXml(
+      svg,
+      (name, attrs) => {
+        if (name.includes(":") || !allowed.has(name)) out.add(`<${name}>`);
+        for (const [attr, value] of attrs) {
+          if (attr === "xmlns" || attr.startsWith("xmlns:")) {
+            if (value !== SVG_NS && value !== XLINK_NS) {
+              out.add(`foreign namespace ${value}`);
+            }
+            continue;
+          }
+          if (
+            attr.startsWith("xml:") &&
+            attr !== "xml:space" &&
+            attr !== "xml:lang"
+          ) {
+            out.add(attr);
+          }
+          const local = attr.slice(attr.indexOf(":") + 1).toLowerCase();
+          if (local.startsWith("on")) out.add("event-handler attribute");
+          if (local === "href" && !squash(value).startsWith("#")) {
+            out.add("external link");
+          }
+          for (const p of activeValue(value, local === "style")) out.add(p);
+        }
+      },
+      (name, content) => {
+        if (name === "style") {
+          for (const p of activeValue(content, true)) out.add(p);
+        }
+      },
+    );
+  } catch (err) {
+    out.add(`not well-formed XML: ${(err as Error).message}`);
+  }
+  return [...out];
 }
