@@ -53,6 +53,7 @@ const (
 	contractFrameworkB = "33333333-3333-4333-8333-333333333333"
 	contractVersionA   = "44444444-4444-4444-8444-444444444444"
 	contractVersionB   = "55555555-5555-4555-8555-555555555555"
+	contractVersionC   = "66666666-6666-4666-8666-666666666666"
 )
 
 // stubReader is the fixed-row implementation of the handler's `reader`
@@ -61,6 +62,7 @@ const (
 type stubReader struct {
 	posture  []dbx.FrameworkPostureRow
 	targets  []dbx.FrameworkPostureTarget
+	prior    map[uuid.UUID]uuid.UUID
 	activity []dbx.ListEvidenceActivityRow
 }
 
@@ -70,6 +72,10 @@ func (s stubReader) FrameworkPosture(_ context.Context, _ pgtype.Timestamptz) ([
 
 func (s stubReader) PostureTargets(_ context.Context) ([]dbx.FrameworkPostureTarget, error) {
 	return s.targets, nil
+}
+
+func (s stubReader) PriorFrameworkVersions(_ context.Context) (map[uuid.UUID]uuid.UUID, error) {
+	return s.prior, nil
 }
 
 func pgNumeric(s string) pgtype.Numeric {
@@ -156,6 +162,22 @@ func TestContract_FrameworkPosture(t *testing.T) {
 			TrendDelta90d:      100,
 			ScopeActivated:     false,
 		},
+		{
+			// #2406: the next SOC 2 version, scoped, with no target of
+			// its own. Its prior version (A) has one, so the row carries
+			// it as prior_target for the Set target dialog to prefill.
+			FrameworkID:           pgUUIDFromString(contractFrameworkA),
+			FrameworkVersion:      "2024",
+			FrameworkName:         "SOC 2",
+			FrameworkVersionID:    pgUUIDFromString(contractVersionC),
+			CoveragePct:           50,
+			CoveredByExceptionPct: 0,
+			FreshnessComposite:    0.5,
+			TrendDelta90d:         0,
+			ScopeActivated:        true,
+		},
+	}, prior: map[uuid.UUID]uuid.UUID{
+		uuid.MustParse(contractVersionC): uuid.MustParse(contractVersionA),
 	}, targets: []dbx.FrameworkPostureTarget{
 		// #2136: version A has a posture target; B has none (target null).
 		{
