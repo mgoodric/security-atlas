@@ -4,7 +4,7 @@
   "x-evidence-kind": "azure.nsg_rules.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["NET-03", "NET-02"],
+  "x-default-scf-anchors": ["NET-03", "NET-06", "NET-02"],
   "title": "Azure Network Security Group (NSG) firewall-rule posture",
   "description": "Per-NSG network security-rule posture captured read-only from Azure Resource Manager (ARM Reader role): the inbound/outbound security rules (name, direction, access allow/deny, protocol, source/destination address-prefix, source/destination port range, priority) and a summary count of subnet / network-interface associations. The minimum that demonstrates the network-segmentation control (e.g. no NSG allows 0.0.0.0/0 inbound on management ports 22/3389). RULE configuration only — NEVER flow logs, packet captures, traffic contents, secrets, or PII; the connector never mutates a network resource (read-only list). The platform evaluator decides pass/fail per (control, NSG); the connector emits a descriptive default verdict. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
   "type": "object",

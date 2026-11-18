@@ -40,6 +40,7 @@ GET /scim/v2/Users/{id} 11
 GET /v1/action-plans 10
 GET /v1/action-plans/{id} 10
 GET /v1/activity 10
+GET /v1/activity/actors 10
 GET /v1/activity/unified 10
 GET /v1/admin/audit-log 10
 GET /v1/admin/audit-log/export 10

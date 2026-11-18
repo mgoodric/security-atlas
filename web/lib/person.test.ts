@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildDirectory, normaliseUserId, resolvePerson } from "./person";
+import {
+  buildDirectory,
+  isMachineActor,
+  normaliseUserId,
+  resolvePerson,
+} from "./person";
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const BOB = "22222222-2222-4222-8222-222222222222";
@@ -86,6 +91,28 @@ describe("resolvePerson", () => {
       }
     },
   );
+
+  it("renders an OAuth client by kind, the client ID in the tooltip (#2414)", () => {
+    for (const d of [dir, null]) {
+      expect(resolvePerson("oauth_client:ci-runner", d)).toEqual({
+        kind: "oauth_client",
+        text: "OAuth client",
+        title: "oauth_client:ci-runner",
+      });
+    }
+  });
+
+  it.each([
+    ["system", true],
+    ["system:scheduler", true],
+    ["oauth_client:ci", true],
+    ["oauth_client:", false],
+    [ALICE, false],
+    ["key_abc", false],
+    ["", false],
+  ])("isMachineActor(%j) is %s", (ref, want) => {
+    expect(isMachineActor(ref)).toBe(want);
+  });
 
   it("renders Unknown when the directory is unavailable", () => {
     const p = resolvePerson(ALICE, null);

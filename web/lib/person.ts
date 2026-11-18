@@ -31,7 +31,7 @@ export interface PersonDirectory {
 }
 
 type PrincipalKind = "user" | "api_key" | "former_user";
-export type PersonKind = PrincipalKind | "system" | "unknown";
+export type PersonKind = PrincipalKind | "system" | "oauth_client" | "unknown";
 
 export interface ResolvedPerson {
   kind: PersonKind;
@@ -83,6 +83,24 @@ function userName(u: DirectoryUser): string {
 
 const UNKNOWN_TEXT = "Unknown";
 
+// The principal a machine token records (`identity.UserID` on the
+// backend names it as "oauth_client:<id>").
+const OAUTH_CLIENT_PREFIX = "oauth_client:";
+
+/**
+ * Whether an actor reference names a machine or system actor rather than
+ * a person or API key: "system", "system:<process>" or
+ * "oauth_client:<id>". The shapes GET /v1/activity/actors lists.
+ */
+export function isMachineActor(ref: string): boolean {
+  const s = ref.trim();
+  return (
+    s === "system" ||
+    s.startsWith("system:") ||
+    (s.startsWith(OAUTH_CLIENT_PREFIX) && s.length > OAUTH_CLIENT_PREFIX.length)
+  );
+}
+
 function unknown(ref: string): ResolvedPerson {
   return {
     kind: "unknown",
@@ -101,6 +119,8 @@ function unknown(ref: string): ResolvedPerson {
  *   and last four characters are never shown;
  * - "system" or "system:<process>" → "System", as the platform's
  *   people.Directory.Name reads it (#2138);
+ * - "oauth_client:<id>" (a machine token) → "OAuth client", the client
+ *   ID in the tooltip (#2414);
  * - anything else (a JWT credential, another tenant's user, a missing
  *   directory) → "Unknown", the reference in the tooltip.
  */
@@ -111,6 +131,9 @@ export function resolvePerson(
   const raw = (ref ?? "").trim();
   if (raw === "system" || raw.startsWith("system:")) {
     return { kind: "system", text: "System", title: raw };
+  }
+  if (raw.startsWith(OAUTH_CLIENT_PREFIX)) {
+    return { kind: "oauth_client", text: "OAuth client", title: raw };
   }
   if (!raw || !dir) return unknown(raw);
 

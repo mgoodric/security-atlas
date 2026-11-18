@@ -17,7 +17,7 @@ import (
 
 // AuditActionSSOUpdate is the me_audit_log action PATCH /v1/admin/sso writes
 // (#2609). CHECK constraint extended in migration
-// 20261260000000_sso_scim_audit.sql.
+// 20261262000000_sso_scim_audit.sql.
 const AuditActionSSOUpdate = "tenant_sso_config_update"
 
 // errSecretRequired aborts the PATCH transaction when the tenant has no

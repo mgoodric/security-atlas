@@ -1,4 +1,4 @@
--- Reverses 20261260000000_sso_scim_audit.sql: restores the me_audit_log
+-- Reverses 20261262000000_sso_scim_audit.sql: restores the me_audit_log
 -- action CHECK of 20261226000000_risk_vendor_owner_users.sql.
 --
 -- 'tenant_sso_config_update', 'scim_credential_issue' and
@@ -13,7 +13,7 @@ BEGIN
      WHERE action IN ('tenant_sso_config_update', 'scim_credential_issue', 'scim_credential_revoke');
     IF n > 0 THEN
         RAISE EXCEPTION 'me_audit_log holds % SSO config or SCIM credential audit row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261260000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261262000000.';
     END IF;
 END
 $$;

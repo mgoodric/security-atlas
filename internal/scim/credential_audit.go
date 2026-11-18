@@ -12,7 +12,7 @@ import (
 )
 
 // The me_audit_log actions for SCIM credential issue and revoke (#2609).
-// CHECK constraint extended in migration 20261260000000_sso_scim_audit.sql.
+// CHECK constraint extended in migration 20261262000000_sso_scim_audit.sql.
 const (
 	AuditActionCredentialIssue  = "scim_credential_issue"
 	AuditActionCredentialRevoke = "scim_credential_revoke"

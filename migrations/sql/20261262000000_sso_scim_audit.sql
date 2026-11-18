@@ -20,7 +20,7 @@
 -- and the new ones are appended. internal/db/sso_scim_audit_integration_test.go
 -- inserts every value to prove none was dropped.
 --
--- Reversible via 20261260000000_sso_scim_audit.down.sql.
+-- Reversible via 20261262000000_sso_scim_audit.down.sql.
 
 ALTER TABLE me_audit_log
     DROP CONSTRAINT IF EXISTS me_audit_log_action_check;

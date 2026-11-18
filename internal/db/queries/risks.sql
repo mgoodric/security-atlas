@@ -46,6 +46,17 @@ FROM risks
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: ListRisksWithProposedAcceptance :many
+-- #2457: the open risks whose acceptance waits for approval, for GET
+-- /v1/approvals and its sidebar badge. A closed risk's acceptance cannot
+-- be approved until it is reopened, so it is not read.
+SELECT *
+FROM risks
+WHERE tenant_id = $1
+  AND status = 'open'
+  AND acceptance_status = 'proposed'
+ORDER BY created_at DESC, id ASC;
+
 -- name: UpdateRisk :one
 -- Full-update path (PATCH handler reads existing, mutates fields, writes).
 -- updated_at is set explicitly so the schema's per-row default doesn't
