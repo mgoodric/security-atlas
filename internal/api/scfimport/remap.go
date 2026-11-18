@@ -66,15 +66,17 @@ const (
 // legacy anchor and release, the target release, the anchor it moved to
 // (for status rebound; none for open), and the path that did it. Call it in
 // the transaction that moves or flags the control. A record for the same
-// control and target release is left alone. It returns the proposal's
-// class.
-func RecordRemapProposal(ctx context.Context, q *dbx.Queries, r dbx.ListControlsOnLegacySCFAnchorsRow, status, source string) (RemapClass, error) {
+// control and target release is left alone, except that an open one becomes
+// rebound when this call re-bound the control. It returns the proposal's
+// class and whether this call wrote a row (#2325: false on a re-run that
+// found the record already there).
+func RecordRemapProposal(ctx context.Context, q *dbx.Queries, r dbx.ListControlsOnLegacySCFAnchorsRow, status, source string) (RemapClass, bool, error) {
 	class, successors := RemapClassFor(r)
 	var target pgtype.UUID
 	if status == ProposalRebound {
 		target = r.CurrentAnchorID
 	}
-	if _, err := q.InsertSCFRemapProposal(ctx, dbx.InsertSCFRemapProposalParams{
+	n, err := q.InsertSCFRemapProposal(ctx, dbx.InsertSCFRemapProposalParams{
 		TenantID:                 r.TenantID,
 		ControlID:                r.ControlID,
 		BundleID:                 r.BundleID,
@@ -88,10 +90,11 @@ func RecordRemapProposal(ctx context.Context, q *dbx.Queries, r dbx.ListControls
 		SuccessorScfIds:          successors,
 		TargetAnchorID:           target,
 		Source:                   source,
-	}); err != nil {
-		return "", fmt.Errorf("scfimport: queue remap proposal for control %s: %w", uuid.UUID(r.ControlID.Bytes), err)
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("scfimport: queue remap proposal for control %s: %w", uuid.UUID(r.ControlID.Bytes), err)
 	}
-	return class, nil
+	return class, n == 1, nil
 }
 
 // RemapClassFor classifies one row of ListControlsOnLegacySCFAnchors and

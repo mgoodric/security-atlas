@@ -166,7 +166,7 @@ test.describe("/activity (#2093)", () => {
     await expect(table).toBeVisible();
     await expect(page.getByTestId("activity-ledger-row")).toHaveCount(3);
     await expect(table.getByTestId("activity-row-kind").nth(0)).toHaveText(
-      "exception",
+      "Exception",
     );
     await expect(table).toContainText("00000000-0000-4000-8000-0000000020e1");
 
