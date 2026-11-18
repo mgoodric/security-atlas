@@ -64,7 +64,7 @@ test.describe("evidence detail (#2137)", () => {
       STATEMENT,
       { timeout: 30_000 },
     );
-    await expect(page.getByTestId("evidence-detail-result")).toHaveText("pass");
+    await expect(page.getByTestId("evidence-detail-result")).toHaveText("Pass");
     await expect(page.getByTestId("evidence-detail-attestor")).toHaveText(
       "demo-operator@example.invalid",
     );

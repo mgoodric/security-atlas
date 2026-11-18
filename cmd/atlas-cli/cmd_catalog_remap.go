@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -46,15 +47,19 @@ type remapListEntry struct {
 
 func newCatalogRemapListCmd() *cobra.Command {
 	var (
-		class, status string
-		jsonOutput    bool
+		class, classNot, status, cursor string
+		limit                           int
+		jsonOutput                      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list the tenant's SCF remap proposals",
 		Long: "List the remap proposals of the credential's tenant, optionally filtered by " +
-			"--class (unchanged, renamed, split, reused_id, no_successor) and --status (" +
-			strings.Join(control.RemapStatuses, ", ") + ").",
+			"--class or --class-not (unchanged, renamed, split, reused_id, no_successor) and --status (" +
+			strings.Join(control.RemapStatuses, ", ") + "). The list is paged: --limit sizes a " +
+			"page, and the last line names the --cursor that reads the next one. " +
+			"--status rebound --class-not unchanged lists the controls the upgrade moved that " +
+			"may still want a look.",
 		Args:    cobra.NoArgs,
 		PreRunE: func(_ *cobra.Command, _ []string) error { return resolveCommon() },
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -62,8 +67,17 @@ func newCatalogRemapListCmd() *cobra.Command {
 			if class != "" {
 				q.Set("class", class)
 			}
+			if classNot != "" {
+				q.Set("class_not", classNot)
+			}
 			if status != "" {
 				q.Set("status", status)
+			}
+			if limit > 0 {
+				q.Set("limit", strconv.Itoa(limit))
+			}
+			if cursor != "" {
+				q.Set("cursor", cursor)
 			}
 			path := "/v1/controls/remap-proposals"
 			if len(q) > 0 {
@@ -77,7 +91,9 @@ func newCatalogRemapListCmd() *cobra.Command {
 				return printIndented(cmd.OutOrStdout(), raw)
 			}
 			var list struct {
-				Proposals []remapListEntry `json:"proposals"`
+				Proposals  []remapListEntry `json:"proposals"`
+				Total      int              `json:"total"`
+				NextCursor string           `json:"next_cursor"`
 			}
 			if err := json.Unmarshal(raw, &list); err != nil {
 				return fmt.Errorf("decode response: %w", err)
@@ -97,11 +113,18 @@ func newCatalogRemapListCmd() *cobra.Command {
 					printable(p.LegacySCFID), printable(p.LegacyRelease),
 					printable(successors), printable(p.TargetRelease), printable(p.BundleID))
 			}
+			if list.NextCursor != "" {
+				_, _ = fmt.Fprintf(out, "%d of %d shown; next page: --cursor %s\n",
+					len(list.Proposals), list.Total, printable(list.NextCursor))
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&class, "class", "", "only proposals of this class")
+	cmd.Flags().StringVar(&classNot, "class-not", "", "leave out proposals of this class")
 	cmd.Flags().StringVar(&status, "status", "", "only proposals with this status")
+	cmd.Flags().IntVar(&limit, "limit", 0, "proposals per page (the platform defaults to 100, at most 500)")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "read the page after this next_cursor")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "print the API response as JSON")
 	return cmd
 }

@@ -65,10 +65,12 @@ type RebindReport struct {
 	// superseded between the listing and the update. They are not moved
 	// here; the new version bound its anchor on upload.
 	SupersededMidRun int
-	// Proposals counts the remap proposals (#1775) of this run by class:
+	// Proposals counts the remap proposals (#1775) this run wrote, by class:
 	// one per non-pinned control above, whether it was re-bound (status
 	// rebound) or still needs re-anchoring (status open). A control
-	// superseded mid-run gets none.
+	// superseded mid-run gets none. A proposal an earlier run already
+	// queued is not counted again (#2325), as EdgeRemapReport.Queued; an
+	// open one this run re-bound is.
 	Proposals map[RemapClass]int
 }
 
@@ -270,11 +272,13 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 	// queue records the #1775 remap proposal for a control the D3 rule did
 	// not leave pinned.
 	queue := func(r dbx.ListControlsOnLegacySCFAnchorsRow, status string) error {
-		class, err := RecordRemapProposal(ctx, q, r, status, SourceBoot)
+		class, written, err := RecordRemapProposal(ctx, q, r, status, SourceBoot)
 		if err != nil {
 			return err
 		}
-		report.Proposals[class]++
+		if written {
+			report.Proposals[class]++
+		}
 		return nil
 	}
 	for _, r := range rows {

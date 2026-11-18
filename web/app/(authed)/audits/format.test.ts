@@ -284,7 +284,7 @@ describe("statusTallyLabel (slice 215 AC-4)", () => {
       period({ id: "4", status: "frozen" }),
     ];
     expect(statusTallyLabel(periods)).toBe(
-      "1 in_progress · 1 frozen · 1 closed · 1 open",
+      "1 In progress · 1 Frozen · 1 Closed · 1 Open",
     );
   });
 
@@ -292,7 +292,7 @@ describe("statusTallyLabel (slice 215 AC-4)", () => {
     const periods = Array.from({ length: 6 }, (_, i) =>
       period({ id: `${i}`, status: "frozen" }),
     );
-    expect(statusTallyLabel(periods)).toBe("6 frozen");
+    expect(statusTallyLabel(periods)).toBe("6 Frozen");
   });
 
   test("AC-1 mockup case: '1 in progress · 4 frozen · 1 closed'", () => {
@@ -307,7 +307,7 @@ describe("statusTallyLabel (slice 215 AC-4)", () => {
       period({ id: "9", status: "closed" }),
     ];
     expect(statusTallyLabel(periods)).toBe(
-      "1 in_progress · 4 frozen · 1 closed",
+      "1 In progress · 4 Frozen · 1 Closed",
     );
   });
 
@@ -318,7 +318,7 @@ describe("statusTallyLabel (slice 215 AC-4)", () => {
       period({ id: `${i}`, status: "frozen" }),
     );
     const tally = statusTallyLabel(periods);
-    expect(tally).toBe("3 frozen");
+    expect(tally).toBe("3 Frozen");
     expect(tally).not.toContain("0 ");
     expect(tally).not.toContain("closed");
     expect(tally).not.toContain("open");
@@ -350,7 +350,7 @@ describe("statusTallyLabel (slice 215 AC-4)", () => {
       period({ id: "4", status: "experimental" }),
     ];
     expect(statusTallyLabel(periods)).toBe(
-      "1 in_progress · 1 frozen · 1 experimental · 1 planned",
+      "1 In progress · 1 Frozen · 1 Experimental · 1 Planned",
     );
   });
 
@@ -393,7 +393,7 @@ describe("statusTallyLabel (slice 215 AC-4)", () => {
       ),
     ];
     expect(statusTallyLabel(periods)).toBe(
-      "2 in_progress · 100 frozen · 5 closed · 50 open",
+      "2 In progress · 100 Frozen · 5 Closed · 50 Open",
     );
   });
 });
