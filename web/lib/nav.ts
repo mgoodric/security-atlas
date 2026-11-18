@@ -89,7 +89,7 @@ export const NAV_GROUPS: readonly {
 
 export type NavFacts = {
   /** The caller's `/v1/me` body; decides the Admin entry. */
-  me: { is_admin?: unknown; roles?: unknown };
+  me: { is_admin?: unknown; is_tenant_admin?: unknown; roles?: unknown };
   /** The caller's effective modules; decides each module's entries. */
   modules: EffectiveModules;
   /** The loaded NIST CSF framework version, or null when none is. */

@@ -117,6 +117,9 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/action-plans/" + id2428 + "/verify", tenantAdminGate},
 	// #2172: a member's module access, set by a tenant admin.
 	{http.MethodPut, "/v1/admin/users/" + id2428 + "/module-access", tenantAdminGate},
+	// #2503: the tenant's own users, read and re-roled by a tenant admin.
+	{http.MethodGet, "/v1/admin/users/" + id2428, tenantAdminGate},
+	{http.MethodPatch, "/v1/admin/users/" + id2428 + "/roles", tenantAdminGate},
 
 	// Tenant-admin gates.
 	{http.MethodPost, "/v1/audit-periods", tenantAdminGate},
@@ -275,6 +278,10 @@ var handlerNarrower2428 = map[string]bool{
 	"/v1/needs-attention?for=all control_owner": true,
 	"/v1/needs-attention?for=all auditor":       true,
 	"/v1/needs-attention?for=all viewer":        true,
+	// #2503: grc_engineer.rego's blanket read admits GET /v1/admin/users;
+	// the handler has always refused it (cred.IsAdmin before, IsTenantAdmin
+	// now). grc_engineer's OPA rules are unchanged by #2503.
+	"/v1/admin/users/" + id2428 + " grc_engineer": true,
 }
 
 // TestTenantGates2428_HandlerAgreesWithOPA runs the real bundle for every

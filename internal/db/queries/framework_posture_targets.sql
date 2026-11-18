@@ -60,3 +60,36 @@ RETURNING tenant_id, framework_version_id, target_value, warning_threshold,
 INSERT INTO framework_posture_target_audit_log (
     tenant_id, framework_version_id, action, before, after, actor
 ) VALUES ($1, $2, 'set', $3, $4, $5);
+
+-- name: ListFrameworkVersionMigrationSources :many
+-- #2406: the distinct (to, from) version pairs of the version-migration
+-- queue (ADR 0019), for the prior-target prefill. Catalog rows: no tenant.
+SELECT DISTINCT to_version_id, from_version_id
+FROM framework_version_migrations
+ORDER BY to_version_id, from_version_id;
+
+-- name: CarryFrameworkPostureTarget :one
+-- #2406: copy the tenant's target on the source version to the destination
+-- version, only when the destination has none. No row back means nothing
+-- was copied: the source has no target, or the destination already has
+-- one (left alone, so a re-run writes nothing).
+INSERT INTO framework_posture_targets (
+    tenant_id, framework_version_id, target_value, warning_threshold,
+    critical_threshold, direction, updated_by
+)
+SELECT src.tenant_id, sqlc.arg('to_version_id'), src.target_value,
+       src.warning_threshold, src.critical_threshold, src.direction,
+       sqlc.arg('actor')
+FROM framework_posture_targets src
+WHERE src.tenant_id = sqlc.arg('tenant_id')
+  AND src.framework_version_id = sqlc.arg('from_version_id')
+ON CONFLICT (tenant_id, framework_version_id) DO NOTHING
+RETURNING tenant_id, framework_version_id, target_value, warning_threshold,
+          critical_threshold, direction, updated_by, created_at, updated_at;
+
+-- name: InsertFrameworkPostureTargetCarryAudit :exec
+-- #2406: the audit row of a carried target. before is NULL: the version
+-- had no target.
+INSERT INTO framework_posture_target_audit_log (
+    tenant_id, framework_version_id, action, before, after, actor
+) VALUES ($1, $2, 'carry_over', NULL, $3, $4);

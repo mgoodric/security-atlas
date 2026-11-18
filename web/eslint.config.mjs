@@ -24,6 +24,8 @@ const eslintConfig = defineConfig([
     // deleted by hand. Found 2026-08-29 while recovering stranded work.
     "playwright-report/**",
     "test-results/**",
+    // #2394: written by openapi-typescript from docs/openapi.yaml.
+    "lib/api/generated/**",
   ]),
   // #2040 — peer-chain.cjs is a `node --require` preload, which must be
   // CommonJS.

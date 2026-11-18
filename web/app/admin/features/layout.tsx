@@ -4,6 +4,8 @@
 
 import type { Metadata } from "next";
 
+import { PlatformAdminGate } from "@/components/admin/platform-admin-gate";
+
 export const metadata: Metadata = {
   title: "Features",
 };
@@ -13,5 +15,6 @@ export default function AdminFeaturesLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  // #2503: a platform page; a tenant admin gets the platform 403 panel.
+  return <PlatformAdminGate>{children}</PlatformAdminGate>;
 }

@@ -481,6 +481,11 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, actor string, effect
 		if lerr := logChange(ctx, q, ActionActivate, actor, &before, row); lerr != nil {
 			return lerr
 		}
+		// #2406: bring the prior version's posture target forward when
+		// this version has none.
+		if _, cerr := carryPostureTarget(ctx, q, tenantID, row, actor); cerr != nil {
+			return cerr
+		}
 		out = rowToScope(row)
 		return nil
 	})
