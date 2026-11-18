@@ -25,8 +25,10 @@ type schemaSample struct {
 	MaybeStr *string           `json:"maybe_str"`
 	At       time.Time         `json:"at"`
 	Skipped  string            `json:"-"`
-	hidden   string
+	hidden   string            // unexported: encoding/json skips it, so must the schema
 }
+
+var _ = schemaSample{hidden: "never encoded"}
 
 func withSchemas(t *testing.T, rs []ResponseSchema, enums []SchemaEnum) {
 	t.Helper()
