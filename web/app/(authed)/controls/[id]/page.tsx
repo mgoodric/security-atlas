@@ -1,52 +1,41 @@
 "use client";
 
 // Slice 041 — control detail view (`/controls/[id]`).
-// Slice 253 — re-pointed the four endpoint-pending placeholders.
-// Slice 254 — re-foldered the page behind a sticky seven-tab strip
-//   (Overview / Evidence / Mappings / Effective scope / Policies /
-//   Risks / History). Tab state is URL-bound via `?tab=<name>` so
-//   deep links resolve to the right tab; default is Overview when
-//   the param is missing or unrecognised. The tab strip mirrors
-//   `Plans/_archive/mockups/control.html` lines 139-152.
 //
-// Built per `Plans/_archive/mockups/control.html`. Renders, in mockup order:
-//   - control header: CTRL id, SCF anchor pill, lifecycle badge, family,
-//     title, owner/implementation/freshness-class meta
-//   - KPI strip: effectiveness 30d, frameworks satisfied, evidence
-//     records 30d (slice 253 — bound to GET /v1/evidence?control_id=…),
-//     effective-scope cells
-//   - tab strip: Overview / Evidence / Mappings / Effective scope /
-//     Policies / Risks / History (slice 254)
-//   - per-tab panels — see the Tabs / panel components below
+// #2140 (front door, #2072) — the page reads, in order, as:
+//   1. the shared header (DetailHeader): the title; the SCF anchor,
+//      lifecycle and family; the bundle, implementation, freshness class,
+//      anchor fit and external refs; and the actions (Attest, Evaluate
+//      now, Download bundle, Upload new version, Request exception);
+//   2. the state strip: current state, last evaluated, freshness, owner,
+//      owner role, and markers for an exception covering the control and
+//      an open action plan;
+//   3. the AI gap explanation, once, and only when one is available;
+//   4. the Overview panel's Evidence, Coverage and Linked sections (see
+//      ./_sections/panels.tsx).
 //
-// Slice 253 backstory: slice 041 shipped five "endpoint not on main yet"
-// placeholders for the evidence-list KPI, the evidence-stream card, and
-// the three right-rail Policies / Risks / Audit-log cards. Each named a
-// specific upstream that DID land later (slice 106 for the evidence
-// list; slice 064 for per-control history / policies / risks). The
-// placeholders were not re-walked when the backends shipped, so the
-// page denied real platform capability. Slice 253 binds all four to
-// their live upstreams; empty states still render when the response is
-// genuinely empty (fresh-install tenant, no linked policies, etc.) —
-// the empty-state copy now reflects "no data" honestly, not "endpoint
-// pending". No fabricated rows anywhere (anti-criterion P0-253-2).
+// The framework graph is on the Framework map tab (`?tab=map`); the
+// overview never renders it. History keeps the evaluation history. Tab
+// state is URL-bound via `?tab=<key>`; a missing, unknown or retired key
+// lands on the overview (./tabs.ts).
 //
-// Slice 254 backstory: the page previously inlined every section on a
-// single scroll. The mockup's information density assumes a tabbed
-// view (each tab's content is page-sized once #253 wired real
-// backends). The slice re-folders the rendered sections behind seven
-// tabs without changing any data path or backend contract — anti-
-// criterion P0-254-3: the Overview tab's data layout is preserved
-// verbatim. All TanStack Query keys, fetchers, error branches, and
-// data-testids from slices 152 / 253 / 255 / 256 / 257 are unchanged
-// — slices that touched the page recently keep working because the
-// re-folder is purely a render-shape change.
+// Write affordances follow the live GET /v1/me and fail closed: none show
+// until it answers, and none when it fails. Upload new version and
+// Request exception need is_approver (admin, grc_engineer: the set OPA
+// admits on controls and exceptions writes). Evaluate now and Attest
+// also show for a control_owner, whom OPA admits on those two paths; the
+// handler then checks the assignment.
 //
-// Data sync: server values live ONLY in TanStack Query cache and are read
-// during render — there is NO useEffect that seeds state from a server
-// value (React 19 set-state-in-effect lint, slice 063 learned this). The
-// single useEffect is the 401 -> /login redirect, matching the
-// `catalog/scf/[id]` precedent exactly.
+// Exceptions are read through GET /v1/exceptions?control_id=, filtered
+// on the server. A caller the platform refuses the exceptions read (a
+// viewer, a control owner) gets no Exceptions part and no error; the
+// strip's exception marker then rests on the evaluated state alone. The
+// Exceptions and Action plans parts are also left out when their module
+// is off for the caller (#2174, useSeesPage over /v1/me/modules).
+//
+// The 404 empty state (slice 152, ADR 0004) and the 401 -> /login
+// redirect are unchanged. Server values live only in the TanStack Query
+// cache; the one useEffect is the redirect.
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -54,118 +43,96 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect } from "react";
 
 import { DemoBadge } from "@/components/demo-badge";
+import { DetailHeader } from "@/components/detail/detail-header";
 import { Person } from "@/components/ui/person";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import {
   formatExternalRef,
   groupExternalRefs,
 } from "@/components/control/external-refs";
-import { ControlHeaderActions } from "@/components/control/header-actions";
+import { GapExplanationCard } from "@/components/control/gap-explanation";
+import {
+  ControlHeaderActions,
+  ControlStateStrip,
+  StripCell,
+} from "@/components/control/header-actions";
 
 import { cn } from "@/lib/utils";
+import { fetchActionPlansForControl } from "@/lib/api/action-plans";
 import {
   fetchControlCoverage,
   fetchControlEffectiveScope,
-  fetchControlEffectiveness,
   fetchControlHistory,
   fetchControlPolicies,
   fetchControlRisks,
   fetchControlState,
   type ControlCoverage,
-  type ControlLinkedPoliciesResponse,
-  type ControlLinkedRisksResponse,
   type EffectiveScopeResponse,
 } from "@/lib/api/control-detail";
-import {
-  fetchEvidenceList,
-  type EvidenceListResponse,
-} from "@/lib/api/evidence";
-import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
+import { fetchEvidenceList } from "@/lib/api/evidence";
+import { fetchExceptionsList } from "@/lib/api/exceptions";
 import { type AnchorDetail } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
+import { getMe } from "@/lib/api/me";
 import { enumLabel } from "@/lib/labels/enum-labels";
 
 import { classifyControlDetailError } from "../error-classifier";
 import { anchorFitLabel } from "../filters";
 import { useSeesPage } from "@/components/modules-context";
 
+import { CONTROL_TABS, isTabKey, type TabKey } from "./tabs";
 import {
-  formatTabCount,
-  isTabKey,
-  visibleControlTabs,
-  type TabKey,
-} from "./tabs";
+  activeExceptions,
+  exceptionsForControl,
+  isExcepted,
+  openActionPlans,
+  worstFreshness,
+} from "./strip";
 
-import {
-  EvidencePanel,
-  HistoryPanel,
-  MappingsPanel,
-  OverviewPanel,
-  PoliciesPanel,
-  RisksPanel,
-  ScopePanel,
-} from "./_sections/panels";
+import { HistoryPanel, MapPanel, OverviewPanel } from "./_sections/panels";
 
-// Slice 253 — page size for the evidence stream card. Five rows mirrors
-// the mockup (`Plans/_archive/mockups/control.html` lines 389-440). The KPI sub-
-// text reads "in last 30 days" (the upstream default window) — when the
-// stream's count maxes at the limit AND a next_cursor is present we
-// surface a "<limit>+ in last 30 days" hint rather than fabricating a
-// total the backend never returned. The dedicated /evidence list page
-// is the destination for full paginated browsing.
+// Page size for the Evidence section. The /evidence list page is the
+// destination for full paginated browsing.
 const EVIDENCE_STREAM_LIMIT = 5;
 
-// Slice 254 — Tab strip definitions + count formatting live in
-// `./tabs.ts` for vitest unit-test coverage. See that file for the
-// AC-2 + D3 rules around chip rendering. The page re-uses the
-// literal-union TabKey + `isTabKey` validator so URL hydration and
-// panel-selection share one source of truth.
+// A refused read is terminal: do not retry it.
+function retryUnlessRefused(count: number, err: Error): boolean {
+  return (
+    !(
+      err instanceof APIError &&
+      (err.status === 401 || err.status === 403 || err.status === 404)
+    ) && count < 2
+  );
+}
 
-// ControlDetailPageInner holds the entire client-side body. The outer
-// default export wraps this in Suspense so `useSearchParams` is
-// satisfied per Next 16's App Router strict-mode contract (the
-// calendar page sets the same precedent — see
-// `web/app/(authed)/calendar/page.tsx`).
+// ControlDetailPageInner holds the client-side body. The default export
+// wraps it in Suspense so `useSearchParams` is satisfied per Next 16's
+// App Router contract.
 function ControlDetailPageInner() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
 
-  // Slice 254 — read the active tab from `?tab=<key>`. Unknown /
-  // missing values default to "overview" (D2). The tab setter writes
-  // back through router.replace so the browser back/forward stack
-  // navigates between tabs without re-mounting the page (AC-8).
-  //
-  // #2174: link sections into a module the caller cannot see (switched
-  // off, or outside their module access) are hidden entirely, tab and
-  // count included, and never fetched. A `?tab=` naming a hidden tab
-  // falls back to the overview.
+  // #2174: link parts into a module the caller cannot see are left out
+  // and never fetched.
   const seesPolicies = useSeesPage("/policies");
   const seesRisks = useSeesPage("/risks");
   const seesActionPlans = useSeesPage("/action-plans");
-  const visibleTabs = visibleControlTabs({
-    policies: seesPolicies,
-    risks: seesRisks,
-  });
+  const seesExceptions = useSeesPage("/exceptions");
+
   const rawTab = searchParams.get("tab");
-  const activeTab: TabKey =
-    isTabKey(rawTab) && visibleTabs.some((t) => t.key === rawTab)
-      ? rawTab
-      : "overview";
+  const activeTab: TabKey = isTabKey(rawTab) ? rawTab : "overview";
 
   const setTab = useCallback(
     (next: TabKey) => {
       const params = new URLSearchParams(searchParams.toString());
       if (next === "overview") {
-        // Default tab — strip the param so the canonical URL on first
-        // visit stays clean (`/controls/<id>` rather than
-        // `/controls/<id>?tab=overview`).
+        // Default tab: keep the canonical URL clean.
         params.delete("tab");
       } else {
         params.set("tab", next);
@@ -174,11 +141,7 @@ function ControlDetailPageInner() {
       const href = qs
         ? `/controls/${encodeURIComponent(id)}?${qs}`
         : `/controls/${encodeURIComponent(id)}`;
-      // router.replace (vs push) — clicking a tab is not a navigation
-      // event the back-button should treat as a separate page; the
-      // browser back stack should still navigate between tabs via the
-      // hash-style replace contract. This mirrors the calendar page's
-      // search-param mutation pattern.
+      // replace, not push: a tab click is not a separate page.
       router.replace(href, { scroll: false });
     },
     [id, router, searchParams],
@@ -196,18 +159,6 @@ function ControlDetailPageInner() {
     enabled: Boolean(id),
   });
 
-  const effectivenessQ = useQuery({
-    queryKey: ["control", id, "effectiveness"],
-    queryFn: () => fetchControlEffectiveness(id),
-    enabled: Boolean(id),
-  });
-
-  // Slice 253 — bind the four formerly-"endpoint pending" surfaces to
-  // their real upstreams. Errors are tolerated independently: a 404 on,
-  // say, `/policies` should NOT mask the rest of the page; the per-card
-  // empty-state still renders honestly. Only `coverageQ`'s error drives
-  // the page-level branch (the page makes no sense without a control to
-  // anchor to).
   const evidenceQ = useQuery({
     queryKey: ["control", id, "evidence", EVIDENCE_STREAM_LIMIT],
     queryFn: () =>
@@ -227,11 +178,41 @@ function ControlDetailPageInner() {
     enabled: Boolean(id) && seesRisks,
   });
 
+  // #2140: the exceptions filed against this control, filtered on the
+  // server. A 403 means the caller may not read exceptions.
+  const exceptionsQ = useQuery({
+    queryKey: ["exceptions", "for-control", id],
+    queryFn: () => fetchExceptionsList({ controlId: id }),
+    enabled: Boolean(id) && seesExceptions,
+    retry: retryUnlessRefused,
+  });
+  const exceptionsRefused =
+    exceptionsQ.error instanceof APIError && exceptionsQ.error.status === 403;
+
+  // The same query LinkedActionPlans reads, so the strip's marker and the
+  // Linked part share one request.
+  const actionPlansQ = useQuery({
+    queryKey: ["action-plans", "for", "control", id],
+    queryFn: () => fetchActionPlansForControl(id),
+    enabled: Boolean(id) && seesActionPlans,
+  });
+
   const historyQ = useQuery({
     queryKey: ["control", id, "history"],
     queryFn: () => fetchControlHistory(id),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && activeTab === "history",
   });
+
+  // Write affordances follow the live role. Fail closed: none show until
+  // /v1/me answers, and none when it fails.
+  const meQ = useQuery({
+    queryKey: ["settings-me-profile"],
+    queryFn: getMe,
+    staleTime: 60_000,
+  });
+  const canWrite = meQ.data?.is_approver === true;
+  const canEvaluate =
+    canWrite || (meQ.data?.roles ?? []).includes("control_owner");
 
   // Distinct framework_version_ids from the coverage requirements drive
   // the effective-scope fan-out — one /effective-scope call per framework
@@ -246,22 +227,14 @@ function ControlDetailPageInner() {
   });
 
   // Slice 152: error-class discriminates `notfound` (empty-state),
-  // `unauthorized` (/login redirect), `other` (destructive Alert).
-  // The classifier is pure logic + vitest-covered (8 cases) so a
-  // regression that mis-routes 404 vs 5xx fails before merge. Full
-  // trail: docs/adr/0004-control-detail-404-empty-state.md.
-  const firstError =
-    coverageQ.error ?? stateQ.error ?? effectivenessQ.error ?? null;
+  // `unauthorized` (/login redirect), `other` (destructive Alert). Only
+  // the coverage read drives the page-level branch; the state read's
+  // 401 still redirects.
+  const firstError = coverageQ.error ?? stateQ.error ?? null;
   const errorClass = classifyControlDetailError(firstError);
 
-  // ATLAS-012 — when the coverage call 404s, the id in the URL is an SCF
-  // anchor with no instantiated control. The empty-state copy should name
-  // the human-readable SCF code (e.g. "MON-04"), not the raw UUID. The
-  // anchor still resolves in the global catalog, so we look up its
-  // requirements (same BFF the catalog detail page uses) purely to read
-  // `anchor.scf_id`. Enabled only on the notfound branch so the happy
-  // path makes no extra call; if the lookup is pending or also fails we
-  // fall back to the id so the empty-state always renders.
+  // ATLAS-012 — on the 404 empty state, name the SCF code (e.g. "MON-04")
+  // rather than the raw UUID. Enabled only on the notfound branch.
   const anchorCodeQ = useQuery<AnchorDetail>({
     queryKey: ["control", id, "anchor-code"],
     queryFn: () => fetchAnchorDetail(id),
@@ -287,14 +260,8 @@ function ControlDetailPageInner() {
   }
 
   // Slice 152 D1-c: 404 on the coverage call means the id in the URL
-  // does not resolve to a tenant control. On a fresh install the most
-  // common cause is that the operator clicked an SCF anchor row from
-  // the /controls list (which renders ~1,400 catalog-global anchors via
-  // /v1/anchors) whose anchor.id has no instantiated control in their
-  // tenant. The friendly empty-state names the cause honestly — slice
-  // 150 D3 pinned that bare-{id} 404 is a load-bearing PLATFORM
-  // contract; the UI's job is to render it humanely, not to convert it
-  // to 200.
+  // does not resolve to a tenant control — on a fresh install, usually an
+  // SCF anchor with no instantiated control (slice 150 D3).
   if (coverageQ.error && errorClass === "notfound") {
     return (
       <PageShell title="Control">
@@ -356,11 +323,8 @@ function ControlDetailPageInner() {
     return null;
   }
 
-  // out-of-scope set: a framework_version is out of scope when its
-  // effective-scope call resolved with in_scope === false. Computed
-  // here (after the early-return branches above) so the empty-state +
-  // destructive-error paths don't pay for an iteration that their
-  // render does not consume.
+  // A framework_version is out of scope when its effective-scope call
+  // resolved with in_scope === false.
   const outOfScopeFvIds = new Set<string>();
   scopeQueries.forEach((q) => {
     const data = q.data as EffectiveScopeResponse | undefined;
@@ -370,399 +334,278 @@ function ControlDetailPageInner() {
   });
 
   const coverage = coverageQ.data;
-  const { control, anchor, requirements } = coverage;
-  const effectiveness = effectivenessQ.data;
-  const state = stateQ.data;
-
-  const frameworksSatisfied = fvIds.length;
-  const inScopeFrameworks = fvIds.length - outOfScopeFvIds.size;
-
-  // Slice 254 — tab-count chips read from each tab's underlying query
-  // payload. AC-2: when a query is loading or errored, the chip
-  // renders "—" (not a placeholder integer). History has no chip per
-  // the mockup (line 149 — `History` with no trailing count).
-  //
-  // Evidence chip semantics: the page's evidence query is bounded to
-  // EVIDENCE_STREAM_LIMIT (5 rows) for the Overview-tab stream card,
-  // so `count` is at most 5 and `next_cursor` indicates "more
-  // available". When more rows exist the chip surfaces "5+" rather
-  // than fabricating a higher total the backend hasn't returned. The
-  // /evidence list page is the authoritative count surface (slice 236
-  // exposes the tenant-wide total).
-  const tabCounts: Record<Exclude<TabKey, "overview" | "history">, string> = {
-    evidence: evidenceCount(
-      evidenceQ.data,
-      evidenceQ.isLoading,
-      evidenceQ.error,
-    ),
-    mappings:
-      coverageQ.isLoading || coverageQ.error
-        ? "—"
-        : formatTabCount(requirements.length),
-    scope:
-      scopeQueries.some((q) => q.isLoading) || scopeQueries.some((q) => q.error)
-        ? "—"
-        : formatTabCount(scopeCellSum(scopeQueries)),
-    policies: policiesCount(
-      policiesQ.data,
-      policiesQ.isLoading,
-      policiesQ.error,
-    ),
-    risks: risksCount(risksQ.data, risksQ.isLoading, risksQ.error),
-  };
+  const { control, anchor } = coverage;
+  const states = stateQ.data?.states;
+  const freshness = worstFreshness(states);
+  const excepted = isExcepted(states);
+  const active = exceptionsRefused
+    ? []
+    : activeExceptions(exceptionsForControl(exceptionsQ.data?.exceptions, id));
+  const openPlans = seesActionPlans
+    ? openActionPlans(actionPlansQ.data?.action_plans)
+    : [];
+  const showExceptionMarker = excepted || active.length > 0;
 
   return (
-    <div className="space-y-4">
-      {/* breadcrumb — ATLAS-011: include the leaf crumb (the SCF anchor
-          code, e.g. "Controls › MON-04") so the trail ends at the page the
-          operator is on, not at the section. Falls back to the control's
-          bundle id when the row is unanchored. */}
-      <nav
-        aria-label="Breadcrumb"
-        data-testid="control-detail-breadcrumb"
-        className="flex items-center gap-1.5 text-sm text-muted-foreground"
-      >
-        <Link href="/controls" className="hover:underline">
-          Controls
-        </Link>
-        <span aria-hidden>›</span>
-        <span
-          className="font-medium text-foreground"
-          data-testid="control-detail-breadcrumb-leaf"
-        >
-          {anchor ? anchor.scf_id : control.bundle_id}
-        </span>
-      </nav>
-      {/* ============ CONTROL HEADER ============ */}
-      {/* Slice 255 — the header splits into a "title + meta" well (the
-          PageShell title and subtitle) and an "action buttons +
-          last-evaluated" well (the PageShell actions slot). #2080 moved it
-          onto PageShell; the meta rows keep the `control-header` testid. */}
-      <PageShell
-        data-testid="control-detail"
-        title={<span data-testid="control-title">{control.title}</span>}
-        subtitle={
-          <div className="space-y-2" data-testid="control-header">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-xs text-muted-foreground">
-                {control.bundle_id}
-                {control.version ? ` · v${control.version}` : ""}
-              </span>
-              {anchor ? (
-                <Link
-                  href={`/catalog/scf/${encodeURIComponent(anchor.id)}`}
-                  className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary hover:bg-primary/20"
-                  data-testid="scf-anchor-pill"
-                >
-                  {anchor.scf_id}
-                </Link>
-              ) : (
-                <span
-                  className="font-mono text-[11px] text-muted-foreground"
-                  data-testid="scf-anchor-pill"
-                >
-                  unanchored
-                </span>
-              )}
-              <Badge variant="secondary" data-testid="lifecycle-badge">
-                {enumLabel("ControlLifecycleState", control.lifecycle_state)}
-              </Badge>
-              {control.demo ? (
-                <DemoBadge className="ml-0" testId="control-demo-badge" />
-              ) : null}
-              <span className="text-xs text-muted-foreground">
-                {control.control_family}
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-              <span className="text-muted-foreground">
-                Owner{" "}
-                <Person
-                  id={control.owner_user_id}
-                  className="text-foreground"
-                  testId="control-owner"
-                />
-              </span>
-              <span className="text-muted-foreground">
-                Default owner role{" "}
-                <span
-                  className="text-foreground"
-                  data-testid="control-owner-role"
-                >
-                  {control.owner_role}
-                </span>
-              </span>
-              <span className="text-muted-foreground">
-                Implementation{" "}
-                <span
-                  className="text-foreground"
-                  data-testid="control-implementation-type"
-                >
-                  {enumLabel(
-                    "ControlImplementationType",
-                    control.implementation_type,
-                  )}
-                </span>
-              </span>
-              <span className="text-muted-foreground">
-                Freshness class{" "}
-                <span className="text-foreground">
-                  {enumLabel("EvidenceFreshnessClass", control.freshness_class)}
-                </span>
-              </span>
+    <DetailHeader
+      data-testid="control-detail"
+      titleTestId="control-title"
+      headerTestId="control-header"
+      title={control.title}
+      back={<BackLink leaf={anchor ? anchor.scf_id : control.bundle_id} />}
+      status={
+        <>
+          {anchor ? (
+            <Link
+              href={`/catalog/scf/${encodeURIComponent(anchor.id)}`}
+              className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-primary hover:bg-primary/20"
+              data-testid="scf-anchor-pill"
+            >
+              {anchor.scf_id}
+            </Link>
+          ) : (
+            <span
+              className="text-[11px] text-muted-foreground"
+              data-testid="scf-anchor-pill"
+            >
+              Not anchored
+            </span>
+          )}
+          <Badge variant="secondary" data-testid="lifecycle-badge">
+            {enumLabel("ControlLifecycleState", control.lifecycle_state)}
+          </Badge>
+          {control.demo ? (
+            <DemoBadge className="ml-0" testId="control-demo-badge" />
+          ) : null}
+          <span className="text-xs text-muted-foreground">
+            {control.control_family}
+          </span>
+        </>
+      }
+      subtitle={
+        <>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+            <span className="font-mono text-xs text-muted-foreground">
+              {control.bundle_id}
+              {control.version ? ` · v${control.version}` : ""}
+            </span>
+            <span className="text-muted-foreground">
+              Implementation{" "}
               <span
-                className="text-muted-foreground"
-                data-testid="control-anchor-fit"
-                data-anchor-fit={control.anchor_fit ?? "exact"}
+                className="text-foreground"
+                data-testid="control-implementation-type"
               >
-                Anchor fit{" "}
-                <span className="text-foreground">
-                  {anchorFitLabel(control.anchor_fit)}
-                </span>
-              </span>
-            </div>
-            {control.anchor_fit_note ? (
-              <p
-                className="text-sm text-muted-foreground"
-                data-testid="control-anchor-fit-note"
-              >
-                {control.anchor_fit_note}
-              </p>
-            ) : null}
-
-            {/* #1737 — control.yaml external_refs: auditor control numbers
-                and the framework requirements this control was tested
-                under. Rendered only when the control carries any. */}
-            {groupExternalRefs(control.external_refs).map((group) => (
-              <div
-                key={group.kind}
-                className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
-                data-testid={`control-external-refs-${group.kind}`}
-              >
-                <span className="text-muted-foreground">{group.label}</span>
-                {group.refs.map((ref) => (
-                  <Badge
-                    key={`${ref.system}:${ref.id}`}
-                    variant="outline"
-                    className="font-normal"
-                  >
-                    <span className="font-mono">{formatExternalRef(ref)}</span>
-                    {ref.note ? (
-                      <span className="text-muted-foreground">
-                        {" · "}
-                        {ref.note}
-                      </span>
-                    ) : null}
-                  </Badge>
-                ))}
-              </div>
-            ))}
-          </div>
-        }
-        actions={
-          <>
-            {/* Slice 255 / #2110 — header actions well: Evaluate now,
-                Download bundle, Upload new version and Request exception,
-                with the "last evaluated <relative-time>" sub-line. See
-                web/components/control/header-actions.tsx. */}
-            <ControlHeaderActions
-              controlID={id}
-              state={state}
-              implementationType={control.implementation_type}
-            />
-          </>
-        }
-      >
-        {/* ============ KPI STRIP ============ */}
-        <div
-          className="grid grid-cols-2 gap-3 lg:grid-cols-4"
-          data-testid="kpi-strip"
-        >
-          <KpiCard
-            label="Effectiveness · 30d"
-            value={effectiveness ? effectiveness.pass_rate.toFixed(2) : "—"}
-            sub={
-              effectiveness
-                ? `${effectiveness.pass_count}/${effectiveness.total_count} evaluations`
-                : effectivenessQ.isLoading
-                  ? "loading…"
-                  : "no data"
-            }
-          />
-          <KpiCard
-            label="Frameworks satisfied"
-            value={String(frameworksSatisfied)}
-            sub="via SCF anchor"
-          />
-          <KpiCard
-            label="Evidence records · 30d"
-            value={
-              evidenceQ.isLoading
-                ? "…"
-                : evidenceQ.data
-                  ? evidenceQ.data.next_cursor
-                    ? `${evidenceQ.data.count}+`
-                    : String(evidenceQ.data.count)
-                  : "—"
-            }
-            sub={
-              evidenceQ.isLoading
-                ? "loading…"
-                : evidenceQ.error
-                  ? "error"
-                  : "in last 30 days"
-            }
-          />
-          <KpiCard
-            label="In-scope frameworks"
-            value={
-              scopeQueries.some((q) => q.isLoading)
-                ? "…"
-                : String(inScopeFrameworks)
-            }
-            sub={`of ${frameworksSatisfied} mapped`}
-          />
-        </div>
-
-        {/* ============ TAB STRIP ============ */}
-        {/* Slice 254 — sticky seven-tab strip per mockup
-          (Plans/_archive/mockups/control.html lines 139-152). The strip uses
-          the slice 044 inlined-tab-list pattern (the codebase has no
-          shared tabs primitive; introducing one would violate
-          P0-254-1's "do not introduce a new component primitive"). The
-          tab key is URL-bound (`?tab=<key>`) and the count chip reads
-          from each tab's underlying query payload.
-          #2096: <main> is the scroll container (the top bar sits outside
-          it) and a sticky offset counts from main's padding edge, so the
-          old top-12 left a 48px band plus main's padding that table rows
-          scrolled through. The negative top equal to main's padding (p-4,
-          sm:p-6 in app-shell.tsx) pins the strip flush to main's top edge,
-          the negative margins span its side padding so no content shows
-          beside it, and `data-sticky-tabs` turns on main's scroll padding
-          so focus and anchor jumps land below it. */}
-        <div
-          role="tablist"
-          aria-label="Control detail sections"
-          data-testid="control-tabs"
-          data-sticky-tabs
-          className="sticky -top-4 z-20 -mx-4 flex items-center gap-1 overflow-x-auto border-b bg-background px-4 sm:-top-6 sm:-mx-6 sm:px-6"
-        >
-          {visibleTabs.map((t) => {
-            const isActive = activeTab === t.key;
-            const chip =
-              t.key === "overview" || t.key === "history"
-                ? null
-                : tabCounts[t.key as Exclude<TabKey, "overview" | "history">];
-            return (
-              <button
-                key={t.key}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                aria-controls={`control-tab-panel-${t.key}`}
-                id={`control-tab-${t.key}`}
-                data-testid={`control-tab-${t.key}`}
-                onClick={() => setTab(t.key)}
-                className={cn(
-                  "-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors",
-                  isActive
-                    ? "border-primary font-medium text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
+                {enumLabel(
+                  "ControlImplementationType",
+                  control.implementation_type,
                 )}
-              >
-                <span>{t.label}</span>
-                {chip ? (
-                  <span
-                    className="font-mono text-xs text-muted-foreground"
-                    data-testid={`control-tab-${t.key}-chip`}
-                  >
-                    {chip}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+              </span>
+            </span>
+            <span className="text-muted-foreground">
+              Freshness class{" "}
+              <span className="text-foreground">
+                {enumLabel("EvidenceFreshnessClass", control.freshness_class)}
+              </span>
+            </span>
+            <span
+              className="text-muted-foreground"
+              data-testid="control-anchor-fit"
+              data-anchor-fit={control.anchor_fit ?? "exact"}
+            >
+              Anchor fit{" "}
+              <span className="text-foreground">
+                {anchorFitLabel(control.anchor_fit)}
+              </span>
+            </span>
+          </div>
+          {control.anchor_fit_note ? (
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="control-anchor-fit-note"
+            >
+              {control.anchor_fit_note}
+            </p>
+          ) : null}
 
-        {/* ============ TAB PANELS ============ */}
-        {/* Slice 254 — panels are conditionally rendered (no `hidden`-
-          class mounting like slice 044's audit workspace) because the
-          control-detail page does NOT have draft state that must
-          survive tab flips. Switching tabs unmounts the previous
-          panel's subtree; TanStack Query keeps the data in cache so
-          flipping back is instant. */}
-        <div
-          role="tabpanel"
-          id={`control-tab-panel-${activeTab}`}
-          aria-labelledby={`control-tab-${activeTab}`}
-          data-testid={`control-tab-panel-${activeTab}`}
-        >
-          {activeTab === "overview" ? (
+          {/* #1737 — control.yaml external_refs: auditor control numbers
+              and the framework requirements this control was tested
+              under. Rendered only when the control carries any. */}
+          {groupExternalRefs(control.external_refs).map((group) => (
+            <div
+              key={group.kind}
+              className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+              data-testid={`control-external-refs-${group.kind}`}
+            >
+              <span className="text-muted-foreground">{group.label}</span>
+              {group.refs.map((ref) => (
+                <Badge
+                  key={`${ref.system}:${ref.id}`}
+                  variant="outline"
+                  className="font-normal"
+                >
+                  <span className="font-mono">{formatExternalRef(ref)}</span>
+                  {ref.note ? (
+                    <span className="text-muted-foreground">
+                      {" · "}
+                      {ref.note}
+                    </span>
+                  ) : null}
+                </Badge>
+              ))}
+            </div>
+          ))}
+        </>
+      }
+      actions={
+        <ControlHeaderActions
+          controlID={id}
+          implementationType={control.implementation_type}
+          canWrite={canWrite}
+          canEvaluate={canEvaluate}
+        />
+      }
+    >
+      {/* ============ STATE STRIP (#2140) ============ */}
+      <ControlStateStrip
+        controlID={id}
+        state={stateQ.data}
+        stateError={Boolean(stateQ.error)}
+      >
+        <StripCell label="Freshness">
+          <span data-testid="control-strip-freshness">
+            {freshness ? enumLabel("FreshnessState", freshness) : "—"}
+          </span>
+        </StripCell>
+        <StripCell label="Owner">
+          {control.owner_user_id ? (
+            <Person
+              id={control.owner_user_id}
+              className="text-foreground"
+              testId="control-owner"
+            />
+          ) : (
+            <span className="text-muted-foreground" data-testid="control-owner">
+              Unassigned
+            </span>
+          )}
+        </StripCell>
+        <StripCell label="Owner role">
+          <span data-testid="control-owner-role">
+            {control.owner_role || "—"}
+          </span>
+        </StripCell>
+        <StripCell label="Markers">
+          <div
+            className="flex flex-wrap gap-1.5"
+            data-testid="control-strip-markers"
+          >
+            {showExceptionMarker ? (
+              <Badge
+                variant="info"
+                data-testid="control-strip-exception"
+                title="An active exception covers this control."
+              >
+                Exception
+              </Badge>
+            ) : null}
+            {openPlans.length > 0 ? (
+              <Badge
+                variant="warning"
+                data-testid="control-strip-action-plan"
+                title={openPlans.map((p) => p.title).join(", ")}
+              >
+                {openPlans.length === 1
+                  ? "Open action plan"
+                  : `${openPlans.length} open action plans`}
+              </Badge>
+            ) : null}
+            {!showExceptionMarker && openPlans.length === 0 ? (
+              <span className="text-muted-foreground">None</span>
+            ) : null}
+          </div>
+        </StripCell>
+      </ControlStateStrip>
+
+      {/* ============ TAB STRIP ============ */}
+      {/* #2096: <main> is the scroll container; the negative top equal to
+          main's padding pins the strip flush to main's top edge, and
+          `data-sticky-tabs` turns on main's scroll padding. */}
+      <div
+        role="tablist"
+        aria-label="Control detail sections"
+        data-testid="control-tabs"
+        data-sticky-tabs
+        className="sticky -top-4 z-20 -mx-4 flex items-center gap-1 overflow-x-auto border-b bg-background px-4 sm:-top-6 sm:-mx-6 sm:px-6"
+      >
+        {CONTROL_TABS.map((t) => {
+          const isActive = activeTab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`control-tab-panel-${t.key}`}
+              id={`control-tab-${t.key}`}
+              data-testid={`control-tab-${t.key}`}
+              onClick={() => setTab(t.key)}
+              className={cn(
+                "-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-sm transition-colors",
+                isActive
+                  ? "border-primary font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ============ TAB PANELS ============ */}
+      <div
+        role="tabpanel"
+        id={`control-tab-panel-${activeTab}`}
+        aria-labelledby={`control-tab-${activeTab}`}
+        data-testid={`control-tab-panel-${activeTab}`}
+        className="space-y-5"
+      >
+        {activeTab === "overview" ? (
+          <>
+            {/* The AI explanation, once, only when available (#2140). */}
+            <GapExplanationCard id={id} />
             <OverviewPanel
               id={id}
               coverage={coverage}
               outOfScopeFvIds={outOfScopeFvIds}
               evidenceQ={evidenceQ}
-              stateQ={stateQ}
-              state={state}
+              excepted={excepted}
               fvIds={fvIds}
               scopeQueries={scopeQueries}
-              requirements={requirements}
               policiesQ={seesPolicies ? policiesQ : null}
               risksQ={seesRisks ? risksQ : null}
-              historyQ={historyQ}
-              anchorSCF={anchor ? anchor.scf_id : null}
+              exceptionsQ={
+                seesExceptions && !exceptionsRefused ? exceptionsQ : null
+              }
+              showActionPlans={seesActionPlans}
             />
-          ) : null}
+          </>
+        ) : null}
 
-          {/* Slice 384 (AC-26): read-only "Linked Action Plans" section,
-            rendered on the Overview tab. #2174: hidden with Risk. */}
-          {activeTab === "overview" && seesActionPlans ? (
-            <div className="mt-6">
-              <LinkedActionPlans target="control" targetId={id} />
-            </div>
-          ) : null}
+        {activeTab === "map" ? (
+          <MapPanel coverage={coverage} outOfScopeFvIds={outOfScopeFvIds} />
+        ) : null}
 
-          {activeTab === "evidence" ? (
-            <EvidencePanel id={id} evidenceQ={evidenceQ} />
-          ) : null}
-
-          {activeTab === "mappings" ? (
-            <MappingsPanel
-              coverage={coverage}
-              outOfScopeFvIds={outOfScopeFvIds}
-              anchorSCF={anchor ? anchor.scf_id : null}
-            />
-          ) : null}
-
-          {activeTab === "scope" ? (
-            <ScopePanel
-              fvIds={fvIds}
-              scopeQueries={scopeQueries}
-              requirements={requirements}
-            />
-          ) : null}
-
-          {activeTab === "policies" ? (
-            <PoliciesPanel policiesQ={policiesQ} />
-          ) : null}
-
-          {activeTab === "risks" ? <RisksPanel risksQ={risksQ} /> : null}
-
-          {activeTab === "history" ? (
-            <HistoryPanel historyQ={historyQ} />
-          ) : null}
-        </div>
-      </PageShell>
-    </div>
+        {activeTab === "history" ? (
+          <HistoryPanel historyQ={historyQ} stateQ={stateQ} />
+        ) : null}
+      </div>
+    </DetailHeader>
   );
 }
 
 export default function ControlDetailPage() {
-  // Slice 254 — useSearchParams requires Suspense in Next.js 16 App
-  // Router strict mode. The fallback is a small skeleton so the page
-  // shell still shows something during the brief client boot. Pattern
-  // borrowed from `web/app/(authed)/calendar/page.tsx`.
+  // useSearchParams requires Suspense in Next.js 16 App Router.
   return (
     <Suspense
       fallback={
@@ -779,9 +622,32 @@ export default function ControlDetailPage() {
   );
 }
 
+// BackLink is the header's way back, ending at this control (ATLAS-011:
+// the trail names the page the operator is on).
+function BackLink({ leaf }: { leaf: string }) {
+  return (
+    <nav
+      aria-label="Breadcrumb"
+      data-testid="control-detail-breadcrumb"
+      className="flex items-center gap-1.5 text-sm text-muted-foreground"
+    >
+      <Link href="/controls" className="hover:underline">
+        Controls
+      </Link>
+      <span aria-hidden>›</span>
+      <span
+        className="font-medium text-foreground"
+        data-testid="control-detail-breadcrumb-leaf"
+      >
+        {leaf}
+      </span>
+    </nav>
+  );
+}
+
 // distinctFrameworkVersionIds pulls the unique framework_version_id set
 // out of the coverage requirements, preserving first-seen order so the
-// effective-scope rail is stable across renders.
+// effective-scope rows are stable across renders.
 function distinctFrameworkVersionIds(
   coverage: ControlCoverage | undefined,
 ): string[] {
@@ -797,90 +663,8 @@ function distinctFrameworkVersionIds(
   return out;
 }
 
-// scopeCellSum totals the effective-scope cell counts across all
-// resolved framework-version scope queries. Used for the "Effective
-// scope" tab's count chip. Errors / loading rows contribute 0 — the
-// chip logic upstream renders "—" when ANY query is unresolved, so
-// this sum only runs in the fully-resolved branch.
-function scopeCellSum(scopeQueries: ReadonlyArray<{ data?: unknown }>): number {
-  let total = 0;
-  for (const q of scopeQueries) {
-    const d = q.data as EffectiveScopeResponse | undefined;
-    if (d) total += d.effective_scope_count;
-  }
-  return total;
-}
-
-function evidenceCount(
-  data: EvidenceListResponse | undefined,
-  isLoading: boolean,
-  error: unknown,
-): string {
-  if (isLoading || error) return "—";
-  if (!data) return "—";
-  // The Overview-tab evidence card pages at EVIDENCE_STREAM_LIMIT
-  // rows; when more exist the chip surfaces "5+" rather than
-  // fabricating a higher total. The Evidence tab itself reads the
-  // same payload and renders the same hint; the /evidence list page
-  // is the authoritative tenant-wide count surface.
-  if (data.next_cursor) return `${data.count}+`;
-  return formatTabCount(data.count);
-}
-
-function policiesCount(
-  data: ControlLinkedPoliciesResponse | undefined,
-  isLoading: boolean,
-  error: unknown,
-): string {
-  if (isLoading || error || !data) return "—";
-  return formatTabCount(data.count);
-}
-
-function risksCount(
-  data: ControlLinkedRisksResponse | undefined,
-  isLoading: boolean,
-  error: unknown,
-): string {
-  if (isLoading || error || !data) return "—";
-  return formatTabCount(data.count);
-}
-
-function KpiCard({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-}) {
-  return (
-    <Card size="sm" data-testid="kpi-card">
-      <CardContent>
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          {label}
-        </div>
-        <div className="mt-1 text-2xl font-semibold">{value}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// =================== TAB PANELS ===================
-
-// OverviewPanel — Plans/_archive/mockups/control.html shows the Overview tab as
-// the "everything-at-a-glance" surface (lines 156-560). Slice 254
-// preserves the exact two-column layout that shipped pre-tab-strip
-// (anti-criterion P0-254-3): coverage + UCF graph + evidence stream
-// on the left two-thirds, freshness + effective scope + policies +
-// risks + audit log on the right one-third. Each card's data is
-// shared across tabs (the same TanStack Query keys back the
-// dedicated-tab views), so flipping tabs is free.
-
 // ATLAS-012 — resolve an SCF anchor's human-readable code via the same
-// BFF the catalog detail page uses. Used only on the control-detail
-// 404 empty-state to print "MON-04" instead of the raw anchor UUID.
+// BFF the catalog detail page uses. Used only on the 404 empty state.
 async function fetchAnchorDetail(id: string): Promise<AnchorDetail> {
   const res = await fetch(
     `/api/anchors/${encodeURIComponent(id)}/requirements`,

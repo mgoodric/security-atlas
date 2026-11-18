@@ -166,7 +166,9 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"exception": exceptionWireFrom(created)})
 }
 
-// ListExceptions handles GET /v1/exceptions (filterable by ?status=).
+// ListExceptions handles GET /v1/exceptions, filterable by ?status= and
+// ?control_id= (#2140: one control's exceptions, for the control page).
+// RLS keeps the list to the caller's tenant either way.
 func (h *Handler) ListExceptions(w http.ResponseWriter, r *http.Request) {
 	ctx, _, ok := h.tenantCredContext(r)
 	if !ok {
@@ -174,6 +176,14 @@ func (h *Handler) ListExceptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := exception.ListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
+	if raw := strings.TrimSpace(r.URL.Query().Get("control_id")); raw != "" {
+		cid, err := uuid.Parse(raw)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "control_id must be a UUID")
+			return
+		}
+		filter.ControlID = cid
+	}
 	rows, err := h.store.List(ctx, filter)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list exceptions", err)
