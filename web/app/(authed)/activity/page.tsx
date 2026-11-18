@@ -49,7 +49,11 @@ export default async function ActivityPage() {
       }
       bodyClassName="space-y-4"
     >
-      <ActivityPageClient canExport={canExport} />
+      {/* #2464: the default window's end, read once on the server. */}
+      <ActivityPageClient
+        canExport={canExport}
+        openedAt={new Date().toISOString()}
+      />
     </PageShell>
   );
 }

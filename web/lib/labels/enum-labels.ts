@@ -250,6 +250,7 @@ export const ENUM_LABELS = {
     risk: "Risk",
     posture_target: "Posture target",
     module_access: "Module access",
+    vendor: "Vendor",
   },
   // Checklist citation kinds: the CitationKind constants in
   // internal/checklist/checklist.go, which the coverage test reads.

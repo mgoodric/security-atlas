@@ -263,6 +263,35 @@ func (q *Queries) GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, e
 	return i, err
 }
 
+const insertVendorAuditLog = `-- name: InsertVendorAuditLog :exec
+INSERT INTO vendor_audit_log (
+    tenant_id, vendor_id, actor, action_type, before_state, after_state
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertVendorAuditLogParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	VendorID    pgtype.UUID `json:"vendor_id"`
+	Actor       string      `json:"actor"`
+	ActionType  string      `json:"action_type"`
+	BeforeState []byte      `json:"before_state"`
+	AfterState  []byte      `json:"after_state"`
+}
+
+// #2450: one append-only row per vendor owner change, in the write's tx.
+func (q *Queries) InsertVendorAuditLog(ctx context.Context, arg InsertVendorAuditLogParams) error {
+	_, err := q.db.Exec(ctx, insertVendorAuditLog,
+		arg.TenantID,
+		arg.VendorID,
+		arg.Actor,
+		arg.ActionType,
+		arg.BeforeState,
+		arg.AfterState,
+	)
+	return err
+}
+
 const listOverdueVendors = `-- name: ListOverdueVendors :many
 SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence, owner_user_id FROM vendors
 WHERE tenant_id = $1

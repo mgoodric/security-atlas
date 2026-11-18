@@ -808,6 +808,10 @@ type Querier interface {
 	// encrypted client secret from the response shape so a leaked log line
 	// never carries the secret material.
 	GetAdminSSO(ctx context.Context, arg GetAdminSSOParams) (GetAdminSSORow, error)
+	// #2609: the current config, read inside the write's own transaction (after
+	// LockAdminSSO) as the before value of the audit row. Omits
+	// client_secret_enc for the same reason GetAdminSSO does.
+	GetAdminSSOForUpdate(ctx context.Context, arg GetAdminSSOForUpdateParams) (GetAdminSSOForUpdateRow, error)
 	// Returns a single user with their roles and most-recent session timestamp.
 	// 404 (pgx.ErrNoRows) when the id is not in the tenant.
 	GetAdminUser(ctx context.Context, arg GetAdminUserParams) (GetAdminUserRow, error)
@@ -1564,6 +1568,8 @@ type Querier interface {
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
+	// #2450: one append-only row per vendor owner change, in the write's tx.
+	InsertVendorAuditLog(ctx context.Context, arg InsertVendorAuditLogParams) error
 	// #2118: whether user_id is an active user of this tenant holding the
 	// auditor role. The assign route refuses anyone else.
 	IsActiveTenantAuditor(ctx context.Context, arg IsActiveTenantAuditorParams) (bool, error)
@@ -3188,6 +3194,11 @@ type Querier interface {
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
+	// #2450: the tenant's users that have a display name, for the risk and
+	// vendor exports' owner_name. Email is not read: an export never names a
+	// user by their email or its local-part (slice 139 D1). Disabled users
+	// stay listed: they still name the owner of older records.
+	ListTenantUserNames(ctx context.Context, tenantID pgtype.UUID) ([]ListTenantUserNamesRow, error)
 	// The 15-min cron enumerates tenants from the migrator pool (BYPASSRLS)
 	// so it can iterate every tenant; each evaluator then runs through the
 	// app pool with tenancy.WithTenant applied. Same shape as
@@ -3341,7 +3352,7 @@ type Querier interface {
 	// for the Activity page's actor picker. A person or API key is listed
 	// from /v1/people instead, so only these shapes are returned.
 	//
-	// The branches mirror ListUnifiedAuditLog's sixteen sources, projected to
+	// The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
 	// what the visibility rules read: the same window, the slice 270
 	// non-privileged predicate and the slice 669 read-telemetry predicate.
 	// One row per (actor, kind, target_type, request_path), so the handler
@@ -3428,6 +3439,12 @@ type Querier interface {
 	// same manifest into control_manifest_revisions and the first one's text
 	// would be overwritten without a trace.
 	LockActiveControlByBundleID(ctx context.Context, arg LockActiveControlByBundleIDParams) (LockActiveControlByBundleIDRow, error)
+	// #2609: serialize every SSO config write in one tenant, so the before value
+	// its audit row records is the state the write replaced. A row lock alone
+	// cannot do this: while the tenant has no row, FOR UPDATE locks nothing, and
+	// two first PATCHes would each record "no config" as their before.
+	// Transaction-scoped. Namespace 11 is advisorylock.TenantSSOConfig.
+	LockAdminSSO(ctx context.Context, tenantID pgtype.UUID) error
 	// #1861: serialize every evaluation of one rule's meta-risk key inside the
 	// caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
 	// then an insert (CreateAggregateRisk); without this lock two concurrent

@@ -63,6 +63,10 @@ const (
 	// LockFrameworkScopeFreeze). Key: hashtext(tenant uuid || '/' ||
 	// framework_version uuid).
 	FrameworkScopeFreeze Namespace = 10
+	// TenantSSOConfig serialises SSO config writes in one tenant, so each
+	// audit row's before value is the state its write replaced (#2609,
+	// LockAdminSSO). Key: hashtext(tenant uuid text).
+	TenantSSOConfig Namespace = 11
 )
 
 // Keys within IntegrationTestSeed. Distinct values; never reuse one.
@@ -94,6 +98,7 @@ func All() []Entry {
 		{IntegrationTestSeed, "integration_test_seed"},
 		{TenantLLMRouting, "tenant_llm_routing"},
 		{FrameworkScopeFreeze, "framework_scope_freeze"},
+		{TenantSSOConfig, "tenant_sso_config"},
 	}
 }
 

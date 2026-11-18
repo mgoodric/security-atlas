@@ -125,7 +125,11 @@ const createRiskInputSchema = `{
     },
     "treatment_owner": {
       "type": "string",
-      "description": "User/credential id responsible for the treatment plan."
+      "description": "Free text naming who is responsible for the treatment plan, shown as Owner (unlinked) only while no owner_user_id is set. Prefer owner_user_id."
+    },
+    "owner_user_id": {
+      "type": "string",
+      "description": "Optional; the risk's owner, the UUID of an active user of this organisation. When set, treatment_owner is not stored. A user of another organisation, a disabled user or an unknown id is refused."
     }
   }
 }`
@@ -304,7 +308,11 @@ const updateRiskTreatmentInputSchema = `{
     },
     "treatment_owner": {
       "type": "string",
-      "description": "Optional; the user/credential id that owns the new treatment plan."
+      "description": "Optional free text naming who owns the new treatment plan, shown as Owner (unlinked) only while the risk has no owner user. Prefer owner_user_id; ignored when owner_user_id is given."
+    },
+    "owner_user_id": {
+      "type": "string",
+      "description": "Optional; the risk's new owner, the UUID of an active user of this organisation. Clears treatment_owner. A user of another organisation, a disabled user or an unknown id is refused."
     }
   }
 }`
@@ -323,7 +331,7 @@ func NewUpdateRiskTreatment(c *mcp.Client) *UpdateRiskTreatmentTool {
 func (t *UpdateRiskTreatmentTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "update_risk_treatment",
-		Description: "Propose a risk treatment change (and optionally a treatment_owner " +
+		Description: "Propose a risk treatment change (and optionally an owner " +
 			"reassignment). Proposal sits at state='ai_proposed' until an approver confirms.",
 		InputSchema: json.RawMessage(updateRiskTreatmentInputSchema),
 	}

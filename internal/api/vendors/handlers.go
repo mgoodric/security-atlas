@@ -673,10 +673,11 @@ func dateString(t *time.Time) *string {
 
 // actor names the caller on the owner audit row (#2129): the user behind
 // the credential, or uuid.Nil for a caller that is not a user.
-func actor(r *http.Request) uuid.UUID {
+// actor is the caller's principal for the owner audit row (#2450): a
+// machine caller is named by its key or client id, not recorded as nil.
+func actor(r *http.Request) string {
 	cred, _ := authctx.CredentialFromContext(r.Context())
-	u, _ := credstore.CallerUserID(cred)
-	return u
+	return credstore.PrincipalOf(cred)
 }
 
 func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {

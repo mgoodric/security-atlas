@@ -11,7 +11,9 @@ package adminauditlog
 
 import (
 	"net/http/httptest"
+	"net/url"
 	"testing"
+	"time"
 )
 
 // TestParseUnifiedParams_IncludeReadsFlag pins the `?include_reads`
@@ -78,6 +80,26 @@ func TestActivityDefaultExcludesReadTelemetry(t *testing.T) {
 				t.Errorf("ExcludeReadTelemetry (== !includeReads) = %v; want %v", want, tc.wantExcludeReads)
 			}
 		})
+	}
+}
+
+// TestParseUnifiedParams_FutureToAccepted pins #2464: the Activity page's
+// default `to` is the browser's "now", which can sit slightly ahead of the
+// server's clock. A `to` in the future is a valid window bound; only the
+// span is capped.
+func TestParseUnifiedParams_FutureToAccepted(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	from := now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
+	to := now.Add(2 * time.Minute).Format(time.RFC3339Nano)
+	req := httptest.NewRequest("GET",
+		"/v1/activity/unified?from="+url.QueryEscape(from)+"&to="+url.QueryEscape(to), nil)
+	got, err := parseUnifiedParams(req)
+	if err != nil {
+		t.Fatalf("parseUnifiedParams: unexpected error for a future to: %v", err)
+	}
+	if !got.queryParams.To.After(now) {
+		t.Errorf("To = %v; want the future instant sent", got.queryParams.To)
 	}
 }
 

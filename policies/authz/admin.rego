@@ -64,6 +64,8 @@ is_admin_credential if {
 #                 (#2503).
 #   features      the tenant's module and feature switches; spine flags
 #                 stay refused in the store (#2503).
+#   credentials   the tenant's API keys. A tenant admin by role cannot mint,
+#                 rotate or revoke an is_admin or is_approver key (#2503 D6).
 #   audit-log     the tenant's admin audit log, unified read and export
 #                 (#2503 D5). grc_engineer keeps its blanket read here.
 #   controls      GET /v1/admin/controls/held-back (#2358).
@@ -78,6 +80,7 @@ tenant_admin_segments := {
     "scim-credentials",
     "group-role-mappings",
     "features",
+    "credentials",
     "audit-log",
     "controls",
     "llm-routing",

@@ -3,8 +3,9 @@
 // #2129 — a vendor's owner is a user. POST and PATCH /v1/vendors set
 // owner_user_id; GET returns it, and the free text no user matched as
 // owner_unlinked. An owner that is not an active user of the vendor's own
-// tenant is a 422, and every owner change writes one me_audit_log
-// 'vendor_owner_update' row.
+// tenant is a 422, and every owner change writes one vendor_audit_log
+// 'owner_changed' row naming the caller's principal (#2450), and no
+// me_audit_log row.
 //
 // Run with:
 //
@@ -38,7 +39,7 @@ func seedVendorOwner(t *testing.T, admin *pgxpool.Pool, tenant, name, status str
 
 func freshOwnerTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	return dbtest.SeedTenant(t, admin, "vendor_scope_cells", "vendors", "me_audit_log", "users")
+	return dbtest.SeedTenant(t, admin, "vendor_scope_cells", "vendors", "vendor_audit_log", "me_audit_log", "users")
 }
 
 type vendorOwnerWire struct {
@@ -59,23 +60,37 @@ func decodeVendor(t *testing.T, body []byte) vendorOwnerWire {
 	return out.Vendor
 }
 
-// ownerAuditRows returns the before and after of each vendor_owner_update
-// row of tenant, oldest first.
+// ownerAuditRows returns the before and after of each owner_changed row of
+// tenant, oldest first. It fails the test if a row names no actor or the
+// nil uuid, or if any owner change still went to me_audit_log.
 func ownerAuditRows(t *testing.T, admin *pgxpool.Pool, tenant string) [][2]map[string]any {
 	t.Helper()
+	var meRows int
+	if err := admin.QueryRow(context.Background(), `
+		SELECT count(*) FROM me_audit_log
+		 WHERE tenant_id = $1 AND action = 'vendor_owner_update'`, tenant).Scan(&meRows); err != nil {
+		t.Fatalf("count me_audit_log rows: %v", err)
+	}
+	if meRows != 0 {
+		t.Errorf("%d owner changes went to me_audit_log, want 0", meRows)
+	}
 	rows, err := admin.Query(context.Background(), `
-		SELECT before, after FROM me_audit_log
-		 WHERE tenant_id = $1 AND action = 'vendor_owner_update'
-		 ORDER BY occurred_at, id`, tenant)
+		SELECT actor, before_state, after_state FROM vendor_audit_log
+		 WHERE tenant_id = $1 AND action_type = 'owner_changed'
+		 ORDER BY created_at, id`, tenant)
 	if err != nil {
 		t.Fatalf("read audit: %v", err)
 	}
 	defer rows.Close()
 	var out [][2]map[string]any
 	for rows.Next() {
+		var actor string
 		var b, a []byte
-		if err := rows.Scan(&b, &a); err != nil {
+		if err := rows.Scan(&actor, &b, &a); err != nil {
 			t.Fatalf("scan audit: %v", err)
+		}
+		if actor == "" || actor == uuid.Nil.String() {
+			t.Errorf("audit row actor = %q, want the caller's principal", actor)
 		}
 		var before, after map[string]any
 		_ = json.Unmarshal(b, &before)
@@ -128,7 +143,7 @@ func TestOwner_VendorOwnerUserSetAndReturned(t *testing.T) {
 
 	rows := ownerAuditRows(t, admin, tenant)
 	if len(rows) != 2 {
-		t.Fatalf("got %d vendor_owner_update rows, want 2 (create, change): %v", len(rows), rows)
+		t.Fatalf("got %d owner_changed rows, want 2 (create, change): %v", len(rows), rows)
 	}
 	if rows[0][0]["owner_user_id"] != nil || rows[0][1]["owner_user_id"] != alice {
 		t.Errorf("create row = %v", rows[0])

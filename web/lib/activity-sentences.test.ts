@@ -71,6 +71,16 @@ describe("describeEvent", () => {
     });
   });
 
+  it("names a vendor owner change (#2450)", () => {
+    expect(
+      describeEvent(row("vendor", "owner_changed", "vendor")),
+    ).toMatchObject({
+      phrase: "changed the owner of",
+      noun: "vendor",
+      href: null,
+    });
+  });
+
   it("keeps a dotted action's prefix as a qualifier", () => {
     const s = describeEvent(row("framework_scope", "predicate.update"));
     expect(s.phrase).toBe("updated");

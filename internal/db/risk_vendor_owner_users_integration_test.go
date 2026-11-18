@@ -93,10 +93,12 @@ func TestRiskVendorOwnerUsersMigration_LinksUnambiguousOwnersAndLosesNothing(t *
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Back to the pre-#2129 schema: owners are free text only. Rows other
-	// tests wrote with the new action are cleared first (rolled back with
-	// the transaction), or the down migration refuses.
-	if _, err := tx.Exec(ctx, `DELETE FROM me_audit_log WHERE action = 'vendor_owner_update'`); err != nil {
-		t.Fatalf("clear vendor_owner_update rows: %v", err)
+	// tests wrote with the new action, or with any action a later migration
+	// added (#2609), are cleared first (rolled back with the transaction),
+	// or the down migration refuses.
+	if _, err := tx.Exec(ctx, `DELETE FROM me_audit_log WHERE NOT (action = ANY($1))`,
+		meAuditActions(t, ownerUsersPrior)); err != nil {
+		t.Fatalf("clear rows the prior CHECK refuses: %v", err)
 	}
 	if _, err := tx.Exec(ctx, string(down)); err != nil {
 		t.Fatalf("apply down migration: %v", err)

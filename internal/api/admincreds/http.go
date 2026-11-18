@@ -4,9 +4,11 @@
 // revoke — with JSON request/response shapes. The bearer plaintext is
 // returned exactly once in the issue/rotate response and never persisted.
 //
-// Auth: every handler requires an admin credential. The slice-014 IsAdmin
-// flag on credstore.Credential gates access; slice 035 will graduate this
-// to OPA-driven RBAC.
+// Auth: every handler requires an admin of the caller's tenant
+// (authz.IsTenantAdmin, #2503). A tenant admin by role, with no admin
+// credential, works only with keys it could hold itself: it cannot mint,
+// rotate or revoke an is_admin or is_approver key, and cannot label a key
+// with a canonical role it does not hold live (mintWithinCaller).
 package admincreds
 
 import (
@@ -25,6 +27,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -111,6 +114,10 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 	}
 	// requireAdmin returning true guarantees the credential is in context.
 	cred, _ := authctx.CredentialFromContext(r.Context())
+	if msg := mintWithinCaller(cred, req.IsAdmin, req.IsApprover, req.OwnerRoles); msg != "" {
+		httpresp.WriteError(w, http.StatusForbidden, msg)
+		return
+	}
 	in := apikeystore.IssueInput{
 		ScopePredicate: predicate,
 		AllowedKinds:   req.AllowedKinds,
@@ -262,6 +269,9 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid tenant in credential")
 		return
 	}
+	if !h.callerMayHandle(w, r, cred, uid, true) {
+		return
+	}
 	successor, plain, predExp, err := h.store.Rotate(ctx, cred.TenantID, uid)
 	if err != nil {
 		if errors.Is(err, apikeystore.ErrUnknownKey) {
@@ -297,6 +307,9 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, terr := tenancy.TenantFromContext(ctx); terr != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid tenant in credential")
+		return
+	}
+	if !h.callerMayHandle(w, r, cred, uid, false) {
 		return
 	}
 	if err := h.store.Revoke(ctx, cred.TenantID, uid); err != nil {
@@ -339,11 +352,92 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if !cred.IsAdmin {
+	// #2503: a tenant admin by its live roles manages its own tenant's API
+	// keys, within mintWithinCaller.
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return false
 	}
 	return true
+}
+
+// mintWithinCaller reports why cred may not hold a key with these flags and
+// role labels, or "" when it may (#2503 D6). An admin credential
+// (cred.IsAdmin: the super_admin claim, or an admin-flagged key) may mint
+// anything, as before. A tenant admin by role may not mint an is_admin key,
+// which would be an admin credential and reach the platform /v1/admin
+// segments, nor an is_approver key. Each canonical role label must be one
+// the caller holds live, and a live admin holds every tenant role; a
+// free-text label grants nothing (#2595) and passes.
+func mintWithinCaller(cred credstore.Credential, isAdmin, isApprover bool, ownerRoles []string) string {
+	if cred.IsAdmin {
+		return ""
+	}
+	if isAdmin {
+		return "a tenant admin cannot mint an is_admin key"
+	}
+	if isApprover {
+		return "a tenant admin cannot mint an is_approver key"
+	}
+	held := authz.TenantRoleLabels(cred)
+	if containsRole(held, string(authz.RoleAdmin)) {
+		return ""
+	}
+	for _, role := range ownerRoles {
+		if !authz.IsCanonical(authz.Role(role)) {
+			continue
+		}
+		if !containsRole(held, role) {
+			return "owner_roles names " + role + ", which the caller does not hold"
+		}
+	}
+	return ""
+}
+
+// callerMayHandle refuses a rotate or revoke of a key the caller could not
+// have minted (mintWithinCaller), writing the 403. A rotate hands back a new
+// plaintext with the same flags, so a tenant admin rotating an is_admin key
+// would get an admin credential. A rotate of another user's personal
+// (user-bound) key is refused too: the plaintext would let the caller act as
+// that user, and the user's own token would retire. Revoking one stays
+// allowed. An unknown id passes here and the store answers 404.
+func (h *Handler) callerMayHandle(w http.ResponseWriter, r *http.Request, cred credstore.Credential, id uuid.UUID, rotate bool) bool {
+	if cred.IsAdmin {
+		return true
+	}
+	creds, err := h.store.List(r.Context(), cred.TenantID)
+	if err != nil {
+		httperr.WriteInternal(w, r, "load credential", err)
+		return false
+	}
+	for _, c := range creds {
+		if parsed, perr := parseCredID(c.ID); perr != nil || parsed != id {
+			continue
+		}
+		if msg := mintWithinCaller(cred, c.IsAdmin, c.IsApprover, c.OwnerRoles); msg != "" {
+			httpresp.WriteError(w, http.StatusForbidden, "this key is outside what a tenant admin manages: "+msg)
+			return false
+		}
+		if rotate && credstore.OwnedByUser(c) {
+			owner, _ := credstore.CallerUserID(c)
+			self, isUser := credstore.CallerUserID(cred)
+			if !isUser || owner != self {
+				httpresp.WriteError(w, http.StatusForbidden, "a tenant admin cannot rotate another user's personal key; revoke it instead")
+				return false
+			}
+		}
+		return true
+	}
+	return true
+}
+
+func containsRole(labels []string, role string) bool {
+	for _, l := range labels {
+		if l == role {
+			return true
+		}
+	}
+	return false
 }
 
 func parseCredID(s string) (uuid.UUID, error) {

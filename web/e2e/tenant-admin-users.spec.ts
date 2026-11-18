@@ -3,11 +3,11 @@
 // read GET /v1/me server-side, so a browser route-mock cannot reach them).
 //
 //   1. A tenant admin (a user_roles 'admin' row, no super_admin) sees the
-//      sidebar Admin entry, and the admin section lists SSO, Users,
-//      Features and Audit and none of the platform pages.
+//      sidebar Admin entry, and the admin section lists SSO, Users, API
+//      keys, Features and Audit and none of the platform pages.
 //   2. In Admin › Users it sees its own tenant's members and grants one of
 //      them a role; the platform writes it.
-//   3. Its SSO page opens (#2503), and a platform page (/admin/api-keys)
+//   3. Its SSO page opens (#2503), and a platform page (/admin/tenants)
 //      shows the super-admin panel, not the page.
 //
 // The tenant and members are the spec's own
@@ -86,10 +86,10 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
 
     await page.goto("/admin");
     const sections = page.getByRole("navigation", { name: "Admin sections" });
-    for (const name of ["SSO", "Users", "Features", "Audit"]) {
+    for (const name of ["SSO", "Users", "API keys", "Features", "Audit"]) {
       await expect(sections.getByRole("link", { name })).toBeVisible();
     }
-    for (const name of ["API keys", "Tenants", "Super admins"]) {
+    for (const name of ["Tenants", "Super admins"]) {
       await expect(sections.getByRole("link", { name })).toHaveCount(0);
     }
   });
@@ -124,7 +124,7 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
     await expect(page.getByTestId("sso-config-form")).toBeVisible();
     await expect(page.getByTestId("admin-platform-forbidden")).toHaveCount(0);
 
-    await page.goto("/admin/api-keys");
+    await page.goto("/admin/tenants");
     await expect(page.getByTestId("admin-platform-forbidden")).toBeVisible();
   });
 });

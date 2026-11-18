@@ -6,6 +6,7 @@
 package risks
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -173,21 +174,28 @@ func TestRiskExportFilenamePrefix(t *testing.T) {
 	}
 }
 
+// col returns the index of the named column, failing the test when the
+// header lacks it.
+func col(t *testing.T, header []string, name string) int {
+	t.Helper()
+	i := slices.Index(header, name)
+	if i < 0 {
+		t.Fatalf("export header has no %q column: %v", name, header)
+	}
+	return i
+}
+
 // A risk with no parents renders an empty parent_risk_ids cell (#1748),
 // and the column is appended after acceptance_status so the existing
 // column positions hold.
 func TestRisksToRowIter_NoParentsRendersBlank(t *testing.T) {
 	header := riskExportHeader()
-	// #1814 appended category_name after parent_risk_ids, and #2107
-	// appended status and closure_reason after that.
-	if got := header[len(header)-4]; got != "parent_risk_ids" {
-		t.Fatalf("fourth-to-last column = %q; want parent_risk_ids", got)
-	}
-	if got := header[len(header)-5]; got != "acceptance_status" {
-		t.Fatalf("fifth-to-last column = %q; want acceptance_status", got)
+	parents := col(t, header, "parent_risk_ids")
+	if got := col(t, header, "acceptance_status"); got != parents-1 {
+		t.Fatalf("acceptance_status at %d; want just before parent_risk_ids (%d)", got, parents)
 	}
 	for cells := range risksToRowIter([]riskRow{{ID: uuid.New()}}) {
-		if got := cells[len(header)-4]; got != "" {
+		if got := cells[parents]; got != "" {
 			t.Errorf("parent_risk_ids for a risk with no parents = %q; want empty string", got)
 		}
 		break
@@ -195,26 +203,25 @@ func TestRisksToRowIter_NoParentsRendersBlank(t *testing.T) {
 }
 
 // #1814: the export carries both the category slug and the organisation's
-// name for it, the name appended last so existing column positions hold.
+// name for it, the name appended after parent_risk_ids so existing column
+// positions hold.
 func TestRiskExportHeader_CategorySlugAndName(t *testing.T) {
 	header := riskExportHeader()
 	if got := header[3]; got != "category" {
 		t.Errorf("header[3] = %q; want category (slug, position unchanged)", got)
 	}
-	if got := header[len(header)-3]; got != "category_name" {
-		t.Errorf("third-to-last column = %q; want category_name", got)
+	if got, want := col(t, header, "category_name"), col(t, header, "parent_risk_ids")+1; got != want {
+		t.Errorf("category_name at %d; want %d, after parent_risk_ids", got, want)
 	}
 }
 
 // #2107: the export carries every risk with its status and, for a closed
-// risk, its closure reason, appended last so existing positions hold.
+// risk, its closure reason, appended after category_name.
 func TestRiskExportHeader_StatusAndClosureReason(t *testing.T) {
 	header := riskExportHeader()
-	if got := header[len(header)-2]; got != "status" {
-		t.Errorf("second-to-last column = %q; want status", got)
-	}
-	if got := header[len(header)-1]; got != "closure_reason" {
-		t.Errorf("last column = %q; want closure_reason", got)
+	status, reason := col(t, header, "status"), col(t, header, "closure_reason")
+	if want := col(t, header, "category_name") + 1; status != want || reason != want+1 {
+		t.Errorf("status, closure_reason at %d, %d; want %d, %d", status, reason, want, want+1)
 	}
 	rows := []riskRow{
 		{ID: uuid.New(), Status: "open"},
@@ -222,12 +229,44 @@ func TestRiskExportHeader_StatusAndClosureReason(t *testing.T) {
 	}
 	var got [][2]string
 	for cells := range risksToRowIter(rows) {
-		got = append(got, [2]string{cells[len(header)-2], cells[len(header)-1]})
+		got = append(got, [2]string{cells[status], cells[reason]})
 	}
 	want := [][2]string{{"open", ""}, {"closed", "merged"}}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("row %d status, closure_reason = %v; want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// #2450: the owner user and their name are appended last, beside the
+// free-text treatment_owner, so existing positions hold. A risk with no
+// owner user leaves both empty.
+func TestRiskExportHeader_OwnerUserAndName(t *testing.T) {
+	header := riskExportHeader()
+	if got := header[len(header)-2]; got != "owner_user_id" {
+		t.Errorf("second-to-last column = %q; want owner_user_id", got)
+	}
+	if got := header[len(header)-1]; got != "owner_name" {
+		t.Errorf("last column = %q; want owner_name", got)
+	}
+	owner := uuid.New()
+	rows := []riskRow{
+		{ID: uuid.New(), OwnerUserID: &owner, OwnerName: "Alice Owner"},
+		{ID: uuid.New(), TreatmentOwner: "risk team"},
+	}
+	text := col(t, header, "treatment_owner")
+	var got [][3]string
+	for cells := range risksToRowIter(rows) {
+		if len(cells) != len(header) {
+			t.Fatalf("row has %d cells; header has %d", len(cells), len(header))
+		}
+		got = append(got, [3]string{cells[text], cells[len(header)-2], cells[len(header)-1]})
+	}
+	want := [][3]string{{"", owner.String(), "Alice Owner"}, {"risk team", "", ""}}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d treatment_owner, owner_user_id, owner_name = %v; want %v", i, got[i], want[i])
 		}
 	}
 }

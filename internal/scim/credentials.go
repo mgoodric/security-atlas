@@ -47,6 +47,9 @@ type CredentialStore struct {
 	authPool *pgxpool.Pool
 	hasher   *bearer.Hasher
 	prefix   string
+	// insertAudit writes the issue / revoke audit row (#2609). Tests
+	// replace it to prove a failed audit write rolls the change back.
+	insertAudit func(context.Context, *dbx.Queries, dbx.InsertMeAuditLogParams) error
 }
 
 // NewCredentialStore constructs a CredentialStore.
@@ -68,8 +71,10 @@ func NewCredentialStore(pool, authPool *pgxpool.Pool, hasher *bearer.Hasher) *Cr
 func (s *CredentialStore) SetPrefix(p string) { s.prefix = p }
 
 // Issue creates a new scim_credentials row and returns the bearer plaintext
-// exactly once. issuedBy is the admin user that minted it (nil for bootstrap).
-func (s *CredentialStore) Issue(ctx context.Context, tenantID string, description string, issuedBy *uuid.UUID) (Credential, string, error) {
+// exactly once. by.UserID is the admin user that minted it (nil for
+// bootstrap). The scim_credential_issue audit row is written in the same
+// transaction (#2609).
+func (s *CredentialStore) Issue(ctx context.Context, tenantID string, description string, by Actor) (Credential, string, error) {
 	plain, err := bearer.Generate(s.prefix)
 	if err != nil {
 		return Credential{}, "", err
@@ -88,8 +93,8 @@ func (s *CredentialStore) Issue(ctx context.Context, tenantID string, descriptio
 	}
 	q := dbx.New(tx)
 	var issuedByPg pgtype.UUID
-	if issuedBy != nil {
-		issuedByPg = pgtype.UUID{Bytes: *issuedBy, Valid: true}
+	if by.UserID != nil {
+		issuedByPg = pgtype.UUID{Bytes: *by.UserID, Valid: true}
 	}
 	row, err := q.InsertSCIMCredential(ctx, dbx.InsertSCIMCredentialParams{
 		ID:          pgtype.UUID{Bytes: uuid.New(), Valid: true},
@@ -102,10 +107,15 @@ func (s *CredentialStore) Issue(ctx context.Context, tenantID string, descriptio
 	if err != nil {
 		return Credential{}, "", fmt.Errorf("scim: insert credential: %w", err)
 	}
+	issued := credentialFromRow(row)
+	if err := s.audit(ctx, q, tIDU, by, AuditActionCredentialIssue,
+		map[string]any{}, credentialAuditOf(issued, false)); err != nil {
+		return Credential{}, "", err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Credential{}, "", err
 	}
-	return credentialFromRow(row), plain, nil
+	return issued, plain, nil
 }
 
 // Authenticate resolves a plaintext bearer to its SCIM credential. Returns
@@ -142,8 +152,10 @@ func (s *CredentialStore) Authenticate(ctx context.Context, token string) (Crede
 
 // Revoke flips revoked_at on the credential (AC-3). Idempotent at the SQL
 // layer (the UPDATE matches by tenant+id; a missing row is reported as
-// ErrUnknownCredential via the prior GET).
-func (s *CredentialStore) Revoke(ctx context.Context, tenantID string, id uuid.UUID) error {
+// ErrUnknownCredential via the prior GET). The scim_credential_revoke audit
+// row is written in the same transaction (#2609); revoking a credential that
+// is already revoked changes nothing and writes no row.
+func (s *CredentialStore) Revoke(ctx context.Context, tenantID string, id uuid.UUID, by Actor) error {
 	tIDU, err := uuidToPg(tenantID)
 	if err != nil {
 		return err
@@ -157,10 +169,11 @@ func (s *CredentialStore) Revoke(ctx context.Context, tenantID string, id uuid.U
 		return err
 	}
 	q := dbx.New(tx)
-	if _, err := q.GetSCIMCredentialByID(ctx, dbx.GetSCIMCredentialByIDParams{
+	cur, err := q.GetSCIMCredentialByID(ctx, dbx.GetSCIMCredentialByIDParams{
 		TenantID: tIDU,
 		ID:       pgtype.UUID{Bytes: id, Valid: true},
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUnknownCredential
 		}
@@ -171,6 +184,13 @@ func (s *CredentialStore) Revoke(ctx context.Context, tenantID string, id uuid.U
 		ID:       pgtype.UUID{Bytes: id, Valid: true},
 	}); err != nil {
 		return err
+	}
+	if !cur.RevokedAt.Valid {
+		c := credentialFromRow(cur)
+		if err := s.audit(ctx, q, tIDU, by, AuditActionCredentialRevoke,
+			credentialAuditOf(c, false), credentialAuditOf(c, true)); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }

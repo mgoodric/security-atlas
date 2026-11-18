@@ -12,3 +12,9 @@ func (s *Store) WithNotifierForTest(f func(context.Context, dbx.DBTX, dbx.Notify
 	s.notify = f
 	return s
 }
+
+// SetAuditInsert replaces the credential audit write, so a test can make it
+// fail and prove the issue or revoke rolls back with it (#2609).
+func (s *CredentialStore) SetAuditInsert(fn func(context.Context, *dbx.Queries, dbx.InsertMeAuditLogParams) error) {
+	s.insertAudit = fn
+}
