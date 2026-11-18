@@ -24,6 +24,13 @@ import (
 // read from the exception's history rather than its current status: it
 // had been activated by t and had not been revoked by t. A NULL
 // effective_from falls back to activated_at.
+//
+// Reading the current effective_from and expires_at is safe because neither
+// changes after activation (#2526): ActivateException is the only write of
+// effective_from, nothing in internal/db/queries writes expires_at after
+// the INSERT, and a revoke sets revoked_at and leaves expires_at as granted.
+// A future edit path for either column must record the activated window,
+// or this reconstruction drifts from what the engine applied.
 func inForceAt(x dbx.ListActivatedExceptionsForExportRow, t time.Time) bool {
 	if !x.ActivatedAt.Valid || t.Before(x.ActivatedAt.Time) {
 		return false
