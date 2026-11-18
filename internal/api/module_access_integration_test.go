@@ -241,6 +241,54 @@ func TestModuleAccess_WildcardGainsNewlySwitchedOnModule(t *testing.T) {
 	}
 }
 
+// #2466: a request the access gate refuses writes one decision_audit_log
+// row, the module gate's shape (deny, resource "module", the actor) with
+// reason "module_no_access", and a polling client's repeats inside the
+// window write no more.
+func TestModuleAccess_NoAccessAttemptIsAudited(t *testing.T) {
+	e := newModuleAccessEnv(t)
+	narrowed, viewer := e.member(t, "viewer")
+	e.setAccess(t, narrowed, []string{"policies"})
+
+	for i := 0; i < 3; i++ {
+		if got := e.do(t, http.MethodGet, "/v1/questionnaires", viewer, nil); !noAccess(got, "questionnaires") {
+			t.Fatalf("GET /v1/questionnaires: status %d body=%s; want 403 naming questionnaires", got.status, got.body)
+		}
+	}
+
+	rows, err := e.migrate.Query(context.Background(), `
+		SELECT user_id, result, resource_type, resource_id, policy_hits, request_path
+		  FROM decision_audit_log
+		 WHERE tenant_id = $1::uuid AND reason = 'module_no_access'`, e.tenant)
+	if err != nil {
+		t.Fatalf("query decision_audit_log: %v", err)
+	}
+	defer rows.Close()
+	type row struct {
+		user, result, rtype, rid, path string
+		hits                           []string
+	}
+	var got []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.user, &r.result, &r.rtype, &r.rid, &r.hits, &r.path); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("module_no_access rows = %d (%+v); want 1 for three requests", len(got), got)
+	}
+	r := got[0]
+	if r.user != "user:"+narrowed.String() || r.result != "deny" || r.rtype != "module" || r.rid != "questionnaires" ||
+		r.path != "/v1/questionnaires" || len(r.hits) != 1 || r.hits[0] != "module_access:questionnaires" {
+		t.Fatalf("row %+v; want the member's deny on module questionnaires", r)
+	}
+}
+
 // Module-access rows are invisible across tenants (RLS), a member of
 // another tenant cannot be targeted, and every change writes one row to the
 // append-only access audit log.

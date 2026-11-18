@@ -31,7 +31,12 @@ function ActivityRow({ entry }: { entry: UnifiedEntry }) {
       <p data-testid="activity-feed-sentence" className="min-w-0 flex-1">
         <Person id={entry.actor_id} className="font-medium" /> {s.phrase}
         {s.noun ? ` ${s.noun}` : ""}
-        {target ? (
+        {target && s.person ? (
+          <>
+            {" "}
+            <Person id={s.targetId} />
+          </>
+        ) : target ? (
           <>
             {" "}
             {s.href ? (
