@@ -2526,6 +2526,9 @@ type Querier interface {
 	// under a few hundred for any realistic deployment.
 	ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error)
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
+	// #2457: the framework scopes waiting for approval, for GET /v1/approvals
+	// and its sidebar badge.
+	ListFrameworkScopesInReview(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error)
 	// Audit history for one framework (newest first). Admin-scoped.
 	ListFrameworkVersionAudit(ctx context.Context, frameworkID pgtype.UUID) ([]FrameworkVersionAudit, error)
 	// The tenant controls behind each requirement of a framework version, for
@@ -2748,6 +2751,9 @@ type Querier interface {
 	// ordering. The policy library is small per the canvas v1 scope, so this
 	// endpoint is not paginated.
 	ListPoliciesLinkedToControl(ctx context.Context, arg ListPoliciesLinkedToControlParams) ([]ListPoliciesLinkedToControlRow, error)
+	// #2457: the policies waiting for approval, for GET /v1/approvals and its
+	// sidebar badge. Served by the (tenant_id, status, created_at DESC) index.
+	ListPoliciesUnderReview(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
 	// Slice 107 — paginated policy list LEFT JOINed to the per-policy
 	// acknowledgment-rate cell. Single query; the handler MUST NOT loop
 	// per-policy (anti-criterion P0 -- the whole point of the extension).
@@ -2843,6 +2849,10 @@ type Querier interface {
 	// ops paths (a future admin UI surface) and by the integration test
 	// asserting projected-Entry fields landed correctly.
 	ListRecentSinkFailures(ctx context.Context, limit int32) ([]AuditSinkFailure, error)
+	// #2457: the exceptions waiting for approval, for GET /v1/approvals and
+	// its sidebar badge. Served by idx_exceptions_tenant_status_expires's
+	// (tenant_id, status) prefix.
+	ListRequestedExceptions(ctx context.Context, tenantID pgtype.UUID) ([]Exception, error)
 	// AC-2. Reverse traversal — given an SCF anchor, return every framework
 	// requirement it satisfies, joined to framework_versions + frameworks so
 	// callers see the full natural key (slug + version + code) in one
@@ -2994,6 +3004,10 @@ type Querier interface {
 	// RLS posture: the explicit tenant_id predicates sit alongside the
 	// GUC-driven RLS on every table read here.
 	ListRisksPage(ctx context.Context, arg ListRisksPageParams) ([]ListRisksPageRow, error)
+	// #2457: the open risks whose acceptance waits for approval, for GET
+	// /v1/approvals and its sidebar badge. A closed risk's acceptance cannot
+	// be approved until it is reopened, so it is not read.
+	ListRisksWithProposedAcceptance(ctx context.Context, tenantID pgtype.UUID) ([]Risk, error)
 	// Paginated anchor list for a specific framework_version. Caller supplies
 	// limit + offset; default at the call site.
 	ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAnchorsForVersionParams) ([]ScfAnchor, error)
