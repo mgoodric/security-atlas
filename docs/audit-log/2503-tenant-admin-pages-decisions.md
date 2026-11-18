@@ -339,3 +339,39 @@ in OPA. The handler refuses it, as before, and it is pinned in
 - Another tenant's admin gets a 404 when it tries to delete the mapping.
 
 On part 3's code the test fails, because both creates are refused with 403.
+
+## Part 5 — module and feature switches
+
+### D17 — features are tenant-scoped
+
+`GET /v1/admin/features` and `PATCH /v1/admin/features/{key}` admit
+`authz.IsTenantAdmin`, and `features` joins `tenant_admin_segments`.
+
+- Every flag row is keyed on the caller's tenant under RLS. A switch
+  changes only that tenant's modules.
+- The spine flags (`rls`, `tenancy`, `auth`, `schema.registry`, the scope,
+  evidence, framework and control-core keys) are refused in
+  `featureflag.Store.Set` for every caller, so a tenant admin cannot switch
+  off a platform invariant.
+- Every switch already writes `feature_flag_audit_log`, and since part 2 an
+  org admin reads that log.
+
+On the web:
+
+- `/admin/features` is no longer behind `PlatformAdminGate`.
+- A tenant admin's section nav and overview list Features, and the
+  overview shows its count for every admin.
+
+grc_engineer's blanket read still admits `GET /v1/admin/features` in OPA.
+The handler refuses it, as before, and `handlerNarrower2428` pins that.
+
+### D18 — tests
+
+`TestTenantAdmin2503_Features` checks that a tenant admin by role:
+
+- lists its flags;
+- switches its own `vendor.enabled` off, and another tenant's stays on;
+- is refused on `rls.policies`.
+
+On part 4's code the test fails: the list is a 403. The Playwright spec now
+expects Features among a tenant admin's pages.
