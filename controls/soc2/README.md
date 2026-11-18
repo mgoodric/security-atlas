@@ -1,17 +1,19 @@
 # SOC 2 stock control kit
 
-This directory contains the v1 stock SOC 2 control library — 50 SCF-anchored
+This directory contains the v1 stock SOC 2 control library — 63 SCF-anchored
 controls authored in the slice-009 bundle format. The kit ships with a fresh
 security-atlas deploy so the solo security leader can run their SOC 2 program
 out of the box without authoring controls from scratch.
 
 ## Provenance
 
-- **Slice:** 010 (control-as-code · SCF-anchored SOC 2 control kit)
+- **Slice:** 010 (control-as-code · SCF-anchored SOC 2 control kit); the 13
+  Privacy (P1–P8) bundles were added by #2426
 - **TSC version:** 2017 (with 2022 points-of-focus revisions)
 - **SCF crosswalk:** `data/crosswalks/soc2-tsc-2017.yaml` (slice 007)
 - **SCF anchor catalog:** `migrations/fixtures/scf-sample.json` (slice 006)
-- **HITL review log:** `docs/audit-log/control-kit-review.md`
+- **HITL review log:** `docs/audit-log/control-kit-review.md`; Privacy
+  bundles: `docs/audit-log/2426-soc2-privacy-control-kit-decisions.md`
 
 ## Licensing posture
 
@@ -55,14 +57,16 @@ upload time (`internal/control/validate.go::ValidateEvidenceKinds`).
 
 | Count | Implementation type | Notes                                                             |
 | ----- | ------------------- | ----------------------------------------------------------------- |
-| 24    | `automated`         | Rego or SQL queries over the ledger; freshness ≤ daily            |
-| 4     | `semi_automated`    | Mixed — automated detection + manual attestation closeout         |
+| 25    | `automated`         | Rego or SQL queries over the ledger                               |
+| 8     | `semi_automated`    | Mixed — automated detection + manual attestation closeout         |
 | 11    | `manual_periodic`   | Owner uploads evidence on schedule (annual / quarterly / monthly) |
-| 11    | `manual_attested`   | Roleholder asserts state digitally on schedule                    |
+| 19    | `manual_attested`   | Roleholder asserts state digitally on schedule                    |
 
-Total: **50** controls. TSC coverage: **43 / 43** crosswalked TSC codes
+Total: **63** controls. TSC coverage: **61 / 61** crosswalked TSC codes
 satisfied (100% of the SCF-crosswalkable universe; matches the slice 007
-crosswalk's mapping table).
+crosswalk's mapping table, including the Privacy criteria #1753 added).
+`go run ./cmd/scripts/coverage-check` (`just lint-soc2-coverage`, and a CI
+step in `Go · lint`) fails below 80%.
 
 ## TSC family breakdown
 
@@ -80,7 +84,14 @@ crosswalk's mapping table).
 | A1 — Availability               | 3      | A1.1, A1.2, A1.3                     |
 | C1 — Confidentiality            | 2      | C1.1, C1.2                           |
 | PI1 — Processing integrity      | 5      | PI1.1–PI1.5                          |
-| **Total**                       | **50** |                                      |
+| P1–P8 — Privacy                 | 13     | P1.1–P8.1 (see below)                |
+| **Total**                       | **63** |                                      |
+
+Several Privacy bundles each satisfy two criteria through one SCF anchor:
+`soc2_p4_2_retention_schedule` (P4.2, P4.3), `soc2_p5_1_data_subject_requests`
+(P5.1, P5.2), `soc2_p6_2_disclosure_log` (P6.2, P6.7),
+`soc2_p6_3_privacy_breach_handling` (P6.3, P6.6) and
+`soc2_p6_4_vendor_privacy_terms` (P6.4, P6.5).
 
 ## Forking
 

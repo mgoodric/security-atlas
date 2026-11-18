@@ -57,9 +57,9 @@
 # Assertions (both modes):
 #   1. `docker compose up` brings every service to running/healthy.
 #   2. atlas /health returns 200.
-#   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 50
+#   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 63
 #      SOC 2 control-bundle uploads all succeeded).
-#   4. `controls` ends up with the 50 seeded control rows.
+#   4. `controls` ends up with the 63 seeded control rows.
 #   5. `decision_audit_log` ends up with at least one row — every
 #      authenticated control-bundle upload in phase 6 passes through the
 #      OPA authz middleware, which writes one decision row per request.
@@ -517,10 +517,10 @@ db_count() {
     docker exec -i "${PG_CID}" psql -U postgres -d security_atlas -t -A -c "$1" 2>/dev/null | tr -d '[:space:]'
 }
 
-# Assertion 4: 50 control rows.
+# Assertion 4: 63 control rows.
 CONTROLS="$(db_count 'SELECT count(*) FROM controls')"
-[ "${CONTROLS}" = "50" ] || fail "controls row count = ${CONTROLS}, want 50"
-log "controls table has 50 rows"
+[ "${CONTROLS}" = "63" ] || fail "controls row count = ${CONTROLS}, want 63"
+log "controls table has 63 rows"
 
 # Assertion 5: decision_audit_log has at least one row — proves phase 6's
 # authenticated control-bundle upload path ran AND slice 065 bug #1's fix
@@ -612,13 +612,13 @@ rm -f "${LOGIN_RESP}"
 # Assertion 8 (security-atlas#1739): the stock controls the bootstrap
 # uploaded with its OAuth client land in the bootstrap tenant, and the
 # default user sees them. Before the fix the client's tokens were
-# tenant-free, so all 50 rows landed in the all-zeros tenant and the
+# tenant-free, so every stock row landed in the all-zeros tenant and the
 # signed-in user's GET /v1/controls returned count 0.
 # ---------------------------------------------------------------------
 BOOTSTRAP_TENANT_ID="00000000-0000-4000-8000-000000000001"
 NIL_TENANT_ID="00000000-0000-0000-0000-000000000000"
 IN_TENANT="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${BOOTSTRAP_TENANT_ID}'")"
-[ "${IN_TENANT}" = "50" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 50"
+[ "${IN_TENANT}" = "63" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 63"
 IN_NIL="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${NIL_TENANT_ID}'")"
 [ "${IN_NIL}" = "0" ] || fail "controls in the all-zeros tenant = ${IN_NIL}, want 0"
 UNBOUND="$(db_count "SELECT count(*) FROM oauth_clients WHERE name LIKE 'atlas-bootstrap-controls-%' AND bound_tenant_id IS DISTINCT FROM '${BOOTSTRAP_TENANT_ID}'")"
@@ -632,8 +632,8 @@ CONTROLS_CODE="$(curl -sS -o "${CONTROLS_RESP}" -w "%{http_code}" \
     || fail "GET /v1/controls: HTTP ${CONTROLS_CODE} (want 200); body: $(head -c 400 "${CONTROLS_RESP}")"
 API_COUNT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("count", -1))' "${CONTROLS_RESP}")"
 rm -f "${CONTROLS_RESP}"
-[ "${API_COUNT}" = "50" ] || fail "default user's GET /v1/controls count = ${API_COUNT}, want 50"
-log "default user sees the 50 stock controls in the bootstrap tenant; none in the all-zeros tenant"
+[ "${API_COUNT}" = "63" ] || fail "default user's GET /v1/controls count = ${API_COUNT}, want 63"
+log "default user sees the 63 stock controls in the bootstrap tenant; none in the all-zeros tenant"
 
 # ---------------------------------------------------------------------
 # Assertion 8b (security-atlas#1721): the bootstrap imports the bundled
@@ -656,16 +656,10 @@ SOC2_WITH_EDGES="$(db_count "SELECT count(DISTINCT fr.id)
 [ "${SOC2_WITH_EDGES}" = "${SOC2_WANT}" ] \
     || fail "SOC 2 requirements with edges = ${SOC2_WITH_EDGES:-?}, want ${SOC2_WANT} (every requirement in soc2-tsc-2017.yaml)"
 #
-# TEMPORARY until security-atlas#2426 (stock SOC 2 Privacy control kit)
-# lands: remove SOC2_UNMAPPED_WANT and restore the reach-every-requirement
-# assertion (stock controls map to every SOC 2 requirement with edges).
-#
-# security-atlas#1753: the Privacy criteria P1.1-P8.1 have edges but no
-# stock control yet (the Privacy control kit is a follow-up); only P4.3
-# is reached, through AST-22. So the requirements the stock controls do
-# NOT reach must be exactly the other 17:
-# a lost edge elsewhere still fails, and so does the kit landing, which
-# is when this expected gap is removed.
+# Every SOC 2 requirement with edges is reached by a stock control: the
+# requirements no bootstrap-tenant control reaches must be none. The
+# Privacy criteria P1.1-P8.1 (#1753) are reached by the Privacy kit
+# (#2426), so a lost edge or a dropped bundle fails here.
 SOC2_UNMAPPED="$(db_count "SELECT coalesce(string_agg(fr.code, ',' ORDER BY fr.code COLLATE \"C\"), '')
     FROM framework_requirements fr
     JOIN framework_versions fv ON fv.id = fr.framework_version_id
@@ -677,10 +671,9 @@ SOC2_UNMAPPED="$(db_count "SELECT coalesce(string_agg(fr.code, ',' ORDER BY fr.c
         JOIN controls c ON c.scf_anchor_id = e.scf_anchor_id
         WHERE e.framework_requirement_id = fr.id
           AND c.tenant_id = '${BOOTSTRAP_TENANT_ID}')")"
-SOC2_UNMAPPED_WANT="P1.1,P2.1,P3.1,P3.2,P4.1,P4.2,P5.1,P5.2,P6.1,P6.2,P6.3,P6.4,P6.5,P6.6,P6.7,P7.1,P8.1"
-[ "${SOC2_UNMAPPED}" = "${SOC2_UNMAPPED_WANT}" ] \
-    || fail "SOC 2 requirements no stock control reaches = '${SOC2_UNMAPPED}', want exactly the 17 unreached Privacy criteria '${SOC2_UNMAPPED_WANT}'"
-log "stock SOC 2 controls reach every SOC 2 requirement with edges except 17 Privacy criteria (no stock Privacy kit yet)"
+[ -z "${SOC2_UNMAPPED}" ] \
+    || fail "SOC 2 requirements no stock control reaches = '${SOC2_UNMAPPED}', want none"
+log "stock SOC 2 controls reach every SOC 2 requirement with edges"
 
 # ---------------------------------------------------------------------
 # Assertion 8c (security-atlas#1928) — BUNDLED MODE: the artifact store is

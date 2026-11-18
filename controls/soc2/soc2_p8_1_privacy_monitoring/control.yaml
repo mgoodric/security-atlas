@@ -1,0 +1,69 @@
+bundle_schema_version: "1"
+bundle_id: soc2_p8_1_privacy_monitoring
+title: "Privacy inquiries are resolved and privacy practices reviewed annually"
+description: |
+  Privacy questions and complaints have a published channel and are
+  resolved, and privacy practices are checked against the organisation's
+  commitments (TSC P8.1). The owner uploads the annual privacy program
+  review: inquiries and complaints received and how each was resolved,
+  and the findings of the compliance check with their remediation owners.
+
+scf_anchor_id: PRI-11
+control_family: PRI
+implementation_type: semi_automated
+owner_role: ciso
+lifecycle_state: active
+freshness_class: annual
+
+evidence_queries:
+  - id: privacy_program_review_within_365d
+    language: rego
+    evidence_kind: manual.upload.v1
+    description: "A privacy program review upload exists within the last 365 days"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
+
+manual_evidence_schema:
+  type: object
+  required: [reviewed_at, reviewer, inquiries, findings]
+  properties:
+    reviewed_at: { type: string, format: date-time }
+    reviewer: { type: string, minLength: 1 }
+    inquiry_channel: { type: string }
+    inquiries:
+      type: array
+      items:
+        type: object
+        required: [received_at, category, resolved_at]
+        properties:
+          received_at: { type: string, format: date }
+          category: { type: string, enum: [inquiry, complaint] }
+          resolved_at: { type: string, format: date }
+    findings:
+      type: array
+      items:
+        type: object
+        required: [finding, owner]
+        properties:
+          finding: { type: string }
+          owner: { type: string }
+          due_date: { type: string, format: date }
