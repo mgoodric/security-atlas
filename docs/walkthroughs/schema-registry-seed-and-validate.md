@@ -119,7 +119,7 @@ docker exec security-atlas-pg-030 psql -U postgres -d security_atlas -c "SELECT 
 ```output
            kind           | semver |  owner   | default_scf_anchors
 --------------------------+--------+----------+---------------------
- demo.encryption_state.v1 | 1.0.0  | platform | {CRY-05}
+ demo.encryption_state.v1 | 1.0.0  | platform | {CRY-07}
 (1 row)
 
 ```
