@@ -153,8 +153,10 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// #2534: the preflight honours the same private-issuer opt-in as the
 	// sign-in path. cmd/atlas refuses to boot on an invalid value, so an
 	// error here can only mean strict.
-	if p, err := oidc.IssuerPolicyFromEnv(); err == nil && p.AllowPrivate {
-		ssoH = ssoH.WithPreflightOptions(adminsso.PreflightOptions{AllowPrivateIPs: true})
+	// #2609: PATCH validates the issuer with this same policy, the one
+	// cmd/atlas hands the sign-in resolver, so a config that saves signs in.
+	if p, err := oidc.IssuerPolicyFromEnv(); err == nil {
+		ssoH = ssoH.WithPreflightOptions(adminsso.PreflightOptions{IssuerPolicy: p})
 	}
 	// #2034: PATCH seals the client secret with the key the sign-in
 	// resolver opens it with. cmd/atlas refuses to boot on a malformed

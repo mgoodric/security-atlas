@@ -30,8 +30,19 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /*
+      #2609: the OIDC key Secret is mounted root-owned, mode 0440. The atlas
+      image runs as distroless nonroot (uid/gid 65532), so the pod needs that
+      fsGroup to read it; without it the read fails and the boot is fatal.
+      Added on this pod only, and only with the mount, so MinIO and NATS
+      PVCs are not re-chowned. An explicit podSecurityContext.fsGroup wins.
+      */}}
+      {{- $podSecurityContext := deepCopy .Values.podSecurityContext }}
+      {{- if .Values.oidc.secretKey.existingSecret }}
+      {{- $podSecurityContext = merge $podSecurityContext (dict "fsGroup" 65532) }}
+      {{- end }}
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- toYaml $podSecurityContext | nindent 8 }}
       containers:
         - name: atlas
           image: "{{ .Values.image.registry }}/{{ $imageRepo }}:{{ $imageTag }}"
@@ -46,9 +57,23 @@ spec:
                 name: {{ include "security-atlas.configMapName" . }}
             - secretRef:
                 name: {{ include "security-atlas.secretName" . }}
-          {{- with .Values.atlas.extraEnv }}
+          {{- if or .Values.oidc.secretKey.existingSecret .Values.atlas.extraEnv }}
           env:
+            {{- if .Values.oidc.secretKey.existingSecret }}
+            # #2609: the OIDC client-secret key is read from a file, never
+            # from an environment variable.
+            - name: ATLAS_OIDC_SECRET_KEY_FILE
+              value: /etc/security-atlas/oidc/{{ .Values.oidc.secretKey.secretKey }}
+            {{- end }}
+            {{- with .Values.atlas.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.oidc.secretKey.existingSecret }}
+          volumeMounts:
+            - name: oidc-secret-key
+              mountPath: /etc/security-atlas/oidc
+              readOnly: true
           {{- end }}
           # The atlas server exposes /health on the HTTP port (slice 037).
           livenessProbe:
@@ -65,6 +90,17 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.atlas.resources | nindent 12 }}
+      {{- if .Values.oidc.secretKey.existingSecret }}
+      volumes:
+        - name: oidc-secret-key
+          secret:
+            secretName: {{ .Values.oidc.secretKey.existingSecret }}
+            # Owner root, group the pod's fsGroup (65532 by default, above).
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.oidc.secretKey.secretKey }}
+                path: {{ .Values.oidc.secretKey.secretKey }}
+      {{- end }}
       {{- with .Values.atlas.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

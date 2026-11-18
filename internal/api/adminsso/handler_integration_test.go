@@ -26,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 )
 
 // testCrypter seals client secrets the way the deployment's
@@ -309,7 +310,7 @@ func TestGetSSOReturns404WhenAbsent(t *testing.T) {
 
 // AC-2: POST /v1/admin/sso/preflight fetches discovery doc and returns
 // parsed endpoints. Drives a local httptest server as the fake IdP; the
-// handler is configured with AllowPrivateIPs so 127.0.0.1 isn't blocked
+// handler is configured with the private-issuer policy so 127.0.0.1 isn't blocked
 // by the SSRF guard.
 func TestPreflightReturnsParsedEndpoints(t *testing.T) {
 	// Spin up a fake IdP exposing /.well-known/openid-configuration.
@@ -328,9 +329,9 @@ func TestPreflightReturnsParsedEndpoints(t *testing.T) {
 
 	tenant := uuid.New()
 	r := newRouter(t, tenant, true, &adminsso.PreflightOptions{
-		AllowPrivateIPs: true,
-		Timeout:         3 * time.Second,
-		MaxBodyBytes:    64 * 1024,
+		IssuerPolicy: netguard.Policy{AllowLoopback: true, AllowPrivate: true},
+		Timeout:      3 * time.Second,
+		MaxBodyBytes: 64 * 1024,
 	})
 
 	body, _ := json.Marshal(map[string]any{"issuer_url": srv.URL})
@@ -355,10 +356,10 @@ func TestPreflightReturnsParsedEndpoints(t *testing.T) {
 }
 
 // Preflight rejects an issuer_url that's http (not https) in production
-// (no AllowPrivateIPs).
+// (the strict issuer policy).
 func TestPreflightRejectsHTTP(t *testing.T) {
 	tenant := uuid.New()
-	r := newRouter(t, tenant, true, nil) // default opts: AllowPrivateIPs=false
+	r := newRouter(t, tenant, true, nil) // default opts: the strict issuer policy
 
 	body, _ := json.Marshal(map[string]any{"issuer_url": "http://example.com"})
 	rec := httptest.NewRecorder()
@@ -375,9 +376,9 @@ func TestPreflightRejectsHTTP(t *testing.T) {
 func TestPreflightRejectsPrivateIP(t *testing.T) {
 	tenant := uuid.New()
 	r := newRouter(t, tenant, true, &adminsso.PreflightOptions{
-		AllowPrivateIPs: false,
-		Timeout:         3 * time.Second,
-		MaxBodyBytes:    64 * 1024,
+		IssuerPolicy: netguard.Policy{},
+		Timeout:      3 * time.Second,
+		MaxBodyBytes: 64 * 1024,
 		LookupHost: func(_ context.Context, _ string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP("10.0.0.5")}, nil
 		},

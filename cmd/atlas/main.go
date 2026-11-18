@@ -10,7 +10,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -35,7 +34,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
-	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
@@ -784,21 +782,10 @@ func main() {
 		// (PATCH /v1/admin/sso). Only ATLAS_OIDC_LOCAL_MODE=true, for dev,
 		// wires the resolver that knows no IdP. A missing secret key does
 		// not stop the boot; every saved config then refuses sign-in.
-		oidcLocalMode, err := idpconfig.LocalModeFromEnv()
+		idpResolver, oidcSource, err := oidcResolverFromEnv(pool, issuerPolicy)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
 			os.Exit(1)
-		}
-		var idpResolver oidc.IdpResolver = idpconfig.LocalModeResolver{}
-		oidcSource := "local-mode (OIDC off)"
-		if !oidcLocalMode {
-			secretCrypter, cErr := idpconfig.SecretCrypterFromEnv()
-			if cErr != nil && !errors.Is(cErr, idpconfig.ErrSecretKeyUnconfigured) {
-				fmt.Fprintf(os.Stderr, "atlas: %v\n", cErr)
-				os.Exit(1)
-			}
-			idpResolver = idpconfig.NewResolver(pool, secretCrypter, issuerPolicy.AllowLoopback)
-			oidcSource = fmt.Sprintf("oidc_idp_configs (secret_key_configured=%t)", secretCrypter != nil)
 		}
 		oidcAuth := oidc.New(idpResolver, oidcStateKey, oidc.WithIssuerPolicy(issuerPolicy))
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"

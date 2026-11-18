@@ -149,3 +149,89 @@ So reaching the gRPC admin service needs a credential that already holds
 `IsAdmin`. If a later change lets a tenant admin set `is_admin` on a key, or
 removes the rotate check, this stops holding and the gRPC path must be
 audited before that lands.
+
+## D10. Part 3: generic pre-auth errors
+
+`/auth/oidc/login` and `/auth/oidc/callback` answer before anyone is signed
+in. An unusable saved config used to reach the caller as
+`OIDC begin: oidc: IdP config unusable: <reason>`, and the reason describes
+the organisation's configuration ("issuer_url must be https", "re-enter it on
+the SSO settings page"). Both handlers now answer 503 with
+`ErrMsgSSOConfigUnusable`. The reason stays in the server log, where
+`idpconfig.Resolver.unusable` already writes it with the tenant and config
+ids. 503 rather than 400: the caller did nothing wrong, and the organisation's
+SSO is not available until an admin fixes it. The callback also clears the
+flow cookies, as its other refusals do.
+
+The sentinel moved to `oidc.ErrIdpConfigUnusable` so the handlers can match it
+without importing `idpconfig`. `idpconfig.ErrConfigUnusable` is the same
+value, so existing `errors.Is` checks keep working. Other fall-through errors
+(`OIDC begin: ...`, `OIDC callback: ...`) are unchanged: the ticket names
+this one, and the others carry no organisation configuration.
+
+## D11. One issuer policy
+
+PATCH validated the issuer with `PreflightOptions.AllowPrivateIPs`, and the
+resolver with `issuerPolicy.AllowLoopback`. Both came from the same env var,
+so they agreed in practice, but through two booleans derived in two places.
+Now `idpconfig.ValidateIssuerURL` takes a `netguard.Policy`. PATCH, preflight
+and the resolver all call it with the policy `oidc.IssuerPolicyFromEnv`
+returns: `register_admin` hands it to the SSO handler as
+`PreflightOptions.IssuerPolicy`, which replaces `AllowPrivateIPs`, and
+`cmd/atlas` hands it to the resolver. Preflight now applies the same scheme
+rule, so under the dev opt-in it refuses an `http://` issuer that is not
+loopback, as PATCH and sign-in always did.
+
+## D12. The secret key is validated in every mode
+
+`cmd/atlas` read `ATLAS_OIDC_SECRET_KEY` only when local mode was off, so a
+malformed key passed the boot check in local mode, and `register_admin` then
+silently left PATCH without a crypter. The resolver choice moved into
+`oidcResolverFromEnv`, which reads the key first, in every mode: a key that is
+set but malformed (not base64, wrong length, unreadable `_FILE`) stops the
+boot. An unset key is still not an error. `register_admin`'s comment, which
+says cmd/atlas refuses to boot on a malformed key, is now true in every mode.
+
+## D13. Helm: the key is a mounted file
+
+`oidc.secretKey.existingSecret` names a Secret the chart mounts read-only
+at `/etc/security-atlas/oidc/`, and the chart sets
+`ATLAS_OIDC_SECRET_KEY_FILE`. The key is kept apart from
+`secrets.existingSecret`, which the chart feeds to the pod as environment
+variables through `envFrom`, so that it never sits in the environment.
+`secrets.oidcSecretKey` renders it into the inline dev Secret instead. The
+compose `.env.example` already carried the key; it now notes the every-mode
+check.
+
+**Review fix: the file must be readable by the server.** The first version
+mounted the file root-owned, mode 0400, with no `fsGroup`. The atlas image
+runs as distroless `nonroot` (uid/gid 65532), so the read failed, D12 made
+that a fatal boot error, and `values-production.yaml` turned the mount on by
+default: every production install would crash-loop. Now:
+
+- the volume is mode 0440 (owner root, group the pod's `fsGroup`);
+- the atlas pod gets `fsGroup: 65532` whenever the key is mounted, merged
+  into `podSecurityContext` so an explicit `podSecurityContext.fsGroup`
+  wins. It is added to the atlas pod only, not to the chart-wide
+  `podSecurityContext` default, because that default is shared with the
+  MinIO and NATS pods, whose PVCs `fsGroup` would recursively re-chown on
+  every mount;
+- `values-production.yaml` leaves `existingSecret` empty and shows the
+  Secret name as a commented example, so an upgrade without a pre-created
+  Secret does not hang in ContainerCreating;
+- `scripts/test-helm-oidc-key.sh`, run by the `Helm chart · lint + template`
+  CI job, asserts on every render that a key volume implies an `fsGroup`,
+  and checks the mode, the override, the production values and that NATS
+  is untouched. The repo has no kind / cluster smoke job, so this is a
+  render assertion, not a boot check.
+
+## D14. SSO page wording
+
+With `trust_unverified_email_for_link` on, `emailDomainAllowed` counts an
+email with no `email_verified` claim as verified, so the flag widens the
+domain allowlist as well as SCIM linking. The SSO page help, the in-app help
+module and `oidc-setup.md` now say so.
+
+The admin help modules' "Who can do this" sections (`admin-sso`,
+`admin-users`, `admin-api-keys`) still say "Only super admins", which #2503
+made stale. That is outside this ticket and is left for a follow-up.

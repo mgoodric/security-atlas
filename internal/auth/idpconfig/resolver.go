@@ -17,14 +17,17 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ErrConfigUnusable wraps every refusal of a saved config that exists but
 // cannot be used: a non-https issuer, a missing client or redirect, or a
 // client secret that does not decrypt. The sign-in fails; nothing falls back
-// to another config or tenant. Its text never carries the secret.
-var ErrConfigUnusable = errors.New("oidc: IdP config unusable")
+// to another config or tenant. Its text never carries the secret, and the
+// sign-in handlers keep it off the wire (#2609): it is oidc.ErrIdpConfigUnusable,
+// which they answer with a generic message.
+var ErrConfigUnusable = oidc.ErrIdpConfigUnusable
 
 // Resolver is the production oidc.IdpResolver (#2034). It returns the
 // oidc_idp_configs row named name in tenantID, read under that tenant's RLS
@@ -32,18 +35,19 @@ var ErrConfigUnusable = errors.New("oidc: IdP config unusable")
 type Resolver struct {
 	pool    *pgxpool.Pool
 	crypter *SecretCrypter
-	// allowLoopbackHTTP admits an http:// issuer on a loopback host. It is
-	// the dev-only opt-in carried by oidc.AllowPrivateIssuersEnv; every
-	// other issuer must be https.
-	allowLoopbackHTTP bool
+	// issuerPolicy is the deployment's issuer policy
+	// (oidc.IssuerPolicyFromEnv), the same value PATCH /v1/admin/sso
+	// validates with (#2609), so a config that saves is one that signs in.
+	issuerPolicy netguard.Policy
 }
 
 var _ oidc.IdpResolver = (*Resolver)(nil)
 
 // NewResolver builds a Resolver over the RLS app pool. A nil crypter makes
-// every config unusable, since no client secret can be read.
-func NewResolver(pool *pgxpool.Pool, crypter *SecretCrypter, allowLoopbackHTTP bool) *Resolver {
-	return &Resolver{pool: pool, crypter: crypter, allowLoopbackHTTP: allowLoopbackHTTP}
+// every config unusable, since no client secret can be read. issuerPolicy is
+// the deployment's oidc.IssuerPolicyFromEnv.
+func NewResolver(pool *pgxpool.Pool, crypter *SecretCrypter, issuerPolicy netguard.Policy) *Resolver {
+	return &Resolver{pool: pool, crypter: crypter, issuerPolicy: issuerPolicy}
 }
 
 // ResolveIdp implements oidc.IdpResolver. No row is oidc.ErrUnknownIdp; a row
@@ -71,7 +75,7 @@ func (r *Resolver) ResolveIdp(ctx context.Context, tenantID uuid.UUID, name stri
 	}
 
 	cfgID := uuid.UUID(row.ID.Bytes)
-	if err := ValidateIssuerURL(row.IssuerUrl, r.allowLoopbackHTTP); err != nil {
+	if err := ValidateIssuerURL(row.IssuerUrl, r.issuerPolicy); err != nil {
 		return oidc.IdpConfig{}, r.unusable(ctx, tenantID, cfgID, err.Error())
 	}
 	if strings.TrimSpace(row.ClientID) == "" {
@@ -126,9 +130,13 @@ func (r *Resolver) unusable(ctx context.Context, tenantID, cfgID uuid.UUID, reas
 }
 
 // ValidateIssuerURL accepts an absolute https URL with a host and no
-// userinfo, query or fragment. With allowLoopbackHTTP, an http URL whose host
-// is loopback is also accepted, for a dev IdP on the same machine.
-func ValidateIssuerURL(raw string, allowLoopbackHTTP bool) error {
+// userinfo, query or fragment. When policy allows loopback (the dev opt-in
+// oidc.AllowPrivateIssuersEnv), an http URL whose host is loopback is also
+// accepted, for a dev IdP on the same machine.
+//
+// It is the one issuer check: PATCH /v1/admin/sso and the sign-in Resolver
+// both call it with the deployment's oidc.IssuerPolicyFromEnv (#2609).
+func ValidateIssuerURL(raw string, policy netguard.Policy) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.Hostname() == "" {
 		return errors.New("issuer_url must be an absolute URL with a host")
@@ -140,7 +148,7 @@ func ValidateIssuerURL(raw string, allowLoopbackHTTP bool) error {
 	case "https":
 		return nil
 	case "http":
-		if allowLoopbackHTTP && isLoopbackHost(u.Hostname()) {
+		if policy.AllowLoopback && isLoopbackHost(u.Hostname()) {
 			return nil
 		}
 	}

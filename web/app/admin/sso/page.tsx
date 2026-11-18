@@ -387,7 +387,10 @@ export default function SSOConfigPage() {
                   when the IdP marks the email verified. Turn this on for IdPs
                   that never send <code>email_verified</code>, such as Microsoft
                   Entra ID. An IdP that reports the email unverified is still
-                  refused.
+                  refused. With this on, an email with no{" "}
+                  <code>email_verified</code> claim also counts as verified for
+                  the allowed email domains above, so turn it on only for an IdP
+                  you trust to send real addresses.
                 </p>
               </div>
             </div>

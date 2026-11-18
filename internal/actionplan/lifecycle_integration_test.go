@@ -63,7 +63,8 @@ func TestLifecycle_TriggerPairs(t *testing.T) {
 			// #2109: verified -> completed is the system's move, which the
 			// trigger admits only as the reconcile function's owner with
 			// its marker set. The migrate pool is that owner; the marker
-			// is what action_plans_reconcile_verification sets.
+			// is the per-call nonce action_plans_reconcile_verification
+			// writes and names in the GUC (#2458).
 			// TestReconcile_TriggerRefusesUnverifyOutsideTheFunction proves
 			// the app role cannot do the same.
 			tx, err := admin.Begin(context.Background())
@@ -71,12 +72,21 @@ func TestLifecycle_TriggerPairs(t *testing.T) {
 				return err
 			}
 			defer func() { _ = tx.Rollback(context.Background()) }()
+			nonce := uuid.New()
 			if _, err := tx.Exec(context.Background(),
-				`SELECT set_config('atlas.action_plan_system_move', 'on', true)`); err != nil {
+				`INSERT INTO action_plan_system_move_nonces (nonce) VALUES ($1)`, nonce); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(context.Background(),
+				`SELECT set_config('atlas.action_plan_system_move', $1, true)`, nonce.String()); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(context.Background(),
 				`UPDATE action_plans SET status = $2 WHERE id = $1`, id, to); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(context.Background(),
+				`DELETE FROM action_plan_system_move_nonces WHERE nonce = $1`, nonce); err != nil {
 				return err
 			}
 			return tx.Commit(context.Background())
