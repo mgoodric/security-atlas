@@ -71,3 +71,46 @@ func TestList_RejectsMalformedMintedBy(t *testing.T) {
 		t.Fatalf("want 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// #2384: a label is trimmed, may be empty, and is refused over 100
+// characters or with a control character.
+func TestNormalizeLabel(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		in, want string
+		refused  bool
+	}{
+		{in: "", want: ""},
+		{in: "   ", want: ""},
+		{in: "  CI deploy  ", want: "CI deploy"},
+		{in: strings.Repeat("é", 100), want: strings.Repeat("é", 100)},
+		{in: strings.Repeat("a", 101), refused: true},
+		{in: "ci\ndeploy", refused: true},
+		{in: "ci\x00", refused: true},
+	} {
+		got, msg := normalizeLabel(tc.in)
+		if tc.refused {
+			if msg == "" {
+				t.Errorf("%q: want refused, got %q", tc.in, got)
+			}
+			continue
+		}
+		if msg != "" || got != tc.want {
+			t.Errorf("%q: got (%q, %q), want (%q, \"\")", tc.in, got, msg, tc.want)
+		}
+	}
+}
+
+// #2384: an over-long label is refused with 400 before the store is
+// touched (the nil store would panic).
+func TestIssue_RejectsLongLabel(t *testing.T) {
+	t.Parallel()
+	body, _ := json.Marshal(IssueRequest{Label: strings.Repeat("x", 101)})
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(body))
+	req = req.WithContext(authctx.WithCredential(req.Context(), credstore.Credential{IsAdmin: true}))
+	w := httptest.NewRecorder()
+	New(nil).Issue(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "label") {
+		t.Fatalf("want 400 naming label, got %d: %s", w.Code, w.Body.String())
+	}
+}

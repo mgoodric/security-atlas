@@ -37,6 +37,8 @@ export type AdminCredential = {
   expires_at?: string | null;
   // The admin who minted the key, for attribution only (#1947).
   minted_by?: string | null;
+  // The admin-chosen name for the key (#2384); absent when it has none.
+  label?: string | null;
 };
 
 export type AdminCredentialListResponse = { items: AdminCredential[] };
@@ -48,6 +50,8 @@ export type AdminCredentialIssueRequest = {
   is_admin: boolean;
   is_approver: boolean;
   owner_roles: string[];
+  // Optional name for the key (#2384); trimmed, at most 100 characters.
+  label?: string;
 };
 
 export type AdminCredentialIssueResponse = {
@@ -57,6 +61,7 @@ export type AdminCredentialIssueResponse = {
   last4: string;
   issued_at: string;
   expires_at?: string;
+  label?: string;
 };
 
 export type AdminCredentialRotateResponse = {

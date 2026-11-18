@@ -115,6 +115,9 @@ type IssueInput struct {
 	// key's owner (IssuedBy is) and nothing authorizes on it: an
 	// admin-minted machine key outlives the admin who minted it.
 	MintedBy *uuid.UUID
+	// Label is the admin-chosen name for the key (api_keys.label, #2384),
+	// shown in place of its id. Empty is an unlabelled key.
+	Label string
 }
 
 // Issue creates a new api_keys row and returns the bearer plaintext exactly
@@ -188,6 +191,10 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 		IsAdmin:        pred.IsAdmin,
 		IsApprover:     pred.IsApprover,
 		OwnerRoles:     pred.OwnerRoles,
+	}
+	// A successor keeps its predecessor's name (#2384).
+	if pred.Label != nil {
+		in.Label = *pred.Label
 	}
 	if pred.MintedBy.Valid {
 		if u, uerr := uuidFromPg(pred.MintedBy); uerr == nil {
@@ -482,6 +489,10 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 	if in.MintedBy != nil {
 		mintedBy = pgtype.UUID{Bytes: *in.MintedBy, Valid: true}
 	}
+	var label *string
+	if in.Label != "" {
+		label = &in.Label
+	}
 	row, err := q.InsertAPIKey(ctx, dbx.InsertAPIKeyParams{
 		ID:             id,
 		TenantID:       tIDU,
@@ -497,6 +508,7 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 		Last4:          bearer.Last4(plain),
 		TtlSeconds:     int64(in.TTL.Seconds()),
 		MintedBy:       mintedBy,
+		Label:          label,
 	})
 	return row, err
 }
@@ -539,6 +551,9 @@ func credentialFromRow(row dbx.ApiKey) credstore.Credential {
 		if u, err := uuidFromPg(row.MintedBy); err == nil {
 			c.MintedBy = u.String()
 		}
+	}
+	if row.Label != nil {
+		c.Label = *row.Label
 	}
 	if row.RetiresAt.Valid {
 		c.RetiresAt = row.RetiresAt.Time

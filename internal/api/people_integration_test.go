@@ -66,6 +66,11 @@ func TestPeople2085_TenantScopedNoEmail(t *testing.T) {
 	// for a missing owner.
 	keyA := seedPeopleKey(t, migrate, tenantA, &alice, &former)
 	ownerless := seedPeopleKey(t, migrate, tenantA, nil, &alice)
+	// #2384: keyA carries a label; ownerless has none.
+	if _, err := migrate.Exec(context.Background(),
+		`UPDATE api_keys SET label = 'CI deploy 2384' WHERE id = $1`, keyA); err != nil {
+		t.Fatalf("label key: %v", err)
+	}
 	bobB := seedPeopleUser(t, migrate, tenantB, "bob-2085@example.invalid", "Bob Other Tenant", "active")
 	keyB := seedPeopleKey(t, migrate, tenantB, &bobB, &bobB)
 
@@ -148,11 +153,15 @@ func TestPeople2085_TenantScopedNoEmail(t *testing.T) {
 				t.Errorf("tenant A's key %s missing from %s", keyA, body)
 			} else if k.OwnerID != alice.String() {
 				t.Errorf("key owner = %q, want issued_by %s (not minted_by)", k.OwnerID, alice)
+			} else if k.Label != "CI deploy 2384" {
+				t.Errorf("key label = %q, want %q", k.Label, "CI deploy 2384")
 			}
 			if k, ok := keys[ownerless.String()]; !ok {
 				t.Errorf("ownerless key %s missing from %s", ownerless, body)
 			} else if k.OwnerID != "" {
 				t.Errorf("ownerless key owner = %q, want none (no minted_by fallback)", k.OwnerID)
+			} else if k.Label != "" {
+				t.Errorf("unlabelled key label = %q, want none", k.Label)
 			}
 		})
 	}
