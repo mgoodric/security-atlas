@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -33,7 +34,8 @@ func TestViewerReads2556_ReadsEveryRiskRouteWritesNone(t *testing.T) {
 
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
-	viewer := liveRoleBearer(t, srv, app, tenant, "viewer")
+	liveroletest.Attach(t, srv, app)
+	viewer := liveroletest.Bearer(t, srv, tenant, "viewer")
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
 

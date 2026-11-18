@@ -37,9 +37,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
-	"github.com/mgoodric/security-atlas/internal/api/testjwt"
-	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/decision"
 )
@@ -88,7 +87,8 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	srv.AttachDB(app)
 	// #2556: a viewer by live role, through OPA (liveRoleBearer). The
 	// tests here only read, and a viewer reads the decision log.
-	bearer := liveRoleBearer(t, srv, app, tenant, "viewer")
+	liveroletest.Attach(t, srv, app)
+	bearer := liveroletest.Bearer(t, srv, tenant, "viewer")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil — DB pool not attached")
@@ -96,40 +96,6 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
 	return testEnv{server: ts, bearer: bearer}
-}
-
-// liveRoleBearer seeds a users row holding role in tenant and returns a
-// sign-in JWT for it, and attaches the real OPA bundle with the DB roles
-// resolver, so authzmw stamps the live role on the credential the handler
-// gates read. #2556 moved the risk-module read gates to live roles: a role
-// claim alone, on a server without authzmw, no longer passes them.
-func liveRoleBearer(t *testing.T, srv *api.Server, app *pgxpool.Pool, tenant, role string) string {
-	t.Helper()
-	ctx := context.Background()
-	admin := dbtest.NewMigratePool(t)
-	user := uuid.New()
-	if _, err := admin.Exec(ctx,
-		`INSERT INTO users (id, tenant_id, email, display_name, status) VALUES ($1, $2, $3, 'u2556', 'active')`,
-		user, tenant, "u2556-"+user.String()+"@example.invalid"); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	if _, err := admin.Exec(ctx,
-		`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test-2556')`,
-		tenant, user.String(), role); err != nil {
-		t.Fatalf("seed user_roles: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2`, tenant, user.String())
-		_, _ = admin.Exec(ctx, `DELETE FROM users WHERE id = $1`, user)
-	})
-	engine, err := authz.NewEngine(ctx, authz.NewDBRolesResolver(app))
-	if err != nil {
-		t.Fatalf("authz.NewEngine: %v", err)
-	}
-	srv.AttachAuthz(engine, nil)
-	claims := testjwt.OwnerFor(uuid.MustParse(tenant), []string{role})
-	claims.Subject = "user:" + user.String()
-	return srv.IssueTestJWT(t, claims)
 }
 
 func get(t *testing.T, env testEnv, path string) (*http.Response, map[string]any) {

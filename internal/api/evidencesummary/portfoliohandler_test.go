@@ -30,19 +30,23 @@ func (f fakePortfolioSummarizer) PortfolioSummarize(_ context.Context, _ evidenc
 	return f.sum, f.err
 }
 
-// portfolioRouterFor wires the route behind an owner credential + tenant ctx.
+// portfolioRouterFor wires the route behind a credential holding roles live
+// (default grc_engineer: OPA reads the portfolio for admin and grc_engineer
+// only, #2507) + tenant ctx.
 func portfolioRouterFor(svc portfolioSummarizer, tenant string, roles ...string) http.Handler {
 	if roles == nil {
-		roles = []string{"control_owner"}
+		roles = []string{"grc_engineer"}
 	}
 	h := newPortfolioHandlerWith(svc)
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := authctx.WithCredential(req.Context(), credstore.Credential{
-				TenantID:   tenant,
-				UserID:     "owner-test",
-				OwnerRoles: roles,
+				ID:          "jwt:owner-test",
+				TenantID:    tenant,
+				UserID:      "owner-test",
+				OwnerRoles:  roles,
+				TenantRoles: roles,
 			})
 			ctx, _ = tenancy.WithTenant(ctx, tenant)
 			next.ServeHTTP(w, req.WithContext(ctx))
@@ -211,7 +215,7 @@ func TestPortfolioHandler_TenantMissing(t *testing.T) {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := authctx.WithCredential(req.Context(), credstore.Credential{
-				UserID: "owner", OwnerRoles: []string{"control_owner"},
+				ID: "jwt:owner", UserID: "owner", TenantRoles: []string{"grc_engineer"},
 			})
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})

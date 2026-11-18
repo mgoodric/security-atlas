@@ -7,7 +7,7 @@ package authz_test
 //
 // This test parses every non-test Go file under internal/api and records,
 // per function, the authz.IsTenantAdmin / IsTenantApprover /
-// IsTenantRiskReader (#2556) calls in
+// IsTenantRiskReader (#2556) / HasAnyTenantRole (#2507) calls in
 // it. That inventory must equal gateSites2447 exactly: each site names the
 // gate it calls and the routes2428 rows it guards, or why it guards no
 // route. A changed, added or removed call fails here until the site table
@@ -49,6 +49,7 @@ const (
 	admin2447      = "IsTenantAdmin"
 	approver2447   = "IsTenantApprover"
 	riskReader2447 = "IsTenantRiskReader"
+	anyRole2447    = "HasAnyTenantRole"
 )
 
 // gateSites2447 is keyed by "<dir under internal/api>/<file> <func>", with
@@ -58,6 +59,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 	adm := []string{admin2447}
 	apr := []string{approver2447}
 	rdr := []string{riskReader2447}
+	anyr := []string{anyRole2447}
 	get, post, patch, put, del := http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete
 	site := func(calls []string, routes ...string) gateSite2447 {
 		return gateSite2447{calls: calls, routes: routes}
@@ -67,6 +69,50 @@ var gateSites2447 = func() map[string]gateSite2447 {
 	}
 	const preRoute = "tenant-admin gate that predates #2428 and is not in routes2428"
 	return map[string]gateSite2447{
+		// #2507: the last `len(OwnerRoles) > 0` read gates.
+		"actionplans/authz.go requireProgramRead": site(apr,
+			r2447(get, "/v1/action-plans"),
+			r2447(get, "/v1/action-plans/"+id)),
+		"actionplans/authz.go requireProgramWrite": site(adm,
+			r2447(post, "/v1/action-plans"),
+			r2447(patch, "/v1/action-plans/"+id),
+			r2447(del, "/v1/action-plans/"+id),
+			r2447(post, "/v1/action-plans/"+id+"/risks/"+id),
+			r2447(del, "/v1/action-plans/"+id+"/risks/"+id),
+			r2447(post, "/v1/action-plans/"+id+"/controls/"+id),
+			r2447(del, "/v1/action-plans/"+id+"/controls/"+id)),
+		"actionplans/handlers.go Handler.PlansForRisk":    site(rdr, r2447(get, "/v1/risks/"+id+"/action-plans")),
+		"actionplans/handlers.go Handler.PlansForControl": site(anyr, r2447(get, "/v1/controls/"+id+"/action-plans")),
+		"audit/export.go samplesHasProgramRead":           site(apr, r2447(get, "/v1/admin/samples/export")),
+		"evidence/export.go evidenceHasProgramRead":       site(apr, r2447(get, "/v1/admin/evidence/export")),
+		"exceptions/export.go exceptionsHasProgramRead":   site(apr, r2447(get, "/v1/admin/exceptions/export")),
+		"policies/export.go policiesHasProgramRead":       site(apr, r2447(get, "/v1/admin/policies/export")),
+		"oscalcomponents/handler.go hasOscalRead": site(apr,
+			r2447(get, "/v1/oscal/component-definitions"),
+			r2447(get, "/v1/oscal/component-definitions/"+id)),
+		"oscalprovenance/handler.go hasOscalRead": site(apr,
+			r2447(get, "/v1/oscal/imported-profiles/"+id+"/provenance")),
+		"personnelsecurity/authz.go hasProgramRead": site(apr,
+			r2447(get, "/v1/personnel-security/checklists"),
+			r2447(get, "/v1/personnel-security/checklists/"+id),
+			r2447(post, "/v1/personnel-security/checklists"),
+			r2447(post, "/v1/personnel-security/checklist-items/"+id+"/complete")),
+		"evidencesummary/portfoliohandler.go PortfolioHandler.PortfolioEvidenceSummary": site(apr,
+			r2447(get, "/v1/evidence-summary/portfolio")),
+		"evidencesummary/handler.go hasControlRead": site(anyr, r2447(get, "/v1/controls/"+id+"/evidence-summary")),
+		"gapexplain/handler.go hasControlRead":      site(anyr, r2447(get, "/v1/controls/"+id+"/gap-explanation")),
+		// Also GET /v1/evidence and /v1/evidence/{id}, where OPA is the
+		// narrower layer: read_gates_2507_test.go pins those.
+		"controldetail/authz.go hasControlRead": site(anyr,
+			r2447(get, "/v1/controls/"+id+"/policies"),
+			r2447(get, "/v1/controls/"+id+"/risks"),
+			r2447(get, "/v1/controls/"+id+"/history")),
+		"controls/export.go controlsHasProgramRead": site(anyr,
+			r2447(get, "/v1/controls/export"),
+			r2447(get, "/v1/controls/history/export")),
+		"dashboard/authz.go hasProgramRead": site(anyr,
+			r2447(get, "/v1/activity"),
+			r2447(get, "/v1/frameworks/posture")),
 		"actionplans/handlers.go Handler.VerifyActionPlan": site(adm, r2447(post, "/v1/action-plans/"+id+"/verify")),
 		"adminusers/moduleaccess.go Handler.moduleAccessTarget": site(adm,
 			r2447(put, "/v1/admin/users/"+id+"/module-access")),
@@ -83,8 +129,8 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"boardnarrative/handlers.go Handler.GenerateAll": site(adm, r2447(post, "/v1/board/narrative/generate-all")),
 		"checklist/handler.go Handler.ApproveSection":    site(apr, r2447(post, "/v1/controls/checklist/sections/"+id+":approve")),
 		"checklist/handler.go Handler.Generate":          site(apr, r2447(post, "/v1/controls/checklist:generate")),
-		"checklist/handler.go Handler.ExportMarkdown":    notRoute(apr, "checklist read: an approver or any owner-role credential"),
-		"checklist/handler.go Handler.LoadGeneration":    notRoute(apr, "checklist read: an approver or any owner-role credential"),
+		"checklist/handler.go Handler.ExportMarkdown":    site(anyr, r2447(get, "/v1/controls/checklist/"+id+"/export.md")),
+		"checklist/handler.go Handler.LoadGeneration":    site(anyr, r2447(get, "/v1/controls/checklist/"+id)),
 		"controldetail/authz.go readsUnscopedEvidence": notRoute(apr,
 			"per-control evidence list (#2470): narrows a period-scoped caller to control_id resolution; never a refusal"),
 		"controlimports/settings.go requireTenantAdmin":     notRoute(adm, preRoute+" (control import LLM settings)"),
@@ -214,7 +260,7 @@ func scanGateSites2447(t *testing.T) map[string][]string {
 					return true
 				}
 				pkg, ok := sel.X.(*ast.Ident)
-				if ok && pkg.Name == "authz" && (sel.Sel.Name == admin2447 || sel.Sel.Name == approver2447 || sel.Sel.Name == riskReader2447) {
+				if ok && pkg.Name == "authz" && (sel.Sel.Name == admin2447 || sel.Sel.Name == approver2447 || sel.Sel.Name == riskReader2447 || sel.Sel.Name == anyRole2447) {
 					calls = append(calls, sel.Sel.Name)
 				}
 				return true

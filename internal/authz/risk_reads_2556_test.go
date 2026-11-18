@@ -9,10 +9,8 @@ package authz_test
 //
 // The route lists are the risk module's routes in register_risk.go and
 // register_governance.go. A read listed with no gate is decided by OPA
-// alone: its handler has no role check. GET /v1/risks/{id}/action-plans is
-// the one risk read whose handler gate is not here: it is actionplans'
-// hasProgramRead, still on the #2507 allow-list and shared with
-// /v1/controls/{id}/action-plans; this file pins its OPA layer only.
+// alone: its handler has no role check. GET /v1/risks/{id}/action-plans
+// gained its risk-reader gate in #2507.
 
 import (
 	"context"
@@ -44,7 +42,7 @@ var riskReads2556 = []route2428{
 	{http.MethodGet, "/v1/risks/" + id2428 + "/children", noGate2556},
 	{http.MethodGet, "/v1/risks/" + id2428 + "/parents", noGate2556},
 	{http.MethodGet, "/v1/risks/" + id2428 + "/audit-log", noGate2556},
-	{http.MethodGet, "/v1/risks/" + id2428 + "/action-plans", noGate2556},
+	{http.MethodGet, "/v1/risks/" + id2428 + "/action-plans", riskReaderGate},
 	{http.MethodGet, "/v1/themes", noGate2556},
 	{http.MethodGet, "/v1/org_units", riskReaderGate},
 	{http.MethodGet, "/v1/org_units/" + id2428, noGate2556},

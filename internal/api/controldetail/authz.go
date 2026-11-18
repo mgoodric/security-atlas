@@ -45,7 +45,7 @@ import (
 // user_roles becomes the role source of truth, this should re-derive from
 // the resolved role set — see decisions log D5.
 func hasControlRead(c credstore.Credential) bool {
-	return c.IsAdmin || c.IsApprover || len(c.OwnerRoles) > 0
+	return authz.HasAnyTenantRole(c)
 }
 
 // requireControlRead is the guard the four handlers call FIRST — before

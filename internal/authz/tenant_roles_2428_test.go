@@ -35,6 +35,7 @@ var (
 	tenantAdminGate    = gate2428{"IsTenantAdmin", authz.IsTenantAdmin}
 	tenantApproverGate = gate2428{"IsTenantApprover", authz.IsTenantApprover}
 	riskReaderGate     = gate2428{"IsTenantRiskReader", authz.IsTenantRiskReader}
+	anyRoleGate        = gate2428{"HasAnyTenantRole", authz.HasAnyTenantRole}
 )
 
 // route2428 is one switched route and the gate its handler calls.
@@ -141,6 +142,51 @@ var routes2428 = []route2428{
 	{http.MethodGet, "/v1/risks/export", riskReaderGate},
 	{http.MethodGet, "/v1/decisions", riskReaderGate},
 	{http.MethodGet, "/v1/org_units", riskReaderGate},
+
+	// #2507: the last `len(OwnerRoles) > 0` read gates, on live roles.
+	// Action plans: reads admin and grc_engineer, writes admin only; a
+	// risk's or control's plan list follows that record's read gate.
+	{http.MethodGet, "/v1/action-plans", tenantApproverGate},
+	{http.MethodGet, "/v1/action-plans/" + id2428, tenantApproverGate},
+	{http.MethodPost, "/v1/action-plans", tenantAdminGate},
+	{http.MethodPatch, "/v1/action-plans/" + id2428, tenantAdminGate},
+	{http.MethodDelete, "/v1/action-plans/" + id2428, tenantAdminGate},
+	{http.MethodPost, "/v1/action-plans/" + id2428 + "/risks/" + id2428, tenantAdminGate},
+	{http.MethodDelete, "/v1/action-plans/" + id2428 + "/risks/" + id2428, tenantAdminGate},
+	{http.MethodPost, "/v1/action-plans/" + id2428 + "/controls/" + id2428, tenantAdminGate},
+	{http.MethodDelete, "/v1/action-plans/" + id2428 + "/controls/" + id2428, tenantAdminGate},
+	{http.MethodGet, "/v1/risks/" + id2428 + "/action-plans", riskReaderGate},
+	{http.MethodGet, "/v1/controls/" + id2428 + "/action-plans", anyRoleGate},
+	// The /v1/admin/* exports: admin and grc_engineer read.
+	{http.MethodGet, "/v1/admin/samples/export", tenantApproverGate},
+	{http.MethodGet, "/v1/admin/evidence/export", tenantApproverGate},
+	{http.MethodGet, "/v1/admin/exceptions/export", tenantApproverGate},
+	{http.MethodGet, "/v1/admin/policies/export", tenantApproverGate},
+	// OSCAL, personnel security and the evidence-summary portfolio:
+	// admin and grc_engineer.
+	{http.MethodGet, "/v1/oscal/component-definitions", tenantApproverGate},
+	{http.MethodGet, "/v1/oscal/component-definitions/" + id2428, tenantApproverGate},
+	{http.MethodGet, "/v1/oscal/imported-profiles/" + id2428 + "/provenance", tenantApproverGate},
+	{http.MethodGet, "/v1/personnel-security/checklists", tenantApproverGate},
+	{http.MethodGet, "/v1/personnel-security/checklists/" + id2428, tenantApproverGate},
+	{http.MethodPost, "/v1/personnel-security/checklists", tenantApproverGate},
+	{http.MethodPost, "/v1/personnel-security/checklist-items/" + id2428 + "/complete", tenantApproverGate},
+	{http.MethodGet, "/v1/evidence-summary/portfolio", tenantApproverGate},
+	// Control reads, the activity feed and framework posture: every role.
+	// controldetail's gate also guards GET /v1/evidence and
+	// /v1/evidence/{id}, where OPA is the narrower layer
+	// (read_gates_2507_test.go); those are not rows here.
+	{http.MethodGet, "/v1/controls/checklist/" + id2428, anyRoleGate},
+	{http.MethodGet, "/v1/controls/checklist/" + id2428 + "/export.md", anyRoleGate},
+	{http.MethodGet, "/v1/controls/" + id2428 + "/policies", anyRoleGate},
+	{http.MethodGet, "/v1/controls/" + id2428 + "/risks", anyRoleGate},
+	{http.MethodGet, "/v1/controls/" + id2428 + "/history", anyRoleGate},
+	{http.MethodGet, "/v1/controls/export", anyRoleGate},
+	{http.MethodGet, "/v1/controls/history/export", anyRoleGate},
+	{http.MethodGet, "/v1/controls/" + id2428 + "/evidence-summary", anyRoleGate},
+	{http.MethodGet, "/v1/controls/" + id2428 + "/gap-explanation", anyRoleGate},
+	{http.MethodGet, "/v1/activity", anyRoleGate},
+	{http.MethodGet, "/v1/frameworks/posture", anyRoleGate},
 }
 
 // tenantRoles2428 are the tenant roles the matrices run, each alone.
@@ -157,6 +203,8 @@ func wantAdmit2428(g gate2428, role authz.Role) bool {
 		return role == authz.RoleAdmin
 	case riskReaderGate.name:
 		return role == authz.RoleAdmin || role == authz.RoleGRCEngineer || role == authz.RoleViewer
+	case anyRoleGate.name:
+		return true
 	default:
 		return role == authz.RoleAdmin || role == authz.RoleGRCEngineer
 	}
