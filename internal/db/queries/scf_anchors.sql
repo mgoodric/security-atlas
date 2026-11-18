@@ -51,6 +51,17 @@ JOIN frameworks f ON f.id = fv.framework_id
 WHERE f.slug = $1 AND fv.tenant_id IS NULL
 ORDER BY fv.effective_from DESC NULLS LAST, fv.version DESC;
 
+-- name: ListFrameworkVersionsForTenant :many
+-- #2414: every catalog version plus the caller's own tenant-private
+-- versions, for `GET /v1/frameworks?include=versions`, newest first within
+-- each framework. RLS (tenant_or_catalog) is the boundary; the tenant_id
+-- predicate is the ADR 0026 second leg. Pairs with ListFrameworksForTenant
+-- (board_briefs.sql).
+SELECT fv.*
+FROM framework_versions fv
+WHERE fv.tenant_id IS NULL OR fv.tenant_id = sqlc.arg('tenant_id')
+ORDER BY fv.framework_id, fv.effective_from DESC NULLS LAST, fv.version DESC;
+
 -- name: GetSCFAnchorByVersionAndSCFID :one
 -- Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.
 -- The importer calls this first to classify the upsert as Created /

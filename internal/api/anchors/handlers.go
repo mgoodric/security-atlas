@@ -351,46 +351,79 @@ func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 
 // listFrameworks returns the framework catalog (global only).
 //
-// #2086: `?include=versions` (additive) adds each framework's global
-// versions, newest first, so a picker can label a framework version by
-// name and version. The catalog is a handful of frameworks, so one
-// versions query per framework stays bounded.
+// #2086: `?include=versions` (additive) adds each framework's versions,
+// newest first, so a picker can label a framework version by name and
+// version.
+//
+// #2414: with `?include=versions` the list also carries the caller's own
+// tenant-private frameworks and versions (custom or imported catalogs),
+// read in a tenant transaction so RLS binds. Another tenant's private
+// rows never appear. The plain list stays catalog-only.
 func (h *Handler) listFrameworks(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	rows, err := h.q.ListFrameworks(ctx)
+	if includes(r, "versions") {
+		h.listFrameworksWithVersions(w, r)
+		return
+	}
+	rows, err := h.q.ListFrameworks(r.Context())
 	if err != nil {
 		httperr.WriteInternal(w, r, "list frameworks", err)
 		return
 	}
-	withVersions := includes(r, "versions")
 	out := make([]frameworkWire, 0, len(rows))
 	for _, f := range rows {
-		fw := frameworkWire{
-			ID:              uuidStr(f.ID),
-			Name:            f.Name,
-			Slug:            f.Slug,
-			Issuer:          f.Issuer,
-			LatestVersionID: uuidStr(f.LatestVersionID),
+		out = append(out, frameworkFromRow(f))
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
+}
+
+// listFrameworksWithVersions serves `?include=versions`: the catalog plus
+// the caller's own frameworks and versions, two queries in one tenant tx.
+func (h *Handler) listFrameworksWithVersions(w http.ResponseWriter, r *http.Request) {
+	var (
+		fws []dbx.Framework
+		vs  []dbx.FrameworkVersion
+	)
+	err := h.inTenantTx(r.Context(), func(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
+		var err error
+		if fws, err = q.ListFrameworksForTenant(ctx, tenantID); err != nil {
+			return err
 		}
-		if withVersions {
-			vs, err := h.q.ListFrameworkVersionsBySlug(ctx, f.Slug)
-			if err != nil {
-				httperr.WriteInternal(w, r, "list framework versions", err)
-				return
-			}
-			fw.Versions = make([]frameworkVersionWire, 0, len(vs))
-			for _, v := range vs {
-				fw.Versions = append(fw.Versions, frameworkVersionWire{
-					ID:            uuidStr(v.ID),
-					Version:       v.Version,
-					Status:        string(v.Status),
-					EffectiveFrom: dateStr(v.EffectiveFrom),
-				})
-			}
+		vs, err = q.ListFrameworkVersionsForTenant(ctx, tenantID)
+		return err
+	})
+	if err != nil {
+		httperr.WriteInternal(w, r, "list frameworks with versions", err)
+		return
+	}
+	byFramework := make(map[[16]byte][]frameworkVersionWire, len(fws))
+	for _, v := range vs {
+		byFramework[v.FrameworkID.Bytes] = append(byFramework[v.FrameworkID.Bytes], frameworkVersionWire{
+			ID:            uuidStr(v.ID),
+			Version:       v.Version,
+			Status:        string(v.Status),
+			EffectiveFrom: dateStr(v.EffectiveFrom),
+		})
+	}
+	out := make([]frameworkWire, 0, len(fws))
+	for _, f := range fws {
+		fw := frameworkFromRow(f)
+		fw.Versions = byFramework[f.ID.Bytes]
+		if fw.Versions == nil {
+			fw.Versions = []frameworkVersionWire{}
 		}
 		out = append(out, fw)
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
+}
+
+func frameworkFromRow(f dbx.Framework) frameworkWire {
+	return frameworkWire{
+		ID:              uuidStr(f.ID),
+		Name:            f.Name,
+		Slug:            f.Slug,
+		Issuer:          f.Issuer,
+		LatestVersionID: uuidStr(f.LatestVersionID),
+	}
 }
 
 // listSCFVersions returns every SCF framework_version for the slice's

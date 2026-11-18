@@ -40,6 +40,7 @@ GET /scim/v2/Users/{id} settings_admin
 GET /v1/action-plans risk
 GET /v1/action-plans/{id} risk
 GET /v1/activity dashboard
+GET /v1/activity/actors dashboard
 GET /v1/activity/unified dashboard
 GET /v1/admin/audit-log settings_admin
 GET /v1/admin/audit-log/export settings_admin

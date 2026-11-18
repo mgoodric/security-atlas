@@ -9,6 +9,7 @@ import {
   policyOptions,
   riskOptions,
   toggleSelection,
+  machineActorOptions,
   userOptions,
 } from "./entity-picker";
 
@@ -77,6 +78,34 @@ describe("userOptions", () => {
     ).toEqual([
       { value: U1, label: "Alice" },
       { value: U2, label: "Zed" },
+    ]);
+  });
+
+  // #2414: /v1/people sends a user with no display name under their
+  // email's local-part (people.DisplayName), so they are listed by it.
+  test("lists a user without a display name by the local-part /v1/people sends", () => {
+    expect(
+      userOptions([{ id: U1, display_name: "jdoe", status: "active" }]),
+    ).toEqual([{ value: U1, label: "jdoe" }]);
+  });
+});
+
+describe("machineActorOptions", () => {
+  test("labels system actors and OAuth clients as <Person> does, the ID as the hint", () => {
+    expect(
+      machineActorOptions([
+        "system:scheduler",
+        "oauth_client:ci",
+        "system",
+        "system:scheduler",
+        U1,
+        "key_abc",
+        "",
+      ]),
+    ).toEqual([
+      { value: "oauth_client:ci", label: "OAuth client", hint: "ci" },
+      { value: "system", label: "System", hint: undefined },
+      { value: "system:scheduler", label: "System", hint: "scheduler" },
     ]);
   });
 });
