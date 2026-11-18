@@ -210,8 +210,7 @@ func TestLimiter_WindowSecondsEdges(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			lim := oauth.ExportNewTokenBucketLimiter(c.rate, pinnedNow)
-			if got := oauth.ExportLimiterWindowSeconds(lim); got != c.want {
+			if got := oauth.ExportWindowSeconds(c.rate); got != c.want {
 				t.Errorf("WindowSeconds(rate=%d) = %d, want %d", c.rate, got, c.want)
 			}
 		})

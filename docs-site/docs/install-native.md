@@ -220,7 +220,7 @@ sh deploy/docker/bootstrap/bootstrap.sh
 
 This is the compose `atlas-bootstrap` service. It seeds the default
 tenant, scope cell and local user, imports the bundled SCF sample and the
-SOC 2 crosswalk, then uploads the 50 SOC 2 control bundles through an
+SOC 2 crosswalk, then uploads the 63 SOC 2 control bundles through an
 OAuth client whose credentials it keeps in
 `$ATLAS_DATA_DIR/oauth-bootstrap-credentials.json` (mode 0600). It is
 idempotent, and it prints the `atlas-cli catalog import-crosswalk`

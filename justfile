@@ -38,7 +38,7 @@ test-frontend:
     cd web && npm test --if-present
 
 # Run all linters (Go + frontend + Python)
-lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
+lint: lint-go lint-errleak lint-duphelper lint-soc2-coverage lint-frontend lint-python
 
 # Pinned golangci-lint version. Mirrors the `version:` pin on the
 # golangci-lint-action in .github/workflows/ci.yml (the required `Go · lint`
@@ -78,6 +78,10 @@ lint-errleak:
 # Background: docs/audits/328-code-review-comprehensive-report.md finding H-1.
 lint-duphelper:
     go run ./cmd/scripts/duphelper-lint ./internal/api/...
+
+# #2426 — the SOC 2 stock control kit covers >= 80% of the crosswalked TSC codes.
+lint-soc2-coverage:
+    go run ./cmd/scripts/coverage-check
 
 # Lint frontend (eslint)
 lint-frontend:
