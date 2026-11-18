@@ -808,6 +808,10 @@ type Querier interface {
 	// encrypted client secret from the response shape so a leaked log line
 	// never carries the secret material.
 	GetAdminSSO(ctx context.Context, arg GetAdminSSOParams) (GetAdminSSORow, error)
+	// #2609: the current config, read inside the write's own transaction (after
+	// LockAdminSSO) as the before value of the audit row. Omits
+	// client_secret_enc for the same reason GetAdminSSO does.
+	GetAdminSSOForUpdate(ctx context.Context, arg GetAdminSSOForUpdateParams) (GetAdminSSOForUpdateRow, error)
 	// Returns a single user with their roles and most-recent session timestamp.
 	// 404 (pgx.ErrNoRows) when the id is not in the tenant.
 	GetAdminUser(ctx context.Context, arg GetAdminUserParams) (GetAdminUserRow, error)
@@ -3428,6 +3432,12 @@ type Querier interface {
 	// same manifest into control_manifest_revisions and the first one's text
 	// would be overwritten without a trace.
 	LockActiveControlByBundleID(ctx context.Context, arg LockActiveControlByBundleIDParams) (LockActiveControlByBundleIDRow, error)
+	// #2609: serialize every SSO config write in one tenant, so the before value
+	// its audit row records is the state the write replaced. A row lock alone
+	// cannot do this: while the tenant has no row, FOR UPDATE locks nothing, and
+	// two first PATCHes would each record "no config" as their before.
+	// Transaction-scoped. Namespace 11 is advisorylock.TenantSSOConfig.
+	LockAdminSSO(ctx context.Context, tenantID pgtype.UUID) error
 	// #1861: serialize every evaluation of one rule's meta-risk key inside the
 	// caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
 	// then an insert (CreateAggregateRisk); without this lock two concurrent

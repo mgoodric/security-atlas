@@ -71,3 +71,29 @@ RETURNING id,
           trust_unverified_email_for_link,
           created_at,
           updated_at;
+
+-- name: LockAdminSSO :exec
+-- #2609: serialize every SSO config write in one tenant, so the before value
+-- its audit row records is the state the write replaced. A row lock alone
+-- cannot do this: while the tenant has no row, FOR UPDATE locks nothing, and
+-- two first PATCHes would each record "no config" as their before.
+-- Transaction-scoped. Namespace 11 is advisorylock.TenantSSOConfig.
+SELECT pg_advisory_xact_lock(11, hashtext(sqlc.arg(tenant_id)::uuid::text));
+
+-- name: GetAdminSSOForUpdate :one
+-- #2609: the current config, read inside the write's own transaction (after
+-- LockAdminSSO) as the before value of the audit row. Omits
+-- client_secret_enc for the same reason GetAdminSSO does.
+SELECT id,
+       tenant_id,
+       name,
+       issuer_url,
+       client_id,
+       redirect_url,
+       allowed_email_domains,
+       trust_unverified_email_for_link,
+       created_at,
+       updated_at
+FROM oidc_idp_configs
+WHERE tenant_id = $1 AND name = $2
+FOR UPDATE;

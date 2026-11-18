@@ -79,6 +79,75 @@ func (q *Queries) GetAdminSSO(ctx context.Context, arg GetAdminSSOParams) (GetAd
 	return i, err
 }
 
+const getAdminSSOForUpdate = `-- name: GetAdminSSOForUpdate :one
+SELECT id,
+       tenant_id,
+       name,
+       issuer_url,
+       client_id,
+       redirect_url,
+       allowed_email_domains,
+       trust_unverified_email_for_link,
+       created_at,
+       updated_at
+FROM oidc_idp_configs
+WHERE tenant_id = $1 AND name = $2
+FOR UPDATE
+`
+
+type GetAdminSSOForUpdateParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Name     string      `json:"name"`
+}
+
+type GetAdminSSOForUpdateRow struct {
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Name                        string             `json:"name"`
+	IssuerUrl                   string             `json:"issuer_url"`
+	ClientID                    string             `json:"client_id"`
+	RedirectUrl                 string             `json:"redirect_url"`
+	AllowedEmailDomains         []string           `json:"allowed_email_domains"`
+	TrustUnverifiedEmailForLink bool               `json:"trust_unverified_email_for_link"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// #2609: the current config, read inside the write's own transaction (after
+// LockAdminSSO) as the before value of the audit row. Omits
+// client_secret_enc for the same reason GetAdminSSO does.
+func (q *Queries) GetAdminSSOForUpdate(ctx context.Context, arg GetAdminSSOForUpdateParams) (GetAdminSSOForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getAdminSSOForUpdate, arg.TenantID, arg.Name)
+	var i GetAdminSSOForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.IssuerUrl,
+		&i.ClientID,
+		&i.RedirectUrl,
+		&i.AllowedEmailDomains,
+		&i.TrustUnverifiedEmailForLink,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockAdminSSO = `-- name: LockAdminSSO :exec
+SELECT pg_advisory_xact_lock(11, hashtext($1::uuid::text))
+`
+
+// #2609: serialize every SSO config write in one tenant, so the before value
+// its audit row records is the state the write replaced. A row lock alone
+// cannot do this: while the tenant has no row, FOR UPDATE locks nothing, and
+// two first PATCHes would each record "no config" as their before.
+// Transaction-scoped. Namespace 11 is advisorylock.TenantSSOConfig.
+func (q *Queries) LockAdminSSO(ctx context.Context, tenantID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockAdminSSO, tenantID)
+	return err
+}
+
 const upsertAdminSSO = `-- name: UpsertAdminSSO :one
 INSERT INTO oidc_idp_configs (
     id, tenant_id, name, issuer_url, client_id,

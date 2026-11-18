@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -63,11 +64,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	var issuedBy *uuid.UUID
-	if u, err := parseUserID(cred.UserID); err == nil {
-		issuedBy = &u
-	}
-	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, req.Description, issuedBy)
+	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, req.Description, cred.actor())
 	if err != nil {
 		httperr.WriteInternal(w, r, "issue scim credential", err)
 		return
@@ -137,7 +134,7 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid credential id")
 		return
 	}
-	if err := h.store.Revoke(r.Context(), cred.TenantID, id); err != nil {
+	if err := h.store.Revoke(r.Context(), cred.TenantID, id, cred.actor()); err != nil {
 		if errors.Is(err, scim.ErrUnknownCredential) {
 			httpresp.WriteError(w, http.StatusNotFound, "unknown credential id")
 			return
@@ -151,8 +148,19 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 // --- helpers ---
 
 type adminCred struct {
-	TenantID string
-	UserID   string
+	TenantID  string
+	UserID    string
+	Principal string
+}
+
+// actor is who the audit row names (#2609): the users(id) behind the
+// caller, when there is one, and the credential's principal (#2329).
+func (c adminCred) actor() scim.Actor {
+	a := scim.Actor{Principal: c.Principal}
+	if u, err := parseUserID(c.UserID); err == nil {
+		a.UserID = &u
+	}
+	return a
 }
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
@@ -168,7 +176,7 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return adminCred{}, false
 	}
-	return adminCred{TenantID: cred.TenantID, UserID: cred.UserID}, true
+	return adminCred{TenantID: cred.TenantID, UserID: cred.UserID, Principal: credstore.PrincipalOf(cred)}, true
 }
 
 // parseUserID strips the "user:" prefix the atlas JWT subject carries before

@@ -58,6 +58,7 @@ var sqlSites = map[string]Namespace{
 	"internal/db/queries/aggregation_rules.sql":  AggregationKey,
 	"internal/db/queries/tenant_llm_routing.sql": TenantLLMRouting,
 	"internal/db/queries/framework_scopes.sql":   FrameworkScopeFreeze,
+	"internal/db/queries/admin_sso.sql":          TenantSSOConfig,
 }
 
 // TestNoUnregisteredAdvisoryLocks scans the tree for advisory lock calls.
