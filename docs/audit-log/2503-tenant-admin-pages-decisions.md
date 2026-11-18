@@ -129,7 +129,7 @@ so the segment is platform and OPA now refuses the status read too. The web
 probes it only for a super-admin. The answer is an env-var flag, so nothing a
 tenant admin needs is lost.
 
-## D5 — audit-log stays where it is (for Matt)
+## D5 — audit-log stays where it is (for Matt; resolved in D9)
 
 grc_engineer's and auditor's reads of `/v1/admin/audit-log/unified` and its
 export are their own rules (slice 124 D5) and are unchanged. Whether a tenant
@@ -140,7 +140,7 @@ access, settings, keys, SCIM/OIDC". It stays platform for a tenant admin and
 unchanged for the others until Matt decides. The same goes for the
 audit-periods and vendors exports.
 
-## D5a — grc_engineer still reads `admin/users` in OPA (for Matt)
+## D5a — grc_engineer still reads `admin/users` in OPA (for Matt; resolved in D10)
 
 `grc_engineer.rego`'s blanket read admits `GET /v1/admin/users` and
 `GET /v1/admin/users/{id}`. The handler refused grc_engineer there before
@@ -183,3 +183,86 @@ Each adds its segment to `tenant_admin_segments` and switches its handler to
   `FeatureGate` uses it for module visibility, not the admin section, and
   the Settings page's API tokens card follows `/v1/admin/credentials`, which
   moves with the credentials PR (D6).
+
+## Part 2 — SSO, and Matt's calls on D4, D5, D5a and D6
+
+The second PR of the split. Matt decided the four open items on
+2026-11-18: D5 and D5a as below, D4 as built (demo status stays platform),
+and D6 as written (the credentials mint guard lands in the credentials PR,
+before `credentials` joins the segments).
+
+### D8 — SSO is tenant-scoped
+
+`GET/PATCH /v1/admin/sso` and `POST /v1/admin/sso/preflight` admit
+`authz.IsTenantAdmin`, and `sso` joins `tenant_admin_segments`. The handler
+keys every read and write on the credential's tenant under RLS (one
+`oidc_idp_configs` row per tenant), and the sign-in resolver reads the same
+row (#2602), so a tenant admin's change affects only its own sign-in. The
+issuer validation and SSRF guard are unchanged and apply to a tenant admin
+as to anyone. The `trust_unverified_email_for_link` switch (#1944) is in the
+same config: a tenant admin can turn it on for its own tenant. It links an
+IdP identity to an existing member of that tenant by email, the same
+authority the admin already has through Users.
+
+grc_engineer's blanket read still admits `GET /v1/admin/sso` in OPA; the
+handler refuses it, as before. It is pinned in `handlerNarrower2428`.
+
+### D9 — org admins read and export their own audit log (Matt, 2026-11-18)
+
+`audit-log` joins `tenant_admin_segments`. The handler gates move from
+`cred.IsAdmin` to `authz.IsTenantAdmin`:
+
+- `GET /v1/admin/audit-log` (the feature-flag flip log): `requireAdmin`.
+- `GET /v1/admin/audit-log/unified` and `…/export`: `callerAllowedUnified`
+  takes `IsTenantAdmin` in place of the flag; the live auditor/grc_engineer
+  `user_roles` lookup is unchanged, so grc_engineer keeps its read.
+- `GET /v1/activity/unified` passes the same value as its privileged view,
+  so an org admin sees the rows a privileged caller sees there (feature-flag
+  rows and other members' own-settings rows), as a super-admin does.
+
+All four run under the credential's tenant RLS. On the web, the export bar
+on Activity (`canReachAuditLog`) admits `is_tenant_admin`.
+
+### D10 — Users is org-admin only (Matt, 2026-11-18)
+
+`users` joins `tenant_admin_only_segments`, so grc_engineer's blanket read no
+longer admits `GET /v1/admin/users` in OPA; the handler and OPA now agree,
+and the `handlerNarrower2428` pin for it is gone. One consequence: the
+unified log's module-access rows (#2172) take their payload visibility from
+`admin/users`, so a grc_engineer now sees those rows without their payload.
+The payload-gate test pins that.
+
+The payload gate used to cache one OPA answer for every kind whose source
+is `admin`, and part 1 asked it on `admin/users`. Once `users` became
+tenant-admin only, that answer also hid the decision-log and feature-flag
+payloads from grc*engineer, which `TestPayloadGate*\*` caught. The gate now
+asks per segment (`kindSourceAdminSegment`): decision rows on `audit-log`,
+feature-flag rows on `features`, module-access rows on `users`. So
+grc_engineer keeps the first two and loses only the third.
+
+### D11 — inventory rows after part 2
+
+| Route                                         | Class                     | Handler gate                                 | OPA, tenant admin by role | OPA, grc_engineer                        |
+| --------------------------------------------- | ------------------------- | -------------------------------------------- | ------------------------- | ---------------------------------------- |
+| `GET/PATCH /v1/admin/sso`, `POST …/preflight` | tenant                    | `IsTenantAdmin`                              | allow                     | read allow (handler refuses); write deny |
+| `GET /v1/admin/audit-log`                     | tenant                    | `IsTenantAdmin`                              | allow                     | allow (handler refuses)                  |
+| `GET /v1/admin/audit-log/unified`, `…/export` | tenant                    | `IsTenantAdmin` or live auditor/grc_engineer | allow                     | allow                                    |
+| `GET /v1/admin/users…`                        | tenant, tenant-admin only | `IsTenantAdmin`                              | allow                     | deny (was allow)                         |
+
+The other D1 rows are unchanged.
+
+### D12 — tests
+
+- `TestTenantAdmin2503_SSOAndAuditLog`: a tenant admin by role saves and
+  reads its SSO config, another tenant's admin sees none of it, and the
+  feature-flag log, unified read and export all answer 200.
+- `TestTenantAdmin2503_OtherRolesRefused`: grc_engineer's `GET
+/v1/admin/users` is refused by OPA before the handler runs.
+- Both fail on main's code (the SSO read is a 403, the grc_engineer read
+  reaches the handler) and pass on this PR's.
+- `slice124` / `slice135`: a tenant admin by role is now admitted to the
+  unified log and its export.
+- `gate_sites_2447` / `routes2428`: the SSO and feature-flag-log gates are
+  rows. The unified read, export and activity gates are listed with no route
+  row: the unified pair adds a live DB role lookup a cred-only row cannot
+  express, and the activity call only picks the view.

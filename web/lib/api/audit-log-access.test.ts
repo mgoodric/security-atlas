@@ -26,6 +26,19 @@ import { describe, expect, test } from "vitest";
 import { canReachAuditLog } from "./audit-log-access";
 
 describe("canReachAuditLog", () => {
+  // #2503 D5 (Matt, 2026-11-18): an org admin exports its own log.
+  test("admit: is_tenant_admin true", () => {
+    expect(canReachAuditLog({ is_admin: false, is_tenant_admin: true })).toBe(
+      true,
+    );
+  });
+
+  test("redirect: is_tenant_admin false with no matching role", () => {
+    expect(
+      canReachAuditLog({ is_admin: false, is_tenant_admin: false, roles: [] }),
+    ).toBe(false);
+  });
+
   test("admit: is_admin true overrides roles entirely", () => {
     expect(canReachAuditLog({ is_admin: true })).toBe(true);
     expect(canReachAuditLog({ is_admin: true, roles: [] })).toBe(true);

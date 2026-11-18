@@ -4,8 +4,6 @@
 
 import type { Metadata } from "next";
 
-import { PlatformAdminGate } from "@/components/admin/platform-admin-gate";
-
 export const metadata: Metadata = {
   title: "SSO",
 };
@@ -15,6 +13,6 @@ export default function AdminSsoLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // #2503: a platform page; a tenant admin gets the platform 403 panel.
-  return <PlatformAdminGate>{children}</PlatformAdminGate>;
+  // #2503: a tenant-scoped page; the /admin layout admits a tenant admin.
+  return children;
 }
