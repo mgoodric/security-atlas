@@ -11,6 +11,12 @@
 // does: a picked owner clears the unlinked text. The platform side
 // (validation, the 422, the audit row) is covered by
 // internal/api/risks/owner_integration_test.go against real Postgres.
+//
+// #2607: the picker opens inside the Owner cell of the summary strip, one
+// narrow column of seven. It once overflowed into the next cells, which
+// painted over "Save owner" and timed the click out. The spec checks the
+// open picker stays inside its cell. /api/me is mocked as an approver
+// (#2138 gates the picker on is_approver), so the viewer is known.
 
 import type { Route } from "@playwright/test";
 
@@ -65,6 +71,24 @@ test.describe("/risks/[id] unlinked owner (#2129)", () => {
     const risk = storedRisk();
     let patched: Record<string, unknown> | undefined;
 
+    await page.route("**/api/me", (route) =>
+      json(route, 200, {
+        user_id: USER_ID,
+        tenant_id: "e5e5e5e5-0000-4000-8000-000000002129",
+        display_name: USER_NAME,
+        email: "owner-picked@example.test",
+        idp_subject: "",
+        tenant_role: "admin",
+        time_zone: null,
+        theme: null,
+        is_admin: false,
+        is_tenant_admin: true,
+        is_approver: true,
+        has_tenant_role: true,
+        owner_roles: [],
+        roles: ["admin"],
+      }),
+    );
     await page.route(/\/api\/people(\?.*)?$/, (route) =>
       json(route, 200, {
         users: [{ id: USER_ID, display_name: USER_NAME, status: "active" }],
@@ -130,7 +154,20 @@ test.describe("/risks/[id] unlinked owner (#2129)", () => {
     await page.getByTestId("risk-detail-owner-pick-open").click();
     const picked = await pickFirstUser(page, "risk-detail-owner-pick");
     expect(picked).toBe(USER_NAME);
-    await page.getByTestId("risk-detail-owner-save").click();
+
+    // The open picker stays inside the Owner cell, so no neighbour can
+    // paint over its buttons (#2607).
+    const cell = await page
+      .getByTestId("risk-detail-summary-owner")
+      .boundingBox();
+    const save = page.getByTestId("risk-detail-owner-save");
+    const saveBox = await save.boundingBox();
+    expect(cell).not.toBeNull();
+    expect(saveBox).not.toBeNull();
+    expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(
+      cell!.x + cell!.width + 1,
+    );
+    await save.click();
 
     await expect.poll(() => patched).toEqual({ owner_user_id: USER_ID });
     const owner = page.getByTestId("risk-detail-owner");
