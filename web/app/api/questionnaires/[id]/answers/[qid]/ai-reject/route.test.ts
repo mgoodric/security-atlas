@@ -41,7 +41,13 @@ describe("POST /api/questionnaires/[id]/answers/[qid]/ai-reject", () => {
 
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await POST(makeReq({}) as never, paramsFor("a", "b"));
+    const res = await POST(
+      makeReq({}) as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580002",
+      ),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -59,12 +65,15 @@ describe("POST /api/questionnaires/[id]/answers/[qid]/ai-reject", () => {
     );
     const res = await POST(
       makeReq({ answer_id: "answer-1" }) as never,
-      paramsFor("qn1", "question-1"),
+      paramsFor(
+        "00000000-0000-0000-0000-000025580003",
+        "00000000-0000-0000-0000-000025580004",
+      ),
     );
     expect(res.status).toBe(200);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
     expect(calledURL).toContain(
-      "/v1/questionnaires/qn1/answers/question-1/ai-reject",
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580003/answers/00000000-0000-0000-0000-000025580004/ai-reject",
     );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
@@ -83,7 +92,10 @@ describe("POST /api/questionnaires/[id]/answers/[qid]/ai-reject", () => {
     );
     const res = await POST(
       makeReq({ answer_id: "answer-1" }) as never,
-      paramsFor("qn1", "question-1"),
+      paramsFor(
+        "00000000-0000-0000-0000-000025580003",
+        "00000000-0000-0000-0000-000025580004",
+      ),
     );
     expect(res.status).toBe(409);
   });
@@ -98,7 +110,10 @@ describe("POST /api/questionnaires/[id]/answers/[qid]/ai-reject", () => {
     );
     const res = await POST(
       makeReq({ answer_id: "answer-1" }) as never,
-      paramsFor("qn1", "question-1"),
+      paramsFor(
+        "00000000-0000-0000-0000-000025580003",
+        "00000000-0000-0000-0000-000025580004",
+      ),
     );
     expect(res.status).toBe(404);
   });

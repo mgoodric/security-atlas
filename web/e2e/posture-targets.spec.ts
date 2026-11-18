@@ -107,6 +107,22 @@ test.describe("posture targets (#2136)", () => {
     await expect(tile.getByTestId("framework-tile-set-target")).toHaveText(
       "Edit target",
     );
+
+    // #2341: a target below the value (40 / 30 / 20 against 50.0%) is
+    // exceeded, so the tile is green and never red.
+    await tile.getByTestId("framework-tile-set-target").click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Target coverage (%)").fill("40");
+    await dialog.getByLabel("Warning threshold (%)").fill("30");
+    await dialog.getByLabel("Critical threshold (%)").fill("20");
+    await dialog.getByRole("button", { name: "Save target" }).click();
+    await expect(dialog).toBeHidden();
+
+    await expect(coverage).toHaveAttribute("data-tone", "green");
+    await expect(coverage).not.toHaveClass(/destructive/);
+    await expect(tile.getByTestId("framework-tile-target")).toHaveText(
+      "On target · target 40%",
+    );
   });
 
   test("an unscoped framework still shows Scope not set", async ({

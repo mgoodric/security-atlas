@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 async function proxy(
   id: string,
@@ -41,6 +42,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string; riskId: string }> },
 ): Promise<Response> {
   const { id, riskId } = await params;
+  const bad = rejectNonUUID({ id, riskId });
+  if (bad) return bad;
   return proxy(id, riskId, "POST");
 }
 
@@ -49,5 +52,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; riskId: string }> },
 ): Promise<Response> {
   const { id, riskId } = await params;
+  const bad = rejectNonUUID({ id, riskId });
+  if (bad) return bad;
   return proxy(id, riskId, "DELETE");
 }

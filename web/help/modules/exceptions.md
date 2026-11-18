@@ -38,8 +38,8 @@ While an exception is active, the control shows **Excepted** wherever
 the exception applies, whatever its evidence says. Excepted is never a
 pass. A framework's posture still counts the control as covered, but
 shows separately how much of the framework rests only on exceptions.
-When an exception starts or ends, the control's state follows at its
-evaluation.
+Starting an exception, ending it by expiry, or revoking it re-evaluates
+the control straight away, so its state changes then.
 
 ## What this page shows
 

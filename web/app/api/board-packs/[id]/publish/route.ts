@@ -8,13 +8,15 @@
 
 import { NextRequest } from "next/server";
 
-import { forwardJSON } from "@/lib/api/bff";
+import { forwardJSON, rejectNonUUID } from "@/lib/api/bff";
 
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   let body: unknown;
   try {
     body = await req.json();

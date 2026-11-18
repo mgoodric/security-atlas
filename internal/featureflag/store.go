@@ -69,7 +69,7 @@ type AuditEntry struct {
 // transaction.
 //
 // Field `pool` may be nil for unit tests that exercise the helper +
-// Gate middleware without a DB; in that case Get / List / Set return
+// ModuleGate without a DB; in that case Get / List / Set return
 // the Seed default (Get) or an empty list (List) or ErrNoPool (Set).
 type Store struct {
 	pool *pgxpool.Pool
@@ -85,18 +85,25 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // that exercise the helper without a DB use this signal.
 var ErrNoPool = errors.New("featureflag: store has no DB pool wired")
 
+// ErrStoreUnavailable is wrapped by Get when the flag read fails for a
+// reason other than a missing row (the DB is down, the transaction could
+// not open). The flag it returns alongside is the Seed default.
+var ErrStoreUnavailable = errors.New("featureflag: flag store unavailable")
+
 // Get returns the effective Flag for (current-tenant, key).
 //
 // Lookup order:
 //  1. Try feature_flags row (under tenant tx).
 //  2. On pgx.ErrNoRows -> return Seed default with HasOverride=false.
-//  3. On any other DB error -> log warning, return Seed default with
-//     HasOverride=false, swallow the error (anti-criterion P0: feature
-//     flags MUST NOT fail closed; RLS is the security boundary).
+//  3. On any other DB error -> log warning, return the Seed default with
+//     HasOverride=false AND an error wrapping ErrStoreUnavailable. Enabled
+//     swallows it and answers the default (slice 059 anti-criterion P0);
+//     ModuleGate does not guess a tenant's module switch from the default
+//     and answers 503 instead (#2339).
 //
 // Returns ErrNotFound when the key is absent from the Seed list (so a
-// typo'd key in a Gate(key) call surfaces at startup rather than
-// silently allowing the route to serve).
+// typo'd key surfaces as a 500 rather than silently allowing the route
+// to serve).
 func (s *Store) Get(ctx context.Context, key string) (Flag, error) {
 	def, ok := DefaultByKey(key)
 	if !ok {
@@ -127,12 +134,10 @@ func (s *Store) Get(ctx context.Context, key string) (Flag, error) {
 		return nil
 	})
 	if err != nil {
-		// Anti-criterion P0: never fail closed. Log the warning and
-		// return the Seed default. The operator sees a degraded service
-		// (no audit-log entry for the failed lookup) but no capability
-		// is silently disabled.
-		log.Printf("featureflag: DB read failed for key=%q: %v -- falling back to seed default", key, err)
-		return flagFromDefault(def), nil
+		// Log and hand back the Seed default with the error: Enabled
+		// answers the default, ModuleGate answers 503 (#2339).
+		log.Printf("featureflag: DB read failed for key=%q: %v -- returning seed default with error", key, err)
+		return flagFromDefault(def), fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
 	}
 	if !hasOverride {
 		return flagFromDefault(def), nil

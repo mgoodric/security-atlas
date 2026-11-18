@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
@@ -31,6 +32,9 @@ import (
 type moduleGateFixture struct {
 	url           string
 	admin, member string
+	memberID      string
+	tenant        string
+	migrate       *pgxpool.Pool
 }
 
 func newModuleGateFixture(t *testing.T) *moduleGateFixture {
@@ -58,8 +62,11 @@ func newModuleGateFixture(t *testing.T) *moduleGateFixture {
 	srv.AttachDB(app)
 	srv.AttachAuthz(engine, authz.NewAuditWriter(app))
 	f := &moduleGateFixture{
-		admin:  srv.IssueTestJWT(t, adminClaims),
-		member: srv.IssueTestJWT(t, memberClaims),
+		admin:    srv.IssueTestJWT(t, adminClaims),
+		member:   srv.IssueTestJWT(t, memberClaims),
+		memberID: memberClaims.Subject,
+		tenant:   tenant,
+		migrate:  migrate,
 	}
 	ts := httptest.NewServer(srv.HTTPHandlerForTests())
 	t.Cleanup(ts.Close)
@@ -250,4 +257,50 @@ func equalStates(got, want map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// #2339: a request the module gate refuses writes one decision_audit_log
+// row (deny, module_disabled, the module and the actor), and a polling
+// client's repeats inside the window write no more.
+func TestModuleGate_SwitchedOffAttemptIsAudited(t *testing.T) {
+	f := newModuleGateFixture(t)
+	f.setSwitch(t, "questionnaires.enabled", false)
+
+	for i := 0; i < 3; i++ {
+		if got := f.do(t, http.MethodGet, "/v1/questionnaires", f.member, nil); got.status != http.StatusNotFound {
+			t.Fatalf("off: GET /v1/questionnaires: status %d; want 404", got.status)
+		}
+	}
+
+	rows, err := f.migrate.Query(context.Background(), `
+		SELECT user_id, result, resource_type, resource_id, policy_hits, request_path
+		  FROM decision_audit_log
+		 WHERE tenant_id = $1::uuid AND reason = 'module_disabled'`, f.tenant)
+	if err != nil {
+		t.Fatalf("query decision_audit_log: %v", err)
+	}
+	defer rows.Close()
+	type row struct {
+		user, result, rtype, rid, path string
+		hits                           []string
+	}
+	var got []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.user, &r.result, &r.rtype, &r.rid, &r.hits, &r.path); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("module_disabled rows = %d (%+v); want 1 for three polls", len(got), got)
+	}
+	r := got[0]
+	if r.user != f.memberID || r.result != "deny" || r.rtype != "module" || r.rid != "questionnaires" ||
+		r.path != "/v1/questionnaires" || len(r.hits) != 1 || r.hits[0] != "module_gate:questionnaires.enabled" {
+		t.Fatalf("row %+v; want the member's deny on module questionnaires", r)
+	}
 }

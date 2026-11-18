@@ -40,26 +40,29 @@ import "github.com/mgoodric/security-atlas/internal/api/credstore"
 // install-wide and /v1/admin/* gates stay on cred.IsAdmin (#2216 D2).
 //
 // A JWT session's role claim (OwnerRoles) does not count: it outlives a
-// revoke until the token expires (#2381). An API key's owner_roles label
-// still does, as it did before #2428, so no key loses access.
+// revoke until the token expires (#2381). An unbound API key's owner_roles
+// label still does, as it did before #2428: it names no user, so the label
+// is its grant. A key bound to a user counts its owner's live roles alone
+// (#2541): its label is a copy taken when the key was minted, and keeping it
+// would let a revoked admin act as one through the key.
 func IsTenantAdmin(cred credstore.Credential) bool {
 	if cred.IsAdmin || hasLabel(cred.TenantRoles, RoleAdmin) {
 		return true
 	}
-	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleAdmin)
+	return ownerLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleAdmin)
 }
 
 // IsTenantApprover reports whether cred may approve: a tenant admin, the
 // approver flag, or the live tenant grc_engineer role (#2428). It matches
 // grc_engineer.rego, which grants grc_engineer the approve action, so a
 // handler gate and the OPA decision admit the same callers. As in
-// IsTenantAdmin, an API key's owner_roles label counts and a JWT role
-// claim does not.
+// IsTenantAdmin, an unbound API key's owner_roles label counts, and neither a
+// JWT role claim nor a bound key's label does.
 func IsTenantApprover(cred credstore.Credential) bool {
 	if IsTenantAdmin(cred) || cred.IsApprover || hasLabel(cred.TenantRoles, RoleGRCEngineer) {
 		return true
 	}
-	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
+	return ownerLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
 }
 
 // IsTenantRiskReader reports whether cred may read the risk register, the
@@ -77,13 +80,14 @@ func IsTenantRiskReader(cred credstore.Credential) bool {
 }
 
 // IsTenantControlOwner reports whether cred holds the live tenant
-// control_owner role, or, for an API key, the control_owner owner_roles
-// label. As in IsTenantAdmin, a JWT role claim does not count.
+// control_owner role, or, for an unbound API key, the control_owner
+// owner_roles label. As in IsTenantAdmin, neither a JWT role claim nor a
+// bound key's label counts.
 func IsTenantControlOwner(cred credstore.Credential) bool {
 	if hasLabel(cred.TenantRoles, RoleControlOwner) {
 		return true
 	}
-	return !jwtSession(cred) && hasLabel(cred.OwnerRoles, RoleControlOwner)
+	return ownerLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleControlOwner)
 }
 
 // HasTenantRole reports whether the caller holds any role in its current
@@ -143,12 +147,22 @@ func TenantRoleLabels(cred credstore.Credential) []string {
 // user on the roster who can never acknowledge. The label is set by an admin
 // when the key is minted and goes when the key is revoked; it is not a copy
 // of a revocable tenant role, and an ack grants nothing.
+//
+// A bound key's label that names a canonical role (control_owner,
+// grc_engineer, ...) is the exception (#2541): that role is revocable, and
+// the owner's live user_roles already carry it while it is held. So it counts
+// only through TenantRoles, and a revoked control_owner cannot attest through
+// a key minted while they held the role.
 func AckRoleLabels(cred credstore.Credential) []string {
 	out := append([]string(nil), cred.TenantRoles...)
 	if jwtSession(cred) && !machineJWT(cred) {
 		return out
 	}
+	bound := boundKey(cred)
 	for _, l := range cred.OwnerRoles {
+		if bound && isCanonicalRole(l) {
+			continue
+		}
 		if !containsLabel(out, l) {
 			out = append(out, l)
 		}
@@ -189,6 +203,30 @@ func roleLabelIsGrant(cred credstore.Credential) bool {
 	default:
 		return true
 	}
+}
+
+// ownerLabelIsGrant reports whether the tenant gates (IsTenantAdmin,
+// IsTenantApprover, IsTenantControlOwner) count cred's OwnerRoles: never for a
+// JWT, whose role claim outlives a revoke (#2381), and never for a key bound
+// to a user, whose label is a copy of the owner's roles (#2541).
+func ownerLabelIsGrant(cred credstore.Credential) bool {
+	return !jwtSession(cred) && !boundKey(cred)
+}
+
+// boundKey reports whether cred is an API key bound to a user: issued_by is
+// set, so UserID is the owner's id rather than the key's own. A key naming no
+// user at all (empty UserID) is not bound.
+func boundKey(cred credstore.Credential) bool {
+	return apiKey(cred) && cred.UserID != "" && cred.UserID != cred.ID
+}
+
+func isCanonicalRole(l string) bool {
+	for _, r := range CanonicalRoles() {
+		if l == string(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func containsLabel(labels []string, l string) bool {

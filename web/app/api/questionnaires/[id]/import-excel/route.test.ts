@@ -18,6 +18,8 @@ vi.mock("next/headers", () => ({
 
 import { POST } from "./route";
 
+const QID = "00000000-0000-0000-0000-000025580001";
+
 function makeReq(form: FormData): Promise<Request> {
   return multipartRequest(form);
 }
@@ -42,7 +44,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
   test("401 when bearer cookie missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
     const form = new FormData();
-    const res = await POST((await makeReq(form)) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor(QID));
     expect(res.status).toBe(401);
   });
 
@@ -64,10 +66,12 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
       "test.xlsx",
     );
 
-    const res = await POST((await makeReq(form)) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor(QID));
     expect(res.status).toBe(201);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/abc/import-excel");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/import-excel",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("POST");
     const headers = init?.headers as Record<string, string> | undefined;
@@ -87,7 +91,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
       },
       body,
     });
-    const res = await POST(req as never, paramsFor("abc"));
+    const res = await POST(req as never, paramsFor(QID));
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -100,7 +104,7 @@ describe("POST /api/questionnaires/[id]/import-excel", () => {
       }),
     );
     const form = new FormData();
-    const res = await POST((await makeReq(form)) as never, paramsFor("abc"));
+    const res = await POST((await makeReq(form)) as never, paramsFor(QID));
     expect(res.status).toBe(413);
   });
 });

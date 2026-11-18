@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { dispositionClaim, Disposition } from "@/lib/api/oscal-components";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // Server-side proxy for the operator disposition. The disposition verb rides
 // in the request body (`{disposition, note}`) and is mapped to the upstream
@@ -13,12 +14,14 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
   let body: { disposition?: string; note?: string };
   try {
     body = (await req.json()) as { disposition?: string; note?: string };

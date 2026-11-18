@@ -138,8 +138,9 @@ func writeBriefPosture(w *strings.Builder, b Brief) {
 	if c.NoScopedFrameworks() {
 		w.WriteString(`<div class="drift">No framework has an activated scope, so no coverage figure is reported.</div>`)
 	} else {
-		fmt.Fprintf(w, `<div class="drift">Requirement coverage averages %s%% across the %d framework(s) with an activated scope.</div>`,
-			html.EscapeString(formatPct(c.CoveragePct)), c.ScopedFrameworkCount)
+		fmt.Fprintf(w, `<div class="drift">Requirement coverage averages %s%% across the %d %s with an activated scope.</div>`,
+			html.EscapeString(formatPct(c.CoveragePct)), c.ScopedFrameworkCount,
+			pluralize(c.ScopedFrameworkCount, "framework", "frameworks"))
 	}
 	w.WriteString(`<div class="grid">`)
 	for _, fp := range b.Frameworks {

@@ -393,7 +393,7 @@ func (h *Handler) editContext(w http.ResponseWriter, r *http.Request) (context.C
 	// the cut OPA admits here (csf.rego + admin.rego). HasOwnerRole (#2530)
 	// refused a tenant admin: its admin wildcard is the super-admin flag.
 	if !authz.IsTenantApprover(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer or admin role required to edit the CSF assessment")
+		httpresp.WriteError(w, http.StatusForbidden, "the grc_engineer or admin role (a tenant admin or a super-admin) is required to edit the CSF assessment")
 		return nil, "", false
 	}
 	actor := cred.UserID

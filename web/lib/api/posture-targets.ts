@@ -47,22 +47,18 @@ export type PostureTargetInput = {
   direction: PostureDirection;
 };
 
-/** The roles the platform lets set a posture target (hasTargetAdmin). */
-const TARGET_ROLES = ["admin", "grc_engineer"];
-
 /**
  * canSetPostureTarget mirrors the platform's guard, so the tile offers
- * "Set target" only to a caller whose PUT would succeed. Like
- * `canManageTaxonomy`, it reads what `/v1/me` echoes of the credential:
- * `is_admin` and the JWT's tenant role list in `owner_roles`. Anything
- * unknown is view-only.
+ * "Set target" only to a caller whose PUT would succeed. The handler
+ * gates on `authz.IsTenantApprover` over the live tenant roles (admin or
+ * grc_engineer, #2447), and `/v1/me` reports exactly that as
+ * `is_approver`. The JWT's `owner_roles` claim is not read: it goes
+ * stale after a role is revoked (#2341). Anything unknown is view-only.
  */
 export function canSetPostureTarget(
-  me: { is_admin?: boolean; owner_roles?: readonly string[] } | undefined,
+  me: { is_approver?: boolean } | undefined,
 ): boolean {
-  if (!me) return false;
-  if (me.is_admin === true) return true;
-  return (me.owner_roles ?? []).some((r) => TARGET_ROLES.includes(r));
+  return me?.is_approver === true;
 }
 
 /**

@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { forwardMultipart } from "@/lib/api/bff";
+import { forwardMultipart, rejectNonUUID } from "@/lib/api/bff";
 import { parseBoundedForm, readBoundedUpload } from "@/lib/api/upload";
 
 // MAX_UPLOAD_BYTES mirrors the handler's MaxBytesReader in
@@ -25,6 +25,8 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const read = await readBoundedUpload(req, {
     maxBytes: MAX_UPLOAD_BYTES,
     tooLarge: "attachment exceeds the 100 MiB upload cap",

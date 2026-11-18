@@ -199,7 +199,14 @@ func (s *Server) buildRouter() *chi.Mux {
 	// with the switched-off marker before the OPA role decision; core
 	// routes and switched-on modules fall through to it. It replaces the
 	// per-route featureflag.Gate groups board and OSCAL vendor claims used.
-	root.Use(featureflag.ModuleGate(featureFlagStore))
+	// #2339: a refused request writes a decision_audit_log row (deduped per
+	// tenant, actor and switch), since the OPA step that audits every
+	// other decision never sees it; a failed module-state read answers 503.
+	var gateOpts []featureflag.GateOption
+	if s.authzAudit != nil {
+		gateOpts = append(gateOpts, featureflag.WithAttemptRecorder(newGatedAttemptAuditor(s.authzAudit).Record))
+	}
+	root.Use(featureflag.ModuleGate(featureFlagStore, gateOpts...))
 	// #2172: the module access step. A switched-on optional module outside
 	// the caller's module access answers 403 naming the module, before the
 	// OPA role decision; admins, auditors and members with "all" fall

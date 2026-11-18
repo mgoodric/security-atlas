@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 export async function POST(
   _req: NextRequest,
@@ -10,12 +11,14 @@ export async function POST(
     params,
   }: { params: Promise<{ id: string; qid: string; proposalID: string }> },
 ): Promise<Response> {
+  const { id, qid, proposalID } = await params;
+  const bad = rejectNonUUID({ id, qid, proposalID });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id, qid, proposalID } = await params;
   const upstream = await fetch(
     `${apiBaseURL()}/v1/questionnaires/${encodeURIComponent(
       id,

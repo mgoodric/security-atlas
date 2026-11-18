@@ -19,12 +19,15 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {

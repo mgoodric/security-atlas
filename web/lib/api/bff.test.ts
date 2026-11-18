@@ -31,7 +31,7 @@ vi.mock("next/headers", () => ({
 vi.mock("next/server", () => mockNextServer());
 
 import { ATLAS_JWT_COOKIE } from "../auth";
-import { forwardJSON, noStore } from "./bff";
+import { forwardJSON, noStore, rejectUnsafeSegment, SEGMENT } from "./bff";
 
 describe("forwardJSON", () => {
   beforeEach(() => {
@@ -180,5 +180,49 @@ describe("noStore (slice 746)", () => {
     expect(wrapped.status).toBe(204);
     expect(wrapped.headers.get("Cache-Control")).toBe("no-store");
     expect(wrapped.body).toBeNull();
+  });
+});
+
+describe("rejectUnsafeSegment (#2558)", () => {
+  const UUID = "00000000-0000-0000-0000-000000002558";
+
+  test.each([
+    ["slug", "risk.themes"],
+    ["slug", "evidence_freshness_pct"],
+    ["slugOrUUID", "third-party"],
+    ["slugOrUUID", UUID],
+    ["token", "aB3_-xYz"],
+    ["credentialID", `key_${UUID}`],
+    ["credentialID", UUID],
+    ["code", "IAC-06.1"],
+    ["code", "hipaa:2013:164.308(a)(1)(ii)(A)"],
+  ] as const)("SEGMENT.%s admits %s", (allow, v) => {
+    expect(rejectUnsafeSegment({ p: v }, SEGMENT[allow])).toBeNull();
+  });
+
+  const unsafe = ["", ".", "..", "a/b", "a\\b", "a%2Fb", "%2E%2E"];
+  for (const allow of Object.keys(SEGMENT) as (keyof typeof SEGMENT)[]) {
+    test.each(unsafe)(`SEGMENT.${allow} refuses %j`, async (v) => {
+      const res = rejectUnsafeSegment({ p: v }, SEGMENT[allow]);
+      expect(res?.status).toBe(400);
+      expect(await res?.json()).toEqual({
+        error: "p is not a valid path segment",
+      });
+    });
+  }
+
+  test("a closed set admits its members and names them on refusal", async () => {
+    const kinds: ReadonlySet<string> = new Set(["current", "target"]);
+    expect(rejectUnsafeSegment({ kind: "target" }, kinds)).toBeNull();
+    const res = rejectUnsafeSegment({ kind: ".." }, kinds);
+    expect(res?.status).toBe(400);
+    expect(await res?.json()).toEqual({
+      error: "kind must be one of current, target",
+    });
+  });
+
+  test("checks every param it is given", () => {
+    const res = rejectUnsafeSegment({ a: "ok", b: ".." }, SEGMENT.slug);
+    expect(res?.status).toBe(400);
   });
 });

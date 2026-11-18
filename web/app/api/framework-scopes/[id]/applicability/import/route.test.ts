@@ -18,7 +18,9 @@ vi.mock("next/server", () => mockNextServer());
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { POST } from "./route";
 
-const ctx = { params: Promise.resolve({ id: "scope-1" }) };
+const ctx = {
+  params: Promise.resolve({ id: "00000000-0000-0000-0000-000025580001" }),
+};
 
 function makeReq(body: string, contentLength?: number): Request {
   const headers: Record<string, string> = { "Content-Type": "text/csv" };
@@ -26,7 +28,7 @@ function makeReq(body: string, contentLength?: number): Request {
     headers["Content-Length"] = String(contentLength);
   }
   return new Request(
-    "http://test/api/framework-scopes/scope-1/applicability/import",
+    "http://test/api/framework-scopes/00000000-0000-0000-0000-000025580001/applicability/import",
     { method: "POST", headers, body },
   );
 }
@@ -59,7 +61,7 @@ describe("POST /api/framework-scopes/[id]/applicability/import", () => {
     expect(res.status).toBe(200);
     const [url, init] = fetchSpy.mock.calls[0];
     expect(String(url)).toBe(
-      "http://atlas:8080/v1/framework-scopes/scope-1/applicability/import",
+      "http://atlas:8080/v1/framework-scopes/00000000-0000-0000-0000-000025580001/applicability/import",
     );
     expect((init as RequestInit).body).toBe(csv);
   });

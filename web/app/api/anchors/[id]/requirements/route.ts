@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getAnchorRequirements } from "@/lib/api/anchors";
+import { SEGMENT, rejectUnsafeSegment } from "@/lib/api/bff";
 
 // Slice 484 — the version-aware reverse-traversal proxy. Reads the optional
 // `?framework_version=slug:version` query and forwards it upstream so the
@@ -21,6 +22,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const bad = rejectUnsafeSegment({ id }, SEGMENT.code);
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {

@@ -28,17 +28,20 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await params;
   const anchor = req.nextUrl.searchParams.get("anchor") ?? "";
   // Empty anchor is forwarded so the upstream returns its canonical
   // 400 response — the BFF does not invent validation copy (the same

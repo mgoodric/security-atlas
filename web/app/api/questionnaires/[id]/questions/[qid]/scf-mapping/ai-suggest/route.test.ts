@@ -36,7 +36,13 @@ describe("POST mapping ai-suggest BFF", () => {
 
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await POST({} as never, paramsFor("q1", "question1"));
+    const res = await POST(
+      {} as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580002",
+      ),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -48,11 +54,17 @@ describe("POST mapping ai-suggest BFF", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    const res = await POST({} as never, paramsFor("q1", "question1"));
+    const res = await POST(
+      {} as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580002",
+      ),
+    );
     expect(res.status).toBe(200);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
     expect(calledURL).toContain(
-      "/v1/questionnaires/q1/questions/question1/scf-mapping/ai-suggest",
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/questions/00000000-0000-0000-0000-000025580002/scf-mapping/ai-suggest",
     );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;

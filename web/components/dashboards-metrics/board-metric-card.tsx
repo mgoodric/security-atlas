@@ -24,7 +24,9 @@ import {
   EVIDENCE_FRESHNESS_METRIC_ID,
   freshnessPctFromReport,
 } from "@/lib/api/freshness-consistency";
+import { getMe } from "@/lib/api/me";
 import {
+  canSetMetricTarget,
   fetchObservations,
   fetchTarget,
   measuredObservations,
@@ -85,6 +87,9 @@ export function BoardMetricCard({
   });
 
   const target = targetQuery.data ?? null;
+  // #2341: only a caller who may set a target is linked to the form.
+  const meQuery = useQuery({ queryKey: ["dashboard", "me"], queryFn: getMe });
+  const canSetTarget = canSetMetricTarget(meQuery.data);
 
   // For the freshness KPI, derive the headline value from live freshness;
   // otherwise use the latest stored observation. `freshnessPctFromReport`
@@ -182,7 +187,8 @@ export function BoardMetricCard({
                   target{" "}
                   {formatValue(parseValue(target.target_value), metric.unit)}
                 </span>
-              ) : (
+              ) : canSetTarget ? (
+                // #2341: leads an admin to the detail page's Set target.
                 <Link
                   href={`/dashboards/metrics/${encodeURIComponent(
                     metric.id,
@@ -192,6 +198,13 @@ export function BoardMetricCard({
                 >
                   No target set
                 </Link>
+              ) : (
+                <span
+                  className="text-xs text-muted-foreground"
+                  data-testid={`board-metric-${metric.id}-no-target`}
+                >
+                  No target set
+                </span>
               )}
               {trend ? (
                 <span

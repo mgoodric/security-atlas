@@ -3,7 +3,9 @@ package featureflag
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -393,6 +395,29 @@ func ModuleForFlag(key string) (m Module, f *Feature, ok bool) {
 	return Module{}, nil, false
 }
 
+// GatedAttempt is one request ModuleGate refused because its module or
+// feature is switched off.
+type GatedAttempt struct {
+	// Module is the owning module's key.
+	Module string
+	// FlagKey is the switch that is off: the module's, or the feature's.
+	FlagKey string
+}
+
+// GateOption configures ModuleGate.
+type GateOption func(*gateConfig)
+
+type gateConfig struct {
+	record func(*http.Request, GatedAttempt)
+}
+
+// WithAttemptRecorder has ModuleGate call record for every request it
+// refuses as switched off, after the 404 is written. The recorder owns its
+// failure handling: the response is already sent (#2339).
+func WithAttemptRecorder(record func(*http.Request, GatedAttempt)) GateOption {
+	return func(c *gateConfig) { c.record = record }
+}
+
 // ModuleGate is the module gate step of the authorization chain. It
 // resolves the request path's owner from the registry and answers 404
 // with the switched-off marker (X-Feature-Disabled: <flag key>, body
@@ -409,11 +434,16 @@ func ModuleForFlag(key string) (m Module, f *Feature, ok bool) {
 // encoded "/" in an id cannot route past it.
 //
 // Mount it after tenancy (the flag read is tenant-scoped under RLS) and
-// before the OPA role decision. A flag-store error falls open to the Seed
-// default, as Enabled does for every switch (RLS is the security boundary,
-// not the switch); Board reporting and Vendor claims default off, so they
-// fall closed. An unknown FlagKey is a code bug and answers 500.
-func ModuleGate(looker Looker) func(http.Handler) http.Handler {
+// before the OPA role decision. A flag-store error answers 503
+// {"error":"module_state_unavailable"}: the gate does not guess the
+// tenant's switch from the Seed default, since serving the module could
+// expose one the tenant switched off, and a 404 would claim the tenant
+// switched it off (#2339). An unknown FlagKey is a code bug and answers 500.
+func ModuleGate(looker Looker, opts ...GateOption) func(http.Handler) http.Handler {
+	var cfg gateConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			paths := []string{r.URL.Path}
@@ -429,12 +459,19 @@ func ModuleGate(looker Looker) func(http.Handler) http.Handler {
 					continue
 				}
 				off, err := switchedOffKey(r, looker, o)
-				if err != nil {
+				if errors.Is(err, ErrNotFound) {
 					http.Error(w, "feature flag misconfigured: unknown key", http.StatusInternalServerError)
+					return
+				}
+				if err != nil {
+					writeModuleStateUnavailable(w, r, o, err)
 					return
 				}
 				if off != "" {
 					writeFeatureDisabled(w, off)
+					if cfg.record != nil {
+						cfg.record(r, GatedAttempt{Module: o.Module.Key, FlagKey: off})
+					}
 					return
 				}
 			}
@@ -472,8 +509,8 @@ func switchedOffKey(r *http.Request, looker Looker, o Owner) (string, error) {
 		keys = append(keys, o.Feature.FlagKey)
 	}
 	for _, k := range keys {
-		on, err := Enabled(r.Context(), looker, k)
-		if err != nil && errors.Is(err, ErrNotFound) {
+		on, err := lookup(r.Context(), looker, k)
+		if err != nil {
 			return "", err
 		}
 		if !on {
@@ -481,6 +518,32 @@ func switchedOffKey(r *http.Request, looker Looker, o Owner) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// moduleStateRetryAfterSeconds is the Retry-After hint on a 503 from a
+// failed module-state read, the same as the authz step's
+// database_unavailable.
+const moduleStateRetryAfterSeconds = 5
+
+// writeModuleStateUnavailable answers a request whose module switch could
+// not be read: logged, counted (atlas.module_gate.state_errors), and 503
+// {"error":"module_state_unavailable"}.
+func writeModuleStateUnavailable(w http.ResponseWriter, r *http.Request, o Owner, err error) {
+	countModuleStateError(r.Context(), o.Module.Key)
+	slog.Error("module gate: module state read failed",
+		slog.String("module", o.Module.Key),
+		slog.String("method", r.Method),
+		slog.String("path", r.URL.Path),
+		slog.Int("status", http.StatusServiceUnavailable),
+		slog.String("error", err.Error()),
+	)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", strconv.Itoa(moduleStateRetryAfterSeconds))
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":       "module_state_unavailable",
+		"retry_after": moduleStateRetryAfterSeconds,
+	})
 }
 
 // writeFeatureDisabled writes the switched-off marker: 404, the

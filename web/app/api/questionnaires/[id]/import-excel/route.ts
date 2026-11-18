@@ -24,6 +24,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { rejectNonUUID } from "@/lib/api/bff";
 import { parseBoundedForm, readBoundedUpload } from "@/lib/api/upload";
 
 // MAX_UPLOAD_BYTES mirrors questionnaire.MaxUploadBytes (5 MiB), which the
@@ -36,13 +37,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const read = await readBoundedUpload(req, {
     maxBytes: MAX_UPLOAD_BYTES,
     tooLarge: "upload exceeds the 5 MB size cap",
     notMultipart: NOT_MULTIPART,
   });
   if (!read.ok) return read.response;
-  const { id } = await params;
   const form = await parseBoundedForm(read.upload);
   if (!form) {
     return NextResponse.json({ error: NOT_MULTIPART }, { status: 400 });
