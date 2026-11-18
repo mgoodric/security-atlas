@@ -48,6 +48,10 @@ export type DetailHeaderProps = {
   edit?: DetailHeaderLink;
   primaryAction?: DetailHeaderAction;
   overflow?: readonly RowActionItem[];
+  /** A page's own actions that are not Edit, one lifecycle step or an
+   *  overflow item (the control page's Evaluate now and bundle actions,
+   *  #2140). Rendered after the back link, before the shared cluster. */
+  actions?: ReactNode;
   /** Page body, rendered under the header by PageShell. */
   children?: ReactNode;
   tabs?: ReactNode;
@@ -68,6 +72,7 @@ export function DetailHeader({
   edit,
   primaryAction,
   overflow,
+  actions,
   children,
   tabs,
   "data-testid": testId,
@@ -93,6 +98,7 @@ export function DetailHeader({
       actions={
         <>
           {back}
+          {actions}
           <DetailHeaderActions
             edit={edit}
             primaryAction={primaryAction}

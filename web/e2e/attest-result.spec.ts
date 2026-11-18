@@ -86,7 +86,7 @@ test.describe("attestation pass / fail (#2111)", () => {
     await expect(result).toHaveAttribute("data-result", "fail", {
       timeout: 30_000,
     });
-    await expect(result).toHaveText("fail");
+    await expect(result).toHaveText("Fail");
 
     await attest(
       page,
@@ -96,6 +96,6 @@ test.describe("attestation pass / fail (#2111)", () => {
     await expect(result).toHaveAttribute("data-result", "pass", {
       timeout: 30_000,
     });
-    await expect(result).toHaveText("pass");
+    await expect(result).toHaveText("Pass");
   });
 });
