@@ -564,7 +564,7 @@ func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithTenant: %v", err)
 	}
-	privileged, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IsAdmin: true})
+	privileged, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IsAdmin: true}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("seed is_admin key: %v", err)
 	}
@@ -578,7 +578,7 @@ func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
 	// but not rotate it, which would hand it the member's bearer and retire
 	// the member's own token.
 	member := seedMember2261(t, own, "active", "viewer")
-	memberKey, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IssuedBy: &member})
+	memberKey, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IssuedBy: &member}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("seed member key: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
 	}
 
 	// Its own bound key rotates, and the successor stays bound to it.
-	ownKey, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IssuedBy: &admin})
+	ownKey, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IssuedBy: &admin}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("seed own key: %v", err)
 	}

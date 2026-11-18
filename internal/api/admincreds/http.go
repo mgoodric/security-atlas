@@ -131,7 +131,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 	if m, merr := uuid.Parse(credstore.MinterUserID(cred)); merr == nil {
 		in.MintedBy = &m
 	}
-	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, in)
+	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, in, auditActor(cred))
 	if err != nil {
 		httperr.WriteInternal(w, r, "issue failed", err)
 		return
@@ -272,7 +272,7 @@ func (h *Handler) Rotate(w http.ResponseWriter, r *http.Request) {
 	if !h.callerMayHandle(w, r, cred, uid, true) {
 		return
 	}
-	successor, plain, predExp, err := h.store.Rotate(ctx, cred.TenantID, uid)
+	successor, plain, predExp, err := h.store.Rotate(ctx, cred.TenantID, uid, auditActor(cred))
 	if err != nil {
 		if errors.Is(err, apikeystore.ErrUnknownKey) {
 			httpresp.WriteError(w, http.StatusNotFound, "unknown credential id")
@@ -312,7 +312,7 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	if !h.callerMayHandle(w, r, cred, uid, false) {
 		return
 	}
-	if err := h.store.Revoke(ctx, cred.TenantID, uid); err != nil {
+	if err := h.store.Revoke(ctx, cred.TenantID, uid, auditActor(cred)); err != nil {
 		if errors.Is(err, apikeystore.ErrUnknownKey) {
 			httpresp.WriteError(w, http.StatusNotFound, "unknown credential id")
 			return
@@ -359,6 +359,14 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// auditActor is who the audit row names (#2609): the users(id) behind the
+// caller (uuid.Nil for a caller that is not a user) and the acting
+// credential's principal (#2329).
+func auditActor(cred credstore.Credential) apikeystore.Actor {
+	u, _ := credstore.CallerUserID(cred)
+	return apikeystore.Actor{UserID: u, Principal: credstore.PrincipalOf(cred)}
 }
 
 // mintWithinCaller reports why cred may not hold a key with these flags and

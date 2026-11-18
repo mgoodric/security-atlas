@@ -119,8 +119,9 @@ type IssueInput struct {
 
 // Issue creates a new api_keys row and returns the bearer plaintext exactly
 // once. The plaintext is hashed before persistence — nothing in the DB can
-// recover it.
-func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput) (credstore.Credential, string, error) {
+// recover it. The api_key_issue audit row naming by is written in the same
+// transaction (#2609).
+func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput, by Actor) (credstore.Credential, string, error) {
 	plain, err := bearer.Generate(s.prefix)
 	if err != nil {
 		return credstore.Credential{}, "", err
@@ -138,16 +139,23 @@ func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput) (cred
 	if err != nil {
 		return credstore.Credential{}, "", err
 	}
+	issued := credentialFromRow(row)
+	if err := s.audit(ctx, q, row.TenantID, by, AuditActionKeyIssue,
+		map[string]any{}, keyAuditOf(issued)); err != nil {
+		return credstore.Credential{}, "", err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return credstore.Credential{}, "", err
 	}
-	return credentialFromRow(row), plain, nil
+	return issued, plain, nil
 }
 
 // Rotate mints a successor with the same scope/kinds/flags and owner
 // (issued_by) as the predecessor and sets the predecessor's `retires_at` to
-// now()+rotationGrace.
-func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.UUID) (credstore.Credential, string, time.Time, error) {
+// now()+rotationGrace. The api_key_rotate audit row naming by is written in
+// the same transaction (#2609): before is the predecessor, after is the
+// successor and the predecessor's retirement.
+func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.UUID, by Actor) (credstore.Credential, string, time.Time, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return credstore.Credential{}, "", time.Time{}, err
@@ -213,14 +221,26 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 		return credstore.Credential{}, "", time.Time{}, err
 	}
 
+	successor := credentialFromRow(row)
+	predecessor := credentialFromRow(pred)
+	retired := predecessor
+	retired.RetiresAt = retiresAt
+	if err := s.audit(ctx, q, tIDU, by, AuditActionKeyRotate,
+		map[string]any{"predecessor": keyAuditOf(predecessor)},
+		map[string]any{"predecessor": keyAuditOf(retired), "successor": keyAuditOf(successor)}); err != nil {
+		return credstore.Credential{}, "", time.Time{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return credstore.Credential{}, "", time.Time{}, err
 	}
-	return credentialFromRow(row), plain, retiresAt, nil
+	return successor, plain, retiresAt, nil
 }
 
-// Revoke flips revoked_at on the key.
-func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID) error {
+// Revoke flips revoked_at on the key. The api_key_revoke audit row naming by
+// is written in the same transaction (#2609); revoking a key that is already
+// revoked changes nothing and writes no row.
+func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID, by Actor) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -234,7 +254,8 @@ func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID) error
 	if err != nil {
 		return err
 	}
-	if _, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}}); err != nil {
+	cur, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUnknownKey
 		}
@@ -242,6 +263,14 @@ func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID) error
 	}
 	if err := q.RevokeAPIKey(ctx, dbx.RevokeAPIKeyParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}}); err != nil {
 		return err
+	}
+	if !cur.RevokedAt.Valid {
+		before := keyAuditOf(credentialFromRow(cur))
+		after := before
+		after.Revoked = true
+		if err := s.audit(ctx, q, tIDU, by, AuditActionKeyRevoke, before, after); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }

@@ -104,7 +104,7 @@ func TestAPIKeys_CrossTenantRLS(t *testing.T) {
 	store := apikeystore.NewStore(appPool, adminPool, testHasher, 0)
 	store.SetPrefix(bearer.PrefixTest)
 
-	_, _, err := store.Issue(withTenant(t, tenantA), tenantA.String(), apikeystore.IssueInput{})
+	_, _, err := store.Issue(withTenant(t, tenantA), tenantA.String(), apikeystore.IssueInput{}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Issue(A): %v", err)
 	}
@@ -138,7 +138,7 @@ func TestAPIKeys_AuthenticateAndRevoke(t *testing.T) {
 	store := apikeystore.NewStore(appPool, adminPool, testHasher, 0)
 	store.SetPrefix(bearer.PrefixTest)
 
-	cred, plain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{})
+	cred, plain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestAPIKeys_AuthenticateAndRevoke(t *testing.T) {
 	}
 
 	credUUID, _ := parseCredID(cred.ID)
-	if err := store.Revoke(withTenant(t, tenant), tenant.String(), credUUID); err != nil {
+	if err := store.Revoke(withTenant(t, tenant), tenant.String(), credUUID, apikeystore.Actor{}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	if _, err := store.Authenticate(context.Background(), plain); !errors.Is(err, apikeystore.ErrUnknownKey) {
@@ -196,12 +196,12 @@ func TestAPIKeys_RotationGraceWindow(t *testing.T) {
 		})
 	store.SetPrefix(bearer.PrefixTest)
 
-	cred, predPlain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{})
+	cred, predPlain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{}, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
 	predUUID, _ := parseCredID(cred.ID)
-	successor, succPlain, predExpiresAt, err := store.Rotate(withTenant(t, tenant), tenant.String(), predUUID)
+	successor, succPlain, predExpiresAt, err := store.Rotate(withTenant(t, tenant), tenant.String(), predUUID, apikeystore.Actor{})
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}

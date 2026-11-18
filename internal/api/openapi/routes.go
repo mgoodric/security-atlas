@@ -22,9 +22,9 @@ type RouteSpec struct {
 
 // RouteSpecs is the canonical route list. See package doc.
 var RouteSpecs = []RouteSpec{
-	{Method: "DELETE", Path: "/v1/action-plans/{id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "DELETE /v1/action-plans/{id}"},
+	{Method: "DELETE", Path: "/v1/action-plans/{id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "DELETE /v1/action-plans/{id} — tombstone an action plan; 409 when an open mitigate risk it links would be left with no linked control or live action plan (the whole tombstone is refused; the message names the risk)"},
 	{Method: "DELETE", Path: "/v1/action-plans/{id}/controls/{control_id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "DELETE /v1/action-plans/{id}/controls/{control_id}"},
-	{Method: "DELETE", Path: "/v1/action-plans/{id}/risks/{risk_id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "DELETE /v1/action-plans/{id}/risks/{risk_id}"},
+	{Method: "DELETE", Path: "/v1/action-plans/{id}/risks/{risk_id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "DELETE /v1/action-plans/{id}/risks/{risk_id} — unlink a risk from an action plan; 404 when not linked; 409 when the risk is open, mitigate, and this plan is its last linked control or live action plan"},
 	{Method: "DELETE", Path: "/v1/admin/group-role-mappings/{id}", Tag: "admin-group-role-mappings", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/group-role-mappings/{id}"},
 	{Method: "DELETE", Path: "/v1/admin/llm-routing", Tag: "admin-llm-routing", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/llm-routing — clear cloud-LLM routing, revert to local-ollama (slice 499)"},
 	{Method: "DELETE", Path: "/v1/admin/scim-credentials/{id}", Tag: "admin-scim-credentials", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/scim-credentials/{id}"},

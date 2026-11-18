@@ -50,6 +50,11 @@ import {
 } from "@/components/ui/table";
 
 import { describeEvent, groupByDay } from "@/lib/activity-sentences";
+import {
+  type ActivityWindow,
+  defaultActivityWindow,
+  toRFC3339Day,
+} from "@/lib/activity-window";
 import { enumLabel } from "@/lib/labels/enum-labels";
 import {
   machineActorOptions,
@@ -79,23 +84,6 @@ import {
 // into more work. 10 pages × 1000 rows/page = 10,000 rows, mirroring
 // slice 125.
 const AUTO_LOAD_PAGE_LIMIT = 10;
-
-// Default window: last 7 days.
-function defaultFrom(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 7);
-  return toRFC3339Day(d);
-}
-function defaultTo(): string {
-  return toRFC3339Day(new Date());
-}
-
-function toRFC3339Day(d: Date): string {
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}T00:00:00.000Z`;
-}
 
 function htmlDateValue(rfc3339: string): string {
   return rfc3339.slice(0, 10);
@@ -127,13 +115,26 @@ type Filters = {
   view: View;
 };
 
-export function ActivityPageClient({ canExport }: { canExport: boolean }) {
+export function ActivityPageClient({
+  canExport,
+  openedAt,
+}: {
+  canExport: boolean;
+  openedAt: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // #2464: the default window ends at the moment the page opened. The
+  // server shell supplies that moment, so the server render and the
+  // hydrated client agree on it (a clock read on each side would leave
+  // the server-rendered export href on a different `to` than the feed).
+  // It is fixed for the life of the page so the query key does not move
+  // on every render.
+  const [defaults] = useState(() => defaultActivityWindow(new Date(openedAt)));
   const filters = useMemo<Filters>(
-    () => parseFilters(searchParams),
-    [searchParams],
+    () => parseFilters(searchParams, defaults),
+    [searchParams, defaults],
   );
 
   const queryEnabled = rangeIsValid(filters.from, filters.to);
@@ -309,7 +310,10 @@ export function ActivityPageClient({ canExport }: { canExport: boolean }) {
   );
 }
 
-function parseFilters(searchParams: URLSearchParams): Filters {
+function parseFilters(
+  searchParams: URLSearchParams,
+  defaults: ActivityWindow,
+): Filters {
   const fromRaw = searchParams.get("from");
   const toRaw = searchParams.get("to");
   const actor = searchParams.get("actor") ?? "";
@@ -321,8 +325,8 @@ function parseFilters(searchParams: URLSearchParams): Filters {
     searchParams.get("view") === "ledger" ? "ledger" : "sentences";
 
   const from =
-    fromRaw && Number.isFinite(Date.parse(fromRaw)) ? fromRaw : defaultFrom();
-  const to = toRaw && Number.isFinite(Date.parse(toRaw)) ? toRaw : defaultTo();
+    fromRaw && Number.isFinite(Date.parse(fromRaw)) ? fromRaw : defaults.from;
+  const to = toRaw && Number.isFinite(Date.parse(toRaw)) ? toRaw : defaults.to;
 
   const kinds: ActivityKind[] = kindRaw
     ? kindRaw
