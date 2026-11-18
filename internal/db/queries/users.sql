@@ -113,10 +113,11 @@ SELECT (
 )::boolean AS taken;
 
 -- name: ListTenantUserNames :many
--- #2450: every user of the tenant with the two columns a name is built
--- from (people.DisplayName), for the risk and vendor exports' owner name.
--- Disabled users stay listed: they still name the owner of older records.
-SELECT id, display_name, email
+-- #2450: the tenant's users that have a display name, for the risk and
+-- vendor exports' owner_name. Email is not read: an export never names a
+-- user by their email or its local-part (slice 139 D1). Disabled users
+-- stay listed: they still name the owner of older records.
+SELECT id, btrim(display_name)::text AS display_name
 FROM users
-WHERE tenant_id = $1
+WHERE tenant_id = $1 AND btrim(display_name) <> ''
 ORDER BY id;

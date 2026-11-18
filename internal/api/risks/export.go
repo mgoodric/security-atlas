@@ -150,8 +150,9 @@ type riskRow struct {
 	// (#2107). The export carries every risk, closed ones included.
 	Status        string
 	ClosureReason string
-	// OwnerUserID is the risk's owner user (#2129) and OwnerName the name
-	// GET /v1/people shows for them (#2450); both empty when unset.
+	// OwnerUserID is the risk's owner user (#2129) and OwnerName their
+	// display name (#2450), blank when they have none: the export never
+	// names a user by their email's local-part.
 	OwnerUserID *uuid.UUID
 	OwnerName   string
 }
@@ -575,7 +576,7 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 		child := uuid.UUID(l.ChildRiskID.Bytes)
 		parentsOf[child] = append(parentsOf[child], uuid.UUID(l.ParentRiskID.Bytes))
 	}
-	ownerNames, err := people.NamesByID(ctx, q, tenantID)
+	ownerNames, err := people.ExportNamesByID(ctx, q, tenantID)
 	if err != nil {
 		return nil, false, err
 	}

@@ -61,12 +61,18 @@ The ticket's third item was done by #2581 (#2138): `history-format.ts` marks
 `owner_user_id` as a `person` ref and `risk-history.tsx` renders it through
 `<Person>`. No change here.
 
-## D5 — vendor export names the owner by display name only
+## D5 — both exports name the owner by display name only
 
-The dispatcher's rule was the `/v1/people` name with its local-part fallback.
-The risk export uses exactly that (`people.NamesByID`). The vendor export
-cannot: slice 139 D1 masks every email-shaped owner so a vendor export handed
-to a third party leaks no local-parts, and a test pins that the local-part
-never appears. So `owner_name` there is the trimmed `display_name`, empty
-when the user has none; `owner_user_id` still identifies them. Both columns
-are appended so existing positions hold.
+The first rule was the `/v1/people` name with its local-part fallback. The
+vendor export could not follow it: slice 139 D1 masks every email-shaped
+owner so a vendor export handed to a third party leaks no local-parts, and a
+test pins that the local-part never appears.
+
+**Matt, 2026-11-18 (review of #2640):** the risk export follows the vendor
+export. In both, `owner_name` is the trimmed `display_name`, blank when the
+user has none; `owner_user_id` still identifies them. No email local-part
+appears in any export. One helper, `people.ExportNamesByID`, serves both,
+and its query (`ListTenantUserNames`) does not read `email` at all. A test
+in each export pins that a user with no display name exports a blank name
+and that their local-part is absent from the body. Both columns are appended
+so existing positions hold.

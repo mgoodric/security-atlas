@@ -575,10 +575,11 @@ func TestRiskExport_ParentRiskIDsColumn(t *testing.T) {
 	}
 }
 
-// #2450: a risk owned by a user exports the owner's id and the name
-// GET /v1/people shows for them: display_name, else the email's
-// local-part. A risk with no owner user leaves both empty and keeps its
-// free-text treatment_owner.
+// #2450: a risk owned by a user exports the owner's id and display name.
+// A user with no display name exports a blank name, never the email's
+// local-part (Matt, 2026-11-18: as the vendor export, slice 139 D1). A
+// risk with no owner user leaves both empty and keeps its free-text
+// treatment_owner.
 func TestRiskExport_OwnerNameBesideFreeText(t *testing.T) {
 	tenant := uuid.New()
 	admin := dbtest.NewMigratePool(t)
@@ -617,6 +618,9 @@ func TestRiskExport_OwnerNameBesideFreeText(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
 	}
+	if strings.Contains(rec.Body.String(), "bob-2450") {
+		t.Errorf("export leaks an owner's email local-part: %s", rec.Body.String())
+	}
 	rows := mustParseRiskCSV(t, rec.Body.String())
 	idx := map[string]int{}
 	for i, h := range rows[0] {
@@ -628,7 +632,7 @@ func TestRiskExport_OwnerNameBesideFreeText(t *testing.T) {
 	for id, owner := range owners {
 		name := "Alice Owner"
 		if owner == unnamed {
-			name = "bob-2450"
+			name = ""
 		}
 		want[id.String()] = [3]string{"", owner.String(), name}
 	}

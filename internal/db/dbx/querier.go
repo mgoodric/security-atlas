@@ -3170,9 +3170,10 @@ type Querier interface {
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
-	// #2450: every user of the tenant with the two columns a name is built
-	// from (people.DisplayName), for the risk and vendor exports' owner name.
-	// Disabled users stay listed: they still name the owner of older records.
+	// #2450: the tenant's users that have a display name, for the risk and
+	// vendor exports' owner_name. Email is not read: an export never names a
+	// user by their email or its local-part (slice 139 D1). Disabled users
+	// stay listed: they still name the owner of older records.
 	ListTenantUserNames(ctx context.Context, tenantID pgtype.UUID) ([]ListTenantUserNamesRow, error)
 	// The 15-min cron enumerates tenants from the migrator pool (BYPASSRLS)
 	// so it can iterate every tenant; each evaluator then runs through the

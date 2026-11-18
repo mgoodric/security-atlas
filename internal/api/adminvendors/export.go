@@ -38,9 +38,9 @@
 //
 // `owner_user_id` and `owner_name` (#2450) name the vendor's owner user
 // (#2129) beside the masked free text. `owner_name` is the user's
-// display_name only: GET /v1/people falls back to the email's local-part,
-// which this export never emits (D1 above), so a user with no display name
-// exports an empty name and their id.
+// display_name only (people.ExportNamesByID): GET /v1/people falls back to
+// the email's local-part, which no export emits (D1 above), so a user with
+// no display name exports an empty name and their id.
 //
 // `scope_cell_ids` renders as a `;`-separated UUID list (mirroring the
 // CSV-friendly join the slice-135 reference uses for repeated-column
@@ -87,6 +87,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/people"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/export"
@@ -483,22 +484,13 @@ func callerAllowedExport(cred credstore.Credential) bool {
 	return false
 }
 
-// ownerNames is each tenant user's display_name, for owner_name (#2450).
-// A user with no display name is left out rather than named by the
-// email's local-part, which this export never emits (slice 139 D1).
+// ownerNames is each tenant user's display name, for owner_name (#2450).
 func (h *Handler) ownerNames(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID]string, error) {
-	names := map[uuid.UUID]string{}
+	var names map[uuid.UUID]string
 	err := h.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
-		rows, err := q.ListTenantUserNames(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
-		if err != nil {
-			return fmt.Errorf("list user names: %w", err)
-		}
-		for _, r := range rows {
-			if name := strings.TrimSpace(r.DisplayName); name != "" {
-				names[uuid.UUID(r.ID.Bytes)] = name
-			}
-		}
-		return nil
+		var err error
+		names, err = people.ExportNamesByID(ctx, q, tenantID)
+		return err
 	})
 	return names, err
 }

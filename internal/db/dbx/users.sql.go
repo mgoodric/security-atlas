@@ -205,21 +205,21 @@ func (q *Queries) LinkUserIdpByEmail(ctx context.Context, arg LinkUserIdpByEmail
 }
 
 const listTenantUserNames = `-- name: ListTenantUserNames :many
-SELECT id, display_name, email
+SELECT id, btrim(display_name)::text AS display_name
 FROM users
-WHERE tenant_id = $1
+WHERE tenant_id = $1 AND btrim(display_name) <> ''
 ORDER BY id
 `
 
 type ListTenantUserNamesRow struct {
 	ID          pgtype.UUID `json:"id"`
 	DisplayName string      `json:"display_name"`
-	Email       string      `json:"email"`
 }
 
-// #2450: every user of the tenant with the two columns a name is built
-// from (people.DisplayName), for the risk and vendor exports' owner name.
-// Disabled users stay listed: they still name the owner of older records.
+// #2450: the tenant's users that have a display name, for the risk and
+// vendor exports' owner_name. Email is not read: an export never names a
+// user by their email or its local-part (slice 139 D1). Disabled users
+// stay listed: they still name the owner of older records.
 func (q *Queries) ListTenantUserNames(ctx context.Context, tenantID pgtype.UUID) ([]ListTenantUserNamesRow, error) {
 	rows, err := q.db.Query(ctx, listTenantUserNames, tenantID)
 	if err != nil {
@@ -229,7 +229,7 @@ func (q *Queries) ListTenantUserNames(ctx context.Context, tenantID pgtype.UUID)
 	var items []ListTenantUserNamesRow
 	for rows.Next() {
 		var i ListTenantUserNamesRow
-		if err := rows.Scan(&i.ID, &i.DisplayName, &i.Email); err != nil {
+		if err := rows.Scan(&i.ID, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
