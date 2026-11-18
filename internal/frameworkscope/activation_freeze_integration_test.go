@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -32,7 +33,7 @@ import (
 
 // seedAuditPeriod inserts an audit period on the framework version, frozen
 // at frozenAt when frozen is true, and removes it at cleanup.
-func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid.UUID, frozen bool, frozenAt time.Time) {
+func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid.UUID, frozen bool, frozenAt time.Time) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	ctx := context.Background()
@@ -48,13 +49,14 @@ func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid
 		}
 	})
 	if !frozen {
-		return
+		return id
 	}
 	if _, err := admin.Exec(ctx,
 		`UPDATE audit_periods SET status='frozen', frozen_at=$2, frozen_by='tester',
 		        frozen_hash=decode('00','hex') WHERE id=$1`, id, frozenAt); err != nil {
 		t.Fatalf("freeze audit period: %v", err)
 	}
+	return id
 }
 
 // seedOtherFrameworkVersion is seedFrameworkVersion under a slug of its own,
@@ -136,9 +138,15 @@ func TestHTTP_ActivateRefusesEffectiveFromBeforeFreeze(t *testing.T) {
 		t.Fatalf("store Activate before freeze: err = %v, want ErrEffectiveBeforeFreeze", err)
 	}
 
-	// At the latest freeze: accepted.
-	if code, body := activate(refused, latest); code != http.StatusOK {
-		t.Fatalf("effective_from = latest freeze: status %d, want 200; body %s", code, body)
+	// At the latest freeze: refused too, so an as_of at frozen_at never
+	// picks a revision activated after it.
+	if code, body := activate(refused, latest); code != http.StatusConflict {
+		t.Fatalf("effective_from = latest freeze: status %d, want 409; body %s", code, body)
+	}
+
+	// After the latest freeze: accepted.
+	if code, body := activate(refused, latest.Add(time.Second)); code != http.StatusOK {
+		t.Fatalf("effective_from = latest freeze + 1s: status %d, want 200; body %s", code, body)
 	}
 
 	// The other framework version's freeze is an hour ago; this one has none.
@@ -183,5 +191,135 @@ func TestAsOf_BackdatingWithoutFreeze(t *testing.T) {
 	}
 	if got, err := store.AsOf(ctx, fvID, time.Now().UTC().Add(-24*time.Hour)); err != nil || got.ID != id {
 		t.Fatalf("AsOf a day ago: %v %v, want %s", got.ID, err, id)
+	}
+}
+
+// TestSoAExport_AsOfFrozenAt: an activation effective at the freeze is
+// refused, so the SoA at ?as_of=frozen_at keeps the revision in force then.
+func TestSoAExport_AsOfFrozenAt(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	fvID := seedFrameworkVersion(t, admin, tenant)
+	store := frameworkscope.NewStore(app)
+	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+
+	revA := mustApprove(t, ctx, store, fvID, "rev A")
+	if _, err := store.Activate(ctx, revA, "key_test", time.Now().UTC().Add(-48*time.Hour)); err != nil {
+		t.Fatalf("Activate rev A: %v", err)
+	}
+	frozenAt := time.Now().UTC().Truncate(time.Second)
+	seedAuditPeriod(t, admin, tenant, fvID, true, frozenAt)
+
+	revB := mustApprove(t, ctx, store, fvID, "rev B")
+	if _, err := store.Activate(ctx, revB, "key_test", frozenAt); !errors.Is(err, frameworkscope.ErrEffectiveBeforeFreeze) {
+		t.Fatalf("Activate rev B at frozen_at: err = %v, want ErrEffectiveBeforeFreeze", err)
+	}
+
+	exp, err := store.SoAExport(ctx, fvID, frameworkscope.SoASelector{AsOf: &frozenAt})
+	if err != nil {
+		t.Fatalf("SoAExport as_of frozen_at: %v", err)
+	}
+	if exp.Applicability.Scope == nil || exp.Applicability.Scope.ID != revA {
+		t.Fatalf("SoA as_of frozen_at scope = %+v, want rev A %s", exp.Applicability.Scope, revA)
+	}
+}
+
+// holdFreezeLock takes the (tenant, framework version) activation/freeze
+// lock in an admin transaction and returns it; the caller ends it.
+func holdFreezeLock(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid.UUID) pgx.Tx {
+	t.Helper()
+	tx, err := admin.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	if _, err := tx.Exec(context.Background(),
+		`SELECT pg_advisory_xact_lock(10, hashtext($1::uuid::text || '/' || $2::uuid::text))`, tenant, fvID); err != nil {
+		t.Fatalf("take freeze lock: %v", err)
+	}
+	return tx
+}
+
+// stillBlocked fails the test if done delivers within the grace period.
+func stillBlocked[T any](t *testing.T, done <-chan T, what string) {
+	t.Helper()
+	select {
+	case v := <-done:
+		t.Fatalf("%s returned while the freeze lock was held: %v", what, v)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestActivate_SerialisedAgainstFreeze forces the interleaving: a freeze
+// holds the lock and commits while Activate waits. Activate must read the
+// freeze after it commits and refuse; without the lock it would read "no
+// freeze" and activate across it.
+func TestActivate_SerialisedAgainstFreeze(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	fvID := seedFrameworkVersion(t, admin, tenant)
+	store := frameworkscope.NewStore(app)
+	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	periodID := seedAuditPeriod(t, admin, tenant, fvID, false, time.Now().UTC())
+	id := mustApprove(t, ctx, store, fvID, "racing")
+
+	freeze := holdFreezeLock(t, admin, tenant, fvID)
+	done := make(chan error, 1)
+	go func() {
+		_, err := store.Activate(ctx, id, "key_test", time.Now().UTC().Add(-time.Hour))
+		done <- err
+	}()
+	stillBlocked(t, done, "Activate")
+
+	if _, err := freeze.Exec(context.Background(),
+		`UPDATE audit_periods SET status='frozen', frozen_at=now(), frozen_by='tester',
+		        frozen_hash=decode('00','hex') WHERE id=$1`, periodID); err != nil {
+		t.Fatalf("freeze: %v", err)
+	}
+	if err := freeze.Commit(context.Background()); err != nil {
+		t.Fatalf("commit freeze: %v", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, frameworkscope.ErrEffectiveBeforeFreeze) {
+			t.Fatalf("Activate after the freeze committed: err = %v, want ErrEffectiveBeforeFreeze", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Activate did not return after the lock was released")
+	}
+}
+
+// TestFreeze_TakesFreezeLock: period.Store.Freeze waits on the same lock.
+func TestFreeze_TakesFreezeLock(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	fvID := seedFrameworkVersion(t, admin, tenant)
+	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	periodID := seedAuditPeriod(t, admin, tenant, fvID, false, time.Now().UTC())
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM audit_period_audit_log WHERE tenant_id = $1`, tenant)
+	})
+
+	lock := holdFreezeLock(t, admin, tenant, fvID)
+	done := make(chan error, 1)
+	go func() {
+		_, err := period.NewStore(app).Freeze(ctx, periodID, "tester", time.Time{})
+		done <- err
+	}()
+	stillBlocked(t, done, "Freeze")
+
+	if err := lock.Rollback(context.Background()); err != nil {
+		t.Fatalf("release lock: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Freeze after the lock was released: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Freeze did not return after the lock was released")
 	}
 }

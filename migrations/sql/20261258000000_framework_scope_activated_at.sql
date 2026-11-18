@@ -8,17 +8,18 @@
 -- frozen period reported. It now also requires activated_at <= frozen_at:
 -- a frozen period sees only revisions that existed at its freeze.
 --
--- Activate also refuses an effective_from earlier than the latest frozen
+-- Activate also refuses an effective_from at or before the latest frozen
 -- audit period's frozen_at for the framework version (HTTP 409,
--- frameworkscope.ErrEffectiveBeforeFreeze). The refusal is the
--- operator-facing answer; activated_at closes the race with a freeze that
--- commits while an activation is in flight. General as-of reads
+-- frameworkscope.ErrEffectiveBeforeFreeze), under an advisory lock that
+-- Freeze also takes. activated_at covers a freeze whose frozen_at was taken
+-- before an activation that committed first. General as-of reads
 -- (GetFrameworkScopeAsOf) keep selecting by effective_from, so backdating
 -- still works for planning where no freeze is crossed.
 --
--- activated_at is set by framework_scopes_stamp_activated_at on the move
--- into `activated` (and on any direct INSERT of an activated or superseded
--- row, as seeds and tests do). The CHECK makes it NOT NULL for every
+-- activated_at is set by framework_scopes_stamp_activated_at, to
+-- clock_timestamp() (the write, after Activate's lock, not the transaction
+-- start), on the move into `activated`, and on any direct INSERT of an
+-- activated or superseded row, as seeds and tests do. The CHECK makes it NOT NULL for every
 -- revision that has been activated; draft, review and approved rows hold
 -- NULL.
 --
@@ -57,7 +58,7 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
     IF NEW.state IN ('activated', 'superseded') AND NEW.activated_at IS NULL THEN
-        NEW.activated_at := now();
+        NEW.activated_at := clock_timestamp();
     END IF;
     RETURN NEW;
 END;

@@ -32,11 +32,11 @@ var (
 	// same (tenant, framework_version)). HTTP 409.
 	ErrAnotherActivated = errors.New("frameworkscope: another scope is already activated for this framework version")
 	// ErrEffectiveBeforeFreeze is returned when Activate is given an
-	// effective_from earlier than the latest frozen audit period's
+	// effective_from at or before the latest frozen audit period's
 	// frozen_at on the framework version. A frozen period is immutable
 	// evidence; a backdated activation would rewrite what was in force at
 	// its freeze (#2078). HTTP 409.
-	ErrEffectiveBeforeFreeze = errors.New("frameworkscope: effective_from is earlier than the freeze of an audit period on this framework version")
+	ErrEffectiveBeforeFreeze = errors.New("frameworkscope: effective_from is not after the freeze of an audit period on this framework version")
 	// ErrPredicateFrozen is returned when the predicate of an activated or
 	// superseded revision is edited. Create a new revision from it instead
 	// (CreateRequest.FromScopeID). HTTP 409.
@@ -417,8 +417,14 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, actor string, effect
 		if before.State != StateApproved {
 			return ErrWrongState
 		}
-		// #2078: refuse a backdate across a freeze. activated_at, checked by
-		// the as-of reads, covers a freeze that commits after this read.
+		// #2078: refuse an effective_from at or before the latest freeze.
+		// The lock serialises this read against a concurrent Freeze.
+		if lerr := q.LockFrameworkScopeFreeze(ctx, dbx.LockFrameworkScopeFreezeParams{
+			TenantID:           pgUUID(tenantID),
+			FrameworkVersionID: before.FrameworkVersionID,
+		}); lerr != nil {
+			return fmt.Errorf("lock framework scope freeze: %w", lerr)
+		}
 		frozenAt, ferr := q.GetLatestFrozenAtForFrameworkVersion(ctx, dbx.GetLatestFrozenAtForFrameworkVersionParams{
 			TenantID:           pgUUID(tenantID),
 			FrameworkVersionID: before.FrameworkVersionID,
@@ -426,7 +432,7 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, actor string, effect
 		if ferr != nil {
 			return fmt.Errorf("get latest freeze: %w", ferr)
 		}
-		if frozenAt.Valid && effectiveFrom.Before(frozenAt.Time) {
+		if frozenAt.Valid && !effectiveFrom.After(frozenAt.Time) {
 			return ErrEffectiveBeforeFreeze
 		}
 		// Read the prior activated row (if any) so its supersession can

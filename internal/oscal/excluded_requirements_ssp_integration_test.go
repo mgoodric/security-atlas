@@ -54,7 +54,10 @@ type exclusionFixture struct {
 	approved func(name string, excluded map[string]string) uuid.UUID
 }
 
-func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixture {
+// seedExclusionTimeline builds the timeline above. beforeFreeze, if given,
+// runs after rev A is activated and before the period is frozen at rev A's
+// activated_at; the fixture it receives already carries that frozenAt.
+func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool, beforeFreeze ...func(exclusionFixture)) exclusionFixture {
 	t.Helper()
 	ctx := context.Background()
 	tenant := freshTenant(t, admin)
@@ -153,6 +156,13 @@ func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixt
 	).Scan(&frozenAt); err != nil {
 		t.Fatalf("read rev A activated_at: %v", err)
 	}
+	f := exclusionFixture{
+		tenant: tenant, periodID: periodID, namespace: slug + "-" + version,
+		frozenAt: frozenAt, store: store, ctx: tctx, approved: approved,
+	}
+	for _, hook := range beforeFreeze {
+		hook(f)
+	}
 	if _, err := admin.Exec(ctx,
 		`UPDATE audit_periods SET status='frozen', frozen_at=$2, frozen_by='tester',
 		        frozen_hash=decode('00','hex') WHERE id=$1`,
@@ -165,10 +175,7 @@ func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixt
 		"A.5.1":  excludedAfterFreezeJustif,
 	}), frozenAt.Add(time.Hour))
 
-	return exclusionFixture{
-		tenant: tenant, periodID: periodID, namespace: slug + "-" + version,
-		frozenAt: frozenAt, store: store, ctx: tctx, approved: approved,
-	}
+	return f
 }
 
 // The DB read path, no Python needed: the SSP input carries the requirement
@@ -316,10 +323,8 @@ func TestSSP_ExcludedRequirements_BackdatedActivationAfterFreezeRefused(t *testi
 	}
 }
 
-// #2078: a revision activated after the freeze with effective_from at the
-// freeze itself (not earlier, so Activate accepts it) did not exist at the
-// freeze. A re-export of the frozen period still reports rev A's exclusions;
-// selecting by effective_from alone, rev D would win the as-of pick.
+// #2078: a later activation (effective after the freeze, as Activate now
+// requires) leaves a re-export of the frozen period unchanged.
 func TestSSP_ExcludedRequirements_ReExportUnchangedAfterLaterActivation(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -330,11 +335,41 @@ func TestSSP_ExcludedRequirements_ReExportUnchangedAfterLaterActivation(t *testi
 	}
 
 	revD := f.approved("ISMS rev D", map[string]string{"A.8.28": "Activated after the freeze."})
-	if _, err := f.store.Activate(f.ctx, revD, "tester", f.frozenAt); err != nil {
-		t.Fatalf("Activate with effective_from = freeze: %v", err)
+	if _, err := f.store.Activate(f.ctx, revD, "tester", f.frozenAt.Add(time.Second)); err != nil {
+		t.Fatalf("Activate with effective_from = freeze+1s: %v", err)
 	}
 
 	if after := sspExcluded(t, app, f); fmt.Sprint(after) != fmt.Sprint(before) {
 		t.Fatalf("frozen export changed after a later activation: before %v, after %v", before, after)
+	}
+}
+
+// #2078: frozen_at is the instant the freeze names, which can precede an
+// activation that committed before the freeze did. Rev D is activated while
+// the period is still open, effective at the coming frozen_at and activated
+// after it. The period is then frozen at rev A's activated_at. Rev D did not
+// exist at that instant, so the SSP reports rev A's exclusions; selecting by
+// effective_from alone, rev D would win.
+func TestSSP_ExcludedRequirements_RevisionActivatedAfterFrozenAtNotSeen(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	var revD uuid.UUID
+	f := seedExclusionTimeline(t, admin, app, func(f exclusionFixture) {
+		revD = f.approved("ISMS rev D", map[string]string{"A.8.28": "Activated after frozen_at."})
+		if _, err := f.store.Activate(f.ctx, revD, "tester", f.frozenAt); err != nil {
+			t.Fatalf("Activate rev D while open: %v", err)
+		}
+	})
+	var activatedAt time.Time
+	if err := admin.QueryRow(context.Background(),
+		`SELECT activated_at FROM framework_scopes WHERE id = $1`, revD).Scan(&activatedAt); err != nil {
+		t.Fatalf("read rev D activated_at: %v", err)
+	}
+	if !activatedAt.After(f.frozenAt) {
+		t.Fatalf("precondition: rev D activated_at %v not after frozen_at %v", activatedAt, f.frozenAt)
+	}
+
+	if got := sspExcluded(t, app, f); len(got) != 1 || got["A.8.25"] != excludedAtFreezeJustification {
+		t.Fatalf("frozen export = %v, want only rev A's A.8.25", got)
 	}
 }

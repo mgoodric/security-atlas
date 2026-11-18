@@ -157,10 +157,18 @@ WHERE tenant_id = $1
   AND id <> $3
   AND state = 'activated';
 
+-- name: LockFrameworkScopeFreeze :exec
+-- Serialises framework-scope activation against audit-period freeze on one
+-- (tenant, framework version) for the rest of the transaction (#2078).
+-- Activate takes it before reading the latest freeze; Freeze takes it
+-- before writing frozen_at. Namespace 10 is
+-- advisorylock.FrameworkScopeFreeze.
+SELECT pg_advisory_xact_lock(10, hashtext(sqlc.arg(tenant_id)::uuid::text || '/' || sqlc.arg(framework_version_id)::uuid::text));
+
 -- name: GetLatestFrozenAtForFrameworkVersion :one
 -- The latest frozen_at of the tenant's frozen audit periods on a framework
 -- version, or NULL when none is frozen. Activate refuses an effective_from
--- earlier than it (#2078).
+-- at or before it (#2078).
 SELECT max(frozen_at)::timestamptz AS frozen_at
 FROM audit_periods
 WHERE tenant_id = $1

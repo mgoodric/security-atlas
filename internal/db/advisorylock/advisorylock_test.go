@@ -57,6 +57,7 @@ var sqlSites = map[string]Namespace{
 	"internal/db/queries/risk_aggregations.sql":  RiskHierarchy,
 	"internal/db/queries/aggregation_rules.sql":  AggregationKey,
 	"internal/db/queries/tenant_llm_routing.sql": TenantLLMRouting,
+	"internal/db/queries/framework_scopes.sql":   FrameworkScopeFreeze,
 }
 
 // TestNoUnregisteredAdvisoryLocks scans the tree for advisory lock calls.

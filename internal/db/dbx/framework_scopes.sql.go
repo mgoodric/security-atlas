@@ -521,7 +521,7 @@ type GetLatestFrozenAtForFrameworkVersionParams struct {
 
 // The latest frozen_at of the tenant's frozen audit periods on a framework
 // version, or NULL when none is frozen. Activate refuses an effective_from
-// earlier than it (#2078).
+// at or before it (#2078).
 func (q *Queries) GetLatestFrozenAtForFrameworkVersion(ctx context.Context, arg GetLatestFrozenAtForFrameworkVersionParams) (pgtype.Timestamptz, error) {
 	row := q.db.QueryRow(ctx, getLatestFrozenAtForFrameworkVersion, arg.TenantID, arg.FrameworkVersionID)
 	var frozen_at pgtype.Timestamptz
@@ -942,6 +942,25 @@ func (q *Queries) ListFrameworkVersionMigrationsInto(ctx context.Context, toVers
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockFrameworkScopeFreeze = `-- name: LockFrameworkScopeFreeze :exec
+SELECT pg_advisory_xact_lock(10, hashtext($1::uuid::text || '/' || $2::uuid::text))
+`
+
+type LockFrameworkScopeFreezeParams struct {
+	TenantID           pgtype.UUID `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+}
+
+// Serialises framework-scope activation against audit-period freeze on one
+// (tenant, framework version) for the rest of the transaction (#2078).
+// Activate takes it before reading the latest freeze; Freeze takes it
+// before writing frozen_at. Namespace 10 is
+// advisorylock.FrameworkScopeFreeze.
+func (q *Queries) LockFrameworkScopeFreeze(ctx context.Context, arg LockFrameworkScopeFreezeParams) error {
+	_, err := q.db.Exec(ctx, lockFrameworkScopeFreeze, arg.TenantID, arg.FrameworkVersionID)
+	return err
 }
 
 const lockOpenFrameworkScope = `-- name: LockOpenFrameworkScope :one

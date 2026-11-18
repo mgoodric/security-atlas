@@ -1016,7 +1016,7 @@ type Querier interface {
 	GetLatestDriftSnapshotForDay(ctx context.Context, arg GetLatestDriftSnapshotForDayParams) (ControlDriftSnapshot, error)
 	// The latest frozen_at of the tenant's frozen audit periods on a framework
 	// version, or NULL when none is frozen. Activate refuses an effective_from
-	// earlier than it (#2078).
+	// at or before it (#2078).
 	GetLatestFrozenAtForFrameworkVersion(ctx context.Context, arg GetLatestFrozenAtForFrameworkVersionParams) (pgtype.Timestamptz, error)
 	GetLocalCredentialByUserID(ctx context.Context, arg GetLocalCredentialByUserIDParams) (LocalCredential, error)
 	// #2172: module access for each member. Every query runs under
@@ -3368,6 +3368,12 @@ type Querier interface {
 	// hashtext maps the hex key into it, and a hash collision only
 	// over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// Serialises framework-scope activation against audit-period freeze on one
+	// (tenant, framework version) for the rest of the transaction (#2078).
+	// Activate takes it before reading the latest freeze; Freeze takes it
+	// before writing frozen_at. Namespace 10 is
+	// advisorylock.FrameworkScopeFreeze.
+	LockFrameworkScopeFreeze(ctx context.Context, arg LockFrameworkScopeFreezeParams) error
 	// The applicability carry-over's target (#2179): a draft or review revision
 	// of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
 	// (approved, activated, superseded) or unknown revision.
