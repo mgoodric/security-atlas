@@ -116,7 +116,8 @@ func DefaultSeed() []KindVersion {
 		// only — never admin kubeconfig, secrets, or workload manifests.
 		{Kind: "azure.aks_cluster_config.v1", Version: "1.0.0"},
 		// Slice 520: Azure connector NSG / firewall security-rule posture
-		// (network-segmentation controls: SCF NET-03 / NET-02). ARM Reader only
+		// (boundary-protection and segmentation controls: SCF NET-03 / NET-06 /
+		// NET-02, #2396). ARM Reader only
 		// — RULE configuration only, never flow logs, packet captures, or
 		// traffic contents; read-only (never mutates a network resource).
 		{Kind: "azure.nsg_rules.v1", Version: "1.0.0"},
@@ -128,8 +129,8 @@ func DefaultSeed() []KindVersion {
 		// granted any data-plane permission).
 		{Kind: "azure.keyvault_access_config.v1", Version: "1.0.0"},
 		// Slice 614: Azure connector Azure-Firewall rule-collection posture
-		// (network-segmentation / boundary-protection controls: SCF NET-03 /
-		// NET-02 — the SAME anchors as the NSG kind). ARM Reader only — RULE
+		// (boundary-protection controls: SCF NET-03 / NET-02 — a central
+		// perimeter control point, so not NET-06, #2396). ARM Reader only — RULE
 		// configuration only (network + application rule collections + the
 		// rule-collection-group priority ordering), never flow logs, packet
 		// captures, traffic contents, NAT-rule secrets, threat-intel feeds, or
@@ -139,7 +140,7 @@ func DefaultSeed() []KindVersion {
 		{Kind: "k8s.rbac_binding.v1", Version: "1.0.0"},
 		{Kind: "k8s.workload_security_context.v1", Version: "1.0.0"},
 		// Slice 523: Kubernetes connector NetworkPolicy coverage posture
-		// (network-segmentation controls: SCF NET-03 / NET-02). Read-only
+		// (network-segmentation controls: SCF NET-06 / NET-02, #2396). Read-only
 		// (get/list on networking.k8s.io/v1 networkpolicies + core namespaces) —
 		// NetworkPolicy SPEC metadata only, NEVER pod contents, container env,
 		// secrets, the peer/CIDR/port contents of a rule block, or traffic.

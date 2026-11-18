@@ -71,7 +71,7 @@ const ROUTES = [
     route: "/oscal/component-definitions",
     id: "vendor-claims",
     title: "Vendor claims",
-    // One source line: the renderer joins a paragraph's lines with <br/>.
+    // One source line, so the match holds however the .md wraps (#2455).
     body: "statements is a vendor claim",
     term: "vendor-claim",
   },
