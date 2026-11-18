@@ -186,10 +186,10 @@ mappings:
     strength: 0.9
     rationale: "Restricting inbound traffic to the CDE maps to SCF Boundary Protection — shared with SOC 2 CC6.6 and ISO A.8.20 (three-framework anchor)."
   - requirement_code: 1.4.1
-    scf_anchor: NET-24
+    scf_anchor: NET-06
     relationship_type: equal
     strength: 0.8
-    rationale: "Controls between trusted and untrusted networks map to SCF Network Segmentation; CDE segmentation is the PCI scope-reduction lever."
+    rationale: "Controls between trusted and untrusted networks map to SCF Network Segmentation (macrosegmentation); CDE segmentation is the PCI scope-reduction lever."
   # --- Req 2: Secure configurations ---
   - requirement_code: 2.2.1
     scf_anchor: CFG-04
@@ -233,7 +233,7 @@ mappings:
     scf_anchor: END-03
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Keeping anti-malware current and active overlaps with SCF Endpoint Protection Measures (managed-agent currency facet)."
+    rationale: "Keeping anti-malware current and active overlaps with SCF Endpoint Protection Mechanisms (managed-agent currency facet)."
   # --- Req 6: Secure development ---
   - requirement_code: 6.2.1
     scf_anchor: TDA-05
