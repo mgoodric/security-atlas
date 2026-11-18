@@ -2,7 +2,7 @@
 // from the former `web/lib/api.ts` god-file.
 
 import { APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, bffControlFetch, bffPostJSON } from "./_shared";
 
 // ----- Slice 101: /policies list view -----
 //
@@ -296,5 +296,54 @@ export async function transitionPolicy(
       `/api/policies/${encodeURIComponent(id)}/${action}`,
       jsonInit("POST", body),
     ),
+  );
+}
+
+// ----- #2465: acknowledging a policy -----
+//
+// Wire shapes: `pendingResponse` and `ackResponse` in
+// `internal/api/policyacks/handlers.go`. The pending list holds the
+// published policies whose audience includes the caller and that the
+// caller has not acknowledged for this version within the year.
+
+export type PendingAcknowledgment = {
+  policy_id: string;
+  policy_version_id: string;
+  title: string;
+  version: string;
+  effective_date?: string | null;
+  required_roles: string[];
+  /** An earlier acknowledgment: of an older version, or over a year ago. */
+  last_acknowledged_at?: string | null;
+};
+
+export type MyAcknowledgmentsResponse = {
+  pending: PendingAcknowledgment[];
+  count: number;
+  window_seconds: number;
+};
+
+export type PolicyAcknowledgment = {
+  id: string;
+  policy_id: string;
+  policy_version_id: string;
+  acknowledged_at: string;
+  deduplicated: boolean;
+};
+
+/** The one query key for the caller's pending list, shared by the policy
+ *  list's callout and the detail page so an ack refreshes both. */
+export const MY_ACKS_QUERY_KEY = ["me", "acknowledgments"] as const;
+
+export async function fetchMyAcknowledgments(): Promise<MyAcknowledgmentsResponse> {
+  return bffControlFetch<MyAcknowledgmentsResponse>("/api/me/acknowledgments");
+}
+
+// The platform records the ack for the caller only; no body is sent.
+export async function acknowledgePolicy(
+  id: string,
+): Promise<PolicyAcknowledgment> {
+  return bffPostJSON<PolicyAcknowledgment>(
+    `/api/policies/${encodeURIComponent(id)}/acknowledge`,
   );
 }

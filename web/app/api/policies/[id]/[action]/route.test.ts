@@ -100,6 +100,7 @@ describe("policy write BFF routes (#2116)", () => {
       ["submit", "PATCH"],
       ["approve", "PATCH"],
       ["publish", "POST"],
+      ["acknowledge", "POST"],
     ]) {
       const calls = captureFetch(200, { policy: { id: ID } });
       const body = action === "publish" ? { new_version: "1.0" } : undefined;
@@ -116,6 +117,17 @@ describe("policy write BFF routes (#2116)", () => {
       );
       vi.restoreAllMocks();
     }
+  });
+
+  test("acknowledge passes the 403 for a role outside the audience through (#2465)", async () => {
+    captureFetch(403, {
+      error:
+        "caller's roles do not intersect the policy's acknowledgment_required_roles",
+    });
+    const res = await transition(req("POST"), {
+      params: Promise.resolve({ id: ID, action: "acknowledge" }),
+    });
+    expect(res.status).toBe(403);
   });
 
   test("the approval rule's 403 reaches the page", async () => {
