@@ -42,6 +42,15 @@ FROM policies
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: ListPoliciesUnderReview :many
+-- #2457: the policies waiting for approval, for GET /v1/approvals and its
+-- sidebar badge. Served by the (tenant_id, status, created_at DESC) index.
+SELECT *
+FROM policies
+WHERE tenant_id = $1
+  AND status = 'under_review'
+ORDER BY created_at DESC, id ASC;
+
 -- name: ListPoliciesWithAckRate :many
 -- Slice 107 — paginated policy list LEFT JOINed to the per-policy
 -- acknowledgment-rate cell. Single query; the handler MUST NOT loop

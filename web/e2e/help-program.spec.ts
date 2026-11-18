@@ -18,7 +18,7 @@ const ROUTES = [
     route: "/dashboard",
     id: "dashboard",
     title: "Dashboard",
-    // One source line: the renderer joins a paragraph's lines with <br/>.
+    // One source line, so the match holds however the .md wraps (#2455).
     body: "The dashboard is where a working day starts.",
     term: "needs-attention",
   },

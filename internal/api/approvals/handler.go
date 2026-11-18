@@ -9,7 +9,8 @@
 //  1. the type's module is on (featureflag.RouteOn on its approve route,
 //     the check ModuleGate makes);
 //  2. authz.IsTenantApprover(cred), the handler's role gate;
-//  3. the record is in the state the approve move leaves from;
+//  3. the record is in the state the approve move leaves from (filtered
+//     in SQL, #2457, and checked again per row);
 //  4. the type's own approver check (exception.CheckApprover,
 //     risk.CheckAcceptanceApprover, policy.CheckApprover,
 //     frameworkscope.CheckApprover), called per row with the tenant's
@@ -246,7 +247,7 @@ func (h *Handler) pending(ctx context.Context, tenantID uuid.UUID, a approval.Ap
 
 	var items []Item
 	if on[TypeException] {
-		rows, err := q.ListExceptions(ctx, tid)
+		rows, err := q.ListRequestedExceptions(ctx, tid)
 		if err != nil {
 			return nil, fmt.Errorf("list exceptions: %w", err)
 		}
@@ -257,21 +258,21 @@ func (h *Handler) pending(ctx context.Context, tenantID uuid.UUID, a approval.Ap
 		items = append(items, PendingExceptions(rows, titles, a, allowSelf)...)
 	}
 	if on[TypeRiskAcceptance] {
-		rows, err := q.ListRisks(ctx, tid)
+		rows, err := q.ListRisksWithProposedAcceptance(ctx, tid)
 		if err != nil {
 			return nil, fmt.Errorf("list risks: %w", err)
 		}
 		items = append(items, PendingRiskAcceptances(rows, a, allowSelf)...)
 	}
 	if on[TypePolicy] {
-		rows, err := q.ListPolicies(ctx, tid)
+		rows, err := q.ListPoliciesUnderReview(ctx, tid)
 		if err != nil {
 			return nil, fmt.Errorf("list policies: %w", err)
 		}
 		items = append(items, PendingPolicies(rows, a, allowSelf)...)
 	}
 	if on[TypeFrameworkScope] {
-		rows, err := q.ListFrameworkScopes(ctx, tid)
+		rows, err := q.ListFrameworkScopesInReview(ctx, tid)
 		if err != nil {
 			return nil, fmt.Errorf("list framework scopes: %w", err)
 		}
