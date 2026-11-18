@@ -2,19 +2,12 @@
 //
 // The wire shape mirrors `internal/api/adminauditlog/activity.go`, which
 // reuses the slice-124 UnifiedListResponse + UnifiedEntry shapes. We
-// re-export those types from `lib/api/audit-log.ts` so the activity
-// page consumes the same types as the audit-log page (slice 270 D3 —
-// future refactor extracts a shared component using these types).
+// re-export those types from `lib/api/audit-log.ts`, which also holds the
+// export helpers the Activity page's Export button uses.
 //
-// The differences between the two endpoints are:
-//
-//   - BFF path: `/api/activity` vs `/api/audit-log/unified`.
-//   - Default `actor` filter: the activity page understands a `me`
-//     sentinel that the BFF resolves to the caller's user_id (slice
-//     270 D5). The audit-log page does not.
-//
-// Both endpoints accept the same kind, from/to, actor, and cursor
-// query parameters and return the same UnifiedListResponse shape.
+// The `actor` filter understands a `me` sentinel that the BFF resolves to
+// the caller's user_id (slice 270 D5); the export BFF resolves it the same
+// way (#2430).
 
 import {
   AUDIT_LOG_KINDS,
