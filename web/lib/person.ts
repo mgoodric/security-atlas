@@ -30,7 +30,8 @@ export interface PersonDirectory {
   apiKeys: Map<string, DirectoryApiKey>;
 }
 
-export type PersonKind = "user" | "api_key" | "former_user" | "unknown";
+type PrincipalKind = "user" | "api_key" | "former_user";
+export type PersonKind = PrincipalKind | "system" | "unknown";
 
 export interface ResolvedPerson {
   kind: PersonKind;
@@ -98,6 +99,8 @@ function unknown(ref: string): ResolvedPerson {
  * - an API key → "API key (owner: <name>)", or "API key" when the owner
  *   does not resolve. Keys carry no label today, and the token, prefix
  *   and last four characters are never shown;
+ * - "system" or "system:<process>" → "System", as the platform's
+ *   people.Directory.Name reads it (#2138);
  * - anything else (a JWT credential, another tenant's user, a missing
  *   directory) → "Unknown", the reference in the tooltip.
  */
@@ -106,6 +109,9 @@ export function resolvePerson(
   dir: PersonDirectory | null | undefined,
 ): ResolvedPerson {
   const raw = (ref ?? "").trim();
+  if (raw === "system" || raw.startsWith("system:")) {
+    return { kind: "system", text: "System", title: raw };
+  }
   if (!raw || !dir) return unknown(raw);
 
   const userId = normaliseUserId(raw);
