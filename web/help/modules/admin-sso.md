@@ -30,7 +30,9 @@ to keep the current one.
 
 Some providers, such as Entra ID, don't say whether an email address is
 verified. Tick the option to link users from those providers anyway only
-if you trust your provider's directory.
+if you trust your provider's directory. The option also lets such an
+address pass the allowed email domains check, since nothing else vouches
+that the address is the user's.
 
 ## Who can do this
 

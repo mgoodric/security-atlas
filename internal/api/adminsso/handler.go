@@ -91,12 +91,15 @@ type PreflightOptions struct {
 	Timeout time.Duration
 	// MaxBodyBytes caps the response body size. Default: 64 KiB.
 	MaxBodyBytes int64
-	// AllowPrivateIPs, when true, permits the fetch to target loopback
-	// and private (RFC1918 / ULA / CGNAT) addresses; link-local stays
-	// denied. Off by default; the deployment sets it through
-	// oidc.AllowPrivateIssuersEnv (#2534), and tests set it so a local
-	// fake IdP can be reached via 127.0.0.1.
-	AllowPrivateIPs bool
+	// IssuerPolicy is the deployment's issuer policy,
+	// oidc.IssuerPolicyFromEnv (#2534): the strict zero value by default,
+	// loopback and private (RFC1918 / ULA / CGNAT) addresses with
+	// oidc.AllowPrivateIssuersEnv; link-local stays denied either way.
+	// PATCH validates the issuer with it through idpconfig.ValidateIssuerURL,
+	// the check the sign-in Resolver makes with the same policy, so a config
+	// that saves is one that signs in (#2609). Tests set the opt-in so a
+	// local fake IdP can be reached via 127.0.0.1.
+	IssuerPolicy netguard.Policy
 	// HTTPClient overrides the default transport so tests can supply a
 	// roundtripper that records calls.
 	HTTPClient *http.Client
@@ -256,7 +259,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	// The sign-in path refuses the same issuers (#2034), so a config that
 	// saves here is one the resolver will use.
-	if err := idpconfig.ValidateIssuerURL(req.IssuerURL, h.preflightOpts.AllowPrivateIPs); err != nil {
+	if err := idpconfig.ValidateIssuerURL(req.IssuerURL, h.guard()); err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -393,8 +396,9 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid issuer_url: "+err.Error())
 		return
 	}
-	if !h.preflightOpts.AllowPrivateIPs && parsed.Scheme != "https" {
-		httpresp.WriteError(w, http.StatusBadRequest, "issuer_url must be https")
+	// The same issuer check as PATCH and the sign-in Resolver (#2609).
+	if err := idpconfig.ValidateIssuerURL(parsed.String(), h.guard()); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if parsed.Host == "" {
@@ -403,7 +407,7 @@ func (h *Handler) Preflight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// SSRF guard: resolve host and reject loopback / RFC1918.
-	if !h.preflightOpts.AllowPrivateIPs {
+	if !h.privateIssuersAllowed() {
 		if err := h.guardSSRF(r.Context(), parsed.Host); err != nil {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 			return
@@ -512,16 +516,20 @@ func (h *Handler) guardSSRF(ctx context.Context, host string) error {
 	return nil
 }
 
-// guard is the shared SSRF policy (internal/netguard, #2534) the preflight
-// applies. AllowPrivateIPs is the deployment opt-in for a self-hosted IdP
-// on a private network (oidc.AllowPrivateIssuersEnv); it permits loopback
-// and private ranges but never link-local, so cloud metadata stays denied.
-// The sign-in path builds the same policy, so preflight and runtime agree.
+// guard is the deployment's issuer policy (internal/netguard, #2534), the
+// one PATCH, the preflight and the sign-in path all apply.
+// oidc.AllowPrivateIssuersEnv is the opt-in for a self-hosted IdP on a
+// private network; it permits loopback and private ranges but never
+// link-local, so cloud metadata stays denied.
 func (h *Handler) guard() netguard.Policy {
-	return netguard.Policy{
-		AllowLoopback: h.preflightOpts.AllowPrivateIPs,
-		AllowPrivate:  h.preflightOpts.AllowPrivateIPs,
-	}
+	return h.preflightOpts.IssuerPolicy
+}
+
+// privateIssuersAllowed reports the private-issuer opt-in. With it, the
+// preflight's DNS pre-check is skipped (a dev IdP is reached by raw IP) and
+// the dial-time guard still applies the policy.
+func (h *Handler) privateIssuersAllowed() bool {
+	return h.preflightOpts.IssuerPolicy.AllowLoopback || h.preflightOpts.IssuerPolicy.AllowPrivate
 }
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {

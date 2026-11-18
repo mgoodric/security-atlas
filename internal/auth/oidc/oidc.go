@@ -147,6 +147,13 @@ type IdpResolver interface {
 // ErrUnknownIdp is the sentinel for "no such IdP configured."
 var ErrUnknownIdp = errors.New("oidc: unknown IdP")
 
+// ErrIdpConfigUnusable is the sentinel for an IdP config that exists but
+// cannot be used (#2034): a non-https issuer, a missing client, a secret that
+// does not decrypt. A resolver wraps it with the reason, which is for the
+// server log only: sign-in answers before authentication, so the reason
+// never goes on the wire (#2609).
+var ErrIdpConfigUnusable = errors.New("oidc: IdP config unusable")
+
 // ErrProviderUnavailable is the sentinel for a configured IdP whose discovery
 // endpoint cannot be reached or does not answer in time.
 var ErrProviderUnavailable = errors.New("oidc: provider unavailable")

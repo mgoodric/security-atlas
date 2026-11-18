@@ -96,6 +96,15 @@ oidc:
   issuer: https://idp.example.com/
   clientId: security-atlas-prod
   redirectUrl: https://security-atlas.example.com/auth/callback
+  # Seals the client secret saved on the SSO page (#2034). Off until you
+  # pre-create the Secret, so an upgrade without it does not hang in
+  # ContainerCreating:
+  #   kubectl create secret generic security-atlas-oidc-secret-key \
+  #     --from-literal=oidc-secret-key="$(openssl rand -base64 32)"
+  # then set existingSecret: security-atlas-oidc-secret-key.
+  secretKey:
+    existingSecret: ""
+    secretKey: oidc-secret-key
 
 bootstrap:
   tenantId: "00000000-0000-4000-8000-000000000001"
