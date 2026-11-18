@@ -320,3 +320,46 @@ func TestSlice270_PrivilegedCallerSeesEverything(t *testing.T) {
 		t.Errorf("admin caller did NOT see feature_flag row; want full visibility (CallerIsPrivileged short-circuit)")
 	}
 }
+
+// #2135: ?limit= caps the activity page and hands back a cursor when
+// more rows exist; the dashboard's Recent activity asks for 10.
+func TestActivity2135_LimitCapsThePage(t *testing.T) {
+	tenant := uuid.New()
+	adminActor := uuid.New()
+	cleanupUnifiedTables(t, tenant)
+	for _, action := range []string{"profile.update", "preferences.update", "session.revoke"} {
+		seedMeRowForActor(t, tenant, adminActor, action)
+	}
+
+	from := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
+	to := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
+	r := newActivityRouter(t, tenant, adminActor.String(), true)
+
+	get := func(query string) (int, adminauditlog.UnifiedListResponse) {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+			fmt.Sprintf("/v1/activity/unified?from=%s&to=%s%s", from, to, query), nil))
+		var resp adminauditlog.UnifiedListResponse
+		if rec.Code == http.StatusOK {
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+		}
+		return rec.Code, resp
+	}
+
+	st, all := get("")
+	if st != http.StatusOK || len(all.Entries) < 3 {
+		t.Fatalf("no limit: status %d, %d entries; want 200 and at least 3", st, len(all.Entries))
+	}
+	st, two := get("&limit=2")
+	if st != http.StatusOK || len(two.Entries) != 2 {
+		t.Fatalf("limit=2: status %d, %d entries; want 200 and 2", st, len(two.Entries))
+	}
+	if two.NextCursor == "" {
+		t.Errorf("limit=2 with more rows: want a next_cursor")
+	}
+	if st, _ := get("&limit=0"); st != http.StatusBadRequest {
+		t.Errorf("limit=0: status %d; want 400", st)
+	}
+}

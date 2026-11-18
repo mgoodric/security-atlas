@@ -19,7 +19,11 @@ import { describe, expect, test } from "vitest";
 
 import type { AuditPeriod } from "@/lib/api/audit-periods";
 
-import { pickMostRecentInProgress } from "./in-progress-audit-pill";
+import {
+  auditCountdownText,
+  auditDaysRemaining,
+  pickMostRecentInProgress,
+} from "./in-progress-audit-pill";
 
 function makePeriod(overrides: Partial<AuditPeriod> = {}): AuditPeriod {
   return {
@@ -113,5 +117,45 @@ describe("pickMostRecentInProgress", () => {
   test("handles a single-element list correctly", () => {
     const periods = [makePeriod({ id: "solo", status: "open" })];
     expect(pickMostRecentInProgress(periods)?.id).toBe("solo");
+  });
+});
+
+// #2135: the banner's countdown, in the viewer's local calendar days.
+describe("auditDaysRemaining", () => {
+  test("counts whole local calendar days to the end date", () => {
+    // Local 2026-03-21, any hour: 10 days to 2026-03-31.
+    expect(auditDaysRemaining("2026-03-31", new Date(2026, 2, 21, 0, 5))).toBe(
+      10,
+    );
+    expect(
+      auditDaysRemaining("2026-03-31", new Date(2026, 2, 21, 23, 55)),
+    ).toBe(10);
+  });
+
+  test("is 0 on the last day and negative after it", () => {
+    expect(auditDaysRemaining("2026-03-31", new Date(2026, 2, 31, 12))).toBe(0);
+    expect(auditDaysRemaining("2026-03-31", new Date(2026, 3, 2, 12))).toBe(-2);
+  });
+
+  test("reads only the date of a timestamp-shaped end", () => {
+    expect(
+      auditDaysRemaining("2026-03-31T00:00:00Z", new Date(2026, 2, 30, 9)),
+    ).toBe(1);
+  });
+
+  test("crosses a DST change without an off-by-one", () => {
+    expect(auditDaysRemaining("2026-11-10", new Date(2026, 9, 25, 12))).toBe(
+      16,
+    );
+  });
+});
+
+describe("auditCountdownText", () => {
+  test("says how many days are left, or that the period has ended", () => {
+    expect(auditCountdownText(12)).toBe("Audit ends in 12 days");
+    expect(auditCountdownText(1)).toBe("Audit ends in 1 day");
+    expect(auditCountdownText(0)).toBe("Audit ends today");
+    expect(auditCountdownText(-1)).toBe("Audit ended 1 day ago");
+    expect(auditCountdownText(-4)).toBe("Audit ended 4 days ago");
   });
 });

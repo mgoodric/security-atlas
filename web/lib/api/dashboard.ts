@@ -2,6 +2,11 @@
 // extracted from the former `web/lib/api.ts` god-file.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import {
+  MAX_WINDOW_DAYS,
+  buildUnifiedQuery,
+  type UnifiedListResponse,
+} from "./audit-log";
 import type { PostureTarget } from "./posture-targets";
 import {
   type CalendarResponse,
@@ -223,19 +228,17 @@ export async function getEvidenceFreshness(
   return (await res.json()) as FreshnessReport;
 }
 
-// getMitigateRisks fetches the dashboard top-risks panel feed —
-// risks with treatment=mitigate, ranked by residual-score magnitude
-// descending then risk age ascending. The `sort=residual,age` ordering
-// is the slice-066 (AC-3) server-side capability that slice 157
-// re-points the dashboard onto; before slice 157 the dashboard rendered
-// the unsorted list with a labelled "ranking pending" footer.
-export async function getMitigateRisks(
-  bearer: string,
-): Promise<DashboardRisk[]> {
-  const res = await apiFetch(
-    `/v1/risks?treatment=mitigate&sort=residual,age`,
-    bearer,
-  );
+// TOP_RISKS_QUERY is the dashboard top-risks card's register query
+// (#2135): the 5 open risks with the highest residual, roll-ups left out,
+// in the register's own residual order (5x5, then FAIR, then unscored;
+// #2475/#2528). Every narrowing is the platform's; the card renders the
+// page it is given.
+export const TOP_RISKS_LIMIT = 5;
+export const TOP_RISKS_QUERY = `?status=open&include_rollups=false&sort=-residual&limit=${TOP_RISKS_LIMIT}`;
+
+// getTopRisks fetches the dashboard top-risks card feed.
+export async function getTopRisks(bearer: string): Promise<DashboardRisk[]> {
+  const res = await apiFetch(`/v1/risks${TOP_RISKS_QUERY}`, bearer);
   const body = (await res.json()) as RiskListResponse;
   return body.risks;
 }
@@ -263,6 +266,31 @@ export async function getActivity(
 ): Promise<ActivityFeedResponse> {
   const res = await apiFetch(`/v1/activity`, bearer);
   return (await res.json()) as ActivityFeedResponse;
+}
+
+// Recent activity (#2135): the last 10 rows of the unified activity log
+// (GET /v1/activity/unified, the /activity page's source, module-filtered
+// on the platform, #2477), rendered as sentences (#2093). The window is
+// the endpoint's widest, so a quiet tenant still shows its last changes.
+export const RECENT_ACTIVITY_LIMIT = 10;
+
+export function recentActivityQuery(now: Date = new Date()): string {
+  const from = new Date(now.getTime() - MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return buildUnifiedQuery({
+    from: from.toISOString(),
+    to: now.toISOString(),
+    limit: RECENT_ACTIVITY_LIMIT,
+  });
+}
+
+export async function getRecentActivity(
+  bearer: string,
+): Promise<UnifiedListResponse> {
+  const res = await apiFetch(
+    `/v1/activity/unified${recentActivityQuery()}`,
+    bearer,
+  );
+  return (await res.json()) as UnifiedListResponse;
 }
 
 // getComingUp fetches the dashboard's "Coming up" panel feed: the
@@ -299,4 +327,12 @@ export function fetchDashboardFrameworkPosture(): Promise<FrameworkPostureReport
 
 export function fetchDashboardActivity(): Promise<ActivityFeedResponse> {
   return bffControlFetch<ActivityFeedResponse>(`/api/dashboard/activity`);
+}
+
+// fetchDashboardRecentActivity reads the activity BFF (the /activity
+// page's), which forwards the query to /v1/activity/unified.
+export function fetchDashboardRecentActivity(): Promise<UnifiedListResponse> {
+  return bffControlFetch<UnifiedListResponse>(
+    `/api/activity${recentActivityQuery()}`,
+  );
 }

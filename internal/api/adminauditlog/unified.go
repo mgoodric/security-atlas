@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -200,14 +201,14 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 		// was asked for (pageSize + 1) rows; if it returned more than
 		// pageSize, the (pageSize+1)-th row signals "more available" and
 		// the in-page cursor anchor is entries[pageSize-1].
-		if len(got) > unifiedPageSize {
-			anchor := got[unifiedPageSize-1]
+		if len(got) > params.pageSize {
+			anchor := got[params.pageSize-1]
 			nextCursor = &unifiedlog.Cursor{
 				OccurredAt: anchor.OccurredAt,
 				Kind:       anchor.Kind,
 				RowID:      anchor.RowID,
 			}
-			got = got[:unifiedPageSize]
+			got = got[:params.pageSize]
 		}
 		entries = got
 
@@ -333,6 +334,10 @@ type parsedUnifiedParams struct {
 	// here (rather than per-handler) keeps the query-string contract in one
 	// place.
 	includeReads bool
+	// pageSize is the rows-per-page cap: `?limit=` when given (1 to
+	// unifiedPageSize), else unifiedPageSize. The dashboard's Recent
+	// activity asks for 10 (#2135).
+	pageSize int
 }
 
 func (p parsedUnifiedParams) toAuditShape() metaAuditParams {
@@ -413,10 +418,20 @@ func parseUnifiedParams(r *http.Request) (parsedUnifiedParams, error) {
 	// this; the admin handler ignores it (always shows every row).
 	includeReads := q.Get("include_reads") == "true"
 
+	// #2135: `?limit=` narrows the page; absent, a page is the cap.
+	pageSize := unifiedPageSize
+	if raw := q.Get("limit"); raw != "" {
+		n, perr := strconv.Atoi(raw)
+		if perr != nil || n < 1 || n > unifiedPageSize {
+			return parsedUnifiedParams{}, fmt.Errorf("limit must be between 1 and %d", unifiedPageSize)
+		}
+		pageSize = n
+	}
+
 	// The aggregator returns up to Limit rows; the handler asks for one
 	// more than the page size so it can detect "more available" without
 	// an extra round-trip.
-	params.Limit = unifiedPageSize + 1
+	params.Limit = pageSize + 1
 
 	return parsedUnifiedParams{
 		queryParams:  params,
@@ -424,6 +439,7 @@ func parseUnifiedParams(r *http.Request) (parsedUnifiedParams, error) {
 		toRaw:        toRaw,
 		cursorRaw:    cursorRaw,
 		includeReads: includeReads,
+		pageSize:     pageSize,
 	}, nil
 }
 
