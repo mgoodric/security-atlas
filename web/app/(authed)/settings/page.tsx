@@ -80,12 +80,27 @@ import { TenantSection } from "./_tabs/tenant";
 import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
 
+// #2503: a tenant admin by its live roles reaches /admin and its own
+// tenant's API keys. `is_admin` stays the super-admin bit (the profile badge
+// and the tenant rename below). Fail-closed: a failed read is false.
+async function fetchIsTenantAdmin(): Promise<boolean> {
+  const res = await fetch("/api/admin/me", { cache: "no-store" });
+  if (!res.ok) return false;
+  const body = (await res.json()) as { is_tenant_admin?: unknown };
+  return body.is_tenant_admin === true;
+}
+
 export default function SettingsPage() {
   const meQuery = useQuery({
     queryKey: ["settings-session-me"],
     queryFn: getSessionMe,
   });
   const isAdmin = meQuery.data?.is_admin === true;
+  const tenantAdminQuery = useQuery({
+    queryKey: ["settings-session-me", "is-tenant-admin"],
+    queryFn: fetchIsTenantAdmin,
+  });
+  const canAdminister = isAdmin || tenantAdminQuery.data === true;
 
   return (
     <PageShell
@@ -96,7 +111,7 @@ export default function SettingsPage() {
         <>
           Your personal preferences and credentials.{" "}
           <Term id="tenant">Tenant</Term>-wide settings live in{" "}
-          {isAdmin ? (
+          {canAdminister ? (
             <a
               href="/admin"
               className="text-primary underline-offset-4 hover:underline"
@@ -118,7 +133,7 @@ export default function SettingsPage() {
       <AppearanceSection />
       <OnboardingSection />
       <NotificationsSection />
-      <ApiTokensSection isAdmin={isAdmin} />
+      <ApiTokensSection isAdmin={canAdminister} />
       <SessionsSection />
     </PageShell>
   );

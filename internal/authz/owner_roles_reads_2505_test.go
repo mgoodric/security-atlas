@@ -30,8 +30,9 @@ import (
 var ownerRolesReads2505 = map[string]string{
 	"cmd/atlas-cli/cmd_oauth_migrate.go runMigrateAPIKey": "copies a legacy credential's label into an OAuth client registration; mints, does not gate",
 
-	"internal/api/admincreds/http.go Handler.Issue": "the issue request body's owner_roles, written to the new key",
-	"internal/api/admincreds/http.go Handler.List":  "lists each key's stored label; display only",
+	"internal/api/admincreds/http.go Handler.Issue":           "the issue request body's owner_roles, written to the new key",
+	"internal/api/admincreds/http.go Handler.List":            "lists each key's stored label; display only",
+	"internal/api/admincreds/http.go Handler.callerMayHandle": "the target key's stored label, checked against the caller's live roles (#2503); not the caller's claim",
 
 	"internal/api/credstore/credstore.go Store.Rotate": "a rotated key's successor inherits its label",
 

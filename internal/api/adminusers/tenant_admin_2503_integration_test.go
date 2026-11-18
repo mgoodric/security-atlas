@@ -26,6 +26,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
+	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/admingroupmappings"
 	"github.com/mgoodric/security-atlas/internal/api/adminscim"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
@@ -33,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
@@ -43,6 +45,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/scim"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 const (
@@ -53,8 +56,6 @@ const (
 // platformRoutes2503 are platform /v1/admin/* routes. authzmw must refuse a
 // tenant admin by role on each before any handler runs.
 var platformRoutes2503 = []struct{ method, path string }{
-	{http.MethodGet, "/v1/admin/credentials"},
-	{http.MethodPost, "/v1/admin/credentials"},
 	{http.MethodGet, "/v1/admin/tenants"},
 	{http.MethodPost, "/v1/admin/tenants"},
 	{http.MethodGet, "/v1/admin/super-admins"},
@@ -70,6 +71,7 @@ type stack2503 struct {
 	signer  *tokensign.Signer
 	handler http.Handler
 	reached *bool
+	keys    *apikeystore.Store
 }
 
 func newStack2503(t *testing.T) stack2503 {
@@ -125,6 +127,14 @@ func newStack2503(t *testing.T) stack2503 {
 	feats := featuresapi.New(featureflag.NewStore(appPool))
 	r.Get("/v1/admin/features", feats.List)
 	r.Patch("/v1/admin/features/{key}", feats.Patch)
+	// #2503: the tenant's API keys.
+	keys := apikeystore.NewStore(appPool, adminPool, hasher, time.Hour)
+	keys.SetPrefix(bearer.PrefixTest)
+	creds := admincreds.New(keys)
+	r.Post("/v1/admin/credentials", creds.Issue)
+	r.Get("/v1/admin/credentials", creds.List)
+	r.Post("/v1/admin/credentials/{id}/rotate", creds.Rotate)
+	r.Post("/v1/admin/credentials/{id}/revoke", creds.Revoke)
 	auditLog := adminauditlog.New(appPool)
 	r.Get("/v1/admin/audit-log", auditLog.List)
 	r.Get("/v1/admin/audit-log/unified", auditLog.UnifiedList)
@@ -138,7 +148,7 @@ func newStack2503(t *testing.T) stack2503 {
 		ExpectedIssuer:   issuer2503,
 		ExpectedAudience: audience2503,
 	})(tenancymw.Middleware(authzmw.Middleware(engine, nil)(r)))
-	return stack2503{signer: signer, handler: chain, reached: reached}
+	return stack2503{signer: signer, handler: chain, reached: reached, keys: keys}
 }
 
 func (s stack2503) mint(t *testing.T, tenant, user uuid.UUID, role authz.Role) string {
@@ -506,6 +516,70 @@ func TestTenantAdmin2503_Features(t *testing.T) {
 	if rr, _ := s.do(t, tok, http.MethodPatch, "/v1/admin/features/rls.policies",
 		map[string]any{"enabled": false, "reason": "#2503 e2e"}); rr.Code != http.StatusBadRequest && rr.Code != http.StatusNotFound {
 		t.Errorf("switch spine flag rls.policies = %d, want 400 or 404", rr.Code)
+	}
+}
+
+// #2503 D6: a tenant admin by role mints, rotates and revokes its own
+// tenant's ordinary keys, and none it could not hold itself: no is_admin or
+// is_approver key at issue, and no rotate or revoke of one a super-admin
+// minted. Another tenant's key id is a 404.
+func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
+	skipIfNoAdminPool(t)
+	s := newStack2503(t)
+	own := seedTenant478(t, "test-2503-keys-"+uuid.NewString()[:8])
+	other := seedTenant478(t, "test-2503-keys-other-"+uuid.NewString()[:8])
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(),
+			`DELETE FROM api_keys WHERE tenant_id = ANY($1)`, []uuid.UUID{own, other})
+	})
+	tok := s.mint(t, own, seedMember2261(t, own, "active", "admin"), authz.RoleAdmin)
+	otherTok := s.mint(t, other, seedMember2261(t, other, "active", "admin"), authz.RoleAdmin)
+
+	issue := func(body map[string]any) (int, string) {
+		t.Helper()
+		rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials", body)
+		var out struct {
+			ID string `json:"id"`
+		}
+		_ = json.NewDecoder(bytes.NewReader(rr.Body.Bytes())).Decode(&out)
+		return rr.Code, out.ID
+	}
+	for _, body := range []map[string]any{
+		{"is_admin": true},
+		{"is_approver": true},
+	} {
+		if code, _ := issue(body); code != http.StatusForbidden {
+			t.Errorf("tenant admin issue %v = %d, want 403", body, code)
+		}
+	}
+	code, plainID := issue(map[string]any{"owner_roles": []string{"viewer"}})
+	if code != http.StatusCreated || plainID == "" {
+		t.Fatalf("tenant admin issue of a viewer key = %d, want 201", code)
+	}
+
+	// A super-admin minted an is_admin key in the tenant earlier.
+	ctx, err := tenancy.WithTenant(context.Background(), own.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	privileged, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IsAdmin: true})
+	if err != nil {
+		t.Fatalf("seed is_admin key: %v", err)
+	}
+	for _, verb := range []string{"rotate", "revoke"} {
+		if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+privileged.ID+"/"+verb, nil); rr.Code != http.StatusForbidden {
+			t.Errorf("tenant admin %s of an is_admin key = %d %s, want 403", verb, rr.Code, rr.Body.String())
+		}
+	}
+
+	if rr, _ := s.do(t, otherTok, http.MethodPost, "/v1/admin/credentials/"+plainID+"/revoke", nil); rr.Code != http.StatusNotFound {
+		t.Errorf("other tenant's revoke = %d, want 404", rr.Code)
+	}
+	if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+plainID+"/rotate", nil); rr.Code != http.StatusOK {
+		t.Errorf("own rotate of its viewer key = %d %s, want 200", rr.Code, rr.Body.String())
+	}
+	if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+plainID+"/revoke", nil); rr.Code != http.StatusNoContent {
+		t.Errorf("own revoke of its viewer key = %d %s, want 204", rr.Code, rr.Body.String())
 	}
 }
 

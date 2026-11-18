@@ -133,6 +133,9 @@ var routes2428 = []route2428{
 	// #2503: the tenant's module and feature switches.
 	{http.MethodGet, "/v1/admin/features", tenantAdminGate},
 	{http.MethodPatch, "/v1/admin/features/policy.enabled", tenantAdminGate},
+	// #2503: the tenant's API keys.
+	{http.MethodGet, "/v1/admin/credentials", tenantAdminGate},
+	{http.MethodPost, "/v1/admin/credentials/" + id2428 + "/revoke", tenantAdminGate},
 
 	// Tenant-admin gates.
 	{http.MethodPost, "/v1/audit-periods", tenantAdminGate},
@@ -303,6 +306,8 @@ var handlerNarrower2428 = map[string]bool{
 	"/v1/admin/group-role-mappings grc_engineer": true,
 	// ... and the feature switches list; the handler refuses it.
 	"/v1/admin/features grc_engineer": true,
+	// ... and the API key list (no plaintext); the handler refuses it.
+	"/v1/admin/credentials grc_engineer": true,
 }
 
 // TestTenantGates2428_HandlerAgreesWithOPA runs the real bundle for every

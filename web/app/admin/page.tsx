@@ -41,8 +41,8 @@ async function fetchFeatures(): Promise<FeatureFlag[]> {
 }
 
 // #2503: the layout admits a tenant admin too, who manages only the
-// tenant-scoped pages (SSO, Users, Features, Audit log). The platform tiles,
-// and the API key count fetch, are for a super-admin (`is_admin`). Fail-closed: a failed
+// tenant-scoped pages (SSO, Users, API keys, Features, Audit log); the
+// overview shows a super-admin (`is_admin`) the same tiles. Fail-closed: a failed
 // read shows the tenant-scoped tiles only.
 async function fetchIsPlatformAdmin(): Promise<boolean> {
   const res = await fetch(`/api/admin/me`, { cache: "no-store" });
@@ -57,17 +57,22 @@ export default function AdminOverviewPage() {
     queryFn: fetchIsPlatformAdmin,
   });
   const platform = platformQ.data === true;
+  // #2503: API keys and features are tenant-scoped, so every admin the
+  // layout admits reads them.
   const creds = useQuery({
     queryKey: ["admin-creds"],
     queryFn: fetchCreds,
-    enabled: platform,
   });
-  // #2503: features are tenant-scoped, so every admin the layout admits
-  // reads them.
   const flags = useQuery({
     queryKey: ["admin-features"],
     queryFn: fetchFeatures,
   });
+
+  const credsSummary = creds.isLoading
+    ? "loading…"
+    : creds.error
+      ? "unavailable"
+      : `${creds.data?.length ?? 0} active`;
 
   const flagsSummary = flags.isLoading
     ? "loading…"
@@ -83,7 +88,7 @@ export default function AdminOverviewPage() {
     return (
       <PageShell
         title={pageTitle("/admin")}
-        subtitle="Manage your organisation's sign-in, members and their roles, and modules, and read its audit log."
+        subtitle="Manage your organisation's sign-in, members and their roles, API keys and modules, and read its audit log."
       >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <AdminTile
@@ -95,6 +100,14 @@ export default function AdminOverviewPage() {
             href="/admin/users"
             title="Users"
             description="List users, assign roles, manage local + SSO-provisioned accounts."
+          />
+          <AdminTile
+            href="/admin/api-keys"
+            title="API keys"
+            summary={
+              creds.isLoading ? <Skeleton className="h-4 w-24" /> : credsSummary
+            }
+            description="Issue, rotate, and revoke connector and CLI credentials. Bearer plaintext is shown once."
           />
           <AdminTile
             href="/admin/features"
@@ -113,12 +126,6 @@ export default function AdminOverviewPage() {
       </PageShell>
     );
   }
-
-  const credsSummary = creds.isLoading
-    ? "loading…"
-    : creds.error
-      ? "unavailable"
-      : `${creds.data?.length ?? 0} active`;
 
   return (
     <PageShell
