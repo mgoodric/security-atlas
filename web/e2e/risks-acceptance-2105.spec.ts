@@ -72,6 +72,18 @@ function json(body: unknown, status = 200) {
 
 /** Mocks the risk page's BFFs on `ctx`, answering as `me`. */
 async function mockRisk(ctx: BrowserContext, store: Store, me: string) {
+  // #2138: the page names people through the directory, never by id.
+  await ctx.route(/\/api\/people(\?.*)?$/, (route: Route) =>
+    route.fulfill(
+      json({
+        users: [
+          { id: OWNER, display_name: "Olive Owner", status: "active" },
+          { id: APPROVER, display_name: "Abel Approver", status: "active" },
+        ],
+        api_keys: [],
+      }),
+    ),
+  );
   await ctx.route("**/api/risks/categories**", (route: Route) =>
     route.fulfill(
       json({
@@ -279,7 +291,7 @@ test.describe("/risks/[id] acceptance (#2105)", () => {
       ).toHaveText("Mar 31, 2099");
       await expect(
         approver.getByTestId("risk-detail-acceptance-approved"),
-      ).toContainText(APPROVER);
+      ).toContainText("Abel Approver");
       await expect(
         approver.getByTestId("risk-detail-self-approved"),
       ).toHaveCount(0);

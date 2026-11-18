@@ -76,6 +76,17 @@ describe("resolvePerson", () => {
     expect(p.title).toContain(ref);
   });
 
+  it.each(["system", "system:action-plan-verification"])(
+    "renders %s as System, with or without a directory (#2138)",
+    (ref) => {
+      for (const d of [dir, null]) {
+        const p = resolvePerson(ref, d);
+        expect(p.kind).toBe("system");
+        expect(p.text).toBe("System");
+      }
+    },
+  );
+
   it("renders Unknown when the directory is unavailable", () => {
     const p = resolvePerson(ALICE, null);
     expect(p.text).toBe("Unknown");

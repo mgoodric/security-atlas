@@ -34,11 +34,25 @@
 // replaces it. #2106 adds the Linked controls section (link with the shared
 // picker, unlink confirmed inline) and "Add action plan", which opens the
 // create form pre-linked to this risk.
+//
+// #2138 (front door, #2072): the page reads, in order, as the shared
+// header; a summary strip (inherent and residual, treatment, acceptance,
+// owner, review due, status); then four `risk-detail-section`s, each with
+// its `data-section` name: description (Markdown), mitigation (linked
+// controls with their live states, action plans with their status),
+// hierarchy (parents and children) and history (the audit trail). Each
+// section owns its queries and shows its own error, so one failing read
+// never blanks the rest. Every write affordance (Edit, the lifecycle
+// actions, the owner picker, link, attach, add plan) shows only when the
+// live /v1/me says is_approver: risk writes are admin and grc_engineer,
+// the set that flag names. A viewer reads the same page without them, and
+// while /v1/me is loading none show. People read as names, linked items
+// as titles, enums as labels: no id or enum key is page text.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useState, type ReactNode } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +69,9 @@ import { RiskHistory } from "@/components/risks/risk-history";
 import { DetailHeader } from "@/components/detail/detail-header";
 import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { PageShell } from "@/components/shell/page-shell";
+import { Person } from "@/components/ui/person";
 import { APIError } from "@/lib/api/base";
+import { getMe } from "@/lib/api/me";
 import {
   fetchRiskCategories,
   fetchRiskDetail,
@@ -135,6 +151,15 @@ export default function RiskDetailPage({
     staleTime: 60_000,
   });
 
+  // #2138: write affordances follow the live role. Fail closed: none show
+  // until /v1/me answers, and none when it fails.
+  const meQ = useQuery({
+    queryKey: ["settings-me-profile"],
+    queryFn: getMe,
+    staleTime: 60_000,
+  });
+  const canEdit = meQ.data?.is_approver === true;
+
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
       router.push(`/login?from=/risks/${id}`);
@@ -207,51 +232,58 @@ export default function RiskDetailPage({
       headerTestId="risk-detail-header"
       back={<BackLink />}
       title={risk.title}
-      edit={{
-        href: `${base}/edit`,
-        "data-testid": "risk-detail-edit",
-      }}
-      primaryAction={
-        closed
-          ? {
-              label: reopen.isPending ? "Reopening…" : "Reopen",
-              onClick: () => setConfirmingReopen(true),
-              disabled: confirmingReopen || reopen.isPending,
-              "data-testid": "risk-detail-reopen",
-            }
-          : {
-              label: ACTION_COPY[nextAcceptance].title,
-              href: `${base}/acceptance/${nextAcceptance}`,
-              "data-testid": `risk-detail-${nextAcceptance}-acceptance`,
-            }
+      edit={
+        canEdit
+          ? { href: `${base}/edit`, "data-testid": "risk-detail-edit" }
+          : undefined
       }
-      overflow={[
-        {
-          id: "close",
-          label: "Close risk…",
-          hidden: closed,
-          onSelect: () => router.push(`${base}/close`),
-          "data-testid": "risk-detail-close",
-        },
-        {
-          id: "treatment",
-          label: "Change treatment…",
-          hidden: closed,
-          onSelect: () => router.push(`${base}/treatment`),
-          disabledReason:
-            accState === "none"
-              ? undefined
-              : "Reject or revoke the acceptance first.",
-          "data-testid": "risk-detail-change-treatment",
-        },
-        {
-          id: "reject",
-          label: "Reject acceptance…",
-          hidden: closed || accState !== "proposed",
-          onSelect: () => router.push(`${base}/acceptance/reject`),
-          "data-testid": "risk-detail-reject-acceptance",
-        },
-      ]}
+      primaryAction={
+        !canEdit
+          ? undefined
+          : closed
+            ? {
+                label: reopen.isPending ? "Reopening…" : "Reopen",
+                onClick: () => setConfirmingReopen(true),
+                disabled: confirmingReopen || reopen.isPending,
+                "data-testid": "risk-detail-reopen",
+              }
+            : {
+                label: ACTION_COPY[nextAcceptance].title,
+                href: `${base}/acceptance/${nextAcceptance}`,
+                "data-testid": `risk-detail-${nextAcceptance}-acceptance`,
+              }
+      }
+      overflow={
+        canEdit
+          ? [
+              {
+                id: "close",
+                label: "Close risk…",
+                hidden: closed,
+                onSelect: () => router.push(`${base}/close`),
+                "data-testid": "risk-detail-close",
+              },
+              {
+                id: "treatment",
+                label: "Change treatment…",
+                hidden: closed,
+                onSelect: () => router.push(`${base}/treatment`),
+                disabledReason:
+                  accState === "none"
+                    ? undefined
+                    : "Reject or revoke the acceptance first.",
+                "data-testid": "risk-detail-change-treatment",
+              },
+              {
+                id: "reject",
+                label: "Reject acceptance…",
+                hidden: closed || accState !== "proposed",
+                onSelect: () => router.push(`${base}/acceptance/reject`),
+                "data-testid": "risk-detail-reject-acceptance",
+              },
+            ]
+          : []
+      }
       status={
         <>
           {closed ? (
@@ -259,9 +291,6 @@ export default function RiskDetailPage({
               Closed
             </Badge>
           ) : null}
-          <Badge variant="secondary" data-testid="risk-detail-treatment">
-            {treatmentLabel(risk)}
-          </Badge>
           <SelfApprovedBadge
             selfApproved={Boolean(risk.acceptance?.self_approved)}
             testId="risk-detail-self-approved"
@@ -281,41 +310,13 @@ export default function RiskDetailPage({
               archived category
             </Badge>
           ) : null}
-        </>
-      }
-      subtitle={
-        <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-          <div>
-            <dt className="inline text-muted-foreground">Owner </dt>
-            <dd className="inline text-foreground">
-              <RiskOwner risk={risk} />
-            </dd>
-          </div>
-          <div>
-            <dt className="inline text-muted-foreground">Methodology </dt>
-            <dd
-              className="inline text-foreground"
-              data-testid="risk-detail-methodology"
-            >
+          <span className="text-xs text-muted-foreground">
+            {enumLabel("RiskLevel", risk.level)} risk ·{" "}
+            <span data-testid="risk-detail-methodology">
               {enumLabel("RiskMethodology", risk.methodology)}
-            </dd>
-          </div>
-          <div>
-            <dt className="inline text-muted-foreground">Review due </dt>
-            <dd
-              className="inline font-mono text-foreground"
-              data-testid="risk-detail-review-due"
-            >
-              {reviewDuePending(risk.review_due_at) ? (
-                "Not set"
-              ) : (
-                // The UTC calendar day, as the edit form and History read
-                // it (#2104); the "date" style formats in UTC.
-                <Timestamp value={risk.review_due_at} style="date" />
-              )}
-            </dd>
-          </div>
-        </dl>
+            </span>
+          </span>
+        </>
       }
     >
       {closed && confirmingReopen ? (
@@ -370,108 +371,91 @@ export default function RiskDetailPage({
         </Alert>
       ) : null}
 
-      {/* ============ SCORING (independent axes — canvas §6.2) ============ */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card size="sm" data-testid="risk-detail-severity-card">
-          <CardContent>
-            {unscored ? (
-              <>
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Inherent severity
-                </div>
-                <div
-                  className="mt-1 text-2xl font-semibold text-muted-foreground"
+      {/* ============ SUMMARY STRIP (#2138) ============ */}
+      {/* Inherent and residual are independent axes (canvas §6.2). */}
+      <Card size="sm" data-testid="risk-detail-summary">
+        <CardContent>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-7">
+            <SummaryCell
+              label={
+                unscored
+                  ? "Inherent severity"
+                  : fairInherent
+                    ? "Inherent exposure"
+                    : "Inherent severity"
+              }
+              title="Inherent severity (1–25): likelihood × impact on the 5×5 grid, before any control mitigation."
+              testId="risk-detail-severity-card"
+            >
+              {unscored ? (
+                <span
+                  className="text-lg font-semibold text-muted-foreground"
                   data-testid="risk-detail-unscored"
                 >
                   {UNSCORED_LABEL}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Logged before it was assessed. Edit the risk to score it.
-                </div>
-              </>
-            ) : fairInherent ? (
-              <>
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Inherent annualized exposure
-                </div>
-                <div
-                  className="mt-1 text-2xl font-semibold"
-                  data-testid="risk-detail-fair-inherent-exposure"
-                >
-                  {formatDollars(fairInherent.annualized_loss_exposure)}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {fairInherent.loss_event_frequency.toFixed(2)} events/year ×{" "}
-                  {formatDollars(fairInherent.loss_magnitude)}
-                </div>
-              </>
-            ) : (
-              <>
-                <div
-                  className="text-[11px] uppercase tracking-wider text-muted-foreground"
-                  title="Inherent severity (1–25): likelihood × impact on the 5×5 grid, before any control mitigation."
-                >
-                  Inherent severity
-                </div>
-                <div className="mt-1">
-                  <SeverityPill
-                    value={String(risk.severity)}
-                    band={band}
-                    className={severityClasses(band)}
-                    testId="risk-detail-severity"
-                    size="md"
-                  />
-                </div>
-              </>
-            )}
-            {risk.rollup ? (
-              <div
-                className="mt-3 border-t pt-2 text-sm"
-                data-testid="risk-detail-rollup"
-              >
+                </span>
+              ) : fairInherent ? (
+                <>
+                  <span
+                    className="text-lg font-semibold"
+                    data-testid="risk-detail-fair-inherent-exposure"
+                  >
+                    {formatDollars(fairInherent.annualized_loss_exposure)}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {fairInherent.loss_event_frequency.toFixed(2)} events/year ×{" "}
+                    {formatDollars(fairInherent.loss_magnitude)}
+                  </span>
+                </>
+              ) : (
+                <SeverityPill
+                  value={String(risk.severity)}
+                  band={band}
+                  className={severityClasses(band)}
+                  testId="risk-detail-severity"
+                  size="md"
+                />
+              )}
+              {risk.rollup ? (
                 <span
-                  className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                  className="mt-1 block text-xs"
+                  data-testid="risk-detail-rollup"
                   title="Roll-up severity: the child risks' severities combined by the severity function. It does not change the assessed score."
                 >
-                  Rolled up from children{" "}
-                </span>
-                <span
-                  className="font-semibold"
-                  data-testid="risk-detail-rollup-severity"
-                >
-                  {risk.rollup.severity}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {" "}
-                  ({risk.rollup.severity_function} of {risk.rollup.child_count}{" "}
-                  {risk.rollup.child_count === 1 ? "child" : "children"})
-                </span>
-                {risk.rollup.exceeds_assessed ? (
-                  <div
-                    className="mt-1 text-xs text-amber-700 dark:text-amber-300"
-                    data-testid="risk-detail-rollup-exceeds"
+                  <span className="text-muted-foreground">Rolled up </span>
+                  <span
+                    className="font-semibold"
+                    data-testid="risk-detail-rollup-severity"
                   >
-                    Higher than the assessed severity (
-                    {risk.rollup.assessed_severity}). Review the assessment.
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+                    {risk.rollup.severity}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    (
+                    {ROLLUP_FUNCTION_LABEL[risk.rollup.severity_function] ??
+                      "combined"}{" "}
+                    of {risk.rollup.child_count}{" "}
+                    {risk.rollup.child_count === 1 ? "child" : "children"})
+                  </span>
+                  {risk.rollup.exceeds_assessed ? (
+                    <span
+                      className="block text-amber-700 dark:text-amber-300"
+                      data-testid="risk-detail-rollup-exceeds"
+                    >
+                      Higher than the assessed severity (
+                      {risk.rollup.assessed_severity}). Review the assessment.
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+            </SummaryCell>
 
-        <Card size="sm" data-testid="risk-detail-residual-card">
-          <CardContent>
-            <div
-              className="text-[11px] uppercase tracking-wider text-muted-foreground"
+            <SummaryCell
+              label={isFair ? "Residual exposure" : "Residual"}
               title="Residual (1–25): inherent severity reduced by the linked controls' measured effectiveness, on the same scale and bands as inherent."
+              testId="risk-detail-residual-card"
             >
-              {isFair
-                ? "Residual annualized exposure"
-                : "Residual (after controls)"}
-            </div>
-            {residualN != null ? (
-              <div className="mt-1">
+              {residualN != null ? (
                 <SeverityPill
                   value={residualText}
                   band={severityBand(residualN)}
@@ -479,84 +463,187 @@ export default function RiskDetailPage({
                   testId="risk-detail-residual"
                   size="md"
                 />
-              </div>
-            ) : (
-              <div
-                className="mt-1 text-2xl font-semibold"
-                data-testid="risk-detail-residual"
-              >
-                {residualText}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              ) : (
+                <span
+                  className="text-lg font-semibold"
+                  data-testid="risk-detail-residual"
+                >
+                  {residualText}
+                </span>
+              )}
+            </SummaryCell>
+
+            <SummaryCell label="Treatment">
+              <span data-testid="risk-detail-treatment">
+                {treatmentLabel(risk)}
+              </span>
+            </SummaryCell>
+
+            <SummaryCell label="Acceptance">
+              <span data-testid="risk-detail-acceptance-state">
+                {risk.acceptance_status
+                  ? enumLabel("RiskAcceptanceStatus", risk.acceptance_status)
+                  : "None"}
+              </span>
+            </SummaryCell>
+
+            <SummaryCell label="Owner">
+              <RiskOwner risk={risk} canEdit={canEdit} />
+            </SummaryCell>
+
+            <SummaryCell label="Review due">
+              <span data-testid="risk-detail-review-due">
+                {reviewDuePending(risk.review_due_at) ? (
+                  "Not set"
+                ) : (
+                  // The UTC calendar day, as the edit form and History read
+                  // it (#2104); the "date" style formats in UTC.
+                  <Timestamp value={risk.review_due_at} style="date" />
+                )}
+              </span>
+            </SummaryCell>
+
+            <SummaryCell label="Status">
+              <span data-testid="risk-detail-status">
+                {enumLabel("RiskStatus", risk.status ?? "open")}
+              </span>
+            </SummaryCell>
+          </dl>
+        </CardContent>
+      </Card>
 
       {/* ============ ACCEPTANCE (#2105) ============ */}
       {risk.acceptance ? <AcceptanceCard risk={risk} /> : null}
 
       {/* ============ DESCRIPTION ============ */}
-      <Card data-testid="risk-detail-description-card">
-        <CardHeader className="border-b">
-          <CardTitle>Description</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {risk.description.trim() ? (
-            <Markdown
-              source={risk.description}
-              data-testid="risk-detail-description"
-            />
-          ) : (
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="risk-detail-description-empty"
-            >
-              This risk has no description.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+      <RiskSection name="description" label="Description">
+        <Card data-testid="risk-detail-description-card">
+          <CardHeader className="border-b">
+            <CardTitle>Description</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {risk.description.trim() ? (
+              <Markdown
+                source={risk.description}
+                data-testid="risk-detail-description"
+              />
+            ) : (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="risk-detail-description-empty"
+              >
+                This risk has no description.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </RiskSection>
 
-      {/* ============ PARENTS / CHILDREN (#1748) ============ */}
-      <RiskHierarchyLinks risk={risk} />
+      {/* ============ MITIGATION (#2106, slice 384) ============ */}
+      <RiskSection name="mitigation" label="Mitigation">
+        <h2 className="text-lg font-semibold">Mitigation</h2>
+        <RiskControls risk={risk} canEdit={canEdit} />
+        {/* #2106: "Add action plan" opens the create form pre-linked. */}
+        <LinkedActionPlans
+          target="risk"
+          targetId={id}
+          addHref={
+            canEdit && !closed
+              ? `/action-plans/new?risk_id=${encodeURIComponent(id)}`
+              : undefined
+          }
+        />
+      </RiskSection>
 
-      {/* ============ LINKED CONTROLS (#2106) ============ */}
-      <RiskControls risk={risk} />
-
-      {/* ============ LINKED ACTION PLANS (slice 384, AC-25) ============ */}
-      {/* #2106: "Add action plan" opens the create form pre-linked. */}
-      <LinkedActionPlans
-        target="risk"
-        targetId={id}
-        addHref={
-          closed
-            ? undefined
-            : `/action-plans/new?risk_id=${encodeURIComponent(id)}`
-        }
-      />
-
-      {/* ============ HIERARCHY LINK ============ */}
-      <div data-testid="risk-detail-hierarchy-link">
-        <Link
-          href={`/risks/hierarchy?focus=${encodeURIComponent(id)}`}
-          className="text-sm text-primary hover:underline"
-        >
-          View in hierarchy →
-        </Link>
-      </div>
+      {/* ============ HIERARCHY (#1748) ============ */}
+      <RiskSection name="hierarchy" label="Hierarchy">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="text-lg font-semibold">Hierarchy</h2>
+          <Link
+            href={`/risks/hierarchy?focus=${encodeURIComponent(id)}`}
+            className="text-sm text-primary hover:underline"
+            data-testid="risk-detail-hierarchy-link"
+          >
+            View in hierarchy →
+          </Link>
+        </div>
+        <RiskHierarchyLinks risk={risk} canEdit={canEdit} />
+      </RiskSection>
 
       {/* ============ HISTORY (#2104) ============ */}
-      <RiskHistory riskId={id} />
+      <RiskSection name="history" label="History">
+        <RiskHistory riskId={id} />
+      </RiskSection>
     </DetailHeader>
   );
 }
 
+// How a roll-up combined its children, in words (the severity function).
+const ROLLUP_FUNCTION_LABEL: Record<string, string> = {
+  max: "highest",
+  weighted_max: "weighted highest",
+  sum: "sum",
+};
+
+// RiskSection names one of the page's ordered sections (#2138), the
+// dashboard's section pattern (#2135).
+function RiskSection({
+  name,
+  label,
+  children,
+}: {
+  name: string;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      data-testid="risk-detail-section"
+      data-section={name}
+      aria-label={label}
+      className="space-y-4"
+    >
+      {children}
+    </section>
+  );
+}
+
+// One labelled value of the summary strip.
+function SummaryCell({
+  label,
+  title,
+  testId,
+  children,
+}: {
+  label: string;
+  title?: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0" data-testid={testId}>
+      <dt
+        className="text-[11px] uppercase tracking-wider text-muted-foreground"
+        title={title}
+      >
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm">{children}</dd>
+    </div>
+  );
+}
+
 // The proposed or approved acceptance: why, until when, and who. People
-// show as their ids, as on the exception page.
+// show by name through <Person> (#2138), never as ids.
 function AcceptanceCard({ risk }: { risk: Risk }) {
   const a = risk.acceptance;
   if (!a) return null;
-  const by = (who: string | undefined) => ` by ${who || "unknown"}`;
+  const by = (who: string | undefined) => (
+    <>
+      {" by "}
+      <Person id={who || null} />
+    </>
+  );
   const rows: [string, React.ReactNode, string][] = [
     [
       "Proposed",
