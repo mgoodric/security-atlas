@@ -23,8 +23,9 @@
 //                    score widget here: nist_800_30, qualitative_5x5, and FAIR.
 //   RiskTreatment:   untreated (default) | mitigate | transfer | accept
 //                    | avoid. accept is posted as a proposed acceptance
-//                    (acceptance_status=proposed): the form has no
-//                    accepter / expiry inputs, so it cannot approve one.
+//                    (acceptance_status=proposed) with its justification
+//                    and proposed expiry (#2391); the form has no accepter
+//                    or approved-expiry inputs, so it cannot approve one.
 //
 // 5x5 inherent_score widget: two native `<select>` dropdowns (1..5 each)
 // that serialize into `inherent_score: {likelihood, impact}`. This is
@@ -133,6 +134,8 @@ function toCreateInput(
   }
   if (s.treatment === "accept") {
     body.acceptance_status = "proposed";
+    body.justification = s.justification.trim();
+    body.proposed_until = s.proposed_until;
   }
   // Slice 151: only post linked_control_ids when treatment requires
   // them. Sending an empty array for non-mitigate is noise; the
@@ -563,6 +566,77 @@ export function RiskForm(props: Props) {
             </>
           }
         />
+      )}
+
+      {/* #2391: treatment=accept proposes the acceptance, on the terms
+          the propose action asks for: a justification and a proposed
+          expiry after today. A second person approves it. */}
+      {!editing && state.treatment === "accept" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={LABEL_CLASS} htmlFor="risk-justification">
+              Justification <span className="text-destructive">*</span>
+            </label>
+            <textarea
+              id="risk-justification"
+              name="justification"
+              value={state.justification}
+              onChange={(e) => update("justification", e.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              placeholder="Why the risk should be accepted"
+              aria-invalid={fieldErrors.justification ? true : undefined}
+              aria-describedby={
+                fieldErrors.justification
+                  ? "risk-justification-error"
+                  : undefined
+              }
+              data-testid="risks-create-justification"
+            />
+            {fieldErrors.justification && (
+              <p
+                id="risk-justification-error"
+                className="mt-1 text-sm text-destructive"
+                data-testid="risks-create-justification-error"
+              >
+                {fieldErrors.justification}
+              </p>
+            )}
+          </div>
+          <div>
+            <label className={LABEL_CLASS} htmlFor="risk-proposed-until">
+              Proposed expiry <span className="text-destructive">*</span>
+            </label>
+            <Input
+              id="risk-proposed-until"
+              name="proposed_until"
+              type="date"
+              className="w-48"
+              value={state.proposed_until}
+              onChange={(e) => update("proposed_until", e.target.value)}
+              aria-invalid={fieldErrors.proposed_until ? true : undefined}
+              aria-describedby={
+                fieldErrors.proposed_until
+                  ? "risk-proposed-until-error"
+                  : "risk-proposed-until-help"
+              }
+              data-testid="risks-create-proposed-until"
+            />
+            {fieldErrors.proposed_until ? (
+              <p
+                id="risk-proposed-until-error"
+                className="mt-1 text-sm text-destructive"
+                data-testid="risks-create-proposed-until-error"
+              >
+                {fieldErrors.proposed_until}
+              </p>
+            ) : (
+              <p id="risk-proposed-until-help" className={HELP_CLASS}>
+                The approver sets the approved expiry, which may differ.
+              </p>
+            )}
+          </div>
+        </div>
       )}
 
       {/* #2511: a risk may be logged before it is assessed. Offered on

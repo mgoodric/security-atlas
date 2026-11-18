@@ -8,14 +8,16 @@ INSERT INTO risks (
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
     acceptance_status, level, org_unit_id,
-    acceptance_proposed_by, acceptance_proposed_at, owner_user_id
+    acceptance_proposed_by, acceptance_proposed_at, owner_user_id,
+    acceptance_justification, acceptance_proposed_until
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
     $15, $16, $17,
-    $18, $19, $20
+    $18, $19, $20,
+    $21, $22
 )
 RETURNING *;
 
