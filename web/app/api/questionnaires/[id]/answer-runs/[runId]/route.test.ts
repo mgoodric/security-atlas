@@ -38,7 +38,13 @@ describe("GET /api/questionnaires/[id]/answer-runs/[runId]", () => {
 
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await GET({} as never, paramsFor("qn1", "run-1"));
+    const res = await GET(
+      {} as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580002",
+      ),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -47,16 +53,28 @@ describe("GET /api/questionnaires/[id]/answer-runs/[runId]", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
-          run: { id: "run-1", status: "completed", drafted_count: 3 },
+          run: {
+            id: "00000000-0000-0000-0000-000025580002",
+            status: "completed",
+            drafted_count: 3,
+          },
           items: [],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
-    const res = await GET({} as never, paramsFor("qn1", "run-1"));
+    const res = await GET(
+      {} as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580002",
+      ),
+    );
     expect(res.status).toBe(200);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/qn1/answer-runs/run-1");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580001/answer-runs/00000000-0000-0000-0000-000025580002",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const auth = (init?.headers as Record<string, string>)?.Authorization;
     expect(auth).toBe(`Bearer ${TEST_BEARER_263}`);
@@ -70,7 +88,13 @@ describe("GET /api/questionnaires/[id]/answer-runs/[runId]", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    const res = await GET({} as never, paramsFor("qn1", "run-x"));
+    const res = await GET(
+      {} as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580003",
+      ),
+    );
     expect(res.status).toBe(404);
   });
 });

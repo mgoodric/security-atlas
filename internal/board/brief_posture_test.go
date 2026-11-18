@@ -78,7 +78,7 @@ func TestRenderNarrative_NoScopedFrameworkIsNotZeroPercent(t *testing.T) {
 func TestBuildBriefHTML_PerFrameworkPosture(t *testing.T) {
 	out := buildBriefHTML(StoredBrief{Content: postureBrief()})
 	for _, want := range []string{
-		"Requirement coverage averages 47.5% across the 2 framework(s) with an activated scope.",
+		"Requirement coverage averages 47.5% across the 2 frameworks with an activated scope.",
 		"Framework C 4</div><div class=\"pct\">Scope not set",
 		"Evidence freshness rate (tenant-wide): 67% of controls have fresh evidence.",
 	} {
@@ -88,6 +88,12 @@ func TestBuildBriefHTML_PerFrameworkPosture(t *testing.T) {
 	}
 	if strings.Contains(out, "evidence freshness rate (tenant-wide)</div>") {
 		t.Error("brief HTML labels a framework card with the legacy tenant-wide figure")
+	}
+
+	one := postureBrief()
+	one.Coverage = &CoverageSummary{CoveragePct: 40, ScopedFrameworkCount: 1, EvidenceFreshnessRatePct: 67}
+	if !strings.Contains(buildBriefHTML(StoredBrief{Content: one}), "averages 40% across the 1 framework with an activated scope.") {
+		t.Error("brief HTML does not use the singular for one scoped framework")
 	}
 
 	b := postureBrief()

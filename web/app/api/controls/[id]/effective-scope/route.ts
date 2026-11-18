@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { getControlEffectiveScope } from "@/lib/api/control-detail";
+import { rejectNonUUID } from "@/lib/api/bff";
 
 // Slice 041 — server-side proxy for
 // GET /v1/controls/{id}/effective-scope?framework_version=<UUID>
@@ -18,12 +19,14 @@ export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
   const frameworkVersion = req.nextUrl.searchParams.get("framework_version");
   if (!frameworkVersion) {
     return NextResponse.json(

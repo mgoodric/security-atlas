@@ -41,7 +41,13 @@ describe("PATCH /api/questionnaires/[id]/answers/[qid]", () => {
 
   test("401 when bearer missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await PATCH(makeReq({}) as never, paramsFor("a", "b"));
+    const res = await PATCH(
+      makeReq({}) as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580002",
+      ),
+    );
     expect(res.status).toBe(401);
   });
 
@@ -63,11 +69,16 @@ describe("PATCH /api/questionnaires/[id]/answers/[qid]", () => {
         narrative: "MFA enforced.",
         save_to_library: true,
       }) as never,
-      paramsFor("q1", "q1-question"),
+      paramsFor(
+        "00000000-0000-0000-0000-000025580003",
+        "00000000-0000-0000-0000-000025580004",
+      ),
     );
     expect(res.status).toBe(200);
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/questionnaires/q1/answers/q1-question");
+    expect(calledURL).toContain(
+      "/v1/questionnaires/00000000-0000-0000-0000-000025580003/answers/00000000-0000-0000-0000-000025580004",
+    );
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(init?.method).toBe("PATCH");
     const sent = String(init?.body ?? "");
@@ -80,7 +91,13 @@ describe("PATCH /api/questionnaires/[id]/answers/[qid]", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "boom" }), { status: 500 }),
     );
-    const res = await PATCH(makeReq({}) as never, paramsFor("a", "b"));
+    const res = await PATCH(
+      makeReq({}) as never,
+      paramsFor(
+        "00000000-0000-0000-0000-000025580001",
+        "00000000-0000-0000-0000-000025580002",
+      ),
+    );
     expect(res.status).toBe(500);
   });
 });

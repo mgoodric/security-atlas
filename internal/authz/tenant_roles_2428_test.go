@@ -183,6 +183,12 @@ func TestTenantGates2428_Helpers(t *testing.T) {
 		{"API key admin label", credstore.Credential{ID: "key_8", OwnerRoles: []string{"admin"}}, true, true},
 		{"API key grc_engineer label", credstore.Credential{ID: "key_9", OwnerRoles: []string{"grc_engineer"}}, false, true},
 		{"bare credential", credstore.Credential{ID: "key_0"}, false, false},
+		// #2541: a key bound to a user counts its owner's live roles, not its
+		// label, which is a copy taken when the key was minted.
+		{"bound key admin label, owner's admin revoked", credstore.Credential{ID: "key_b1", UserID: "u1", OwnerRoles: []string{"admin"}, TenantRoles: []string{"viewer"}}, false, false},
+		{"bound key grc_engineer label, owner's role revoked", credstore.Credential{ID: "key_b2", UserID: "u2", OwnerRoles: []string{"grc_engineer"}}, false, false},
+		{"bound key grc_engineer label, owner holds it live", credstore.Credential{ID: "key_b3", UserID: "u3", OwnerRoles: []string{"grc_engineer"}, TenantRoles: []string{"grc_engineer"}}, false, true},
+		{"unbound key admin label", credstore.Credential{ID: "key_u1", UserID: "key_u1", OwnerRoles: []string{"admin"}}, true, true},
 	} {
 		if got := authz.IsTenantAdmin(c.cred); got != c.admin {
 			t.Errorf("%s: IsTenantAdmin = %v, want %v", c.name, got, c.admin)

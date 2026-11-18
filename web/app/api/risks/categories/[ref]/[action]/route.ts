@@ -9,7 +9,12 @@
 
 import { NextResponse } from "next/server";
 
-import { forwardJSON, noStore } from "@/lib/api/bff";
+import {
+  SEGMENT,
+  forwardJSON,
+  noStore,
+  rejectUnsafeSegment,
+} from "@/lib/api/bff";
 
 const CATEGORY_ACTIONS: readonly string[] = [
   "archive",
@@ -21,6 +26,8 @@ type Ctx = { params: Promise<{ ref: string; action: string }> };
 
 export async function POST(_req: Request, ctx: Ctx): Promise<Response> {
   const { ref, action } = await ctx.params;
+  const bad = rejectUnsafeSegment({ ref }, SEGMENT.slugOrUUID);
+  if (bad) return bad;
   if (!CATEGORY_ACTIONS.includes(action)) {
     return NextResponse.json({ error: "unknown action" }, { status: 404 });
   }

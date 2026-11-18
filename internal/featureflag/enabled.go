@@ -54,10 +54,27 @@ func cacheFrom(ctx context.Context) *requestCache {
 // indicates a registry key missing from Seed -- a code bug, not a
 // runtime degradation).
 //
-// Anti-criterion P0: a DB-down Looker MUST NOT fail closed. The
+// Anti-criterion P0: a DB-down Looker MUST NOT fail closed here. The
 // returned bool is the Seed default; the returned error is nil. Only an
-// unknown-key lookup surfaces a non-nil error.
+// unknown-key lookup surfaces a non-nil error. ModuleGate is the one
+// exception: it reads through lookup and answers 503 rather than guess a
+// tenant's module switch from the default (#2339).
 func Enabled(ctx context.Context, looker Looker, key string) (bool, error) {
+	on, err := lookup(ctx, looker, key)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		// Already logged inside Store.Get. Fall back to the Seed default
+		// for the key rather than disable the feature.
+		if def, ok := DefaultByKey(key); ok {
+			return def.Enabled, nil
+		}
+	}
+	return on, err
+}
+
+// lookup is Enabled without the Seed-default fallback: a flag-store error
+// comes back as an error. ErrNotFound (a key missing from Seed) is a code
+// bug; any other error means the tenant's stored value is unknown.
+func lookup(ctx context.Context, looker Looker, key string) (bool, error) {
 	if cache := cacheFrom(ctx); cache != nil {
 		cache.mu.Lock()
 		if v, ok := cache.v[key]; ok {
@@ -68,20 +85,6 @@ func Enabled(ctx context.Context, looker Looker, key string) (bool, error) {
 	}
 	flag, err := looker.Get(ctx, key)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			// Unknown key -- this is a code bug (caller typo), surface
-			// it. The boolean default is false so a misconfigured gate
-			// fails closed UI-wise, but the error caller is expected
-			// to surface a 500 rather than silently 404.
-			return false, err
-		}
-		// Other errors -- already logged inside Store.Get. Fall back to
-		// the Seed default for the key (Get does this internally and
-		// returns nil; reaching here means a different error class --
-		// surface it but don't disable the feature).
-		if def, ok := DefaultByKey(key); ok {
-			return def.Enabled, nil
-		}
 		return false, err
 	}
 	if cache := cacheFrom(ctx); cache != nil {

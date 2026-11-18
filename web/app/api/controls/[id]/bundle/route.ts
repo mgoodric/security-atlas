@@ -24,14 +24,14 @@ export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
-  const { id } = await ctx.params;
-  const bad = rejectNonUUID({ id });
-  if (bad) return bad;
   const upstream = await fetch(`${apiBaseURL()}/v1/controls/${id}/bundle`, {
     headers: { Authorization: `Bearer ${bearer}` },
     cache: "no-store",
