@@ -3,8 +3,10 @@ import { describe, expect, test } from "vitest";
 import {
   controlOptions,
   credentialOptions,
+  evidenceOptions,
   frameworkOptions,
   matchesQuery,
+  notListedError,
   parsePastedId,
   policyOptions,
   riskOptions,
@@ -196,12 +198,14 @@ describe("controlOptions / riskOptions / policyOptions", () => {
       {
         value: U1,
         label: "Multi-factor authentication",
+        kind: "control",
         hint: "IAC-06 · IAC",
         keywords: ["soc2-starter"],
       },
       {
         value: U2,
         label: "Custom control",
+        kind: "control",
         hint: undefined,
         keywords: undefined,
       },
@@ -220,8 +224,8 @@ describe("controlOptions / riskOptions / policyOptions", () => {
         { id: U2, title: "Vendor", category: "third_party" },
       ]),
     ).toEqual([
-      { value: U1, label: "Stale access", hint: "Operational" },
-      { value: U2, label: "Vendor", hint: "third_party" },
+      { value: U1, label: "Stale access", kind: "risk", hint: "Operational" },
+      { value: U2, label: "Vendor", kind: "risk", hint: "third_party" },
     ]);
   });
 
@@ -232,6 +236,50 @@ describe("controlOptions / riskOptions / policyOptions", () => {
     expect(p.value).toBe(U1);
     expect(p.label).toBe("Access policy");
     expect(p.hint).toMatch(/^v2 · /);
+    expect(p.kind).toBe("policy");
+  });
+});
+
+describe("evidenceOptions (#2432)", () => {
+  test("a record is its kind and observed day, with the result labelled", () => {
+    expect(
+      evidenceOptions([
+        {
+          evidence_id: U1.toUpperCase(),
+          evidence_kind: "okta.mfa_policy",
+          observed_at: "2026-11-01T23:30:00Z",
+          result: "na",
+        },
+      ]),
+    ).toEqual([
+      {
+        value: U1,
+        label: "okta.mfa_policy · 2026-11-01",
+        kind: "evidence",
+        hint: "Not applicable",
+      },
+    ]);
+  });
+
+  test("a record with no kind still has a label, never the raw ID", () => {
+    const [o] = evidenceOptions([
+      {
+        evidence_id: U2,
+        evidence_kind: null,
+        observed_at: "2026-11-01T00:00:00Z",
+        result: "pass",
+      },
+    ]);
+    expect(o.label).toMatch(/^Evidence · /);
+    expect(o.label).not.toContain(U2);
+    expect(o.hint).toBe("Pass");
+  });
+
+  test("a pasted evidence ID parses; a list-only picker names both kinds", () => {
+    expect(parsePastedId(["evidence"], U1)).toEqual({ ok: true, id: U1 });
+    expect(notListedError(["control", "evidence"], ` ${U1} `)).toBe(
+      `"${U1}" is not in the list. Pick a control or evidence record from the list.`,
+    );
   });
 });
 
