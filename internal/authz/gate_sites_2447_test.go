@@ -46,10 +46,11 @@ type gateSite2447 struct {
 func r2447(method, path string) string { return method + " " + path }
 
 const (
-	admin2447      = "IsTenantAdmin"
-	approver2447   = "IsTenantApprover"
-	riskReader2447 = "IsTenantRiskReader"
-	anyRole2447    = "HasAnyTenantRole"
+	admin2447       = "IsTenantAdmin"
+	approver2447    = "IsTenantApprover"
+	riskReader2447  = "IsTenantRiskReader"
+	auditReader2447 = "IsTenantAuditReader"
+	anyRole2447     = "HasAnyTenantRole"
 )
 
 // gateSites2447 is keyed by "<dir under internal/api>/<file> <func>", with
@@ -59,6 +60,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 	adm := []string{admin2447}
 	apr := []string{approver2447}
 	rdr := []string{riskReader2447}
+	aud := []string{auditReader2447}
 	anyr := []string{anyRole2447}
 	get, post, patch, put, del := http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete
 	site := func(calls []string, routes ...string) gateSite2447 {
@@ -188,7 +190,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			r2447(put, "/v1/csf/profiles/target"),
 			r2447(put, "/v1/csf/profiles/target/selections"),
 			r2447(del, "/v1/csf/profiles/target/selections/"+id)),
-		"dashboardexport/dashboardexport.go hasDashboardExportAccess": site(apr, r2447(get, "/v1/dashboard/export")),
+		"dashboardexport/dashboardexport.go hasDashboardExportAccess": site(aud, r2447(get, "/v1/dashboard/export")),
 		"evidencesummary/periodhandler.go hasAuditWorkspaceRead": site(apr,
 			r2447(get, "/v1/audit-periods/"+id+"/controls/"+id+"/evidence-summary")),
 		"exceptions/handlers.go Handler.Activate":               site(apr, r2447(patch, "/v1/exceptions/"+id+"/activate")),
@@ -307,7 +309,7 @@ func scanGateSites2447(t *testing.T) map[string][]string {
 					return true
 				}
 				pkg, ok := sel.X.(*ast.Ident)
-				if ok && pkg.Name == "authz" && (sel.Sel.Name == admin2447 || sel.Sel.Name == approver2447 || sel.Sel.Name == riskReader2447 || sel.Sel.Name == anyRole2447) {
+				if ok && pkg.Name == "authz" && (sel.Sel.Name == admin2447 || sel.Sel.Name == approver2447 || sel.Sel.Name == riskReader2447 || sel.Sel.Name == auditReader2447 || sel.Sel.Name == anyRole2447) {
 					calls = append(calls, sel.Sel.Name)
 				}
 				return true

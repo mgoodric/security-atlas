@@ -35,6 +35,7 @@ var (
 	tenantAdminGate    = gate2428{"IsTenantAdmin", authz.IsTenantAdmin}
 	tenantApproverGate = gate2428{"IsTenantApprover", authz.IsTenantApprover}
 	riskReaderGate     = gate2428{"IsTenantRiskReader", authz.IsTenantRiskReader}
+	auditReaderGate    = gate2428{"IsTenantAuditReader", authz.IsTenantAuditReader}
 	anyRoleGate        = gate2428{"HasAnyTenantRole", authz.HasAnyTenantRole}
 )
 
@@ -66,7 +67,8 @@ var routes2428 = []route2428{
 	{http.MethodPatch, "/v1/risks/" + id2428 + "/acceptance/revoke", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist:generate", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist/sections/" + id2428 + ":approve", tenantApproverGate},
-	{http.MethodGet, "/v1/dashboard/export", tenantApproverGate},
+	// #2350: admin, grc_engineer or auditor, as OPA admits the export.
+	{http.MethodGet, "/v1/dashboard/export", auditReaderGate},
 	{http.MethodGet, "/v1/audit-periods/" + id2428 + "/control-state", tenantApproverGate},
 	{http.MethodGet, "/v1/audit-periods/" + id2428 + "/controls/" + id2428 + "/evidence-summary", tenantApproverGate},
 	{http.MethodPost, "/v1/walkthroughs", tenantApproverGate},
@@ -226,6 +228,8 @@ func wantAdmit2428(g gate2428, role authz.Role) bool {
 		return role == authz.RoleAdmin
 	case riskReaderGate.name:
 		return role == authz.RoleAdmin || role == authz.RoleGRCEngineer || role == authz.RoleViewer
+	case auditReaderGate.name:
+		return role == authz.RoleAdmin || role == authz.RoleGRCEngineer || role == authz.RoleAuditor
 	case anyRoleGate.name:
 		return true
 	default:
@@ -277,7 +281,6 @@ func TestTenantGates2428_Helpers(t *testing.T) {
 // narrower layer there, so nothing widens; the reverse (a handler
 // admitting what OPA refuses) is never allowed.
 var handlerNarrower2428 = map[string]bool{
-	"/v1/dashboard/export auditor":                                                      true,
 	"/v1/audit-periods/" + id2428 + "/control-state auditor":                            true,
 	"/v1/audit-periods/" + id2428 + "/controls/" + id2428 + "/evidence-summary auditor": true,
 	"/v1/walkthroughs control_owner":                                                    true,
