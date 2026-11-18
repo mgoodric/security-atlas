@@ -32,7 +32,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -46,6 +45,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/ratelimit"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/eval"
@@ -72,7 +72,7 @@ type EvaluateHandler struct {
 	ownerOf ownerLookup
 	timeout time.Duration
 	flight  singleflight.Group
-	limiter *principalLimiter
+	limiter *ratelimit.Limiter
 }
 
 // NewEvaluateHandler wires the handler over the eval engine and the app-role
@@ -84,7 +84,7 @@ func NewEvaluateHandler(engine *eval.Engine, pool *pgxpool.Pool, ratePerMin int)
 		runner:  engine,
 		ownerOf: poolOwnerLookup(pool),
 		timeout: evaluateTimeout,
-		limiter: newPrincipalLimiter(ratePerMin, nil),
+		limiter: newEvaluateLimiter(ratePerMin, nil),
 	}
 }
 
@@ -123,8 +123,8 @@ func (h *EvaluateHandler) Evaluate(w http.ResponseWriter, r *http.Request) {
 	// a token, and before single-flight, so a joiner counts too.
 	actor := credstore.PrincipalOf(cred)
 	if h.limiter != nil {
-		if wait := h.limiter.allow(actor); wait > 0 {
-			w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(wait)))
+		if ok, wait := h.limiter.Allow(actor); !ok {
+			ratelimit.SetRetryAfter(w, ratelimit.RetryAfterSeconds(wait))
 			httpresp.WriteError(w, http.StatusTooManyRequests, "too many evaluations; retry later")
 			return
 		}
