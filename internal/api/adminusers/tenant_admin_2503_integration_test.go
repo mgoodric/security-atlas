@@ -26,12 +26,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
+	"github.com/mgoodric/security-atlas/internal/api/admingroupmappings"
 	"github.com/mgoodric/security-atlas/internal/api/adminscim"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -51,7 +53,6 @@ const (
 var platformRoutes2503 = []struct{ method, path string }{
 	{http.MethodGet, "/v1/admin/credentials"},
 	{http.MethodPost, "/v1/admin/credentials"},
-	{http.MethodGet, "/v1/admin/group-role-mappings"},
 	{http.MethodGet, "/v1/admin/features"},
 	{http.MethodGet, "/v1/admin/tenants"},
 	{http.MethodPost, "/v1/admin/tenants"},
@@ -114,6 +115,11 @@ func newStack2503(t *testing.T) stack2503 {
 	r.Post("/v1/admin/scim-credentials", scimH.Issue)
 	r.Get("/v1/admin/scim-credentials", scimH.List)
 	r.Delete("/v1/admin/scim-credentials/{id}", scimH.Revoke)
+	// #2503: the tenant's IdP group-to-role map.
+	groupMap := admingroupmappings.New(grouprole.NewStore(appPool))
+	r.Post("/v1/admin/group-role-mappings", groupMap.Create)
+	r.Get("/v1/admin/group-role-mappings", groupMap.List)
+	r.Delete("/v1/admin/group-role-mappings/{id}", groupMap.Delete)
 	auditLog := adminauditlog.New(appPool)
 	r.Get("/v1/admin/audit-log", auditLog.List)
 	r.Get("/v1/admin/audit-log/unified", auditLog.UnifiedList)
@@ -400,6 +406,53 @@ func TestTenantAdmin2503_SCIMCredentials(t *testing.T) {
 	}
 	if rr, _ := s.do(t, bearerTok, http.MethodDelete, "/v1/admin/scim-credentials/"+issued.ID, nil); rr.Code != http.StatusNoContent {
 		t.Errorf("own revoke = %d %s, want 204", rr.Code, rr.Body.String())
+	}
+}
+
+// #2503: a tenant admin by role maps its own tenant's IdP groups to
+// canonical roles, never to super_admin. Another tenant's admin neither
+// lists nor deletes the mapping (404).
+func TestTenantAdmin2503_GroupRoleMappings(t *testing.T) {
+	skipIfNoAdminPool(t)
+	s := newStack2503(t)
+	own := seedTenant478(t, "test-2503-grp-"+uuid.NewString()[:8])
+	other := seedTenant478(t, "test-2503-grp-other-"+uuid.NewString()[:8])
+	t.Cleanup(func() {
+		_, _ = adminPool.Exec(context.Background(),
+			`DELETE FROM oidc_idp_group_mappings WHERE tenant_id = ANY($1)`, []uuid.UUID{own, other})
+	})
+	tok := s.mint(t, own, seedMember2261(t, own, "active", "admin"), authz.RoleAdmin)
+	otherTok := s.mint(t, other, seedMember2261(t, other, "active", "admin"), authz.RoleAdmin)
+
+	if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/group-role-mappings",
+		map[string]any{"group_ref": "platform-admins-2503", "role": "super_admin"}); rr.Code != http.StatusBadRequest {
+		t.Errorf("map a group to super_admin = %d, want 400", rr.Code)
+	}
+	rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/group-role-mappings",
+		map[string]any{"group_ref": "auditors-2503", "role": "auditor"})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create mapping = %d %s, want 201", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if rr, _ := s.do(t, tok, http.MethodGet, "/v1/admin/group-role-mappings", nil); rr.Code != http.StatusOK ||
+		!bytes.Contains(rr.Body.Bytes(), []byte(created.ID)) {
+		t.Errorf("own list = %d %s, want 200 listing %s", rr.Code, rr.Body.String(), created.ID)
+	}
+	if rr, _ := s.do(t, otherTok, http.MethodGet, "/v1/admin/group-role-mappings", nil); rr.Code != http.StatusOK ||
+		bytes.Contains(rr.Body.Bytes(), []byte(created.ID)) {
+		t.Errorf("other tenant's list = %d %s, want 200 without %s", rr.Code, rr.Body.String(), created.ID)
+	}
+	if rr, _ := s.do(t, otherTok, http.MethodDelete, "/v1/admin/group-role-mappings/"+created.ID, nil); rr.Code != http.StatusNotFound {
+		t.Errorf("other tenant's delete = %d, want 404", rr.Code)
+	}
+	if rr, _ := s.do(t, tok, http.MethodDelete, "/v1/admin/group-role-mappings/"+created.ID, nil); rr.Code != http.StatusNoContent {
+		t.Errorf("own delete = %d %s, want 204", rr.Code, rr.Body.String())
 	}
 }
 
