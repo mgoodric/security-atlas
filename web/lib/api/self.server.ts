@@ -70,12 +70,18 @@ import { apiBaseURL } from "./base";
  */
 export type AdminMe = {
   is_admin: boolean;
+  /**
+   * #2503: the caller administers its own tenant (`/v1/me`
+   * `is_tenant_admin`, authz.IsTenantAdmin on live roles). It opens the
+   * tenant-scoped admin pages; `is_admin` stays the super-admin bit.
+   */
+  is_tenant_admin: boolean;
   roles: string[];
 };
 
 /** emptyAdminMe is the deny value: not an admin, no roles. */
 export function emptyAdminMe(): AdminMe {
-  return { is_admin: false, roles: [] };
+  return { is_admin: false, is_tenant_admin: false, roles: [] };
 }
 
 /**
@@ -93,9 +99,14 @@ export function normalizeAdminMe(parsed: unknown): AdminMe {
   if (parsed === null || typeof parsed !== "object") {
     return emptyAdminMe();
   }
-  const body = parsed as { is_admin?: unknown; roles?: unknown };
+  const body = parsed as {
+    is_admin?: unknown;
+    is_tenant_admin?: unknown;
+    roles?: unknown;
+  };
   return {
     is_admin: body.is_admin === true,
+    is_tenant_admin: body.is_tenant_admin === true,
     roles: Array.isArray(body.roles)
       ? body.roles.filter((r): r is string => typeof r === "string")
       : [],

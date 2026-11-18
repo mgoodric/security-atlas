@@ -99,15 +99,11 @@ func TestDecide_NonSuperAdmin_BlockedFromManagementSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
-	// Per-tenant admin DOES match the generic admin.rego allow rule
-	// (which allows ANY action on ANY resource within the tenant —
-	// the canvas §9.5 design). So the OPA decision is `allow=true`
-	// here even though the handler itself rejects via requireSuperAdmin.
-	// That's the intended dual-leg defense: the handler gate is the
-	// LOAD-BEARING super_admin check; the OPA policy is the second
-	// leg for the JWT-only path. We assert the handler-level rejection
-	// in handler_integration_test.go.
-	if !d.Allow {
-		t.Fatalf("per-tenant admin should still pass OPA (admin.rego allows any tenant action); handler-layer super_admin gate is the load-bearing check")
+	// #2503: super-admins is a platform segment. A tenant admin by role
+	// is no longer admitted by admin.rego there; only an admin credential
+	// or the super_admin rule is. The handler's requireSuperAdmin stays the
+	// load-bearing check (handler_integration_test.go).
+	if d.Allow {
+		t.Fatalf("per-tenant admin by role passed OPA on /v1/admin/super-admins (reason=%s); #2503 keeps platform segments to admin credentials", d.Reason)
 	}
 }

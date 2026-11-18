@@ -47,6 +47,7 @@ import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 type AdminMeBody = {
   is_admin: boolean;
+  is_tenant_admin: boolean;
   roles: string[];
   error?: string;
 };

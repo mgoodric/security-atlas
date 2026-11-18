@@ -172,7 +172,10 @@ export type FixtureName =
   | "module-links"
   // #2494 — a tenant with one member whose roles are cleared each run,
   // for no-tenant-role.spec.ts.
-  | "no-tenant-role";
+  | "no-tenant-role"
+  // #2503 — a tenant with a tenant admin and a viewer member whose roles
+  // are reset each run, for tenant-admin-users.spec.ts.
+  | "tenant-admin-users";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
