@@ -377,7 +377,7 @@ mappings:
     scf_anchor: "HRS-12"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Termination Procedures map directly to the SCF Personnel Termination."
+    rationale: "Termination Procedures map directly to SCF Personnel Termination (HRS-12)."
   - requirement_code: "164.308(a)(4)(i)"
     scf_anchor: "IAC-04"
     relationship_type: "subset_of"

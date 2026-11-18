@@ -150,11 +150,11 @@ func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput, by Ac
 	return issued, plain, nil
 }
 
-// Rotate mints a successor with the same scope/kinds/flags as the predecessor
-// and sets the predecessor's `retires_at` to now()+rotationGrace. The
-// api_key_rotate audit row naming by is written in the same transaction
-// (#2609): before is the predecessor, after is the successor and the
-// predecessor's retirement.
+// Rotate mints a successor with the same scope/kinds/flags and owner
+// (issued_by) as the predecessor and sets the predecessor's `retires_at` to
+// now()+rotationGrace. The api_key_rotate audit row naming by is written in
+// the same transaction (#2609): before is the predecessor, after is the
+// successor and the predecessor's retirement.
 func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.UUID, by Actor) (credstore.Credential, string, time.Time, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -192,6 +192,14 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 	if pred.MintedBy.Valid {
 		if u, uerr := uuidFromPg(pred.MintedBy); uerr == nil {
 			in.MintedBy = &u
+		}
+	}
+	// #2503: the successor stays bound to the predecessor's owner. Dropping
+	// issued_by turned a user's personal token into an unbound machine key,
+	// whose copied owner_roles label then counts as its own grant.
+	if pred.IssuedBy.Valid {
+		if u, uerr := uuidFromPg(pred.IssuedBy); uerr == nil {
+			in.IssuedBy = &u
 		}
 	}
 	predUU, _ := uuidFromPg(pred.ID)

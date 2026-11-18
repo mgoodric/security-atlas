@@ -118,9 +118,28 @@ type FreshSecret =
       predecessor_expires_at: string;
     };
 
+// #2503: a tenant admin manages its own tenant's keys, but not an admin or
+// approver key: the platform refuses it the issue flags and a rotate or
+// revoke of such a key (admincreds.mintWithinCaller). `is_admin` here is the
+// super-admin bit. Fail-closed: a failed read hides the admin controls.
+async function fetchIsPlatformAdmin(): Promise<boolean> {
+  const res = await fetch(`/api/admin/me`, { cache: "no-store" });
+  if (!res.ok) return false;
+  const body = (await res.json()) as { is_admin?: unknown };
+  return body.is_admin === true;
+}
+
+const PLATFORM_KEY_REASON =
+  "Only a platform super-admin rotates or revokes an admin or approver key.";
+
 export default function APIKeysPage() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["admin-creds"], queryFn: fetchCreds });
+  const platformQ = useQuery({
+    queryKey: ["admin-me", "is-admin"],
+    queryFn: fetchIsPlatformAdmin,
+  });
+  const platform = platformQ.data === true;
   const [freshSecret, setFreshSecret] = useState<FreshSecret>({ kind: "none" });
 
   const issueMut = useMutation({
@@ -174,6 +193,7 @@ export default function APIKeysPage() {
       />
 
       <IssueForm
+        allowAdmin={platform}
         onSubmit={(body) => issueMut.mutate(body)}
         submitting={issueMut.isPending}
         error={issueMut.error ? (issueMut.error as Error).message : null}
@@ -255,9 +275,12 @@ export default function APIKeysPage() {
                           {
                             id: "rotate",
                             label: "Rotate",
-                            disabledReason: rotateMut.isPending
-                              ? "A rotation is already running."
-                              : undefined,
+                            disabledReason:
+                              !platform && (c.is_admin || c.is_approver)
+                                ? PLATFORM_KEY_REASON
+                                : rotateMut.isPending
+                                  ? "A rotation is already running."
+                                  : undefined,
                             onSelect: () => rotateMut.mutate(c.id),
                             "data-testid": `cred-rotate-${c.id}`,
                           },
@@ -265,6 +288,10 @@ export default function APIKeysPage() {
                             id: "revoke",
                             label: "Revoke",
                             destructive: true,
+                            disabledReason:
+                              !platform && (c.is_admin || c.is_approver)
+                                ? PLATFORM_KEY_REASON
+                                : undefined,
                             confirmPrompt: `Revoke the credential ending ${
                               c.last4
                             }? Revocation is immediate: any connector using this bearer fails on its next push. Last used: ${
@@ -353,10 +380,13 @@ function FreshSecretCallout({
 }
 
 function IssueForm({
+  allowAdmin,
   onSubmit,
   submitting,
   error,
 }: {
+  /** #2503: only a platform super-admin may mint an admin key. */
+  allowAdmin: boolean;
   onSubmit: (body: AdminCredentialIssueRequest) => void;
   submitting: boolean;
   error: string | null;
@@ -412,7 +442,7 @@ function IssueForm({
       scope_predicate: predicateBody(predicateToSend),
       allowed_kinds: allowedKinds,
       ttl_seconds: ttlDays * 86400,
-      is_admin: isAdmin,
+      is_admin: allowAdmin && isAdmin,
       is_approver: false,
       owner_roles: [],
     });
@@ -501,18 +531,20 @@ function IssueForm({
               aria-describedby={errorId}
             />
           </Field>
-          <Field label="Admin credential">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isAdmin}
-                onChange={(e) => setIsAdmin(e.target.checked)}
-                className="h-4 w-4"
-                aria-describedby={errorId}
-              />
-              Grant admin privileges on this credential
-            </label>
-          </Field>
+          {allowAdmin ? (
+            <Field label="Admin credential">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={isAdmin}
+                  onChange={(e) => setIsAdmin(e.target.checked)}
+                  className="h-4 w-4"
+                  aria-describedby={errorId}
+                />
+                Grant admin privileges on this credential
+              </label>
+            </Field>
+          ) : null}
         </div>
         <Button
           onClick={submit}

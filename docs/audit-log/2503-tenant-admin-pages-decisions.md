@@ -375,3 +375,107 @@ The handler refuses it, as before, and `handlerNarrower2428` pins that.
 
 On part 4's code the test fails: the list is a 403. The Playwright spec now
 expects Features among a tenant admin's pages.
+
+## Part 6 — API keys, with the mint guard (D6)
+
+### D19 — credentials are tenant-scoped, within the minter's authority
+
+The credentials routes now admit `authz.IsTenantAdmin`, and `credentials`
+joins `tenant_admin_segments`:
+
+- `POST/GET /v1/admin/credentials`
+- `POST …/{id}/rotate`
+- `POST …/{id}/revoke`
+
+As D6 required, a tenant admin by role (no admin credential) works only
+with keys it could hold itself. `admincreds.mintWithinCaller` enforces this:
+
+- **No `is_admin` key.** Such a key is an admin credential
+  (`cred.IsAdmin`). It would reach every platform `/v1/admin` segment, and
+  pass the handlers that still gate on the flag. Issue answers 403.
+- **No `is_approver` key.** Issue answers 403, as Matt confirmed in D6.
+- **Canonical `owner_roles` labels.** Each canonical label must be a role
+  the caller holds live. A live admin holds every tenant role, so for a
+  tenant admin this admits any canonical label; it is not a wider grant
+  than the admin already has. A free-text label grants nothing (#2595)
+  and passes.
+- **Rotate and revoke of a key it could not have minted are 403.** A
+  rotate returns a new plaintext with the same flags. Without this check, a
+  tenant admin who rotated a super-admin's `is_admin` key would receive an
+  admin credential. The falsifier showed exactly that: with the guard
+  disabled, the rotate answered 200 with a bearer.
+- **No change for an admin credential.** A super-admin, or an
+  admin-flagged key, keeps every behaviour it had before.
+
+The tenant comes from the credential (`tenant_id` is refused, slice 051),
+and the store runs under its RLS, so another tenant's key id is a 404.
+
+grc_engineer's blanket read still admits `GET /v1/admin/credentials` (the
+list carries no plaintext) in OPA. The handler refuses it, as before, and
+it is pinned in `handlerNarrower2428`.
+
+### D19a — personal keys: no rotate by another user, and rotate keeps the owner
+
+The #2655 review found a gap in D19's guard. The list shows user-bound keys
+(a user's personal token, `issued_by` set). Before this fix:
+
+- A tenant admin could rotate another user's personal token.
+- `Store.Rotate` dropped `issued_by`, so the successor came back unbound.
+- An unbound key's copied `owner_roles` label counts as its own grant
+  (`ownerLabelIsGrant`).
+
+So the admin received a bearer acting with the user's labels, and the
+user's own token retired.
+
+Two fixes:
+
+- `callerMayHandle` refuses a tenant admin (no admin credential) rotating
+  a user-bound key it does not own. It may still revoke one.
+- `Store.Rotate` now carries `issued_by` to the successor for every
+  caller, so a rotated personal token stays bound to its owner.
+
+`TestTenantAdmin2503_CredentialsMintGuard` covers both. A tenant admin
+rotating a member's bound key gets 403, and revoking it is a 204. Rotating
+its own bound key is a 200, and the successor's `issued_by` is the owner.
+
+On the previous head the test fails: the rotate is a 200 with the member's
+bearer, and the successor's `issued_by` is null.
+
+### D20 — web
+
+- `/admin/api-keys` is no longer behind `PlatformAdminGate`.
+- For a caller without `is_admin`, the issue form hides the "Admin
+  credential" checkbox, and Rotate and Revoke are disabled with a reason
+  on an `is_admin` or `is_approver` key. The platform refuses both anyway.
+- A tenant admin's section nav and overview list API keys with their
+  count.
+- Settings (`/settings`): the `/admin` cross-link and the API tokens card
+  admit `is_tenant_admin`. This is the `is_admin` gate D7 said would move
+  with this PR. The card's own issue form already sends
+  `is_admin: false`. The profile's admin badge and the tenant rename stay
+  on `is_admin` (super-admin), as before.
+
+### D21 — tests
+
+`TestTenantAdmin2503_CredentialsMintGuard` covers a tenant admin by role:
+
+- Issuing an `is_admin` or `is_approver` key is a 403.
+- Issuing a `viewer` key is a 201.
+- Rotate and revoke of a super-admin-minted `is_admin` key are 403.
+- Another tenant's admin revoking its key gets a 404.
+- It rotates and revokes its own key.
+
+The test fails two ways:
+
+- On part 5's code: the plain issue is a 403.
+- With the gate opened but `mintWithinCaller` disabled: the `is_admin`
+  and `is_approver` issues are 201, and the rotate of the `is_admin` key
+  is a 200 with a bearer.
+
+The Playwright spec now expects API keys among a tenant admin's pages, and
+checks the platform panel on `/admin/tenants`.
+
+With this part the inventory's tenant-scoped rows are all open. What stays
+platform: `policies/import` (not opened; no decision asked for it), the
+audit-periods and vendors exports, demo, install reset, tenants,
+super-admins, the authz-bundle reload, and the global catalog routes.

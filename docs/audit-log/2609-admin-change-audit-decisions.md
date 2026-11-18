@@ -136,12 +136,16 @@ admin can call it:
   holds `admin` passes `authz.IsTenantAdmin` but not `cred.IsAdmin`, so it
   is refused too.
   At boot `Persister.LoadActive` loads every active `api_keys` row into the
-  in-memory store, so such a row does reach gRPC. Those rows are minted only
-  by `POST /v1/admin/credentials`, whose handler gate is still `cred.IsAdmin`,
-  and `credentials` is not in `admin.rego`'s `tenant_admin_segments`. The
-  gRPC `Issue` (`IssueMinted`) never sets `IsAdmin`.
+  in-memory store, so such a row does reach gRPC. Those rows are minted by
+  `POST /v1/admin/credentials`. The gRPC `Issue` (`IssueMinted`) never sets
+  `IsAdmin`.
+- #2655 opened `/v1/admin/credentials` to tenant admins, but its guard keeps
+  them from creating such a key. `mintWithinCaller` refuses an `is_admin` or
+  `is_approver` key on issue for any caller without `cred.IsAdmin`, and
+  `callerMayHandle` applies the same check to rotate and revoke, so a tenant
+  admin cannot rotate an existing admin key into a fresh plaintext either.
 
 So reaching the gRPC admin service needs a credential that already holds
-`IsAdmin`. If a later change opens `/v1/admin/credentials` to tenant admins,
-or lets one set `is_admin` on a key, this stops holding and the gRPC path
-must be audited before that lands.
+`IsAdmin`. If a later change lets a tenant admin set `is_admin` on a key, or
+removes the rotate check, this stops holding and the gRPC path must be
+audited before that lands.
