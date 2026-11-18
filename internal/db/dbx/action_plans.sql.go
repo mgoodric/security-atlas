@@ -263,6 +263,42 @@ func (q *Queries) GetActionPlanByID(ctx context.Context, arg GetActionPlanByIDPa
 	return i, err
 }
 
+const getActionPlanByIDForUpdate = `-- name: GetActionPlanByIDForUpdate :one
+SELECT id, tenant_id, title, description, triggering_event, owner_id, due_date, status, audit_period_id, tombstoned_at, created_at, updated_at
+FROM action_plans
+WHERE tenant_id = $1 AND id = $2 AND tombstoned_at IS NULL
+FOR UPDATE
+`
+
+type GetActionPlanByIDForUpdateParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// GetActionPlanByID under a row lock, for a write that guards on the plan
+// (#2434). A control link or owner change in flight finishes first, so
+// the guard and the UPDATE see the same plan. The link tables' FK takes
+// KEY SHARE on this row, which FOR UPDATE conflicts with.
+func (q *Queries) GetActionPlanByIDForUpdate(ctx context.Context, arg GetActionPlanByIDForUpdateParams) (ActionPlan, error) {
+	row := q.db.QueryRow(ctx, getActionPlanByIDForUpdate, arg.TenantID, arg.ID)
+	var i ActionPlan
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.TriggeringEvent,
+		&i.OwnerID,
+		&i.DueDate,
+		&i.Status,
+		&i.AuditPeriodID,
+		&i.TombstonedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const linkActionPlanControl = `-- name: LinkActionPlanControl :exec
 
 INSERT INTO action_plan_controls (action_plan_id, control_id, tenant_id, linked_by)
