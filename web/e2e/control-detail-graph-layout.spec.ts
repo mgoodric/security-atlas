@@ -12,8 +12,25 @@
 // Self-contained: every BFF endpoint the page reads is mocked with a
 // schema-conformant payload (the same shapes control-detail-tabs.spec.ts
 // uses), so the spec needs only an authed session, not seed data.
+//
+// #2374 — every mock payload is checked against its BFF wire type with
+// `satisfies`, so a change to a response shape fails typecheck here
+// instead of leaving the spec green against a payload the page no longer
+// gets.
 
 import type { Page } from "@playwright/test";
+
+import type {
+  ControlCoverage,
+  ControlEffectiveness,
+  ControlHistoryResponse,
+  ControlLinkedPoliciesResponse,
+  ControlLinkedRisksResponse,
+  ControlStateResponse,
+  CoverageRequirement,
+  EffectiveScopeResponse,
+} from "@/lib/api/control-detail";
+import type { EvidenceListResponse } from "@/lib/api/evidence";
 
 import { expect, seeded, test } from "./fixtures";
 
@@ -23,24 +40,27 @@ const LONG_ANCHOR_NAME =
   "Personnel screening, background verification and rescreening of individuals";
 const OOS_FV = "11111111-1111-1111-1111-1111111100ff";
 
-const REQUIREMENTS = Array.from({ length: 8 }, (_, i) => ({
-  edge_id: `00000000-0000-0000-0000-0000000001${String(i).padStart(2, "0")}`,
-  requirement_id: `REQ-${i}`,
-  code: `PS.SCREEN-${i}.a.${i}`,
-  title: `Background checks during hiring, onboarding and role changes for personnel in category ${i} with access to customer data`,
-  framework_slug: `fw-${i}`,
-  framework_name:
-    i % 2 === 0 ? "NIST SP 800-53 Rev. 5 Moderate Baseline" : "ISO/IEC 27001",
-  framework_version: "2022",
-  framework_version_id: i === 7 ? OOS_FV : seeded.frameworkVersionId,
-  framework_version_status: "active",
-  relationship_type: ["equal", "subset_of", "superset_of", "intersects_with"][
-    i % 4
-  ],
-  strength: 0.5 + i / 20,
-  coverage: 0.9,
-  source_attribution: "scf",
-}));
+const REQUIREMENTS = Array.from(
+  { length: 8 },
+  (_, i): CoverageRequirement => ({
+    edge_id: `00000000-0000-0000-0000-0000000001${String(i).padStart(2, "0")}`,
+    requirement_id: `REQ-${i}`,
+    code: `PS.SCREEN-${i}.a.${i}`,
+    title: `Background checks during hiring, onboarding and role changes for personnel in category ${i} with access to customer data`,
+    framework_slug: `fw-${i}`,
+    framework_name:
+      i % 2 === 0 ? "NIST SP 800-53 Rev. 5 Moderate Baseline" : "ISO/IEC 27001",
+    framework_version: "2022",
+    framework_version_id: i === 7 ? OOS_FV : seeded.frameworkVersionId,
+    framework_version_status: "active",
+    relationship_type: ["equal", "subset_of", "superset_of", "intersects_with"][
+      i % 4
+    ],
+    strength: 0.5 + i / 20,
+    coverage: 0.9,
+    source_attribution: "scf",
+  }),
+);
 
 async function mockControlEndpoints(page: Page): Promise<void> {
   const id = seeded.controlId;
@@ -55,7 +75,6 @@ async function mockControlEndpoints(page: Page): Promise<void> {
       json({
         control: {
           id,
-          tenant_id: seeded.tenantId,
           bundle_id: "CTRL-PERSONNEL-SCREENING-0042",
           version: 1,
           title: LONG_CONTROL_TITLE,
@@ -73,11 +92,17 @@ async function mockControlEndpoints(page: Page): Promise<void> {
           description: "Personnel screening anchor",
         },
         requirements: REQUIREMENTS,
-      }),
+      } satisfies ControlCoverage),
     ),
   );
   await page.route(`**/api/controls/${id}/state`, (route) =>
-    route.fulfill(json({ control_id: id, states: [], count: 0 })),
+    route.fulfill(
+      json({
+        control_id: id,
+        states: [],
+        count: 0,
+      } satisfies ControlStateResponse),
+    ),
   );
   await page.route(`**/api/controls/${id}/effectiveness`, (route) => {
     const end = new Date();
@@ -89,7 +114,7 @@ async function mockControlEndpoints(page: Page): Promise<void> {
         total_count: 4,
         window_start: new Date(end.getTime() - 30 * 86_400_000).toISOString(),
         window_end: end.toISOString(),
-      }),
+      } satisfies ControlEffectiveness),
     );
   });
   await page.route(`**/api/controls/${id}/effective-scope?**`, (route) => {
@@ -103,12 +128,18 @@ async function mockControlEndpoints(page: Page): Promise<void> {
         framework_version_id: fv,
         framework_scope_id: "00000000-0000-0000-0000-0000000000f1",
         effective_scope: inScope
-          ? [{ id: "00000000-0000-0000-0000-0000000000c1", label: "prod-us" }]
+          ? [
+              {
+                id: "00000000-0000-0000-0000-0000000000c1",
+                label: "prod-us",
+                dimensions: {},
+              },
+            ]
           : [],
         effective_scope_count: inScope ? 1 : 0,
         in_scope: inScope,
         out_of_scope_reason: inScope ? undefined : "no matching scope cells",
-      }),
+      } satisfies EffectiveScopeResponse),
     );
   });
   await page.route("**/api/evidence?**", (route) =>
@@ -119,17 +150,36 @@ async function mockControlEndpoints(page: Page): Promise<void> {
         count: 0,
         total: 0,
         next_cursor: "",
-      }),
+      } satisfies EvidenceListResponse),
     ),
   );
   await page.route(`**/api/controls/${id}/policies`, (route) =>
-    route.fulfill(json({ control_id: id, policies: [], count: 0 })),
+    route.fulfill(
+      json({
+        control_id: id,
+        policies: [],
+        count: 0,
+      } satisfies ControlLinkedPoliciesResponse),
+    ),
   );
   await page.route(`**/api/controls/${id}/risks`, (route) =>
-    route.fulfill(json({ control_id: id, risks: [], count: 0 })),
+    route.fulfill(
+      json({
+        control_id: id,
+        risks: [],
+        count: 0,
+      } satisfies ControlLinkedRisksResponse),
+    ),
   );
   await page.route(`**/api/controls/${id}/history`, (route) =>
-    route.fulfill(json({ control_id: id, history: [], count: 0 })),
+    route.fulfill(
+      json({
+        control_id: id,
+        history: [],
+        count: 0,
+        next_cursor: "",
+      } satisfies ControlHistoryResponse),
+    ),
   );
 }
 
