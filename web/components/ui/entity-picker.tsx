@@ -52,8 +52,7 @@ import { fetchRisksListWithRollUps } from "@/lib/api/risks";
 import {
   controlOptions,
   credentialOptions,
-  evidenceOptions,
-  evidenceSearchOptions,
+  evidencePickerOptions,
   frameworkOptions,
   KIND_PLURAL,
   matchesQuery,
@@ -172,6 +171,14 @@ function useEntityOptions(
     retry,
   });
 
+  // Evidence is refused when either its list or its search is. The
+  // refused kind's error is the one counted below; a search that fails
+  // for any other reason is only a failed search (searchFailed), since
+  // the list itself loaded.
+  const evidenceError =
+    [evidence.error, evidenceSearch.error].find(isUnavailable) ??
+    evidence.error;
+  const evidenceRefused = isUnavailable(evidenceError);
   const options = useMemo(() => {
     const out: EntityOption[] = [];
     if (wantsFrameworks) out.push(...frameworkOptions(frameworks.data ?? []));
@@ -190,12 +197,13 @@ function useEntityOptions(
       out.push(...policyOptions(policies.data?.policies ?? []));
     }
     if (wantsEvidence) {
-      out.push(...evidenceOptions(evidence.data ?? []));
       out.push(
-        ...evidenceSearchOptions(
-          evidenceSearch.data ?? [],
-          evidenceSearch.data ? searchFor : "",
-        ),
+        ...evidencePickerOptions({
+          refused: evidenceRefused,
+          listed: evidence.data,
+          found: evidenceSearch.data,
+          searchFor,
+        }),
       );
     }
     return uniqueOptions(out);
@@ -214,14 +222,10 @@ function useEntityOptions(
     policies.data,
     evidence.data,
     evidenceSearch.data,
+    evidenceRefused,
     searchFor,
   ]);
 
-  // Evidence is refused when either its list or its search is.
-  const evidenceError =
-    [evidence.error, evidenceSearch.error].find(isUnavailable) ??
-    evidence.error ??
-    evidenceSearch.error;
   const records = (
     [
       ["control", wantsControls, controls.isPending, controls.error],
@@ -250,9 +254,15 @@ function useEntityOptions(
   // A search is due (still debouncing) or on its way.
   const isSearching =
     wantsEvidence &&
-    !unavailable &&
+    !evidenceRefused &&
     query.trim().length >= SEARCH_MIN_CHARS &&
     (searchFor !== query.trim() || evidenceSearch.isFetching);
+  const searchFailed =
+    wantsEvidence &&
+    !evidenceRefused &&
+    !isSearching &&
+    evidenceSearch.isError &&
+    query.trim().length >= SEARCH_MIN_CHARS;
   return {
     options,
     isLoading,
@@ -260,6 +270,7 @@ function useEntityOptions(
     unavailable,
     unavailableKinds,
     isSearching,
+    searchFailed,
   };
 }
 
@@ -441,8 +452,14 @@ export function EntityPicker({
                 : fetched.unavailable
                   ? unavailableText(kinds)
                   : fetched.isError
-                    ? "The list could not be loaded. Paste an ID instead."
-                    : "No matches. Paste an ID to use one not listed."}
+                    ? listedOnly
+                      ? "The list could not be loaded. Reload the page to try again."
+                      : "The list could not be loaded. Paste an ID instead."
+                    : fetched.searchFailed
+                      ? "The search could not be completed. Try again."
+                      : listedOnly
+                        ? "No matches."
+                        : "No matches. Paste an ID to use one not listed."}
           </ComboboxEmpty>
           <ComboboxList>
             {(o: EntityOption) => (

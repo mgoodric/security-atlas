@@ -244,6 +244,31 @@ export function evidenceSearchOptions(
 }
 
 /**
+ * The evidence a picker offers: the suggested newest records, then what
+ * the server search found for `searchFor`. Nothing at all once the
+ * server has refused evidence: a query keeps its last data after a
+ * failed refetch, and a title cached before the refusal must not show
+ * beside "not available".
+ */
+export function evidencePickerOptions({
+  refused,
+  listed,
+  found,
+  searchFor,
+}: {
+  refused: boolean;
+  listed: Parameters<typeof evidenceOptions>[0] | undefined;
+  found: readonly EvidenceSearchHit[] | undefined;
+  searchFor: string;
+}): EntityOption[] {
+  if (refused) return [];
+  return [
+    ...evidenceOptions(listed ?? []),
+    ...evidenceSearchOptions(found ?? [], found ? searchFor : ""),
+  ];
+}
+
+/**
  * Options from several sources, the first of each value kept, so a
  * record listed and also found by search appears once.
  */

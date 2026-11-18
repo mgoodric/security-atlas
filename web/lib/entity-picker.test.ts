@@ -4,6 +4,7 @@ import {
   controlOptions,
   credentialOptions,
   evidenceOptions,
+  evidencePickerOptions,
   evidenceSearchOptions,
   frameworkOptions,
   matchesQuery,
@@ -299,6 +300,26 @@ describe("evidenceSearchOptions / uniqueOptions (#2432)", () => {
     });
     // The server matched it per token; the client filter keeps it.
     expect(matchesQuery(o, "legacy backup")).toBe(true);
+  });
+
+  test("a refusal drops cached evidence, listed and found alike", () => {
+    // A query keeps its last data after a failed refetch: the titles
+    // cached before the 403 are still there, and must not be offered.
+    const cached = {
+      listed: [
+        {
+          evidence_id: U1,
+          evidence_kind: "okta.mfa_policy",
+          observed_at: "2026-11-01T00:00:00Z",
+          result: "pass" as const,
+        },
+      ],
+      found: [{ id: U2, title: "legacy.backup · BCD-11" }],
+      searchFor: "legacy",
+    };
+    const offered = evidencePickerOptions({ ...cached, refused: false });
+    expect(offered.map((o) => o.value)).toEqual([U1, U2]);
+    expect(evidencePickerOptions({ ...cached, refused: true })).toEqual([]);
   });
 
   test("a record both listed and found appears once, the first kept", () => {
