@@ -19,7 +19,7 @@ const ROUTES = [
     route: "/policies",
     id: "policies",
     title: "Policies",
-    // One source line: the renderer joins a paragraph's lines with <br/>.
+    // One source line, so the match holds however the .md wraps (#2455).
     body: "A policy is a written rule your organisation commits to",
     term: "policy-acknowledgment",
     lifecycle: "policy",

@@ -19,7 +19,7 @@ const ROUTES = [
     route: "/controls",
     id: "controls",
     title: "Controls",
-    // One source line: the renderer joins a paragraph's lines with <br/>.
+    // One source line, so the match holds however the .md wraps (#2455).
     body: "A control is one thing your organisation does to stay secure",
     term: "evaluation",
     lifecycle: "control_state",
