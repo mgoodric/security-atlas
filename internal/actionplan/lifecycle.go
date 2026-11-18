@@ -54,9 +54,10 @@ var Lifecycle = lifecycle.Table{
 }
 
 // planRoles are the roles the authorization bundle admits on the
-// action-plan write routes. The handler's own guard is looser
-// (hasProgramWrite), but no role other than admin lists "action-plans" as
-// writable, so the bundle admits admin alone.
+// action-plan write routes: no role other than admin lists "action-plans"
+// as writable, so the bundle admits admin alone. The handler's guard
+// (authz.IsTenantAdmin) admits the same, kept admin-only by decision
+// (#2291); internal/api's TestLifecycleGuards_MatchTableRoles proves it.
 var planRoles = []string{"admin"}
 
 func planMove(from, to, action, note string) lifecycle.Transition {
