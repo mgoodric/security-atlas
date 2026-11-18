@@ -14,62 +14,42 @@
 // gets 403, which the page reads as "hide the edge section").
 
 import { bffControlFetch, bffPostJSON } from "./_shared";
+import type { components } from "./generated/openapi";
 
-export const REMAP_CLASSES = [
-  "unchanged",
-  "renamed",
-  "split",
-  "reused_id",
-  "no_successor",
-] as const;
-export type RemapClass = (typeof REMAP_CLASSES)[number];
+// The platform's response bodies are generated from docs/openapi.yaml
+// (#2394), whose schemas internal/api/openapi reflects from the Go wire
+// structs. A renamed or retyped field fails typecheck here and in every
+// caller instead of at runtime. Regenerate with `npm run openapi:types`.
+type Schemas = components["schemas"];
 
-export type RemapStatus =
-  | "open"
-  | "rebound"
-  | "approved"
-  | "rejected"
-  | "kept_legacy";
+export type RemapProposal = Schemas["RemapProposal"];
+export type RemapProposalsResponse = Schemas["RemapProposalsResponse"];
+export type RemapDecision = Schemas["RemapDecision"];
+export type RemapBulkResult = Schemas["RemapBulkResult"];
+export type EdgeRemapProposal = Schemas["EdgeRemapProposal"];
+export type EdgeRemapProposalsResponse = Schemas["EdgeRemapProposalsResponse"];
 
-export interface RemapProposal {
-  id: string;
-  control_id: string;
-  bundle_id: string;
-  title: string;
-  legacy_scf_id: string;
-  legacy_release: string;
-  target_release: string;
-  class: RemapClass;
-  status: RemapStatus;
-  successor_scf_ids: string[];
-  created_at: string;
-}
+export type RemapClass = RemapProposal["class"];
+export type RemapStatus = RemapProposal["status"];
 
-export interface RemapProposalsResponse {
-  proposals: RemapProposal[];
-  // count is this page; total every proposal the filters match (#2325).
-  count: number;
-  total: number;
-  next_cursor?: string;
-}
+// The tab order: one entry per class, keyed so a class the platform adds
+// or drops fails typecheck here.
+const REMAP_CLASS_ORDER: Record<RemapClass, number> = {
+  unchanged: 0,
+  renamed: 1,
+  split: 2,
+  reused_id: 3,
+  no_successor: 4,
+};
+export const REMAP_CLASSES: readonly RemapClass[] = (
+  Object.keys(REMAP_CLASS_ORDER) as RemapClass[]
+).sort((a, b) => REMAP_CLASS_ORDER[a] - REMAP_CLASS_ORDER[b]);
 
-export interface RemapDecision {
-  proposal_id: string;
-  decision: string;
-  new_scf_id?: string;
-  new_release?: string;
-  decided_by: string;
-  decided_at: string;
-}
-
-export interface RemapBulkResult {
-  approved_count: number;
-  approved: RemapDecision[];
-  skipped: { proposal_id: string; bundle_id: string; reason: string }[];
-}
-
-// An SCF anchor as GET /v1/anchors returns it. Titles are SCF's verbatim
-// text and descriptions our own words; the page renders both as text.
+// The anchor types below are the BFF's own response, composed in
+// app/api/controls/remap-proposals/anchors/route.ts, so they stay
+// hand-written. An SCF anchor as GET /v1/anchors returns it. Titles are
+// SCF's verbatim text and descriptions our own words; the page renders
+// both as text.
 export interface SCFAnchor {
   id: string;
   scf_id: string;
@@ -89,25 +69,6 @@ export interface AnchorSearchResponse {
   scf_release: string;
   anchors: SCFAnchor[];
   truncated: boolean;
-}
-
-export interface EdgeRemapProposal {
-  id: string;
-  edge_id: string;
-  framework_slug: string;
-  framework_version: string;
-  requirement_code: string;
-  relationship_type: string;
-  legacy_scf_id: string;
-  legacy_release: string;
-  target_release: string;
-  class: RemapClass;
-  status: RemapStatus;
-  successor_scf_ids: string[];
-}
-
-export interface EdgeRemapProposalsResponse {
-  proposals: EdgeRemapProposal[];
 }
 
 // The platform pages the list (#2325). The review page groups every

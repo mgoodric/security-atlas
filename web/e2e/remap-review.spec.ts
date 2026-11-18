@@ -20,9 +20,16 @@
 
 import type { Page, Request } from "@playwright/test";
 
+// The platform's response types are generated from docs/openapi.yaml
+// (#2394); every mocked body below `satisfies` one, so a contract change
+// fails typecheck here instead of leaving this spec green on a stale shape.
 import type {
   EdgeRemapProposal,
+  EdgeRemapProposalsResponse,
+  RemapBulkResult,
+  RemapDecision,
   RemapProposal,
+  RemapProposalsResponse,
   SCFAnchor,
 } from "../lib/api/remap";
 
@@ -136,16 +143,36 @@ const EDGES: EdgeRemapProposal[] = [
     edge_id: "edge-row-1",
     framework_slug: "soc2",
     framework_version: "2017",
+    requirement_id: "requirement-cc6-1",
     requirement_code: "CC6.1",
     relationship_type: "subset_of",
+    strength: 1,
+    mapping_tier: "canonical",
+    legacy_anchor_id: "anchor-IAC-21",
     legacy_scf_id: "IAC-21",
+    legacy_anchor_title: "Privileged Account Management",
     legacy_release: A,
     target_release: B,
     class: "split",
     status: "open",
     successor_scf_ids: ["IAC-21.1", "IAC-21.2"],
+    created_at: "2026-11-15T12:00:00Z",
   },
 ];
+
+// decided is the part of a RemapDecision every decision carries.
+const decided = (p: RemapProposal, decision: string): RemapDecision => ({
+  proposal_id: p.id,
+  decision,
+  bulk: false,
+  bundle_id: p.bundle_id,
+  legacy_control_id: p.control_id,
+  legacy_anchor_id: `anchor-${p.legacy_scf_id}`,
+  legacy_scf_id: p.legacy_scf_id,
+  legacy_release: p.legacy_release,
+  decided_by: "reviewer",
+  decided_at: "2026-11-15T12:30:00Z",
+});
 
 type Fixture = {
   proposals: RemapProposal[];
@@ -165,7 +192,10 @@ async function mockRemap(
 
   await page.route("**/api/admin/crosswalk-edge-remap-proposals*", (route) =>
     opts.superAdmin
-      ? route.fulfill({ status: 200, json: { proposals: EDGES } })
+      ? route.fulfill({
+          status: 200,
+          json: { proposals: EDGES } satisfies EdgeRemapProposalsResponse,
+        })
       : route.fulfill({ status: 403, json: { error: "super_admin required" } }),
   );
 
@@ -205,11 +235,13 @@ async function mockRemap(
         json: {
           approved_count: approved.length,
           approved: approved.map((p) => ({
-            proposal_id: p.id,
-            decision: "approved",
+            ...decided(p, "approved"),
+            bulk: true,
+            new_scf_id: p.successor_scf_ids[0],
+            new_release: B,
           })),
           skipped: [],
-        },
+        } satisfies RemapBulkResult,
       });
     }
 
@@ -233,18 +265,20 @@ async function mockRemap(
       }
       return route.fulfill({
         json: {
-          proposal_id: p.id,
-          decision: p.status,
-          new_scf_id: body.scf_id,
-          new_release: B,
-          decided_by: "reviewer",
-          decided_at: "2026-11-15T12:30:00Z",
-        },
+          ...decided(p, p.status),
+          ...(action === "approve"
+            ? { new_scf_id: String(body.scf_id ?? ""), new_release: B }
+            : {}),
+        } satisfies RemapDecision,
       });
     }
 
     return route.fulfill({
-      json: { proposals: fx.proposals, count: fx.proposals.length },
+      json: {
+        proposals: fx.proposals,
+        count: fx.proposals.length,
+        total: fx.proposals.length,
+      } satisfies RemapProposalsResponse,
     });
   });
 

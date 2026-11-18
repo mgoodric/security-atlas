@@ -695,12 +695,18 @@ paths:
       security:
         - adminBearer: []
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: OK.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/EdgeRemapProposalsResponse"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/admin/crosswalk-edge-remap-proposals/approve-unchanged:
     post:
       summary: POST /v1/admin/crosswalk-edge-remap-proposals/approve-unchanged — approve every open unchanged edge remap (super_admin; #1777)
@@ -2598,12 +2604,18 @@ paths:
       security:
         - bearer: []
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: OK.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/RemapProposalsResponse"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/controls/remap-proposals/approve-unchanged:
     post:
       summary: POST /v1/controls/remap-proposals/approve-unchanged — approve every open unchanged SCF remap proposal with its single successor, re-anchoring each control as a new revision; a person must approve (#1776)
@@ -2612,12 +2624,18 @@ paths:
       security:
         - bearer: []
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: OK.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/RemapBulkResult"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/controls/remap-proposals/{id}/approve:
     post:
       summary: POST /v1/controls/remap-proposals/{id}/approve — re-anchor the control on a successor (scf_id required for split and no_successor) as a superseding revision and record the anchor history; a person must approve (#1776)
@@ -2632,12 +2650,18 @@ paths:
           schema:
             type: string
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: OK.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/RemapDecision"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/controls/remap-proposals/{id}/keep-legacy:
     post:
       summary: POST /v1/controls/remap-proposals/{id}/keep-legacy — keep the control on its legacy SCF anchor for good; a person must decide (#1776)
@@ -2652,12 +2676,18 @@ paths:
           schema:
             type: string
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: OK.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/RemapDecision"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/controls/remap-proposals/{id}/reject:
     post:
       summary: POST /v1/controls/remap-proposals/{id}/reject — reject a remap proposal; the control stays on its legacy anchor and the proposal can be revisited (#1776)
@@ -2672,12 +2702,18 @@ paths:
           schema:
             type: string
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: OK.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/RemapDecision"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/controls/{id}/action-plans:
     get:
       summary: GET /v1/controls/{id}/action-plans
@@ -7306,3 +7342,238 @@ components:
           minimum: 0
           maximum: 1
           description: Lexical token-overlap relevance score. Higher sorts first.
+    EdgeRemapProposal:
+      type: object
+      required:
+        - id
+        - edge_id
+        - framework_slug
+        - framework_version
+        - requirement_id
+        - requirement_code
+        - relationship_type
+        - strength
+        - mapping_tier
+        - legacy_anchor_id
+        - legacy_scf_id
+        - legacy_anchor_title
+        - legacy_release
+        - target_release
+        - class
+        - status
+        - successor_scf_ids
+        - created_at
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        edge_id:
+          type: string
+        framework_slug:
+          type: string
+        framework_version:
+          type: string
+        requirement_id:
+          type: string
+        requirement_code:
+          type: string
+        relationship_type:
+          type: string
+        strength:
+          type: number
+        mapping_tier:
+          type: string
+        legacy_anchor_id:
+          type: string
+        legacy_scf_id:
+          type: string
+        legacy_anchor_title:
+          type: string
+        legacy_release:
+          type: string
+        target_release:
+          type: string
+        class:
+          type: string
+          enum:
+            - unchanged
+            - renamed
+            - split
+            - reused_id
+            - no_successor
+        status:
+          type: string
+          enum:
+            - open
+            - approved
+            - rejected
+            - kept_legacy
+        successor_scf_ids:
+          type: array
+          items:
+            type: string
+        target_anchor_id:
+          type: string
+        new_edge_id:
+          type: string
+        created_at:
+          type: string
+    EdgeRemapProposalsResponse:
+      type: object
+      required:
+        - proposals
+      additionalProperties: false
+      properties:
+        proposals:
+          type: array
+          items:
+            $ref: "#/components/schemas/EdgeRemapProposal"
+    RemapBulkResult:
+      type: object
+      required:
+        - approved_count
+        - approved
+        - skipped
+      additionalProperties: false
+      properties:
+        approved_count:
+          type: integer
+        approved:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemapDecision"
+        skipped:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemapBulkSkip"
+    RemapBulkSkip:
+      type: object
+      required:
+        - proposal_id
+        - bundle_id
+        - reason
+      additionalProperties: false
+      properties:
+        proposal_id:
+          type: string
+        bundle_id:
+          type: string
+        reason:
+          type: string
+    RemapDecision:
+      type: object
+      required:
+        - proposal_id
+        - decision
+        - bulk
+        - bundle_id
+        - legacy_control_id
+        - legacy_anchor_id
+        - legacy_scf_id
+        - legacy_release
+        - decided_by
+        - decided_at
+      additionalProperties: false
+      properties:
+        proposal_id:
+          type: string
+        decision:
+          type: string
+        bulk:
+          type: boolean
+        bundle_id:
+          type: string
+        legacy_control_id:
+          type: string
+        legacy_anchor_id:
+          type: string
+        legacy_scf_id:
+          type: string
+        legacy_release:
+          type: string
+        new_control_id:
+          type: string
+        new_version:
+          type: integer
+        new_anchor_id:
+          type: string
+        new_scf_id:
+          type: string
+        new_release:
+          type: string
+        reason:
+          type: string
+        decided_by:
+          type: string
+        decided_at:
+          type: string
+    RemapProposal:
+      type: object
+      required:
+        - id
+        - control_id
+        - bundle_id
+        - title
+        - legacy_scf_id
+        - legacy_release
+        - target_release
+        - class
+        - status
+        - successor_scf_ids
+        - created_at
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        control_id:
+          type: string
+        bundle_id:
+          type: string
+        title:
+          type: string
+        legacy_scf_id:
+          type: string
+        legacy_release:
+          type: string
+        target_release:
+          type: string
+        class:
+          type: string
+          enum:
+            - unchanged
+            - renamed
+            - split
+            - reused_id
+            - no_successor
+        status:
+          type: string
+          enum:
+            - open
+            - rebound
+            - approved
+            - rejected
+            - kept_legacy
+        successor_scf_ids:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+    RemapProposalsResponse:
+      type: object
+      required:
+        - proposals
+        - count
+        - total
+      additionalProperties: false
+      properties:
+        proposals:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemapProposal"
+        count:
+          type: integer
+        total:
+          type: integer
+        next_cursor:
+          type: string
