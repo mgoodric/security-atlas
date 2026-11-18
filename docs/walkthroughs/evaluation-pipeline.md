@@ -22,7 +22,7 @@ Every block was captured by `uvx showboat exec` against the slice-037 docker-com
 
 ## 1. The Control Under Trace
 
-The base seed installs one control: CRY-05, "Encryption at rest — production object stores", applying to scope cells where `env == "prod" AND data_classification == "confidential"`:
+The base seed installs one control: CRY-07, "Encryption at rest — production object stores", applying to scope cells where `env == "prod" AND data_classification == "confidential"`:
 
 ```bash
 docker exec security-atlas-pg-030 psql -U atlas_app -d security_atlas -c "BEGIN; SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0'; SELECT scf_id, title, control_family, implementation_type, lifecycle_state, applicability_expr FROM controls WHERE id = '33333333-3333-3333-3333-333333330001'; ROLLBACK;"
@@ -33,7 +33,7 @@ BEGIN
 SET
  scf_id |                     title                     | control_family | implementation_type | lifecycle_state |                   applicability_expr
 --------+-----------------------------------------------+----------------+---------------------+-----------------+---------------------------------------------------------
- CRY-05 | Encryption at rest — production object stores | Cryptography   | automated           | active          | env == "prod" AND data_classification == "confidential"
+ CRY-07 | Encryption at rest — production object stores | Cryptography   | automated           | active          | env == "prod" AND data_classification == "confidential"
 (1 row)
 
 ROLLBACK

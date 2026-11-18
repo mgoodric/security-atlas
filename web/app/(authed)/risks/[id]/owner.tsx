@@ -54,7 +54,7 @@ export function RiskOwner({ risk, canEdit }: { risk: Risk; canEdit: boolean }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       {unlinked ? (
-        <span data-testid="risk-detail-owner-unlinked">
+        <span data-testid="risk-detail-owner-unlinked" className="break-words">
           <span className="text-muted-foreground">(unlinked) </span>
           {unlinked}
         </span>
@@ -64,8 +64,11 @@ export function RiskOwner({ risk, canEdit }: { risk: Risk; canEdit: boolean }) {
         </span>
       )}
       {!canEdit ? null : picking ? (
-        <span className="inline-flex items-center gap-2">
-          <span className="w-64">
+        // The Owner cell is one narrow column of the summary strip. The
+        // picker fills the cell and its buttons wrap below it: a fixed-width
+        // row overflowed into the next cells, which painted over Save.
+        <span className="flex w-full min-w-0 basis-full flex-col items-start gap-2">
+          <span className="w-full min-w-0">
             <EntityPicker
               kinds={["user"]}
               module="risk"
@@ -76,26 +79,28 @@ export function RiskOwner({ risk, canEdit }: { risk: Risk; canEdit: boolean }) {
               placeholder="Search people by name"
             />
           </span>
-          <Button
-            type="button"
-            size="sm"
-            disabled={!picked || save.isPending}
-            onClick={() => save.mutate(picked)}
-            data-testid="risk-detail-owner-save"
-          >
-            Save owner
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setPicking(false);
-              setPicked("");
-            }}
-          >
-            Cancel
-          </Button>
+          <span className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!picked || save.isPending}
+              onClick={() => save.mutate(picked)}
+              data-testid="risk-detail-owner-save"
+            >
+              Save owner
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setPicking(false);
+                setPicked("");
+              }}
+            >
+              Cancel
+            </Button>
+          </span>
         </span>
       ) : (
         <Button
