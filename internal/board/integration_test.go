@@ -406,8 +406,16 @@ func TestGenerator_Generate_EndToEnd(t *testing.T) {
 		t.Fatal("Generate produced zero framework posture rows")
 	}
 	// Posture is the dashboard query's (#2210): 3 of 4 requirements covered.
-	if got := stored.Content.Frameworks[0]; got.Name != "SOC 2 (gen)" || got.CoveragePct != 75 {
-		t.Errorf("framework posture = %+v, want SOC 2 (gen) at 75%%", got)
+	// Found by name, not index: global (tenant_id IS NULL) frameworks that
+	// another package's tests leave on a shared DB are listed too (#2525).
+	var got *board.FrameworkPosture
+	for i := range stored.Content.Frameworks {
+		if stored.Content.Frameworks[i].Name == "SOC 2 (gen)" {
+			got = &stored.Content.Frameworks[i]
+		}
+	}
+	if got == nil || got.CoveragePct != 75 {
+		t.Errorf("framework posture = %+v, want SOC 2 (gen) at 75%% (rows %+v)", got, stored.Content.Frameworks)
 	}
 	// The evidence freshness rate is the freshness read model's: 2 of 3 fresh.
 	if c := stored.Content.Coverage; c == nil || c.CoveragePct != 75 || c.ScopedFrameworkCount != 1 || c.EvidenceFreshnessRatePct != 67 {
