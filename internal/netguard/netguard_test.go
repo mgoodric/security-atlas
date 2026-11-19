@@ -61,6 +61,38 @@ func TestDenyReason(t *testing.T) {
 		{"2002:a9fe:a9fe::1", "6to4-embedded link-local", "6to4-embedded link-local"},    // 169.254.169.254
 		{"2002:c0a8:101::1", "6to4-embedded private", ""},                                // 192.168.1.1
 		{"2002:7f00:1::1", "6to4-embedded loopback", ""},                                 // 127.0.0.1
+
+		// #2549: RFC 8215 local-use NAT64, read at every RFC 6052 layout
+		// the address fits.
+		{"64:ff9b:1::5db8:d822", "", ""},     // /96 93.184.216.34
+		{"64:ff9b:1:5db8:d8:2200::", "", ""}, // /48 93.184.216.34
+		{"64:ff9b:1::a9fe:a9fe", "nat64-local-embedded link-local", "nat64-local-embedded link-local"},       // /96 169.254.169.254
+		{"64:ff9b:1::a00:1", "nat64-local-embedded private", ""},                                             // /96 10.0.0.1
+		{"64:ff9b:1:0:a9:fea9:fe00:0", "nat64-local-embedded link-local", "nat64-local-embedded link-local"}, // /64 169.254.169.254
+		{"64:ff9b:1:a9fe:a9:fe00::", "nat64-local-embedded link-local", "nat64-local-embedded link-local"},   // /48 169.254.169.254
+		// /48 10.0.0.1; its /56 reading 0.0.1.0 is 0/8 padding, dropped.
+		{"64:ff9b:1:a00:0:100::", "nat64-local-embedded private", ""},
+		// /64 10.0.0.1 with a non-zero suffix that reads as /96 1.1.1.1:
+		// RFC 6052's zero suffix is only a SHOULD, so every layout counts.
+		{"64:ff9b:1:0:a:0:101:101", "nat64-local-embedded private", ""},
+		{"64:ff9b:1:0:a9:fe00:101:101", "nat64-local-embedded link-local", "nat64-local-embedded link-local"}, // /64 169.254.0.1, /96 1.1.1.1
+		{"64:ff9b:1:0:5d:b8d8:2200:0", "", ""},                                                                // /64 93.184.216.34
+		{"64:ff9b:1::", "nat64-local without an embedded address", "nat64-local without an embedded address"},
+		{"64:ff9b:1:0:ff00::1", "nat64-local without an embedded address", "nat64-local without an embedded address"}, // u octet set
+
+		// #2549: Teredo, server IPv4 in clear and client IPv4 inverted.
+		{"2001:0:4136:e378:8000:63bf:3fff:fdd2", "", ""},                                                                   // 65.54.227.120 / 192.0.2.45
+		{"2001:0:a00:1:8000:63bf:3fff:fdd2", "teredo-server-embedded private", ""},                                         // server 10.0.0.1
+		{"2001:0:4136:e378:8000:63bf:f5ff:fffe", "teredo-client-embedded private", ""},                                     // client 10.0.0.1
+		{"2001:0:4136:e378:8000:63bf:5601:5601", "teredo-client-embedded link-local", "teredo-client-embedded link-local"}, // client 169.254.169.254
+		{"2001:0:7f00:1:8000:63bf:3fff:fdd2", "teredo-server-embedded loopback", ""},                                       // server 127.0.0.1
+
+		// #2549: deprecated IPv4-compatible ::a.b.c.d.
+		{"::5db8:d822", "", ""}, // 93.184.216.34
+		{"::a9fe:a9fe", "ipv4-compatible-embedded link-local", "ipv4-compatible-embedded link-local"},
+		{"::a00:1", "ipv4-compatible-embedded private", ""},
+		{"::7f00:1", "ipv4-compatible-embedded loopback", ""},
+		{"::2", "ipv4-compatible-embedded this-network", "ipv4-compatible-embedded this-network"},
 	}
 	optIn := Policy{AllowLoopback: true, AllowPrivate: true}
 	for _, tc := range cases {

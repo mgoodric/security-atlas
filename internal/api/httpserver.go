@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -48,10 +49,15 @@ func (s *Server) AttachDB(pool *pgxpool.Pool) { s.dbPool = pool }
 
 // HTTPHandlerForTests exposes the assembled HTTP handler so tests can
 // drive it via httptest.NewServer. Production callers should use RunHTTP.
-// Returns nil when no DB pool has been attached (handlers need one).
+// Returns nil when no DB pool has been attached (handlers need one). It
+// panics when New could not parse the deployment config RunHTTP refuses
+// (#2549), so a test cannot serve what production would not.
 func (s *Server) HTTPHandlerForTests() http.Handler {
 	if s.dbPool == nil {
 		return nil
+	}
+	if err := s.configErr(); err != nil {
+		panic(err)
 	}
 	return s.httpHandler()
 }
@@ -361,6 +367,9 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	if s.dbPool == nil {
 		return errors.New("api: HTTP server requires a DB pool (call Server.AttachDB before RunHTTP)")
 	}
+	if err := s.configErr(); err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.httpHandler(),
@@ -379,6 +388,15 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 		}
 		return err
 	}
+}
+
+// configErr is the deployment config New could not parse; the HTTP
+// server refuses to start on it rather than fall back (#2549).
+func (s *Server) configErr() error {
+	if s.issuerPolicyErr != nil {
+		return fmt.Errorf("api: %w", s.issuerPolicyErr)
+	}
+	return nil
 }
 
 // corsMiddleware allows the Next.js dev origin to call the API with the
