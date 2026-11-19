@@ -184,7 +184,11 @@ export type FixtureName =
   | "tenant-admin-users"
   // #2141 — a tenant with three controls, a second member and an action
   // plan, for controls-bulk-2141.spec.ts's bulk writes.
-  | "controls-bulk";
+  | "controls-bulk"
+  // #2531 — the shared e2e user and its live roles, so the owner pickers
+  // in risks-create.spec.ts and create-toasts.spec.ts list a user when the
+  // spec runs alone or first.
+  | "owner-picker";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

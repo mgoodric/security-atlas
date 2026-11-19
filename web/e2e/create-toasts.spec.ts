@@ -18,6 +18,12 @@ import type { Page, Route } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 import { pickFirstUser } from "./owner-picker";
+import { seedFromFixture } from "./seed";
+
+// #2531: the risk owner picker lists real users, so seed the one it picks.
+test.beforeAll(() => {
+  seedFromFixture("owner-picker");
+});
 
 const RISK_ID = "00000000-0000-4000-8000-0000000b2089";
 const VENDOR_ID = "00000000-0000-4000-8000-0000000c2089";
