@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -13,8 +14,29 @@ import (
 // switchesOff is a Switches with every module on except those listed.
 type switchesOff map[string]bool
 
-func (s switchesOff) SwitchedOn(_ context.Context, _ uuid.UUID, key string) (bool, error) {
+func (s switchesOff) SwitchedOnStrict(_ context.Context, _ uuid.UUID, key string) (bool, error) {
 	return !s[key], nil
+}
+
+// switchesDown fails every switch read, as a down flag store does.
+type switchesDown struct{}
+
+func (switchesDown) SwitchedOnStrict(context.Context, uuid.UUID, string) (bool, error) {
+	return false, errors.New("flag store unavailable")
+}
+
+// #2548: a switch that cannot be read fails generation; the pack is never
+// built from a guessed section set.
+func TestPackGenerator_OmittedFailsClosedOnSwitchError(t *testing.T) {
+	t.Parallel()
+	ctx, err := tenancy.WithTenant(context.Background(), uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := (&PackGenerator{}).WithSwitches(switchesDown{})
+	if got, err := g.omitted(ctx); err == nil {
+		t.Fatalf("omitted = %v, nil; want an error", got)
+	}
 }
 
 // #2175: the sections whose module is switched off are omitted, in

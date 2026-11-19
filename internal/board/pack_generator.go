@@ -80,10 +80,12 @@ type PackGenerator struct {
 	switches Switches
 }
 
-// Switches answers whether a module is switched on for a tenant.
-// moduleaccess.Views satisfies it.
+// Switches answers whether a module is switched on for a tenant, failing
+// closed: a flag-store error is an error, not the seed default, so a pack
+// is never generated from a guessed switch (#2548). moduleaccess.Views
+// satisfies it.
 type Switches interface {
-	SwitchedOn(ctx context.Context, tenantID uuid.UUID, key string) (bool, error)
+	SwitchedOnStrict(ctx context.Context, tenantID uuid.UUID, key string) (bool, error)
 }
 
 // WithSwitches makes Generate leave out the sections of a module that is
@@ -115,7 +117,7 @@ func (g *PackGenerator) omitted(ctx context.Context) ([]string, error) {
 		if !ok {
 			continue
 		}
-		on, err := g.switches.SwitchedOn(ctx, tenantID, module)
+		on, err := g.switches.SwitchedOnStrict(ctx, tenantID, module)
 		if err != nil {
 			return nil, fmt.Errorf("board: module switch: %w", err)
 		}

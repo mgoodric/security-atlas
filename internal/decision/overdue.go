@@ -14,6 +14,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/notify"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -210,6 +211,11 @@ func (n *Notifier) sweepTenant(ctx context.Context, tenantID uuid.UUID, today ti
 		}
 		if n.modules != nil {
 			ok, err := n.modules.Reaches(ctx, tenantID, d.DecisionMaker, decisionLogModule)
+			if errors.Is(err, featureflag.ErrStoreUnavailable) {
+				// #2548: the switch is unknown, so skip the tenant this
+				// sweep (the caller logs it); the next sweep retries.
+				return 0, fmt.Errorf("decision log switch: %w", err)
+			}
 			if err != nil {
 				n.logger.Error("decision overdue: module access read failed; not notifying",
 					"tenant_id", tenantID.String(), "decision_id", d.ID.String(), "err", err.Error())

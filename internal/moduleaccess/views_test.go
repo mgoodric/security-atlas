@@ -88,6 +88,14 @@ func (flagsErr) Get(context.Context, string) (featureflag.Flag, error) {
 	return featureflag.Flag{}, featureflag.ErrNotFound
 }
 
+// flagsDown fails every lookup as the flag store does when its DB read
+// fails.
+type flagsDown struct{}
+
+func (flagsDown) Get(context.Context, string) (featureflag.Flag, error) {
+	return featureflag.Flag{}, featureflag.ErrStoreUnavailable
+}
+
 // Modules honours a feature's own switch, as Sees does (#2477): a feature
 // switched off hides the routes it owns, in an optional module and in a
 // core one, while the rest of its module stays visible.

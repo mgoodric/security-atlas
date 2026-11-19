@@ -27,7 +27,22 @@ import (
 //
 // The switch read follows featureflag.Enabled: a flag-store error falls
 // back to the switch's seed default, as it does for the module's routes.
+// Background senders use SwitchedOnStrict instead.
 func (v *Views) SwitchedOn(ctx context.Context, tenantID uuid.UUID, key string) (bool, error) {
+	return v.switchedOn(ctx, tenantID, key, featureflag.Enabled)
+}
+
+// SwitchedOnStrict is SwitchedOn for work with no request behind it (#2548):
+// a flag-store error comes back as an error (errors.Is
+// featureflag.ErrStoreUnavailable) instead of the seed default. The caller
+// skips the tenant for this sweep and logs; the next sweep retries.
+func (v *Views) SwitchedOnStrict(ctx context.Context, tenantID uuid.UUID, key string) (bool, error) {
+	return v.switchedOn(ctx, tenantID, key, featureflag.EnabledStrict)
+}
+
+func (v *Views) switchedOn(ctx context.Context, tenantID uuid.UUID, key string,
+	enabled func(context.Context, featureflag.Looker, string) (bool, error),
+) (bool, error) {
 	if v == nil || v.flags == nil {
 		return true, nil
 	}
@@ -47,7 +62,7 @@ func (v *Views) SwitchedOn(ctx context.Context, tenantID uuid.UUID, key string) 
 		keys = append(keys, f.FlagKey)
 	}
 	for _, k := range keys {
-		on, err := featureflag.Enabled(tctx, v.flags, k)
+		on, err := enabled(tctx, v.flags, k)
 		if err != nil {
 			return false, err
 		}
@@ -61,8 +76,12 @@ func (v *Views) SwitchedOn(ctx context.Context, tenantID uuid.UUID, key string) 
 // Reaches reports whether a background job may notify userID about work
 // in key (a module or feature key): key is switched on for the tenant and
 // userID can work in its module (UserHas).
+//
+// Only background senders ask it, so the switch is read strictly
+// (SwitchedOnStrict): a flag-store error is an error, which the sender
+// treats as "skip this tenant", never as the seed default (#2548).
 func (v *Views) Reaches(ctx context.Context, tenantID uuid.UUID, userID, key string) (bool, error) {
-	on, err := v.SwitchedOn(ctx, tenantID, key)
+	on, err := v.SwitchedOnStrict(ctx, tenantID, key)
 	if err != nil || !on {
 		return false, err
 	}
