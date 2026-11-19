@@ -162,45 +162,32 @@ func embeddedIPv4(ip net.IP) (label string, addrs []embedded, ok bool) {
 
 // nat64LocalCandidates reads the IPv4 address out of a 64:ff9b:1::/48
 // address at every RFC 6052 prefix length that fits inside the /48 (48,
-// 56, 64 and 96) and whose layout the address is consistent with: the u
-// octet (bits 64..71) and the suffix after the IPv4 are zero. A 0.0.0.0
-// reading is dropped, since it is what a longer layout reads from the
-// zero suffix of a shorter one. The caller denies when any remaining
-// reading is denied, so an ambiguous address fails closed.
+// 56 and 64, and 96). The suffix after the IPv4 is only a SHOULD-be-zero,
+// so a non-zero suffix rules no layout out; the u octet (bits 64..71) is
+// a MUST, so a set one reads nothing. A 0.0.0.0/8 reading is dropped: it
+// is what one layout reads from the zero padding of another (every /96
+// address reads as 0.0.0.x at /64), and 0/8 is never a translated
+// destination. The caller denies when any remaining reading is denied,
+// so an ambiguous address fails closed.
 func nat64LocalCandidates(ip net.IP) []embedded {
 	if ip[8] != 0 {
 		return nil
 	}
-	layouts := []struct {
-		octets [4]int
-		suffix int // ip[suffix:] must be zero
-	}{
-		{[4]int{6, 7, 9, 10}, 11},    // /48
-		{[4]int{7, 9, 10, 11}, 12},   // /56
-		{[4]int{9, 10, 11, 12}, 13},  // /64
-		{[4]int{12, 13, 14, 15}, 16}, // /96
+	layouts := [][4]int{
+		{6, 7, 9, 10},    // /48
+		{7, 9, 10, 11},   // /56
+		{9, 10, 11, 12},  // /64
+		{12, 13, 14, 15}, // /96
 	}
 	var out []embedded
 	for _, l := range layouts {
-		if !allZero(ip[l.suffix:]) {
-			continue
-		}
-		v4 := net.IP{ip[l.octets[0]], ip[l.octets[1]], ip[l.octets[2]], ip[l.octets[3]]}
-		if allZero(v4) {
+		v4 := net.IP{ip[l[0]], ip[l[1]], ip[l[2]], ip[l[3]]}
+		if v4[0] == 0 {
 			continue
 		}
 		out = append(out, embedded{"", v4})
 	}
 	return out
-}
-
-func allZero(b []byte) bool {
-	for _, c := range b {
-		if c != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // DialControl is a net.Dialer.Control hook that applies the policy to the

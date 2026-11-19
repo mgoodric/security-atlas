@@ -70,9 +70,13 @@ func TestDenyReason(t *testing.T) {
 		{"64:ff9b:1::a00:1", "nat64-local-embedded private", ""},                                             // /96 10.0.0.1
 		{"64:ff9b:1:0:a9:fea9:fe00:0", "nat64-local-embedded link-local", "nat64-local-embedded link-local"}, // /64 169.254.169.254
 		{"64:ff9b:1:a9fe:a9:fe00::", "nat64-local-embedded link-local", "nat64-local-embedded link-local"},   // /48 169.254.169.254
-		// /48 10.0.0.1 also reads as /56 0.0.1.0: ambiguous, so it fails
-		// closed even under the opt-in.
-		{"64:ff9b:1:a00:0:100::", "nat64-local-embedded private", "nat64-local-embedded this-network"},
+		// /48 10.0.0.1; its /56 reading 0.0.1.0 is 0/8 padding, dropped.
+		{"64:ff9b:1:a00:0:100::", "nat64-local-embedded private", ""},
+		// /64 10.0.0.1 with a non-zero suffix that reads as /96 1.1.1.1:
+		// RFC 6052's zero suffix is only a SHOULD, so every layout counts.
+		{"64:ff9b:1:0:a:0:101:101", "nat64-local-embedded private", ""},
+		{"64:ff9b:1:0:a9:fe00:101:101", "nat64-local-embedded link-local", "nat64-local-embedded link-local"}, // /64 169.254.0.1, /96 1.1.1.1
+		{"64:ff9b:1:0:5d:b8d8:2200:0", "", ""},                                                                // /64 93.184.216.34
 		{"64:ff9b:1::", "nat64-local without an embedded address", "nat64-local without an embedded address"},
 		{"64:ff9b:1:0:ff00::1", "nat64-local without an embedded address", "nat64-local without an embedded address"}, // u octet set
 
