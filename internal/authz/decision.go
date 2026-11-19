@@ -244,6 +244,12 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 			// answer 503 + retry_after instead of a misleading 500.
 			return Decision{}, wrapIfDependencyUnavailable(fmt.Errorf("authz: resolve roles: %w", err))
 		}
+		if in.roleCeiling != nil {
+			// #2431: a labelled key bound to a user holds no more than its
+			// label allows. Capping here, not in OPA, keeps LiveRoles (the
+			// handler gates' TenantRoles, #2428) under the same cap.
+			dbRoles = capRoles(in.roleCeiling, dbRoles)
+		}
 		if len(dbRoles) > 0 {
 			liveRoles = mergeRoles(nil, dbRoles)
 			in.User.Roles = mergeRoles(in.User.Roles, dbRoles)
