@@ -71,6 +71,17 @@ func Enabled(ctx context.Context, looker Looker, key string) (bool, error) {
 	return on, err
 }
 
+// EnabledStrict is Enabled without the Seed-default fallback: a
+// flag-store error comes back as an error (wrapping ErrStoreUnavailable)
+// rather than as the default. Work with no request behind it (the
+// reminder notifiers, the digests, the board pack generator) reads
+// through it and skips the tenant on an error, because a missed reminder
+// costs less than one sent for a switched-off module (#2548). Request
+// paths keep Enabled.
+func EnabledStrict(ctx context.Context, looker Looker, key string) (bool, error) {
+	return lookup(ctx, looker, key)
+}
+
 // lookup is Enabled without the Seed-default fallback: a flag-store error
 // comes back as an error. ErrNotFound (a key missing from Seed) is a code
 // bug; any other error means the tenant's stored value is unknown.

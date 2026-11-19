@@ -35,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/notify"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -180,6 +181,11 @@ func (n *OverdueNotifier) sweepTenant(ctx context.Context, tenantID uuid.UUID, n
 		recipient := uuid.UUID(u.ID.Bytes).String()
 		if n.modules != nil {
 			ok, err := n.modules.Reaches(ctx, tenantID, recipient, personnelModule)
+			if errors.Is(err, featureflag.ErrStoreUnavailable) {
+				// #2548: the switch is unknown, so skip the tenant this
+				// sweep (the caller logs it); the next sweep retries.
+				return notified, fmt.Errorf("personnel security switch: %w", err)
+			}
 			if err != nil {
 				n.logger.Error("personnel overdue: module access read failed; not notifying",
 					"tenant", tenantID, "recipient", recipient, "err", err.Error())

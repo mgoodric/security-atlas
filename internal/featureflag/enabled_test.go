@@ -2,6 +2,7 @@ package featureflag
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -25,6 +26,21 @@ func (f *fakeLooker) Get(_ context.Context, key string) (Flag, error) {
 		return flag, nil
 	}
 	return Flag{}, ErrNotFound
+}
+
+// #2548: EnabledStrict hands a flag-store error back instead of the seed
+// default Enabled answers with. risk.enabled defaults on, so a fallback
+// would read as "switched on".
+func TestEnabledStrictReturnsStoreError(t *testing.T) {
+	t.Parallel()
+	looker := &fakeLooker{err: ErrStoreUnavailable}
+	if on, err := Enabled(context.Background(), looker, "risk.enabled"); err != nil || !on {
+		t.Fatalf("Enabled = %v, %v; want the seed default (true), nil", on, err)
+	}
+	on, err := EnabledStrict(context.Background(), looker, "risk.enabled")
+	if !errors.Is(err, ErrStoreUnavailable) || on {
+		t.Fatalf("EnabledStrict = %v, %v; want false, ErrStoreUnavailable", on, err)
+	}
 }
 
 // TestEnabledMemoizesInContext asserts the in-request cache returns the
