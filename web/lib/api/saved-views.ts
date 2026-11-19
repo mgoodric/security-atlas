@@ -25,6 +25,11 @@ export type ServerSavedView = {
  */
 export type SavedViewSurface = "controls" | "risks";
 
+// Maximum length of a user-supplied view name, on every surface. Names
+// are display-only labels; the cap bounds the stored payload and the list
+// rendering.
+export const MAX_VIEW_NAME_LENGTH = 60;
+
 type ListResponse = { views: ServerSavedView[] };
 
 // bffJSON is a browser-side fetch against the BFF that unwraps an upstream

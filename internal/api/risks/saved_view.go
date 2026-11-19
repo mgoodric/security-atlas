@@ -37,9 +37,13 @@ var categoryRefRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$|^[0-9a-fA-F]{
 
 // ValidateSavedView checks a register view's entries before it is saved.
 // An unknown key, or a value GET /v1/risks or the column chooser would not
-// accept, is an error naming it. Empty values are dropped.
+// accept, is an error naming it. Empty values are dropped. The kept
+// entries are then read together as one GET /v1/risks query, so a view
+// whose entries are each fine but disagree (a review_due_from after its
+// review_due_to) is refused too (#2550).
 func ValidateSavedView(params map[string]string) (map[string]string, error) {
 	out := make(map[string]string, len(params))
+	q := url.Values{}
 	for k, v := range params {
 		if v == "" {
 			continue
@@ -48,6 +52,16 @@ func ValidateSavedView(params map[string]string) (map[string]string, error) {
 			return nil, err
 		}
 		out[k] = v
+		if k != savedViewColumnsKey {
+			q.Set(k, v)
+		}
+	}
+	f, msg := parsePageFilter(q)
+	if msg != "" {
+		return nil, errors.New(msg)
+	}
+	if f.DueFrom != nil && f.DueTo != nil && f.DueFrom.After(*f.DueTo) {
+		return nil, errors.New("review_due_from must not be after review_due_to")
 	}
 	return out, nil
 }
@@ -69,9 +83,16 @@ var errUnknownSavedViewKey = errors.New("is not a risk register view parameter")
 
 func checkSavedViewEntry(k, v string) error {
 	if k == savedViewColumnsKey {
-		for _, c := range strings.Split(v, ",") {
+		cols := strings.Split(v, ",")
+		if len(cols) > len(savedViewColumns) {
+			return fmt.Errorf("cols: at most %d columns", len(savedViewColumns))
+		}
+		for i, c := range cols {
 			if !slices.Contains(savedViewColumns, c) {
 				return fmt.Errorf("cols: %q is not a register column", c)
+			}
+			if slices.Contains(cols[:i], c) {
+				return fmt.Errorf("cols: %q is listed twice", c)
 			}
 		}
 		return nil
