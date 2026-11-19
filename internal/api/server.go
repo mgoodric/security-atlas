@@ -34,12 +34,14 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
+	"github.com/mgoodric/security-atlas/internal/netguard"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/scim"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -98,6 +100,13 @@ type Server struct {
 	// wires it once at startup via Config.VersionFieldsFn (which is
 	// `versionFields` from cmd/atlas/version.go).
 	versionFieldsFn func() VersionFields
+	// issuerPolicy is the deployment's OIDC issuer SSRF policy
+	// (oidc.IssuerPolicyFromEnv, #2534), parsed once in New.
+	// issuerPolicyErr holds a parse failure: RunHTTP and
+	// HTTPHandlerForTests then refuse to serve, so every entry point that
+	// builds the server fails closed on a bad value (#2549).
+	issuerPolicy    netguard.Policy
+	issuerPolicyErr error
 	// Slice 073: platform_status reader/writer + bootstrap-token file
 	// path. Wired by cmd/atlas; unit servers leave them nil and the
 	// install-state routes 503.
@@ -373,6 +382,7 @@ func New(cfg Config) *Server {
 		evidencePublisher:  cfg.EvidencePublisher,
 		versionFieldsFn:    cfg.VersionFieldsFn,
 	}
+	srv.issuerPolicy, srv.issuerPolicyErr = oidc.IssuerPolicyFromEnv()
 	// #2121: the ResetBootstrap RPC runs the reset-bootstrap endpoint's
 	// code; it reads platformResetter and bootstrapTokenPath at call time,
 	// so the Attach calls cmd/atlas makes after New still take effect.
