@@ -2437,7 +2437,10 @@ type Querier interface {
 	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
 	// #2269: the AR's risk-accepted observations. The latest evaluation per
 	// (control, scope_cell) as of the frozen horizon whose result is
-	// 'excepted' (#2112), the same DISTINCT ON as ListFailingEvaluationsAsOf.
+	// 'excepted' (#2112). #2526: bounded to each control's latest run as of
+	// the horizon, as ListFailingEvaluationsAsOf is, so a cell that stopped
+	// applying while excepted is not a risk-accepted observation. That matches
+	// the dashboard's control_excepted_now.
 	// An excepted cell is never a finding: the export links it to the
 	// exception that accepted the risk instead.
 	ListExceptedEvaluationsAsOf(ctx context.Context, arg ListExceptedEvaluationsAsOfParams) ([]ListExceptedEvaluationsAsOfRow, error)
@@ -2467,9 +2470,16 @@ type Querier interface {
 	ListExpiringExceptions(ctx context.Context, arg ListExpiringExceptionsParams) ([]Exception, error)
 	// POA&M source (slice-030 decision D3): the latest evaluation per
 	// (control, scope_cell) whose result is 'fail', bounded by the frozen
-	// horizon. DISTINCT ON collapses the append-only control_evaluations
-	// history to the current row per cell as of $3 (the period's frozen_at),
+	// horizon $2 (the period's frozen_at). DISTINCT ON collapses the
+	// append-only control_evaluations history to the current row per cell,
 	// then the outer filter keeps only the failing ones.
+	//
+	// #2526: only cells in each control's latest evaluation run as of the
+	// horizon count, the as-of counterpart of the dashboard's
+	// control_latest_run (#2269 D1). One run writes one row per scope cell the
+	// control's applicability_expr resolves to at that moment, so a cell that
+	// stopped applying has no row in it, and its older failing row is not a
+	// finding.
 	//
 	// A failing control evaluation IS a finding for v1 — there is no separate
 	// findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.

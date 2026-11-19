@@ -47,20 +47,38 @@ ORDER BY created_at ASC, id ASC;
 -- name: ListFailingEvaluationsAsOf :many
 -- POA&M source (slice-030 decision D3): the latest evaluation per
 -- (control, scope_cell) whose result is 'fail', bounded by the frozen
--- horizon. DISTINCT ON collapses the append-only control_evaluations
--- history to the current row per cell as of $3 (the period's frozen_at),
+-- horizon $2 (the period's frozen_at). DISTINCT ON collapses the
+-- append-only control_evaluations history to the current row per cell,
 -- then the outer filter keeps only the failing ones.
+--
+-- #2526: only cells in each control's latest evaluation run as of the
+-- horizon count, the as-of counterpart of the dashboard's
+-- control_latest_run (#2269 D1). One run writes one row per scope cell the
+-- control's applicability_expr resolves to at that moment, so a cell that
+-- stopped applying has no row in it, and its older failing row is not a
+-- finding.
 --
 -- A failing control evaluation IS a finding for v1 — there is no separate
 -- findings table. See docs/audit-log/030-oscal-ssp-poam-export-decisions.md.
-SELECT * FROM (
-    SELECT DISTINCT ON (control_id, scope_cell_id)
-        id, tenant_id, control_id, scope_cell_id, eval_run_id,
-        evaluated_at, result, freshness_status, last_observed_at
+WITH control_latest_run AS (
+    SELECT DISTINCT ON (control_id)
+        control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, scope_cell_id, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, evaluated_at DESC, created_at DESC
+)
+SELECT * FROM (
+    SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
+        ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
+        ce.evaluated_at, ce.result, ce.freshness_status, ce.last_observed_at
+    FROM control_evaluations ce
+    JOIN control_latest_run lr
+      ON lr.control_id = ce.control_id
+     AND lr.eval_run_id = ce.eval_run_id
+    WHERE ce.tenant_id = $1
+      AND ce.evaluated_at <= $2
+    ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ) latest
 WHERE latest.result = 'fail'
 ORDER BY latest.control_id ASC, latest.scope_cell_id ASC;
@@ -68,17 +86,31 @@ ORDER BY latest.control_id ASC, latest.scope_cell_id ASC;
 -- name: ListExceptedEvaluationsAsOf :many
 -- #2269: the AR's risk-accepted observations. The latest evaluation per
 -- (control, scope_cell) as of the frozen horizon whose result is
--- 'excepted' (#2112), the same DISTINCT ON as ListFailingEvaluationsAsOf.
+-- 'excepted' (#2112). #2526: bounded to each control's latest run as of
+-- the horizon, as ListFailingEvaluationsAsOf is, so a cell that stopped
+-- applying while excepted is not a risk-accepted observation. That matches
+-- the dashboard's control_excepted_now.
 -- An excepted cell is never a finding: the export links it to the
 -- exception that accepted the risk instead.
-SELECT * FROM (
-    SELECT DISTINCT ON (control_id, scope_cell_id)
-        id, tenant_id, control_id, scope_cell_id, eval_run_id,
-        evaluated_at, result
+WITH control_latest_run AS (
+    SELECT DISTINCT ON (control_id)
+        control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, scope_cell_id, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, evaluated_at DESC, created_at DESC
+)
+SELECT * FROM (
+    SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
+        ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
+        ce.evaluated_at, ce.result
+    FROM control_evaluations ce
+    JOIN control_latest_run lr
+      ON lr.control_id = ce.control_id
+     AND lr.eval_run_id = ce.eval_run_id
+    WHERE ce.tenant_id = $1
+      AND ce.evaluated_at <= $2
+    ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ) latest
 WHERE latest.result = 'excepted'
 ORDER BY latest.control_id ASC, latest.scope_cell_id ASC;
