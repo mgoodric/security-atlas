@@ -15,6 +15,14 @@ import (
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
+// flagsDown fails every switch read, as the flag store does when its DB
+// read fails.
+type flagsDown struct{}
+
+func (flagsDown) Get(context.Context, string) (featureflag.Flag, error) {
+	return featureflag.Flag{}, featureflag.ErrStoreUnavailable
+}
+
 // #2175: the overdue-decision notifier follows the Risk switch, its
 // Decision log feature switch and the decision maker's module access. A
 // decision skipped while switched off gets no dedup marker, so it is
@@ -76,6 +84,16 @@ func TestOverdue_NotifierFollowsModuleSwitchesAndAccess(t *testing.T) {
 		if _, err := notifier.SweepOnce(context.Background()); err != nil {
 			t.Fatalf("SweepOnce: %v", err)
 		}
+	}
+
+	// #2548: the flag store is down, so the switch is unknown. The tenant
+	// is skipped for this sweep rather than read as the seed default (on).
+	down := decision.NewNotifier(admin, nil).WithModules(moduleaccess.NewViews(access, flagsDown{}))
+	if _, err := down.SweepOnce(context.Background()); err != nil {
+		t.Fatalf("SweepOnce (store down): %v", err)
+	}
+	if got := sent(maker); got != 0 {
+		t.Fatalf("store down: decision maker got %d notifications; want 0", got)
 	}
 
 	// Risk off, then only the Decision log feature off: nothing is sent.

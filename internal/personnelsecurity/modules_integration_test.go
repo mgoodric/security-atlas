@@ -29,6 +29,14 @@ func grantRole(t *testing.T, migrate *pgxpool.Pool, tenant, userID, role string)
 	}
 }
 
+// flagsDown fails every switch read, as the flag store does when its DB
+// read fails.
+type flagsDown struct{}
+
+func (flagsDown) Get(context.Context, string) (featureflag.Flag, error) {
+	return featureflag.Flag{}, featureflag.ErrStoreUnavailable
+}
+
 func TestOverdueSweepFollowsPersonnelSwitchAndAccess(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	migrate := dbtest.NewMigratePool(t)
@@ -71,6 +79,17 @@ func TestOverdueSweepFollowsPersonnelSwitchAndAccess(t *testing.T) {
 		t.Fatalf("HandleWorkerEvent: %v", err)
 	}
 	notifier := personnelsecurity.NewOverdueNotifier(migrate, store, nil).WithModules(views)
+
+	// #2548: the flag store is down, so the switch is unknown. The tenant
+	// is skipped for this sweep rather than read as the seed default (on).
+	down := personnelsecurity.NewOverdueNotifier(migrate, store, nil).
+		WithModules(moduleaccess.NewViews(access, flagsDown{}))
+	if _, err := down.SweepOnce(context.Background()); err != nil {
+		t.Fatalf("SweepOnce (store down): %v", err)
+	}
+	if got := countNotifications(t, app, tenant, member.String()); got != 0 {
+		t.Fatalf("store down: member got %d notifications; want 0", got)
+	}
 
 	// Switched off: nobody is notified.
 	if _, err := flags.Set(ctx, "personnel.enabled", false, "test", "#2175"); err != nil {

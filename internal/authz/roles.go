@@ -97,7 +97,8 @@ func IsTenantRiskReader(cred credstore.Credential) bool {
 // outside the five roles does not count, by decision (Matt, 2026-11-17):
 // a free-text label grants nothing at the handler. OPA is wider here today:
 // derivedRolesFor turns a free-text label into control_owner, on an unbound
-// key, a machine token or a legacy credential and on a key bound to a user,
+// key, a machine token or a legacy credential (on a key bound to a user it is
+// a control_owner ceiling on the owner's live roles, #2431),
 // so OPA admits those to the control, evidence and activity reads that this
 // gate refuses (TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses;
 // the policy-layer half is #2596).

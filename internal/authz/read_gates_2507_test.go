@@ -124,11 +124,14 @@ func TestReadGates2507_HasAnyTenantRole(t *testing.T) {
 // derivedRolesFor turns a free-text owner_roles label into control_owner,
 // so OPA admits these credentials to the control, evidence and activity
 // reads: an unbound API key, a client_credentials machine token and a
-// legacy credential, whose label is their grant, and a key bound to a user,
-// whose label is not. HasAnyTenantRole counts canonical roles only, and a
-// bound key's owner's live roles alone, so the handler refuses all four: a
-// free-text label grants nothing at the handler. The policy layer catching
-// up is #2596; when it does, this test flips to agreement.
+// legacy credential, whose label is their grant. HasAnyTenantRole counts
+// canonical roles only, so the handler refuses all three: a free-text label
+// grants nothing at the handler. The policy layer catching up is #2596; when
+// it does, this test flips to agreement.
+//
+// A key bound to a user left the split with #2431: its free-text label is a
+// control_owner ceiling on its owner's live roles, so with an owner holding
+// no role both layers refuse it, and with a control_owner owner both admit.
 func TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses(t *testing.T) {
 	t.Parallel()
 	e := engine(t)
@@ -139,7 +142,6 @@ func TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses(t *testing.T) {
 		{"unbound key", credstore.Credential{ID: "key_2507", UserID: "key_2507", TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
 		{"machine token", credstore.Credential{ID: "jwt:2507", UserID: "oauth_client:c2507", TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
 		{"legacy credential", credstore.Credential{ID: "cred_2507", TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
-		{"bound key", credstore.Credential{ID: "key_2507b", UserID: user2507, TenantID: tenant2507, OwnerRoles: []string{"employee"}}},
 	}
 	routes := []string{
 		"/v1/controls/" + id2428 + "/policies",
@@ -160,6 +162,27 @@ func TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses(t *testing.T) {
 			}
 			if !d.Allow {
 				t.Errorf("%s GET %s: OPA refuses; the recorded split is gone, update this test and D2", sh.name, path)
+			}
+		}
+	}
+
+	// #2431: a bound key with a free-text label holds control_owner only
+	// while its owner does.
+	bound := credstore.Credential{ID: "key_2507b", UserID: user2507, TenantID: tenant2507, OwnerRoles: []string{"employee"}}
+	for _, live := range [][]authz.Role{nil, {authz.RoleControlOwner}} {
+		owned, err := authz.NewEngine(context.Background(), tenantResolver{{tenant2507, user2507}: live})
+		if err != nil {
+			t.Fatalf("NewEngine: %v", err)
+		}
+		for _, path := range routes {
+			r := httptest.NewRequest(http.MethodGet, path, nil)
+			r = r.WithContext(authctx.WithCredential(r.Context(), bound))
+			d, err := owned.Decide(context.Background(), authz.BuildInput(r, nil))
+			if err != nil {
+				t.Fatalf("bound key GET %s: Decide: %v", path, err)
+			}
+			if want := live != nil; d.Allow != want {
+				t.Errorf("bound key with a free-text label, owner live roles %v: GET %s allow = %v, want %v", live, path, d.Allow, want)
 			}
 		}
 	}

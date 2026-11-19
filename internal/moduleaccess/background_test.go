@@ -2,9 +2,12 @@ package moduleaccess
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 )
 
 // #2175: SwitchedOn answers for a module key or a feature key, with no
@@ -37,6 +40,24 @@ func TestViews_SwitchedOnFlagError(t *testing.T) {
 	v := &Views{flags: flagsErr{}}
 	if on, err := v.SwitchedOn(context.Background(), uuid.New(), "risk"); err == nil || on {
 		t.Fatalf("SwitchedOn = %v, %v; want false, error", on, err)
+	}
+}
+
+// #2548: with the flag store down, SwitchedOn falls back to the seed
+// default (Risk defaults on) as the routes do, while SwitchedOnStrict and
+// Reaches hand the error back so a background sender skips the tenant.
+func TestViews_StrictFailsClosedOnStoreError(t *testing.T) {
+	t.Parallel()
+	v := &Views{flags: flagsDown{}}
+	ctx, tenant := context.Background(), uuid.New()
+	if on, err := v.SwitchedOn(ctx, tenant, "risk"); err != nil || !on {
+		t.Fatalf("SwitchedOn = %v, %v; want the seed default (true), nil", on, err)
+	}
+	if on, err := v.SwitchedOnStrict(ctx, tenant, "decision_log"); !errors.Is(err, featureflag.ErrStoreUnavailable) || on {
+		t.Fatalf("SwitchedOnStrict = %v, %v; want false, ErrStoreUnavailable", on, err)
+	}
+	if ok, err := v.Reaches(ctx, tenant, "u1", "risk"); !errors.Is(err, featureflag.ErrStoreUnavailable) || ok {
+		t.Fatalf("Reaches = %v, %v; want false, ErrStoreUnavailable", ok, err)
 	}
 }
 
