@@ -378,6 +378,15 @@ func validTransition(from, to string) bool {
 	return next[from] == to
 }
 
+// addLinks writes an incident's links. It checks only that each target
+// exists in the tenant, not that the caller can use the module it lives in:
+// that is the HTTP handler's refuseHiddenLinks (#2501), run before the
+// store. A new route that reaches addLinks or otherwise writes risk or
+// vendor links (an incident update, a link or unlink route) must call
+// refuseHiddenLinks first, or a caller narrowed out of Risk or Third-party
+// risk can link into it and learn from the error which ids exist.
+// internal/api's TestIncidentRoutes_LinkWritesRefuseHiddenModules fails
+// until such a route is reviewed and listed (#2531).
 func addLinks(ctx context.Context, q *dbx.Queries, tenantID, incidentID uuid.UUID, actor string, links Links) error {
 	for _, id := range links.ControlIDs {
 		if _, err := q.AddIncidentControlLink(ctx, dbx.AddIncidentControlLinkParams{TenantID: pgUUID(tenantID), IncidentID: pgUUID(incidentID), ControlID: pgUUID(id), LinkedBy: actor}); err != nil && !errors.Is(err, pgx.ErrNoRows) {

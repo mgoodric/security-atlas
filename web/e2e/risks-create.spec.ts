@@ -34,6 +34,12 @@ import type { Risk } from "@/lib/api/risks";
 
 import { expect, test } from "./fixtures";
 import { pickFirstUser } from "./owner-picker";
+import { seedFromFixture } from "./seed";
+
+// #2531: the owner picker lists real users, so seed the one it picks.
+test.beforeAll(() => {
+  seedFromFixture("owner-picker");
+});
 
 const NEW_RISK_TITLE = "E2E test risk — unauthorized data export";
 const CREATED_RISK_ID = "00000000-0000-0000-0000-0000000r1s01";
