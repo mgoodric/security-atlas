@@ -184,5 +184,16 @@ test.describe("/risks — saved views (#2133)", () => {
         return `${q.get("treatment")} ${q.get("sort")}`;
       })
       .toBe("mitigate -title");
+
+    // #2550: a filter edited by hand leaves the applied view.
+    await expect(page.getByTestId("risks-saved-views-select")).toHaveValue(
+      VIEW_ID,
+    );
+    await page
+      .getByTestId("list-filter-pill-treatment")
+      .locator("select")
+      .selectOption("accept");
+    await expect(page).toHaveURL(/[?&]treatment=accept/);
+    await expect(page.getByTestId("risks-saved-views-select")).toHaveValue("");
   });
 });

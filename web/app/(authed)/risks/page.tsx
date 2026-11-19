@@ -46,6 +46,7 @@ import {
   ListPage,
   ListPagination,
   ListTable,
+  SavedViewsBar,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
@@ -79,7 +80,6 @@ import {
 import { enumLabel, enumOptions } from "@/lib/labels/enum-labels";
 import { pageTitle } from "@/lib/page-titles";
 
-import { SavedViewsBar } from "../controls/controls-toolbar";
 import { risksCountLabel } from "./count-label";
 import {
   categoryDisplay,
@@ -205,6 +205,9 @@ function RisksPageInner() {
   const showRollUps = search.get(ROLLUPS_PARAM) === "1";
   const showArchived = search.get(ARCHIVED_PARAM) === "1";
 
+  // #2133 — the saved view last applied, or "" when none is.
+  const [activeViewId, setActiveViewId] = useState("");
+
   // Every URL change goes through here. A change to what the list holds
   // (a filter, the sort, a toggle) resets the page to 1.
   const replace = (edit: (sp: URLSearchParams) => void, resetPage = true) => {
@@ -215,32 +218,39 @@ function RisksPageInner() {
     router.replace(qs ? `/risks?${qs}` : "/risks");
   };
 
+  // A hand edit to what a view holds (a filter, the sort, a toggle, the
+  // columns) leaves the applied saved view (#2550).
+  const editView = (edit: (sp: URLSearchParams) => void, resetPage = true) => {
+    setActiveViewId("");
+    replace(edit, resetPage);
+  };
+
   const updateFilter = (key: FilterKey, value: string) =>
-    replace((sp) => {
+    editView((sp) => {
       if (value === DEFAULT_FILTERS[key] || value === "") sp.delete(key);
       else sp.set(key, value);
     });
 
   const clearAll = () =>
-    replace((sp) => {
+    editView((sp) => {
       for (const k of FILTER_KEYS) sp.delete(k);
     });
 
   const updateSort = (clicked: SortKey) =>
-    replace((sp) => {
+    editView((sp) => {
       const next = sortParam(nextSortState(sortState, clicked));
       if (next) sp.set(SORT_PARAM, next);
       else sp.delete(SORT_PARAM);
     });
 
   const toggleFlag = (param: string, on: boolean) =>
-    replace((sp) => {
+    editView((sp) => {
       if (on) sp.delete(param);
       else sp.set(param, "1");
     });
 
   const toggleOptionalColumn = (col: OptionalColumn) =>
-    replace((sp) => {
+    editView((sp) => {
       const next = toggleColumn(columnsChosen, col);
       if (next) sp.set(COLUMNS_PARAM, next);
       else sp.delete(COLUMNS_PARAM);
@@ -249,7 +259,6 @@ function RisksPageInner() {
   // #2133 — saved views. The query key is the surface's own, apart from
   // the controls list's.
   const queryClient = useQueryClient();
-  const [activeViewId, setActiveViewId] = useState("");
   const savedViewsQ = useQuery<ServerSavedView[]>({
     queryKey: ["saved-views", "risks"],
     queryFn: () => listSavedViews("risks"),

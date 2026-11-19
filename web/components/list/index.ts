@@ -47,6 +47,8 @@ export {
   type ListTableMobileMode,
   type ListTableProps,
 } from "./list-table";
+// #2550 — the saved filter-views bar, shared by /controls and /risks.
+export { SavedViewsBar, type SavedViewsBarProps } from "./saved-views-bar";
 export {
   ListLoadingSkeleton,
   type ListLoadingSkeletonProps,

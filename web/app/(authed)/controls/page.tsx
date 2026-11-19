@@ -56,6 +56,7 @@ import {
   ListPage,
   ListPagination,
   ListTable,
+  SavedViewsBar,
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
@@ -139,7 +140,6 @@ import {
 import {
   BulkResultMessage,
   ExportMenu,
-  SavedViewsBar,
   SelectionBar,
 } from "./controls-toolbar";
 import {
@@ -369,7 +369,12 @@ function ControlsPageInner() {
     router.replace(`/controls?${sp.toString()}`);
   };
 
+  // The saved view last applied, or "" when none is. Editing a filter by
+  // hand leaves it (#2550).
+  const [activeViewId, setActiveViewId] = useState<string>("");
+
   const updateFilter = (key: keyof ControlFilters, value: string) => {
+    setActiveViewId("");
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
     if (next[key] === ALL) {
@@ -385,6 +390,7 @@ function ControlsPageInner() {
   };
 
   const clearAll = () => {
+    setActiveViewId("");
     const cleared = clearFilters();
     const sp = new URLSearchParams(search.toString());
     for (const k of FILTER_KEYS) {
@@ -701,8 +707,8 @@ function ControlsPageInner() {
   // scoped `/v1/saved-views` store via the BFF; the SavedViewStore seam
   // slice 448 built made this a one-place swap. The server returns a flat
   // filter map; `toSavedView` narrows it back to the typed ControlFilters
-  // via the slice-448 `sanitizeFilters` (defense-in-depth on read).
-  const [activeViewId, setActiveViewId] = useState<string>("");
+  // via the slice-448 `sanitizeFilters` (defense-in-depth on read). The
+  // applied view's id is `activeViewId`, declared beside the filter edits.
 
   const savedViewsQ = useQuery<SavedView[]>({
     queryKey: ["saved-views", "controls"],
