@@ -24,7 +24,9 @@ package scfimport
 // edge's own, and the table's composite (tenant_id, overlay_edge_id) FK
 // refuses any other. The carry is not global: it runs once per tenant, in
 // that tenant's own transaction, as atlas_app under its app.current_tenant,
-// so RLS binds it exactly as it binds a writer's approval.
+// so RLS binds it exactly as it binds a writer's approval. One tenant's
+// failed carry does not stop the others (#2568): it is reported, its
+// transaction rolls back, and its proposals stay open for a re-run.
 
 import (
 	"context"
@@ -94,7 +96,25 @@ type OverlayRemapReport struct {
 	// Closed counts the proposals this run kept legacy because the
 	// requirement already maps to that anchor in the edge's tenant.
 	Closed int
+	// Failed lists the tenants whose carry failed, in tenant order. Each
+	// failed tenant's carry rolled back as a whole; its proposals stay open,
+	// so a re-run of the import carries them (#2568).
+	Failed []OverlayCarryFailure
 }
+
+// OverlayCarryFailure is one tenant whose carry-forward failed.
+type OverlayCarryFailure struct {
+	TenantID uuid.UUID
+	Err      error
+}
+
+// carryAppRole is the role every tenant's carry runs as, so RLS binds it.
+const carryAppRole = "atlas_app"
+
+// carryTenantHook, when set, runs inside each tenant's carry transaction
+// after the role switch and tenant context, before any carry. Tests set it
+// to observe the context or fail one tenant; it is nil in production.
+var carryTenantHook func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error
 
 // overlayCarry is one overlay edge that qualifies for the carry-forward.
 type overlayCarry struct {
@@ -122,7 +142,8 @@ func QueueOverlayRemapProposals(ctx context.Context, db DBTX) (OverlayRemapRepor
 	for _, tenantID := range sortedTenants(carries) {
 		carried, closed, err := carryOverlaysInTenant(ctx, conn, tenantID, carries[tenantID])
 		if err != nil {
-			return OverlayRemapReport{}, err
+			report.Failed = append(report.Failed, OverlayCarryFailure{TenantID: tenantID, Err: err})
+			continue
 		}
 		report.Carried += carried
 		report.Closed += closed
@@ -202,11 +223,26 @@ func carryOverlaysInTenant(ctx context.Context, conn pgxBeginner, tenantID uuid.
 		return 0, 0, fmt.Errorf("scfimport: carry overlays: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "SET LOCAL ROLE atlas_app"); err != nil {
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE "+carryAppRole); err != nil {
 		return 0, 0, fmt.Errorf("scfimport: carry overlays: become atlas_app: %w", err)
+	}
+	// The migrate role bypasses RLS. Refuse to carry unless the switch took,
+	// so dropping or breaking it fails every carry rather than running one
+	// tenant's carry with sight of all of them (#2568).
+	var role string
+	if err := tx.QueryRow(ctx, "SELECT current_user").Scan(&role); err != nil {
+		return 0, 0, fmt.Errorf("scfimport: carry overlays: read current role: %w", err)
+	}
+	if role != carryAppRole {
+		return 0, 0, fmt.Errorf("scfimport: carry overlays: running as %q, not %s; refusing to carry outside RLS", role, carryAppRole)
 	}
 	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", tenancy.GUCName, tenantID.String()); err != nil {
 		return 0, 0, fmt.Errorf("scfimport: carry overlays: set tenant: %w", err)
+	}
+	if carryTenantHook != nil {
+		if err := carryTenantHook(ctx, tx, tenantID); err != nil {
+			return 0, 0, fmt.Errorf("scfimport: carry overlays in tenant %s: %w", tenantID, err)
+		}
 	}
 	for _, c := range carries {
 		outcome, err := mappingoverlay.CarryRemap(ctx, tx, tenantID, c.edgeID, c.targetVersionID, c.scfID)

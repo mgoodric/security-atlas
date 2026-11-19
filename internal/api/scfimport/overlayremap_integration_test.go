@@ -98,8 +98,12 @@ func setupOverlayRemap(t *testing.T) overlayFixture {
 			t.Fatalf("tenant B overlay: %v", err)
 		}
 	})
-	if _, err := scfimport.QueueOverlayRemapProposals(context.Background(), f.admin); err != nil {
+	report, err := scfimport.QueueOverlayRemapProposals(context.Background(), f.admin)
+	if err != nil {
 		t.Fatalf("QueueOverlayRemapProposals: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("QueueOverlayRemapProposals: carry failed in %+v", report.Failed)
 	}
 	return f
 }
