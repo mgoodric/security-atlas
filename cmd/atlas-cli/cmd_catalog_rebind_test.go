@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -53,5 +54,29 @@ func TestPrintOverlayRemapCounts(t *testing.T) {
 	want := "overlay_remap_proposals unchanged=0 renamed=0 split=3 reused_id=0 no_successor=0\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("output = %q; want %q", got, want)
+	}
+}
+
+// #2568: the overlay carry names each tenant whose carry failed, and fails
+// the command so the operator re-runs the import.
+func TestPrintOverlayCarryReport(t *testing.T) {
+	t.Parallel()
+	tenant := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	var buf bytes.Buffer
+	if err := printOverlayCarryReport(&buf, scfimport.OverlayRemapReport{Carried: 2, Closed: 1}); err != nil {
+		t.Fatalf("no failures: err = %v", err)
+	}
+	err := printOverlayCarryReport(&buf, scfimport.OverlayRemapReport{
+		Carried: 1,
+		Failed:  []scfimport.OverlayCarryFailure{{TenantID: tenant, Err: errors.New("boom")}},
+	})
+	if err == nil {
+		t.Fatal("a failed tenant: err = nil; want an error")
+	}
+	want := "overlay_edges carried_forward=2 closed=1 failed=0\n" +
+		"overlay_edges carried_forward=1 closed=0 failed=1\n" +
+		"overlay carry failed tenant=22222222-2222-4222-8222-222222222222: boom\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("output =\n%s\nwant\n%s", got, want)
 	}
 }
