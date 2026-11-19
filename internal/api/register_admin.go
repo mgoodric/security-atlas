@@ -238,7 +238,9 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA
 	// policy in policies/authz/super_admin.rego is the second leg.
-	superAdminsH := adminsuperadmins.New(s.dbPool)
+	// #2385: the BYPASSRLS authPool names super admins whose users row
+	// is in another tenant (PK-bounded read). Nil in the test harness.
+	superAdminsH := adminsuperadmins.New(s.dbPool).SetAuthPool(s.authPool)
 	root.Get("/v1/admin/super-admins", superAdminsH.List)
 	root.Post("/v1/admin/super-admins", superAdminsH.Grant)
 	root.Delete("/v1/admin/super-admins/{user_id}", superAdminsH.Demote)

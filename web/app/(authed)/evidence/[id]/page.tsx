@@ -25,13 +25,15 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Timestamp } from "@/components/ui/timestamp";
 import { APIError } from "@/lib/api/base";
 import { fetchEvidenceDetail, type EvidenceDetail } from "@/lib/api/evidence";
 
 import { enumLabel } from "@/lib/labels/enum-labels";
-import { prettyJSON, scopeLabel, sourceSummary } from "../format";
+import { prettyJSON, scopeLabel } from "../format";
+import { SourceAttribution } from "../source-attribution";
 import {
   attestationFields,
   isManualAttestation,
@@ -153,7 +155,7 @@ function AttestationCard({ evidence }: { evidence: EvidenceDetail }) {
       <CardContent>
         <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-[10rem_1fr]">
           <Field label="Attestor" testId="evidence-detail-attestor">
-            {a.attestor ?? "—"}
+            <Person id={a.attestor} freeText />
           </Field>
           <Field label="Statement" testId="evidence-detail-statement">
             {a.statement ? <Markdown source={a.statement} /> : "—"}
@@ -179,10 +181,6 @@ function AttestationCard({ evidence }: { evidence: EvidenceDetail }) {
 }
 
 function RecordCard({ evidence: ev }: { evidence: EvidenceDetail }) {
-  const observer =
-    sourceSummary(ev.source_attribution) !== "—"
-      ? sourceSummary(ev.source_attribution)
-      : ev.credential_id ?? "—";
   return (
     <Card>
       <CardHeader>
@@ -209,11 +207,16 @@ function RecordCard({ evidence: ev }: { evidence: EvidenceDetail }) {
             <Timestamp value={ev.ingested_at} style="datetime" />
           </Field>
           <Field label="Observer" testId="evidence-detail-observer">
-            <span className="font-mono">{observer}</span>
+            <span className="font-mono">
+              <SourceAttribution
+                source={ev.source_attribution}
+                fallbackActor={ev.credential_id}
+              />
+            </span>
           </Field>
           <Field label="Source" testId="evidence-detail-source">
             <span className="font-mono">
-              {sourceSummary(ev.source)} · {ev.ingestion_path}
+              <SourceAttribution source={ev.source} /> · {ev.ingestion_path}
             </span>
           </Field>
           <Field label="Scope cell" testId="evidence-detail-scope">

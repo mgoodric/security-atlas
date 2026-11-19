@@ -19,6 +19,7 @@ import Link from "next/link";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { ComponentDefinitionList } from "@/lib/api/oscal-components";
@@ -88,7 +89,7 @@ export default function ComponentDefinitionsPage() {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {d.catalog_title} · OSCAL {d.oscal_version} · imported by{" "}
-                    {d.imported_by}
+                    <Person id={d.imported_by} />
                   </div>
                 </div>
                 <Badge variant="secondary" data-testid="cd-claim-count">

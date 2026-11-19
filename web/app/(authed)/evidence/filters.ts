@@ -217,9 +217,14 @@ export type EvidenceSource = {
  * Value shape: `<actor_type>|<actor_id>` (the composite key); label
  * shape: `<actor_type> · <actor_id>` (same as the table cell renderer
  * in `sourceSummary`). Rows missing either component are skipped.
+ *
+ * #2385: `actorName` turns an actor ID into the text the label shows,
+ * so a person reads by name (the page passes resolvePerson's text). The
+ * value keeps the raw ID: it is the filter, never visible text.
  */
 export function buildSourceOptions(
   sources: EvidenceSource[],
+  actorName: (actorId: string) => string = (id) => id,
 ): { value: string; label: string }[] {
   const tuples = new Set<string>();
   for (const s of sources) {
@@ -232,7 +237,7 @@ export function buildSourceOptions(
     { value: ALL, label: "All sources" },
     ...sorted.map((v) => {
       const [t, id] = v.split(SOURCE_DELIM);
-      return { value: v, label: `${t} · ${id}` };
+      return { value: v, label: `${t} · ${actorName(id)}` };
     }),
   ];
 }

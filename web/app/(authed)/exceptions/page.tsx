@@ -48,6 +48,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { SelfApprovedBadge } from "@/components/self-approved-badge";
+import { Person } from "@/components/ui/person";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -266,12 +267,11 @@ function ExceptionsPageInner() {
       id: "requested_by",
       header: "Requested by",
       cell: (row) => (
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          data-testid="exceptions-row-requested-by"
-        >
-          {row.requested_by}
-        </span>
+        <Person
+          id={row.requested_by}
+          className="text-xs text-muted-foreground"
+          testId="exceptions-row-requested-by"
+        />
       ),
     },
     {

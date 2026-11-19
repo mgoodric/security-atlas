@@ -29,6 +29,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Person } from "@/components/ui/person";
 import { RowActions } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FeatureFlag, FeatureFlagListResponse } from "@/lib/api/admin";
@@ -210,7 +211,12 @@ function FlagRow({
         {flag.last_changed_at ? (
           <p className="text-xs text-muted-foreground">
             Last changed {flag.last_changed_at}
-            {flag.last_changed_by ? ` by ${flag.last_changed_by}` : null}
+            {flag.last_changed_by ? (
+              <>
+                {" "}
+                by <Person id={flag.last_changed_by} />
+              </>
+            ) : null}
           </p>
         ) : null}
       </div>

@@ -5,10 +5,12 @@
 //
 // Callers decide a row is an org mapping from the platform's `origin` field
 // only (isOrgMapping). Rationale and source are organisation-entered text:
-// they render as React text children, never as HTML.
+// they render as React text children, never as HTML. The author renders
+// through <Person> (#2385), like every other actor on the platform.
 
 import { Term } from "@/components/help/term";
 import { formatAddedOn } from "@/components/mappings/format";
+import { Person } from "@/components/ui/person";
 import type { OverlayProvenance } from "@/lib/api/org-mapping";
 
 export function OrgMappingBadge() {
@@ -47,9 +49,7 @@ export function OrgMappingDetails({
           <dt className="font-medium">Added</dt>
           <dd data-testid="org-mapping-added">
             {formatAddedOn(overlay.created_at)} by{" "}
-            <span title={overlay.created_by}>
-              {overlay.created_by_name || "Unknown"}
-            </span>
+            <Person id={overlay.created_by} />
           </dd>
         </>
       ) : null}

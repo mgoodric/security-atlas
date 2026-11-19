@@ -14,6 +14,7 @@
 // Honesty > parity.
 
 import { Badge } from "@/components/ui/badge";
+import { Person } from "@/components/ui/person";
 import { exactUTC } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { periodLabel } from "./pack-breadcrumb-segments";
@@ -76,7 +77,15 @@ export function PackHeader({
         <MetaCell
           label={PACK_HEADER_META_LABELS[2]}
           value={
-            publishedBy && publishedBy.length > 0 ? publishedBy : "pending"
+            publishedBy && publishedBy.length > 0 ? (
+              <Person
+                id={publishedBy}
+                freeText
+                testId="pack-header-published-by"
+              />
+            ) : (
+              "pending"
+            )
           }
           muted={!publishedBy}
         />
@@ -92,7 +101,7 @@ function MetaCell({
   muted,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   mono?: boolean;
   muted?: boolean;
 }) {
