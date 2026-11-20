@@ -148,13 +148,17 @@ func TestClient_CiliumPresent_FoldsNamespacedAndClusterwide(t *testing.T) {
 	if !prod.DefaultDenyIngress || !prod.DefaultDenyEgress {
 		t.Errorf("prod default-deny ingress=%v egress=%v; want both", prod.DefaultDenyIngress, prod.DefaultDenyEgress)
 	}
-	// dev has no namespaced policy but inherits the cluster-wide egress-deny => PASS.
+	// dev has no namespaced policy but inherits the cluster-wide egress-deny.
+	// Its ingress stays open, so it FAILS (#2745: both directions required).
 	dev := byNS["dev"]
 	if !dev.DefaultDenyEgress {
 		t.Errorf("dev should inherit cluster-wide egress default-deny; got %+v", dev)
 	}
-	if dev.Result != ResultPass {
-		t.Errorf("dev should PASS via cluster-wide policy; got %q", dev.Result)
+	if dev.Result != ResultFail || dev.Reason != "namespace enforces default-deny egress only (ingress is open)" {
+		t.Errorf("dev should FAIL with ingress open; got %q (%s)", dev.Result, dev.Reason)
+	}
+	if prod.Result != ResultPass {
+		t.Errorf("prod should PASS with both directions denied; got %q (%s)", prod.Result, prod.Reason)
 	}
 	// The allow policy must NOT credit default-deny ingress on its own, but the
 	// deny policy does — assert the source is tagged.
