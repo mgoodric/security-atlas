@@ -645,7 +645,7 @@ WHERE unified.occurred_at >= $1::timestamptz
       OR NOT (unified.kind = 'decision' AND unified.action = 'read')
   )
 ORDER BY 1, 2, 3, 4
-LIMIT 1000
+LIMIT 1001
 `
 
 type ListUnifiedAuditMachineActorsParams struct {
@@ -678,6 +678,10 @@ type ListUnifiedAuditMachineActorsRow struct {
 //
 // RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
 // atlas_app and takes no tenant parameter.
+//
+// LIMIT 1001 is the handler's 1000-tuple cap plus one (#2627): a 1001st
+// row is how the handler knows the window held more and sets `truncated`,
+// rather than dropping actors silently.
 func (q *Queries) ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]ListUnifiedAuditMachineActorsRow, error) {
 	rows, err := q.db.Query(ctx, listUnifiedAuditMachineActors,
 		arg.FromTs,
