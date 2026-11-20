@@ -159,10 +159,15 @@ describe("risk list fetchers and roll-ups", () => {
   });
 
   test("a BFF 5xx shows the status line, not its body (#2645)", async () => {
-    stubFetch({ error: "pq: relation risks does not exist" }, 502);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: "pq: relation risks does not exist" }),
+        { status: 502, statusText: "Bad Gateway" },
+      ),
+    );
     const err = await fetchRisksListWithRollUps().catch((e: Error) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).not.toContain("pq:");
+    expect((err as Error).message).toBe("502 Bad Gateway");
   });
 });
 
