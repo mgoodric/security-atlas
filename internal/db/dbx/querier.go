@@ -264,6 +264,8 @@ type Querier interface {
 	CountFreshAcksForVersion(ctx context.Context, arg CountFreshAcksForVersionParams) (int64, error)
 	// Audit query — exposed for integration tests + the audit log.
 	CountFwToScfEdgesBySourceAttribution(ctx context.Context, sourceAttribution CrosswalkSourceAttribution) (int64, error)
+	// The mappings scoped to one OIDC config: the rows deleting it removes.
+	CountGroupRoleMappingsForConfig(ctx context.Context, arg CountGroupRoleMappingsForConfigParams) (int64, error)
 	CountOpenPersonnelChecklistItems(ctx context.Context, arg CountOpenPersonnelChecklistItemsParams) (int64, error)
 	CountPersonnelChecklistsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Dedup probe for SurfaceOverdueOffboarding: has this recipient already been
@@ -324,6 +326,10 @@ type Querier interface {
 	// integration test to assert exactly-1 fallback row after the 10001-record
 	// backpressure scenario.
 	CountSinkFailures(ctx context.Context) (int64, error)
+	// The group-derived roles deleting one OIDC config would revoke (#2760):
+	// the config's source rows on a group-derived user_roles row that no other
+	// source derives. A role the user also holds manually is not counted.
+	CountSoleSourceGroupRolesForConfig(ctx context.Context, arg CountSoleSourceGroupRolesForConfigParams) (int64, error)
 	// Count claims for a recipient (tests assert no duplicate rows after a re-run).
 	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
 	// #2446 — how many of the given control ids exist in the tenant. A policy's
@@ -567,6 +573,10 @@ type Querier interface {
 	// (not cleared) so the activation-coherent CHECK still holds for an
 	// inactive row and the audit story stays legible.
 	DeactivateAggregationRule(ctx context.Context, arg DeactivateAggregationRuleParams) (AggregationRule, error)
+	// #2760: removes the tenant's IdP config by id. The FK cascades remove the
+	// group-role mappings and the role-source rows scoped to it; DELETE
+	// /v1/admin/sso revokes the roles only it derived first.
+	DeleteAdminSSO(ctx context.Context, arg DeleteAdminSSOParams) (int64, error)
 	DeleteAggregationRule(ctx context.Context, arg DeleteAggregationRuleParams) error
 	// The seeder calls this once per boot before re-applying the YAML edges
 	// so a deleted YAML edge is reflected in the DB. Safe because cascade
@@ -593,6 +603,8 @@ type Querier interface {
 	// Removes a mapping by id within the tenant. Returns affected-row count so the
 	// handler can 404 a missing id.
 	DeleteGroupRoleMapping(ctx context.Context, arg DeleteGroupRoleMappingParams) (int64, error)
+	// Removes one source's derivation of the user's role (#2760).
+	DeleteGroupRoleSource(ctx context.Context, arg DeleteGroupRoleSourceParams) (int64, error)
 	// #2145: show one module's hint again.
 	DeleteOnboardingHintDismissal(ctx context.Context, arg DeleteOnboardingHintDismissalParams) error
 	// #2145: "Show onboarding hints again" clears every dismissal for the caller.
@@ -1244,6 +1256,13 @@ type Querier interface {
 	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
 	// Read a user's webhook-channel master opt-in. Missing row = OPTED-OUT.
 	GetWebhookOptIn(ctx context.Context, arg GetWebhookOptInParams) (bool, error)
+	// Reports whether a source other than idp_config_id derives the user's role
+	// (#2760). The last-admin guard reads it: a user another source keeps admin
+	// for is not stranded by this source's revoke.
+	GroupRoleHasOtherSource(ctx context.Context, arg GroupRoleHasOtherSourceParams) (bool, error)
+	// Reports whether any source still derives the user's role (#2760). The
+	// group-derived user_roles row is removed only when none does.
+	GroupRoleHasSource(ctx context.Context, arg GroupRoleHasSourceParams) (bool, error)
 	// Reports whether idp_config_id names one of the tenant's own oidc_idp_configs
 	// (#2643). Runs under RLS, so another tenant's config reads as absent: a
 	// foreign id and a nonexistent one are indistinguishable to the caller.
@@ -1446,6 +1465,9 @@ type Querier interface {
 	// duplicate returns the existing row. The role CHECK enforces P0-509-4 at the
 	// DB layer; the application validates authz.IsCanonical first for a clean 400.
 	InsertGroupRoleMapping(ctx context.Context, arg InsertGroupRoleMappingParams) (OidcIdpGroupMapping, error)
+	// Records that a source derived the user's role (#2760). The user_roles row
+	// must exist first (FK). Idempotent on the per-source unique index.
+	InsertGroupRoleSource(ctx context.Context, arg InsertGroupRoleSourceParams) error
 	// Slice 492: OSCAL catalog-import queries.
 	//
 	// CRUD against the three new tables (imported_catalogs,
@@ -2633,11 +2655,13 @@ type Querier interface {
 	// counting as coverage. Already-retired edges are not returned.
 	ListFwToScfEdgesForVersionForUpdate(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForVersionForUpdateRow, error)
 	// ===== user_roles origin-aware reconciliation =====
-	// The user's CURRENT group-derived roles (origin='group-derived') in the
-	// tenant. The resolver diffs this against the freshly-resolved target set to
-	// compute grants + revokes. Manual roles (origin='manual') are intentionally
-	// excluded — they are never touched by re-derivation (AC-4).
-	ListGroupDerivedRoles(ctx context.Context, arg ListGroupDerivedRolesParams) ([]string, error)
+	// The user's CURRENT group-derived roles from ONE source (#2760): the roles
+	// user_role_group_sources attributes to this idp_config_id (NULL = SCIM).
+	// The resolver diffs this against that source's freshly-resolved target
+	// set, so a reconcile through one source never revokes a role another
+	// source derived. Manual roles have no source row and are never touched
+	// by re-derivation (AC-4).
+	ListGroupDerivedRolesForSource(ctx context.Context, arg ListGroupDerivedRolesForSourceParams) ([]string, error)
 	// The DISTINCT group_refs the user is currently a member of across ALL active
 	// groups in the tenant. This is the resolver input on a membership change: the
 	// user's FULL current validated group set (AC-3). Inactive (soft-disabled)
@@ -2647,6 +2671,9 @@ type Querier interface {
 	ListGroupRoleAuditForUser(ctx context.Context, arg ListGroupRoleAuditForUserParams) ([]GroupRoleAuditLog, error)
 	// All mappings for a tenant, ordered for stable display. Admin CRUD list (AC-8).
 	ListGroupRoleMappings(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpGroupMapping, error)
+	// Every (user, role) one OIDC config derived, for the config delete (#2760).
+	// FOR UPDATE so a concurrent reconcile cannot drop a row mid-delete.
+	ListGroupRoleSourcesForConfig(ctx context.Context, arg ListGroupRoleSourcesForConfigParams) ([]ListGroupRoleSourcesForConfigRow, error)
 	// Every control for one imported catalog, ordered for stable rendering.
 	ListImportedCatalogControls(ctx context.Context, arg ListImportedCatalogControlsParams) ([]ImportedCatalogControl, error)
 	// Enumerate every imported catalog for the tenant, most recent first.

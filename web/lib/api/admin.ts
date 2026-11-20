@@ -540,6 +540,7 @@ export async function postAdminDemoTeardown(
 // Wire shape mirrors `internal/api/adminsso/handler.go`:
 //   GET   /v1/admin/sso   -> AdminSSOConfig sans client_secret (404 = unset)
 //   PATCH /v1/admin/sso   -> upsert; empty client_secret => leave existing
+//   DELETE /v1/admin/sso  -> AdminSSODeleteResult (#2760)
 //
 // client_secret is NEVER returned from GET. The UI keeps the input
 // password-typed and treats an empty submit as "leave existing" per
@@ -557,6 +558,17 @@ export type AdminSSOConfig = {
   trust_unverified_email_for_link: boolean;
   created_at: string;
   updated_at: string;
+  // #2760: what DELETE would remove. GET only; absent on a PATCH response.
+  mapping_count?: number;
+  derived_role_count?: number;
+};
+
+// #2760: DELETE /v1/admin/sso response.
+export type AdminSSODeleteResult = {
+  config_id: string;
+  mapping_count: number;
+  revoked_role_count: number;
+  affected_user_count: number;
 };
 
 export type AdminSSOPatchRequest = {

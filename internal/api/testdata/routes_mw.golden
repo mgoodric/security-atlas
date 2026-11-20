@@ -6,6 +6,7 @@ DELETE /v1/action-plans/{id}/risks/{risk_id} 10
 DELETE /v1/admin/group-role-mappings/{id} 10
 DELETE /v1/admin/llm-routing 10
 DELETE /v1/admin/scim-credentials/{id} 10
+DELETE /v1/admin/sso 10
 DELETE /v1/admin/super-admins/{user_id} 10
 DELETE /v1/audit-periods/{id}/auditors/{userID} 10
 DELETE /v1/csf/profiles/{kind}/selections/{requirement_id} 10

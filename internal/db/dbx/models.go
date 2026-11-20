@@ -3610,6 +3610,14 @@ type UserRole struct {
 	Origin    string             `json:"origin"`
 }
 
+type UserRoleGroupSource struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	UserID      string             `json:"user_id"`
+	Role        string             `json:"role"`
+	IdpConfigID pgtype.UUID        `json:"idp_config_id"`
+	GrantedAt   pgtype.Timestamptz `json:"granted_at"`
+}
+
 type Vendor struct {
 	ID               pgtype.UUID            `json:"id"`
 	TenantID         pgtype.UUID            `json:"tenant_id"`

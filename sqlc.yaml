@@ -170,6 +170,8 @@ sql:
       - "migrations/sql/20261265000000_api_keys_label.sql"
       # #2618: Idempotency-Key -> exception for POST /v1/exceptions.
       - "migrations/sql/20261270000000_exception_idempotency_keys.sql"
+      # #2760: which source derived each group-derived role.
+      - "migrations/sql/20261272000000_user_role_group_sources.sql"
     queries: "internal/db/queries"
     gen:
       go:

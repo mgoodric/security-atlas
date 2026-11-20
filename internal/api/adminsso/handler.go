@@ -1,15 +1,19 @@
 // Package adminsso is the HTTP surface for /v1/admin/sso (slice 062).
 //
-// Two routes:
+// Four routes:
 //
-//	GET   /v1/admin/sso              -- returns the tenant's primary IdP config
-//	                                    (sans client_secret); 404 when unset
-//	PATCH /v1/admin/sso              -- upserts the primary IdP config
+//	GET    /v1/admin/sso             -- returns the tenant's primary IdP config
+//	                                    (sans client_secret) and what deleting
+//	                                    it would remove; 404 when unset
+//	PATCH  /v1/admin/sso             -- upserts the primary IdP config
+//	DELETE /v1/admin/sso             -- deletes it, its mappings and the
+//	                                    group-derived roles only it derived
+//	                                    (#2760, delete.go)
 //	POST  /v1/admin/sso/preflight    -- server-side fetch of the IdP
 //	                                    .well-known/openid-configuration
 //	                                    (no state change)
 //
-// All three require an admin credential (cred.IsAdmin) -- the slice 035
+// All four require an admin credential (cred.IsAdmin) -- the slice 035
 // OPA RBAC middleware also gates the path, this handler does
 // defense-in-depth.
 //
@@ -58,6 +62,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -155,6 +160,11 @@ type GetResponse struct {
 	TrustUnverifiedEmailForLink bool      `json:"trust_unverified_email_for_link"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
+	// MappingCount and DerivedRoleCount are what DELETE would remove: the
+	// group-role mappings scoped to this config, and the group-derived
+	// roles only it derives (#2760). GET only; PATCH leaves them zero.
+	MappingCount     int64 `json:"mapping_count"`
+	DerivedRoleCount int64 `json:"derived_role_count"`
 }
 
 // PatchRequest is the JSON body of PATCH /v1/admin/sso. client_secret is
@@ -199,12 +209,17 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var row dbx.GetAdminSSORow
+	var preview grouprole.ConfigDeletePreview
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		got, qErr := q.GetAdminSSO(ctx, dbx.GetAdminSSOParams{
 			TenantID: uuidToPgtype(tenantID),
 			Name:     configName,
 		})
+		if qErr != nil {
+			return qErr
+		}
 		row = got
+		preview, qErr = grouprole.PreviewConfigDelete(ctx, q, tenantID, uuidFromPgtype(got.ID))
 		return qErr
 	})
 	if err != nil {
@@ -227,6 +242,8 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:           row.UpdatedAt.Time,
 
 		TrustUnverifiedEmailForLink: row.TrustUnverifiedEmailForLink,
+		MappingCount:                preview.MappingCount,
+		DerivedRoleCount:            preview.DerivedRoleCount,
 	}
 	httpresp.WriteJSON(w, http.StatusOK, resp)
 }

@@ -163,6 +163,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	}
 	root.Get("/v1/admin/sso", ssoH.Get)
 	root.Patch("/v1/admin/sso", ssoH.Patch)
+	root.Delete("/v1/admin/sso", ssoH.Delete)
 	root.Post("/v1/admin/sso/preflight", ssoH.Preflight)
 	// Slice 478: extend the slice-062 users surface with the cross-tenant
 	// super-admin list + the assign/revoke verbs (incl. super-admin

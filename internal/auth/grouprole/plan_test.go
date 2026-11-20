@@ -115,11 +115,11 @@ func TestPlanReconcile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			st := reconcileState{
-				target:               setOf(tc.target),
-				current:              setOf(tc.current),
-				manual:               setOf(tc.manual),
-				tenantAdminCount:     tc.adminCount,
-				userHoldsManualAdmin: tc.manualAdmin,
+				target:           setOf(tc.target),
+				current:          setOf(tc.current),
+				manual:           setOf(tc.manual),
+				tenantAdminCount: tc.adminCount,
+				userKeepsAdmin:   tc.manualAdmin,
 			}
 			got := planReconcile(st)
 			if !eqSlice(got.grants, tc.wantGrants) {
@@ -162,7 +162,7 @@ func TestWouldStrandLastAdmin(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := wouldStrandLastAdmin(reconcileState{tenantAdminCount: tc.count, userHoldsManualAdmin: tc.manualAdmin})
+			got := wouldStrandLastAdmin(reconcileState{tenantAdminCount: tc.count, userKeepsAdmin: tc.manualAdmin})
 			if got != tc.want {
 				t.Errorf("wouldStrandLastAdmin = %v, want %v", got, tc.want)
 			}

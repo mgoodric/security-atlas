@@ -95,6 +95,7 @@ func newRouterWith(t *testing.T, tenantID uuid.UUID, isAdmin bool, opts *adminss
 	r.Use(tenancymw.Middleware)
 	r.Get("/v1/admin/sso", h.Get)
 	r.Patch("/v1/admin/sso", h.Patch)
+	r.Delete("/v1/admin/sso", h.Delete)
 	r.Post("/v1/admin/sso/preflight", h.Preflight)
 	return r
 }
