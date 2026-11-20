@@ -11,6 +11,7 @@ import "slices"
 // TestStockControlBundleIDs_MatchControlsDir fails when it drifts from that
 // directory.
 var StockControlBundleIDs = []string{
+	"network_segmentation_default_deny",
 	"soc2_a1_1_capacity_monitoring",
 	"soc2_a1_2_backup_processes",
 	"soc2_a1_3_backup_testing",
