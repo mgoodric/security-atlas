@@ -43,6 +43,7 @@ import {
 import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
 import { Timestamp } from "@/components/ui/timestamp";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 interface Questionnaire {
   id: string;
@@ -61,13 +62,7 @@ interface ListResp {
 async function fetchList(): Promise<Questionnaire[]> {
   const res = await fetch("/api/questionnaires", { cache: "no-store" });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   const body = (await res.json()) as ListResp;
@@ -81,13 +76,7 @@ async function createQuestionnaire(name: string): Promise<Questionnaire> {
     body: JSON.stringify({ name, source_filename: name }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as Questionnaire;
@@ -101,13 +90,7 @@ async function importExcel(id: string, file: File): Promise<void> {
     body: form,
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
 }

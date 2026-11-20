@@ -21,6 +21,7 @@
 // 040 pattern) so the bearer cookie never leaves the server.
 
 import { apiBaseURL, APIError } from "@/lib/api/base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ===== wire shapes =====
 
@@ -260,13 +261,7 @@ export async function upsertTarget(
 async function bffFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as T;

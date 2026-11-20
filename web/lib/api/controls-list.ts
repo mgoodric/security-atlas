@@ -2,7 +2,7 @@
 // extracted from the former `web/lib/api.ts` god-file.
 
 import { APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 import type { AnchorWithState } from "./anchors";
 
 // ----- Slice 098 + 104: /controls list view (browser-side BFF call) -----
@@ -52,13 +52,7 @@ export async function fetchControlsList(
     : `/api/controls`;
   const res = await fetch(url);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ControlsListResponse;
@@ -152,13 +146,7 @@ export async function listScopeCells(bearer: string): Promise<ScopeCell[]> {
 export async function fetchScopeCells(): Promise<ScopeCellsListResponse> {
   const res = await fetch("/api/scope-cells");
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ScopeCellsListResponse;
@@ -205,13 +193,7 @@ export async function fetchTenantControls(
 export async function fetchTenantControlsList(): Promise<TenantControl[]> {
   const res = await fetch(`/api/controls-list`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   const body = (await res.json()) as TenantControlsListResponse;
@@ -321,13 +303,7 @@ export async function fetchMyControlsPage(
   const qs = new URLSearchParams({ include: "state", ...params });
   const res = await fetch(`/api/controls-list?${qs.toString()}`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as Partial<ControlsWithStateResponse>;

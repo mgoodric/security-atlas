@@ -13,7 +13,7 @@
 // app/api/mapping-overlays.
 
 import { APIError } from "./base";
-import { bffControlFetch } from "./_shared";
+import { bffControlFetch, upstreamErrorMessage } from "./_shared";
 
 export interface CandidateAnchor {
   anchor_id: string;
@@ -136,13 +136,7 @@ export async function addOverlayEdge(edge: NewOverlayEdge): Promise<void> {
     body: JSON.stringify(edge),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
 }

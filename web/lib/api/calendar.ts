@@ -2,7 +2,7 @@
 // `web/lib/api.ts` god-file.
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch, bffControlFetch } from "./_shared";
+import { apiFetch, bffControlFetch, upstreamErrorMessage } from "./_shared";
 
 // ===== Slice 094 — Compliance calendar =====
 //
@@ -104,13 +104,7 @@ export function fetchCalendarEvents(params: {
 export async function createCalendarSubscription(): Promise<CalendarSubscriptionResponse> {
   const res = await fetch(`/api/calendar/subscription`, { method: "POST" });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as CalendarSubscriptionResponse;

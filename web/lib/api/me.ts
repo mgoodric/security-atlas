@@ -5,6 +5,7 @@
 import type { Theme } from "@/app/(authed)/settings/theme";
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ===== Slice 108 — /v1/me/* (profile + preferences + sessions) =====
 
@@ -89,13 +90,7 @@ export async function patchMe(body: MePatchRequest): Promise<MeProfile> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as MeProfile;
@@ -143,13 +138,7 @@ async function patchHints(body: {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   const out = (await res.json()) as { dismissed_hints?: string[] };
@@ -185,13 +174,7 @@ export async function setEmailChannelOptIn(
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as EmailChannelOptIn;
@@ -231,13 +214,7 @@ async function setChannelOptIn(
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ChannelOptIn;
@@ -272,13 +249,7 @@ export async function patchMyPreferences(
     body: JSON.stringify(partial),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   const body = (await res.json()) as { preferences: MePreferences };
