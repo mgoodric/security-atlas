@@ -257,6 +257,7 @@ func TestListRisksPage_RefusesUnknownValues(t *testing.T) {
 		"sort=bogus", "sort=-residual,age", "status=archived", "treatment=ignore",
 		"methodology=octave", "level=division", "owner=me", "org_unit=x",
 		"review_due=soon", "review_due_from=2026-13-01", "review_due_to=tomorrow",
+		"review_due_from=2026-12-31&review_due_to=2026-01-01",
 		"include_rollups=maybe", "limit=0", "limit=-1", "offset=-1",
 		"category=no-such-category",
 	} {
