@@ -138,6 +138,8 @@ var routes2428 = []route2428{
 	// #2503: the tenant's API keys.
 	{http.MethodGet, "/v1/admin/credentials", tenantAdminGate},
 	{http.MethodPost, "/v1/admin/credentials/" + id2428 + "/revoke", tenantAdminGate},
+	// #2443: the organisation's own settings, allow_self_approval included.
+	{http.MethodPatch, "/v1/tenants/" + id2428, tenantAdminGate},
 
 	// Tenant-admin gates.
 	{http.MethodPost, "/v1/audit-periods", tenantAdminGate},
