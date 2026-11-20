@@ -118,3 +118,81 @@ func TestIssue_RejectsLongLabel(t *testing.T) {
 		t.Fatalf("want 400 naming label, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// adminLabelledKey2656 is an unbound key labelled admin: a tenant admin by
+// its label (authz.IsTenantAdmin), not an admin credential.
+func adminLabelledKey2656(issued time.Time, ttl time.Duration, predicate string, kinds []string) credstore.Credential {
+	const id = "key_00000000-0000-4000-8000-000000002656"
+	return credstore.Credential{
+		ID: id, UserID: id, TenantID: "00000000-0000-4000-8000-0000000026a0",
+		OwnerRoles: []string{"admin"}, IssuedAt: issued, TTL: ttl,
+		ScopePredicate: predicate, Kinds: kinds,
+	}
+}
+
+// #2656: a key-as-tenant-admin mints no key that outlives it, is scoped
+// wider, or pushes other kinds. Admin credentials and JWT callers are not
+// bound.
+func TestBoundByCallerKey(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	const prod = `{"op":"eq","dim":"environment","value":"prod"}`
+	const prodAWS = `{"op":"and","args":[` + prod + `,{"op":"eq","dim":"cloud_account","value":"aws:1"}]}`
+	// Issued an hour ago with a two-hour TTL: an hour left.
+	short := adminLabelledKey2656(now.Add(-time.Hour), 2*time.Hour, "{}", nil)
+	scoped := adminLabelledKey2656(now, 0, prod, nil)
+	kinded := adminLabelledKey2656(now, 0, "{}", []string{"sast.scan_result"})
+	jwtAdmin := credstore.Credential{ID: "jwt:2656", UserID: "user:00000000-0000-4000-8000-000000002656", TenantRoles: []string{"admin"}}
+
+	cases := []struct {
+		name      string
+		cred      credstore.Credential
+		ttl       time.Duration
+		predicate string
+		kinds     []string
+		refused   bool
+	}{
+		{"short key: no expiry", short, 0, "{}", nil, true},
+		{"short key: past its expiry", short, time.Hour + time.Second, "{}", nil, true},
+		{"short key: ends with it", short, time.Hour, "{}", nil, false},
+		{"short key: ends before it", short, time.Minute, "{}", nil, false},
+		{"scoped key: unrestricted", scoped, 0, "{}", nil, true},
+		{"scoped key: other value", scoped, 0, `{"op":"eq","dim":"environment","value":"staging"}`, nil, true},
+		{"scoped key: same scope", scoped, 0, prod, nil, false},
+		{"scoped key: narrower", scoped, 0, prodAWS, nil, false},
+		{"kinded key: every kind", kinded, 0, "{}", nil, true},
+		{"kinded key: other kind", kinded, 0, "{}", []string{"sast.scan_result", "access_review.completion"}, true},
+		{"kinded key: same kinds", kinded, 0, "{}", []string{"sast.scan_result"}, false},
+		{"unbounded key: anything", adminLabelledKey2656(now, 0, "{}", nil), 0, "{}", nil, false},
+		{"admin key is not bound", credstore.Credential{ID: "key_x", IsAdmin: true, TTL: time.Minute, IssuedAt: now, ScopePredicate: prod, Kinds: []string{"k"}}, 0, "{}", nil, false},
+		{"JWT tenant admin is not bound", jwtAdmin, 0, "{}", nil, false},
+	}
+	for _, tc := range cases {
+		msg := boundByCallerKey(tc.cred, tc.ttl, tc.predicate, tc.kinds, now)
+		if (msg != "") != tc.refused {
+			t.Errorf("%s: boundByCallerKey = %q, want refused=%v", tc.name, msg, tc.refused)
+		}
+	}
+}
+
+// #2656: Issue refuses a key-as-tenant-admin's wider key with 403 before
+// the store is touched (the nil store would panic).
+func TestIssue_KeyCallerCannotMintWiderKey(t *testing.T) {
+	t.Parallel()
+	caller := adminLabelledKey2656(time.Now().Add(-time.Minute), 10*time.Minute,
+		`{"op":"eq","dim":"environment","value":"prod"}`, []string{"sast.scan_result"})
+	for name, body := range map[string]IssueRequest{
+		"never expires": {TTLSeconds: 0, ScopePredicate: `{"op":"eq","dim":"environment","value":"prod"}`, AllowedKinds: []string{"sast.scan_result"}},
+		"no scope":      {TTLSeconds: 60, AllowedKinds: []string{"sast.scan_result"}},
+		"every kind":    {TTLSeconds: 60, ScopePredicate: `{"op":"eq","dim":"environment","value":"prod"}`},
+	} {
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(raw))
+		req = req.WithContext(authctx.WithCredential(req.Context(), caller))
+		w := httptest.NewRecorder()
+		New(nil).Issue(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s: want 403, got %d: %s", name, w.Code, w.Body.String())
+		}
+	}
+}
