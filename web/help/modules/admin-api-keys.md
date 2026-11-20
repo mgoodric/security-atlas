@@ -14,8 +14,8 @@ straight away.
 
 ## What a key can do
 
-A key issued from this page acts as a GRC engineer, or as an admin when
-you tick **Grant admin privileges on this credential**. You can narrow a
+A key issued from this page acts as a GRC engineer, or, when a super
+admin ticks **Grant admin privileges on this credential**, as an admin. You can narrow a
 key to a scope and to the kinds of evidence it may push. A key never
 approves anything, so approvals always need a person.
 
@@ -36,4 +36,10 @@ keys.
 
 ## Who can do this
 
-Only super admins, here or under **Personal API tokens** in Settings.
+An admin of the tenant, or a super admin, here or under **Personal API
+tokens** in Settings. A tenant's admins manage only their own tenant's
+keys, and only keys they could hold themselves: they can't issue a key
+with admin privileges or one that approves, and can't rotate or revoke
+such a key. They can revoke another person's personal key but not
+rotate it, since the new secret would let them act as that person.
+Only a super admin sees the option to grant admin privileges.

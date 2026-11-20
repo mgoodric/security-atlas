@@ -23,12 +23,14 @@ whole tenant.
   email, and turns on a daily email digest if you want one.
 - **Active sessions** lists the browsers you are signed in on. Revoke any
   you don't recognise; the one you are using stays signed in.
-- **Personal API tokens** issues, rotates and revokes API keys. Only
-  super admins can use it.
+- **Personal API tokens** issues, rotates and revokes API keys. An admin
+  of the tenant or a super admin can use it. A tenant's admins can't
+  issue a key with admin privileges or one that approves, and can't
+  rotate another person's personal key, only revoke it.
 - **Organisation** renames the tenant and sets its defaults: how control
   bundles are checked on upload, how often risks are reviewed, and when a
-  new vendor's first review is due. Only super admins see it, and every
-  change is recorded in the audit log.
+  new vendor's first review is due. An admin of the tenant or a super
+  admin sees it, and every change is recorded in the audit log.
 
 ## Self-approval
 

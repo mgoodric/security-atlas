@@ -21,10 +21,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/policyacks"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/duedate"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -287,6 +289,22 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 		items = append(items, DueItems(rows, now)...)
 	}
 
+	// Bands 3 and 4, the caller's own policy acknowledgements: the Policies
+	// module and its acknowledgements feature both on (#2175).
+	if visible["policy"] {
+		on, err := h.views.SwitchedOnStrict(ctx, tenantID, "policy_acknowledgments")
+		if err != nil {
+			return nil, fmt.Errorf("module access: %w", err)
+		}
+		if on {
+			ack, err := h.ackItems(r, cred)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, ack...)
+		}
+	}
+
 	// Bands 1 and 5, and every item's owner.
 	err = h.inTx(ctx, tenantID, func(tx pgx.Tx) error {
 		q := dbx.New(tx)
@@ -311,6 +329,59 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 		return nameOwners(ctx, tx, tenantID, items)
 	})
 	return items, err
+}
+
+// ackItems lists the policies waiting for the caller's acknowledgement:
+// published, aimed at a role the caller holds live or at everyone (the
+// targeting POST /v1/policies/{id}/acknowledge applies, #2580), with no
+// fresh ack of the current version. The admin flag is dropped: the ack
+// store lets an admin acknowledge any policy, but a policy not aimed at
+// them is not theirs to acknowledge. A credential with no person behind
+// it acknowledges nothing.
+func (h *Handler) ackItems(r *http.Request, cred credstore.Credential) ([]Item, error) {
+	caller := policyacks.CallerFromCred(cred)
+	if caller.UserID == "" {
+		return nil, nil
+	}
+	caller.IsAdmin = false
+	pending, err := policy.NewAckStore(h.pool).WithClock(h.nowFn).PendingForUser(r.Context(), caller)
+	if err != nil {
+		return nil, fmt.Errorf("pending acknowledgements: %w", err)
+	}
+	return AckItems(pending, caller.UserID, h.nowFn()), nil
+}
+
+// AckItems turns the caller's pending acknowledgements into items they
+// own. A lapsed ack (the last one is older than
+// policy.AcknowledgmentFreshness) is overdue from the day it lapsed; a
+// policy never acknowledged has no due date, so it is due soon, dated from
+// its effective date.
+//
+// The store matches acks to the current version only (a re-publish is a
+// new policies row), so a pending row's ack is always lapsed. An ack that
+// would lapse after now is not a lapse of this version and counts as none,
+// rather than an overdue item due in the future.
+func AckItems(pending []policy.Pending, caller string, now time.Time) []Item {
+	out := make([]Item, 0, len(pending))
+	for _, p := range pending {
+		id := p.PolicyID.String()
+		it := Item{
+			Type: TypePolicyAck, ID: id, Title: p.Title,
+			Link: links["policy"] + id, Action: "Acknowledge",
+			Owner: &Owner{UserID: caller},
+		}
+		var due time.Time
+		if p.LastAcknowledgedAt != nil {
+			due = p.LastAcknowledgedAt.UTC().Add(policy.AcknowledgmentFreshness)
+		}
+		if p.LastAcknowledgedAt != nil && !due.After(now) {
+			it.Band, it.DueAt = BandOverdue, &due
+		} else {
+			it.Band, it.Since = BandDueSoon, p.EffectiveDate
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 func typesCSV(visible map[string]bool) string {
