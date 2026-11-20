@@ -10,6 +10,7 @@
 // The signed-in test user is a super admin, so every /admin page opens.
 
 import { expect, test } from "./fixtures";
+import { clickHelp } from "./help";
 
 const DOCS = "https://mgoodric.github.io/security-atlas/help/";
 
@@ -91,7 +92,7 @@ test.describe("Settings & admin help (#2155)", () => {
 
       const button = page.getByTestId("help-button");
       await expect(button).toHaveAccessibleName(`How this works: ${r.title}`);
-      await button.click();
+      await clickHelp(button);
 
       const panel = page.getByTestId("help-panel");
       await expect(panel).toBeVisible();

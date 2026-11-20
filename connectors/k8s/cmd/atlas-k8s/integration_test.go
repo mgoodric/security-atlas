@@ -167,6 +167,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	npAPI := &fakeNetpolForIntegration{namespaces: []netpol.RawNamespace{
 		{Name: "prod", Policies: []netpol.RawPolicy{
 			{Name: "default-deny-ingress", PolicyTypes: []string{netpol.PolicyTypeIngress}, SelectsAllPods: true},
+			{Name: "default-deny-egress", PolicyTypes: []string{netpol.PolicyTypeEgress}, SelectsAllPods: true},
 		}},
 		{Name: "dev"}, // unprotected — no policies
 	}}
@@ -183,8 +184,8 @@ func TestRun_PushesAllKinds(t *testing.T) {
 			prodCov = &coverage[i]
 		}
 	}
-	if prodCov == nil || prodCov.Result != netpol.ResultPass || !prodCov.DefaultDenyIngress {
-		t.Fatalf("prod namespace should PASS with default-deny ingress; got %+v", prodCov)
+	if prodCov == nil || prodCov.Result != netpol.ResultPass || !prodCov.DefaultDenyIngress || !prodCov.DefaultDenyEgress {
+		t.Fatalf("prod namespace should PASS with default-deny ingress and egress; got %+v", prodCov)
 	}
 	npRec, err := buildNetpolRecord(*prodCov, "cluster-1", "prod", "scf:NET-03")
 	if err != nil {
