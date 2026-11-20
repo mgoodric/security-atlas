@@ -30,7 +30,6 @@ import (
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/idpconfig"
-	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/crosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
@@ -151,13 +150,11 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// PASS.
 	ssoH := adminsso.New(s.dbPool)
 	// #2534: the preflight honours the same private-issuer opt-in as the
-	// sign-in path. cmd/atlas refuses to boot on an invalid value, so an
-	// error here can only mean strict.
+	// sign-in path. New parsed it; on an invalid value the server refuses
+	// to serve (#2549), so this router is never built with one.
 	// #2609: PATCH validates the issuer with this same policy, the one
 	// cmd/atlas hands the sign-in resolver, so a config that saves signs in.
-	if p, err := oidc.IssuerPolicyFromEnv(); err == nil {
-		ssoH = ssoH.WithPreflightOptions(adminsso.PreflightOptions{IssuerPolicy: p})
-	}
+	ssoH = ssoH.WithPreflightOptions(adminsso.PreflightOptions{IssuerPolicy: s.issuerPolicy})
 	// #2034: PATCH seals the client secret with the key the sign-in
 	// resolver opens it with. cmd/atlas refuses to boot on a malformed
 	// key, so an error here means none is set and PATCH refuses a secret.

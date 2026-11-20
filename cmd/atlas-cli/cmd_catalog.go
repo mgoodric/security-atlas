@@ -110,8 +110,9 @@ func newCatalogImportSCFCmd() *cobra.Command {
 				return err
 			}
 			printOverlayRemapCounts(os.Stdout, overlays.Queued)
-			fmt.Printf("overlay_edges carried_forward=%d closed=%d\n", overlays.Carried, overlays.Closed)
-			return nil
+			// #2568: a tenant whose carry failed is named and the rest
+			// still carry; the exit is non-zero so the operator re-runs.
+			return printOverlayCarryReport(os.Stdout, overlays)
 		},
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
@@ -347,6 +348,21 @@ func printEdgeRemapCounts(w io.Writer, counts map[scfimport.RemapClass]int) {
 // (#1804) an SCF import queued across every tenant, by class.
 func printOverlayRemapCounts(w io.Writer, counts map[scfimport.RemapClass]int) {
 	printRemapCounts(w, "overlay_remap_proposals", counts)
+}
+
+// printOverlayCarryReport writes the overlay carry-forward outcome (#2554),
+// then one line per tenant whose carry failed (#2568). It returns an error
+// when any tenant failed: those tenants' proposals are still open, and a
+// re-run of the import carries them.
+func printOverlayCarryReport(w io.Writer, r scfimport.OverlayRemapReport) error {
+	_, _ = fmt.Fprintf(w, "overlay_edges carried_forward=%d closed=%d failed=%d\n", r.Carried, r.Closed, len(r.Failed))
+	for _, f := range r.Failed {
+		_, _ = fmt.Fprintf(w, "overlay carry failed tenant=%s: %v\n", f.TenantID, f.Err)
+	}
+	if len(r.Failed) > 0 {
+		return fmt.Errorf("overlay carry-forward failed in %d tenant(s); their proposals stay open, re-run the import to carry them", len(r.Failed))
+	}
+	return nil
 }
 
 func printRemapCounts(w io.Writer, label string, counts map[scfimport.RemapClass]int) {

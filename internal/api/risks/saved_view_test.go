@@ -21,6 +21,12 @@ func TestValidateSavedView(t *testing.T) {
 	if !maps.Equal(got, ok) {
 		t.Fatalf("valid view changed: %#v", got)
 	}
+	if _, err := ValidateSavedView(map[string]string{
+		"review_due_from": "2026-06-01", "review_due_to": "2026-06-01",
+		"cols": "methodology,level,org_unit,themes,created_at",
+	}); err != nil {
+		t.Fatalf("one-day range with every column rejected: %v", err)
+	}
 	if got, err := ValidateSavedView(map[string]string{"owner": ""}); err != nil || len(got) != 0 {
 		t.Fatalf("empty value: got %#v, %v; want dropped", got, err)
 	}
@@ -37,6 +43,9 @@ func TestValidateSavedView(t *testing.T) {
 		"rollups":        {"include_rollups": "maybe"},
 		"unknown column": {"cols": "level,colour"},
 		"empty column":   {"cols": "level,"},
+		"dup column":     {"cols": "level,themes,level"},
+		"too many cols":  {"cols": "methodology,level,org_unit,themes,created_at,level"},
+		"inverted range": {"review_due_from": "2026-12-31", "review_due_to": "2026-01-01"},
 	} {
 		if _, err := ValidateSavedView(bad); err == nil {
 			t.Errorf("%s: %#v accepted; want an error", name, bad)
