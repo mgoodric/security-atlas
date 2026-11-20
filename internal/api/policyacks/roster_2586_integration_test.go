@@ -3,7 +3,7 @@
 package policyacks_test
 
 // #2586 — the ack-rate roster is the live user_roles set, the same set the
-// authz engine resolves and policy.WithEveryone admits. For each of an
+// authz engine resolves and the acknowledge gate admits. For each of an
 // "everyone" policy and a role-targeted one, every candidate tries to
 // acknowledge, and the rate's denominator must equal the number of them
 // whose ack was accepted.

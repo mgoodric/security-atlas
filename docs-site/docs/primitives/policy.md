@@ -93,6 +93,13 @@ generates an acknowledgment task for every member of those roles:
 4. The acknowledgment expires after the org's configured
    acknowledgment cadence (typically annual).
 
+Only members of the audience can acknowledge. The audience is the
+active users who hold one of the named roles in the tenant, or any role
+when the audience is Everyone. That set is also the denominator of the
+acknowledgment rate. Anyone else, a super admin included, gets
+`403 Forbidden`, so every recorded acknowledgment counts toward the
+rate.
+
 The board pack (and the SOC 2 audit export) reports current
 acknowledgment rate per policy. Stale acknowledgments roll up as a
 warning.
