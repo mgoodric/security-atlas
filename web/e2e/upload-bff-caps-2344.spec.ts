@@ -11,7 +11,10 @@
 // not mounted, 404, and a walkthrough attachment is 503 "artifact store
 // not configured"), and this spec seeds no staged framework version,
 // questionnaire or walkthrough. Those platform answers still prove the
-// upload crossed the BFF. The 411 and 413 paths, including a lying
+// upload crossed the BFF. The BFF relays a platform 5xx with a generic
+// body (#2704), so the 503 shows as that body: only a relayed platform
+// answer carries it, the BFF's own failure is 502 "upstream unavailable".
+// The 411 and 413 paths, including a lying
 // Content-Length, are pinned in vitest (app/api/upload-caps.test.ts).
 // controls/upload-bundle has a real happy path in
 // control-actions-2110.spec.ts.
@@ -22,8 +25,9 @@ import { expect, test } from "./fixtures";
 
 const UNKNOWN_ID = "b2344000-0000-4000-8000-0000000000ff";
 
-// The platform's answer when the stack has no artifact store.
-const NO_ARTIFACT_STORE = "artifact store not configured";
+// The platform's 503 when the stack has no artifact store, as the BFF
+// relays it: UPSTREAM_5XX_BODY in web/lib/api/bff.ts (#2704).
+const RELAYED_5XX = JSON.stringify({ error: "platform error" });
 
 const file = (name: string, mimeType: string, body: string) => ({
   name,
@@ -77,7 +81,7 @@ test.describe("upload BFFs pass a browser-shaped upload through (#2344)", () => 
       expect(status, text).not.toBe(413);
       if (status >= 500) {
         expect(status, text).toBe(503);
-        expect(text).toContain(NO_ARTIFACT_STORE);
+        expect(text).toBe(RELAYED_5XX);
       }
     });
   }
