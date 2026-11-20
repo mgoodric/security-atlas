@@ -65,6 +65,9 @@ var HintModules = []string{
 	"metrics",
 	"activity",
 	"approvals",
+	// #2592: auditor workspace and requirement detail.
+	"audit-workspace",
+	"requirements",
 }
 
 // HintChange is one PATCH's worth of hint edits. Reset clears every

@@ -155,9 +155,11 @@ test.describe("How this works panel (#2143)", () => {
   test("a page with no help module shows no ?", async ({
     authedPage: page,
   }) => {
-    await page.goto("/requirements/00000000-0000-0000-0000-000000000000");
+    // #2592: every route has help now, so an unmatched URL stands in. Its
+    // 404 renders in PageShell, whose ? shows only on a path help covers.
+    await page.goto("/no-such-page");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Requirement" }),
+      page.getByRole("heading", { level: 1, name: "Page not found" }),
     ).toBeVisible();
     await expect(page.getByTestId("help-button")).toHaveCount(0);
   });
