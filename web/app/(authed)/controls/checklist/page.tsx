@@ -43,12 +43,14 @@ import {
 } from "@/lib/checklist/checklist-view";
 import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 async function postJSON(path: string): Promise<ChecklistResponse> {
   const res = await fetch(path, { method: "POST" });
   if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail.error ?? `request failed (${res.status})`);
+    throw new Error(
+      await upstreamErrorMessage(res, `request failed (${res.status})`),
+    );
   }
   return (await res.json()) as ChecklistResponse;
 }

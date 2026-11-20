@@ -35,19 +35,14 @@ import {
   type AnswerRunDetail,
   pendingDrafts,
 } from "@/lib/questionnaire/review-queue";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 async function fetchDetail(id: string): Promise<QuestionnaireDetail> {
   const res = await fetch(`/api/questionnaires/${id}`, {
     cache: "no-store",
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as QuestionnaireDetail;
@@ -58,13 +53,7 @@ async function exportPDF(id: string, name: string): Promise<void> {
     method: "POST",
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   const blob = await res.blob();
@@ -86,13 +75,7 @@ async function fetchRunDetail(
     cache: "no-store",
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as AnswerRunDetail;
@@ -138,13 +121,7 @@ export default function QuestionnaireDetailPage(props: {
         method: "POST",
       });
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          // body not JSON
-        }
+        const msg = await upstreamErrorMessage(res);
         setDraftError(msg);
         return;
       }

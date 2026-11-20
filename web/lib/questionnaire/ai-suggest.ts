@@ -12,6 +12,8 @@
 //   - insufficient: { insufficient_evidence:true, reason:"insufficient_evidence" }
 //   - suppressed:   { suppressed:true, reason:"unresolved_citation"|... }
 
+import { upstreamErrorText } from "@/lib/api/_shared";
+
 export interface AISuggestCitation {
   kind: "policy" | "evidence";
   id: string;
@@ -153,14 +155,11 @@ export function parseAISuggest(
   raw: unknown,
 ): AISuggestViewModel {
   if (!ok) {
-    let msg = `Suggestion failed (${status}).`;
-    if (
-      raw &&
-      typeof raw === "object" &&
-      typeof (raw as { error?: string }).error === "string"
-    ) {
-      msg = (raw as { error: string }).error;
-    }
+    const msg = upstreamErrorText(
+      status,
+      raw,
+      `Suggestion failed (${status}).`,
+    );
     return {
       status: "error",
       draft: "",

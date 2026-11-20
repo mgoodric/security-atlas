@@ -2,6 +2,7 @@
 // from the former `web/lib/api.ts` god-file.
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ----- Slice 099 + 106: /evidence list view (browser-side BFF call) -----
 //
@@ -121,13 +122,7 @@ export async function fetchEvidenceList(
     : `/api/evidence`;
   const res = await fetch(url);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as EvidenceListResponse;
@@ -205,13 +200,7 @@ export async function fetchEvidenceDetail(
 ): Promise<EvidenceDetailResponse> {
   const res = await fetch(`/api/evidence/${encodeURIComponent(id)}`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as EvidenceDetailResponse;

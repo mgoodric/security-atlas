@@ -3,7 +3,7 @@
 // `ScopeDimensionWire` mirrors `dimWire` in internal/api/scopes/handlers.go.
 
 import { APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 import type { ScopeDimensionWire } from "@/components/scope/scope-picker-model";
 
 export type ScopeDimensionsListResponse = {
@@ -24,13 +24,7 @@ export async function listScopeDimensions(
 export async function fetchScopeDimensions(): Promise<ScopeDimensionsListResponse> {
   const res = await fetch("/api/scope-dimensions");
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ScopeDimensionsListResponse;

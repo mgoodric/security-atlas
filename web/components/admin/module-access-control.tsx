@@ -29,6 +29,7 @@ import {
   accessSummary,
   type OptionalModule,
 } from "@/lib/admin/module-access";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 export function ModuleAccessControl({
   userID,
@@ -60,9 +61,8 @@ export function ModuleAccessControl({
           body: JSON.stringify(body),
         },
       );
-      const out = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
-        throw new Error(out.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
     },
     onSuccess: async () => {

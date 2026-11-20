@@ -151,9 +151,18 @@ describe("risk list fetchers and roll-ups", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  test("a BFF error surfaces its message", async () => {
-    stubFetch({ error: "upstream down" }, 502);
-    await expect(fetchRisksListWithRollUps()).rejects.toThrow("upstream down");
+  test("a BFF 4xx surfaces its message", async () => {
+    stubFetch({ error: "limit out of range" }, 400);
+    await expect(fetchRisksListWithRollUps()).rejects.toThrow(
+      "limit out of range",
+    );
+  });
+
+  test("a BFF 5xx shows the status line, not its body (#2645)", async () => {
+    stubFetch({ error: "pq: relation risks does not exist" }, 502);
+    const err = await fetchRisksListWithRollUps().catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).not.toContain("pq:");
   });
 });
 
