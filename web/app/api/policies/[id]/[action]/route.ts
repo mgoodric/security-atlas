@@ -10,8 +10,9 @@
 //
 // #2465 — acknowledge (POST upstream) records the caller's own
 // acknowledgment of a published policy. The platform admits any member
-// whose role is in the policy's audience and ignores any body: an ack is
-// always for the caller.
+// whose role is in the policy's audience, and an ack is always for the
+// caller. The body's optional `policy_version_id` pins the version the
+// caller was shown; a mismatch is the platform's 409 (#2668).
 
 import { NextResponse } from "next/server";
 

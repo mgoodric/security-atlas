@@ -61,6 +61,11 @@ var (
 	// ErrAckMissingPolicyID is returned when the input policy id is the
 	// nil UUID.
 	ErrAckMissingPolicyID = errors.New("policy_ack: policy id is required")
+	// ErrAckVersionMismatch is returned by Record when the caller pins the
+	// version it was shown (RecordInput.PolicyVersionID) and that is not
+	// the version it would acknowledge. Handler maps to 409, so no one
+	// acknowledges a version they never saw (#2668).
+	ErrAckVersionMismatch = errors.New("policy_ack: policy version is not the one the caller was shown")
 )
 
 // AudienceEveryone is the acknowledgment_required_roles value that aims a
@@ -168,14 +173,33 @@ func (s *AckStore) WithClock(fn func() time.Time) *AckStore {
 // nil) from "stale ack" (LastAcknowledgedAt set but older than the
 // freshness window) -- the UI labels these differently.
 func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pending, error) {
+	acks, err := s.ForUser(ctx, caller)
+	return acks.Pending, err
+}
+
+// UserAcks splits the published policies whose audience includes a caller
+// by whether the caller still owes an acknowledgment (#2668).
+type UserAcks struct {
+	// Pending is PendingForUser's list.
+	Pending []Pending
+	// Current holds the policies the caller has acknowledged, for the
+	// current version, within AcknowledgmentFreshness. LastAcknowledgedAt
+	// is that acknowledgment.
+	Current []Pending
+}
+
+// ForUser is PendingForUser plus the policies the caller has a fresh
+// acknowledgment of, so a page can show "You acknowledged version N" after
+// a reload (#2668). Same query, same audience rule.
+func (s *AckStore) ForUser(ctx context.Context, caller AckCaller) (UserAcks, error) {
 	if caller.UserID == "" {
-		return nil, ErrAckMissingUser
+		return UserAcks{}, ErrAckMissingUser
 	}
 	userID, err := uuid.Parse(caller.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("policy_ack: parse user id: %w", err)
+		return UserAcks{}, fmt.Errorf("policy_ack: parse user id: %w", err)
 	}
-	var out []Pending
+	var out UserAcks
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		roles := caller.OwnerRoles
 		if roles == nil {
@@ -200,10 +224,7 @@ func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pend
 				lastAt = &t
 				isFresh = !t.Before(cutoff)
 			}
-			if isFresh {
-				continue
-			}
-			out = append(out, Pending{
+			item := Pending{
 				PolicyID:           policyID,
 				PolicyVersionID:    policyID,
 				Title:              p.Title,
@@ -211,7 +232,12 @@ func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pend
 				EffectiveDate:      datePtr(p.EffectiveDate),
 				RequiredRoles:      append([]string(nil), p.AcknowledgmentRequiredRoles...),
 				LastAcknowledgedAt: lastAt,
-			})
+			}
+			if isFresh {
+				out.Current = append(out.Current, item)
+				continue
+			}
+			out.Pending = append(out.Pending, item)
 		}
 		return nil
 	})
@@ -223,6 +249,10 @@ func (s *AckStore) PendingForUser(ctx context.Context, caller AckCaller) ([]Pend
 type RecordInput struct {
 	PolicyID uuid.UUID
 	Caller   AckCaller
+	// PolicyVersionID, when non-nil, pins the version the caller was
+	// shown. Record refuses with ErrAckVersionMismatch when it is not the
+	// version it would record (#2668).
+	PolicyVersionID *uuid.UUID
 	// EvidenceRecordID, when non-nil, is written to the row's
 	// evidence_record_id column. The handler calls Record FIRST to
 	// reserve the ack row, then calls ingest.Service.Process to emit
@@ -271,6 +301,10 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 				return ErrNotFound
 			}
 			return fmt.Errorf("policy_ack: load policy: %w", perr)
+		}
+		// A policy row is one version, so policy_version_id is the row id.
+		if in.PolicyVersionID != nil && *in.PolicyVersionID != uuid.UUID(policyRow.ID.Bytes) {
+			return ErrAckVersionMismatch
 		}
 		if policyRow.Status != StatePublished {
 			return ErrAckPolicyNotPublished

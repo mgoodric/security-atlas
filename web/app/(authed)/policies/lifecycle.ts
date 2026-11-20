@@ -9,6 +9,7 @@
 import { ROLES } from "@/components/admin/roles";
 import type {
   CreatePolicyInput,
+  CurrentAcknowledgment,
   PendingAcknowledgment,
   Policy,
   PolicyAcknowledgment,
@@ -70,16 +71,24 @@ export function needsControlsWarning(
  *  acknowledgment. `pending` when the policy is published and is on the
  *  caller's pending list (their role is in its audience and they have not
  *  acknowledged this version within the year); `acknowledged` right after
- *  they do; otherwise null, and the page offers nothing. The platform
- *  decides who may acknowledge; this only mirrors its pending list. */
+ *  they do, or when the platform lists a fresh ack of this version
+ *  (`current`, #2668), so a reload still shows it; otherwise null, and the
+ *  page offers nothing. The platform decides who may acknowledge; this only
+ *  mirrors its lists. A pending state carries the version id the caller is
+ *  shown, which the click pins (#2668). */
 export type MyAckState =
-  | { kind: "pending"; lastAcknowledgedAt: string | null }
+  | {
+      kind: "pending";
+      policyVersionId: string;
+      lastAcknowledgedAt: string | null;
+    }
   | { kind: "acknowledged"; acknowledgedAt: string; version: string | null };
 
 export function myAckState(
   p: Pick<Policy, "id" | "status" | "version">,
   pending: readonly PendingAcknowledgment[] | undefined,
   justAcknowledged: PolicyAcknowledgment | undefined,
+  current?: readonly CurrentAcknowledgment[],
 ): MyAckState | null {
   if (justAcknowledged && justAcknowledged.policy_id === p.id) {
     // The version comes from the ack response: `policy_version_id` is the
@@ -92,11 +101,36 @@ export function myAckState(
       version: justAcknowledged.policy_version_id === p.id ? p.version : null,
     };
   }
-  if (p.status !== "published" || !pending) return null;
-  const mine = pending.find((a) => a.policy_id === p.id);
-  return mine
-    ? { kind: "pending", lastAcknowledgedAt: mine.last_acknowledged_at ?? null }
+  if (p.status !== "published") return null;
+  const mine = pending?.find((a) => a.policy_id === p.id);
+  if (mine) {
+    return {
+      kind: "pending",
+      policyVersionId: mine.policy_version_id,
+      lastAcknowledgedAt: mine.last_acknowledged_at ?? null,
+    };
+  }
+  // A fresh ack the platform lists for this row. Its version is shown only
+  // when the ack names this row, as for a just-made ack.
+  const done = current?.find((a) => a.policy_id === p.id);
+  return done
+    ? {
+        kind: "acknowledged",
+        acknowledgedAt: done.acknowledged_at,
+        version: done.policy_version_id === p.id ? done.version : null,
+      }
     : null;
+}
+
+/** #2668 — the toast after an acknowledgment. The platform keeps the ack
+ *  even when its evidence record fails (`evidence_emission_ok: false`), so
+ *  the message says both halves rather than reporting a plain success. */
+export function acknowledgedToast(
+  ack: Pick<PolicyAcknowledgment, "evidence_emission_ok">,
+): string {
+  return ack.evidence_emission_ok
+    ? "Policy acknowledged"
+    : "Policy acknowledged, but its evidence record was not saved";
 }
 
 /** The roles a policy can require to acknowledge it: the platform's RBAC
