@@ -53,8 +53,12 @@ import { describeEvent, groupByDay } from "@/lib/activity-sentences";
 import {
   type ActivityWindow,
   defaultActivityWindow,
-  toRFC3339Day,
+  fromBoundForDay,
+  fromInputValue,
+  toBoundForDay,
+  toInputValue,
 } from "@/lib/activity-window";
+import { useHydrated } from "@/lib/use-hydrated";
 import { enumLabel } from "@/lib/labels/enum-labels";
 import {
   machineActorOptions,
@@ -85,6 +89,9 @@ import {
 // slice 125.
 const AUTO_LOAD_PAGE_LIMIT = 10;
 
+// htmlDateValue is the UTC day of a bound: what the date inputs show in
+// the server render and the hydrating pass, before the viewer's timezone
+// is known (#2658).
 function htmlDateValue(rfc3339: string): string {
   return rfc3339.slice(0, 10);
 }
@@ -207,16 +214,14 @@ export function ActivityPageClient({
     [router],
   );
 
-  const setFrom = (from: string) => {
-    const next = {
-      ...filters,
-      from: toRFC3339Day(new Date(`${from}T00:00:00Z`)),
-    };
-    replaceWith(next);
+  // #2658: a picked day is the viewer's local day, and "To" includes it.
+  const setFrom = (day: string) => {
+    const from = fromBoundForDay(day);
+    if (from) replaceWith({ ...filters, from });
   };
-  const setTo = (to: string) => {
-    const next = { ...filters, to: toRFC3339Day(new Date(`${to}T00:00:00Z`)) };
-    replaceWith(next);
+  const setTo = (day: string) => {
+    const to = toBoundForDay(day);
+    if (to) replaceWith({ ...filters, to });
   };
   const toggleKind = (k: ActivityKind) => {
     const next = filters.kinds.includes(k)
@@ -361,6 +366,7 @@ function FilterBar({
   onIncludeReadsToggle,
   windowValid,
 }: FilterBarProps) {
+  const hydrated = useHydrated();
   return (
     <div
       data-testid="activity-filters"
@@ -372,13 +378,17 @@ function FilterBar({
             htmlFor="activity-from"
             className="block text-xs font-medium text-muted-foreground"
           >
-            From (UTC day)
+            From
           </label>
           <Input
             id="activity-from"
             data-testid="activity-from"
             type="date"
-            value={htmlDateValue(filters.from)}
+            value={
+              hydrated
+                ? fromInputValue(filters.from)
+                : htmlDateValue(filters.from)
+            }
             onChange={(e) => onFromChange(e.target.value)}
           />
         </div>
@@ -387,13 +397,15 @@ function FilterBar({
             htmlFor="activity-to"
             className="block text-xs font-medium text-muted-foreground"
           >
-            To (UTC day)
+            To (inclusive)
           </label>
           <Input
             id="activity-to"
             data-testid="activity-to"
             type="date"
-            value={htmlDateValue(filters.to)}
+            value={
+              hydrated ? toInputValue(filters.to) : htmlDateValue(filters.to)
+            }
             onChange={(e) => onToChange(e.target.value)}
           />
         </div>
