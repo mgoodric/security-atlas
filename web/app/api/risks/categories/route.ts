@@ -11,7 +11,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { forwardJSON, noStore } from "@/lib/api/bff";
+import { forwardJSON, noStore, upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // #1818 — POST adds a category (the Taxonomy settings page). The body is
@@ -48,7 +48,7 @@ export async function GET(req: Request): Promise<Response> {
     cache: "no-store",
   });
   const text = await upstream.text();
-  return new NextResponse(text, {
+  return new NextResponse(upstreamBody(upstream.status, text), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

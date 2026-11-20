@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-import { rejectNonUUID } from "@/lib/api/bff";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 
 export async function GET(
   _req: Request,
@@ -30,7 +30,7 @@ export async function GET(
     { headers: { Authorization: `Bearer ${bearer}` }, cache: "no-store" },
   );
   const body = await upstream.text();
-  return new NextResponse(body, {
+  return new NextResponse(upstreamBody(upstream.status, body), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

@@ -37,6 +37,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import {
   ACTOR_ME_SENTINEL,
   resolveCallerUserID,
@@ -84,7 +85,7 @@ export async function GET(request: Request): Promise<Response> {
   // the browser sees the upstream error message.
   if (!upstream.ok) {
     const text = await upstream.text();
-    return new NextResponse(text, {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
       headers: {
         "Content-Type":

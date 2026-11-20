@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // #1794 — BFF for the Statement of Applicability export (#1791).
@@ -31,13 +32,16 @@ export async function GET(request: Request): Promise<Response> {
     { headers: { Authorization: `Bearer ${bearer}` }, cache: "no-store" },
   );
   if (!upstream.ok) {
-    return new NextResponse(await upstream.text(), {
-      status: upstream.status,
-      headers: {
-        "Content-Type":
-          upstream.headers.get("Content-Type") ?? "application/json",
+    return new NextResponse(
+      upstreamBody(upstream.status, await upstream.text()),
+      {
+        status: upstream.status,
+        headers: {
+          "Content-Type":
+            upstream.headers.get("Content-Type") ?? "application/json",
+        },
       },
-    });
+    );
   }
   const headers: Record<string, string> = {};
   for (const name of PASSTHROUGH_HEADERS) {

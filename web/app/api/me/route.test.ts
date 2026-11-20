@@ -56,6 +56,20 @@ describe("GET /api/me", () => {
     const res = await GET();
     expect(res.status).toBe(401);
   });
+
+  // #2757: the status survives, a 5xx body does not (JSON or text).
+  test.each([
+    ['{"error":"pq: relation tenants does not exist"}'],
+    ["panic: runtime error: index out of range"],
+  ])("masks an upstream 5xx body: %s", async (upstreamText) => {
+    cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(upstreamText, { status: 500 }),
+    );
+    const res = await GET();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "platform error" });
+  });
 });
 
 describe("PATCH /api/me", () => {

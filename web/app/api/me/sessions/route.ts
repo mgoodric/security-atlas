@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { OIDC_SESSION_COOKIE, ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { buildSessionsForwardHeaders } from "./_headers";
 
@@ -44,10 +45,15 @@ async function passthrough(upstream: Response): Promise<Response> {
     return new NextResponse(null, { status: 204 });
   }
   try {
-    return NextResponse.json(text ? JSON.parse(text) : null, {
+    return NextResponse.json(
+      text ? JSON.parse(upstreamBody(upstream.status, text)) : null,
+      {
+        status: upstream.status,
+      },
+    );
+  } catch {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
     });
-  } catch {
-    return new NextResponse(text, { status: upstream.status });
   }
 }

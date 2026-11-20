@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { OIDC_SESSION_COOKIE, ATLAS_JWT_COOKIE } from "@/lib/auth";
-import { SEGMENT, rejectUnsafeSegment } from "@/lib/api/bff";
+import { rejectUnsafeSegment, SEGMENT, upstreamBody } from "@/lib/api/bff";
 import { buildSessionsForwardHeaders } from "../_headers";
 
 export async function DELETE(
@@ -36,10 +36,15 @@ export async function DELETE(
   }
   const text = await upstream.text();
   try {
-    return NextResponse.json(text ? JSON.parse(text) : null, {
+    return NextResponse.json(
+      text ? JSON.parse(upstreamBody(upstream.status, text)) : null,
+      {
+        status: upstream.status,
+      },
+    );
+  } catch {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
     });
-  } catch {
-    return new NextResponse(text, { status: upstream.status });
   }
 }

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-import { rejectNonUUID } from "@/lib/api/bff";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 
 // #1794 — POST /v1/framework-scopes/{id}/applicability/import. The body is
 // the CSV file itself (not multipart), so it goes upstream as text/csv
@@ -49,8 +49,11 @@ export async function POST(
       cache: "no-store",
     },
   );
-  return new NextResponse(await upstream.text(), {
-    status: upstream.status,
-    headers: { "Content-Type": "application/json" },
-  });
+  return new NextResponse(
+    upstreamBody(upstream.status, await upstream.text()),
+    {
+      status: upstream.status,
+      headers: { "Content-Type": "application/json" },
+    },
+  );
 }
