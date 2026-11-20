@@ -24,7 +24,17 @@ type ActivityActorsResponse struct {
 	// `oauth_client:<id>`), sorted. Never a person or API key: those
 	// are listed from /v1/people.
 	Actors []string `json:"actors"`
+	// Truncated is true when the window held more than machineActorRowCap
+	// distinct (actor, kind, target_type, request_path) tuples (#2627).
+	// Actors is then built from the first machineActorRowCap of them and
+	// may be missing some; a narrower window lists them all.
+	Truncated bool `json:"truncated"`
 }
+
+// machineActorRowCap bounds the tuples one actors request reads.
+// ListUnifiedAuditMachineActors returns one row more than this, so a
+// 1001st row marks the response truncated.
+const machineActorRowCap = 1000
 
 // ActivityActors handles GET /v1/activity/actors (#2414): the machine and
 // system actors in the caller's activity for a `from`/`to` window, so the
@@ -81,7 +91,14 @@ func (h *Handler) ActivityActors(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "activity actors", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, ActivityActorsResponse{Actors: visibleActors(rows, modules)})
+	truncated := len(rows) > machineActorRowCap
+	if truncated {
+		rows = rows[:machineActorRowCap]
+	}
+	httpresp.WriteJSON(w, http.StatusOK, ActivityActorsResponse{
+		Actors:    visibleActors(rows, modules),
+		Truncated: truncated,
+	})
 }
 
 // visibleActors keeps each actor seen in at least one row the module
