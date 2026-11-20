@@ -100,9 +100,9 @@ func TestNeedsAttention2587_PolicyAckDue(t *testing.T) {
 		}
 	}
 	it := owner[engineers.String()]
-	if it.Band != "due_soon" || it.DueAt != nil || it.Link != "/policies/"+engineers.String() ||
+	if it.Band != "due_soon" || it.DueAt == nil || !it.DueAt.After(time.Now()) || it.Link != "/policies/"+engineers.String() ||
 		it.Action != "Acknowledge" || it.Owner == nil || it.Owner.UserID != e.fx.A.Owner.String() {
-		t.Errorf("never-acknowledged item = %+v; want due_soon, no due date, linked to the policy, owned by Owner", it)
+		t.Errorf("never-acknowledged item = %+v; want due_soon, due in the grace period, linked to the policy, owned by Owner", it)
 	}
 	if len(e.ackItems2587(t, e.ownerB)) != 0 {
 		t.Errorf("tenant B sees tenant A's acknowledgements")
@@ -139,7 +139,7 @@ func TestNeedsAttention2587_PolicyAckDue(t *testing.T) {
 
 // A re-publish is a new version: an ack of the old version, fresh or
 // lapsed, is not an ack of the new one. The new version is never
-// acknowledged (due soon, no due date), not overdue with a due date.
+// acknowledged (due soon, within the grace period), not overdue.
 func TestNeedsAttention2587_RepublishNeedsANewAck(t *testing.T) {
 	e := newNAEnv2134(t)
 	ctx := context.Background()
@@ -167,7 +167,7 @@ func TestNeedsAttention2587_RepublishNeedsANewAck(t *testing.T) {
 		t.Errorf("superseded v1 is listed")
 	}
 	it, ok := got[v2.String()]
-	if !ok || it.Band != "due_soon" || it.DueAt != nil {
-		t.Errorf("v2 after re-publish: listed=%v item %+v; want due_soon with no due date (v1's acks do not count)", ok, it)
+	if !ok || it.Band != "due_soon" || it.DueAt == nil || !it.DueAt.After(time.Now()) {
+		t.Errorf("v2 after re-publish: listed=%v item %+v; want due_soon, due in the grace period (v1's acks do not count)", ok, it)
 	}
 }
