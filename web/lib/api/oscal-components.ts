@@ -5,7 +5,7 @@
 // canvas invariant #2 / P0-512-1).
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 
 export type ClaimStatus = "asserted" | "accepted" | "rejected" | "needs_info";
 export type Disposition = "accept" | "reject" | "needs-info";
@@ -147,13 +147,7 @@ export async function mapClaimScfAnchor(
     },
   );
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // keep status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as MapScfAnchorResult;
