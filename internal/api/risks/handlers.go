@@ -506,6 +506,10 @@ func parsePageFilter(q url.Values) (risk.PageFilter, string) {
 		}
 		f.DueTo = &d
 	}
+	// #2693: an inverted range is a 400, not an empty page.
+	if f.DueFrom != nil && f.DueTo != nil && f.DueFrom.After(*f.DueTo) {
+		return f, errInvertedReviewDue
+	}
 	if raw := q.Get("include_rollups"); raw != "" {
 		include, perr := strconv.ParseBool(raw)
 		if perr != nil {

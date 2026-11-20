@@ -8,7 +8,9 @@
 // (authz.IsTenantAdmin, #2503). A tenant admin by role, with no admin
 // credential, works only with keys it could hold itself: it cannot mint,
 // rotate or revoke an is_admin or is_approver key, and cannot label a key
-// with a canonical role it does not hold live (mintWithinCaller).
+// with a canonical role it does not hold live (mintWithinCaller). A tenant
+// admin that is itself a key mints no key wider than itself: no later
+// expiry, no wider scope, no other kinds (boundByCallerKey).
 package admincreds
 
 import (
@@ -156,10 +158,15 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusForbidden, msg)
 		return
 	}
+	ttl := time.Duration(req.TTLSeconds) * time.Second
+	if msg := boundByCallerKey(cred, ttl, predicate, req.AllowedKinds, time.Now()); msg != "" {
+		httpresp.WriteError(w, http.StatusForbidden, msg)
+		return
+	}
 	in := apikeystore.IssueInput{
 		ScopePredicate: predicate,
 		AllowedKinds:   req.AllowedKinds,
-		TTL:            time.Duration(req.TTLSeconds) * time.Second,
+		TTL:            ttl,
 		IsAdmin:        req.IsAdmin,
 		IsApprover:     req.IsApprover,
 		OwnerRoles:     req.OwnerRoles,
@@ -445,10 +452,45 @@ func mintWithinCaller(cred credstore.Credential, isAdmin, isApprover bool, owner
 	return ""
 }
 
+// boundByCallerKey reports why a key-as-tenant-admin caller may not mint a
+// key with this TTL, scope predicate and kinds, or "" when it may (#2656).
+// A minted key is no wider than the key minting it: it expires no later than
+// the caller does, its scope is within the caller's (scope.PredicateWithin)
+// and its kinds are a subset of the caller's (no kinds is every kind). An
+// admin credential, a JWT session and any other non-key caller are not
+// bound here.
+func boundByCallerKey(cred credstore.Credential, ttl time.Duration, predicate string, kinds []string, now time.Time) string {
+	if cred.IsAdmin || !strings.HasPrefix(cred.ID, "key_") {
+		return ""
+	}
+	if exp := cred.ExpiresAt(); !exp.IsZero() {
+		if ttl <= 0 || now.Add(ttl).After(exp) {
+			return "ttl_seconds must end no later than the calling key expires (" + exp.UTC().Format(time.RFC3339) + ")"
+		}
+	}
+	within, err := scope.PredicateWithin(predicate, cred.ScopePredicate)
+	if err != nil || !within {
+		return "scope_predicate must be within the calling key's scope"
+	}
+	if len(cred.Kinds) > 0 {
+		if len(kinds) == 0 {
+			return "allowed_kinds must be within the calling key's kinds"
+		}
+		for _, k := range kinds {
+			if !containsRole(cred.Kinds, k) {
+				return "allowed_kinds names " + k + ", which the calling key may not push"
+			}
+		}
+	}
+	return ""
+}
+
 // callerMayHandle refuses a rotate or revoke of a key the caller could not
 // have minted (mintWithinCaller), writing the 403. A rotate hands back a new
 // plaintext with the same flags, so a tenant admin rotating an is_admin key
-// would get an admin credential. A rotate of another user's personal
+// would get an admin credential. For the same reason a rotate is refused when
+// the successor, which keeps the key's TTL, scope and kinds, would be wider
+// than a calling key (boundByCallerKey, #2656). A rotate of another user's personal
 // (user-bound) key is refused too: the plaintext would let the caller act as
 // that user, and the user's own token would retire. Revoking one stays
 // allowed. An unknown id passes here and the store answers 404.
@@ -468,6 +510,12 @@ func (h *Handler) callerMayHandle(w http.ResponseWriter, r *http.Request, cred c
 		if msg := mintWithinCaller(cred, c.IsAdmin, c.IsApprover, c.OwnerRoles); msg != "" {
 			httpresp.WriteError(w, http.StatusForbidden, "this key is outside what a tenant admin manages: "+msg)
 			return false
+		}
+		if rotate {
+			if msg := boundByCallerKey(cred, c.TTL, c.ScopePredicate, c.Kinds, time.Now()); msg != "" {
+				httpresp.WriteError(w, http.StatusForbidden, "rotating this key would mint one wider than the calling key: "+msg)
+				return false
+			}
 		}
 		if rotate && credstore.OwnedByUser(c) {
 			owner, _ := credstore.CallerUserID(c)
