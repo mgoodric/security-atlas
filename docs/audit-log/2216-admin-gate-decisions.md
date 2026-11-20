@@ -48,6 +48,20 @@ Both web gates admit on `is_admin` OR a role in `/v1/me` `roles`. While
 
 Net effect: neither gate admits anyone it did not admit before this change.
 
+## D4 — /v1/admin/controls/held-back is tenant-admin (Matt, 2026-11-17)
+
+D2 keeps the `/admin` section super-admin only. `GET
+/v1/admin/controls/held-back` (#2358) is an exception by Matt's decision of
+2026-11-17: a tenant admin by live role (`authz.IsTenantAdmin`, read from
+`user_roles` at request time, not a JWT claim) lists the stock controls the
+boot seed holds back in their own tenant. The list is per tenant and RLS
+bounds it, so it needs no platform-wide reach.
+
+`admin.rego` lists the whole `controls` segment in
+`tenant_admin_only_segments`, so any later route under
+`/v1/admin/controls/` is tenant-admin-only by default, and no other role
+reads it. Recorded under #2599.
+
 ## Out of scope (filed separately)
 
 Two other role lookups still key on the raw subject. Both are authorization

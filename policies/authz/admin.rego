@@ -98,7 +98,10 @@ tenant_admin_segments := {
 #
 #   controls   GET /v1/admin/controls/held-back, the stock controls whose
 #              shipped update the boot seed holds back behind a reviewed
-#              SCF re-anchor.
+#              SCF re-anchor. The whole segment is listed, so any route
+#              added under /v1/admin/controls/ is tenant-admin-only by
+#              default; widening one is a decision to record, as
+#              held-back's was (Matt, 2026-11-17; #2216 decisions log D4).
 #   users      the tenant's members and their roles (#2503 D5a, Matt
 #              2026-11-18: Users is org-admin only).
 tenant_admin_only_resource if {
