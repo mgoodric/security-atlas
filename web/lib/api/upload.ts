@@ -23,6 +23,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export type UploadLimits = {
@@ -120,7 +121,9 @@ export async function readBoundedUpload(
 // upstream fetch asks for one, so the BFF holds about one chunk per upload
 // whatever the cap. Past the cap the stream errors and the answer is 413;
 // a client stream that breaks mid-read is 400 "upload interrupted".
-// Otherwise the platform's status and body pass through.
+// Otherwise the platform's status passes through, with its body unless it
+// is a 5xx (upstreamBody, #2704). The client's abort signal goes upstream,
+// so a client that disconnects ends the platform call as well.
 export async function proxyBoundedUpload(
   req: Request,
   upstreamPath: string,
@@ -142,6 +145,7 @@ export async function proxyBoundedUpload(
       body: counted.body,
       duplex: "half",
       cache: "no-store",
+      signal: req.signal,
     } as RequestInit & { duplex: "half" });
     text = await upstream.text();
   } catch {
@@ -153,7 +157,7 @@ export async function proxyBoundedUpload(
   // that ran past the cap is refused all the same.
   const refusal = counted.refusal(limits);
   if (refusal) return refusal;
-  return new NextResponse(text, {
+  return new NextResponse(upstreamBody(upstream.status, text), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });
