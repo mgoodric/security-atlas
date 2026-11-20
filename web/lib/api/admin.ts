@@ -6,7 +6,7 @@
 // (decision D1: the admin domain IS one domain).
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 
 // ===== Slice 060 — Admin settings (API keys + features) =====
 //
@@ -233,13 +233,7 @@ export async function grantSuperAdmin(
     body: JSON.stringify({ user_id: userID }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as SuperAdminRow;
@@ -257,13 +251,7 @@ export async function demoteSuperAdmin(
     },
   );
   if (!res.ok && res.status !== 204) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
 }
@@ -319,13 +307,7 @@ export async function createAdminTenant(
     body: JSON.stringify(req),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as CreateTenantResponse;
@@ -450,13 +432,7 @@ export async function assignAdminUser(
     body: JSON.stringify(req),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as AssignUserResponse;
@@ -475,13 +451,7 @@ export async function revokeAdminUser(
     body: JSON.stringify(req),
   });
   if (!res.ok && res.status !== 204) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through with the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
 }
@@ -525,13 +495,7 @@ export async function getAdminDemoStatus(
     headers: { Authorization: `Bearer ${bearer}` },
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as DemoStatusResponse;
@@ -548,13 +512,7 @@ export async function postAdminDemoSeed(
     },
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as DemoSeedResponse;
@@ -571,13 +529,7 @@ export async function postAdminDemoTeardown(
     },
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body?.error) msg = body.error;
-    } catch {
-      // fall through
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as DemoTeardownResponse;
@@ -646,13 +598,7 @@ export async function patchAdminSSO(
   if (!res.ok) {
     // Bubble up the upstream JSON body's `error` field for UI display
     // (slice 062 always returns {error: string} on non-2xx).
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON; fall back to status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as AdminSSOConfig;

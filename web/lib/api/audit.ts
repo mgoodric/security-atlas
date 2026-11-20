@@ -1,3 +1,4 @@
+import { upstreamErrorMessage } from "./_shared";
 // Slice 042 — audit workspace API client.
 //
 // Typed client functions + TanStack Query hook helpers binding four
@@ -47,13 +48,7 @@ export class AuditAPIError extends Error {
 async function bffFetch(path: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new AuditAPIError(res.status, msg);
   }
   return res.json();
@@ -266,13 +261,7 @@ export async function uploadWalkthroughAttachment(
     { method: "POST", body: form },
   );
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new AuditAPIError(res.status, msg);
   }
   const body = (await res.json()) as { walkthrough: Walkthrough };

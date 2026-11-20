@@ -94,11 +94,10 @@ import {
 import { showTenantChrome, useTenancy } from "@/lib/tenancy";
 import { PageShell } from "@/components/shell/page-shell";
 import { Term } from "@/components/help/term";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-type AdminUserListBody = AdminUserListResult & { error?: string };
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
@@ -122,11 +121,10 @@ export default function UsersPage() {
     queryKey: ["admin", "users"],
     queryFn: async (): Promise<AdminUserListResult> => {
       const res = await fetch("/api/admin/users", { cache: "no-store" });
-      const body = (await res.json()) as AdminUserListBody;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as AdminUserListResult;
     },
   });
 
@@ -174,13 +172,10 @@ export default function UsersPage() {
     enabled: crossTenant,
     queryFn: async (): Promise<TenantRow[]> => {
       const res = await fetch("/api/admin/tenants", { cache: "no-store" });
-      const body = (await res.json()) as {
-        items?: TenantRow[];
-        error?: string;
-      };
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
+      const body = (await res.json()) as { items?: TenantRow[] };
       return body.items ?? [];
     },
   });
@@ -220,13 +215,10 @@ export default function UsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
-      const body = (await res.json()) as {
-        error?: string;
-      } & AssignUserResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as AssignUserResponse;
     },
     onSuccess: async (out, vars) => {
       setAssignOpen(false);
@@ -254,11 +246,10 @@ export default function UsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
-      const body = (await res.json()) as { error?: string; ok?: boolean };
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as { ok?: boolean };
     },
     onSuccess: async () => {
       setRevokeTarget(null);

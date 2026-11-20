@@ -3,6 +3,7 @@
 // export-URL helpers and the approver-role probe (`getSessionMe`).
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ----- Slice 032: quarterly board pack -----
 //
@@ -182,13 +183,7 @@ export type BoardPackSectionInputs = {
 async function boardPackJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) msg = body.error;
-    } catch {
-      // keep the status-line message
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as T;

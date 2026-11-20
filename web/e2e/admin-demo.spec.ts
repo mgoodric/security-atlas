@@ -207,7 +207,7 @@ test.describe("admin demo-seed page", () => {
     await expect(success).toHaveAttribute("aria-live", "polite");
   });
 
-  test("AC-3: failure Alert surfaces error message via the BFF body", async ({
+  test("AC-3: a 503 failure Alert shows the status line, not the body (#2645)", async ({
     authedPage,
   }) => {
     await authedPage.route("**/api/admin/demo/status", async (route) => {
@@ -233,7 +233,8 @@ test.describe("admin demo-seed page", () => {
 
     const errorAlert = authedPage.getByTestId("demo-error");
     await expect(errorAlert).toBeVisible();
-    await expect(errorAlert).toContainText(
+    await expect(errorAlert).toContainText("503 Service Unavailable");
+    await expect(errorAlert).not.toContainText(
       "demo seed not enabled on this deployment",
     );
     await expect(errorAlert).toHaveAttribute("aria-live", "polite");

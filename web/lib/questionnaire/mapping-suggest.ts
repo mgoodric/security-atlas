@@ -1,3 +1,5 @@
+import { upstreamErrorText } from "@/lib/api/_shared";
+
 export interface MappingSuggestResponse {
   proposal_id?: string;
   question_id?: string;
@@ -118,14 +120,11 @@ export function parseMappingSuggest(
   raw: unknown,
 ): MappingSuggestViewModel {
   if (!ok) {
-    let msg = `Mapping suggestion failed (${status}).`;
-    if (
-      raw &&
-      typeof raw === "object" &&
-      typeof (raw as { error?: string }).error === "string"
-    ) {
-      msg = (raw as { error: string }).error;
-    }
+    const msg = upstreamErrorText(
+      status,
+      raw,
+      `Mapping suggestion failed (${status}).`,
+    );
     return {
       status: "error",
       proposalId: "",

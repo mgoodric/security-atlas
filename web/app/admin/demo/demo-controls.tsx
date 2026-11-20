@@ -53,6 +53,7 @@ import {
   DialogPortal,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 type SeedResult = {
   tenant_id: string;
@@ -212,20 +213,15 @@ export function DemoControls() {
     setSeedDialog(false);
     try {
       const res = await fetch("/api/admin/demo/seed", { method: "POST" });
-      const body = (await res.json()) as Partial<SeedResult> & {
-        error?: string;
-      };
       if (!res.ok) {
-        warnInDev("seed", res, body);
-        setState({
-          kind: "error",
-          message: body.error ?? `${res.status} ${res.statusText}`,
-        });
+        const message = await upstreamErrorMessage(res.clone());
+        warnInDev("seed", res, await res.json().catch(() => null));
+        setState({ kind: "error", message });
         return;
       }
       setState({
         kind: "success-seed",
-        result: body as SeedResult,
+        result: (await res.json()) as SeedResult,
       });
     } catch (err) {
       if (process.env.NODE_ENV === "development") {
@@ -243,20 +239,15 @@ export function DemoControls() {
     setTeardownDialog(false);
     try {
       const res = await fetch("/api/admin/demo/teardown", { method: "POST" });
-      const body = (await res.json()) as Partial<TeardownResult> & {
-        error?: string;
-      };
       if (!res.ok) {
-        warnInDev("teardown", res, body);
-        setState({
-          kind: "error",
-          message: body.error ?? `${res.status} ${res.statusText}`,
-        });
+        const message = await upstreamErrorMessage(res.clone());
+        warnInDev("teardown", res, await res.json().catch(() => null));
+        setState({ kind: "error", message });
         return;
       }
       setState({
         kind: "success-teardown",
-        result: body as TeardownResult,
+        result: (await res.json()) as TeardownResult,
       });
     } catch (err) {
       if (process.env.NODE_ENV === "development") {

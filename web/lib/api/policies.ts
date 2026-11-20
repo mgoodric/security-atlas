@@ -2,7 +2,12 @@
 // from the former `web/lib/api.ts` god-file.
 
 import { APIError } from "./base";
-import { apiFetch, bffControlFetch, bffPostJSON } from "./_shared";
+import {
+  apiFetch,
+  bffControlFetch,
+  bffPostJSON,
+  upstreamErrorMessage,
+} from "./_shared";
 
 // ----- Slice 101: /policies list view -----
 //
@@ -112,13 +117,7 @@ export async function listPolicies(bearer: string): Promise<Policy[]> {
 export async function fetchPoliciesList(): Promise<PoliciesListResponse> {
   const res = await fetch(`/api/policies`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as PoliciesListResponse;
@@ -194,13 +193,7 @@ export async function fetchPolicyDetail(
 ): Promise<PolicyDetailResponse> {
   const res = await fetch(`/api/policies/${encodeURIComponent(id)}`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as PolicyDetailResponse;
@@ -239,13 +232,7 @@ export type PublishPolicyInput = {
 
 async function parsePolicy(res: Response): Promise<Policy> {
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return ((await res.json()) as { policy: Policy }).policy;
