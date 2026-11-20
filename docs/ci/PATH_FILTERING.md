@@ -70,6 +70,8 @@ The filter list lives inline in `.github/workflows/ci.yml` under the
 - Proto + generated: `proto/**`, `gen/**`, `buf.yaml`, `buf.gen.yaml`
 - Policies + schemas: `policies/**`, `schemas/**`
 - Source trees: `internal/**`, `cmd/**`, `pkg/**`, `connectors/**`
+- Go-embedded data: `controls/**` (stock control bundles),
+  `data/crosswalks/**` (#2676)
 - Containers + deploy: `Dockerfile*`, `**/Dockerfile`,
   `docker-compose*.yml`, `deploy/**`
 - Build / tool config: `.github/workflows/**`, `justfile`,
@@ -100,7 +102,8 @@ Only which twin fires changes.
 ### The allowlists and the shared set
 
 - **Go tier allowlist:** `**/*.go`, `go.mod`, `go.sum`, `go.work`,
-  `go.work.sum`, `internal/**`, `cmd/**`, `pkg/**`, `connectors/**`, and
+  `go.work.sum`, `internal/**`, `cmd/**`, `pkg/**`, `connectors/**`,
+  `controls/**`, `data/crosswalks/**`, and
   Python (`**/*.py`, `oscal-bridge/**`, `pyproject.toml`, `uv.lock`,
   nested ones too), because integration legs B3/B5 use uv.
 - **Web tier allowlist:** `web/**`, `package.json`, `package-lock.json`
