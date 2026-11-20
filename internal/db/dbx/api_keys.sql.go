@@ -87,6 +87,49 @@ func (q *Queries) GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (A
 	return i, err
 }
 
+const getAPIKeyByIDForUpdate = `-- name: GetAPIKeyByIDForUpdate :one
+SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose, minted_by, label
+FROM api_keys
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetAPIKeyByIDForUpdateParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// GetAPIKeyByID with a row lock, for the audited revoke paths (#2740): two
+// replicas revoking one key serialize here, so the second sees revoked_at
+// set and writes no second api_key_revoke row.
+func (q *Queries) GetAPIKeyByIDForUpdate(ctx context.Context, arg GetAPIKeyByIDForUpdateParams) (ApiKey, error) {
+	row := q.db.QueryRow(ctx, getAPIKeyByIDForUpdate, arg.TenantID, arg.ID)
+	var i ApiKey
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TokenHash,
+		&i.ScopePredicate,
+		&i.AllowedKinds,
+		&i.IssuedBy,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RotatedFrom,
+		&i.RetiresAt,
+		&i.IsAdmin,
+		&i.IsApprover,
+		&i.OwnerRoles,
+		&i.Last4,
+		&i.TtlSeconds,
+		&i.Purpose,
+		&i.MintedBy,
+		&i.Label,
+	)
+	return i, err
+}
+
 const insertAPIKey = `-- name: InsertAPIKey :one
 INSERT INTO api_keys (
     id, tenant_id, token_hash, scope_predicate, allowed_kinds,

@@ -776,6 +776,10 @@ type Querier interface {
 	// state-check tree.
 	GetAPIKeyByHash(ctx context.Context, tokenHash []byte) (ApiKey, error)
 	GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (ApiKey, error)
+	// GetAPIKeyByID with a row lock, for the audited revoke paths (#2740): two
+	// replicas revoking one key serialize here, so the second sees revoked_at
+	// set and writes no second api_key_revoke row.
+	GetAPIKeyByIDForUpdate(ctx context.Context, arg GetAPIKeyByIDForUpdateParams) (ApiKey, error)
 	// Idempotency lookup for the handler's deduplicate path.
 	GetAcknowledgmentByToken(ctx context.Context, arg GetAcknowledgmentByTokenParams) (PolicyAcknowledgment, error)
 	// Live (non-tombstoned) plan by id. A tombstoned plan reads as absent

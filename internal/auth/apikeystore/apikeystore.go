@@ -261,7 +261,7 @@ func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID, by Ac
 	if err != nil {
 		return err
 	}
-	cur, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}})
+	cur, err := q.GetAPIKeyByIDForUpdate(ctx, dbx.GetAPIKeyByIDForUpdateParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUnknownKey
