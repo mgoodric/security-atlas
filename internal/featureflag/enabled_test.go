@@ -37,9 +37,14 @@ func TestEnabledStrictReturnsStoreError(t *testing.T) {
 	if on, err := Enabled(context.Background(), looker, "risk.enabled"); err != nil || !on {
 		t.Fatalf("Enabled = %v, %v; want the seed default (true), nil", on, err)
 	}
+	before := StrictReadErrors()
 	on, err := EnabledStrict(context.Background(), looker, "risk.enabled")
 	if !errors.Is(err, ErrStoreUnavailable) || on {
 		t.Fatalf("EnabledStrict = %v, %v; want false, ErrStoreUnavailable", on, err)
+	}
+	// #2575: the failed read is counted.
+	if StrictReadErrors() <= before {
+		t.Fatal("StrictReadErrors did not count the failed read")
 	}
 }
 
