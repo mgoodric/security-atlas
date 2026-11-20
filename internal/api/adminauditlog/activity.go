@@ -179,26 +179,20 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
-		got, _, qErr := unifiedlog.Query(ctx, q, params.queryParams)
+		// #2590: the page is cut after rows from hidden modules are
+		// skipped, so it is full whenever more visible rows exist and
+		// the cursor is set only when they do. #2477: filter by module
+		// before the payload gate, which can clear the request path a
+		// decision row is placed by.
+		var qErr error
+		entries, nextCursor, qErr = activityPage(params.queryParams, params.pageSize, modules,
+			func(p unifiedlog.QueryParams) ([]unifiedlog.Entry, error) {
+				got, _, err := unifiedlog.Query(ctx, q, p)
+				return got, err
+			})
 		if qErr != nil {
 			return qErr
 		}
-		// Apply the page-size cap + cursor derivation here (mirrors
-		// UnifiedList — the aggregator returns up to Limit rows, and
-		// the handler asks for one more than the page size to detect
-		// "more available" without an extra round-trip).
-		if len(got) > params.pageSize {
-			anchor := got[params.pageSize-1]
-			nextCursor = &unifiedlog.Cursor{
-				OccurredAt: anchor.OccurredAt,
-				Kind:       anchor.Kind,
-				RowID:      anchor.RowID,
-			}
-			got = got[:params.pageSize]
-		}
-		// #2477: filter by module before the payload gate, which can
-		// clear the request path a decision row is placed by.
-		entries = visibleEntries(got, modules)
 		gate.apply(entries)
 
 		// Meta-audit: one row per successful query, surface-tagged so

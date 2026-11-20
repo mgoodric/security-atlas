@@ -46,6 +46,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/identity"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -93,6 +94,10 @@ type UnifiedEntry struct {
 	RowID         uuid.UUID       `json:"row_id"`
 	SubjectModule string          `json:"subject_module"`
 	PayloadJSON   json.RawMessage `json:"payload_json"`
+	// ModuleSwitchedOff is set, on GET /v1/admin/audit-log/unified only,
+	// when the module that owns the row is switched off for the tenant
+	// now. The row is kept, not hidden (#2590).
+	ModuleSwitchedOff bool `json:"module_switched_off,omitempty"`
 }
 
 // UnifiedListResponse is the GET /v1/admin/audit-log/unified shape.
@@ -189,15 +194,27 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	// nine audit-log tables filters reads; the me_audit_log INSERT
 	// policy filters the audit write.
 	var (
-		entries    []unifiedlog.Entry
-		nextCursor *unifiedlog.Cursor
+		entries     []unifiedlog.Entry
+		switchedOff []bool
+		nextCursor  *unifiedlog.Cursor
 	)
 	gate := h.newPayloadGate(r, userIdentifier)
+	// #2590: rows from switched-off modules are marked, not hidden. The
+	// switches are read strictly before the transaction, so a flag-store
+	// error fails the request rather than leaving rows unmarked.
+	switches, err := h.views.Switches(r)
+	if err != nil {
+		moduleaccess.WriteError(w, r, "audit log module switches", err)
+		return
+	}
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		got, _, qErr := unifiedlog.Query(ctx, q, params.queryParams)
 		if qErr != nil {
 			return qErr
 		}
+		// Marked before the payload gate, which can clear the request
+		// path a decision row is placed by.
+		switchedOff = markSwitchedOff(got, switches)
 		gate.apply(got)
 		// Apply the page-size cap + cursor derivation here. The aggregator
 		// was asked for (pageSize + 1) rows; if it returned more than
@@ -269,19 +286,20 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := make([]UnifiedEntry, 0, len(entries))
-	for _, e := range entries {
+	for i, e := range entries {
 		out = append(out, UnifiedEntry{
-			OccurredAt:    e.OccurredAt,
-			ActorID:       e.ActorID,
-			ActorName:     e.ActorName,
-			TenantID:      e.TenantID,
-			Kind:          string(e.Kind),
-			TargetType:    e.TargetType,
-			TargetID:      e.TargetID,
-			Action:        e.Action,
-			RowID:         e.RowID,
-			SubjectModule: e.SubjectModule,
-			PayloadJSON:   e.PayloadJSON,
+			OccurredAt:        e.OccurredAt,
+			ActorID:           e.ActorID,
+			ActorName:         e.ActorName,
+			TenantID:          e.TenantID,
+			Kind:              string(e.Kind),
+			TargetType:        e.TargetType,
+			TargetID:          e.TargetID,
+			Action:            e.Action,
+			RowID:             e.RowID,
+			SubjectModule:     e.SubjectModule,
+			PayloadJSON:       e.PayloadJSON,
+			ModuleSwitchedOff: switchedOff[i],
 		})
 	}
 	httpresp.WriteJSON(w, http.StatusOK, UnifiedListResponse{

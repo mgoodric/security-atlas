@@ -167,7 +167,7 @@ describe("the real help files", () => {
 
   it("covers Controls, and leaves an unmapped page without help", () => {
     expect(helpModuleForPath("/controls")?.id).toBe("controls");
-    expect(helpModuleForPath("/requirements/abc")).toBeUndefined();
+    expect(helpModuleForPath("/no-such-page")).toBeUndefined();
     expect(helpDocsHref("controls")).toBe(
       "https://mgoodric.github.io/security-atlas/help/controls/",
     );
@@ -316,6 +316,32 @@ describe("the real help files", () => {
 
   // #2149 — no Program page owns an exported lifecycle, so none embeds one.
   it.each(["dashboard", "approvals", "calendar", "metrics", "activity"])(
+    "embeds no lifecycle diagram in the %s help",
+    (id) => {
+      const mod = HELP_MODULES.find((m) => m.id === id);
+      expect(mod).toBeDefined();
+      expect(mod?.lifecycles).toEqual([]);
+    },
+  );
+
+  // #2592 — the audit workspace (with a control open) and a requirement's
+  // page each resolve to their own module; /audit claims neither /audits
+  // nor /audit-log, the redirect the activity help covers once it lands.
+  it.each([
+    ["/audit", "audit-workspace"],
+    ["/audit/abc", "audit-workspace"],
+    ["/requirements/abc", "requirements"],
+    ["/audits", "audits"],
+  ])("covers %s with the %s help", (route, id) => {
+    expect(helpModuleForPath(route)?.id).toBe(id);
+  });
+
+  it("does not cover /audit-log with the audit workspace help", () => {
+    expect(helpModuleForPath("/audit-log")).toBeUndefined();
+  });
+
+  // #2592 — neither page owns an exported lifecycle.
+  it.each(["audit-workspace", "requirements"])(
     "embeds no lifecycle diagram in the %s help",
     (id) => {
       const mod = HELP_MODULES.find((m) => m.id === id);

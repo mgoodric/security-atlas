@@ -91,11 +91,7 @@ export const HELP_EXEMPT: readonly HelpExemption[] = [
 
 /** Shrink-only. Remove an entry in the PR that writes its help; never add
  *  one (`coverage.test.ts` fails on a route not in the original list). */
-export const HELP_PENDING: readonly HelpPending[] = [
-  { route: "/audit", ticket: 2592 },
-  { route: "/audit/[controlId]", ticket: 2592 },
-  { route: "/requirements/[id]", ticket: 2592 },
-];
+export const HELP_PENDING: readonly HelpPending[] = [];
 
 /** Every way the routes and the help disagree, one line each; empty when
  *  every route is covered, exempt or pending, and no list entry is stale. */
