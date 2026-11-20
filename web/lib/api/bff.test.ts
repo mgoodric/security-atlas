@@ -31,7 +31,55 @@ vi.mock("next/headers", () => ({
 vi.mock("next/server", () => mockNextServer());
 
 import { ATLAS_JWT_COOKIE } from "../auth";
-import { forwardJSON, noStore, rejectUnsafeSegment, SEGMENT } from "./bff";
+import {
+  forwardJSON,
+  forwardMultipart,
+  noStore,
+  rejectUnsafeSegment,
+  SEGMENT,
+  UPSTREAM_5XX_BODY,
+  upstreamBody,
+} from "./bff";
+
+describe("upstreamBody (#2704)", () => {
+  test.each([500, 502, 503, 599])("%i body is replaced", (status) => {
+    expect(upstreamBody(status, "panic: runtime error")).toBe(
+      UPSTREAM_5XX_BODY,
+    );
+  });
+  test.each([200, 201, 400, 404, 409, 429, 499])(
+    "%i body passes through",
+    (status) => {
+      expect(upstreamBody(status, '{"error":"x"}')).toBe('{"error":"x"}');
+    },
+  );
+});
+
+describe("forwardMultipart (#2704)", () => {
+  beforeEach(() => {
+    cookieStore.clear();
+    vi.restoreAllMocks();
+    process.env.ATLAS_HTTP_URL = "http://atlas:8080";
+  });
+
+  test("relays a 4xx body and replaces a 5xx body", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockResolvedValueOnce(
+      new Response('{"error":"bad sheet"}', { status: 400 }),
+    );
+    const bad = await forwardMultipart("/v1/imports", new FormData());
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "bad sheet" });
+
+    fetchSpy.mockResolvedValueOnce(
+      new Response("open /var/atlas/x: permission denied", { status: 500 }),
+    );
+    const broke = await forwardMultipart("/v1/imports", new FormData());
+    expect(broke.status).toBe(500);
+    expect(await broke.text()).toBe(UPSTREAM_5XX_BODY);
+  });
+});
 
 describe("forwardJSON", () => {
   beforeEach(() => {
@@ -110,6 +158,25 @@ describe("forwardJSON", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("forbidden");
+  });
+
+  // #2704 — a 5xx body is the server's own failure; it never reaches the
+  // wire, whatever a handler wrote there. The status and Retry-After do.
+  test("replaces an upstream 5xx body with a generic one", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response('{"error":"pq: relation \\"secret_table\\" missing"}', {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Retry-After": "5" },
+      }),
+    );
+
+    const res = await forwardJSON("/v1/audit/notes");
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+    const text = await res.text();
+    expect(text).toBe(UPSTREAM_5XX_BODY);
+    expect(text).not.toContain("secret_table");
   });
 
   test("sends POST with Content-Type and serialized body when jsonBody set", async () => {

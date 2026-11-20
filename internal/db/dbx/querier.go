@@ -285,15 +285,15 @@ type Querier interface {
 	// user_roles row the policy's audience names, or any live role when the
 	// audience is 'everyone'. This is the set the authz engine resolves
 	// (authz.DBRolesResolver reads the same rows and gives a user whose
-	// users.status is not 'active' none) and the set policy.WithEveryone admits,
+	// users.status is not 'active' none) and the set IsUserOnAckRoster admits,
 	// so the denominator is who may acknowledge. user_roles.user_id is TEXT; a
 	// "user:<uuid>" principal is read as its bare uuid, and a row naming no
 	// users row (a key, bootstrap-admin) is not a person and is not counted.
 	//
 	// Before #2586 this counted api_keys holders: a user whose role was revoked
 	// but whose key was not was counted, and a JWT-only member was missed.
-	// ListPoliciesWithAckRate (policies.sql) repeats this predicate; keep them
-	// in sync.
+	// ListPoliciesWithAckRate (policies.sql), ListPendingAcksForUser and
+	// IsUserOnAckRoster repeat this predicate; keep them in sync.
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	// #2105: live (not tombstoned) action plans linked to a risk, for the
 	// mitigate rule (a linked control or a linked action plan).
@@ -1083,6 +1083,12 @@ type Querier interface {
 	// Single-row lookup used by POST /v1/policies/{id}/acknowledge. The
 	// handler checks status='published' itself so it can return a precise
 	// 409 (vs 404) when the row exists but is not currently in force.
+	//
+	// FOR SHARE (#2728): inside Record's transaction the row stays locked until
+	// the ack row is inserted and committed, so a concurrent publish (which
+	// supersedes this row with an UPDATE) waits for an in-flight ack instead of
+	// landing between the status check and the insert. Rate reads through the
+	// same query and holds the lock only for its own short read transaction.
 	GetPolicyForAcknowledge(ctx context.Context, arg GetPolicyForAcknowledgeParams) (Policy, error)
 	GetPopulationByID(ctx context.Context, arg GetPopulationByIDParams) (Population, error)
 	// ===== slice 599: resolved-chain provenance read =====
@@ -1592,6 +1598,11 @@ type Querier interface {
 	// #2118: whether user_id is an active user of this tenant holding the
 	// auditor role. The assign route refuses anyone else.
 	IsActiveTenantAuditor(ctx context.Context, arg IsActiveTenantAuditorParams) (bool, error)
+	// The acknowledge gate (#2728): true when user_id is on the version's
+	// roster, the set CountRequiredRoleUsersForVersion counts. Same predicate,
+	// narrowed to one user; keep them in sync. A super admin, or a user whose
+	// only match is an api_keys label, is not on the roster and is refused.
+	IsUserOnAckRoster(ctx context.Context, arg IsUserOnAckRosterParams) (bool, error)
 	// The most recent successful backup run — what restore-verification restores.
 	LatestSucceededBackup(ctx context.Context) (BackupRun, error)
 	// The most-recent reviewed_at for a vendor, used to keep vendors.last_review_date
@@ -2765,7 +2776,12 @@ type Querier interface {
 	//
 	// A row appears in the result when:
 	//   1. status = 'published' AND cardinality(acknowledgment_required_roles) > 0
-	//   2. The caller's roles intersect required_roles, OR caller is admin.
+	//   2. The caller is on the version's roster: an active users row holding
+	//      a live user_roles row the audience names, or any live role when the
+	//      audience is 'everyone'. This is the CountRequiredRoleUsersForVersion
+	//      predicate narrowed to one user, so the pending list, the acknowledge
+	//      gate (IsUserOnAckRoster) and the rate denominator are one set. No
+	//      admin wildcard and no api_keys label (#2728).
 	//   3. (no fresh ack exists) computed in Go: we return latest_ack_at and
 	//      let the handler compare against the freshness cutoff. Pushing
 	//      the cutoff into SQL too would mask "stale" from "never ack'd"

@@ -37,8 +37,14 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	)
 }
 
+// seededAnchor loads the fixture SCF releases (B current) and returns an
+// access-related anchor from the current release. The CI integration DB is
+// migrated but never seeded with the SCF catalog, so reading a pre-seeded
+// catalog here skipped every caller on every CI run (#2743). Call it before
+// freshTenant: LoadAB's cleanup then runs after the tenant's rows are gone.
 func seededAnchor(t *testing.T, admin *pgxpool.Pool) testAnchor {
 	t.Helper()
+	scfreleasetest.LoadAB(t, admin)
 	var a testAnchor
 	err := admin.QueryRow(context.Background(), `
 		SELECT a.id::text, a.scf_id, a.title
@@ -51,7 +57,7 @@ func seededAnchor(t *testing.T, admin *pgxpool.Pool) testAnchor {
 		LIMIT 1
 	`).Scan(&a.UUID, &a.SCFID, &a.Title)
 	if err != nil {
-		t.Skipf("current seeded SCF catalog not available: %v", err)
+		t.Fatalf("fixture SCF release has no current access anchor: %v", err)
 	}
 	return a
 }

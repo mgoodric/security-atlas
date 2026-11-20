@@ -145,7 +145,8 @@ export function PolicyForm({
         </legend>
         <p className="text-xs text-muted-foreground">
           People with these roles, or every member for Everyone, are asked to
-          acknowledge the published policy.
+          acknowledge the published policy. Only they can acknowledge it; admins
+          outside these roles cannot.
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
           {/* #2524: the roles plus Everyone, then any free-text value the
