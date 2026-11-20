@@ -168,13 +168,28 @@ func seedFramework(t *testing.T, admin *pgxpool.Pool, slug, version string, reqC
 		// so any audit period a test seeded against this version must go
 		// first. Cleanups run LIFO and seedFramework is called after
 		// freshTenant, so this runs before freshTenant's audit_periods
-		// delete — clear them here too. fw_to_scf_edges +
+		// delete — clear them here too. The same LIFO order means the
+		// tenant's controls still exist here, and controls_scf_anchor_fk is
+		// ON DELETE RESTRICT, so the controls on these anchors (and their
+		// exceptions, also RESTRICT) go first or the framework delete fails
+		// and leaks the catalog rows (#2743). fw_to_scf_edges +
 		// framework_requirements + scf_anchors cascade from
 		// framework_versions; framework_versions cascades from frameworks.
 		if _, err := admin.Exec(ctx,
 			`DELETE FROM audit_periods WHERE framework_version_id = $1`,
 			fw.frameworkVersionID); err != nil {
 			t.Logf("cleanup audit_periods for framework: %v", err)
+		}
+		if _, err := admin.Exec(ctx, `
+			DELETE FROM exceptions WHERE control_id IN (
+				SELECT id FROM controls WHERE scf_anchor_id = ANY($1))`,
+			anchors); err != nil {
+			t.Logf("cleanup exceptions on framework anchors: %v", err)
+		}
+		if _, err := admin.Exec(ctx,
+			`DELETE FROM controls WHERE scf_anchor_id = ANY($1)`,
+			anchors); err != nil {
+			t.Logf("cleanup controls on framework anchors: %v", err)
 		}
 		if _, err := admin.Exec(ctx,
 			`DELETE FROM frameworks WHERE id = $1`, fw.frameworkID); err != nil {
