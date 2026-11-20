@@ -149,6 +149,10 @@ func (s *AckStore) WithClock(fn func() time.Time) *AckStore {
 	return s
 }
 
+// Now is the store's clock, the instant its pending lists are cut at. A
+// caller judging a pending row's Due reads it, so the two agree.
+func (s *AckStore) Now() time.Time { return s.now() }
+
 // PendingForUser returns the policies that require an acknowledgment
 // from the calling user, sorted by title ASC. A policy is "pending" when the
 // caller is on its roster (an active user holding a live user_roles row the
