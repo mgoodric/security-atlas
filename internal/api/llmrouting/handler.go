@@ -151,7 +151,7 @@ func writeSetError(w http.ResponseWriter, err error) {
 		// The deployment has no cloud master key, so it cannot protect a stored
 		// key. 409: the request is well-formed but the deployment cannot honor
 		// it. The operator must configure ATLAS_LLM_CLOUD_KEY(_FILE) first.
-		httpresp.WriteError(w, http.StatusConflict, "cloud routing is not enabled on this deployment (no cloud key configured)")
+		httpresp.WriteFeatureNotEnabled(w, "cloud routing is not enabled on this deployment (no cloud key configured)")
 	default:
 		httpresp.WriteError(w, http.StatusInternalServerError, "failed to set routing config")
 	}

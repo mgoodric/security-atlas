@@ -13,7 +13,7 @@
 //
 // Coverage maps to slice 278 acceptance criteria + ISC criteria:
 //
-//	AC-4  / ISC-3    env-var unset -> 503 + no seed + no audit row
+//	AC-4  / ISC-3    env-var unset -> 409 + no seed + no audit row
 //	AC-5  / ISC-4    non-admin     -> 403 + no seed + no audit row
 //	AC-6  / ISC-7    admin + env   -> 200 + seed runs + audit row written
 //	AC-8  / ISC-5    rate limit    -> second call within 60s -> 429
@@ -309,8 +309,8 @@ func TestStatus_EnabledFalse(t *testing.T) {
 	}
 }
 
-// AC-4 / ISC-3: env-var unset -> 503 + no seed + no audit row.
-func TestSeed_EnvUnsetGets503AndDoesNotSeed(t *testing.T) {
+// AC-4 / ISC-3: env-var unset -> 409 + no seed + no audit row.
+func TestSeed_EnvUnsetGets409AndDoesNotSeed(t *testing.T) {
 	resetDemoAuditRows(t)
 	sessionTenant := seedTenant(t, "slice278 env-unset")
 	actor := uuid.New()
@@ -319,8 +319,8 @@ func TestSeed_EnvUnsetGets503AndDoesNotSeed(t *testing.T) {
 
 	h := newRouter(t, sessionTenant, actor, true, false)
 	res, body := doRequest(t, h, http.MethodPost, "/v1/admin/demo/seed")
-	if res.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status code = %d; want 503; body=%v", res.StatusCode, body)
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("status code = %d; want 409; body=%v", res.StatusCode, body)
 	}
 
 	// No me_audit_log row should exist for the actor's tenant.
@@ -329,7 +329,7 @@ func TestSeed_EnvUnsetGets503AndDoesNotSeed(t *testing.T) {
 	}
 	// No demo tenant should exist.
 	if demoTenantExists(t, "demo") {
-		t.Fatalf("demo tenant exists after 503; should not have been created")
+		t.Fatalf("demo tenant exists after 409; should not have been created")
 	}
 }
 

@@ -126,3 +126,25 @@ func TestWriteError_SpecialCharactersEscaped(t *testing.T) {
 		t.Fatalf("error field = %q, want %q", got["error"], `bad "value" <x>`)
 	}
 }
+
+// TestWriteFeatureNotEnabled_ExactWireShape pins the refusal for a feature
+// switched off on this deployment: a 409 carrying the message and the stable
+// `feature_not_enabled` code (#2730). A 5xx here would hide the message, since
+// the web client replaces every 5xx body with the status line (#2645).
+func TestWriteFeatureNotEnabled_ExactWireShape(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	httpresp.WriteFeatureNotEnabled(rec, "demo seed not enabled on this deployment")
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	want := "{\"code\":\"feature_not_enabled\",\"error\":\"demo seed not enabled on this deployment\"}\n"
+	if got := rec.Body.String(); got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}

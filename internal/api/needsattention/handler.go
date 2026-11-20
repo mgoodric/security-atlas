@@ -19,7 +19,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/api/policyacks"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -129,7 +128,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.collect(r, cred, tenantID)
 	if err != nil {
-		httperr.WriteInternal(w, r, "needs attention", err)
+		moduleaccess.WriteError(w, r, "needs attention", err)
 		return
 	}
 	mine := mineFor(cred)
@@ -333,17 +332,14 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 
 // ackItems lists the policies waiting for the caller's acknowledgement:
 // published, aimed at a role the caller holds live or at everyone (the
-// targeting POST /v1/policies/{id}/acknowledge applies, #2580), with no
-// fresh ack of the current version. The admin flag is dropped: the ack
-// store lets an admin acknowledge any policy, but a policy not aimed at
-// them is not theirs to acknowledge. A credential with no person behind
+// targeting POST /v1/policies/{id}/acknowledge applies, #2580, #2728), with
+// no fresh ack of the current version. A credential with no person behind
 // it acknowledges nothing.
 func (h *Handler) ackItems(r *http.Request, cred credstore.Credential) ([]Item, error) {
 	caller := policyacks.CallerFromCred(cred)
 	if caller.UserID == "" {
 		return nil, nil
 	}
-	caller.IsAdmin = false
 	pending, err := policy.NewAckStore(h.pool).WithClock(h.nowFn).PendingForUser(r.Context(), caller)
 	if err != nil {
 		return nil, fmt.Errorf("pending acknowledgements: %w", err)
@@ -352,15 +348,10 @@ func (h *Handler) ackItems(r *http.Request, cred credstore.Credential) ([]Item, 
 }
 
 // AckItems turns the caller's pending acknowledgements into items they
-// own. A lapsed ack (the last one is older than
-// policy.AcknowledgmentFreshness) is overdue from the day it lapsed; a
-// policy never acknowledged has no due date, so it is due soon, dated from
-// its effective date.
-//
-// The store matches acks to the current version only (a re-publish is a
-// new policies row), so a pending row's ack is always lapsed. An ack that
-// would lapse after now is not a lapse of this version and counts as none,
-// rather than an overdue item due in the future.
+// own, banded and dated by policy.Pending.Due, the rule
+// GET /v1/me/acknowledgments reports (#2736): a lapsed ack is overdue from
+// the day it lapsed; a policy never acknowledged is due soon until
+// policy.AckGraceDays after its effective date, and overdue after.
 func AckItems(pending []policy.Pending, caller string, now time.Time) []Item {
 	out := make([]Item, 0, len(pending))
 	for _, p := range pending {
@@ -370,14 +361,10 @@ func AckItems(pending []policy.Pending, caller string, now time.Time) []Item {
 			Link: links["policy"] + id, Action: "Acknowledge",
 			Owner: &Owner{UserID: caller},
 		}
-		var due time.Time
-		if p.LastAcknowledgedAt != nil {
-			due = p.LastAcknowledgedAt.UTC().Add(policy.AcknowledgmentFreshness)
-		}
-		if p.LastAcknowledgedAt != nil && !due.After(now) {
-			it.Band, it.DueAt = BandOverdue, &due
-		} else {
-			it.Band, it.Since = BandDueSoon, p.EffectiveDate
+		due, state := p.Due(now)
+		it.Band, it.DueAt = BandDueSoon, due
+		if state == policy.AckOverdue {
+			it.Band = BandOverdue
 		}
 		out = append(out, it)
 	}

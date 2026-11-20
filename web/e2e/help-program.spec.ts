@@ -10,6 +10,7 @@
 // loading, error and loaded states alike, so no data fetch is mocked.
 
 import { expect, test } from "./fixtures";
+import { clickHelp } from "./help";
 
 const DOCS = "https://mgoodric.github.io/security-atlas/help/";
 
@@ -71,7 +72,7 @@ test.describe("Program help (#2149)", () => {
 
       const button = page.getByTestId("help-button");
       await expect(button).toHaveAccessibleName(`How this works: ${r.title}`);
-      await button.click();
+      await clickHelp(button);
 
       const panel = page.getByTestId("help-panel");
       await expect(panel).toBeVisible();

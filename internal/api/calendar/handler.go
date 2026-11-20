@@ -207,12 +207,12 @@ func (h *Handler) ListEvents(w http.ResponseWriter, r *http.Request) {
 	typeFilter, anyLeft := h.readableTypes(r, typeFilter)
 	viewer, err := h.views.For(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "calendar module access", err)
+		moduleaccess.WriteError(w, r, "calendar module access", err)
 		return
 	}
 	if anyLeft {
 		if typeFilter, anyLeft, err = VisibleTypes(viewer, typeFilter); err != nil {
-			httperr.WriteInternal(w, r, "calendar module access", err)
+			moduleaccess.WriteError(w, r, "calendar module access", err)
 			return
 		}
 	}
@@ -366,11 +366,11 @@ func (h *Handler) ICS(w http.ResponseWriter, r *http.Request) {
 		}
 		viewer, verr := h.views.ForUser(r.WithContext(ctx), tenantID, subscriber)
 		if verr != nil {
-			httperr.WriteInternal(w, r, "calendar module access", verr)
+			moduleaccess.WriteError(w, r, "calendar module access", verr)
 			return
 		}
 		if typeFilter, anyLeft, err = VisibleTypes(viewer, typeFilter); err != nil {
-			httperr.WriteInternal(w, r, "calendar module access", err)
+			moduleaccess.WriteError(w, r, "calendar module access", err)
 			return
 		}
 	}

@@ -237,8 +237,15 @@ ISO A.8.22 no longer maps to the stock `soc2_cc6_6_boundary_protection` (NET-03)
 
 The stock `network_segmentation_default_deny` control (#2648) is anchored on
 `NET-06`, so ISO A.8.22 and PCI 1.4.1 are covered again once the bootstrap
-has uploaded it. To link NetworkPolicy records to it, pass
-`--netpol-control network_segmentation_default_deny`.
+has uploaded it. Since #2745 the k8s `--netpol-control` default is that
+control's bundle id, so NetworkPolicy records link to it on default flags. An
+install that passes `--netpol-control scf:NET-06` explicitly keeps storing a
+free-form reference; drop the flag to link the stock control.
+
+#2745 also changes the per-namespace NetworkPolicy verdict: a namespace now
+passes only when it has default-deny for both ingress and egress. A namespace
+with default-deny in one direction only, which passed before, now fails with a
+reason naming the open direction.
 
 A connector run on its defaults picks up the new code when you upgrade it. If
 you pass one of these flags with the old value, by hand or in a scheduler or

@@ -40,7 +40,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -154,7 +153,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httperr.WriteInternal(w, r, "list approvals", err)
+		moduleaccess.WriteError(w, r, "list approvals", err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, Build(items))

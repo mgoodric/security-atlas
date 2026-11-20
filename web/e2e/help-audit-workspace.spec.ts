@@ -17,6 +17,7 @@
 // the coverage fetch returns, so an all-zero id serves.
 
 import { expect, test } from "./fixtures";
+import { clickHelp } from "./help";
 
 const DOCS = "https://mgoodric.github.io/security-atlas/help/";
 const ZERO = "00000000-0000-0000-0000-000000000000";
@@ -61,7 +62,7 @@ test.describe("Audit workspace and requirement help (#2592)", () => {
 
       const button = page.getByTestId("help-button");
       await expect(button).toHaveAccessibleName(`How this works: ${r.title}`);
-      await button.click();
+      await clickHelp(button);
 
       const panel = page.getByTestId("help-panel");
       await expect(panel).toBeVisible();

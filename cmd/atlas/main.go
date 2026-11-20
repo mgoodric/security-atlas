@@ -911,14 +911,14 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
+	var errs errCollector
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		fmt.Fprintf(os.Stderr, "atlas: gRPC listening on %s\n", grpcAddr)
 		if err := srv.Run(ctx, grpcAddr); err != nil {
-			errCh <- fmt.Errorf("grpc: %w", err)
+			errs.add(fmt.Errorf("grpc: %w", err))
 		}
 	}()
 
@@ -928,7 +928,7 @@ func main() {
 			defer wg.Done()
 			fmt.Fprintf(os.Stderr, "atlas: HTTP listening on %s\n", httpAddr)
 			if err := srv.RunHTTP(ctx, httpAddr); err != nil {
-				errCh <- fmt.Errorf("http: %w", err)
+				errs.add(fmt.Errorf("http: %w", err))
 			}
 		}()
 	}
@@ -942,7 +942,7 @@ func main() {
 			defer wg.Done()
 			fmt.Fprintf(os.Stderr, "atlas: NATS consumer draining %s\n", streambufSubject())
 			if err := streamConsumer.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("streambuf consumer: %w", err)
+				errs.add(fmt.Errorf("streambuf consumer: %w", err))
 			}
 		}()
 	}
@@ -956,7 +956,7 @@ func main() {
 			defer wg.Done()
 			fmt.Fprintf(os.Stderr, "atlas: evaluation ingest subscriber starting\n")
 			if err := evalSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("eval ingest subscriber: %w", err)
+				errs.add(fmt.Errorf("eval ingest subscriber: %w", err))
 			}
 		}()
 	}
@@ -970,7 +970,7 @@ func main() {
 			defer wg.Done()
 			fmt.Fprintf(os.Stderr, "atlas: freshness/drift refresh subscriber starting\n")
 			if err := freshnessDriftSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("freshness/drift refresh subscriber: %w", err)
+				errs.add(fmt.Errorf("freshness/drift refresh subscriber: %w", err))
 			}
 		}()
 	}
@@ -984,7 +984,7 @@ func main() {
 			defer wg.Done()
 			fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber starting\n")
 			if err := residualSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("risk residual subscriber: %w", err)
+				errs.add(fmt.Errorf("risk residual subscriber: %w", err))
 			}
 		}()
 	}
@@ -998,7 +998,7 @@ func main() {
 			defer wg.Done()
 			fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber starting\n")
 			if err := personnelSubscriber.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("personnel security worker-event subscriber: %w", err)
+				errs.add(fmt.Errorf("personnel security worker-event subscriber: %w", err))
 			}
 		}()
 	}
@@ -1046,7 +1046,7 @@ func main() {
 				defer expiryPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: exception expirer ticking every %s\n", interval.String())
 				if err := expirer.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("exception expirer: %w", err)
+					errs.add(fmt.Errorf("exception expirer: %w", err))
 				}
 			}()
 		}
@@ -1084,7 +1084,7 @@ func main() {
 				defer overduePool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: decision overdue notifier ticking every %s\n", interval.String())
 				if err := notifier.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("decision overdue notifier: %w", err)
+					errs.add(fmt.Errorf("decision overdue notifier: %w", err))
 				}
 			}()
 		}
@@ -1121,7 +1121,7 @@ func main() {
 				defer psPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: personnel overdue notifier ticking every %s\n", interval.String())
 				if err := psNotifier.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("personnel overdue notifier: %w", err)
+					errs.add(fmt.Errorf("personnel overdue notifier: %w", err))
 				}
 			}()
 		}
@@ -1159,7 +1159,7 @@ func main() {
 				defer rsPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: security awareness roster sync ticking every %s\n", interval.String())
 				if err := rs.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("security awareness roster sync: %w", err)
+					errs.add(fmt.Errorf("security awareness roster sync: %w", err))
 				}
 			}()
 		}
@@ -1195,7 +1195,7 @@ func main() {
 				defer schedPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: eval scheduler ticking every %s\n", interval.String())
 				if err := scheduler.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("eval scheduler: %w", err)
+					errs.add(fmt.Errorf("eval scheduler: %w", err))
 				}
 			}()
 		}
@@ -1231,7 +1231,7 @@ func main() {
 				defer fdPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: freshness/drift scheduler checking every %s\n", tickCheck.String())
 				if err := fdScheduler.Run(ctx, tickCheck); err != nil {
-					errCh <- fmt.Errorf("freshness/drift scheduler: %w", err)
+					errs.add(fmt.Errorf("freshness/drift scheduler: %w", err))
 				}
 			}()
 		}
@@ -1275,7 +1275,7 @@ func main() {
 				defer mPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: metrics scheduler ticking every %s\n", interval.String())
 				if err := ms.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("metrics scheduler: %w", err)
+					errs.add(fmt.Errorf("metrics scheduler: %w", err))
 				}
 			}()
 		}
@@ -1315,7 +1315,7 @@ func main() {
 				defer sPool.Close()
 				fmt.Fprintf(os.Stderr, "atlas: staleness scheduler ticking every %s (weekly digest Mondays 09:00 UTC)\n", interval.String())
 				if err := ss.Run(ctx, interval); err != nil {
-					errCh <- fmt.Errorf("staleness scheduler: %w", err)
+					errs.add(fmt.Errorf("staleness scheduler: %w", err))
 				}
 			}()
 		}
@@ -1340,7 +1340,7 @@ func main() {
 				defer wg.Done()
 				defer ciPool.Close()
 				if err := sweeper.Run(ctx, controlimport.DefaultSweepInterval); err != nil {
-					errCh <- fmt.Errorf("control import sweeper: %w", err)
+					errs.add(fmt.Errorf("control import sweeper: %w", err))
 				}
 			}()
 		}
@@ -1414,7 +1414,7 @@ func main() {
 					fmt.Fprintf(os.Stderr, "atlas: digest scheduler ticking every %s (%d channels)\n",
 						interval.String(), len(channels))
 					if err := ds.Run(ctx, interval); err != nil {
-						errCh <- fmt.Errorf("digest scheduler: %w", err)
+						errs.add(fmt.Errorf("digest scheduler: %w", err))
 					}
 				}()
 			}
@@ -1480,12 +1480,13 @@ func main() {
 	}
 
 	wg.Wait()
-	close(errCh)
 	if streamConn != nil {
 		streamConn.Close()
 	}
-	for err := range errCh {
-		fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+	if collected := errs.all(); len(collected) > 0 {
+		for _, err := range collected {
+			fmt.Fprintf(os.Stderr, "atlas: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }

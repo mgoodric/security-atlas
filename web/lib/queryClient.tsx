@@ -5,6 +5,7 @@
 import { QueryClient } from "@tanstack/react-query";
 
 import { isFeatureDisabledError } from "@/lib/feature-nav";
+import { tenantGuardedMutationCache } from "@/lib/tenant-cache";
 
 // shouldRetryQuery retries a failed query once, except a gated module's
 // 404 "feature disabled": that is the platform's final answer, and
@@ -18,6 +19,8 @@ export function shouldRetryQuery(failureCount: number, error: unknown) {
 
 function makeQueryClient() {
   return new QueryClient({
+    // #2715: a mutation in flight across a tenant switch does not write.
+    mutationCache: tenantGuardedMutationCache(),
     defaultOptions: {
       queries: {
         staleTime: 60 * 1000,

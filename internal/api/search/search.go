@@ -250,7 +250,7 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	// "Risks results hidden — request access" hints.
 	requestedTypes, err = h.visibleTypes(r, requestedTypes)
 	if err != nil {
-		httperr.WriteInternal(w, r, "search module access", err)
+		moduleaccess.WriteError(w, r, "search module access", err)
 		return
 	}
 	admitted, partial := h.partitionByAdmit(r, requestedTypes)

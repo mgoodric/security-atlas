@@ -29,6 +29,15 @@ SELECT *
 FROM api_keys
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: GetAPIKeyByIDForUpdate :one
+-- GetAPIKeyByID with a row lock, for the audited revoke paths (#2740): two
+-- replicas revoking one key serialize here, so the second sees revoked_at
+-- set and writes no second api_key_revoke row.
+SELECT *
+FROM api_keys
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
+
 -- name: ListAPIKeysByTenant :many
 -- Active keys for a tenant. Excludes revoked rows; includes retired-but-not-yet-
 -- past-grace predecessors so the admin UI can show "rotating out — valid until X."

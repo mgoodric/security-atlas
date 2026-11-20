@@ -2,6 +2,10 @@ package risks
 
 import (
 	"maps"
+	"net/url"
+	"os"
+	"regexp"
+	"slices"
 	"testing"
 )
 
@@ -61,5 +65,60 @@ func TestSanitizeSavedView_DropsInvalidEntries(t *testing.T) {
 	want := map[string]string{"owner": "none", "sort": "title"}
 	if !maps.Equal(got, want) {
 		t.Fatalf("got %#v; want %#v", got, want)
+	}
+}
+
+// A view stored before #2692 refused inverted ranges keeps its other
+// entries; the range pair drops out rather than failing the register now
+// that GET /v1/risks refuses it (#2693).
+func TestSanitizeSavedView_DropsInvertedRange(t *testing.T) {
+	t.Parallel()
+	got := SanitizeSavedView(map[string]string{
+		"review_due_from": "2026-12-31", "review_due_to": "2026-01-01", "owner": "none",
+	})
+	want := map[string]string{"owner": "none"}
+	if !maps.Equal(got, want) {
+		t.Fatalf("got %#v; want %#v", got, want)
+	}
+	kept := map[string]string{"review_due_from": "2026-06-01", "review_due_to": "2026-06-01"}
+	if got := SanitizeSavedView(kept); !maps.Equal(got, kept) {
+		t.Fatalf("one-day range: got %#v; want kept", got)
+	}
+}
+
+func TestParsePageFilter_InvertedReviewDueRange(t *testing.T) {
+	t.Parallel()
+	_, msg := parsePageFilter(url.Values{
+		"review_due_from": {"2026-12-31"}, "review_due_to": {"2026-01-01"},
+	})
+	if msg != "review_due_from must not be after review_due_to" {
+		t.Fatalf("inverted range: message %q", msg)
+	}
+	if _, msg := parsePageFilter(url.Values{
+		"review_due_from": {"2026-06-01"}, "review_due_to": {"2026-06-01"},
+	}); msg != "" {
+		t.Fatalf("one-day range refused: %q", msg)
+	}
+}
+
+// savedViewColumns must be the register chooser's OPTIONAL_COLUMNS, in
+// order, or a view saved with a column the chooser offers is refused, or
+// one it no longer offers is still accepted (#2693).
+func TestSavedViewColumns_MatchChooser(t *testing.T) {
+	t.Parallel()
+	src, err := os.ReadFile("../../../web/app/(authed)/risks/server-query.ts")
+	if err != nil {
+		t.Fatalf("read chooser source: %v", err)
+	}
+	m := regexp.MustCompile(`(?s)export const OPTIONAL_COLUMNS = \[(.*?)\] as const;`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("OPTIONAL_COLUMNS not found in server-query.ts")
+	}
+	var web []string
+	for _, q := range regexp.MustCompile(`"([^"]+)"`).FindAllSubmatch(m[1], -1) {
+		web = append(web, string(q[1]))
+	}
+	if !slices.Equal(web, savedViewColumns) {
+		t.Fatalf("savedViewColumns %v; server-query.ts OPTIONAL_COLUMNS %v", savedViewColumns, web)
 	}
 }
