@@ -250,9 +250,12 @@ type schemaTagB struct {
 }
 
 type schemaSelf struct {
+	// An embedding cycle: listed once, at the shallowest depth.
 	*schemaSelf
 	Loop string `json:"loop"`
 }
+
+var _ = schemaSelf{schemaSelf: nil}
 
 // schemaConflict exercises encoding/json's dominance rules: the
 // shallower field wins, a tagged field beats an untagged one at the same
