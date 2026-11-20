@@ -25,7 +25,7 @@ const ROUTES = [
     route: "/admin",
     id: "admin",
     title: "Admin",
-    body: "Only a super admin can open the Admin pages",
+    body: "An admin of a tenant opens the pages that configure their own tenant",
     term: "sso",
   },
   {

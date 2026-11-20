@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -162,6 +163,11 @@ type Server struct {
 	// scan. Wired by cmd/atlas/main.go when DATABASE_URL is set;
 	// nil for in-memory unit servers.
 	authPool *pgxpool.Pool
+
+	// background tracks work a handler starts and does not wait for, such
+	// as the exception Activate/Revoke re-evaluation (#2688). RunHTTP
+	// waits for it after the listener has shut down.
+	background sync.WaitGroup
 }
 
 // AttachAuthPool wires the BYPASSRLS migrate-role pool used by the
