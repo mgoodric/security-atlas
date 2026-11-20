@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { peopleDirectoryQuery } from "./people-cache";
 import { getQueryClient } from "./queryClient";
-import { forgetTenantCaches } from "./tenant-cache";
+import { currentTenantEpoch, forgetTenantCaches } from "./tenant-cache";
 
 const TENANT_A = "aaaaaaaa-0000-4000-8000-000000000001";
 
@@ -163,5 +163,62 @@ describe("tenantGuardedMutationCache", () => {
     await m.done;
     expect(qc.getQueryData(["k"])).toBe("same tenant");
     m.unsubscribe();
+  });
+});
+
+// #2768 — a handler that writes the cache after a plain awaited request
+// (exceptions submit, questionnaire draftAll) is not a mutation, so the
+// guard above never sees it. It compares currentTenantEpoch() before and
+// after the await; this is that handler's shape, on the app's real
+// QueryClient. tenant-switch-guard.test.ts checks the handlers use it.
+describe("currentTenantEpoch", () => {
+  function deferredHandler(qc: QueryClient, key: string[]) {
+    let resolve: ((v: string) => void) | undefined;
+    const navigated = vi.fn();
+    const done = (async () => {
+      const epoch = currentTenantEpoch(qc);
+      const resp = await new Promise<string>((r) => {
+        resolve = r;
+      });
+      if (currentTenantEpoch(qc) !== epoch) return;
+      qc.setQueryData(key, resp);
+      navigated(resp);
+    })();
+    return { done, navigated, resolve: (v: string) => resolve!(v) };
+  }
+
+  it("drops a write whose request was in flight across the switch", async () => {
+    const qc = getQueryClient();
+    const h = deferredHandler(qc, ["exceptions", "x1"]);
+
+    forgetTenantCaches(qc);
+    h.resolve("tenant A exception");
+    await h.done;
+
+    expect(qc.getQueryData(["exceptions", "x1"])).toBeUndefined();
+    expect(h.navigated).not.toHaveBeenCalled();
+  });
+
+  it("lets a write whose request started after the switch land", async () => {
+    const qc = getQueryClient();
+    forgetTenantCaches(qc);
+    const h = deferredHandler(qc, ["questionnaire-run", "q1", "r1"]);
+
+    h.resolve("tenant B run");
+    await h.done;
+
+    expect(qc.getQueryData(["questionnaire-run", "q1", "r1"])).toBe(
+      "tenant B run",
+    );
+    expect(h.navigated).toHaveBeenCalledWith("tenant B run");
+  });
+
+  it("moves on every reset, on any QueryClient", () => {
+    const qc = new QueryClient();
+    const before = currentTenantEpoch(qc);
+    forgetTenantCaches(qc);
+    expect(currentTenantEpoch(qc)).toBe(before + 1);
+    forgetTenantCaches(qc);
+    expect(currentTenantEpoch(qc)).toBe(before + 2);
   });
 });
