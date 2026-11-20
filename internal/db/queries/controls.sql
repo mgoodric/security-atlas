@@ -777,6 +777,13 @@ SET approved_control_id   = EXCLUDED.approved_control_id,
     shipped_manifest_hash = EXCLUDED.shipped_manifest_hash,
     last_held_at          = now();
 
+-- name: ClearStockControlHoldback :exec
+-- Issue #2599: the boot seed found the tenant's active revision already is
+-- the shipped manifest, so nothing is held back any more. The row named an
+-- earlier shipped manifest; without this it would be listed for good.
+DELETE FROM stock_control_holdbacks
+WHERE tenant_id = sqlc.arg(tenant_id) AND bundle_id = sqlc.arg(bundle_id);
+
 -- name: ListStockControlHoldbacks :many
 -- Issue #2358: the tenant's stock controls whose shipped update the boot
 -- seed holds back. Each row names the active revision, the approved
