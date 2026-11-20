@@ -24,6 +24,7 @@ import {
   describeGateMode,
   parseGateMode,
 } from "../gate-mode";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 // --- Section 1.5: Tenant (admin/super_admin only) -------------------------
 //
@@ -68,15 +69,8 @@ async function patchTenantName(
     body: JSON.stringify({ name }),
   });
   if (!res.ok) {
-    const body = await res.text();
-    let parsed: { error?: string } = {};
-    try {
-      parsed = JSON.parse(body) as { error?: string };
-    } catch {
-      // body might be plaintext; fall through
-    }
     const err = new Error(
-      parsed.error ?? `rename tenant: ${res.status}`,
+      await upstreamErrorMessage(res, `rename tenant: ${res.status}`),
     ) as Error & {
       status?: number;
     };
@@ -101,15 +95,8 @@ async function patchTenantGateMode(
     body: JSON.stringify({ bundle_gate_mode }),
   });
   if (!res.ok) {
-    const body = await res.text();
-    let parsed: { error?: string } = {};
-    try {
-      parsed = JSON.parse(body) as { error?: string };
-    } catch {
-      // body might be plaintext; fall through
-    }
     const err = new Error(
-      parsed.error ?? `set gate policy: ${res.status}`,
+      await upstreamErrorMessage(res, `set gate policy: ${res.status}`),
     ) as Error & { status?: number };
     err.status = res.status;
     throw err;
@@ -418,13 +405,9 @@ async function patchRiskReviewCadence(
     body: JSON.stringify({ risk_review_cadence_days }),
   });
   if (!res.ok) {
-    let parsed: { error?: string } = {};
-    try {
-      parsed = JSON.parse(await res.text()) as { error?: string };
-    } catch {
-      // body might be plaintext; fall through
-    }
-    throw new Error(parsed.error ?? `set risk review cadence: ${res.status}`);
+    throw new Error(
+      await upstreamErrorMessage(res, `set risk review cadence: ${res.status}`),
+    );
   }
   const json = (await res.json()) as {
     tenant?: { risk_review_cadence_days?: unknown };
@@ -567,14 +550,11 @@ async function patchVendorInitialReviewDays(
     body: JSON.stringify({ vendor_initial_review_days }),
   });
   if (!res.ok) {
-    let parsed: { error?: string } = {};
-    try {
-      parsed = JSON.parse(await res.text()) as { error?: string };
-    } catch {
-      // body might be plaintext; fall through
-    }
     throw new Error(
-      parsed.error ?? `set vendor initial review window: ${res.status}`,
+      await upstreamErrorMessage(
+        res,
+        `set vendor initial review window: ${res.status}`,
+      ),
     );
   }
   const json = (await res.json()) as {

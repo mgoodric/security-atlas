@@ -64,8 +64,9 @@ import type { CreateTenantResponse, TenantRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 import { Term } from "@/components/help/term";
 import { Timestamp } from "@/components/ui/timestamp";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
-type TenantListResponse = { items: TenantRow[]; error?: string };
+type TenantListResponse = { items: TenantRow[] };
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
@@ -83,10 +84,10 @@ export default function AdminTenantsPage() {
     queryKey: ["admin", "tenants"],
     queryFn: async () => {
       const res = await fetch("/api/admin/tenants", { cache: "no-store" });
-      const body = (await res.json()) as TenantListResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
+      const body = (await res.json()) as TenantListResponse;
       return body.items ?? [];
     },
   });
@@ -102,13 +103,10 @@ export default function AdminTenantsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
-      const body = (await res.json()) as {
-        error?: string;
-      } & CreateTenantResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as CreateTenantResponse;
     },
     onSuccess: async (out) => {
       setName("");

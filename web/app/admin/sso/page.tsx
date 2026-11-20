@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import type { AdminSSOConfig } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 import { Term } from "@/components/help/term";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 type Preflight =
   | { state: "idle" }
@@ -144,13 +145,7 @@ export default function SSOConfigPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          /* not JSON; fall back to status line */
-        }
+        const msg = await upstreamErrorMessage(res);
         throw new Error(msg);
       }
       return (await res.json()) as { config: AdminSSOConfig };

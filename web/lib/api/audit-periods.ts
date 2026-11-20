@@ -4,6 +4,7 @@
 // `lib/api/audit-server.ts` / `lib/api/audit-log.ts` siblings.
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ----- Slice 102: /audits list view (browser-side BFF call) -----
 //
@@ -54,13 +55,7 @@ export type AuditPeriodsListResponse = {
 export async function fetchAuditPeriods(): Promise<AuditPeriodsListResponse> {
   const res = await fetch(`/api/audits`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as AuditPeriodsListResponse;
@@ -91,14 +86,12 @@ export type ControlStateResponse = {
 };
 
 async function throwAPIError(res: Response): Promise<never> {
-  let msg = `${res.status} ${res.statusText}`;
+  const msg = await upstreamErrorMessage(res.clone());
   let code: string | undefined;
   try {
-    const j = (await res.json()) as { error?: string; code?: string };
-    if (j.error) msg = j.error;
-    code = j.code;
+    code = ((await res.json()) as { code?: string }).code;
   } catch {
-    /* body not JSON — keep the status line */
+    /* body not JSON — no code */
   }
   throw new APIError(res.status, msg, code);
 }

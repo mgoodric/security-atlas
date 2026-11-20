@@ -12,6 +12,7 @@
 // on read for defense-in-depth).
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 export type ServerSavedView = {
   id: string;
@@ -48,13 +49,7 @@ async function bffJSON<T>(
     body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   // DELETE returns 204 with no body.

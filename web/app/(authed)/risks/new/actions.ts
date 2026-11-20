@@ -7,6 +7,7 @@
 
 import { APIError } from "@/lib/api/base";
 import { Risk, RiskCreateInput } from "@/lib/api/risks";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 export async function createRiskFromCookieSession(
   body: RiskCreateInput,
@@ -20,13 +21,7 @@ export async function createRiskFromCookieSession(
     // Bubble the upstream {error} string when present — the slice-019
     // handler returns `{"error": "<msg>"}` on every 4xx. The form
     // surfaces this inline without losing the user's input.
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON; keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   const decoded = (await res.json()) as { risk: Risk };

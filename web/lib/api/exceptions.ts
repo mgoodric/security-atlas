@@ -3,6 +3,7 @@
 // the pre-existing `lib/api/exceptions-export.ts` (data-export client).
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 // ----- Slice 177: /exceptions list view -----
 //
@@ -106,13 +107,7 @@ export async function fetchExceptionsList(
     : `/api/exceptions`;
   const res = await fetch(url);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ExceptionsListResponse;
@@ -162,13 +157,7 @@ export type CreateExceptionInput = {
 export type ExceptionTransition = "approve" | "deny" | "activate" | "revoke";
 
 async function throwAPIError(res: Response): Promise<never> {
-  let msg = `${res.status} ${res.statusText}`;
-  try {
-    const j = (await res.json()) as { error?: string };
-    if (j.error) msg = j.error;
-  } catch {
-    /* body not JSON — keep the status line */
-  }
+  const msg = await upstreamErrorMessage(res);
   throw new APIError(res.status, msg);
 }
 
