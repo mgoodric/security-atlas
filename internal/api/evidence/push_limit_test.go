@@ -2,7 +2,7 @@ package evidence
 
 // #2497 — pins the push limiter's behaviour across the move onto
 // internal/api/ratelimit: per credential, rate r/s with burst 2r, 429 with
-// code rate_limited, and Retry-After rounded to the nearest second.
+// code rate_limited. #2678 — Retry-After rounds up, never below 1.
 
 import (
 	"encoding/json"
@@ -50,13 +50,19 @@ func TestPushHTTP_RateLimitPerCredential(t *testing.T) {
 		t.Fatalf("other credential = %d; want 400 (own bucket)", got)
 	}
 
-	// Retry-After rounds to the nearest second, not up: at +0.75s the
-	// wait is 1.25s, advertised as 1.
+	// Retry-After rounds up: at +0.75s the wait is 1.25s, advertised
+	// as 2, so a client that honours it is admitted.
 	now = now.Add(750 * time.Millisecond)
-	if got := push("a").Header().Get("Retry-After"); got != "1" {
-		t.Fatalf("Retry-After at +0.75s = %q; want 1", got)
+	if got := push("a").Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("Retry-After at +0.75s = %q; want 2", got)
 	}
-	now = now.Add(1250 * time.Millisecond)
+	// A wait under half a second is advertised as 1, never 0 (which
+	// would tell the client to retry at once): at +1.75s it is 0.25s.
+	now = now.Add(time.Second)
+	if got := push("a").Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After at +1.75s = %q; want 1", got)
+	}
+	now = now.Add(250 * time.Millisecond)
 	if got := push("a").Code; got != http.StatusBadRequest {
 		t.Fatalf("push at +2s = %d; want 400 (admitted)", got)
 	}
