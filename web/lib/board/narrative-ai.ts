@@ -16,6 +16,8 @@
 // the rollup is always computable when a brief exists, and the suppression
 // reasons are the four guardrail rejections.
 
+import { upstreamErrorText } from "@/lib/api/_shared";
+
 export interface NarrativeCitation {
   kind: "control" | "evidence";
   id: string;
@@ -162,14 +164,11 @@ export function parseGenerate(
   raw: unknown,
 ): NarrativeViewModel {
   if (!ok) {
-    let msg = `Generation failed (${status}).`;
-    if (
-      raw &&
-      typeof raw === "object" &&
-      typeof (raw as { error?: string }).error === "string"
-    ) {
-      msg = (raw as { error: string }).error;
-    }
+    const msg = upstreamErrorText(
+      status,
+      raw,
+      `Generation failed (${status}).`,
+    );
     return {
       status: "error",
       draft: "",

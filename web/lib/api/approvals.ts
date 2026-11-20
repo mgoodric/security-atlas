@@ -17,6 +17,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 export type ApprovalType =
   | "exception"
@@ -109,13 +110,7 @@ export function groupApprovals(
 export async function fetchApprovals(): Promise<ApprovalsResponse> {
   const res = await fetch("/api/approvals");
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      /* body not JSON — keep the status line */
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ApprovalsResponse;

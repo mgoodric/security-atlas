@@ -23,6 +23,7 @@ import { MappingSuggestPanel } from "./mapping-suggest-panel";
 import { SuggestionsPanel } from "./suggestions-panel";
 import type { Citation, Question } from "./types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 const AUTOSAVE_DEBOUNCE_MS = 500;
 
@@ -48,13 +49,7 @@ async function patchAnswer(
     },
   );
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new Error(msg);
   }
 }

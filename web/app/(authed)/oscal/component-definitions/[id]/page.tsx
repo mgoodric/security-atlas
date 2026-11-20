@@ -37,7 +37,7 @@ import { Button } from "@/components/ui/button";
 import { Person } from "@/components/ui/person";
 import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
-import { bffControlFetch } from "@/lib/api/_shared";
+import { bffControlFetch, upstreamErrorMessage } from "@/lib/api/_shared";
 import type { Anchor } from "@/lib/api/anchors";
 import type {
   ClaimStatus,
@@ -126,13 +126,7 @@ export default function ComponentDefinitionDetailPage({
         },
       );
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          // keep status line
-        }
+        const msg = await upstreamErrorMessage(res);
         throw new Error(msg);
       }
       return (await res.json()) as DispositionResult;
@@ -164,13 +158,7 @@ export default function ComponentDefinitionDetailPage({
         },
       );
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          // keep status line
-        }
+        const msg = await upstreamErrorMessage(res);
         throw new Error(msg);
       }
       return (await res.json()) as MapScfAnchorResult;

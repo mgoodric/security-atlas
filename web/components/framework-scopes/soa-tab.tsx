@@ -60,6 +60,7 @@ import {
 } from "@/lib/api/applicability";
 import { APIError } from "@/lib/api/base";
 import { FrameworkScope } from "@/lib/api/framework-scopes";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 type Framework = { id: string; slug: string; latest_version_id?: string };
 
@@ -74,13 +75,7 @@ const FILTER_LABELS: Record<SoAFilter, string> = {
 // readError surfaces the platform's {"error": "..."} message, so a
 // "justification is required" 400 reads as itself rather than a status.
 async function readError(res: Response): Promise<APIError> {
-  let msg = `${res.status} ${res.statusText}`;
-  try {
-    const body = (await res.json()) as { error?: string };
-    if (body.error) msg = body.error;
-  } catch {
-    // Non-JSON error body: keep the status line.
-  }
+  const msg = await upstreamErrorMessage(res);
   return new APIError(res.status, msg);
 }
 

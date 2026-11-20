@@ -46,13 +46,25 @@ export async function upstreamErrorMessage(
   generic = `${res.status} ${res.statusText}`,
 ): Promise<string> {
   if (res.status >= 500) return generic;
+  let body: unknown = null;
   try {
-    const j = (await res.json()) as { error?: unknown } | null;
-    if (typeof j?.error === "string" && j.error) return j.error;
+    body = await res.json();
   } catch {
     // body not JSON — keep the generic text
   }
-  return generic;
+  return upstreamErrorText(res.status, body, generic);
+}
+
+// upstreamErrorText is the same rule for a body the caller has already
+// parsed (the AI-assist view-model parsers take `(ok, status, raw)`).
+export function upstreamErrorText(
+  status: number,
+  body: unknown,
+  generic: string,
+): string {
+  if (status >= 500) return generic;
+  const e = (body as { error?: unknown } | null)?.error;
+  return typeof e === "string" && e ? e : generic;
 }
 
 // bffControlFetch is the browser-side fetch against the BFF routes under

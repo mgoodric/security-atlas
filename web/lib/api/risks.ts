@@ -2,7 +2,7 @@
 // from the former `web/lib/api.ts` god-file.
 
 import { apiBaseURL, APIError } from "./base";
-import { apiFetch } from "./_shared";
+import { apiFetch, upstreamErrorMessage } from "./_shared";
 import { enumLabel } from "../labels/enum-labels";
 
 // ----- Slice 100: /risks list view -----
@@ -152,13 +152,7 @@ async function hierarchyRequest<T>(
 ): Promise<T | null> {
   const res = await fetch(url, init);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   if (res.status === 204) return null;
@@ -353,13 +347,7 @@ export async function fetchRegisterPage(
 async function fetchRisks(url: string): Promise<RisksListResponse> {
   const res = await fetch(url);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as RisksListResponse;
@@ -396,13 +384,7 @@ export async function fetchRiskCategories(
     { cache: "no-store" },
   );
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   const body = (await res.json()) as { categories?: RiskCategory[] };
@@ -455,13 +437,7 @@ export async function getRisk(
 export async function fetchRiskDetail(id: string): Promise<RiskDetailResponse> {
   const res = await fetch(`/api/risks/${encodeURIComponent(id)}`);
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as RiskDetailResponse;
@@ -699,13 +675,7 @@ export async function createRisk(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   const decoded = (await res.json()) as RiskCreatedResponse;
