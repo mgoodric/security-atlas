@@ -20,6 +20,7 @@ package authz_test
 // helper call disappears.
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -272,8 +273,58 @@ var gateSites2447 = func() map[string]gateSite2447 {
 	}
 }()
 
+// authzImport2447 is the import path the helpers live in.
+const authzImport2447 = "github.com/mgoodric/security-atlas/internal/authz"
+
+// isHelper2447 reports whether name is one of the inventoried helpers.
+func isHelper2447(name string) bool {
+	switch name {
+	case admin2447, approver2447, riskReader2447, auditReader2447, anyRole2447:
+		return true
+	}
+	return false
+}
+
+// gateEscapes2447 (#2456) returns each way file f could reach a helper
+// without the scan seeing an `authz.<helper>(...)` call: an aliased or dot
+// import of internal/authz, or a helper used other than as the callee of a
+// call (`f := authz.IsTenantApprover`). A wrapper in another package is
+// still out of sight (#2447 D3).
+func gateEscapes2447(fset *token.FileSet, f *ast.File) []string {
+	var out []string
+	for _, imp := range f.Imports {
+		if strings.Trim(imp.Path.Value, "`\"") != authzImport2447 || imp.Name == nil || imp.Name.Name == "authz" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s: imports internal/authz as %q; import it unaliased so the gate scan sees its calls",
+			fset.Position(imp.Pos()), imp.Name.Name))
+	}
+	callees := map[*ast.SelectorExpr]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
+				callees[sel] = true
+			}
+		}
+		return true
+	})
+	ast.Inspect(f, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok || callees[sel] || !isHelper2447(sel.Sel.Name) {
+			return true
+		}
+		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "authz" {
+			out = append(out, fmt.Sprintf("%s: uses authz.%s as a value; call it directly so the gate scan sees it",
+				fset.Position(sel.Pos()), sel.Sel.Name))
+		}
+		return true
+	})
+	return out
+}
+
 // scanGateSites2447 returns the helper calls per function under
-// internal/api, test files excluded.
+// internal/api, test files excluded. It fails the test on any file
+// gateEscapes2447 flags.
 func scanGateSites2447(t *testing.T) map[string][]string {
 	t.Helper()
 	root := filepath.Join("..", "api")
@@ -290,6 +341,9 @@ func scanGateSites2447(t *testing.T) map[string][]string {
 		if err != nil {
 			return err
 		}
+		for _, e := range gateEscapes2447(fset, f) {
+			t.Error(e)
+		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
@@ -305,12 +359,12 @@ func scanGateSites2447(t *testing.T) map[string][]string {
 				if !ok {
 					return true
 				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
+				sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 				if !ok {
 					return true
 				}
 				pkg, ok := sel.X.(*ast.Ident)
-				if ok && pkg.Name == "authz" && (sel.Sel.Name == admin2447 || sel.Sel.Name == approver2447 || sel.Sel.Name == riskReader2447 || sel.Sel.Name == auditReader2447 || sel.Sel.Name == anyRole2447) {
+				if ok && pkg.Name == "authz" && isHelper2447(sel.Sel.Name) {
 					calls = append(calls, sel.Sel.Name)
 				}
 				return true
@@ -398,5 +452,41 @@ func TestGateSites2447_RoutesAgree(t *testing.T) {
 		if !covered[route] {
 			t.Errorf("routes2428 row %q is guarded by no gateSites2447 site", route)
 		}
+	}
+}
+
+// TestGateSites2447_EscapesCaught (#2456): gateEscapes2447 flags each way a
+// helper could be reached out of the scan's sight, and passes a plain call.
+func TestGateSites2447_EscapesCaught(t *testing.T) {
+	t.Parallel()
+	src := func(name, body string) string {
+		return "package p\n\nimport " + name + " \"" + authzImport2447 + "\"\n\n" + body + "\n"
+	}
+	cases := []struct {
+		name, src string
+		escapes   int
+	}{
+		{"plain call", src("", "func f() { _ = authz.IsTenantAdmin(nil) }"), 0},
+		{"parenthesised call", src("", "func f() { _ = (authz.IsTenantAdmin)(nil) }"), 0},
+		{"explicit authz name", src("authz", "func f() { _ = authz.IsTenantAdmin(nil) }"), 0},
+		{"alias", src("az", "func f() { _ = az.IsTenantAdmin(nil) }"), 1},
+		{"dot import", src(".", "func f() { _ = IsTenantAdmin(nil) }"), 1},
+		{"function value", src("", "func f() { g := authz.IsTenantApprover; _ = g(nil) }"), 1},
+		{"function argument", src("", "func f() { run(authz.HasAnyTenantRole) }"), 1},
+		{"package-level value", src("", "var g = authz.IsTenantRiskReader"), 1},
+		{"non-helper value", src("", "var g = authz.Other"), 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "x.go", tc.src, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if got := gateEscapes2447(fset, f); len(got) != tc.escapes {
+				t.Errorf("escapes = %v, want %d", got, tc.escapes)
+			}
+		})
 	}
 }

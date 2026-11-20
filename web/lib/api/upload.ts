@@ -12,13 +12,17 @@
 //      as soon as the count passes the cap, so a header that understates
 //      the body never buys more than cap+one chunk of memory.
 //
-// Routes parse the multipart from the bounded bytes (`parseBoundedForm`)
-// or forward them as-is; none calls `req.formData()` on the raw request.
+// The small-cap routes buffer the bounded bytes (`readBoundedUpload`) and
+// parse the multipart from them (`parseBoundedForm`). The large-cap routes
+// (walkthrough attachments, artifacts) stream the body to the platform
+// through the same count (`proxyBoundedUpload`, #2583) instead of holding
+// it. None calls `req.formData()` on the raw request.
 // The Go handlers keep their own caps; this protects the BFF process.
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export type UploadLimits = {
@@ -40,23 +44,18 @@ type Accepted = { ok: true; upload: BoundedUpload };
 type Refused = { ok: false; response: NextResponse };
 type Result = Accepted | Refused;
 
+type UploadHeaders = { bearer: string; contentType: string };
+type Checked = { ok: true; headers: UploadHeaders };
+
 const DECIMAL = /^\d+$/;
 
-// readBoundedUpload checks the bearer, the declared length, the content
-// type and then the streamed length, in that order, so nothing is read
-// from an unauthenticated or oversize request.
-export async function readBoundedUpload(
+// checkHeaders checks the bearer, the declared length and the content
+// type, in that order, so nothing is read from an unauthenticated or
+// oversize request.
+async function checkHeaders(
   req: Request,
   limits: UploadLimits,
-): Promise<Result> {
-  const tooLarge = () =>
-    fail(413, limits.tooLarge ?? `upload exceeds ${limits.maxBytes} bytes`);
-  const notMultipart = () =>
-    fail(
-      400,
-      limits.notMultipart ?? "content-type must be multipart/form-data",
-    );
-
+): Promise<Checked | Refused> {
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
@@ -67,12 +66,24 @@ export async function readBoundedUpload(
     return fail(411, "upload must declare its Content-Length");
   }
   if (Number(rawLength) > limits.maxBytes) {
-    return tooLarge();
+    return tooLarge(limits);
   }
   const contentType = req.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
-    return notMultipart();
+    return notMultipart(limits);
   }
+  return { ok: true, headers: { bearer, contentType } };
+}
+
+// readBoundedUpload checks the headers, then buffers the body, counting
+// it while it streams. For the small-cap routes that parse the form.
+export async function readBoundedUpload(
+  req: Request,
+  limits: UploadLimits,
+): Promise<Result> {
+  const checked = await checkHeaders(req, limits);
+  if (!checked.ok) return checked;
+  const { bearer, contentType } = checked.headers;
 
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -83,13 +94,13 @@ export async function readBoundedUpload(
       try {
         step = await reader.read();
       } catch {
-        return notMultipart();
+        return interrupted();
       }
       if (step.done) break;
       total += step.value.byteLength;
       if (total > limits.maxBytes) {
         await reader.cancel().catch(() => undefined);
-        return tooLarge();
+        return tooLarge(limits);
       }
       chunks.push(step.value);
     }
@@ -101,6 +112,111 @@ export async function readBoundedUpload(
     at += c.byteLength;
   }
   return { ok: true, upload: { bearer, contentType, bytes } };
+}
+
+// proxyBoundedUpload checks the headers, then streams the body to the
+// platform without buffering it (#2583). The body passes through a
+// counting stream that pulls a chunk from the client only when the
+// upstream fetch asks for one, so the BFF holds about one chunk per upload
+// whatever the cap. Past the cap the stream errors and the answer is 413;
+// a client stream that breaks mid-read is 400 "upload interrupted".
+// Otherwise the platform's status and body pass through.
+export async function proxyBoundedUpload(
+  req: Request,
+  upstreamPath: string,
+  limits: UploadLimits,
+): Promise<NextResponse> {
+  const checked = await checkHeaders(req, limits);
+  if (!checked.ok) return checked.response;
+  const { bearer, contentType } = checked.headers;
+  const counted = countedBody(req.body, limits.maxBytes);
+  let upstream: Response;
+  let text: string;
+  try {
+    upstream = await fetch(`${apiBaseURL()}${upstreamPath}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        "Content-Type": contentType,
+      },
+      body: counted.body,
+      duplex: "half",
+      cache: "no-store",
+    } as RequestInit & { duplex: "half" });
+    text = await upstream.text();
+  } catch {
+    return (
+      counted.refusal(limits) ?? fail(502, "upstream unavailable").response
+    );
+  }
+  // The platform can answer before it has read the whole body; a body
+  // that ran past the cap is refused all the same.
+  const refusal = counted.refusal(limits);
+  if (refusal) return refusal;
+  return new NextResponse(text, {
+    status: upstream.status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+type CountedBody = {
+  body: ReadableStream<Uint8Array>;
+  // The 413 or 400 for a body cut off by the cap or by a broken client
+  // stream; null when the body streamed normally.
+  refusal: (limits: UploadLimits) => NextResponse | null;
+};
+
+function countedBody(
+  source: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): CountedBody {
+  let state: "ok" | "tooLarge" | "interrupted" = "ok";
+  let total = 0;
+  const reader = source?.getReader();
+  // highWaterMark 0: nothing queues here. Each pull is one client chunk,
+  // made when the upstream fetch reads.
+  const body = new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        if (!reader) {
+          controller.close();
+          return;
+        }
+        let step: ReadableStreamReadResult<Uint8Array>;
+        try {
+          step = await reader.read();
+        } catch (err) {
+          state = "interrupted";
+          controller.error(err);
+          return;
+        }
+        if (step.done) {
+          controller.close();
+          return;
+        }
+        total += step.value.byteLength;
+        if (total > maxBytes) {
+          state = "tooLarge";
+          await reader.cancel().catch(() => undefined);
+          controller.error(new Error("upload exceeds its cap"));
+          return;
+        }
+        controller.enqueue(step.value);
+      },
+      cancel(reason) {
+        return reader?.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return {
+    body,
+    refusal: (limits) => {
+      if (state === "tooLarge") return tooLarge(limits).response;
+      if (state === "interrupted") return interrupted().response;
+      return null;
+    },
+  };
 }
 
 // parseBoundedForm parses the multipart from the already-bounded bytes.
@@ -117,6 +233,24 @@ export async function parseBoundedForm(
   }
 }
 
-function fail(status: number, error: string): Result {
+function fail(status: number, error: string): Refused {
   return { ok: false, response: NextResponse.json({ error }, { status }) };
+}
+
+function tooLarge(limits: UploadLimits): Refused {
+  return fail(
+    413,
+    limits.tooLarge ?? `upload exceeds ${limits.maxBytes} bytes`,
+  );
+}
+
+function notMultipart(limits: UploadLimits): Refused {
+  return fail(
+    400,
+    limits.notMultipart ?? "content-type must be multipart/form-data",
+  );
+}
+
+function interrupted(): Refused {
+  return fail(400, "upload interrupted");
 }

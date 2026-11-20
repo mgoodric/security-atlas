@@ -22,9 +22,14 @@ export async function multipartRequest(
   });
 }
 
+// tailBytes appends one more chunk of that size, for a body that is not a
+// whole number of chunks. failAfter breaks the stream once that many
+// chunks have been pulled, as a client that drops mid-upload does.
 export function streamingRequest(opts: {
   chunks: number;
   chunkBytes: number;
+  tailBytes?: number;
+  failAfter?: number;
   headers?: Record<string, string>;
   url?: string;
 }): { req: Request; pulled: () => number } {
@@ -34,12 +39,21 @@ export function streamingRequest(opts: {
   const body = new ReadableStream<Uint8Array>(
     {
       pull(controller) {
-        if (pulled >= opts.chunks) {
-          controller.close();
+        if (opts.failAfter !== undefined && pulled >= opts.failAfter) {
+          controller.error(new Error("client went away"));
           return;
         }
-        pulled += 1;
-        controller.enqueue(new Uint8Array(opts.chunkBytes));
+        if (pulled < opts.chunks) {
+          pulled += 1;
+          controller.enqueue(new Uint8Array(opts.chunkBytes));
+          return;
+        }
+        if (opts.tailBytes && pulled === opts.chunks) {
+          pulled += 1;
+          controller.enqueue(new Uint8Array(opts.tailBytes));
+          return;
+        }
+        controller.close();
       },
     },
     { highWaterMark: 0 },

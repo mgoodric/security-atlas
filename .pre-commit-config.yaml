@@ -38,7 +38,9 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # Frontend / config: prettier
+  # Frontend / config: prettier. This rev is the repo's only prettier pin;
+  # `just fmt-frontend` runs this hook rather than a prettier of its own
+  # (#2583), so `just fmt` cannot format web/ differently from this hook.
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v3.1.0
     hooks:

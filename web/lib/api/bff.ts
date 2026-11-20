@@ -92,8 +92,9 @@ export function noStore(res: Response): Response {
   });
 }
 
-// forwardMultipart proxies a multipart/form-data request (walkthrough
-// attachment upload) to the platform, streaming the FormData through.
+// forwardMultipart proxies a parsed multipart/form-data request (control
+// sheet import, bundle upload) to the platform, streaming the FormData
+// through.
 export async function forwardMultipart(
   upstreamPath: string,
   form: FormData,
