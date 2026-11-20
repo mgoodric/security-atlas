@@ -188,7 +188,13 @@ export type FixtureName =
   // #2531 — the shared e2e user and its live roles, so the owner pickers
   // in risks-create.spec.ts and create-toasts.spec.ts list a user when the
   // spec runs alone or first.
-  | "owner-picker";
+  | "owner-picker"
+  // Slice 218 — a no-row stub for board-pack-detail.spec.ts, whose
+  // assertions are still commented out.
+  | "board-pack-detail"
+  // Slice 160 — no rows, for control-detail-empty.spec.ts's bogus-id
+  // empty state (its assertions are still commented out).
+  | "control-detail-empty";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

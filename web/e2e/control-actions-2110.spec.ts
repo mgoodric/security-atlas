@@ -91,7 +91,10 @@ function tarGz(name: string, content: string): Buffer {
 // untarFirst reads the first file of a gzip-tar: its name and content.
 function untarFirst(archive: Buffer): { name: string; content: string } {
   const tar = gunzipSync(archive);
-  const name = tar.subarray(0, 100).toString("utf8").replace(/\0.*$/s, "");
+  const name = tar
+    .subarray(0, 100)
+    .toString("utf8")
+    .replace(/\0[\s\S]*$/, "");
   const size = parseInt(tar.subarray(124, 136).toString("ascii").trim(), 8);
   return { name, content: tar.subarray(512, 512 + size).toString("utf8") };
 }
