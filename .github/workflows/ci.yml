@@ -655,6 +655,28 @@ jobs:
           go-version: "1.27"
           check-latest: true
           cache: true
+      - name: Warm headless Chrome in the background (#2743)
+        # WORKAROUND (ADR 0032) for a GitHub-hosted runner-image behaviour
+        # this repo cannot change. Remove it (with the wait step below) when
+        # the runner image ships a warm Chrome, or PDF rendering moves to a
+        # CHROME_DEBUG_URL headless-shell service, whichever comes first.
+        # Removal ticket: #2751.
+        #
+        # The first Chrome launch on a fresh runner is slow, and only the
+        # first: on leg B3 the first PDF render (TestExportPDF_SmokeTest)
+        # took 7-90s across 25 runs and hit the 90s render deadline twice,
+        # while on leg B2 five back-to-back renders after the first take
+        # ~0.7s each. Each render is its own Chrome process with a fresh
+        # profile, so the cost is per runner, not per process. This step
+        # pays it once, off the test's clock and alongside the service
+        # bring-up below, through the production renderer so it launches
+        # the same binary chromedp picks. Best-effort: the PDF tests under
+        # ATLAS_REQUIRE_PDF stay the gate.
+        run: |
+          nohup bash -c 'start=$(date +%s)
+            go test -count=1 -v -run "^TestPrintHTML_AllowsDataResources$" ./internal/pdfrender
+            echo "warm-up exit=$? after $(( $(date +%s) - start ))s"' \
+            > "$RUNNER_TEMP/chrome-warm.log" 2>&1 &
       - name: Install cosign
         # Slice 413: the internal/oscal/cosign integration tests exercise
         # the real `cosign sign-blob`/`verify-blob` exec boundary (ADR-0010
@@ -750,6 +772,15 @@ jobs:
         # so pg_catalog reads are not RLS-filtered. See scripts/audit-rls.sh
         # and docs/architecture/rls.md.
         run: ./scripts/audit-rls.sh
+      - name: Wait for the Chrome warm-up (#2743)
+        # Bounded at 180s and never fails the job; prints the warm-up's
+        # timing so a slow cold start stays visible in the log.
+        run: |
+          for _ in $(seq 1 90); do
+            grep -q '^warm-up exit=' "$RUNNER_TEMP/chrome-warm.log" && break
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/chrome-warm.log"
       - name: Run integration shard (-p 1 within the leg)
         # Slice 417: run ONLY this leg's packages, read from the source of
         # truth scripts/integration-shards.txt via run-integration-shard.sh.
