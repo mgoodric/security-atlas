@@ -107,10 +107,42 @@ export async function signIn(formData: FormData): Promise<void> {
   redirect(target);
 }
 
+// signOut ends the session server-side as well as in the browser (#2618).
+// Deleting the cookie alone left a copied session JWT valid until it
+// expired; revoking it first puts its jti on the slice-190 denylist, which
+// the request middleware checks on every call. The revoke is the RFC 7009
+// self-revocation path: the token revokes itself, presented as its own
+// bearer. It is best effort: a failure is logged and the cookie is still
+// deleted and the redirect still happens, so signing out never strands
+// the user. See docs/audit-log/2618-signout-revocation-decisions.md.
 export async function signOut(): Promise<void> {
   const jar = await cookies();
+  const token = jar.get(ATLAS_JWT_COOKIE)?.value;
+  if (token) await revokeSession(token, await headers());
   jar.delete(ATLAS_JWT_COOKIE);
   redirect("/login");
+}
+
+async function revokeSession(token: string, reqHeaders: Headers) {
+  try {
+    const res = await fetch(`${apiBaseURL()}/oauth/revoke`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        // The revoke endpoint throttles per client IP (#2041); name the
+        // user's, not the web container's.
+        ...forwardedForHeaders(reqHeaders),
+      },
+      body: new URLSearchParams({ token }).toString(),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      console.error(`signOut: session revoke answered ${res.status}`);
+    }
+  } catch (err) {
+    console.error("signOut: session revoke failed", err);
+  }
 }
 
 // signInLocal — slice 209. POSTs (tenant_id, email, password) to

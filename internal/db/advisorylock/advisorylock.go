@@ -67,6 +67,12 @@ const (
 	// audit row's before value is the state its write replaced (#2609,
 	// LockAdminSSO). Key: hashtext(tenant uuid text).
 	TenantSSOConfig Namespace = 11
+	// ExceptionIdempotencyKey serialises POST /v1/exceptions requests that
+	// carry one Idempotency-Key, so a concurrent retry replays the first
+	// request instead of filing a second exception (#2618,
+	// LockExceptionIdempotencyKey). Key: hashtext(tenant || '|' ||
+	// requested_by || '|' || idempotency_key).
+	ExceptionIdempotencyKey Namespace = 12
 )
 
 // Keys within IntegrationTestSeed. Distinct values; never reuse one.
@@ -99,6 +105,7 @@ func All() []Entry {
 		{TenantLLMRouting, "tenant_llm_routing"},
 		{FrameworkScopeFreeze, "framework_scope_freeze"},
 		{TenantSSOConfig, "tenant_sso_config"},
+		{ExceptionIdempotencyKey, "exception_idempotency_key"},
 	}
 }
 

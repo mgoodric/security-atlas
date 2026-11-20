@@ -24,7 +24,10 @@
 package exceptions
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
@@ -158,12 +161,75 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 		RequestedBy: credstore.PrincipalOf(cred),
 		ExpiresAt:   req.ExpiresAt.UTC(),
 	}
-	created, err := h.store.Create(ctx, in)
+	// #2618: an Idempotency-Key makes a retry after a client timeout
+	// replay the first request's exception instead of filing a second.
+	if key := r.Header.Get(IdempotencyKeyHeader); key != "" {
+		if !validIdempotencyKey(key) {
+			httpresp.WriteError(w, http.StatusBadRequest,
+				"Idempotency-Key must be 1 to 255 printable ASCII characters")
+			return
+		}
+		in.IdempotencyKey = key
+		in.RequestHash = requestHash(controlID, req)
+	}
+	created, replayed, err := h.store.CreateIdempotent(ctx, in)
 	if err != nil {
 		h.writeCreateErr(w, r, err)
 		return
 	}
+	if replayed {
+		w.Header().Set(IdempotentReplayedHeader, "true")
+	}
 	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"exception": exceptionWireFrom(created)})
+}
+
+// IdempotencyKeyHeader is the request header that makes POST
+// /v1/exceptions idempotent (#2618). IdempotentReplayedHeader marks a
+// response that replays an earlier request's exception.
+const (
+	IdempotencyKeyHeader     = "Idempotency-Key"
+	IdempotentReplayedHeader = "Idempotent-Replayed"
+)
+
+// validIdempotencyKey admits 1 to 255 printable ASCII characters, the
+// shape a client-generated UUID or token takes.
+func validIdempotencyKey(key string) bool {
+	if len(key) == 0 || len(key) > 255 {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] < 0x21 || key[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// requestHash identifies a create request's content, so one key sent with
+// a different body is refused rather than replayed. The predicate is
+// compacted and the expiry normalised to UTC, so formatting differences
+// between two sends of one request do not count as a change.
+func requestHash(controlID uuid.UUID, req createReq) string {
+	var predicate bytes.Buffer
+	if err := json.Compact(&predicate, req.ScopeCellPredicate); err != nil {
+		predicate.Reset()
+		predicate.Write(req.ScopeCellPredicate)
+	}
+	canonical, _ := json.Marshal(struct {
+		ControlID            string   `json:"control_id"`
+		ScopeCellPredicate   string   `json:"scope_cell_predicate"`
+		Justification        string   `json:"justification"`
+		CompensatingControls []string `json:"compensating_controls"`
+		ExpiresAt            string   `json:"expires_at"`
+	}{
+		ControlID:            controlID.String(),
+		ScopeCellPredicate:   predicate.String(),
+		Justification:        req.Justification,
+		CompensatingControls: req.CompensatingControls,
+		ExpiresAt:            req.ExpiresAt.UTC().Format(time.RFC3339Nano),
+	})
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:])
 }
 
 // ListExceptions handles GET /v1/exceptions, filterable by ?status= and
@@ -497,6 +563,9 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 		httpresp.WriteError(w, http.StatusBadRequest, "expires_at exceeds 365-day cap")
 	case errors.Is(err, exception.ErrExpiresAtInPast):
 		httpresp.WriteError(w, http.StatusBadRequest, "expires_at must be in the future")
+	case errors.Is(err, exception.ErrIdempotencyKeyReused):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity,
+			"Idempotency-Key was already used with a different request; send a new key")
 	default:
 		if strings.Contains(err.Error(), "control_id does not exist") {
 			httpresp.WriteError(w, http.StatusBadRequest, "control_id does not exist in tenant")

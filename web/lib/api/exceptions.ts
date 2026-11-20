@@ -193,9 +193,14 @@ export async function fetchExceptionAuditLog(
 /**
  * Files an exception. Refuses, before any request, a predicate that is
  * null or not an object, so an incomplete scope choice is never sent.
+ *
+ * #2618: `idempotencyKey` goes out as the Idempotency-Key header. Send the
+ * same key when retrying the same request, and the platform returns the
+ * exception the first send filed instead of filing a duplicate.
  */
 export async function createException(
   input: CreateExceptionInput,
+  idempotencyKey?: string,
 ): Promise<ExceptionResponse> {
   const p: unknown = input.scope_cell_predicate;
   if (p === null || typeof p !== "object" || Array.isArray(p)) {
@@ -203,9 +208,13 @@ export async function createException(
       "Choose the scope this exception covers before requesting it.",
     );
   }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   const res = await fetch("/api/exceptions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(input),
   });
   if (!res.ok) return throwAPIError(res);

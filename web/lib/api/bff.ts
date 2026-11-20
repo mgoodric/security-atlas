@@ -62,9 +62,16 @@ export async function forwardJSON(
     upstream.status === 204 ||
     upstream.status === 205 ||
     upstream.status === 304;
+  const outHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  // #2618 — a 429 (or 503) names when to retry. The bulk evaluate waits
+  // that long before retrying, so the hint must survive the proxy.
+  const retryAfter = upstream.headers.get("Retry-After");
+  if (retryAfter) outHeaders["Retry-After"] = retryAfter;
   return new NextResponse(hasNullBody ? null : text, {
     status: upstream.status,
-    headers: { "Content-Type": "application/json" },
+    headers: outHeaders,
   });
 }
 

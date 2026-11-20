@@ -81,6 +81,22 @@ describe("forwardJSON", () => {
     expect(body.ok).toBe(true);
   });
 
+  test("passes Retry-After through on a 429 (#2618)", async () => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response('{"error":"too many evaluations; retry later"}', {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "9" },
+      }),
+    );
+
+    const res = await forwardJSON("/v1/controls/x/evaluate", {
+      method: "POST",
+    });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("9");
+  });
+
   test("passes upstream non-2xx status through verbatim", async () => {
     cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

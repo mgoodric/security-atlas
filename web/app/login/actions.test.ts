@@ -6,9 +6,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const setCookie = vi.fn();
+const deleteCookie = vi.fn();
+const cookieValues = new Map<string, string>();
 
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ set: setCookie, delete: vi.fn() }),
+  cookies: async () => ({
+    set: setCookie,
+    delete: deleteCookie,
+    get: (name: string) =>
+      cookieValues.has(name) ? { value: cookieValues.get(name) } : undefined,
+  }),
   headers: async () => new Headers(),
 }));
 
@@ -24,7 +31,9 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { signIn } from "./actions";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+
+import { signIn, signOut } from "./actions";
 
 type FetchCall = { url: string; init?: RequestInit };
 
@@ -69,6 +78,8 @@ const json = (body: unknown) =>
 
 beforeEach(() => {
   setCookie.mockReset();
+  deleteCookie.mockReset();
+  cookieValues.clear();
 });
 
 afterEach(() => {
@@ -126,5 +137,57 @@ describe("signIn gate (#2062)", () => {
     expect(
       (await redirectOf(signIn(form("tok")))).startsWith("/login?error="),
     ).toBe(true);
+  });
+});
+
+describe("signOut revokes the session (#2618)", () => {
+  function stubRevoke(result: Response | Error): FetchCall[] {
+    const calls: FetchCall[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init });
+        if (result instanceof Error) throw result;
+        return result.clone();
+      }),
+    );
+    return calls;
+  }
+
+  test("revokes the cookie's token as its own bearer, then signs out", async () => {
+    cookieValues.set(ATLAS_JWT_COOKIE, "session-jwt");
+    const calls = stubRevoke(new Response(null, { status: 200 }));
+    expect(await redirectOf(signOut())).toBe("/login");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url.endsWith("/oauth/revoke")).toBe(true);
+    expect(calls[0].init?.method).toBe("POST");
+    const h = calls[0].init?.headers as Record<string, string>;
+    expect(h.Authorization).toBe("Bearer session-jwt");
+    expect(h["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(new URLSearchParams(String(calls[0].init?.body)).get("token")).toBe(
+      "session-jwt",
+    );
+    expect(deleteCookie).toHaveBeenCalledWith(ATLAS_JWT_COOKIE);
+  });
+
+  test("still signs out when the revoke fails", async () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    cookieValues.set(ATLAS_JWT_COOKIE, "session-jwt");
+    stubRevoke(new Error("connection refused"));
+    expect(await redirectOf(signOut())).toBe("/login");
+    expect(deleteCookie).toHaveBeenCalledWith(ATLAS_JWT_COOKIE);
+
+    stubRevoke(new Response("{}", { status: 500 }));
+    expect(await redirectOf(signOut())).toBe("/login");
+    expect(deleteCookie).toHaveBeenCalledTimes(2);
+    expect(quiet).toHaveBeenCalled();
+    quiet.mockRestore();
+  });
+
+  test("calls nothing when there is no session cookie", async () => {
+    const calls = stubRevoke(new Response(null, { status: 200 }));
+    expect(await redirectOf(signOut())).toBe("/login");
+    expect(calls).toHaveLength(0);
+    expect(deleteCookie).toHaveBeenCalledWith(ATLAS_JWT_COOKIE);
   });
 });

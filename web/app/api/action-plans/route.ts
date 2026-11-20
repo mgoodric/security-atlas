@@ -15,7 +15,7 @@ import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // Query keys the BFF will forward to upstream GET /v1/action-plans.
-const FORWARD_PARAMS = ["status", "limit", "cursor"];
+const FORWARD_PARAMS = ["status", "q", "limit", "cursor"];
 
 export async function GET(req: Request): Promise<Response> {
   const jar = await cookies();
