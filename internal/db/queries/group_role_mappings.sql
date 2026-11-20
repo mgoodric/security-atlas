@@ -23,6 +23,15 @@ ON CONFLICT (tenant_id, COALESCE(idp_config_id, '00000000-0000-0000-0000-0000000
 DO UPDATE SET group_ref = EXCLUDED.group_ref
 RETURNING id, tenant_id, idp_config_id, group_ref, role, created_at, created_by;
 
+-- name: GroupRoleMappingIdpConfigExists :one
+-- Reports whether idp_config_id names one of the tenant's own oidc_idp_configs
+-- (#2643). Runs under RLS, so another tenant's config reads as absent: a
+-- foreign id and a nonexistent one are indistinguishable to the caller.
+SELECT EXISTS (
+    SELECT 1 FROM oidc_idp_configs
+    WHERE tenant_id = $1 AND id = $2
+) AS config_exists;
+
 -- name: ListGroupRoleMappings :many
 -- All mappings for a tenant, ordered for stable display. Admin CRUD list (AC-8).
 SELECT id, tenant_id, idp_config_id, group_ref, role, created_at, created_by

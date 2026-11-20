@@ -97,6 +97,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m, err := h.store.Create(r.Context(), in, cred.Actor)
+	if errors.Is(err, grouprole.ErrUnknownIDPConfig) {
+		// One message for a nonexistent id and another tenant's id (#2643).
+		httpresp.WriteError(w, http.StatusBadRequest, "idp_config_id is not an IdP config in this tenant")
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "create group-role mapping", err)
 		return
