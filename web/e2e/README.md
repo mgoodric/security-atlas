@@ -144,6 +144,16 @@ A spec's preconditions (the test user, tenant rows, seeded controls/evidence/pol
 
 4. Add the spec to CI by doing nothing — `npx playwright test` runs the whole `e2e/` directory.
 
+5. Every test asserts something. `web/lib/e2e-tests-assert.test.ts` (vitest) fails when a `test`, `test.only` or `test.fail` body never reaches an assertion, because Playwright reports such a test as passed. A body counts as asserting when it calls:
+
+   - `expect(...)`, `expect.soft(...)`, `expect.poll(...)`, or the same through an imported alias (`import { expect as anonExpect }`);
+   - a helper whose name starts with `expect`, such as `expectNoRawIds(page)`, wherever it is defined;
+   - a function declared in the same spec file whose body asserts, followed through any depth of local calls.
+
+   **Name an imported assertion helper `expect…`.** The guard cannot read another module, so `await assertRowVisible(page)` imported from a shared file is flagged, and `await expectRowVisible(page)` is not. A test whose feature does not exist yet is `test.fixme("title", ...)` with the reason in a comment, not a body with its assertions commented out.
+
+   To seed data for a list, count or empty-state assertion, give the spec a tenant of its own in `fixtures/e2e/<spec>.sql` and sign in to it with `signInToTenant(page, { tenantId, roles })` from `e2e/tenant-session.ts`. The demo tenant's contents change as other specs add rows.
+
 ## Timing-sensitive assertions
 
 **Use auto-waiting assertions for any data that arrives asynchronously.** Playwright divides its locator API into two camps:

@@ -139,7 +139,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// approvals band is approvalsH's list, its due-based bands the
 	// calendar's events, under the calendar's OPA and module filters.
 	root.Get("/v1/needs-attention", needsattention.New(s.dbPool, calendarapi.NewStore(s.dbPool), approvalsH).
-		WithAuthz(s.authzEngine).WithModules(s.moduleViews).List)
+		WithAuthz(s.authzEngine).WithModules(s.moduleViews).WithWarnRows(s.needsAttentionWarnRows).List)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each
