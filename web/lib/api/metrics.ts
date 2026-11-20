@@ -15,7 +15,7 @@
 //   * GET  /v1/metrics/{id}/observations   ListObservations (since/until/limit)
 //   * POST /v1/metrics/{id}/inputs         CreateInput  (admin-only)
 //   * GET  /v1/metrics/{id}/target         GetTarget
-//   * PUT  /v1/metrics/{id}/target         UpsertTarget (admin-only)
+//   * PUT  /v1/metrics/{id}/target         UpsertTarget (admin or grc_engineer)
 //
 // Browser-side calls go through the BFF under `/api/metrics/**` (slice
 // 040 pattern) so the bearer cookie never leaves the server.
@@ -455,16 +455,16 @@ export function thresholdBadgeColor(
 
 /**
  * canSetMetricTarget mirrors the platform's guard on
- * PUT /v1/metrics/{id}/target (`authz.IsTenantAdmin`): only an admin may
- * set a metric target. `/v1/me` reports exactly that check, over the
- * live tenant roles, as `is_tenant_admin`. The JWT's `owner_roles` claim
- * is not read: it goes stale after a role is revoked. Anything unknown is
- * view-only.
+ * PUT /v1/metrics/{id}/target (`authz.IsTenantApprover`): an admin or a
+ * grc_engineer may set a metric target, as for a framework posture target
+ * (#2572). `/v1/me` reports exactly that check, over the live tenant
+ * roles, as `is_approver`. The JWT's `owner_roles` claim is not read: it
+ * goes stale after a role is revoked. Anything unknown is view-only.
  */
 export function canSetMetricTarget(
-  me: { is_tenant_admin?: boolean } | undefined,
+  me: { is_approver?: boolean } | undefined,
 ): boolean {
-  return me?.is_tenant_admin === true;
+  return me?.is_approver === true;
 }
 
 // Rounds away float noise from the x100 / /100 conversion (0.7 * 100 is
@@ -472,33 +472,68 @@ export function canSetMetricTarget(
 const roundTiny = (n: number) => Math.round(n * 1e6) / 1e6;
 
 /**
+ * MetricTargetScale is how a metric target is stored:
+ *
+ *   fraction  a percent or ratio metric whose observations are fractions
+ *             (0.85 is 85%), the slice-076 evaluators' shape;
+ *   points    a percent or ratio metric whose observations are already
+ *             percentage points (85 is 85%), as a manual input may be;
+ *   raw       any other unit (count, days), stored as typed.
+ *
+ * Both percent scales are typed as a percentage. `thresholdBadgeColor`
+ * compares the target with the observation as raw numbers, so the target
+ * must be stored on the observations' scale (#2572).
+ */
+export type MetricTargetScale = "fraction" | "points" | "raw";
+
+/**
+ * metricTargetScale picks the scale from the unit and the metric's latest
+ * observation. `formatValue` shows a percent or ratio value above 1 as
+ * percentage points, so an observation above 1 means the series is in
+ * points. With no observation the evaluators' fraction is assumed.
+ */
+export function metricTargetScale(
+  unit: string,
+  latest?: number,
+): MetricTargetScale {
+  if (unit !== "percent" && unit !== "ratio") return "raw";
+  return latest !== undefined && latest > 1 ? "points" : "fraction";
+}
+
+/**
  * metricTargetInputFromStored turns a stored target number into what the
- * dialog shows. Percent metrics record fractions (0.9 is 90%), but an
+ * dialog shows. Percent and ratio metrics are shown as a percentage: an
  * operator thinks in percentages, and typing 0.9 for 90% invites a 100x
- * mistake, so a percent value is shown as a percentage. Like
- * `formatValue`, a stored percent value above 1 is already in percentage
- * points and is shown as it is. Other units pass through.
+ * mistake. On the fraction scale, like `formatValue`, a stored value above
+ * 1 is already in percentage points and is shown as it is. Other units
+ * pass through.
  */
 export function metricTargetInputFromStored(
   stored: string | undefined,
   unit: string,
+  latest?: number,
 ): string {
   if (stored === undefined || stored === "") return "";
   const n = Number(stored);
-  if (unit !== "percent" || !Number.isFinite(n)) return stored;
+  if (metricTargetScale(unit, latest) !== "fraction" || !Number.isFinite(n)) {
+    return stored;
+  }
   return String(n <= 1 ? roundTiny(n * 100) : n);
 }
 
 /**
- * metricTargetStoredFromInput is the reverse: a percentage typed for a
- * percent metric is saved as the fraction its observations use, so the
+ * metricTargetStoredFromInput is the reverse: a percentage is saved on
+ * the scale the metric's observations use (`metricTargetScale`), so the
  * threshold badge compares like with like. Other units pass through.
  */
 export function metricTargetStoredFromInput(
   value: number,
   unit: string,
+  latest?: number,
 ): number {
-  return unit === "percent" ? roundTiny(value / 100) : value;
+  return metricTargetScale(unit, latest) === "fraction"
+    ? roundTiny(value / 100)
+    : value;
 }
 
 /**
@@ -510,10 +545,10 @@ export function metricTargetStoredFromInput(
  *   lower_is_better    target <= warning <= critical
  *   target_is_better   |warning - target| <= |critical - target|
  *
- * The values are as the operator typed them. For a percent metric that is
- * a percentage (see `metricTargetInputFromStored`), so each must be
- * 0..100; other units (count, days) have no range. Returns the first
- * problem, or null.
+ * The values are as the operator typed them. For a percent or ratio
+ * metric that is a percentage (see `metricTargetInputFromStored`), so each
+ * must be 0..100; other units (count, days) have no range. Returns the
+ * first problem, or null.
  */
 export function metricTargetError(
   input: {
@@ -531,7 +566,7 @@ export function metricTargetError(
   ];
   for (const [name, v] of values) {
     if (!Number.isFinite(v)) return `${name} must be a number.`;
-    if (unit === "percent" && (v < 0 || v > 100)) {
+    if ((unit === "percent" || unit === "ratio") && (v < 0 || v > 100)) {
       return `${name} must be between 0 and 100.`;
     }
   }

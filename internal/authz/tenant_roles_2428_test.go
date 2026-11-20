@@ -146,7 +146,7 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/audit-periods/" + id2428 + "/freeze", tenantAdminGate},
 	{http.MethodPost, "/v1/audit-periods/" + id2428 + "/populations/" + id2428, tenantAdminGate},
 	{http.MethodPost, "/v1/metrics/" + id2428 + "/inputs", tenantAdminGate},
-	{http.MethodPut, "/v1/metrics/" + id2428 + "/target", tenantAdminGate},
+	{http.MethodPut, "/v1/metrics/" + id2428 + "/target", tenantApproverGate},
 	{http.MethodPost, "/v1/controls:upload-bundle", tenantAdminGate},
 	// #2358: stock controls the boot seed holds back behind a reviewed
 	// re-anchor.

@@ -3,8 +3,9 @@
 // #2341 — set a metric's target from its detail page.
 //
 // PUT /v1/metrics/{id}/target was API-only before this. The dialog is
-// offered only to admins (`canSetMetricTarget`, the platform's
-// `authz.IsTenantAdmin` guard); the platform refuses anyone else. On
+// offered only to admins and grc_engineers (`canSetMetricTarget`, the
+// platform's `authz.IsTenantApprover` guard, #2572); the platform refuses
+// anyone else. On
 // success the target query is refetched, so the badge, the chart overlays
 // and the board card all grade against the new target.
 
@@ -29,6 +30,7 @@ import { Select } from "@/components/ui/select";
 import {
   metricTargetError,
   metricTargetInputFromStored,
+  metricTargetScale,
   metricTargetStoredFromInput,
   upsertMetricTarget,
   type MetricTarget,
@@ -43,11 +45,23 @@ type Fields = {
   notes: string;
 };
 
-function initialFields(current: MetricTarget | null, unit: string): Fields {
+function initialFields(
+  current: MetricTarget | null,
+  unit: string,
+  latest: number | undefined,
+): Fields {
   return {
-    target: metricTargetInputFromStored(current?.target_value, unit),
-    warning: metricTargetInputFromStored(current?.warning_threshold, unit),
-    critical: metricTargetInputFromStored(current?.critical_threshold, unit),
+    target: metricTargetInputFromStored(current?.target_value, unit, latest),
+    warning: metricTargetInputFromStored(
+      current?.warning_threshold,
+      unit,
+      latest,
+    ),
+    critical: metricTargetInputFromStored(
+      current?.critical_threshold,
+      unit,
+      latest,
+    ),
     direction: current?.direction ?? "higher_is_better",
     notes: current?.notes ?? "",
   };
@@ -60,15 +74,19 @@ export function MetricTargetDialog({
   metricName,
   unit,
   current,
+  latest,
 }: {
   metricID: string;
   metricName: string;
   unit: string;
   current: MetricTarget | null;
+  // The latest observed value, which picks a percent target's scale
+  // (#2572); undefined when the metric has none.
+  latest?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [fields, setFields] = useState<Fields>(() =>
-    initialFields(current, unit),
+    initialFields(current, unit, latest),
   );
   const queryClient = useQueryClient();
   const ids = {
@@ -92,14 +110,20 @@ export function MetricTargetDialog({
     mutationFn: () =>
       upsertMetricTarget(metricID, {
         direction: input.direction,
-        target_value: metricTargetStoredFromInput(input.target_value, unit),
+        target_value: metricTargetStoredFromInput(
+          input.target_value,
+          unit,
+          latest,
+        ),
         warning_threshold: metricTargetStoredFromInput(
           input.warning_threshold,
           unit,
+          latest,
         ),
         critical_threshold: metricTargetStoredFromInput(
           input.critical_threshold,
           unit,
+          latest,
         ),
         notes: fields.notes.trim() === "" ? undefined : fields.notes.trim(),
       }),
@@ -114,9 +138,11 @@ export function MetricTargetDialog({
   const set = (k: keyof Fields) => (v: string) =>
     setFields((f) => ({ ...f, [k]: v }));
 
-  // A percent metric records fractions (0..1) but is entered as a
-  // percentage; the helpers convert both ways.
-  const percent = unit === "percent";
+  // A percent or ratio metric is entered as a percentage and stored on
+  // its observations' scale, fractions or points (#2572); the helpers
+  // convert both ways.
+  const scale = metricTargetScale(unit, latest);
+  const percent = scale !== "raw";
   const unitSuffix = percent ? " (%)" : "";
 
   return (
@@ -124,7 +150,7 @@ export function MetricTargetDialog({
       open={open}
       onOpenChange={(next) => {
         // Re-seed from the saved target each time the dialog opens.
-        if (next) setFields(initialFields(current, unit));
+        if (next) setFields(initialFields(current, unit, latest));
         mutation.reset();
         setOpen(next);
       }}
@@ -207,9 +233,11 @@ export function MetricTargetDialog({
               className="text-xs text-muted-foreground"
               data-testid="metric-target-hint"
             >
-              {percent
-                ? "Enter a percentage from 0 to 100, so 90 is 90%."
-                : `Enter the value in the metric's unit (${unit}).`}
+              {scale === "points"
+                ? "Enter a percentage from 0 to 100, so 90 is 90%. This metric records percentage points, so the target is saved as typed."
+                : percent
+                  ? "Enter a percentage from 0 to 100, so 90 is 90%."
+                  : `Enter the value in the metric's unit (${unit}).`}
             </p>
             <div className="flex flex-col gap-1 text-sm">
               <label htmlFor={ids.notes} className="font-medium">

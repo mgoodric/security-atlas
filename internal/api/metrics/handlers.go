@@ -9,7 +9,7 @@
 //	GET    /v1/metrics/{id}/observations        observations series
 //	POST   /v1/metrics/{id}/inputs              append a manual input (audit-trail)
 //	GET    /v1/metrics/{id}/target              read tenant's target
-//	PUT    /v1/metrics/{id}/target              upsert tenant's target
+//	PUT    /v1/metrics/{id}/target              upsert tenant's target (audited, #2572)
 //
 // All routes require an authenticated tenant context. The catalog +
 // cascade reads are platform-shared (visible to every tenant). The
@@ -536,8 +536,10 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !authz.IsTenantAdmin(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "admin role required")
+	// #2572: admin or grc_engineer, over the live tenant roles, the same
+	// gate as a framework posture target (#2136).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	id := chi.URLParam(r, "id")
@@ -576,9 +578,23 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 	if h.hideMetric(w, r, id) {
 		return
 	}
+	// The audit row names the user; a caller that is not one (a bootstrap
+	// key) is recorded as uuid.Nil, and actor_principal names the
+	// credential either way (#2329).
+	actor, _ := credstore.CallerUserID(cred)
+	principal := credstore.PrincipalOf(cred)
 	var row dbx.MetricTarget
 	err = h.runInTx(ctx, func(q *dbx.Queries) error {
-		var inErr error
+		var before *targetAudit
+		prev, inErr := q.GetMetricTargetForUpdate(ctx, id)
+		switch {
+		case errors.Is(inErr, pgx.ErrNoRows):
+		case inErr != nil:
+			return fmt.Errorf("read current target: %w", inErr)
+		default:
+			cur := targetAudit(targetWireFromRow(prev))
+			before = &cur
+		}
 		row, inErr = q.UpsertMetricTarget(ctx, dbx.UpsertMetricTargetParams{
 			TenantID:          pgtype.UUID{Bytes: tenantUUID, Valid: true},
 			MetricID:          id,
@@ -589,13 +605,63 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 			OwnerUserID:       owner,
 			Notes:             req.Notes,
 		})
-		return inErr
+		if inErr != nil {
+			return inErr
+		}
+		return auditTargetSet(ctx, q, row.TenantID, actor, principal, before, targetAudit(targetWireFromRow(row)))
 	})
 	if err != nil {
 		httperr.WriteInternal(w, r, "upsert target", err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, targetWireFromRow(row))
+}
+
+// AuditActionTargetSet is the me_audit_log action a target upsert writes
+// (#2572). CHECK constraint extended in migration
+// 20261266000000_metric_target_audit.sql.
+const AuditActionTargetSet = "metric_target_set"
+
+// targetAudit is one side of a metric_target_set audit row: the target's
+// fields without omitempty, so a cleared threshold reads as null rather
+// than as absent.
+type targetAudit struct {
+	MetricID          string  `json:"metric_id"`
+	TargetValue       *string `json:"target_value"`
+	WarningThreshold  *string `json:"warning_threshold"`
+	CriticalThreshold *string `json:"critical_threshold"`
+	Direction         string  `json:"direction"`
+	OwnerUserID       string  `json:"owner_user_id"`
+	Notes             string  `json:"notes"`
+}
+
+// auditTargetSet writes one me_audit_log row in the upsert's transaction, so
+// the change cannot commit without it. before is nil the first time the
+// metric's target is set.
+func auditTargetSet(ctx context.Context, q *dbx.Queries, tenant pgtype.UUID, actor uuid.UUID, principal string, before *targetAudit, after targetAudit) error {
+	beforeBlob, err := json.Marshal(before)
+	if err != nil {
+		return fmt.Errorf("audit before: %w", err)
+	}
+	afterBlob, err := json.Marshal(after)
+	if err != nil {
+		return fmt.Errorf("audit after: %w", err)
+	}
+	var p *string
+	if principal != "" {
+		p = &principal
+	}
+	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+		TenantID:       tenant,
+		UserID:         pgtype.UUID{Bytes: actor, Valid: true},
+		Action:         AuditActionTargetSet,
+		Before:         beforeBlob,
+		After:          afterBlob,
+		ActorPrincipal: p,
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", AuditActionTargetSet, err)
+	}
+	return nil
 }
 
 // ===== helpers =====

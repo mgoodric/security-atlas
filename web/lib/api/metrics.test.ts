@@ -27,6 +27,7 @@ import {
   measuredObservations,
   metricTargetError,
   metricTargetInputFromStored,
+  metricTargetScale,
   metricTargetStoredFromInput,
   neutralBadgeLabel,
   noDataReason,
@@ -312,17 +313,18 @@ describe("noDataReason — the evaluators' empty marker (#2064)", () => {
 });
 
 // #2341 — the metric-target dialog's guard and client-side check.
-// The guard reads /v1/me's is_tenant_admin (authz.IsTenantAdmin over the
-// live roles), never the JWT's owner_roles claim, which goes stale after
-// a revoke.
+// The guard reads /v1/me's is_approver (authz.IsTenantApprover over the
+// live roles: admin or grc_engineer, #2572), never the JWT's owner_roles
+// claim, which goes stale after a revoke.
 describe("canSetMetricTarget", () => {
   test.each([
-    [{ is_tenant_admin: true }, true],
-    [{ is_tenant_admin: false }, false],
-    // A stale claim still listing admin is not enough.
-    [{ is_tenant_admin: false, owner_roles: ["admin"] }, false],
-    // An approver (grc_engineer) is not a tenant admin.
-    [{ is_tenant_admin: false, is_approver: true }, false],
+    [{ is_approver: true }, true],
+    [{ is_approver: false }, false],
+    // An admin: /v1/me reports is_approver true for every tenant admin.
+    [{ is_tenant_admin: true, is_approver: true }, true],
+    // A stale claim still listing admin or grc_engineer is not enough.
+    [{ is_approver: false, owner_roles: ["admin"] }, false],
+    [{ is_approver: false, owner_roles: ["grc_engineer"] }, false],
     [{}, false],
     [undefined, false],
   ])("%j -> %s", (me, want) => {
@@ -428,5 +430,60 @@ describe("metric target percent conversion", () => {
     expect(metricTargetInputFromStored("14", "days")).toBe("14");
     expect(metricTargetInputFromStored("0.5", "count")).toBe("0.5");
     expect(metricTargetStoredFromInput(14, "days")).toBe(14);
+    expect(metricTargetStoredFromInput(14, "days", 30)).toBe(14);
+  });
+});
+
+// #2572 — a percent target is stored on its observations' scale, picked
+// from the latest observation, and a ratio is entered as a percentage like
+// the percentage it is displayed as.
+describe("metric target scale", () => {
+  test.each([
+    ["percent", undefined, "fraction"],
+    ["percent", 0.92, "fraction"],
+    ["percent", 1, "fraction"],
+    ["percent", 85, "points"],
+    ["ratio", undefined, "fraction"],
+    ["ratio", 0.4, "fraction"],
+    ["ratio", 40, "points"],
+    ["count", 85, "raw"],
+    ["days", undefined, "raw"],
+  ] as const)("%s latest=%s -> %s", (unit, latest, want) => {
+    expect(metricTargetScale(unit, latest)).toBe(want);
+  });
+
+  test("points: typed percentage is stored and shown as typed", () => {
+    expect(metricTargetStoredFromInput(90, "percent", 85)).toBe(90);
+    expect(metricTargetInputFromStored("90", "percent", 85)).toBe("90");
+    // A target of 0.5 points is 0.5%, not 50%.
+    expect(metricTargetInputFromStored("0.5", "percent", 85)).toBe("0.5");
+  });
+
+  test("points: the stored target grades a points observation", () => {
+    const target = {
+      target_value: String(metricTargetStoredFromInput(90, "percent", 85)),
+      warning_threshold: String(metricTargetStoredFromInput(80, "percent", 85)),
+      critical_threshold: String(
+        metricTargetStoredFromInput(70, "percent", 85),
+      ),
+      direction: "higher_is_better",
+    };
+    expect(thresholdBadgeColor(85, target)).toBe("yellow");
+  });
+
+  test("ratio: a percentage is stored as a fraction and shown back", () => {
+    expect(metricTargetStoredFromInput(40, "ratio")).toBe(0.4);
+    expect(metricTargetInputFromStored("0.4", "ratio")).toBe("40");
+    expect(
+      metricTargetError(
+        {
+          target_value: 140,
+          warning_threshold: 30,
+          critical_threshold: 20,
+          direction: "higher_is_better",
+        },
+        "ratio",
+      ),
+    ).toBe("Target must be between 0 and 100.");
   });
 });
