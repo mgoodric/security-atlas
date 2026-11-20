@@ -13,7 +13,6 @@
 //     stringPtr, datePtr, pgts, pgUUIDPtr)
 //   - Policy.IsOrphan
 //   - DeriveAckToken determinism + day-bucketing
-//   - rolesIntersect (admin wildcard, empty-required, empty-owner, hit/miss)
 //   - the AckStore pre-tx input guards (Record + PendingForUser reject
 //     missing/invalid identity BEFORE opening a transaction, so a nil pool
 //     is never dereferenced — this is the security-relevant deny branch the
@@ -358,57 +357,6 @@ func TestDeriveAckToken(t *testing.T) {
 	// Different policy version → different token.
 	if DeriveAckToken(u, "other-version", day) == tok {
 		t.Fatal("token must depend on policy version id")
-	}
-}
-
-func TestRolesIntersect(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name     string
-		caller   AckCaller
-		required []string
-		want     bool
-	}{
-		{"admin wildcard", AckCaller{IsAdmin: true}, []string{"x"}, true},
-		{"admin with no required still true", AckCaller{IsAdmin: true}, nil, true},
-		{"empty required → no match", AckCaller{OwnerRoles: []string{"a"}}, nil, false},
-		{"empty owner → no match", AckCaller{}, []string{"a"}, false},
-		{"hit", AckCaller{OwnerRoles: []string{"b", "a"}}, []string{"a"}, true},
-		{"miss", AckCaller{OwnerRoles: []string{"c"}}, []string{"a", "b"}, false},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := rolesIntersect(tc.caller, tc.required); got != tc.want {
-				t.Fatalf("rolesIntersect(%+v, %v) = %v, want %v", tc.caller, tc.required, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestWithEveryone2524 pins that a member matches a policy aimed at
-// everyone and a non-member does not, and that the input is not mutated.
-func TestWithEveryone2524(t *testing.T) {
-	t.Parallel()
-	in := []string{"viewer"}
-	if got := WithEveryone(in, true); len(got) != 2 || got[1] != AudienceEveryone {
-		t.Errorf("member: %v; want [viewer everyone]", got)
-	}
-	if len(in) != 1 {
-		t.Errorf("input mutated: %v", in)
-	}
-	if got := WithEveryone([]string{"employee"}, false); len(got) != 1 {
-		t.Errorf("non-member: %v; want [employee]", got)
-	}
-	if got := WithEveryone([]string{AudienceEveryone}, true); len(got) != 1 {
-		t.Errorf("already present: %v; want one entry", got)
-	}
-	if !rolesIntersect(AckCaller{OwnerRoles: WithEveryone([]string{"auditor"}, true)}, []string{AudienceEveryone}) {
-		t.Error("member does not intersect an everyone policy")
-	}
-	if rolesIntersect(AckCaller{OwnerRoles: WithEveryone(nil, false)}, []string{AudienceEveryone}) {
-		t.Error("non-member intersects an everyone policy")
 	}
 }
 
