@@ -3388,6 +3388,10 @@ type Querier interface {
 	//
 	// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
 	// atlas_app and takes no tenant parameter.
+	//
+	// LIMIT 1001 is the handler's 1000-tuple cap plus one (#2627): a 1001st
+	// row is how the handler knows the window held more and sets `truncated`,
+	// rather than dropping actors silently.
 	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]ListUnifiedAuditMachineActorsRow, error)
 	// The tested-under references ListAuditedUnderGaps cannot resolve (#2324):
 	// the system names no global framework with a current version, or the id
