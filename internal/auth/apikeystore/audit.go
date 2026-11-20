@@ -80,9 +80,16 @@ func nonNil(s []string) []string {
 	return s
 }
 
-// audit writes one me_audit_log row in the caller's transaction, so the
-// change it records cannot commit without it.
-func (s *Store) audit(ctx context.Context, q *dbx.Queries, tenant pgtype.UUID, by Actor, action string, before, after any) error {
+// ActorOf is the Actor for the caller cred: the users(id) behind it, or
+// uuid.Nil when it is not a user, and its principal.
+func ActorOf(cred credstore.Credential) Actor {
+	u, _ := credstore.CallerUserID(cred)
+	return Actor{UserID: u, Principal: credstore.PrincipalOf(cred)}
+}
+
+// writeAudit writes one me_audit_log row in the caller's transaction, so
+// the change it records cannot commit without it.
+func writeAudit(ctx context.Context, q *dbx.Queries, tenant pgtype.UUID, by Actor, action string, before, after any) error {
 	beforeBlob, err := json.Marshal(before)
 	if err != nil {
 		return fmt.Errorf("apikeystore: audit before: %w", err)
