@@ -180,10 +180,10 @@ func TenantRoleLabels(cred credstore.Credential) []string {
 // session. A session's OwnerRoles is its role claim, which outlives a revoke.
 //
 // It differs from TenantRoleLabels for a key bound to a user. Required roles
-// are free text ("employee", "security-engineering"), and the only place a
-// user holds one is an api_keys.owner_roles label: the ack roster counts its
-// denominator from that column. Dropping a bound key's label would leave a
-// user on the roster who can never acknowledge. The label is set by an admin
+// can be legacy free text ("employee", "security-engineering"), and the only
+// place a user holds one is an api_keys.owner_roles label. The ack roster
+// counts live user_roles only (#2586), so such a policy's ack by label is
+// recorded but not counted in its rate. The label is set by an admin
 // when the key is minted and goes when the key is revoked; it is not a copy
 // of a revocable tenant role, and an ack grants nothing.
 //

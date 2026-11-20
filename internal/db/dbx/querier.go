@@ -256,7 +256,7 @@ type Querier interface {
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	// Rate numerator: distinct user_ids who (a) are in the denominator set
-	// per the same role predicate AND (b) have at least one ack of
+	// per the same live-role predicate AND (b) have at least one ack of
 	// policy_version_id with acknowledged_at >= the freshness cutoff.
 	//
 	// The cutoff is a parameter (not `now() - interval '365 days'`) so tests
@@ -281,14 +281,19 @@ type Querier interface {
 	// evidence_records.scope_id. v1 keeps the SQL simple; future slices can
 	// push the predicate down into a JSONB index.
 	CountPopulationEvidence(ctx context.Context, arg CountPopulationEvidenceParams) (int64, error)
-	// Rate denominator: distinct user_ids in api_keys whose owner_roles
-	// intersect the policy's acknowledgment_required_roles OR are flagged
-	// is_admin (admin wildcard). Excludes revoked keys. A user with two
-	// credentials counts once.
+	// Rate denominator (#2586): the distinct active users holding a live
+	// user_roles row the policy's audience names, or any live role when the
+	// audience is 'everyone'. This is the set the authz engine resolves
+	// (authz.DBRolesResolver reads the same rows and gives a user whose
+	// users.status is not 'active' none) and the set policy.WithEveryone admits,
+	// so the denominator is who may acknowledge. user_roles.user_id is TEXT; a
+	// "user:<uuid>" principal is read as its bare uuid, and a row naming no
+	// users row (a key, bootstrap-admin) is not a person and is not counted.
 	//
-	// slice-035 (OPA-RBAC) graduates this: replace api_keys with a proper
-	// user-role binding table. Until then this is the stand-in per GLOSSARY.md
-	// "Policy acknowledgment (slice 023)".
+	// Before #2586 this counted api_keys holders: a user whose role was revoked
+	// but whose key was not was counted, and a JWT-only member was missed.
+	// ListPoliciesWithAckRate (policies.sql) repeats this predicate; keep them
+	// in sync.
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	// #2105: live (not tombstoned) action plans linked to a risk, for the
 	// mitigate rule (a linked control or a linked action plan).
@@ -2805,9 +2810,8 @@ type Querier interface {
 	//      the subqueries so non-published rows return NULL for both
 	//      columns (the handler renders `ack_rate: null`).
 	//   3. The denominator subquery mirrors CountRequiredRoleUsersForVersion
-	//      verbatim (distinct issued_by in api_keys whose owner_roles
-	//      intersect the policy's acknowledgment_required_roles, OR is_admin).
-	//      Revoked keys excluded.
+	//      verbatim (#2586: distinct active users holding a live user_roles
+	//      row the audience names, or any live role for 'everyone').
 	//   4. The numerator subquery mirrors CountFreshAcksForVersion verbatim
 	//      (distinct user_ids in policy_acknowledgments for THIS policy
 	//      version, acknowledged_at >= freshness_cutoff, gated on the same
@@ -2815,7 +2819,7 @@ type Querier interface {
 	//      parameter so tests inject without time-bombing.
 	//
 	// Constitutional invariants:
-	//   #6 RLS: policies + api_keys + policy_acknowledgments are tenant-scoped
+	//   #6 RLS: policies + user_roles + users + policy_acknowledgments are tenant-scoped
 	//      under FORCE ROW LEVEL SECURITY. The tenant GUC the slice-033
 	//      middleware sets filters every table this query touches.
 	//   #9 Manual evidence first-class: this query is uniform whether the
