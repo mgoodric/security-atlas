@@ -51,11 +51,13 @@ shape. Neither one hides rows.
 
 ### D3: the strict switch read everywhere a view decides
 
-`Viewer.Modules` (Activity, its actor picker, Metrics) now reads switches
-with `featureflag.EnabledStrict`, the read `RouteOn` and the gate use. A
-flag-store error fails the request (500) instead of falling back to the
-seed default, which could show a module the tenant switched off.
-`Views.Switches` (the admin log mark) uses the same read.
+#2575 landed on `main` while this was in review and made `Viewer.Modules`
+(Activity, its actor picker, Metrics) read switches with
+`featureflag.EnabledStrict`, the read `RouteOn` and the gate use. A
+flag-store error answers 503 `module_state_unavailable`
+(`moduleaccess.WriteError`) instead of falling back to the seed default,
+which could show a module the tenant switched off. `Views.Switches` (the
+admin log mark) uses the same read and the same 503.
 
 ### D4: tied owners fail closed in Sees
 

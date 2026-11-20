@@ -30,7 +30,7 @@ var toolModule = map[string]string{
 // Switches answers whether a module is switched on for a tenant.
 // moduleaccess.Views satisfies it.
 type Switches interface {
-	SwitchedOn(ctx context.Context, tenantID uuid.UUID, key string) (bool, error)
+	SwitchedOnStrict(ctx context.Context, tenantID uuid.UUID, key string) (bool, error)
 }
 
 // WithSwitches makes Confirm refuse a proposal whose module is switched
@@ -48,7 +48,7 @@ func (s *Store) moduleOff(ctx context.Context, p Proposal) error {
 	if !ok || s.switches == nil || p.State != StateAIProposed {
 		return nil
 	}
-	on, err := s.switches.SwitchedOn(ctx, p.TenantID, key)
+	on, err := s.switches.SwitchedOnStrict(ctx, p.TenantID, key)
 	if err != nil {
 		return fmt.Errorf("module switch: %w", err)
 	}

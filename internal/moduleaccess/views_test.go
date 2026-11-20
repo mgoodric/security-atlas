@@ -3,6 +3,7 @@ package moduleaccess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
@@ -197,16 +198,11 @@ func TestViewer_SeesTiedOwnersIsAnError(t *testing.T) {
 	}
 }
 
-// #2590: Modules reads the switches strictly, as Sees (RouteOn) does: with
-// the flag store down it fails rather than falling back to the seed
-// default, which shows Risk.
-func TestViewer_ModulesFailsClosedOnStoreDown(t *testing.T) {
+// #2590: Switches reads the switches strictly, as Modules does: with the
+// flag store down it fails rather than falling back to the seed default.
+func TestViews_SwitchesFailsClosedOnStoreDown(t *testing.T) {
 	t.Parallel()
-	r := httptest.NewRequest("GET", "/v1/activity", nil)
-	v := Viewer{r: r, flags: flagsDown{}, access: Access{Exempt: true}}
-	if _, err := v.Modules(); !errors.Is(err, featureflag.ErrStoreUnavailable) {
-		t.Fatalf("Modules err = %v; want ErrStoreUnavailable", err)
-	}
+	r := httptest.NewRequest("GET", "/v1/admin/audit-log/unified", nil)
 	if _, err := (&Views{flags: flagsDown{}}).Switches(r); !errors.Is(err, featureflag.ErrStoreUnavailable) {
 		t.Fatalf("Switches err = %v; want ErrStoreUnavailable", err)
 	}
@@ -229,5 +225,39 @@ func TestViews_Switches(t *testing.T) {
 	var nilViews *Views
 	if set, err := nilViews.Switches(r); err != nil || !set.Sees("/v1/risks") {
 		t.Errorf("nil Switches err = %v; want every module on", err)
+	}
+}
+
+// #2575: an unreadable switch answers 503, any other viewer error 500.
+func TestWriteError(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		err  error
+		want int
+	}{
+		{fmt.Errorf("wrapped: %w", featureflag.ErrStoreUnavailable), 503},
+		{errors.New("access read failed"), 500},
+	} {
+		rec := httptest.NewRecorder()
+		WriteError(rec, httptest.NewRequest("GET", "/v1/activity", nil), "op", c.err)
+		if rec.Code != c.want {
+			t.Errorf("WriteError(%v) = %d; want %d", c.err, rec.Code, c.want)
+		}
+	}
+}
+
+// #2575: with the flag store down, Modules and SeesModule hand the error
+// back rather than answer from the seed default. The route's own gate has
+// read only its own module, so a default-on module a tenant switched off
+// would otherwise show its rows in the activity log and metrics.
+func TestViewer_StrictOnStoreDown(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest("GET", "/v1/activity", nil)
+	v := Viewer{r: r, flags: flagsDown{}, access: Access{Exempt: true}}
+	if _, err := v.Modules(); !errors.Is(err, featureflag.ErrStoreUnavailable) {
+		t.Fatalf("Modules: err = %v; want ErrStoreUnavailable", err)
+	}
+	if sees, err := v.SeesModule("risk"); !errors.Is(err, featureflag.ErrStoreUnavailable) || sees {
+		t.Fatalf("SeesModule = %v, %v; want false, ErrStoreUnavailable", sees, err)
 	}
 }

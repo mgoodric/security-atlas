@@ -88,8 +88,9 @@ func switchExceptions(t *testing.T, tenantID uuid.UUID, on bool) {
 //     full, and the last carries no cursor.
 //   - The admin unified log keeps every row and marks the switched-off
 //     module's rows module_switched_off.
-//   - With the switch store down, both fail closed (500) rather than
-//     falling back to the seed default, which is on.
+//   - With the switch store down, both fail closed (503
+//     module_state_unavailable, #2575) rather than falling back to the
+//     seed default, which is on.
 func TestModules2590_SwitchedOffModuleInActivityAndAdminLog(t *testing.T) {
 	off, on := uuid.New(), uuid.New()
 	for _, tenant := range []uuid.UUID{off, on} {
@@ -181,8 +182,8 @@ func TestModules2590_SwitchedOffModuleInActivityAndAdminLog(t *testing.T) {
 
 	// Store down: both fail closed.
 	for _, path := range []string{"/v1/activity/unified", "/v1/admin/audit-log/unified"} {
-		if code, _ := getUnified(t, newModulesRouter(t, on, storeDown{}), path, kinds); code != http.StatusInternalServerError {
-			t.Errorf("store down: %s status %d; want 500", path, code)
+		if code, _ := getUnified(t, newModulesRouter(t, on, storeDown{}), path, kinds); code != http.StatusServiceUnavailable {
+			t.Errorf("store down: %s status %d; want 503", path, code)
 		}
 	}
 }

@@ -29,8 +29,8 @@ import {
 //
 // Slice 144: rename-tenant flow. Admins see a tenant-name input field
 // + Save button. Renders only when the caller holds the admin role on
-// the CURRENT tenant (per slice 097 D3 pattern: client-side via
-// getSessionMe + an upstream-enforced 403 from the platform). The
+// the CURRENT tenant or is a super-admin (#2443: the page's
+// is_tenant_admin read, plus an upstream-enforced 403 from the platform). The
 // platform's authority gate is the canonical guard; the
 // hide-when-not-admin is UX-only and not load-bearing.
 //

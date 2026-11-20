@@ -161,12 +161,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		// A failed access read fails closed: 500, never everyone.
 		viewer, err := h.views.For(r)
 		if err != nil {
-			httperr.WriteInternal(w, r, "people module access", err)
+			moduleaccess.WriteError(w, r, "people module access", err)
 			return
 		}
 		sees, err := viewer.SeesModule(module)
 		if err != nil {
-			httperr.WriteInternal(w, r, "people module access", err)
+			moduleaccess.WriteError(w, r, "people module access", err)
 			return
 		}
 		if !sees {

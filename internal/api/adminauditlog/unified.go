@@ -46,6 +46,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/identity"
+	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -203,7 +204,7 @@ func (h *Handler) UnifiedList(w http.ResponseWriter, r *http.Request) {
 	// error fails the request rather than leaving rows unmarked.
 	switches, err := h.views.Switches(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "audit log module switches", err)
+		moduleaccess.WriteError(w, r, "audit log module switches", err)
 		return
 	}
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
