@@ -4,12 +4,14 @@
 import { describe, expect, test } from "vitest";
 
 import type {
+  CurrentAcknowledgment,
   PendingAcknowledgment,
   Policy,
   PolicyAcknowledgment,
 } from "@/lib/api/policies";
 
 import {
+  acknowledgedToast,
   AUDIENCE_OPTIONS,
   audienceLabel,
   createInput,
@@ -206,6 +208,7 @@ describe("myAckState (#2465)", () => {
     policy_version_id: ID,
     acknowledged_at: "2026-11-18T10:00:00Z",
     deduplicated: false,
+    evidence_emission_ok: true,
   };
 
   test("a published policy on the pending list asks for the ack", () => {
@@ -215,7 +218,11 @@ describe("myAckState (#2465)", () => {
         [pending()],
         undefined,
       ),
-    ).toEqual({ kind: "pending", lastAcknowledgedAt: null });
+    ).toEqual({
+      kind: "pending",
+      policyVersionId: ID,
+      lastAcknowledgedAt: null,
+    });
   });
 
   test("a lapsed earlier ack is carried for the card to mention", () => {
@@ -225,7 +232,11 @@ describe("myAckState (#2465)", () => {
         [pending({ last_acknowledged_at: "2025-10-01T00:00:00Z" })],
         undefined,
       ),
-    ).toEqual({ kind: "pending", lastAcknowledgedAt: "2025-10-01T00:00:00Z" });
+    ).toEqual({
+      kind: "pending",
+      policyVersionId: ID,
+      lastAcknowledgedAt: "2025-10-01T00:00:00Z",
+    });
   });
 
   test("not on the pending list, or not published, offers nothing", () => {
@@ -279,5 +290,76 @@ describe("myAckState (#2465)", () => {
       acknowledgedAt: acked.acknowledged_at,
       version: null,
     });
+  });
+
+  // #2668 — after a reload the platform's current list carries the ack.
+  const current = (
+    over: Partial<CurrentAcknowledgment> = {},
+  ): CurrentAcknowledgment => ({
+    policy_id: ID,
+    policy_version_id: ID,
+    title: "Access Control",
+    version: "1.0",
+    acknowledged_at: "2026-11-19T09:00:00Z",
+    ...over,
+  });
+
+  test("a fresh ack on the current list shows as acknowledged after a reload", () => {
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        [],
+        undefined,
+        [current()],
+      ),
+    ).toEqual({
+      kind: "acknowledged",
+      acknowledgedAt: "2026-11-19T09:00:00Z",
+      version: "1.0",
+    });
+  });
+
+  test("the current list counts only for this published policy", () => {
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        [],
+        undefined,
+        [current({ policy_id: "someone-else" })],
+      ),
+    ).toBeNull();
+    expect(
+      myAckState(
+        { id: ID, status: "superseded", version: "1.0" },
+        [],
+        undefined,
+        [current()],
+      ),
+    ).toBeNull();
+  });
+
+  test("pending wins over the current list", () => {
+    expect(
+      myAckState(
+        { id: ID, status: "published", version: "1.0" },
+        [pending()],
+        undefined,
+        [current()],
+      ),
+    ).toMatchObject({ kind: "pending", policyVersionId: ID });
+  });
+});
+
+describe("acknowledgedToast (#2668)", () => {
+  test("a plain success when the evidence record was written", () => {
+    expect(acknowledgedToast({ evidence_emission_ok: true })).toBe(
+      "Policy acknowledged",
+    );
+  });
+
+  test("says the evidence was not saved when it was not", () => {
+    expect(acknowledgedToast({ evidence_emission_ok: false })).toBe(
+      "Policy acknowledged, but its evidence record was not saved",
+    );
   });
 });

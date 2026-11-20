@@ -41,7 +41,10 @@ The people in a policy's acknowledgment roles confirm they have read its
 published version. If a policy is waiting for you, the policy list says
 so; open the policy and click **Acknowledge**. An acknowledgment counts
 for one version and lasts a year, so a new version or the passing of a
-year asks you again. The list shows each policy's acknowledgment rate,
+year asks you again. Once you have acknowledged a version, its page says
+so. If a new version is published while you have the page open, the
+click is refused; reload and acknowledge the version shown. The list
+shows each policy's acknowledgment rate,
 and you can filter for policies below 95% or past their review date.
 
 ## Who can do this
