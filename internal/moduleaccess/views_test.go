@@ -2,6 +2,7 @@ package moduleaccess
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"testing"
 
@@ -170,5 +171,63 @@ func TestViewer_ModulesFailsClosedOnFlagError(t *testing.T) {
 	v := Viewer{r: r, flags: flagsErr{}, access: Access{Exempt: true}}
 	if _, err := v.Modules(); err == nil {
 		t.Fatal("Modules: want error, got nil")
+	}
+}
+
+// #2590: a path the registry places under two tied owners is an error
+// from Sees, as it is from RouteOn and the gate, never "show"; a path no
+// module owns is still shown.
+func TestViewer_SeesTiedOwnersIsAnError(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest("GET", "/v1/activity", nil)
+	v := Viewer{
+		r: r, flags: flagsOff{}, access: Access{Exempt: true},
+		resolve: func(p string) (featureflag.Owner, error) {
+			if p == "/v1/tied" {
+				return featureflag.Owner{}, featureflag.ErrAmbiguousModule
+			}
+			return featureflag.Resolve(p)
+		},
+	}
+	if ok, err := v.Sees("/v1/tied"); !errors.Is(err, featureflag.ErrAmbiguousModule) || ok {
+		t.Errorf("Sees(tied) = %v, %v; want false, ErrAmbiguousModule", ok, err)
+	}
+	if ok, err := v.Sees("/v1/no-such-route"); err != nil || !ok {
+		t.Errorf("Sees(unowned) = %v, %v; want true, nil", ok, err)
+	}
+}
+
+// #2590: Modules reads the switches strictly, as Sees (RouteOn) does: with
+// the flag store down it fails rather than falling back to the seed
+// default, which shows Risk.
+func TestViewer_ModulesFailsClosedOnStoreDown(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest("GET", "/v1/activity", nil)
+	v := Viewer{r: r, flags: flagsDown{}, access: Access{Exempt: true}}
+	if _, err := v.Modules(); !errors.Is(err, featureflag.ErrStoreUnavailable) {
+		t.Fatalf("Modules err = %v; want ErrStoreUnavailable", err)
+	}
+	if _, err := (&Views{flags: flagsDown{}}).Switches(r); !errors.Is(err, featureflag.ErrStoreUnavailable) {
+		t.Fatalf("Switches err = %v; want ErrStoreUnavailable", err)
+	}
+}
+
+// #2590: Switches answers the tenant's switches alone. A switched-off
+// module's routes are hidden; access plays no part, and a nil Views
+// reports every module on.
+func TestViews_Switches(t *testing.T) {
+	t.Parallel()
+	r := httptest.NewRequest("GET", "/v1/admin/audit-log/unified", nil)
+	set, err := (&Views{flags: flagsOff{"risk.enabled": true}}).Switches(r)
+	if err != nil {
+		t.Fatalf("Switches: %v", err)
+	}
+	if set.Sees("/v1/risks") || !set.Sees("/v1/vendors") || !set.Sees("/v1/controls") {
+		t.Errorf("Switches: risks %v, vendors %v, controls %v; want false, true, true",
+			set.Sees("/v1/risks"), set.Sees("/v1/vendors"), set.Sees("/v1/controls"))
+	}
+	var nilViews *Views
+	if set, err := nilViews.Switches(r); err != nil || !set.Sees("/v1/risks") {
+		t.Errorf("nil Switches err = %v; want every module on", err)
 	}
 }

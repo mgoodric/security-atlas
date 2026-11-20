@@ -1,6 +1,7 @@
 package moduleaccess
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -51,6 +52,9 @@ type Viewer struct {
 	flags  featureflag.Looker
 	access Access
 	all    bool
+	// resolve places a path; featureflag.Resolve unless a test swaps in
+	// a broken registry.
+	resolve func(string) (featureflag.Owner, error)
 }
 
 // For resolves the caller of r. A nil Views (a unit-test server with no
@@ -64,6 +68,18 @@ func (v *Views) For(r *http.Request) (Viewer, error) {
 		return Viewer{}, err
 	}
 	return Viewer{r: r, flags: v.flags, access: a}, nil
+}
+
+// Switches resolves only the tenant's module and feature switches for the
+// request, ignoring the caller's module access: ModuleSet.Sees is false
+// for a route whose module or feature is switched off. The admin audit
+// log uses it to mark rows from switched-off modules without hiding them
+// (#2590). A nil or unwired Views reports every module on.
+func (v *Views) Switches(r *http.Request) (ModuleSet, error) {
+	if v == nil || v.flags == nil {
+		return ModuleSet{}, nil
+	}
+	return Viewer{r: r, flags: v.flags, access: Access{Exempt: true}}.Modules()
 }
 
 // ForUser resolves a person who is not the caller of r: the subscriber of
@@ -105,14 +121,23 @@ func (v *Views) ForUser(r *http.Request, tenantID uuid.UUID, userID string) (Vie
 // Sees reports whether an item owned by the module (and feature) that the
 // registry places path under may be shown: the module and feature are
 // switched on, and an optional module is inside the viewer's access. A
-// path the registry cannot place is shown, as ModuleGate passes it on.
+// path no module owns (featureflag.ErrNoModule) is shown, as ModuleGate
+// passes it on. Any other Resolve error, such as two owners tied, is
+// returned, as ModuleGate refuses the path and RouteOn returns it (#2590).
 func (v Viewer) Sees(path string) (bool, error) {
 	if v.all {
 		return true, nil
 	}
-	o, err := featureflag.Resolve(path)
-	if err != nil {
+	resolve := v.resolve
+	if resolve == nil {
+		resolve = featureflag.Resolve
+	}
+	o, err := resolve(path)
+	if errors.Is(err, featureflag.ErrNoModule) {
 		return true, nil
+	}
+	if err != nil {
+		return false, err
 	}
 	if !o.Module.Core && !v.access.Has(o.Module.Key) {
 		return false, nil
@@ -146,6 +171,10 @@ func (v Viewer) SeesModule(key string) (bool, error) {
 // answers: a module switched off or outside the viewer's access hides its
 // routes, and a feature switched off hides the routes it owns, in a core
 // module too (#2477).
+//
+// The switches are read strictly, as RouteOn reads them for Sees: a
+// flag-store error is returned, never the seed default, so a view cannot
+// show a module the tenant switched off while the store is down (#2590).
 func (v Viewer) Modules() (ModuleSet, error) {
 	if v.all {
 		return ModuleSet{}, nil
@@ -158,7 +187,7 @@ func (v Viewer) Modules() (ModuleSet, error) {
 				hidden[m.Key] = true
 				continue
 			}
-			on, err := featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
+			on, err := featureflag.EnabledStrict(v.r.Context(), v.flags, m.FlagKey)
 			if err != nil {
 				return ModuleSet{}, err
 			}
@@ -172,7 +201,7 @@ func (v Viewer) Modules() (ModuleSet, error) {
 			if len(f.Routes) == 0 {
 				continue
 			}
-			on, err := featureflag.Enabled(v.r.Context(), v.flags, f.FlagKey)
+			on, err := featureflag.EnabledStrict(v.r.Context(), v.flags, f.FlagKey)
 			if err != nil {
 				return ModuleSet{}, err
 			}
@@ -192,13 +221,17 @@ type ModuleSet struct {
 }
 
 // Sees reports whether an item owned by the module (and feature) the
-// registry places path under may be shown. Paths the registry cannot
-// place are shown; a core module's paths are shown unless a feature
-// switched off owns them.
+// registry places path under may be shown. A path no module owns is
+// shown; a path the registry cannot place for any other reason (tied
+// owners) is hidden, since its switch is unknown (#2590). A core module's
+// paths are shown unless a feature switched off owns them.
 func (m ModuleSet) Sees(path string) bool {
 	o, err := featureflag.Resolve(path)
-	if err != nil {
+	if errors.Is(err, featureflag.ErrNoModule) {
 		return true
+	}
+	if err != nil {
+		return false
 	}
 	if !o.Module.Core && m.hidden[o.Module.Key] {
 		return false
