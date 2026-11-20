@@ -61,7 +61,14 @@ const SITES: [string, () => Promise<unknown>][] = [
   ["me setEmailChannelOptIn", () => setEmailChannelOptIn(true)],
   ["me patchMyPreferences", () => patchMyPreferences({})],
   ["action-plans", () => fetchActionPlansList()],
-  ["activity", () => fetchActivity({})],
+  [
+    "activity",
+    () =>
+      fetchActivity({
+        from: "2026-01-01T00:00:00Z",
+        to: "2026-01-02T00:00:00Z",
+      }),
+  ],
   ["approvals", () => fetchApprovals()],
   ["audit-periods", () => fetchAuditPeriods()],
   [
