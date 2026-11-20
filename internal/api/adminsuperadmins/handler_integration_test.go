@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -557,5 +558,27 @@ func TestList_NamesSuperAdminFromAnotherTenant(t *testing.T) {
 	}
 	if got := nameOf(body); got != "Other Tenant Admin" {
 		t.Fatalf("with authPool display_name = %v, want Other Tenant Admin", got)
+	}
+	// #2684: the other tenant's email never reaches the wire.
+	if raw, _ := json.Marshal(body); strings.Contains(string(raw), "other-2385@example.invalid") {
+		t.Fatalf("cross-tenant email on the wire: %s", raw)
+	}
+
+	// #2684: a blank display name falls back to the local part, on the
+	// server.
+	if _, err := adminPool.Exec(context.Background(),
+		`UPDATE users SET display_name = '' WHERE id = $1`, otherID); err != nil {
+		t.Fatalf("blank display_name: %v", err)
+	}
+	res, body = doRequest(t, newRouterWith(t, h, sessionTenant, callerID, true),
+		http.MethodGet, "/v1/admin/super-admins", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list: %d %v", res.StatusCode, body)
+	}
+	if got := nameOf(body); got != "other-2385" {
+		t.Fatalf("blank display_name: display_name = %v, want other-2385", got)
+	}
+	if raw, _ := json.Marshal(body); strings.Contains(string(raw), "@example.invalid") {
+		t.Fatalf("cross-tenant email on the wire: %s", raw)
 	}
 }

@@ -520,7 +520,24 @@ func (s *Store) IssueOwner(tenantID string, roles []string, ttl time.Duration) (
 func (s *Store) Rotate(id string) (successor Credential, bearer string, predecessorExpiresAt time.Time, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.rotateLocked(id, func(pc PersistedCredential, pred *record, retiresAt time.Time) error {
+		if pred.persisted {
+			if perr := s.persist.Rotate(pc, id, pred.cred.TenantID, retiresAt); perr != nil {
+				return fmt.Errorf("credstore: persist rotate: %w", perr)
+			}
+			return nil
+		}
+		if perr := s.persist.Insert(pc); perr != nil {
+			return fmt.Errorf("credstore: persist rotate successor: %w", perr)
+		}
+		return nil
+	})
+}
 
+// rotateLocked builds the successor of id and, when a Persister is
+// attached, hands it to persist before either key changes in memory.
+// Caller must hold s.mu.
+func (s *Store) rotateLocked(id string, persist func(pc PersistedCredential, pred *record, retiresAt time.Time) error) (successor Credential, bearer string, predecessorExpiresAt time.Time, err error) {
 	pred, ok := s.byID[id]
 	if !ok || pred.state != stateActive {
 		err = ErrUnknownKey
@@ -548,21 +565,15 @@ func (s *Store) Rotate(id string) (successor Credential, bearer string, predeces
 	predecessorExpiresAt = time.Now().UTC().Add(s.rotationGrace)
 	if s.persist != nil {
 		pc := PersistedCredential{Cred: successor, TokenHashHex: rec.tokenHash}
-		if pred.persisted {
-			if perr := s.persist.Rotate(pc, id, pred.cred.TenantID, predecessorExpiresAt); perr != nil {
-				err = fmt.Errorf("credstore: persist rotate: %w", perr)
-				return
-			}
-		} else {
+		if !pred.persisted {
 			// The predecessor has no api_keys row (memory-only bootstrap
 			// credential), so its retirement is memory-only too and the
 			// successor's rotated_from must be cleared — the FK it names
 			// does not exist.
 			pc.Cred.RotatedFrom = ""
-			if perr := s.persist.Insert(pc); perr != nil {
-				err = fmt.Errorf("credstore: persist rotate successor: %w", perr)
-				return
-			}
+		}
+		if err = persist(pc, pred, predecessorExpiresAt); err != nil {
+			return
 		}
 		rec.persisted = true
 	}

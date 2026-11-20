@@ -24,6 +24,7 @@ import {
   buildDirectory,
   isActorReference,
   resolvePerson,
+  typedName,
   type DirectoryApiKey,
   type DirectoryUser,
   type PersonDirectory,
@@ -101,9 +102,17 @@ export function Person({
     );
   }
   if (freeText && !isActorReference(id)) {
+    // #2684: italics + tooltip mark a typed name apart from a resolved
+    // user, so it cannot pass for a verified identity.
+    const typed = typedName(id);
     return (
-      <span className={className} data-testid={testId} data-person-kind="text">
-        {id}
+      <span
+        className={"italic" + (className ? ` ${className}` : "")}
+        title={typed.title}
+        data-testid={testId}
+        data-person-kind="text"
+      >
+        {typed.text}
       </span>
     );
   }
