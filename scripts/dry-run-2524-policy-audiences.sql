@@ -10,7 +10,9 @@
 --
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/dry-run-2524-policy-audiences.sql
 --
--- Proposed mapping (a separate step, applied only with Matt's approval):
+-- The mapping, applied by migration
+-- 20261272000000_policy_audience_generic_to_everyone.sql (#2588), which
+-- ships only on Matt's go for this script's counts:
 --   'employee', 'all', 'all_staff', 'contractor'  -> 'everyone'
 --   any other value                               -> left as it is, and
 --                                                    flagged "unrecognised
