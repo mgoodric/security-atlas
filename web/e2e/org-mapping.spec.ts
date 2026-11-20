@@ -22,7 +22,9 @@
 // which overlay edges the tenant sees. The token is fetched at runtime and
 // never written as a literal here.
 
-import { expect, test, type Page } from "./fixtures";
+import type { Page } from "@playwright/test";
+
+import { expect, test } from "./fixtures";
 import { seedFromFixture } from "./seed";
 
 const REQUIREMENT_ID = "e2e18000-0000-0000-0000-00000000b001";
