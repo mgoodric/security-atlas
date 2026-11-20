@@ -87,7 +87,7 @@ func (s *Store) Create(ctx context.Context, in CreateMappingInput, by Actor) (Ma
 			Role:        in.Role,
 			CreatedBy:   ptrUUIDToPg(in.CreatedBy),
 		})
-		if isFKViolation(cErr) {
+		if isIDPConfigFKViolation(cErr) {
 			// The config was deleted between the lookup and the insert.
 			return ErrUnknownIDPConfig
 		}
@@ -200,10 +200,16 @@ func mappingFromRow(r dbx.OidcIdpGroupMapping) Mapping {
 	return m
 }
 
-// isFKViolation reports a foreign-key violation (SQLSTATE 23503).
-func isFKViolation(err error) bool {
+// idpConfigFKConstraint is the mapping -> IdP config FK from migration
+// 20261271000000_group_mapping_idp_config_fk.sql.
+const idpConfigFKConstraint = "oidc_idp_group_mappings_idp_config_fk"
+
+// isIDPConfigFKViolation reports a foreign-key violation (SQLSTATE 23503) on
+// the IdP config FK only (#2731), so an unrelated FK failure on the insert
+// surfaces as itself rather than as ErrUnknownIDPConfig.
+func isIDPConfigFKViolation(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == idpConfigFKConstraint
 }
 
 func ptrUUIDToPg(u *uuid.UUID) pgtype.UUID {
