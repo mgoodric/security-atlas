@@ -159,12 +159,11 @@ func (s *Server) registerMe(root *chi.Mux) {
 		}
 		meapi.NewTenancy(counter).Get(w, r)
 	})
-	// Slice 144: PATCH /v1/tenants/{id} — rename a tenant.
-	// Gated on per-tenant admin (slice-034 cred.IsAdmin OR
-	// slice-187 JWT roles[CURRENT][admin]) OR super_admin
-	// (slice-187 JWT atlas:super_admin claim). RLS on the
-	// tenants table is the load-bearing second leg —
-	// cross-tenant rename is impossible at the DB layer
+	// Slice 144: PATCH /v1/tenants/{id} — the organisation's own
+	// settings. Gated on authz.IsTenantAdmin (live tenant admin
+	// role, super_admin, or an admin-flagged key; #2443). RLS on
+	// the tenants table is the load-bearing second leg —
+	// cross-tenant patching is impossible at the DB layer
 	// regardless of the role gate.
 	tenantsH := tenantsapi.New(s.dbPool)
 	root.Patch("/v1/tenants/{id}", tenantsH.PatchTenant)
