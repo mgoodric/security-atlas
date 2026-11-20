@@ -145,7 +145,7 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	pending, err := h.store.PendingForUser(ctx, ackCallerFromCred(cred))
+	pending, err := h.store.PendingForUser(ctx, CallerFromCred(cred))
 	if err != nil {
 		if errors.Is(err, policy.ErrAckMissingUser) {
 			httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
@@ -222,7 +222,7 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 	ack, rerr := h.store.Record(ctx, policy.RecordInput{
 		PolicyID: policyID,
-		Caller:   ackCallerFromCred(cred),
+		Caller:   CallerFromCred(cred),
 	})
 	if rerr != nil {
 		h.writeRecordError(w, r, rerr)
@@ -369,9 +369,9 @@ func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore
 	return r.Context(), cred, true
 }
 
-// ackCallerFromCred hands the ack store the users(id) behind c, or "" when c
+// CallerFromCred hands the ack store the users(id) behind c, or "" when c
 // is not a user (the store then answers ErrAckMissingUser) (#2183).
-func ackCallerFromCred(c credstore.Credential) policy.AckCaller {
+func CallerFromCred(c credstore.Credential) policy.AckCaller {
 	userID := ""
 	if u, ok := credstore.CallerUserID(c); ok {
 		userID = u.String()
