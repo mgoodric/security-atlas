@@ -192,6 +192,173 @@ func TestSchemaComponentsRefuseUnmappedMarshalers(t *testing.T) {
 	}
 }
 
+// #2716: a named number that encodes itself keeps its marshaler under
+// ",string", so it is refused, not documented as a string.
+type schemaCents int64
+
+func (c schemaCents) MarshalJSON() ([]byte, error) { return []byte(`{"cents":1}`), nil }
+
+func TestSchemaComponentsMarshalerBeatsQuoted(t *testing.T) {
+	type quotedMarshaler struct {
+		Price schemaCents `json:"price,string"`
+	}
+	enc, err := json.Marshal(quotedMarshaler{Price: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(enc) != `{"price":{"cents":1}}` {
+		t.Fatalf("encoding/json wrote %s; the premise of this test no longer holds", enc)
+	}
+	withSchemas(t, []ResponseSchema{{Method: "GET", Path: "/x", Type: reflect.TypeOf(quotedMarshaler{})}}, nil)
+	err = writeSchemaComponents(&bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "knownTypes") {
+		t.Fatalf("want a knownTypes error, got %v", err)
+	}
+}
+
+// #2716: the marshaler error names the schema and the field path.
+func TestSchemaComponentsMarshalerErrorNamesThePath(t *testing.T) {
+	type schemaLeaf struct {
+		At pgtype.Timestamptz `json:"at"`
+	}
+	type schemaRoot struct {
+		Items []schemaLeaf `json:"items"`
+	}
+	withSchemas(t, []ResponseSchema{{Method: "GET", Path: "/x", Type: reflect.TypeOf(schemaRoot{})}}, nil)
+	err := writeSchemaComponents(&bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "openapi: schemaRoot.items[].at: pgtype.Timestamptz implements") {
+		t.Fatalf("want the path schemaRoot.items[].at in the error, got %v", err)
+	}
+}
+
+type schemaDeep struct {
+	Shadowed string `json:"shadowed"`
+	Deep     string `json:"deep"`
+}
+
+type schemaMid struct {
+	schemaDeep
+	Shadowed int `json:"shadowed"`
+}
+
+type schemaTagA struct {
+	Name string `json:"Name"`
+}
+
+type schemaTagB struct {
+	Name int // untagged: loses to schemaTagA.Name at the same depth
+}
+
+type schemaSelf struct {
+	*schemaSelf
+	Loop string `json:"loop"`
+}
+
+// schemaConflict exercises encoding/json's dominance rules: the
+// shallower field wins, a tagged field beats an untagged one at the same
+// depth, and a tie drops both.
+type schemaConflict struct {
+	schemaMid
+	schemaTagA
+	schemaTagB
+	schemaSelf
+	Deep string `json:"deep_outer"`
+	Top  bool   `json:"shadowed"`
+}
+
+// #2716: field-name conflicts resolve as encoding/json resolves them.
+func TestJSONFieldsFollowEncodingJSONDominance(t *testing.T) {
+	fields := jsonFields(reflect.TypeOf(schemaConflict{}))
+	got := map[string]jsonField{}
+	var names []string
+	for _, f := range fields {
+		if _, dup := got[f.Name]; dup {
+			t.Errorf("JSON name %q listed twice", f.Name)
+		}
+		got[f.Name] = f
+		names = append(names, f.Name)
+	}
+
+	enc, err := json.Marshal(schemaConflict{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(enc, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(wire) != len(got) {
+		t.Errorf("schema lists %v; encoding/json writes %s", names, enc)
+	}
+	for k := range wire {
+		if _, ok := got[k]; !ok {
+			t.Errorf("encoding/json writes %q, the schema omits it (%v)", k, names)
+		}
+	}
+	if f := got["shadowed"]; f.Type != reflect.TypeOf(false) {
+		t.Errorf("shadowed is %v, want the outer bool", f.Type)
+	}
+	if f := got["Name"]; f.Type != reflect.TypeOf("") || !f.tagged {
+		t.Errorf("Name should come from the tagged schemaTagA.Name, got %+v", f)
+	}
+	if _, ok := wire["Name"].(string); !ok {
+		t.Errorf("encoding/json wrote Name as %T, want string", wire["Name"])
+	}
+	if _, ok := wire["shadowed"].(bool); !ok {
+		t.Errorf("encoding/json wrote shadowed as %T, want bool", wire["shadowed"])
+	}
+	// Declaration order survives the dominance pass.
+	want := []string{"deep", "Name", "loop", "deep_outer", "shadowed"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("order %v, want %v", names, want)
+	}
+}
+
+type SchemaTieA struct {
+	Tie  string `json:"tie"`
+	Keep string `json:"keep_a"`
+}
+
+type SchemaTieB struct {
+	Tie  int    `json:"tie"`
+	Keep string `json:"keep_b"`
+}
+
+type SchemaTwiceInner struct {
+	Twice string `json:"twice"`
+}
+
+type SchemaTwiceL struct{ SchemaTwiceInner }
+
+type SchemaTwiceR struct{ SchemaTwiceInner }
+
+// #2716: a tie at one depth drops both fields, whether two structs tag
+// one name or one struct is embedded twice. The type is built with
+// reflect.StructOf because go vet (rightly) refuses the duplicate tag in
+// a literal struct.
+func TestJSONFieldsDropTies(t *testing.T) {
+	typ := reflect.StructOf([]reflect.StructField{
+		{Name: "SchemaTieA", Type: reflect.TypeOf(SchemaTieA{}), Anonymous: true},
+		{Name: "SchemaTieB", Type: reflect.TypeOf(SchemaTieB{}), Anonymous: true},
+		{Name: "SchemaTwiceL", Type: reflect.TypeOf(SchemaTwiceL{}), Anonymous: true},
+		{Name: "SchemaTwiceR", Type: reflect.TypeOf(SchemaTwiceR{}), Anonymous: true},
+	})
+	var names []string
+	for _, f := range jsonFields(typ) {
+		names = append(names, f.Name)
+	}
+	enc, err := json.Marshal(reflect.New(typ).Elem().Interface())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(enc) != `{"keep_a":"","keep_b":""}` {
+		t.Fatalf("encoding/json wrote %s; the premise of this test no longer holds", enc)
+	}
+	if strings.Join(names, ",") != "keep_a,keep_b" {
+		t.Errorf("schema lists %v; encoding/json writes %s", names, enc)
+	}
+}
+
 func TestSchemaComponentsRefuseEnumOnNonString(t *testing.T) {
 	withSchemas(t, []ResponseSchema{{Method: "GET", Path: "/x", Type: reflect.TypeOf(schemaSample{})}},
 		[]SchemaEnum{{Schema: "schemaSample", Field: "count", Values: []string{"1"}}})
