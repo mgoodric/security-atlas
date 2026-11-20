@@ -1,282 +1,347 @@
 // Slice 100 — Playwright E2E for the /risks list view.
 //
-// Runner status (post-slice-069 / 079 audit):
-// Playwright IS installed in `web/`. This spec is quarantined behind
-// slice 082 (the seed-data harness) per slice 079's decision; when that
-// harness lands, the un-commented assertions below become the gate. The
-// test bodies are preserved verbatim as a reviewable contract per the
-// slice 040 / 042 / 056 / 060 / 064 / 071 / 094 / 098 precedent.
+// Seeded by fixtures/e2e/risks-list.sql: a tenant of the spec's own
+// with 55 open risks (30 `mitigate`, 25 `untreated`, none `avoid`)
+// across two categories, one of them owned by the tenant's user and in
+// its one org unit. 55 rows give the default 50-row page a second page.
+// The spec signs in to the tenant with an admin JWT minted by
+// /v1/test/issue-jwt. #2755 restored the assertions slice 100 and its
+// follow-ons left commented out behind the slice-082 quarantine,
+// against what ships now; the tests whose feature was since removed are
+// `test.fixme` with the reason beside them.
 //
 // Run locally:
 //   cd web
 //   npx playwright install chromium     # once per machine
 //   npx playwright test e2e/risks-list.spec.ts
 //
-// Pre-conditions the seed-data harness (slice 082) must establish
-// before the commented assertions are turned on:
-//   - PLATFORM_BASE_URL points at a running platform instance.
-//   - TEST_BEARER carries a credential in a tenant that has at least
-//     three risks seeded across at least two treatment values and two
-//     owner strings, so the filter pills have something to narrow.
-//   - At least one risk has a 5x5 inherent_score so the severity pill
-//     "high" band returns a non-empty result.
-//
 // AC-10 coverage targets: list renders, filter narrows results, the
 // hierarchy page-header link navigates, and the reciprocal `List view`
 // link on /risks/hierarchy navigates back.
 
-import { test } from "@playwright/test";
+import type { Page } from "@playwright/test";
+
+import { expect, test } from "./fixtures";
+import { seedFromFixture } from "./seed";
+import { signInToTenant } from "./tenant-session";
+
+// Mirror the rows in fixtures/e2e/risks-list.sql.
+const TENANT = "00000000-0000-0000-0000-2755d0000004";
+const OWNER_USER = "44444444-4444-4444-4444-2755d0000041";
+const ORG_UNIT = "cccccccc-cccc-cccc-cccc-2755d0000001";
+const TOTAL = 55;
+const MITIGATED = 30;
+
+/** Opens /risks (plus `query`) and waits for the register to load. */
+async function openRisks(page: Page, query = ""): Promise<void> {
+  await page.goto(`/risks${query}`);
+  await expect(page.getByTestId("list-page")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("list-loading-skeleton")).toHaveCount(0, {
+    timeout: 30_000,
+  });
+}
+
+function rows(page: Page) {
+  return page.getByTestId("list-table-wrap").getByTestId("list-table-row");
+}
+
+function pill(page: Page, id: string) {
+  return page.getByTestId(`list-filter-pill-${id}`);
+}
 
 test.describe("/risks list view", () => {
-  test("AC-1: /risks renders the risk table for any signed-in user", async () => {
-    //    await page.goto("/login");
-    //    await page.fill('input[name="token"]', process.env.TEST_BEARER!);
-    //    await page.click("button[type=submit]");
-    //    await page.goto("/risks");
-    //    await expect(page.getByRole("heading", { name: /Risk register/ })).toBeVisible();
-    //    await expect(page.getByTestId("list-page")).toBeVisible();
-    //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+  test.beforeAll(() => {
+    seedFromFixture("risks-list");
   });
 
-  test("AC-3: horizontal pill filter row narrows the result set", async () => {
-    //    await page.goto("/risks");
-    //    const initial = await page.getByTestId("list-table-row").count();
-    //    const treatmentPill = page.getByLabel("Treatment");
-    //    await treatmentPill.selectOption({ value: "mitigate" });
-    //    await page.waitForLoadState("networkidle");
-    //    const filtered = await page.getByTestId("list-table-row").count();
-    //    expect(filtered).toBeLessThanOrEqual(initial);
-    // The filter row is horizontal (P0-A2) — verify NO left sidebar.
-    //    await expect(page.getByTestId("list-filter-pills")).toBeVisible();
+  test.beforeEach(async ({ page }) => {
+    await signInToTenant(page, {
+      tenantId: TENANT,
+      roles: ["admin"],
+      superAdmin: true,
+    });
   });
 
-  test("AC-4: empty state surfaces when filters return zero rows", async () => {
-    //    // Pick a (treatment, owner) combination unlikely to be seeded.
-    //    await page.goto("/risks?treatment=avoid&owner=DOES-NOT-EXIST");
-    //    await expect(page.getByTestId("list-empty-state")).toBeVisible();
-    //    await expect(
-    //      page.getByText("No risks match these filters"),
-    //    ).toBeVisible();
+  test("AC-1: /risks renders the risk table for any signed-in user", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    await expect(
+      page.getByRole("heading", { name: "Risk register", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+    await expect(rows(page)).toHaveCount(50);
+    await expect(page.getByTestId("risks-count-label")).toContainText(
+      `${TOTAL} risks`,
+    );
+  });
+
+  test("AC-3: horizontal pill filter row narrows the result set", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    // The filter row is horizontal (P0-A2) — no left sidebar.
+    await expect(page.getByTestId("list-filter-pills")).toBeVisible();
+    await expect(rows(page)).toHaveCount(50);
+    await pill(page, "treatment")
+      .getByRole("combobox")
+      .selectOption({ value: "mitigate" });
+    await expect(page).toHaveURL(/[?&]treatment=mitigate/);
+    await expect(rows(page)).toHaveCount(MITIGATED);
+    await expect(page.getByTestId("risks-count-label")).toContainText(
+      `${MITIGATED} of ${TOTAL} risks`,
+    );
+    for (const t of await page.getByTestId("risks-row-treatment").all()) {
+      await expect(t).toContainText(/mitigate/i);
+    }
+  });
+
+  test("AC-4: empty state surfaces when filters return zero rows", async ({
+    page,
+  }) => {
+    // No seeded risk is `avoid`. The owner pill takes a user id since
+    // #2129; this one owns nothing.
+    await openRisks(
+      page,
+      "?treatment=avoid&owner=44444444-4444-4444-4444-2755d00000ff",
+    );
+    await expect(page.getByTestId("list-empty-state")).toContainText(
+      "No risks match these filters",
+    );
     // The CTA reads "Clear filters" on a filter-induced empty state.
-    //    await page.getByTestId("list-empty-state-cta").click();
-    //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+    const cta = page.getByTestId("list-empty-state-cta");
+    await expect(cta).toHaveText("Clear filters");
+    await cta.click();
+    await expect(page).not.toHaveURL(/treatment=|owner=/);
+    await expect(rows(page)).toHaveCount(50);
   });
 
-  test("AC-6: page-header `Hierarchy view ->` link navigates to /risks/hierarchy", async () => {
-    //    await page.goto("/risks");
-    //    await page.getByTestId("risks-hierarchy-link").click();
-    //    await expect(page).toHaveURL(/\/risks\/hierarchy/);
-    //    // Reciprocal AC-8 wiring: the hierarchy page exposes a `List view ->`
-    //    // link back to /risks.
-    //    await expect(page.getByTestId("risk-hierarchy-list-view-link")).toBeVisible();
-    //    await page.getByTestId("risk-hierarchy-list-view-link").click();
-    //    await expect(page).toHaveURL(/\/risks(\?.*)?$/);
+  test("AC-6: page-header `Hierarchy view ->` link navigates to /risks/hierarchy", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    await page.getByTestId("risks-hierarchy-link").click();
+    await expect(page).toHaveURL(/\/risks\/hierarchy/);
+    // Reciprocal AC-8 wiring: the hierarchy page exposes a `List view ->`
+    // link back to /risks.
+    const back = page.getByTestId("risk-hierarchy-list-view-link");
+    await expect(back).toBeVisible({ timeout: 30_000 });
+    await back.click();
+    await expect(page).toHaveURL(/\/risks(\?.*)?$/);
+    await expect(page.getByTestId("list-page")).toBeVisible();
   });
 
-  test("AC-8: sidebar no longer exposes /risks/hierarchy as a top-level entry", async () => {
-    //    await page.goto("/dashboard");
-    //    // The /risks entry stays.
-    //    await expect(page.getByRole("link", { name: "Risks" })).toBeVisible();
-    //    // The /risks/hierarchy entry was REMOVED (audit F-3 closure).
-    //    await expect(
-    //      page.getByRole("link", { name: "Risk hierarchy" }),
-    //    ).toHaveCount(0);
+  // The sidebar lists /risks/hierarchy again: lib/nav.ts NAV_GROUPS puts
+  // it in the "Risks" group beside /risks, reversing slice 100's audit
+  // F-3 removal. Not a product bug on its face; the intent needs a call: #2774.
+  test.fixme(
+    "AC-8: sidebar no longer exposes /risks/hierarchy as a top-level entry",
+    async ({ page }) => {
+      await page.goto("/dashboard");
+      await expect(page.getByRole("link", { name: "Risks" })).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: "Risk hierarchy" }),
+      ).toHaveCount(0);
+    },
+  );
+
+  // Slice 185 (AC-4) made rows non-clickable, with a per-row "View in
+  // hierarchy" link and a future-slice banner, because no per-risk detail
+  // page existed. /risks/[id] has since shipped (#2132): a row click opens
+  // it, and the link and banner are gone. #2755 replaced slice 185's three
+  // tests, which can never pass again, with this one for the shipped shape.
+  test("#2132 (supersedes AC-185-1..3): a row click opens /risks/[id]; no hierarchy-link or future-slice banner", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    await expect(page.getByTestId("risks-row-hierarchy-link")).toHaveCount(0);
+    await expect(
+      page.getByTestId("risks-detail-future-slice-banner"),
+    ).toHaveCount(0);
+    await rows(page).first().getByTestId("list-cell-title").click();
+    await expect(page).toHaveURL(/\/risks\/[0-9a-f-]{36}$/);
   });
 
-  // Slice 185 (AC-4) — F-178-5 honesty fix. Rows are no longer clickable;
-  // the affordance is an explicit per-row "View in hierarchy" link plus a
-  // banner above the table. The prior implementation routed the row
-  // click to `/risks/hierarchy?focus=<id>`, which advertised "row =
-  // detail" but delivered the hierarchy. These assertions stay
-  // quarantined with the rest of the spec until the slice 082 seed
-  // harness lands.
-  test("AC-185-1: /risks rows expose no cursor-pointer affordance and ignore clicks", async () => {
-    //    await page.goto("/risks");
-    //    const firstRow = page.getByTestId("list-table-row").first();
-    //    await expect(firstRow).toBeVisible();
-    //    // The row no longer carries the cursor-pointer class (slice
-    //    // 098 `ListTable` only sets it when `onRowClick` is wired).
-    //    await expect(firstRow).not.toHaveClass(/cursor-pointer/);
-    //    // Clicking the body of the row (a non-anchor cell) must NOT
-    //    // navigate. We click the title cell, which is plain text.
-    //    const titleCell = firstRow.getByTestId("list-cell-title");
-    //    await titleCell.click();
-    //    await expect(page).toHaveURL(/\/risks(\?.*)?$/);
+  // Slice 247 — the header "New risk" is a `<Link>` styled as a button,
+  // replacing the disabled `<Button>`.
+  test("AC-247-1: header `New risk` link is enabled and points at /risks/new", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    const newLink = page.getByTestId("risks-new-link");
+    await expect(newLink).toBeVisible();
+    await expect(newLink).toHaveText("New risk");
+    await expect(newLink).toHaveAttribute("href", "/risks/new");
+    // The link is the role exposed to assistive tech, not a disabled
+    // button.
+    await expect(newLink).toHaveRole("link");
+    await expect(newLink).not.toHaveAttribute("disabled");
+    await expect(
+      page.locator("button[disabled]", { hasText: /^New risk$/ }),
+    ).toHaveCount(0);
   });
 
-  test("AC-185-2: each row exposes an explicit `View in hierarchy` link", async () => {
-    //    await page.goto("/risks");
-    //    const links = page.getByTestId("risks-row-hierarchy-link");
-    //    const count = await links.count();
-    //    expect(count).toBeGreaterThan(0);
-    //    const firstHref = await links.first().getAttribute("href");
-    //    expect(firstHref).toMatch(/^\/risks\/hierarchy\?focus=/);
-    //    // Following the link reaches the hierarchy view (workflow
-    //    // preservation per P0-185-2).
-    //    await links.first().click();
-    //    await expect(page).toHaveURL(/\/risks\/hierarchy/);
+  test("AC-247-2: clicking header `New risk` navigates to /risks/new", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    await page.getByTestId("risks-new-link").click();
+    await expect(page).toHaveURL(/\/risks\/new$/);
   });
 
-  test("AC-185-3: future-slice banner explains the missing per-risk detail page", async () => {
-    //    await page.goto("/risks");
-    //    await expect(
-    //      page.getByTestId("risks-detail-future-slice-banner"),
-    //    ).toBeVisible();
-    //    await expect(
-    //      page.getByText(/Per-risk detail page is a future slice/),
-    //    ).toBeVisible();
+  // Slice 244 — extended filter pill row (Category + Methodology + Org
+  // unit beside Treatment + Owner).
+  test("AC-244-1: Category pill is visible with the default `All categories` label", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    const p = pill(page, "category");
+    await expect(p).toBeVisible();
+    await expect(p).toContainText("Category");
+    await expect(p.getByRole("combobox")).toHaveValue("all");
+    await expect(
+      p.getByRole("option", { name: "All categories" }),
+    ).toBeAttached();
+    // The tenant's own categories are offered by name.
+    await expect(p.getByRole("option", { name: "Operational" })).toBeAttached();
   });
 
-  // Slice 247 — header "New risk" button enable. The header previously
-  // rendered `<Button size="sm" disabled>` even though `/risks/new`
-  // exists (slice 105) and the empty-state CTA already routes there.
-  // This slice replaces the disabled button with a `<Link>` wrapping
-  // the same shadcn Button shape via `buttonVariants({ size: "sm" })`.
-  // Both assertions (href + navigation) stay quarantined behind the
-  // slice 082 seed harness, matching the rest of this spec.
-  test("AC-247-1: header `New risk` link is enabled and points at /risks/new", async () => {
-    //    await page.goto("/risks");
-    //    const newLink = page.getByTestId("risks-new-link");
-    //    await expect(newLink).toBeVisible();
-    //    await expect(newLink).toHaveAttribute("href", "/risks/new");
-    //    // The previously disabled `<button disabled>` is gone — the
-    //    // link is the role exposed to assistive tech.
-    //    await expect(newLink).not.toHaveAttribute("disabled", "");
+  test("AC-244-2: Methodology pill is visible with the default `All methodologies` label", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    const p = pill(page, "methodology");
+    await expect(p).toBeVisible();
+    await expect(p).toContainText("Methodology");
+    await expect(p.getByRole("combobox")).toHaveValue("all");
+    await expect(
+      p.getByRole("option", { name: "All methodologies" }),
+    ).toBeAttached();
   });
 
-  test("AC-247-2: clicking header `New risk` navigates to /risks/new", async () => {
-    //    await page.goto("/risks");
-    //    await page.getByTestId("risks-new-link").click();
-    //    await expect(page).toHaveURL(/\/risks\/new$/);
+  test("AC-244-3: Org unit pill is visible with the default `All units` label", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    const p = pill(page, "org_unit");
+    await expect(p).toBeVisible();
+    await expect(p).toContainText("Org unit");
+    await expect(p.getByRole("combobox")).toHaveValue("all");
+    await expect(p.getByRole("option", { name: "All units" })).toBeAttached();
+    await expect(p.getByRole("option", { name: "Platform" })).toBeAttached();
   });
 
-  // Slice 244 — extended filter pill row (Category + Methodology +
-  // Org unit added to the slice-100 Treatment + Severity + Owner set).
-  // Default labels per page.tsx: "All categories" / "All methodologies"
-  // / "All units". Assertions stay quarantined behind the slice 082
-  // seed-data harness, matching the rest of this spec.
-  test("AC-244-1: Category pill is visible with the default `All categories` label", async () => {
-    //    await page.goto("/risks");
-    //    const pill = page.getByTestId("list-filter-pill-category");
-    //    await expect(pill).toBeVisible();
-    //    await expect(pill).toContainText("Category");
-    //    await expect(pill.getByRole("combobox")).toHaveValue("all");
-    //    await expect(
-    //      pill.getByRole("option", { name: "All categories" }),
-    //    ).toBeAttached();
+  // Slice 246 — /risks pagination footer (AC-7). The fixture's 55 risks
+  // make the default 50-row page a 2-page result.
+  test("AC-246-1: pagination footer renders with truth-telling summary", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    await expect(page.getByTestId("risks-pagination")).toBeVisible();
+    await expect(page.getByTestId("risks-pagination-summary")).toHaveText(
+      `Showing 1–50 of ${TOTAL}`,
+    );
   });
 
-  test("AC-244-2: Methodology pill is visible with the default `All methodologies` label", async () => {
-    //    await page.goto("/risks");
-    //    const pill = page.getByTestId("list-filter-pill-methodology");
-    //    await expect(pill).toBeVisible();
-    //    await expect(pill).toContainText("Methodology");
-    //    await expect(pill.getByRole("combobox")).toHaveValue("all");
-    //    await expect(
-    //      pill.getByRole("option", { name: "All methodologies" }),
-    //    ).toBeAttached();
+  test("AC-246-2: Previous is disabled on page 1, Next is enabled", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
+    await expect(page.getByTestId("risks-pagination-next")).toBeEnabled();
   });
 
-  test("AC-244-3: Org unit pill is visible with the default `All units` label", async () => {
-    //    await page.goto("/risks");
-    //    const pill = page.getByTestId("list-filter-pill-org_unit");
-    //    await expect(pill).toBeVisible();
-    //    await expect(pill).toContainText("Org unit");
-    //    await expect(pill.getByRole("combobox")).toHaveValue("all");
-    //    await expect(
-    //      pill.getByRole("option", { name: "All units" }),
-    //    ).toBeAttached();
+  test("AC-246-3: clicking Next advances to ?page=2 and updates the summary", async ({
+    page,
+  }) => {
+    await openRisks(page);
+    await page.getByTestId("risks-pagination-next").click();
+    await expect(page).toHaveURL(/\/risks\?(.*&)?page=2/);
+    await expect(page.getByTestId("risks-pagination-summary")).toHaveText(
+      `Showing 51–${TOTAL} of ${TOTAL}`,
+    );
+    await expect(rows(page)).toHaveCount(TOTAL - 50);
+    // Previous is now enabled; Next is disabled (only 2 pages).
+    await expect(page.getByTestId("risks-pagination-prev")).toBeEnabled();
+    await expect(page.getByTestId("risks-pagination-next")).toBeDisabled();
   });
 
-  // Slice 246 — /risks list pagination footer (AC-7). The footer is
-  // unconditional once at least one row is in the filtered set; with a
-  // multi-page register the Previous / Next buttons round-trip through
-  // the URL `?page=N`. Assertions stay quarantined behind the slice 082
-  // seed-data harness, matching the rest of this spec. Pre-conditions
-  // the harness must establish:
-  //   - At least 51 risk rows in the seeded tenant (so the default
-  //     `RISKS_PAGE_SIZE = 50` produces a 2-page result).
-  test("AC-246-1: pagination footer renders with truth-telling summary", async () => {
-    //    await page.goto("/risks");
-    //    const footer = page.getByTestId("risks-pagination");
-    //    await expect(footer).toBeVisible();
-    //    // With >=51 seeded rows the page-1 summary reads "Showing 1–50 of N".
-    //    await expect(page.getByTestId("risks-pagination-summary")).toContainText(
-    //      "Showing 1–50 of",
-    //    );
+  test("AC-246-4: Previous from page 2 returns to page 1 with the page param dropped", async ({
+    page,
+  }) => {
+    await openRisks(page, "?page=2");
+    await expect(page.getByTestId("risks-pagination-summary")).toHaveText(
+      `Showing 51–${TOTAL} of ${TOTAL}`,
+    );
+    await page.getByTestId("risks-pagination-prev").click();
+    // Canonical page-1 URL drops the `page` param.
+    await expect(page).not.toHaveURL(/[?&]page=/);
+    await expect(page).toHaveURL(/\/risks(\?.*)?$/);
+    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
+    await expect(page.getByTestId("risks-pagination-summary")).toHaveText(
+      `Showing 1–50 of ${TOTAL}`,
+    );
   });
 
-  test("AC-246-2: Previous is disabled on page 1, Next is enabled", async () => {
-    //    await page.goto("/risks");
-    //    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
-    //    await expect(page.getByTestId("risks-pagination-next")).toBeEnabled();
+  test("AC-246-5: filter mutation while on page 2 resets to page 1", async ({
+    page,
+  }) => {
+    await openRisks(page, "?page=2");
+    await expect(page.getByTestId("risks-pagination-summary")).toHaveText(
+      `Showing 51–${TOTAL} of ${TOTAL}`,
+    );
+    await pill(page, "treatment")
+      .getByRole("combobox")
+      .selectOption({ value: "mitigate" });
+    // The page param is dropped on the URL replace.
+    await expect(page).toHaveURL(/[?&]treatment=mitigate/);
+    await expect(page).not.toHaveURL(/[?&]page=/);
+    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
+    await expect(page.getByTestId("risks-pagination-summary")).toHaveText(
+      `Showing 1–${MITIGATED} of ${MITIGATED}`,
+    );
   });
 
-  test("AC-246-3: clicking Next advances to ?page=2 and updates the summary", async () => {
-    //    await page.goto("/risks");
-    //    await page.getByTestId("risks-pagination-next").click();
-    //    await expect(page).toHaveURL(/\/risks\?(.*&)?page=2/);
-    //    // Page 2 summary reads "Showing 51–N of N" (or similar).
-    //    await expect(page.getByTestId("risks-pagination-summary")).toContainText(
-    //      "Showing 51",
-    //    );
-    //    // Previous is now enabled; Next is disabled (only 2 pages).
-    //    await expect(page.getByTestId("risks-pagination-prev")).toBeEnabled();
-    //    await expect(page.getByTestId("risks-pagination-next")).toBeDisabled();
+  test("AC-246-6: refresh on ?page=2 preserves the page state", async ({
+    page,
+  }) => {
+    await openRisks(page, "?page=2");
+    await page.reload();
+    await expect(page).toHaveURL(/[?&]page=2/);
+    await expect(page.getByTestId("risks-pagination-summary")).toHaveText(
+      `Showing 51–${TOTAL} of ${TOTAL}`,
+      { timeout: 30_000 },
+    );
   });
 
-  test("AC-246-4: Previous from page 2 returns to page 1 with the page param dropped", async () => {
-    //    await page.goto("/risks?page=2");
-    //    await page.getByTestId("risks-pagination-prev").click();
-    //    // Canonical page-1 URL drops the `page` param.
-    //    await expect(page).toHaveURL(/\/risks(\?[^p]*)?$/);
-    //    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
-  });
-
-  test("AC-246-5: filter mutation while on page 2 resets to page 1", async () => {
-    //    await page.goto("/risks?page=2");
-    //    // Apply a filter change (Treatment → mitigate).
-    //    const treatmentPill = page.getByLabel("Treatment");
-    //    await treatmentPill.selectOption({ value: "mitigate" });
-    //    // The page param must be dropped on the next URL replace.
-    //    await expect(page).not.toHaveURL(/[?&]page=/);
-    //    await expect(page.getByTestId("risks-pagination-prev")).toBeDisabled();
-  });
-
-  test("AC-246-6: refresh on ?page=2 preserves the page state", async () => {
-    //    await page.goto("/risks?page=2");
-    //    await page.reload();
-    //    await expect(page).toHaveURL(/[?&]page=2/);
-    //    await expect(page.getByTestId("risks-pagination-summary")).toContainText(
-    //      "Showing 51",
-    //    );
-  });
-
-  test("AC-244-4: URL query round-trips all six filter keys", async () => {
-    //    // Pick valid wire enum values for category + methodology so a
-    //    // populated tenant lands on a real row set. The org_unit value
-    //    // is a UUID derived from the seeded org-units list.
-    //    const orgUnitId = process.env.TEST_ORG_UNIT_ID!;
-    //    await page.goto(
-    //      `/risks?category=operational&methodology=nist_800_30&org_unit=${orgUnitId}&treatment=mitigate&severity=high&owner=alpha`,
-    //    );
-    //    await expect(page.getByTestId("list-filter-pill-category")).toContainText(
-    //      "operational",
-    //    );
-    //    await expect(
-    //      page.getByTestId("list-filter-pill-methodology"),
-    //    ).toContainText("nist_800_30");
-    //    await expect(
-    //      page.getByTestId("list-filter-pill-org_unit"),
-    //    ).toBeVisible();
-    //    await expect(page.getByTestId("list-filter-pill-treatment")).toContainText(
-    //      "mitigate",
-    //    );
-    //    await expect(page.getByTestId("list-filter-pill-severity")).toContainText(
-    //      "high",
-    //    );
-    //    await expect(page.getByTestId("list-filter-pill-owner")).toContainText(
-    //      "alpha",
-    //    );
+  test("AC-244-4: URL query round-trips the filter keys", async ({ page }) => {
+    // The slice 244 set was six keys; the severity pill has since left
+    // the page and Status + Review due joined it. Every key the page
+    // ships reads back into its pill, and the combination lands on the
+    // fixture's one owned, org-unit risk.
+    await openRisks(
+      page,
+      `?status=open&category=operational&methodology=nist_800_30&org_unit=${ORG_UNIT}&treatment=mitigate&owner=${OWNER_USER}`,
+    );
+    const expected: Record<string, string> = {
+      status: "open",
+      category: "operational",
+      methodology: "nist_800_30",
+      org_unit: ORG_UNIT,
+      treatment: "mitigate",
+      owner: OWNER_USER,
+    };
+    for (const [id, value] of Object.entries(expected)) {
+      await expect(pill(page, id).getByRole("combobox")).toHaveValue(value);
+    }
+    // The id-valued pills show the person and the unit by name.
+    await expect(pill(page, "owner").locator("option:checked")).toHaveText(
+      "Risks List Owner",
+    );
+    await expect(pill(page, "org_unit").locator("option:checked")).toHaveText(
+      "Platform",
+    );
+    await expect(rows(page)).toHaveCount(1);
+    await expect(rows(page).first()).toContainText("Register risk 01");
   });
 });

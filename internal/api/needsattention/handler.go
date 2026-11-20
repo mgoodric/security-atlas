@@ -3,6 +3,7 @@ package needsattention
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"slices"
@@ -44,6 +45,12 @@ const (
 // does, so they stay on the calendar only.
 const calendarTypes = "exception,policy,vendor,control,risk,action_plan"
 
+// DefaultWarnRows is the row count past which one source read logs a
+// warning. The reads are uncapped so totals stay exact; past about 10,000
+// rows a source is where the #2555 D1 measurement says to revisit that
+// (#2698). cmd/atlas reads ATLAS_NEEDS_ATTENTION_WARN_ROWS.
+const DefaultWarnRows = 10_000
+
 // Handler serves GET /v1/needs-attention.
 type Handler struct {
 	pool      *pgxpool.Pool
@@ -52,12 +59,53 @@ type Handler struct {
 	engine    *authz.Engine
 	views     *moduleaccess.Views
 	nowFn     func() time.Time
+	warnRows  int
+	logger    *slog.Logger
 }
 
 // New builds a Handler on the app pool. approvals lists band 2, cal the
 // due-based bands.
 func New(pool *pgxpool.Pool, cal *calendar.Store, approvalsH *approvals.Handler) *Handler {
-	return &Handler{pool: pool, calendar: cal, approvals: approvalsH, nowFn: func() time.Time { return time.Now().UTC() }}
+	return &Handler{
+		pool: pool, calendar: cal, approvals: approvalsH,
+		nowFn:    func() time.Time { return time.Now().UTC() },
+		warnRows: DefaultWarnRows,
+	}
+}
+
+// WithWarnRows sets the row count past which one source read logs a
+// warning. n <= 0 keeps DefaultWarnRows.
+func (h *Handler) WithWarnRows(n int) *Handler {
+	if n > 0 {
+		h.warnRows = n
+	}
+	return h
+}
+
+// WithLogger sets the logger the large-read warning goes to; nil, the
+// default, is slog.Default() at the time of the warning.
+func (h *Handler) WithLogger(l *slog.Logger) *Handler {
+	h.logger = l
+	return h
+}
+
+// warnLarge logs a source read that returned more than warnRows rows:
+// the tenant has reached the size where the uncapped reads should be
+// revisited (#2555 D1, #2698).
+func (h *Handler) warnLarge(ctx context.Context, tenantID uuid.UUID, source string, bands []string, rows int) {
+	if rows <= h.warnRows {
+		return
+	}
+	l := h.logger
+	if l == nil {
+		l = slog.Default()
+	}
+	l.WarnContext(ctx, "needs attention: band read passed the row threshold",
+		slog.String("tenant_id", tenantID.String()),
+		slog.String("source", source),
+		slog.String("band", strings.Join(bands, ",")),
+		slog.Int("rows", rows),
+		slog.Int("threshold", h.warnRows))
 }
 
 // WithAuthz wires the OPA engine that narrows item types to the ones the
@@ -285,6 +333,7 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 		if err != nil {
 			return nil, fmt.Errorf("calendar: %w", err)
 		}
+		h.warnLarge(ctx, tenantID, "calendar", []string{BandOverdue, BandDueSoon}, len(rows))
 		items = append(items, DueItems(rows, now)...)
 	}
 
@@ -309,10 +358,11 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 		q := dbx.New(tx)
 		tid := pgtype.UUID{Bytes: tenantID, Valid: true}
 		if visible["control"] {
-			ctl, err := controlItems(ctx, tx, q, tid)
+			ctl, n, err := controlItems(ctx, tx, q, tid)
 			if err != nil {
 				return err
 			}
+			h.warnLarge(ctx, tenantID, "controls", []string{BandFailing, BandOwnershipGap}, n)
 			items = append(items, ctl...)
 		}
 		if visible["risk"] {
@@ -320,6 +370,7 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 			if err != nil {
 				return fmt.Errorf("list risks: %w", err)
 			}
+			h.warnLarge(ctx, tenantID, "risks", []string{BandOwnershipGap}, len(rows))
 			items = append(items, UnownedRisks(rows)...)
 		}
 		if err := resolveOwners(ctx, tx, tenantID, items); err != nil {
@@ -480,13 +531,14 @@ func DueItems(rows []dbx.ListCalendarEventsRow, now time.Time) []Item {
 
 // controlItems reads the in-scope controls through the controls list's
 // own query (active, not superseded, worst state per control) and returns
-// the failing ones (band 1) and the unowned ones (band 5).
-func controlItems(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tid pgtype.UUID) ([]Item, error) {
+// the failing ones (band 1) and the unowned ones (band 5), with the
+// number of rows read.
+func controlItems(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tid pgtype.UUID) ([]Item, int, error) {
 	rows, err := q.ListActiveControlsWithState(ctx, dbx.ListActiveControlsWithStateParams{
 		TenantID: tid, SortKey: "default", RowLimit: math.MaxInt32,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list controls: %w", err)
+		return nil, 0, fmt.Errorf("list controls: %w", err)
 	}
 	var unowned []uuid.UUID
 	for _, c := range rows {
@@ -496,9 +548,9 @@ func controlItems(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tid pgtype.UUI
 	}
 	created, err := createdAt(ctx, tx, tid.Bytes, unowned)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return ControlItems(rows, created), nil
+	return ControlItems(rows, created), len(rows), nil
 }
 
 // ControlItems maps the controls list's rows to band-1 and band-5 items.
