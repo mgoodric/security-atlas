@@ -143,7 +143,7 @@ func (s *Store) Issue(ctx context.Context, tenantID string, in IssueInput, by Ac
 		return credstore.Credential{}, "", err
 	}
 	issued := credentialFromRow(row)
-	if err := s.audit(ctx, q, row.TenantID, by, AuditActionKeyIssue,
+	if err := writeAudit(ctx, q, row.TenantID, by, AuditActionKeyIssue,
 		map[string]any{}, keyAuditOf(issued)); err != nil {
 		return credstore.Credential{}, "", err
 	}
@@ -232,7 +232,7 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 	predecessor := credentialFromRow(pred)
 	retired := predecessor
 	retired.RetiresAt = retiresAt
-	if err := s.audit(ctx, q, tIDU, by, AuditActionKeyRotate,
+	if err := writeAudit(ctx, q, tIDU, by, AuditActionKeyRotate,
 		map[string]any{"predecessor": keyAuditOf(predecessor)},
 		map[string]any{"predecessor": keyAuditOf(retired), "successor": keyAuditOf(successor)}); err != nil {
 		return credstore.Credential{}, "", time.Time{}, err
@@ -275,7 +275,7 @@ func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID, by Ac
 		before := keyAuditOf(credentialFromRow(cur))
 		after := before
 		after.Revoked = true
-		if err := s.audit(ctx, q, tIDU, by, AuditActionKeyRevoke, before, after); err != nil {
+		if err := writeAudit(ctx, q, tIDU, by, AuditActionKeyRevoke, before, after); err != nil {
 			return err
 		}
 	}

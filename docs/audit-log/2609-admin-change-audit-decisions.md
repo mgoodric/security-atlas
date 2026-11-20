@@ -150,6 +150,9 @@ So reaching the gRPC admin service needs a credential that already holds
 removes the rotate check, this stops holding and the gRPC path must be
 audited before that lands.
 
+**Update (#2652):** the gRPC path is now audited, with the same rows; see
+`docs/audit-log/2652-grpc-admin-key-audit-decisions.md`.
+
 ## D10. Part 3: generic pre-auth errors
 
 `/auth/oidc/login` and `/auth/oidc/callback` answer before anyone is signed
