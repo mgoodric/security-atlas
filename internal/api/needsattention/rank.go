@@ -13,8 +13,10 @@
 //  4. due_soon: the same calendar items, plus expiring exceptions, due
 //     within DueSoonDays, and the caller's own policy acknowledgements
 //     (TypePolicyAck, #2587): a lapsed one is overdue, one never made is
-//     due soon. They come from the ack store, not the calendar, whose ack
-//     lapse events are one per policy and day for many people;
+//     due soon until policy.AckGraceDays after the policy took effect and
+//     overdue after (#2736). They come from the ack store, not the
+//     calendar, whose ack lapse events are one per policy and day for
+//     many people;
 //  5. ownership_gap: in-scope controls with no assigned owner and open
 //     risks with no owner, listed for `for=all` only.
 //
