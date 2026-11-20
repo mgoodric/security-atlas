@@ -36,8 +36,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { switchTenant } from "@/lib/auth/switch-tenant";
-import { forgetPeopleDirectory } from "@/lib/people-cache";
 import { getQueryClient } from "@/lib/queryClient";
+import { forgetTenantCaches } from "@/lib/tenant-cache";
 import {
   onTenantSwitched,
   postTenantSwitched,
@@ -193,8 +193,8 @@ export function TenantSwitcher() {
       if (refetch) {
         void refetch();
       }
-      // #2085: names must not resolve against the old tenant.
-      forgetPeopleDirectory(getQueryClient());
+      // #2085, #2621: nothing cached for the old tenant may render.
+      forgetTenantCaches(getQueryClient());
       router.refresh();
     });
     return unsub;
@@ -247,8 +247,9 @@ export function TenantSwitcher() {
         // broadcast goes out promptly — router.refresh() does not
         // block on it, but the ordering documents intent.
         postTenantSwitched(targetId);
-        // #2085: drop the people directory cached for the old tenant.
-        forgetPeopleDirectory(getQueryClient());
+        // #2085, #2621: reset every query cached for the old tenant,
+        // the people directory included.
+        forgetTenantCaches(getQueryClient());
         // Hard refresh so server components re-render with the new
         // tenant scope (the JWT cookie carries it).
         router.refresh();
