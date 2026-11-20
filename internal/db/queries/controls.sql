@@ -434,18 +434,77 @@ ORDER BY c.tenant_id, c.bundle_id, c.id;
 -- RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
 -- belt-and-suspenders alongside the GUC-driven RLS on `controls` and
 -- `control_evaluations` (invariant #6).
-WITH latest_eval AS (
-    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
-        ce.tenant_id,
-        ce.control_id,
-        ce.scope_cell_id,
+WITH RECURSIVE eval_cells AS (
+    -- #2765: the distinct non-NULL scope cells each active control has
+    -- evaluations for, found by a skip scan on
+    -- idx_control_evaluations_latest: one index probe per (control, cell)
+    -- instead of reading the whole ledger. Postgres 16 has no native skip
+    -- scan, so the recursion steps to the next cell above the last one.
+    SELECT c.id AS control_id, f.scope_cell_id
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NOT NULL
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) f
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+    UNION ALL
+    SELECT ec.control_id, n.scope_cell_id
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id > ec.scope_cell_id
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) n
+),
+latest_eval AS (
+    -- The latest evaluation per (control, cell): a LIMIT 1 probe per cell,
+    -- plus one per control for the NULL whole-tenant cell (= cannot match
+    -- NULL, and IS NOT DISTINCT FROM is not indexable, so it is its own
+    -- branch). Same order and tiebreak as the DISTINCT ON this replaced.
+    -- Only active controls are probed; the outer query dropped superseded
+    -- ones anyway.
+    SELECT ec.control_id, ec.scope_cell_id,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT
         ce.result,
         ce.freshness_status,
         ce.last_observed_at,
         ce.evaluated_at
-    FROM control_evaluations ce
-    WHERE ce.tenant_id = sqlc.arg(tenant_id)
-    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id = ec.scope_cell_id
+        ORDER BY ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    UNION ALL
+    SELECT c.id, NULL::uuid,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NULL
+        -- Leading scope_cell_id (constant here) lets the planner read the
+        -- index in order: IS NULL does not make the column a pathkey
+        -- constant the way = does, so without it this sorts every row.
+        ORDER BY ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
 ),
 ranked_per_control AS (
     SELECT
@@ -575,15 +634,77 @@ LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 -- unowned / state / freshness / family / framework), so the total counts
 -- exactly what the filtered list pages over. The rollup CTEs repeat the
 -- list's.
-WITH latest_eval AS (
-    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
-        ce.control_id,
-        ce.scope_cell_id,
+WITH RECURSIVE eval_cells AS (
+    -- #2765: the distinct non-NULL scope cells each active control has
+    -- evaluations for, found by a skip scan on
+    -- idx_control_evaluations_latest: one index probe per (control, cell)
+    -- instead of reading the whole ledger. Postgres 16 has no native skip
+    -- scan, so the recursion steps to the next cell above the last one.
+    SELECT c.id AS control_id, f.scope_cell_id
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NOT NULL
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) f
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+    UNION ALL
+    SELECT ec.control_id, n.scope_cell_id
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT ce.scope_cell_id
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id > ec.scope_cell_id
+        ORDER BY ce.scope_cell_id
+        LIMIT 1
+    ) n
+),
+latest_eval AS (
+    -- The latest evaluation per (control, cell): a LIMIT 1 probe per cell,
+    -- plus one per control for the NULL whole-tenant cell (= cannot match
+    -- NULL, and IS NOT DISTINCT FROM is not indexable, so it is its own
+    -- branch). Same order and tiebreak as the DISTINCT ON this replaced.
+    -- Only active controls are probed; the outer query dropped superseded
+    -- ones anyway.
+    SELECT ec.control_id, ec.scope_cell_id,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM eval_cells ec
+    CROSS JOIN LATERAL (
+        SELECT
         ce.result,
-        ce.freshness_status
-    FROM control_evaluations ce
-    WHERE ce.tenant_id = sqlc.arg(tenant_id)
-    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = ec.control_id
+          AND ce.scope_cell_id = ec.scope_cell_id
+        ORDER BY ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    UNION ALL
+    SELECT c.id, NULL::uuid,
+        l.result, l.freshness_status, l.last_observed_at, l.evaluated_at
+    FROM controls c
+    CROSS JOIN LATERAL (
+        SELECT
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = sqlc.arg(tenant_id) AND ce.control_id = c.id
+          AND ce.scope_cell_id IS NULL
+        -- Leading scope_cell_id (constant here) lets the planner read the
+        -- index in order: IS NULL does not make the column a pathkey
+        -- constant the way = does, so without it this sorts every row.
+        ORDER BY ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+        LIMIT 1
+    ) l
+    WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
 ),
 worst_per_control AS (
     SELECT
