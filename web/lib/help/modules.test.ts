@@ -188,6 +188,29 @@ describe("the real help files", () => {
     expect(helpModuleForPath(route)?.id).toBe(id);
   });
 
+  // #2666 — since #2503 a tenant admin manages SSO, Users, API keys and
+  // Features for its own tenant; Tenants, Super admins and Demo stay
+  // super-admin only. Each page's "Who can do this" says which.
+  it.each([
+    ["admin-sso", true],
+    ["admin-users", true],
+    ["admin-api-keys", true],
+    ["admin-features", true],
+    ["admin-tenants", false],
+    ["admin-super-admins", false],
+    ["admin-demo", false],
+  ])("%s says whether a tenant admin can do it", (id, tenantAdmin) => {
+    const body = HELP_MODULES.find((m) => m.id === id)?.body ?? "";
+    const who = body.split("## Who can do this")[1] ?? "";
+    expect(who).not.toBe("");
+    if (tenantAdmin) {
+      expect(who).toContain("An admin of the tenant, or a super admin");
+      expect(who).not.toMatch(/Only super admins/);
+    } else {
+      expect(who.trim()).toBe("Only super admins.");
+    }
+  });
+
   // #2152 — every Audit page resolves to its own module.
   it.each([
     ["/audits", "audits"],

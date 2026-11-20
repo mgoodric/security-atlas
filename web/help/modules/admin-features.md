@@ -32,5 +32,6 @@ Core modules show **Core module, always on** and have no switch.
 
 ## Who can do this
 
-Only super admins. Other people who reach a switched-off page are told
-to ask an admin.
+An admin of the tenant, or a super admin. A tenant's admins switch
+modules and features only for their own tenant. Other people who reach a
+switched-off page are told to ask an admin.
