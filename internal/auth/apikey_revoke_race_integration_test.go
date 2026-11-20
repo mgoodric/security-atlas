@@ -56,30 +56,63 @@ func raceRevokes(t *testing.T, keyID uuid.UUID, revokes [2]func() error) [2]erro
 			errs[i] = fn()
 		}()
 	}
+	// From here a failure releases the lock and lets both revokes finish
+	// before the test ends, so neither outlives it.
+	fail := func(format string, args ...any) {
+		t.Helper()
+		_ = holder.Rollback(ctx)
+		wg.Wait()
+		t.Fatalf(format, args...)
+	}
 
 	// Both revokers wait on a lock: the first on the holder, the second on
-	// the first (tuple lock) or the holder.
+	// the first (tuple lock) or the holder. Only backends that also hold a
+	// lock on api_keys count, so an unrelated waiter cannot satisfy it.
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var waiting int
 		if err := adminPool.QueryRow(ctx, `
-			SELECT count(DISTINCT pid) FROM pg_locks
-			WHERE NOT granted AND pid <> $1`, holderPID).Scan(&waiting); err != nil {
-			t.Fatal(err)
+			SELECT count(DISTINCT w.pid) FROM pg_locks w
+			WHERE NOT w.granted AND w.pid <> $1
+			  AND EXISTS (SELECT 1 FROM pg_locks r
+			              WHERE r.pid = w.pid AND r.relation = 'api_keys'::regclass)`,
+			holderPID).Scan(&waiting); err != nil {
+			fail("poll pg_locks: %v", err)
 		}
 		if waiting >= 2 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("only %d revokes waiting on the row lock after 15s", waiting)
+			fail("only %d revokes waiting on the row lock after 15s", waiting)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	if err := holder.Commit(ctx); err != nil {
-		t.Fatal(err)
+		fail("release lock: %v", err)
 	}
 	wg.Wait()
 	return errs
+}
+
+// assertRevokedAtIsRevokeRow checks that the key's revoked_at is the
+// occurred_at of its one api_key_revoke row. Both are now() of the
+// transaction that revoked the key, so a later revoke that moved
+// revoked_at breaks the equality.
+func assertRevokedAtIsRevokeRow(t *testing.T, tenant, keyID uuid.UUID) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var revokedAt, occurredAt time.Time
+	if err := adminPool.QueryRow(ctx, `
+		SELECT k.revoked_at, a.occurred_at
+		FROM api_keys k, me_audit_log a
+		WHERE k.id = $1 AND a.tenant_id = $2 AND a.action = $3`,
+		keyID, tenant, apikeystore.AuditActionKeyRevoke).Scan(&revokedAt, &occurredAt); err != nil {
+		t.Fatalf("read revoked_at and revoke row: %v", err)
+	}
+	if !revokedAt.Equal(occurredAt) {
+		t.Errorf("revoked_at = %s, revoke row occurred_at = %s; a later revoke moved revoked_at", revokedAt, occurredAt)
+	}
 }
 
 func countRevokeRows(t *testing.T, tenant uuid.UUID) int {
@@ -116,6 +149,13 @@ func TestAPIKeyAudit_ConcurrentRevokesWriteOneRow(t *testing.T) {
 	if n := countRevokeRows(t, tenant); n != 1 {
 		t.Errorf("api_key_revoke rows = %d, want 1", n)
 	}
+	assertRevokedAtIsRevokeRow(t, tenant, keyID)
+
+	// A later revoke of the revoked key leaves revoked_at where it was.
+	if err := revoke(); err != nil {
+		t.Fatalf("third revoke: %v", err)
+	}
+	assertRevokedAtIsRevokeRow(t, tenant, keyID)
 }
 
 // gRPC path (AdminCredentialsService): two credstores over one database,
@@ -149,4 +189,5 @@ func TestGRPCAdminKeyAudit_ConcurrentRevokesWriteOneRow(t *testing.T) {
 	if n := countRevokeRows(t, tenant); n != 1 {
 		t.Errorf("api_key_revoke rows = %d, want 1", n)
 	}
+	assertRevokedAtIsRevokeRow(t, tenant, keyID)
 }
