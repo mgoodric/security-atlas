@@ -711,8 +711,9 @@ func TestAcknowledgmentRate_AC6(t *testing.T) {
 	s := setup(t)
 	policyID := createAndPublishPolicy(t, s, "AC-6 Policy", "1", []string{s.requiredRole}, s.controlID)
 
-	// Make 3 required-role users; admin user is also in denominator
-	// (is_admin=true wildcard counts).
+	// Make 3 required-role users. The admin's is_admin key does not put
+	// them on the roster: the roster is live user_roles (#2586), and the
+	// admin holds no grc_engineer row.
 	// 2 of 3 required-role users ack.
 	_, b1 := s.makeUserAndBearer(t, "u6a@test", []string{s.requiredRole}, false)
 	_, b2 := s.makeUserAndBearer(t, "u6b@test", []string{s.requiredRole}, false)
@@ -729,19 +730,19 @@ func TestAcknowledgmentRate_AC6(t *testing.T) {
 	if err := json.Unmarshal(raw, &rate); err != nil {
 		t.Fatalf("AC-6 unmarshal: %v body=%s", err, raw)
 	}
-	// Denominator: 3 required-role + 1 admin user = 4.
-	if rate.Denominator != 4 {
-		t.Fatalf("AC-6: want denominator 4 (3 role + 1 admin), got %d", rate.Denominator)
+	// Denominator: the 3 required-role users.
+	if rate.Denominator != 3 {
+		t.Fatalf("AC-6: want denominator 3 (the role holders), got %d", rate.Denominator)
 	}
 	// Numerator: 2 of the 3 role users ack; admin did NOT ack. So 2.
 	if rate.Numerator != 2 {
 		t.Fatalf("AC-6: want numerator 2, got %d (body=%s)", rate.Numerator, raw)
 	}
 	if rate.Percent == nil {
-		t.Fatalf("AC-6: percent is nil; want 50.0")
+		t.Fatalf("AC-6: percent is nil; want 66.67")
 	}
-	if *rate.Percent < 49.99 || *rate.Percent > 50.01 {
-		t.Fatalf("AC-6: want percent ~50, got %v", *rate.Percent)
+	if *rate.Percent < 66.66 || *rate.Percent > 66.67 {
+		t.Fatalf("AC-6: want percent ~66.67, got %v", *rate.Percent)
 	}
 }
 

@@ -342,7 +342,8 @@ func (s *AckStore) SetEvidenceRecordID(ctx context.Context, ackID uuid.UUID, evi
 
 // Rate computes the policy attestation rate for the policy at policyID,
 // resolved to its current published version. denominator = distinct
-// users with the required role in `api_keys`; numerator = those who
+// active users holding a live user_roles row the audience names (any live
+// role for AudienceEveryone, #2586); numerator = those who
 // have a fresh ack (>= now - AcknowledgmentFreshness) of that version.
 //
 // Returns ErrNotFound if the row doesn't exist; ErrAckPolicyNotPublished
@@ -368,12 +369,8 @@ func (s *AckStore) Rate(ctx context.Context, policyID uuid.UUID) (RateResult, er
 		if required == nil {
 			required = []string{}
 		}
-		// TODO(slice-035): the rate denominator currently uses the
-		// slice-034 stand-in (api_keys.owner_roles + is_admin). When
-		// slice 035 lands OPA-driven RBAC with first-class user-role
-		// bindings, replace this with a query against the
-		// user_role_bindings table. GLOSSARY.md "Policy acknowledgment
-		// (slice 023)" documents the stand-in.
+		// #2586: the roster is the live user_roles set, the same rows the
+		// authz engine resolves into a caller's TenantRoles.
 		denom, derr := q.CountRequiredRoleUsersForVersion(ctx, dbx.CountRequiredRoleUsersForVersionParams{
 			TenantID:      pgUUID(tenantID),
 			RequiredRoles: required,
