@@ -188,9 +188,12 @@ func buildCandidates(row BatchControl, edges []CrosswalkEdge, keyword []AnchorCa
 // candidates within that wall-clock budget; its failure leaves the
 // deterministic candidates as computed. Zero means no rerank.
 //
-// It waits for a slot as long as ctx lasts; the background caller's never
-// ends, and the slots are shared fairly between tenants (#2329), so another
-// tenant's load delays the run but cannot fail it.
+// It waits for a slot until ctx ends or backgroundSlotWait elapses. The
+// background caller's ctx never ends, so the wait is what bounds the runs
+// queued in one process (#2569); it equals the sweeper's cutoff, so a run
+// that gives up fails a batch the sweeper would fail anyway. The slots are
+// shared fairly between tenants (#2329), so another tenant's load delays the
+// run but fails it only past that cutoff.
 //
 // Every error path marks the batch failed (best effort), so a run that ends
 // never leaves it pending. A run that never ends (the process stops) is the
@@ -199,9 +202,13 @@ func buildCandidates(row BatchControl, edges []CrosswalkEdge, keyword []AnchorCa
 // ErrSuggestionsNoLongerPending and writes nothing.
 func (s *Stager) suggest(ctx context.Context, b Batch, rerankBudget time.Duration) ([]RowSuggestions, error) {
 	tenant, _ := tenancy.TenantFromContext(ctx)
-	release, ok := s.runs.acquire(ctx, tenant, 0)
+	release, ok := s.runs.acquire(ctx, tenant, s.backgroundSlotWait)
 	if !ok {
-		return nil, s.markFailed(ctx, b.ID, fmt.Errorf("controlimport: waiting for a suggestion slot: %w", ctx.Err()))
+		cause := ctx.Err()
+		if cause == nil {
+			cause = fmt.Errorf("no slot free after %s", s.backgroundSlotWait)
+		}
+		return nil, s.markFailed(ctx, b.ID, fmt.Errorf("controlimport: waiting for a suggestion slot: %w", cause))
 	}
 	defer release()
 	return s.suggestHeld(ctx, b, rerankBudget)

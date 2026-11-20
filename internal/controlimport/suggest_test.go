@@ -355,3 +355,74 @@ func TestBusyTenantDefersAnotherTenantsBatch(t *testing.T) {
 		t.Errorf("stored status = %q, want ready", store.status)
 	}
 }
+
+// panickingStore panics during the run's crosswalk read.
+type panickingStore struct{ *fakeBatchStore }
+
+func (panickingStore) CrosswalkAnchors(context.Context, string, []string) ([]CrosswalkEdge, error) {
+	panic("crosswalk boom")
+}
+
+// #2569: an inline run that panics, which the HTTP server recovers, still
+// frees its slot.
+func TestInlineRunPanicReleasesItsSlot(t *testing.T) {
+	t.Parallel()
+	s := NewStager(panickingStore{suggestStore()}).WithRunLimit(1)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("Stage did not panic")
+			}
+		}()
+		_, _ = s.Stage(tenantCtx(t, batchTenant), StageInput{
+			Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+		})
+	}()
+	release, ok := s.runs.acquire(context.Background(), batchTenant, 100*time.Millisecond)
+	if !ok {
+		t.Fatal("the only slot was not released after the panic")
+	}
+	release()
+}
+
+// #2569: a background run that waits past backgroundSlotWait gives up,
+// leaves the queue, and fails its batch as the sweeper would.
+func TestBackgroundSlotWaitIsBounded(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	s := NewStager(store).WithRunLimit(1)
+	s.asyncThreshold = 1
+	s.backgroundSlotWait = 50 * time.Millisecond
+	done := make(chan error, 1)
+	s.background = func(_ string, err error) { done <- err }
+	release, ok := s.runs.acquire(context.Background(), "22222222-2222-2222-2222-222222222222", 0)
+	if !ok {
+		t.Fatal("could not take the only slot")
+	}
+	defer release()
+	if _, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	}); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "waiting for a suggestion slot") {
+			t.Fatalf("background err = %v, want a slot-wait failure", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("background run still waiting for a slot past its bound")
+	}
+	store.mu.Lock()
+	status := store.status
+	store.mu.Unlock()
+	if status != SuggestionsFailed {
+		t.Errorf("stored status = %q, want failed", status)
+	}
+	s.runs.mu.Lock()
+	waiting := len(s.runs.waiters)
+	s.runs.mu.Unlock()
+	if waiting != 0 {
+		t.Errorf("%d runs still queued, want 0", waiting)
+	}
+}
