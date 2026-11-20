@@ -24,6 +24,7 @@ import {
   proxyBoundedUpload,
   readBoundedUpload,
 } from "./upload";
+import { UPSTREAM_5XX_BODY } from "./bff";
 
 const CAP = 64 * 1024;
 
@@ -363,6 +364,54 @@ describe("proxyBoundedUpload", () => {
     const res = await proxyBoundedUpload(req, UPSTREAM, { maxBytes: CAP });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "upload interrupted" });
+  });
+
+  // #2704 — the platform's 5xx body stays off the wire; a 4xx passes.
+  test("replaces a platform 5xx body, relays a 4xx body", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockResolvedValueOnce(
+      new Response('{"error":"blob put: s3://atlas-private/key denied"}', {
+        status: 500,
+      }),
+    );
+    const form = new FormData();
+    form.append("file", new Blob(["x"]), "x.bin");
+    const broke = await proxyBoundedUpload(
+      await multipartRequest(form),
+      UPSTREAM,
+      { maxBytes: CAP },
+    );
+    expect(broke.status).toBe(500);
+    expect(await broke.text()).toBe(UPSTREAM_5XX_BODY);
+
+    fetchSpy.mockResolvedValueOnce(
+      new Response('{"error":"walkthrough is frozen"}', { status: 409 }),
+    );
+    const refusedRes = await proxyBoundedUpload(
+      await multipartRequest(form),
+      UPSTREAM,
+      { maxBytes: CAP },
+    );
+    expect(refusedRes.status).toBe(409);
+    expect(await refusedRes.json()).toEqual({
+      error: "walkthrough is frozen",
+    });
+  });
+
+  // #2704 — a client that disconnects aborts the platform call, rather
+  // than leaving the BFF waiting on it.
+  test("passes the client's abort signal to the platform fetch", async () => {
+    const form = new FormData();
+    form.append("file", new Blob(["x"]), "x.bin");
+    const req = await multipartRequest(form);
+    let seen: AbortSignal | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      seen = init?.signal ?? undefined;
+      return new Response("{}", { status: 201 });
+    });
+    const res = await proxyBoundedUpload(req, UPSTREAM, { maxBytes: CAP });
+    expect(res.status).toBe(201);
+    expect(seen).toBe(req.signal);
   });
 
   test("502 when the platform cannot be reached", async () => {
