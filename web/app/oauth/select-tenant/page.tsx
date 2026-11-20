@@ -32,6 +32,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { switchTenant } from "@/lib/auth/switch-tenant";
+import { getQueryClient } from "@/lib/queryClient";
+import { forgetTenantCaches } from "@/lib/tenant-cache";
 import { selectTenantReturnTo } from "./return-to";
 
 interface Tenant {
@@ -117,6 +119,8 @@ function SelectTenantInner() {
           setPickingId(null);
           return;
         }
+        // #2621: nothing cached for the previous tenant may render.
+        forgetTenantCaches(getQueryClient());
         router.replace(returnTo);
       } catch (e) {
         setErrorMsg(e instanceof Error ? e.message : "switch failed");

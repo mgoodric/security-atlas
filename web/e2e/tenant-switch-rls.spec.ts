@@ -215,6 +215,38 @@ test.describe("tenant-switch real-RLS cross-tenant-leak (slice 389)", () => {
     // it fails (correctly) if the row ever appears within the timeout.
     await expect(canaryLocator(page)).toHaveCount(0);
   });
+
+  // #2621: the browser QueryClient outlives an in-tab switch, and the
+  // risks list key carries no tenant. Without the switch resetting every
+  // cached query, the mounted tenant-A list kept rendering until its
+  // staleTime ran out. No re-navigation here: the view that was already
+  // on screen must drop tenant A's row by itself.
+  test("#2621: an in-tab switch drops the mounted view's tenant-A data", async ({
+    page,
+  }) => {
+    const bearer = await mintMultiTenantJWT();
+    await injectBearer(page, bearer);
+
+    await gotoRisks(page);
+    await expect(canaryLocator(page)).toBeVisible({ timeout: 30_000 });
+
+    const switcher = page.getByRole("button", { name: "Switch tenant" });
+    await expect(switcher).toContainText(TENANT_A_NAME, { timeout: 30_000 });
+    await switcher.click();
+
+    // The reset refetches the mounted risks query under the new cookie.
+    const refetched = page.waitForResponse(
+      (r) => r.url().includes("/api/risks") && r.status() === 200,
+      { timeout: 30_000 },
+    );
+    await page
+      .getByRole("option", { name: TENANT_B_NAME, exact: true })
+      .click();
+    await refetched;
+
+    await expect(switcher).toContainText(TENANT_B_NAME, { timeout: 30_000 });
+    await expect(canaryLocator(page)).toHaveCount(0);
+  });
 });
 
 // canaryLocator scopes the canary-risk title to the desktop table cell
