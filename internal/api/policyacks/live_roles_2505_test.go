@@ -41,7 +41,7 @@ func TestAckCallerFromCred2505(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := ackCallerFromCred(tc.cred).OwnerRoles
+			got := CallerFromCred(tc.cred).OwnerRoles
 			if len(got) == 0 && len(tc.want) == 0 {
 				return
 			}

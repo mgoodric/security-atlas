@@ -36,4 +36,7 @@ that the address is the user's.
 
 ## Who can do this
 
-Only super admins.
+An admin of the tenant, or a super admin. A tenant's admins see and
+change only their own tenant's sign-in settings. Every change, including
+switching the unverified-email option on or off, is written to the audit
+log.

@@ -23,6 +23,7 @@ export const NEEDS_ATTENTION_TYPES = [
   "vendor",
   "action_plan",
   "exception",
+  "policy_ack",
   "risk_acceptance",
   "framework_scope",
 ] as const;
@@ -70,6 +71,7 @@ const TYPE_LABELS: Record<string, string> = {
   vendor: "Vendor",
   action_plan: "Action plan",
   exception: "Exception",
+  policy_ack: "Policy acknowledgement",
   risk_acceptance: "Risk acceptance",
   framework_scope: "Framework scope",
 };
