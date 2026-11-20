@@ -3,13 +3,13 @@
 //
 //	PATCH /v1/tenants/{id}   rename a tenant
 //
-// The endpoint is gated on (per-tenant admin) OR (super_admin per
-// the JWT claim). cred.IsAdmin is the slice-034 admin flag carried
-// on the legacy credential path; jwtmw.FromContext().SuperAdmin is
-// the slice-187 claim carried on the OAuth path. Either grants
-// rename authority on the caller's CURRENT tenant; cross-tenant
-// rename is denied by the schema layer (RLS) even if the role gate
-// were bypassed.
+// The endpoint is gated on authz.IsTenantAdmin: the caller's live
+// tenant admin role, or an admin credential (super_admin, or an
+// admin-flagged key). That includes allow_self_approval: an
+// organisation admin manages their own organisation's settings
+// (#2443, following #2503). It applies to the caller's CURRENT
+// tenant only; cross-tenant patching is refused by the id check and
+// by RLS even if the role gate were bypassed.
 //
 // What this slice does NOT ship (per the slice 144 spec):
 //
@@ -47,6 +47,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -525,32 +526,18 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"tenant": after})
 }
 
-// callerCanRename returns true when the request was issued by a
-// per-tenant admin OR a super_admin. The JWT claim path is the
-// preferred check (slice-190 cutover); the cred.IsAdmin fallback
-// honors callers still on the slice-034 credential path.
+// callerCanRename returns true when the caller is an admin of its
+// current tenant: authz.IsTenantAdmin, the same gate #2503 put on the
+// tenant-scoped /v1/admin routes. It reads the live user_roles that
+// authzmw resolved for this request, not the JWT role claim, which
+// outlives a role revoke (#2381). A super_admin JWT and an
+// admin-flagged key carry cred.IsAdmin and pass.
 func (h *Handler) callerCanRename(ctx context.Context) bool {
-	if claims := jwtmw.FromContext(ctx); claims != nil {
-		// SuperAdmin is the global override.
-		if claims.SuperAdmin {
-			return true
-		}
-		// Per-tenant admin via the JWT roles map for the caller's
-		// CURRENT tenant id.
-		if claims.CurrentTenantID != uuid.Nil {
-			for _, role := range claims.Roles[claims.CurrentTenantID] {
-				if role == "admin" {
-					return true
-				}
-			}
-		}
+	if claims := jwtmw.FromContext(ctx); claims != nil && claims.SuperAdmin {
+		return true
 	}
-	if cred, ok := authctx.CredentialFromContext(ctx); ok {
-		if cred.IsAdmin {
-			return true
-		}
-	}
-	return false
+	cred, ok := authctx.CredentialFromContext(ctx)
+	return ok && authz.IsTenantAdmin(cred)
 }
 
 // inTx opens a transaction under the caller's tenant GUC and invokes
