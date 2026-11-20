@@ -15,6 +15,7 @@
 import type { Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
+import { clickHelp } from "./help";
 
 const DOCS = "https://mgoodric.github.io/security-atlas/help/";
 const CSF_FV = "11111111-1111-4111-8111-111111111111";
@@ -90,7 +91,7 @@ test.describe("Audit help (#2152)", () => {
 
       const button = page.getByTestId("help-button");
       await expect(button).toHaveAccessibleName(`How this works: ${r.title}`);
-      await button.click();
+      await clickHelp(button);
 
       const panel = page.getByTestId("help-panel");
       await expect(panel).toBeVisible();
