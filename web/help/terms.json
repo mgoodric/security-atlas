@@ -157,7 +157,7 @@
     {
       "id": "super-admin",
       "name": "Super admin",
-      "short": "A person who manages the install as a whole: the Admin pages, creating tenants, and granting or demoting other super admins. It isn't a role inside a tenant.",
+      "short": "A person who manages the install as a whole: every Admin page, creating tenants, and granting or demoting other super admins. It isn't a role inside a tenant.",
       "long": "Super admin sits above the tenants. On its own it gives no right to work in a tenant's programme: a super admin still needs a role in a tenant to read or change its records. A new install's first administrator becomes its first super admin, and the last remaining super admin can't be demoted, so an install is never left without one."
     },
     {

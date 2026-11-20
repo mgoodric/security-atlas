@@ -34,5 +34,8 @@ security-atlas who someone is; this page decides what they may do.
 
 ## Who can do this
 
-Only super admins can open this page. Giving someone a role in a
-different tenant also needs a super admin.
+An admin of the tenant, or a super admin. A tenant's admins see and
+change only their own tenant's members, and can give any of the five
+roles, admin included. Super admin isn't a role, so it can't be given
+here. Giving someone a role in a different tenant, and **Add me to a
+tenant**, need a super admin.
