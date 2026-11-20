@@ -161,6 +161,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			"activity ledger (#2503 D5): picks the privileged view for an admin; never a refusal"),
 		"adminauditlog/activity_actors.go Handler.ActivityActors": notRoute(adm,
 			"activity machine actors (#2414): the same privileged-view choice as ActivityList; never a refusal"),
+		"tenants/handler.go Handler.callerCanRename": site(adm, r2447(patch, "/v1/tenants/"+id)),
 		"adminusers/handler.go requireAdmin": site(adm,
 			r2447(get, "/v1/admin/users/"+id),
 			r2447(patch, "/v1/admin/users/"+id+"/roles")),

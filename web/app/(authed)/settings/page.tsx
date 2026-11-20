@@ -81,8 +81,9 @@ import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
 
 // #2503: a tenant admin by its live roles reaches /admin and its own
-// tenant's API keys. `is_admin` stays the super-admin bit (the profile badge
-// and the tenant rename below). Fail-closed: a failed read is false.
+// tenant's API keys. #2443: it also sees the Organisation section, matching
+// PATCH /v1/tenants/{id}'s authz.IsTenantAdmin gate. `is_admin` stays the
+// super-admin bit (the profile badge). Fail-closed: a failed read is false.
 async function fetchIsTenantAdmin(): Promise<boolean> {
   const res = await fetch("/api/admin/me", { cache: "no-store" });
   if (!res.ok) return false;
@@ -129,7 +130,7 @@ export default function SettingsPage() {
       }
     >
       <ProfileSection isAdmin={isAdmin} />
-      {isAdmin ? <TenantSection /> : null}
+      {canAdminister ? <TenantSection /> : null}
       <AppearanceSection />
       <OnboardingSection />
       <NotificationsSection />
