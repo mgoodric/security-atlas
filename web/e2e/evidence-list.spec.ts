@@ -145,7 +145,9 @@ test.describe("/evidence list view", () => {
 
   // #2137 replaced the inline drawer with the evidence detail page: a row
   // click navigates there, and the page shows the FULL hash.
-  test("AC-7: row click opens the inline record drawer", async ({ page }) => {
+  test("#2137 (supersedes AC-7): row click opens /evidence/[id]", async ({
+    page,
+  }) => {
     await page.goto(`/evidence?control_id=${CONTROL_WITH_ROWS}`);
     await table(page)
       .getByTestId("list-table-row")

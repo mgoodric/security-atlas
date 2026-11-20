@@ -342,7 +342,7 @@ test.describe("/controls list view", () => {
     );
   });
 
-  test("slice 225 AC-4: New control disclosure replaces the disabled button", async ({
+  test("#2082/#1785 (supersedes slice 225 AC-4): no disabled New control; create path is Import controls", async ({
     authedPage: page,
   }) => {
     // Slice 225 replaced a permanently-disabled `<Button>New control</Button>`
