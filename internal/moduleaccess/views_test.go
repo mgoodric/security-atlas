@@ -31,6 +31,28 @@ func TestViews_NilSeesEverything(t *testing.T) {
 	}
 }
 
+// #2555: only a Views over both stores counts as wired; the HTTP server
+// refuses to start on any other.
+func TestViews_Wired(t *testing.T) {
+	t.Parallel()
+	store := NewStore(nil)
+	flags := featureflag.NewStore(nil)
+	cases := map[string]struct {
+		v    *Views
+		want bool
+	}{
+		"nil":         {nil, false},
+		"no access":   {NewViews(nil, flags), false},
+		"no flags":    {NewViews(store, nil), false},
+		"both stores": {NewViews(store, flags), true},
+	}
+	for name, tc := range cases {
+		if got := tc.v.Wired(); got != tc.want {
+			t.Errorf("%s: Wired() = %v; want %v", name, got, tc.want)
+		}
+	}
+}
+
 // ModuleSet answers per module through the registry: a hidden optional
 // module's routes are hidden, nested routes follow their owner, and core
 // routes and unplaced paths are always shown.

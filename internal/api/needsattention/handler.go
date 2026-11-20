@@ -523,7 +523,9 @@ func createdAt(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, ids []uuid.UU
 // ownerQueries reads each due-based item type's owner by record id: a
 // person for every type but a policy, which is owned by a role. An
 // exception's owner is its control's assigned owner, who renews or lets
-// the waiver lapse.
+// the waiver lapse. control_owner_assignments' primary key is
+// (tenant_id, control_id), so a control, and an exception through its
+// control, has at most one owner row (#2555).
 var ownerQueries = map[string]string{
 	"control": `SELECT control_id::text, owner_user_id::text FROM control_owner_assignments
 	             WHERE tenant_id = $1 AND control_id = ANY($2::uuid[])`,
