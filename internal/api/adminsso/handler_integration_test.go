@@ -409,8 +409,8 @@ func TestPatchSSORefusesSecretWithoutKey(t *testing.T) {
 	})
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/admin/sso", bytes.NewReader(body)))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("PATCH status = %d, want 503; body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("PATCH status = %d, want 409; body = %s", rec.Code, rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), "never-stored") {
 		t.Errorf("refusal echoes the secret: %s", rec.Body.String())

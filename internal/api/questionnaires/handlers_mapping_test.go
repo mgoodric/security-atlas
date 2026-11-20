@@ -1,6 +1,6 @@
 // Slice 755 — pure-Go unit tests for the SCF-mapping suggest/approve/reject
 // handler branches: the role gate, the missing-tenant / missing-credential
-// 401, the nil-service 503, the bad-uuid 400, and the service-error → HTTP
+// 401, the nil-service 409, the bad-uuid 400, and the service-error → HTTP
 // status mapping (404 / 409 / 400 / 500) plus the 200 render. The service is
 // a real *qmapsuggest.Service backed by in-memory fakes (the slice-353 Q-2
 // fast-loop convention), so none of these touch Postgres. The happy-path DB
@@ -112,7 +112,7 @@ func grcCred() *credstore.Credential {
 	return &credstore.Credential{ID: "key_grc", TenantID: testTenant, IsAdmin: true}
 }
 
-// guardCases exercises the shared guard ladder (401 / 403 / 503) that all
+// guardCases exercises the shared guard ladder (401 / 403 / 409) that all
 // three mapping handlers repeat, without reaching any service call.
 func guardCases(t *testing.T, name string, fn func(h *Handler) http.HandlerFunc) {
 	t.Helper()
@@ -130,9 +130,9 @@ func guardCases(t *testing.T, name string, fn func(h *Handler) http.HandlerFunc)
 	if w := route(fn(h), reqWith(t, "POST", "/x", testTenant, &viewer), nil); w.Code != http.StatusForbidden {
 		t.Errorf("%s viewer: got %d, want 403", name, w.Code)
 	}
-	// Authorized but mapping service not wired -> 503, not a panic.
-	if w := route(fn(h), reqWith(t, "POST", "/x", testTenant, grcCred()), nil); w.Code != http.StatusServiceUnavailable {
-		t.Errorf("%s nil-service: got %d, want 503", name, w.Code)
+	// Authorized but mapping service not wired -> 409, not a panic.
+	if w := route(fn(h), reqWith(t, "POST", "/x", testTenant, grcCred()), nil); w.Code != http.StatusConflict {
+		t.Errorf("%s nil-service: got %d, want 409", name, w.Code)
 	}
 }
 

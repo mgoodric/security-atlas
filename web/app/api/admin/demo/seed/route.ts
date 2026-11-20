@@ -5,12 +5,12 @@
 // Forwards the bearer cookie + an EMPTY body (P0-278-2: no user
 // input flows through). The upstream hard-codes slug + scale.
 //
-// 503 from upstream means env-var gate is unset. The frontend
-// renders a "demo tools not enabled" banner in that case; the
-// confirmation dialog flow only fires this endpoint when the
-// status probe reported enabled=true. A race where status flipped
-// false between probe and click would surface a 503 here; the
-// page renders that as a destructive toast.
+// 409 {code: "feature_not_enabled"} from upstream means the env-var
+// gate is unset (#2730). The frontend renders a "demo tools not
+// enabled" banner from the status probe; the confirmation dialog flow
+// only fires this endpoint when the probe reported enabled=true. A race
+// where status flipped false between probe and click surfaces the 409
+// here, and the page shows its message in the error Alert.
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";

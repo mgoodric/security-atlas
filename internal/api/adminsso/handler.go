@@ -269,7 +269,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	secretBytes := []byte{}
 	if req.ClientSecret != "" {
 		if h.crypter == nil {
-			httpresp.WriteError(w, http.StatusServiceUnavailable,
+			httpresp.WriteFeatureNotEnabled(w,
 				"client secret encryption is not configured on this deployment (set "+idpconfig.SecretKeyEnv+")")
 			return
 		}
