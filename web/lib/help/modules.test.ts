@@ -211,6 +211,18 @@ describe("the real help files", () => {
     }
   });
 
+  // #2666 — since #2695 Settings shows Personal API tokens and Organisation
+  // to a tenant admin as well as a super admin.
+  it.each(["**Personal API tokens**", "**Organisation**"])(
+    "settings help says a tenant admin can use %s",
+    (section) => {
+      const body = HELP_MODULES.find((m) => m.id === "settings")?.body ?? "";
+      const item = body.split(`- ${section}`)[1]?.split("\n- ")[0] ?? "";
+      expect(item).toMatch(/An admin\s+of the tenant or a super\s+admin/);
+      expect(item).not.toMatch(/Only\s+super admins/);
+    },
+  );
+
   // #2152 — every Audit page resolves to its own module.
   it.each([
     ["/audits", "audits"],
