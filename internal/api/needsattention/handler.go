@@ -332,17 +332,14 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 
 // ackItems lists the policies waiting for the caller's acknowledgement:
 // published, aimed at a role the caller holds live or at everyone (the
-// targeting POST /v1/policies/{id}/acknowledge applies, #2580), with no
-// fresh ack of the current version. The admin flag is dropped: the ack
-// store lets an admin acknowledge any policy, but a policy not aimed at
-// them is not theirs to acknowledge. A credential with no person behind
+// targeting POST /v1/policies/{id}/acknowledge applies, #2580, #2728), with
+// no fresh ack of the current version. A credential with no person behind
 // it acknowledges nothing.
 func (h *Handler) ackItems(r *http.Request, cred credstore.Credential) ([]Item, error) {
 	caller := policyacks.CallerFromCred(cred)
 	if caller.UserID == "" {
 		return nil, nil
 	}
-	caller.IsAdmin = false
 	pending, err := policy.NewAckStore(h.pool).WithClock(h.nowFn).PendingForUser(r.Context(), caller)
 	if err != nil {
 		return nil, fmt.Errorf("pending acknowledgements: %w", err)
