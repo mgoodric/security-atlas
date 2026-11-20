@@ -2,6 +2,7 @@ package policies
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -40,4 +41,24 @@ func validateAudience(roles, keep []string) error {
 		}
 	}
 	return nil
+}
+
+// unknownAudiences returns the values in roles outside AudienceValues,
+// quoted, in the order given and without repeats. The admin import (#2586) reports
+// every one of them for a file rather than stopping at the first.
+func unknownAudiences(roles []string) []string {
+	known := map[string]bool{}
+	for _, v := range AudienceValues() {
+		known[v] = true
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range roles {
+		if known[r] || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, strconv.Quote(r))
+	}
+	return out
 }

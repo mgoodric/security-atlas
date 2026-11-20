@@ -77,8 +77,9 @@ func TestAcknowledge2524_RoleMatrix(t *testing.T) {
 	}
 
 	// The rate of an everyone policy counts every member on the roster:
-	// the admin, the other viewer and the three role users; the three
-	// acknowledged it.
+	// the other viewer and the three role users, each holding a live role
+	// (#2586: the admin's is_admin key is not one); the three acknowledged
+	// it.
 	raw := s.getJSON(t, "/v1/policies/"+everyone+"/acknowledgment-rate", s.adminBear, http.StatusOK)
 	var rate struct {
 		Numerator   int64 `json:"numerator"`
@@ -87,8 +88,8 @@ func TestAcknowledge2524_RoleMatrix(t *testing.T) {
 	if err := json.Unmarshal(raw, &rate); err != nil {
 		t.Fatalf("unmarshal rate: %v body=%s", err, raw)
 	}
-	if rate.Numerator != 3 || rate.Denominator != 5 {
-		t.Errorf("everyone rate = %d/%d; want 3/5", rate.Numerator, rate.Denominator)
+	if rate.Numerator != 3 || rate.Denominator != 4 {
+		t.Errorf("everyone rate = %d/%d; want 3/4", rate.Numerator, rate.Denominator)
 	}
 }
 
