@@ -25,6 +25,12 @@
 // back in the DOM. A list keeps one trigger per row with
 // `useTriggerRefs`. A confirm holding a required field passes
 // `initialFocus` so focus lands in the field instead of on Cancel.
+//
+// #2682 — a confirm that deletes its row leaves focus alone, and the row
+// (and its trigger) then disappears, so focus would drop to <body>. A
+// list that removes rows calls `useFocusAfterRemoval`: it arms on
+// Confirm and, once the row has left the list, focuses the next row's
+// trigger, else the previous row's, else the list's heading.
 
 import { Menu } from "@base-ui/react/menu";
 import {
@@ -45,12 +51,16 @@ import {
   confirmingItem,
   confirmOpenFocus,
   confirmPromptFor,
+  focusFirst,
+  focusWasLost,
   IDLE,
   isDisabled,
   reduceConfirm,
   visibleItems,
+  watchRemoval,
   type ConfirmEvent,
   type ConfirmState,
+  type RemovalWatch,
   type RowActionItem,
 } from "./row-actions-model";
 
@@ -257,6 +267,12 @@ export function ConfirmInline({
     cancelled.current = true;
     onCancel();
   }
+  // A caller may keep the confirm mounted after a cancel and show it
+  // again; a later Confirm must not hand focus back as if cancelled.
+  function confirm() {
+    cancelled.current = false;
+    onConfirm();
+  }
   return (
     <div
       role="group"
@@ -288,7 +304,7 @@ export function ConfirmInline({
           variant="destructive"
           size="sm"
           disabled={busy}
-          onClick={onConfirm}
+          onClick={confirm}
           data-testid={`${testId}-ok`}
         >
           {confirmLabel}
@@ -311,6 +327,59 @@ export function useTriggerRefs() {
         else map.current.delete(key);
       },
       get: (key: string) => map.current.get(key) ?? null,
+    }),
+    [],
+  );
+}
+
+/** #2682 — focus a neighbour after a confirmed delete removes its row.
+ *  `keys` are the list's rows in order, `get` returns a row's trigger
+ *  (a `useTriggerRefs().get`), `fallback` the list's heading or empty
+ *  state (give it `tabIndex={-1}`). `settled` is false while the action
+ *  is in flight; keep it false until the refetch is in (return the
+ *  invalidation from `onSuccess`). Call `arm(key)` in `onConfirm`. */
+export function useFocusAfterRemoval(
+  keys: readonly string[],
+  opts: {
+    get: (key: string) => HTMLElement | null;
+    fallback: () => HTMLElement | null | undefined;
+    settled: boolean;
+  },
+) {
+  const watch = useRef<RemovalWatch>(null);
+  const latestKeys = useRef(keys);
+  const latest = useRef(opts);
+  useEffect(() => {
+    latestKeys.current = keys;
+    latest.current = opts;
+  });
+  const { settled } = opts;
+  useEffect(() => {
+    const { watch: next, focusOrder } = watchRemoval(
+      watch.current,
+      keys,
+      settled,
+    );
+    watch.current = next;
+    if (!focusOrder) return;
+    const active = document.activeElement;
+    const lost = focusWasLost({
+      active,
+      body: document.body,
+      activeConnected: active?.isConnected ?? false,
+    });
+    if (!lost) return;
+    const { get, fallback } = latest.current;
+    focusFirst(
+      [...focusOrder.map(get), fallback()],
+      (f) => document.activeElement === f,
+    );
+  }, [keys, settled]);
+  return useMemo(
+    () => ({
+      arm: (key: string) => {
+        watch.current = { key, before: latestKeys.current, sawBusy: false };
+      },
     }),
     [],
   );

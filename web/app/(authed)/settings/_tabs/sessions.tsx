@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
+import {
+  ConfirmInline,
+  useFocusAfterRemoval,
+  useTriggerRefs,
+} from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { listMySessions, MeSession, revokeMySession } from "@/lib/api/me";
@@ -42,13 +46,26 @@ export function SessionsSection() {
     mutationFn: revokeMySession,
     onSuccess: () => {
       setConfirming(null);
-      qc.invalidateQueries({ queryKey: ["settings-me-sessions"] });
+      // Returned, so the mutation stays pending until the list is
+      // refetched and focus moves only once the row has gone (#2682).
+      return qc.invalidateQueries({ queryKey: ["settings-me-sessions"] });
     },
   });
+  const headingRef = useRef<HTMLDivElement>(null);
+  const removal = useFocusAfterRemoval(
+    (sessionsQuery.data ?? []).map((s) => s.id),
+    {
+      get: revokeTriggers.get,
+      fallback: () => headingRef.current,
+      settled: !revokeMut.isPending,
+    },
+  );
   return (
     <Card id="sessions" data-testid="settings-section-sessions">
       <CardHeader>
-        <CardTitle>Active sessions</CardTitle>
+        <CardTitle ref={headingRef} tabIndex={-1}>
+          Active sessions
+        </CardTitle>
         <CardDescription>Browsers currently signed in as you.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -114,7 +131,10 @@ export function SessionsSection() {
                         busy={revokeMut.isPending}
                         onCancel={() => setConfirming(null)}
                         returnFocus={() => revokeTriggers.get(s.id)}
-                        onConfirm={() => revokeMut.mutate(s.id)}
+                        onConfirm={() => {
+                          removal.arm(s.id);
+                          revokeMut.mutate(s.id);
+                        }}
                         data-testid="settings-session-revoke-confirm"
                       />
                     ) : (

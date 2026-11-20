@@ -25,7 +25,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ConfirmInline } from "@/components/ui/row-actions";
+import {
+  ConfirmInline,
+  useFocusAfterRemoval,
+  useTriggerRefs,
+} from "@/components/ui/row-actions";
 import {
   Table,
   TableBody,
@@ -100,6 +104,9 @@ function CategoriesSection({ canEdit }: { canEdit: boolean }) {
     queryKey: CATEGORIES_KEY,
     queryFn: listTaxonomyCategories,
   });
+  // #2682 — after a delete, focus the next row's Delete, not <body>.
+  const deleteTriggers = useTriggerRefs();
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
   const run = useMutation({
     mutationFn: (op: { fn: () => Promise<unknown>; done: string }) => op.fn(),
@@ -110,6 +117,14 @@ function CategoriesSection({ canEdit }: { canEdit: boolean }) {
     },
     onError: (err) => setError(errorText(err)),
   });
+  const removal = useFocusAfterRemoval(
+    (q.data ?? []).map((c) => c.slug),
+    {
+      get: deleteTriggers.get,
+      fallback: () => headingRef.current,
+      settled: !run.isPending,
+    },
+  );
 
   function add(e: FormEvent) {
     e.preventDefault();
@@ -140,7 +155,12 @@ function CategoriesSection({ canEdit }: { canEdit: boolean }) {
       className="space-y-3"
       data-testid="taxonomy-categories"
     >
-      <h2 id="taxonomy-categories-heading" className="text-lg font-semibold">
+      <h2
+        id="taxonomy-categories-heading"
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-lg font-semibold"
+      >
         Categories
       </h2>
       <p className="text-sm text-muted-foreground">
@@ -214,6 +234,9 @@ function CategoriesSection({ canEdit }: { canEdit: boolean }) {
                 canEdit={canEdit}
                 busy={run.isPending}
                 onRun={(fn, done) => run.mutate({ fn, done })}
+                deleteRef={deleteTriggers.ref(c.slug)}
+                getDeleteTrigger={() => deleteTriggers.get(c.slug)}
+                onDeleteConfirmed={() => removal.arm(c.slug)}
               />
             ))}
           </TableBody>
@@ -228,16 +251,21 @@ function CategoryRow({
   canEdit,
   busy,
   onRun,
+  deleteRef,
+  getDeleteTrigger,
+  onDeleteConfirmed,
 }: {
   category: RiskCategory;
   canEdit: boolean;
   busy: boolean;
   onRun: (fn: () => Promise<unknown>, done: string) => void;
+  deleteRef: (el: HTMLElement | null) => void;
+  getDeleteTrigger: () => HTMLElement | null;
+  onDeleteConfirmed: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(c.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const deleteRef = useRef<HTMLButtonElement>(null);
   const blocked = deleteBlockedReason(c);
 
   return (
@@ -402,9 +430,10 @@ function CategoryRow({
                 confirmLabel="Delete"
                 busy={busy}
                 onCancel={() => setConfirmDelete(false)}
-                returnFocus={() => deleteRef.current}
+                returnFocus={getDeleteTrigger}
                 onConfirm={() => {
                   setConfirmDelete(false);
+                  onDeleteConfirmed();
                   onRun(
                     () => deleteCategory(c.slug),
                     `Category “${c.name}” deleted`,
@@ -459,6 +488,15 @@ function ThemesSection({ canEdit }: { canEdit: boolean }) {
       Number(a.source === "default") - Number(b.source === "default") ||
       a.name.localeCompare(b.name),
   );
+  // #2682 — after a delete, focus the next row's Delete, not <body>.
+  const themeKey = (t: TaxonomyTheme) => `${t.source}:${t.name}`;
+  const deleteTriggers = useTriggerRefs();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const removal = useFocusAfterRemoval(themes.map(themeKey), {
+    get: deleteTriggers.get,
+    fallback: () => headingRef.current,
+    settled: !run.isPending,
+  });
 
   return (
     <section
@@ -467,7 +505,12 @@ function ThemesSection({ canEdit }: { canEdit: boolean }) {
       className="space-y-3"
       data-testid="taxonomy-themes"
     >
-      <h2 id="taxonomy-themes-heading" className="text-lg font-semibold">
+      <h2
+        id="taxonomy-themes-heading"
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-lg font-semibold"
+      >
         Themes
       </h2>
       <p className="text-sm text-muted-foreground">
@@ -525,11 +568,14 @@ function ThemesSection({ canEdit }: { canEdit: boolean }) {
           <TableBody>
             {themes.map((t) => (
               <ThemeRow
-                key={`${t.source}:${t.name}`}
+                key={themeKey(t)}
                 theme={t}
                 canEdit={canEdit}
                 busy={run.isPending}
                 onRun={(fn, done) => run.mutate({ fn, done })}
+                deleteRef={deleteTriggers.ref(themeKey(t))}
+                getDeleteTrigger={() => deleteTriggers.get(themeKey(t))}
+                onDeleteConfirmed={() => removal.arm(themeKey(t))}
               />
             ))}
           </TableBody>
@@ -544,16 +590,21 @@ function ThemeRow({
   canEdit,
   busy,
   onRun,
+  deleteRef,
+  getDeleteTrigger,
+  onDeleteConfirmed,
 }: {
   theme: TaxonomyTheme;
   canEdit: boolean;
   busy: boolean;
   onRun: (fn: () => Promise<unknown>, done: string) => void;
+  deleteRef: (el: HTMLElement | null) => void;
+  getDeleteTrigger: () => HTMLElement | null;
+  onDeleteConfirmed: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(t.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const deleteRef = useRef<HTMLButtonElement>(null);
   const builtIn = t.source === "default";
   const blocked = deleteBlockedReason(t);
 
@@ -664,9 +715,10 @@ function ThemeRow({
                     confirmLabel="Delete"
                     busy={busy}
                     onCancel={() => setConfirmDelete(false)}
-                    returnFocus={() => deleteRef.current}
+                    returnFocus={getDeleteTrigger}
                     onConfirm={() => {
                       setConfirmDelete(false);
+                      onDeleteConfirmed();
                       onRun(
                         () => deleteTheme(t.name),
                         `Theme “${t.name}” deleted`,
