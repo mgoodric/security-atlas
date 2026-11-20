@@ -49,4 +49,37 @@ describe("forgetTenantCaches", () => {
     expect(seen[0]).toBeUndefined();
     unsubscribe();
   });
+
+  // #2715 — pins resetQueries' cancel of an in-flight fetch: an answer
+  // the old tenant asked for, arriving after the switch, never renders.
+  it("drops a tenant-A fetch that resolves after the reset", async () => {
+    const qc = new QueryClient();
+    const pending: Record<string, (v: string) => void> = {};
+    let tenant = "A";
+    const queryFn = () => {
+      const asked = tenant;
+      return new Promise<string>((resolve) => {
+        pending[asked] = resolve;
+      });
+    };
+    const observer = new QueryObserver(qc, { queryKey: ["title"], queryFn });
+    const seen: (string | undefined)[] = [];
+    const unsubscribe = observer.subscribe((r) => seen.push(r.data));
+    await vi.waitFor(() => expect(pending.A).toBeDefined());
+
+    tenant = "B";
+    forgetTenantCaches(qc);
+    await vi.waitFor(() => expect(pending.B).toBeDefined());
+    pending.A("tenant A title");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(observer.getCurrentResult().data).toBeUndefined();
+
+    pending.B("tenant B title");
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().data).toBe("tenant B title"),
+    );
+    expect(seen).not.toContain("tenant A title");
+    expect(qc.getQueryData(["title"])).toBe("tenant B title");
+    unsubscribe();
+  });
 });
