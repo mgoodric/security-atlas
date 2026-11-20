@@ -391,6 +391,8 @@ services:
       ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN: ${ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN:-120}
       # #2479: per-principal limit on Evaluate now.
       ATLAS_EVALUATE_RATE_PER_MIN: ${ATLAS_EVALUATE_RATE_PER_MIN:-6}
+      # #2698: needs-attention large-read warning threshold.
+      ATLAS_NEEDS_ATTENTION_WARN_ROWS: ${ATLAS_NEEDS_ATTENTION_WARN_ROWS:-10000}
       # Slice 015 / slice 460: NATS JetStream evidence-ingest substrate.
       # Defaults to the fixed in-compose-network address of the bundled
       # `nats` service; an operator pointing at an EXTERNAL NATS cluster

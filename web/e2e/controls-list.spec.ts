@@ -14,18 +14,12 @@
 // selected row. See fixtures/e2e/controls-list.sql for the full
 // rationale.
 //
-// STILL QUARANTINED (preconditions out of scope for slice 743's seed):
-//   - slice 224 (Scope pill) — needs a 2nd scope cell + per-cell
-//     control_evaluations rows.
-//   - slice 226 (Frameworks column) — needs fw_to_scf_edges crosswalk
-//     rows so an anchor carries a non-empty frameworks set.
-//   - slice 227 (pagination footer) — needs >=51 anchors for a 2-page
-//     result.
-//   - slice 225 (New-control disclosure) — a toolbar-copy assertion
-//     orthogonal to the seed; left for a focused un-quarantine.
-// These bodies stay commented; a later slice that seeds their
-// preconditions turns them on (P0-743-3 — no assertion is relaxed to
-// pass).
+// #2755 restored the slice 224 (Scope pill), 226 (Frameworks column), 227
+// (pagination) and 225 (New control) bodies that slice 743 left commented
+// out. Their row counts, per-cell state and page totals cannot be pinned in
+// the demo tenant, which other specs add controls to, so those tests sign
+// in to two tenants of their own that the same fixture seeds (see its
+// #2755 section). The slice 098 / 448 / 468 tests stay on the demo tenant.
 //
 // Run locally:
 //   cd web
@@ -37,6 +31,22 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 
 import { seedFromFixture } from "./seed";
+import { signInToTenant, type TenantSession } from "./tenant-session";
+
+// #2755 — the two tenants of the spec's own in fixtures/e2e/controls-list.sql.
+// Tenant S: two scope cells and two controls (Scope pill, Frameworks
+// column). Tenant P: 55 controls (pagination).
+const SCOPE_TENANT = "00000000-0000-0000-0000-2755b0200001";
+const PAGES_TENANT = "00000000-0000-0000-0000-2755b0200002";
+const SCOPE_CELLS = [
+  { id: "00000000-0000-0000-0000-2755b0200101", label: "e2e 2755 list prod" },
+  { id: "00000000-0000-0000-0000-2755b0200102", label: "e2e 2755 list dev" },
+];
+const PAGED_CONTROLS = 55;
+
+function adminIn(tenantId: string): TenantSession {
+  return { tenantId, roles: ["admin"], superAdmin: true };
+}
 
 // #2141 — assign the selection to a person picked by name.
 async function assignTo(page: Page, name: string): Promise<void> {
@@ -122,195 +132,234 @@ test.describe("/controls list view", () => {
     await expect(state).not.toContainText(/pass/i);
   });
 
-  // Slice 224 — Scope filter pill (5th pill, server-side intersection).
-  // Pre-conditions the seed harness (slice 082) must establish before
-  // these assertions are turned on:
-  //   - At least two scope cells in the tenant (the bootstrap seed
-  //     ships one default cell; the seed harness adds a second so the
-  //     select option assertion exercises a non-degenerate dropdown).
-  //   - At least one control_evaluations row recorded against each
-  //     cell so the worst_per_anchor rollup narrows visibly when the
-  //     pill is set.
-  // STILL QUARANTINED (slice 743): these preconditions are out of scope
-  // for the controls-list seed.
-  test("slice 224 AC-1: Scope pill renders as 5th filter pill", async () => {
-    //    await page.goto("/controls");
-    //    await expect(page.getByTestId("list-filter-pill-framework")).toBeVisible();
-    //    await expect(page.getByTestId("list-filter-pill-family")).toBeVisible();
-    //    await expect(page.getByTestId("list-filter-pill-result")).toBeVisible();
-    //    await expect(page.getByTestId("list-filter-pill-freshness")).toBeVisible();
-    //    await expect(page.getByTestId("list-filter-pill-scope")).toBeVisible();
+  // Slice 224 — Scope filter pill (server-side intersection). The tests
+  // run in tenant S: two scope cells, and control CL-S-1 passing in the
+  // prod cell and failing in the dev cell.
+  test("slice 224 AC-1: Scope pill renders as 5th filter pill", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(SCOPE_TENANT));
+    await page.goto("/controls");
+    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
+    // #1741 put the View pill first and #2131 added Owner, so Scope is now
+    // the 5th filter after Framework, Family, State and Freshness (+ Owner).
+    const ids = await page
+      .getByTestId("list-filter-pills")
+      .locator('[data-testid^="list-filter-pill-"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+    expect(ids.slice(0, 7)).toEqual([
+      "list-filter-pill-view",
+      "list-filter-pill-framework",
+      "list-filter-pill-family",
+      "list-filter-pill-result",
+      "list-filter-pill-freshness",
+      "list-filter-pill-owner",
+      "list-filter-pill-scope",
+    ]);
+    // Its options are the tenant's own cells.
+    await expect(page.getByLabel("Scope").locator("option")).toHaveText([
+      "All cells",
+      ...SCOPE_CELLS.map((c) => c.label),
+    ]);
   });
 
-  test("slice 224 AC-3: selecting a scope cell sets ?scope=<id> on the URL", async () => {
-    //    await page.goto("/controls");
-    //    const scopePill = page.getByLabel("Scope");
-    //    // Pick the second option (first non-ALL cell).
-    //    await scopePill.selectOption({ index: 1 });
-    //    await page.waitForLoadState("networkidle");
-    //    const url = new URL(page.url());
-    //    expect(url.searchParams.get("scope")).toMatch(
-    //      /^[0-9a-f-]{36}$/,
-    //    );
+  test("slice 224 AC-3: selecting a scope cell sets ?scope=<id> on the URL", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(SCOPE_TENANT));
+    await page.goto("/controls");
+    const state = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "CL-S-1" })
+      .getByTestId("controls-row-state");
+    // Across both cells the control rolls up to its worst result.
+    await expect(state).toHaveAttribute("data-result", "fail");
+    await page
+      .getByLabel("Scope")
+      .selectOption({ label: SCOPE_CELLS[0].label });
+    await page.waitForURL((u) => u.searchParams.has("scope"));
+    const scope = new URL(page.url()).searchParams.get("scope");
+    expect(scope).toMatch(/^[0-9a-f-]{36}$/);
+    expect(scope).toBe(SCOPE_CELLS[0].id);
+    // The server intersects the rollup with the cell: prod passes.
+    await expect(state).toHaveAttribute("data-result", "pass");
   });
 
-  test("slice 224 AC-3: clearing the scope cell removes ?scope from the URL", async () => {
-    //    await page.goto("/controls?scope=00000000-0000-0000-0000-000000000001");
-    //    const scopePill = page.getByLabel("Scope");
-    //    await scopePill.selectOption({ index: 0 }); // "All cells"
-    //    await page.waitForLoadState("networkidle");
-    //    const url = new URL(page.url());
-    //    expect(url.searchParams.get("scope")).toBeNull();
+  test("slice 224 AC-3: clearing the scope cell removes ?scope from the URL", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(SCOPE_TENANT));
+    await page.goto(`/controls?scope=${SCOPE_CELLS[0].id}`);
+    const state = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "CL-S-1" })
+      .getByTestId("controls-row-state");
+    await expect(state).toHaveAttribute("data-result", "pass");
+    const scopePill = page.getByLabel("Scope");
+    await expect(scopePill).toHaveValue(SCOPE_CELLS[0].id);
+    await scopePill.selectOption({ index: 0 }); // "All cells"
+    await page.waitForURL((u) => !u.searchParams.has("scope"));
+    expect(new URL(page.url()).searchParams.get("scope")).toBeNull();
+    // Unscoped, the dev cell's fail is back in the rollup.
+    await expect(state).toHaveAttribute("data-result", "fail");
   });
 
   // Slice 226 — Frameworks-per-row column (right-aligned, mockup line 197).
-  // Pre-conditions the seed harness (slice 082) must establish before
-  // these assertions are turned on:
-  //   - The SCF catalog + at least one framework crosswalk (SOC 2 v2017)
-  //     are loaded so at least one anchor carries a non-empty frameworks
-  //     array. The setupHTTPServer in the Go integration tests already
-  //     does this for the integration suite; the seed harness must
-  //     replicate the bring-up for the e2e harness.
-  // STILL QUARANTINED (slice 743): the fw_to_scf_edges crosswalk rows are
-  // out of scope for the controls-list seed.
-  test("slice 226 AC-5: Frameworks column header is present", async () => {
-    //    await page.goto("/controls");
-    //    await expect(
-    //      page.getByRole("columnheader", { name: /Frameworks/ }),
-    //    ).toBeVisible();
+  // Tenant S: CL-S-1's anchor is crosswalked to a catalog `soc2`
+  // requirement, CL-S-2's anchor to nothing.
+  test("slice 226 AC-5: Frameworks column header is present", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(SCOPE_TENANT));
+    await page.goto("/controls");
+    await expect(
+      page.getByRole("columnheader", { name: /Frameworks/ }),
+    ).toBeVisible();
   });
 
-  test("slice 226 AC-5 + AC-9: at least one row carries a non-empty Frameworks cell", async () => {
-    //    await page.goto("/controls");
-    //    // Wait for data to load.
-    //    await page.waitForLoadState("networkidle");
-    //    const populatedFrameworks = page.getByTestId("controls-row-frameworks");
-    //    expect(await populatedFrameworks.count()).toBeGreaterThan(0);
-    //    // At least one cell must contain the middle-dot separator OR a
-    //    // single canonical abbreviation (SOC2 / ISO / CSF / PCI / HIPAA / GDPR).
-    //    const firstText = await populatedFrameworks.first().textContent();
-    //    expect(firstText).toMatch(/SOC2|ISO|CSF|PCI|HIPAA|GDPR/);
+  test("slice 226 AC-5 + AC-9: at least one row carries a non-empty Frameworks cell", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(SCOPE_TENANT));
+    await page.goto("/controls");
+    const row = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "CL-S-1" });
+    // The backend's display code for the `soc2` slug.
+    await expect(row.getByTestId("controls-row-frameworks")).toHaveText("SOC2");
   });
 
-  test("slice 226 AC-6: anchors with no satisfaction edges render the em-dash placeholder", async () => {
-    //    await page.goto("/controls");
-    //    await page.waitForLoadState("networkidle");
-    //    // The empty-set marker shares the `controls-row-frameworks-empty`
-    //    // test-id so the assertion is stable when the SCF catalog
-    //    // contains anchors a crosswalk hasn't mapped yet.
-    //    const empties = page.getByTestId("controls-row-frameworks-empty");
-    //    // 0 is a valid count (every anchor MAY be mapped); just verify
-    //    // the locator is plumbed correctly — when the catalog grows to
-    //    // include unmapped anchors, this becomes a non-zero check.
-    //    expect(await empties.count()).toBeGreaterThanOrEqual(0);
+  test("slice 226 AC-6: anchors with no satisfaction edges render the em-dash placeholder", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(SCOPE_TENANT));
+    await page.goto("/controls");
+    const row = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "CL-S-2" });
+    await expect(row.getByTestId("controls-row-frameworks-empty")).toHaveText(
+      "—",
+    );
+    await expect(row.getByTestId("controls-row-frameworks")).toHaveCount(0);
   });
 
-  // Slice 227 — /controls list pagination footer. The footer is
-  // unconditional once at least one row is in the filtered set; with a
-  // multi-page catalog the Previous / Next buttons round-trip through
-  // the URL `?page=N`. Assertions stay quarantined behind the slice 082
-  // seed-data harness, matching the rest of this spec. Pre-conditions
-  // the harness must establish:
-  //   - At least 51 anchor rows in the seeded catalog (so the default
-  //     `CONTROLS_PAGE_SIZE = 50` produces a 2-page result). The SCF
-  //     bootstrap importer (slice 006) ships ~53 anchors on the
-  //     atlas-edge instance, which already satisfies this on main.
-  // STILL QUARANTINED (slice 743): the controls-list seed ships 3
-  // anchors, not the >=51 a 2-page result needs.
-  test("AC-227-1: pagination footer renders with truth-telling summary", async () => {
-    //    await page.goto("/controls");
-    //    const footer = page.getByTestId("controls-pagination");
-    //    await expect(footer).toBeVisible();
-    //    // With >=51 seeded anchors the page-1 summary reads "Showing 1–50 of N".
-    //    await expect(
-    //      page.getByTestId("controls-pagination-summary"),
-    //    ).toContainText("Showing 1–50 of");
+  // Slice 227 — /controls list pagination footer. Tenant P holds 55
+  // controls, so the default 50-row page (CONTROLS_PAGE_SIZE) gives a
+  // two-page result.
+  test("AC-227-1: pagination footer renders with truth-telling summary", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(PAGES_TENANT));
+    await page.goto("/controls");
+    await expect(page.getByTestId("controls-pagination")).toBeVisible();
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 1–50 of ${PAGED_CONTROLS}`,
+    );
+    await expect(page.getByTestId("list-table-row")).toHaveCount(50);
   });
 
-  test("AC-227-2: Previous is disabled on page 1, Next is enabled", async () => {
-    //    await page.goto("/controls");
-    //    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
-    //    await expect(page.getByTestId("controls-pagination-next")).toBeEnabled();
+  test("AC-227-2: Previous is disabled on page 1, Next is enabled", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(PAGES_TENANT));
+    await page.goto("/controls");
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 1–50 of ${PAGED_CONTROLS}`,
+    );
+    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
+    await expect(page.getByTestId("controls-pagination-next")).toBeEnabled();
   });
 
-  test("AC-227-3: clicking Next advances to ?page=2 and updates the summary", async () => {
-    //    await page.goto("/controls");
-    //    await page.getByTestId("controls-pagination-next").click();
-    //    await expect(page).toHaveURL(/\/controls\?(.*&)?page=2/);
-    //    // Page 2 summary reads "Showing 51–N of N" (or similar).
-    //    await expect(
-    //      page.getByTestId("controls-pagination-summary"),
-    //    ).toContainText("Showing 51");
-    //    // Previous is now enabled; Next is disabled (only 2 pages).
-    //    await expect(page.getByTestId("controls-pagination-prev")).toBeEnabled();
-    //    await expect(page.getByTestId("controls-pagination-next")).toBeDisabled();
+  test("AC-227-3: clicking Next advances to ?page=2 and updates the summary", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(PAGES_TENANT));
+    await page.goto("/controls");
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 1–50 of ${PAGED_CONTROLS}`,
+    );
+    await page.getByTestId("controls-pagination-next").click();
+    await expect(page).toHaveURL(/\/controls\?(.*&)?page=2/);
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 51–${PAGED_CONTROLS} of ${PAGED_CONTROLS}`,
+    );
+    await expect(page.getByTestId("list-table-row")).toHaveCount(
+      PAGED_CONTROLS - 50,
+    );
+    // Previous is now enabled; Next is disabled (only 2 pages).
+    await expect(page.getByTestId("controls-pagination-prev")).toBeEnabled();
+    await expect(page.getByTestId("controls-pagination-next")).toBeDisabled();
   });
 
-  test("AC-227-4: Previous from page 2 returns to page 1 with the page param dropped", async () => {
-    //    await page.goto("/controls?page=2");
-    //    await page.getByTestId("controls-pagination-prev").click();
-    //    // Canonical page-1 URL drops the `page` param.
-    //    await expect(page).toHaveURL(/\/controls(\?[^p]*)?$/);
-    //    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
+  test("AC-227-4: Previous from page 2 returns to page 1 with the page param dropped", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(PAGES_TENANT));
+    await page.goto("/controls?page=2");
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 51–${PAGED_CONTROLS} of ${PAGED_CONTROLS}`,
+    );
+    await page.getByTestId("controls-pagination-prev").click();
+    // Canonical page-1 URL drops the `page` param.
+    await page.waitForURL((u) => !u.searchParams.has("page"));
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 1–50 of ${PAGED_CONTROLS}`,
+    );
+    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
   });
 
-  test("AC-227-5: filter mutation while on page 2 resets to page 1", async () => {
-    //    await page.goto("/controls?page=2");
-    //    // Apply a filter change (Family → first non-ALL option).
-    //    const familyPill = page.getByLabel("Family");
-    //    await familyPill.selectOption({ index: 1 });
-    //    // The page param must be dropped on the next URL replace.
-    //    await expect(page).not.toHaveURL(/[?&]page=/);
-    //    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
+  test("AC-227-5: filter mutation while on page 2 resets to page 1", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(PAGES_TENANT));
+    await page.goto("/controls?page=2");
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 51–${PAGED_CONTROLS} of ${PAGED_CONTROLS}`,
+    );
+    // Family -> Asset Management, which 28 of the 55 controls carry.
+    await page.getByLabel("Family").selectOption({ label: "Asset Management" });
+    // The page param is dropped on the same URL replace.
+    await page.waitForURL((u) => u.searchParams.has("family"));
+    expect(new URL(page.url()).searchParams.has("page")).toBe(false);
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      "Showing 1–28 of 28",
+    );
+    await expect(page.getByTestId("controls-pagination-prev")).toBeDisabled();
   });
 
-  test("AC-227-6: refresh on ?page=2 preserves the page state", async () => {
-    //    await page.goto("/controls?page=2");
-    //    await page.reload();
-    //    await expect(page).toHaveURL(/[?&]page=2/);
-    //    await expect(
-    //      page.getByTestId("controls-pagination-summary"),
-    //    ).toContainText("Showing 51");
+  test("AC-227-6: refresh on ?page=2 preserves the page state", async ({
+    page,
+  }) => {
+    await signInToTenant(page, adminIn(PAGES_TENANT));
+    await page.goto("/controls?page=2");
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 51–${PAGED_CONTROLS} of ${PAGED_CONTROLS}`,
+    );
+    await page.reload();
+    await expect(page).toHaveURL(/[?&]page=2/);
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      `Showing 51–${PAGED_CONTROLS} of ${PAGED_CONTROLS}`,
+    );
   });
 
-  test("slice 225 AC-4: New control disclosure replaces the disabled button", async () => {
-    // Slice 225 closed the F-178-225 HONESTY-GAP by replacing a
-    // permanently-disabled `<Button>New control</Button>` in the
-    // toolbar with a non-button `<span>` that discloses the future-
-    // state (the create-control flow lands in a future slice; SCF
-    // importer + atlas CLI are the current instantiation paths).
-    // AC-4 has two halves:
-    //
-    //   1. The disclosure is present, visible, and its text contains
-    //      "create-control" (load-bearing substring pinned by the
-    //      vitest sibling spec at
-    //      `web/app/(authed)/controls/new-control-future.test.ts`).
-    //   2. No disabled `<button>` with the literal text "New control"
-    //      exists anywhere on the page.
-    //
-    // Retired by #2082: the create-control disclosure and
-    // new-control-future.ts were removed; only the "no disabled New
-    // control button" half still applies.
-    //
-    // STILL QUARANTINED (slice 743): a toolbar-copy assertion
-    // orthogonal to the controls-list seed; left for a focused
-    // un-quarantine.
-    //    await page.goto("/controls");
-    //    const disclosure = page.getByTestId(
-    //      "controls-new-control-disabled-reason",
-    //    );
-    //    await expect(disclosure).toBeVisible();
-    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
-    //    expect(text).toContain("create-control");
-    //    // `title` attribute carries the same copy as the visible text
-    //    // so screen readers and pointer-hover both surface the same
-    //    // disclosure. (aria-label likewise — both are set.)
-    //    const titleAttr = await disclosure.getAttribute("title");
-    //    expect(titleAttr).toMatch(/create-control/i);
-    //    // No disabled <button> with the original label survives.
-    //    await expect(
-    //      page.locator("button[disabled]", { hasText: "New control" }),
-    //    ).toHaveCount(0);
+  test("#2082/#1785 (supersedes slice 225 AC-4): no disabled New control; create path is Import controls", async ({
+    authedPage: page,
+  }) => {
+    // Slice 225 replaced a permanently-disabled `<Button>New control</Button>`
+    // with a disclosure of the then-future create flow. #2082 retired the
+    // disclosure, and #1785 shipped a real create path in its place: the
+    // toolbar's Import controls link. What the test pins now: no disabled
+    // "New control" button exists, and the toolbar's create affordance is
+    // a working link to the import flow.
+    await page.goto("/controls");
+    await expect(page.getByTestId("list-page")).toBeVisible();
+    await expect(
+      page.locator("button[disabled]", { hasText: "New control" }),
+    ).toHaveCount(0);
+    const importLink = page.getByTestId("controls-import");
+    await expect(importLink).toBeVisible();
+    await expect(importLink).toHaveText("Import controls");
+    await expect(importLink).toHaveAttribute("href", "/controls/imports");
   });
 
   // ------------------------------------------------------------------
