@@ -100,3 +100,5 @@ fork them: tighten an `applicability_expr` for your environment, add a
 `linked_policy_ids` reference once your policy library lands, swap a
 manual control to automated when a connector matures. The bundle format
 is designed to make `git diff` legible so forks remain reviewable.
+
+<!-- #2676 proof: bundle-only change (do not merge) -->
