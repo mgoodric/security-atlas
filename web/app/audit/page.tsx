@@ -15,6 +15,7 @@ import { redirect } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AuditShell } from "@/components/audit/audit-shell";
+import { Term } from "@/components/help/term";
 import { PageShell } from "@/components/shell/page-shell";
 import { resolveAuditPeriod } from "@/lib/api/audit-server";
 
@@ -62,8 +63,9 @@ function NoPeriodState() {
           <AlertTitle>No audit period assigned</AlertTitle>
           <AlertDescription>
             Your account is signed in but is not assigned to any audit period.
-            The audit workspace opens once an admin assigns you to a period, on
-            that period&apos;s page. Until then there is nothing to test here.
+            The audit workspace opens once an admin makes you an{" "}
+            <Term id="assigned-auditor">assigned auditor</Term> on that
+            period&apos;s page. Until then there is nothing to test here.
           </AlertDescription>
         </Alert>
       </PageShell>

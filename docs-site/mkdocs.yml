@@ -138,6 +138,8 @@ nav:
       - Board packs: help/board-packs.md
       - CSF assessment: help/csf.md
       - Vendor claims: help/vendor-claims.md
+      - Audit workspace: help/audit-workspace.md
+      - Requirement detail: help/requirements.md
       - Policies: help/policies.md
       - Vendors: help/vendors.md
       - Personnel security: help/personnel-security.md

@@ -165,6 +165,14 @@ test("an assigned auditor works the period's population and evidence, and nothin
   await expect(auditor.getByTestId("audit-period-bar")).toContainText(
     PERIOD_NAME,
   );
+  // #2592: the workspace has no PageShell; the period bar carries the ?.
+  const help = auditor
+    .getByTestId("audit-period-bar")
+    .getByTestId("help-button");
+  await expect(help).toHaveAccessibleName("How this works: Audit workspace");
+  await help.click();
+  await expect(auditor.getByTestId("help-panel")).toBeVisible();
+  await auditor.keyboard.press("Escape");
   await auditor.context().close();
 
   // The period's reads, and only those.

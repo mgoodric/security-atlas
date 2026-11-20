@@ -393,6 +393,36 @@
       "name": "Activity log",
       "short": "The append-only record of who did what and when in your organisation. Nobody can edit or delete an entry.",
       "long": "It is how you answer who approved something or when a control changed, and it is what auditors rely on. GRC engineers, auditors and super admins see every event; everyone else sees the organisation's shared events and their own account activity."
+    },
+    {
+      "id": "evidence-horizon",
+      "name": "Evidence horizon",
+      "short": "The moment an audit period was frozen. Its populations and samples hold only evidence observed up to then.",
+      "long": "Until a period is frozen, sampling draws from current evidence and there is no horizon. Freezing sets it once, for good, so evidence that arrives during fieldwork can't slip into the audit while your live programme carries on."
+    },
+    {
+      "id": "walkthrough",
+      "name": "Walkthrough",
+      "short": "A recorded explanation of how a control actually runs, with an optional attachment, kept for the auditor to read.",
+      "long": "Auditors often ask someone to walk them through a control rather than only sample its evidence. A walkthrough records that narrative against the control, with any screenshot or document attached. Its content is hashed, so a later change to the record is detectable."
+    },
+    {
+      "id": "requirement",
+      "name": "Requirement",
+      "short": "One line of a framework, such as a single SOC 2 criterion or ISO 27001 clause, that an auditor checks you against.",
+      "long": "Requirements are not met by controls written for them one by one. Each requirement maps to SCF anchors, through the published crosswalk or your own org mappings, and the controls on those anchors provide its coverage."
+    },
+    {
+      "id": "coverage-strength",
+      "name": "Coverage strength",
+      "short": "How well your controls cover a requirement, from 0 to 1: a mapping's strength times your best control's effectiveness, on the best path.",
+      "long": "For each SCF anchor the requirement maps to, the mapping's strength is multiplied by the effectiveness of your best evaluated control on that anchor. The requirement takes the highest of these, so one strong path is enough and a weaker alternative doesn't drag it down."
+    },
+    {
+      "id": "confidence-band",
+      "name": "Confidence band",
+      "short": "Coverage strength put into words: uncovered, weak (below 0.5), partial (0.5 up to 0.8) or strong (0.8 and above).",
+      "long": "A requirement with no contributing control is uncovered. A requirement your framework scope excludes shows as excluded instead of a band, with the justification from the Statement of Applicability."
     }
   ]
 }

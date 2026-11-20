@@ -23,6 +23,7 @@ import {
   OrgMappingBadge,
   OrgMappingDetails,
 } from "@/components/mappings/org-mapping";
+import { Term } from "@/components/help/term";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -71,7 +72,16 @@ export default function RequirementDetailPage() {
   return (
     <PageShell
       title={req ? `${req.code} — ${req.title}` : "Requirement"}
-      subtitle={req?.body ? <p>{req.body}</p> : undefined}
+      subtitle={
+        <>
+          {req?.body ? <p>{req.body}</p> : null}
+          <p className={req?.body ? "mt-1" : undefined}>
+            How this <Term id="requirement">requirement</Term> reaches your
+            controls through <Term id="anchor">SCF anchors</Term>, and its{" "}
+            <Term id="coverage-strength">coverage strength</Term>.
+          </p>
+        </>
+      }
     >
       {q.isLoading ? <Skeleton className="h-32 w-full" /> : null}
 
@@ -107,7 +117,8 @@ function RequirementDetailView({ detail }: { detail: RequirementCoverage }) {
           <CardTitle>Coverage</CardTitle>
           <CardDescription>
             Best-satisfying path over the anchors below and your evaluated
-            controls.
+            controls, with its <Term id="confidence-band">confidence band</Term>
+            .
           </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center gap-3">

@@ -41,6 +41,7 @@ import adminSuperAdminsSource from "@/help/modules/admin-super-admins.md";
 import adminTenantsSource from "@/help/modules/admin-tenants.md";
 import adminUsersSource from "@/help/modules/admin-users.md";
 import approvalsSource from "@/help/modules/approvals.md";
+import auditWorkspaceSource from "@/help/modules/audit-workspace.md";
 import auditsSource from "@/help/modules/audits.md";
 import boardPacksSource from "@/help/modules/board-packs.md";
 import calendarSource from "@/help/modules/calendar.md";
@@ -55,6 +56,7 @@ import metricsSource from "@/help/modules/metrics.md";
 import personnelSecuritySource from "@/help/modules/personnel-security.md";
 import policiesSource from "@/help/modules/policies.md";
 import questionnairesSource from "@/help/modules/questionnaires.md";
+import requirementsSource from "@/help/modules/requirements.md";
 import risksSource from "@/help/modules/risks.md";
 import risksHierarchySource from "@/help/modules/risks-hierarchy.md";
 import scfCatalogSource from "@/help/modules/scf-catalog.md";
@@ -117,6 +119,9 @@ export const HELP_SOURCES: Readonly<Record<string, string>> = {
   "personnel-security.md": personnelSecuritySource,
   "questionnaires.md": questionnairesSource,
   "scf-catalog.md": scfCatalogSource,
+  // #2592: auditor workspace and requirement detail.
+  "audit-workspace.md": auditWorkspaceSource,
+  "requirements.md": requirementsSource,
 };
 
 export const HELP_DOCS_BASE_URL =
