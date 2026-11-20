@@ -67,3 +67,21 @@ func WriteJSON(w http.ResponseWriter, status int, body any) {
 func WriteError(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
+
+// CodeFeatureNotEnabled is the stable `code` on a refusal for a feature this
+// deployment has switched off (an unset env gate, an unwired AI service). A
+// client branches on the code, not on the wording (#2730).
+const CodeFeatureNotEnabled = "feature_not_enabled"
+
+// WriteFeatureNotEnabled writes a 409 {"error": msg, "code":
+// "feature_not_enabled"}. A feature switched off on this deployment is a
+// refusal about configuration, not a server failure, so it is a 4xx: the web
+// client shows a 4xx `{error}` to the user and replaces every 5xx body with
+// the status line (#2645). 409, not 404: the route exists and the request is
+// well-formed; the deployment's state refuses it (#2730).
+func WriteFeatureNotEnabled(w http.ResponseWriter, msg string) {
+	WriteJSON(w, http.StatusConflict, map[string]string{
+		"error": msg,
+		"code":  CodeFeatureNotEnabled,
+	})
+}
