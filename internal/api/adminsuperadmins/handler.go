@@ -152,7 +152,8 @@ type grantRequest struct {
 // caller's session tenant) so the display_name + email render on the
 // management page. A row whose users row is in another tenant is named
 // from that tenant through the BYPASSRLS authPool when it is wired
-// (#2385); without it the display fields are `null`.
+// (#2385), by display_name only (#2684: its email is never sent);
+// without it the display fields are `null`.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !requireSuperAdmin(w, r) {
 		return
@@ -201,8 +202,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	// #2385: a row the session tenant cannot name is named from the
 	// super admin's own tenant. The read is bounded to the super_admins
-	// user IDs and returns only display_name + email, which this
-	// super-admin-only endpoint already returns for the session tenant.
+	// user IDs. #2684: only a name crosses the tenant boundary, never the
+	// email; a blank display name falls back to the email's local part
+	// here, on the server, so the address is not on the wire.
 	if h.authPool != nil {
 		var unnamed []uuid.UUID
 		for _, rr := range rows {
@@ -218,8 +220,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			}
 			for i := range rows {
 				if n, ok := names[rows[i].UserID]; ok {
-					rows[i].DisplayName = &n.displayName
-					rows[i].Email = &n.email
+					if name := crossTenantDisplayName(n); name != "" {
+						rows[i].DisplayName = &name
+					}
 				}
 			}
 		}
@@ -552,6 +555,17 @@ func (h *Handler) Demote(w http.ResponseWriter, r *http.Request) {
 type userName struct {
 	displayName string
 	email       string
+}
+
+// crossTenantDisplayName is the only name a super admin from another
+// tenant is shown by (#2684): the display name, else the email's local
+// part. The email itself is never returned for such a row.
+func crossTenantDisplayName(n userName) string {
+	if d := strings.TrimSpace(n.displayName); d != "" {
+		return d
+	}
+	local, _, _ := strings.Cut(n.email, "@")
+	return strings.TrimSpace(local)
 }
 
 // crossTenantNames reads the users rows for ids from the BYPASSRLS

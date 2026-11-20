@@ -80,7 +80,7 @@ func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	cred, bearer, err := s.store.IssueMinted(tenant, predicate, req.GetKinds(), ttl, credstore.MinterUserID(caller))
+	cred, bearer, err := s.store.IssueMintedAudited(ctx, caller, tenant, predicate, req.GetKinds(), ttl)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}
@@ -92,10 +92,11 @@ func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv
 
 // Rotate issues a successor token and starts the predecessor's grace window.
 func (s *Service) Rotate(ctx context.Context, req *adminv1.RotateRequest) (*adminv1.RotateResponse, error) {
-	if err := s.requireOwnKey(ctx, req.GetId()); err != nil {
+	caller, err := s.requireOwnKey(ctx, req.GetId())
+	if err != nil {
 		return nil, err
 	}
-	successor, bearer, predecessorExpiresAt, err := s.store.Rotate(req.GetId())
+	successor, bearer, predecessorExpiresAt, err := s.store.RotateAudited(ctx, caller, req.GetId())
 	if err != nil {
 		if errors.Is(err, credstore.ErrUnknownKey) {
 			return nil, status.Errorf(codes.NotFound, "unknown key id %q", req.GetId())
@@ -111,10 +112,11 @@ func (s *Service) Rotate(ctx context.Context, req *adminv1.RotateRequest) (*admi
 
 // Revoke invalidates the key immediately.
 func (s *Service) Revoke(ctx context.Context, req *adminv1.RevokeRequest) (*adminv1.RevokeResponse, error) {
-	if err := s.requireOwnKey(ctx, req.GetId()); err != nil {
+	caller, err := s.requireOwnKey(ctx, req.GetId())
+	if err != nil {
 		return nil, err
 	}
-	if err := s.store.Revoke(req.GetId()); err != nil {
+	if err := s.store.RevokeAudited(ctx, caller, req.GetId()); err != nil {
 		if errors.Is(err, credstore.ErrUnknownKey) {
 			return nil, status.Errorf(codes.NotFound, "unknown key id %q", req.GetId())
 		}
@@ -159,19 +161,20 @@ func RequireAdmin(ctx context.Context) (credstore.Credential, error) {
 
 // requireOwnKey gates Rotate and Revoke: an admin caller, acting on a key
 // in the caller's own tenant. A key in another tenant is NotFound, as on
-// the HTTP path, so a caller learns nothing about other tenants' ids.
-func (s *Service) requireOwnKey(ctx context.Context, id string) error {
+// the HTTP path, so a caller learns nothing about other tenants' ids. It
+// returns the caller, whom the audit row names.
+func (s *Service) requireOwnKey(ctx context.Context, id string) (credstore.Credential, error) {
 	caller, err := RequireAdmin(ctx)
 	if err != nil {
-		return err
+		return credstore.Credential{}, err
 	}
 	if id == "" {
-		return status.Error(codes.InvalidArgument, "id is required")
+		return credstore.Credential{}, status.Error(codes.InvalidArgument, "id is required")
 	}
 	if tenant, ok := s.store.TenantOf(id); !ok || tenant != caller.TenantID {
-		return status.Errorf(codes.NotFound, "unknown key id %q", id)
+		return credstore.Credential{}, status.Errorf(codes.NotFound, "unknown key id %q", id)
 	}
-	return nil
+	return caller, nil
 }
 
 // requestTenant is the tenant an Issue or List acts in: the caller's own

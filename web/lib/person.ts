@@ -151,6 +151,17 @@ export function actorText(
   return isActorReference(ref) ? resolvePerson(ref, dir).text : ref;
 }
 
+/**
+ * #2684 — how a typed name (free text, not an actor reference) renders:
+ * as written, with a tooltip that says it was typed, so a typed approver
+ * on a board pack cannot pass for a resolved, verified user. <Person
+ * freeText> also sets it in italics.
+ */
+export function typedName(value: string): { text: string; title: string } {
+  const text = value.trim();
+  return { text, title: `Typed name, not a linked user: ${text}` };
+}
+
 function unknown(ref: string): ResolvedPerson {
   return {
     kind: "unknown",
