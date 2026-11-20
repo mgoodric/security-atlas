@@ -163,9 +163,12 @@ test.describe("/risks/[id]/edit keeps its opening version (#2544)", () => {
     await page.getByTestId("risk-edit-stale-reload").click();
     // Past the query's retry delays (1s, then 2s).
     await page.clock.fastForward(5_000);
-    await expect(
-      page.getByTestId("risk-edit-stale-reload-error"),
-    ).toContainText("test outage", { timeout: 30_000 });
+    // A 5xx shows the status line, never its body (#2645).
+    const reloadError = page.getByTestId("risk-edit-stale-reload-error");
+    await expect(reloadError).toContainText("500 Internal Server Error", {
+      timeout: 30_000,
+    });
+    await expect(reloadError).not.toContainText("test outage");
     await expect(page.getByTestId("risk-edit-stale")).toBeVisible();
     await expect(title).toHaveValue("Test risk with my edit");
 

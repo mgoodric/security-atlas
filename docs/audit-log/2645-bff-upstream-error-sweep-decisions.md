@@ -80,6 +80,25 @@ and `risks.test.ts` adds the 5xx case. `app/api/admin/demo/status/route.test.ts`
 expected a 500's body text in the route's `{error}`; the route reads
 through `getAdminDemoStatus`, so it now forwards `500 Internal Server Error`.
 
+### D6 — a 503 worded for the user also shows the status line
+
+Two Playwright specs asserted the old pass-through:
+
+- `e2e/admin-demo.spec.ts` AC-3 mocks the platform's real 503 "demo seed
+  not enabled on this deployment" (`internal/api/admindemo/handler.go:239`).
+- `e2e/risks-edit-stale-2544.spec.ts` mocks a 500 "test outage".
+
+Both now assert the status line, and that the body's text is absent.
+
+The strict rule holds for 503 as well (decided through the dispatcher). A
+503 is a server status, and exempting it would reopen the leak for any 503
+handler. The cost is that four responses worded for the user lose their
+wording: the two `admindemo` ones and `boardnarrative/handlers.go:83` and
+`:132`. The demo page already hides the seed button when the status route
+says demo is off, so the effect today is small. #2730 moves those
+responses onto a 4xx with a stable code, where the wording passes through
+again.
+
 ### Out of scope
 
 The BFF route handlers under `app/api/**` still forward the platform's
