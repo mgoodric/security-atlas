@@ -37,6 +37,14 @@ A policy has no ack deadline of its own, so a first acknowledgement has no
 due date ("the ack due date if one exists"). Calling it overdue the day the
 policy is published would rank a new policy above real overdue reviews; due
 soon, dated from the effective date, puts it after them and oldest first.
+Acks count for the current version only: `ListPendingAcksForUser` joins
+`policy_version_id = p.id`, a re-publish is a new `policies` row, and the
+superseded row is no longer `published`. So a pending row's ack is always
+lapsed. `AckItems` still treats an ack that would lapse after now as no ack
+(due soon, no due date), so an old-version ack can never become an overdue
+item due in the future. `TestNeedsAttention2587_RepublishNeedsANewAck`
+pins the re-publish case end to end.
+
 An ack that lapses within 14 days is not listed: it is still fresh, so it
 is not pending, the rule `GET /v1/me/acknowledgments` applies too.
 

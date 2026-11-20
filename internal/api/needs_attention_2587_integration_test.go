@@ -136,3 +136,38 @@ func TestNeedsAttention2587_PolicyAckDue(t *testing.T) {
 		t.Errorf("Policies switched off: %d items; want 0", n)
 	}
 }
+
+// A re-publish is a new version: an ack of the old version, fresh or
+// lapsed, is not an ack of the new one. The new version is never
+// acknowledged (due soon, no due date), not overdue with a due date.
+func TestNeedsAttention2587_RepublishNeedsANewAck(t *testing.T) {
+	e := newNAEnv2134(t)
+	ctx := context.Background()
+	v1 := e.seedAckPolicy2587(t, "tenant A policy: v1", "published", []string{"grc_engineer"})
+	e.ack2587(t, v1, e.fx.A.Owner, time.Now().UTC().Add(-400*24*time.Hour))
+	e.ack2587(t, v1, e.fx.A.Owner, time.Now().UTC().Add(-time.Hour))
+	if _, ok := e.ackItems2587(t, e.owner)[v1.String()]; ok {
+		t.Fatalf("v1 acknowledged an hour ago is still listed")
+	}
+
+	if _, err := e.migrate.Exec(ctx,
+		`UPDATE policies SET status = 'superseded', superseded_at = now() WHERE tenant_id = $1 AND id = $2`,
+		e.fx.A.ID, v1); err != nil {
+		t.Fatalf("supersede v1: %v", err)
+	}
+	v2 := e.seedAckPolicy2587(t, "tenant A policy: v2", "published", []string{"grc_engineer"})
+	if _, err := e.migrate.Exec(ctx,
+		`UPDATE policies SET predecessor_id = $3, version = '2.0.0' WHERE tenant_id = $1 AND id = $2`,
+		e.fx.A.ID, v2, v1); err != nil {
+		t.Fatalf("link v2 to v1: %v", err)
+	}
+
+	got := e.ackItems2587(t, e.owner)
+	if _, ok := got[v1.String()]; ok {
+		t.Errorf("superseded v1 is listed")
+	}
+	it, ok := got[v2.String()]
+	if !ok || it.Band != "due_soon" || it.DueAt != nil {
+		t.Errorf("v2 after re-publish: listed=%v item %+v; want due_soon with no due date (v1's acks do not count)", ok, it)
+	}
+}

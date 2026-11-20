@@ -1,6 +1,8 @@
 package needsattention
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -21,7 +23,8 @@ func TestAckItems2587(t *testing.T) {
 	never := policy.Pending{PolicyID: uuid.New(), Title: "never acknowledged", EffectiveDate: &effective}
 	lapsed := policy.Pending{PolicyID: uuid.New(), Title: "lapsed", LastAcknowledgedAt: &acked}
 
-	got := AckItems([]policy.Pending{never, lapsed}, caller)
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	got := AckItems([]policy.Pending{never, lapsed}, caller, now)
 	if len(got) != 2 {
 		t.Fatalf("AckItems: %d items; want 2", len(got))
 	}
@@ -52,6 +55,38 @@ func TestAckItems2587(t *testing.T) {
 	}
 	if len(Rank(got, ForMe, mineFor(other))) != 0 {
 		t.Errorf("for=me: another member sees the caller's acknowledgements")
+	}
+}
+
+// An ack that would lapse after now is not a lapse of this version: the
+// item is never acknowledged, not overdue with a future due date.
+func TestAckItems2587_UnlapsedAckIsNone(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-24 * time.Hour)
+	effective := now.Add(-48 * time.Hour)
+	got := AckItems([]policy.Pending{{PolicyID: uuid.New(), Title: "re-published", LastAcknowledgedAt: &recent, EffectiveDate: &effective}}, uuid.NewString(), now)
+	if len(got) != 1 || got[0].Band != BandDueSoon || got[0].DueAt != nil || got[0].Since == nil || !got[0].Since.Equal(effective) {
+		t.Errorf("unlapsed ack: %+v; want one due_soon item, no due date, since the effective date", got)
+	}
+}
+
+// A credential with no person behind it (bootstrap admin, an unbound key,
+// a machine token) acknowledges nothing, so it gets no item. ackItems
+// returns before touching the database: the Handler here has none.
+func TestAckItems2587_MachineCredentialHasNone(t *testing.T) {
+	t.Parallel()
+	h := New(nil, nil, nil)
+	for _, cred := range []credstore.Credential{
+		{ID: "bootstrap", TenantID: tenant2134, UserID: "bootstrap-admin", IsAdmin: true},
+		{ID: "key_abc", TenantID: tenant2134, UserID: "key_abc", OwnerRoles: []string{"grc_engineer"}},
+		{ID: "jwt:m", TenantID: tenant2134, UserID: "oauth_client:" + uuid.NewString(), TenantRoles: []string{"grc_engineer"}},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/v1/needs-attention", nil)
+		got, err := h.ackItems(r, cred)
+		if err != nil || len(got) != 0 {
+			t.Errorf("%s: %d items, err %v; want none", cred.UserID, len(got), err)
+		}
 	}
 }
 
