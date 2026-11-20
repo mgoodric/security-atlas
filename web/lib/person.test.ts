@@ -11,6 +11,7 @@ import {
   isMachineActor,
   normaliseUserId,
   resolvePerson,
+  typedName,
 } from "./person";
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -204,5 +205,19 @@ describe("actorText (#2385)", () => {
 
   it("shows free text as written", () => {
     expect(actorText("aws-config", dir)).toBe("aws-config");
+  });
+});
+
+describe("typedName (#2684)", () => {
+  it("shows a typed name as written and says it was typed", () => {
+    const t = typedName("  Sam Rivera (CISO) ");
+    expect(t.text).toBe("Sam Rivera (CISO)");
+    expect(t.title).toBe("Typed name, not a linked user: Sam Rivera (CISO)");
+  });
+
+  it("never reads like a resolved user's tooltip", () => {
+    const resolved = resolvePerson(ALICE, dir);
+    expect(resolved.title).toBe("Alice Admin");
+    expect(typedName("Alice Admin").title).not.toBe(resolved.title);
   });
 });
