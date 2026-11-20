@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -203,4 +204,117 @@ func expandCells(dims map[string][]string) ([]Cell, error) {
 func ValidateExpr(b []byte) error {
 	_, err := parsePredicate(b)
 	return err
+}
+
+// PredicateWithin reports whether every record child admits is also
+// admitted by parent, so a key scoped by child is no wider than one scoped
+// by parent (#2656). It is sound, not complete: false can mean "not
+// provably within". It proves containment from the structure alone:
+//
+//   - parent unrestricted, or parent {"op":"true"} with child restricted;
+//   - parent "and": child within every arg;
+//   - child "or": every arg within parent;
+//   - child "and": some arg within parent;
+//   - parent "or": child within some arg;
+//   - eq and in on one dim, when child's values are a subset of parent's;
+//   - otherwise only a structurally equal expression ("not" included).
+//
+// An unrestricted child is within an unrestricted parent only. Either
+// predicate malformed returns an error wrapping ErrBadPredicate.
+func PredicateWithin(child, parent string) (bool, error) {
+	c, err := NormalizeCredentialPredicate(child)
+	if err != nil {
+		return false, err
+	}
+	p, err := NormalizeCredentialPredicate(parent)
+	if err != nil {
+		return false, err
+	}
+	if IsUnrestrictedPredicate(p) {
+		return true, nil
+	}
+	if IsUnrestrictedPredicate(c) {
+		return false, nil
+	}
+	cn, err := parsePredicate([]byte(c))
+	if err != nil {
+		return false, err
+	}
+	pn, err := parsePredicate([]byte(p))
+	if err != nil {
+		return false, err
+	}
+	return implies(cn, pn), nil
+}
+
+// implies reports whether c holding on a cell means p holds on it, by the
+// rules PredicateWithin lists.
+func implies(c, p *node) bool {
+	if p.Op == "true" {
+		return true
+	}
+	if p.Op == "and" {
+		for i := range p.Args {
+			if !implies(c, &p.Args[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	if c.Op == "or" {
+		for i := range c.Args {
+			if !implies(&c.Args[i], p) {
+				return false
+			}
+		}
+		return true
+	}
+	if c.Op == "and" {
+		for i := range c.Args {
+			if implies(&c.Args[i], p) {
+				return true
+			}
+		}
+	}
+	if p.Op == "or" {
+		for i := range p.Args {
+			if implies(c, &p.Args[i]) {
+				return true
+			}
+		}
+	}
+	if cv, ok := leafValues(c); ok {
+		if pv, ok := leafValues(p); ok && c.Dim == p.Dim {
+			return subsetOf(cv, pv)
+		}
+	}
+	return reflect.DeepEqual(c, p)
+}
+
+// leafValues returns the values an eq or in node admits on its dim.
+func leafValues(n *node) ([]string, bool) {
+	switch n.Op {
+	case "eq":
+		return []string{*n.Value}, true
+	case "in":
+		return n.Values, true
+	}
+	return nil, false
+}
+
+// subsetOf reports whether every value in a is in b.
+func subsetOf(a, b []string) bool {
+	for _, v := range a {
+		found := false
+		for _, w := range b {
+			if v == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }

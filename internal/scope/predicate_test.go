@@ -141,3 +141,57 @@ func TestValidateExpr(t *testing.T) {
 		}
 	}
 }
+
+// #2656: PredicateWithin bounds a key-minted key's scope by the caller's.
+func TestPredicateWithin(t *testing.T) {
+	t.Parallel()
+	const (
+		prod        = `{"op":"eq","dim":"environment","value":"prod"}`
+		staging     = `{"op":"eq","dim":"environment","value":"staging"}`
+		prodStaging = `{"op":"in","dim":"environment","values":["prod","staging"]}`
+		aws1        = `{"op":"eq","dim":"cloud_account","value":"aws:1"}`
+		prodAndAWS  = `{"op":"and","args":[` + prod + `,` + aws1 + `]}`
+		prodOrStg   = `{"op":"or","args":[` + prod + `,` + staging + `]}`
+		notProd     = `{"op":"not","arg":` + prod + `}`
+		opTrue      = `{"op":"true"}`
+	)
+	cases := []struct {
+		name          string
+		child, parent string
+		want          bool
+	}{
+		{"both unrestricted", "{}", "", true},
+		{"anything within unrestricted", prodAndAWS, "{}", true},
+		{"unrestricted not within restricted", "{}", prod, false},
+		{"unrestricted not within op true", "", opTrue, false},
+		{"restricted within op true", prod, opTrue, true},
+		{"op true not within eq", opTrue, prod, false},
+		{"equal eq", prod, prod, true},
+		{"other value", staging, prod, false},
+		{"other dim", aws1, prod, false},
+		{"eq within in", prod, prodStaging, true},
+		{"in not within eq", prodStaging, prod, false},
+		{"in within wider in", `{"op":"in","dim":"environment","values":["prod"]}`, prodStaging, true},
+		{"and narrows", prodAndAWS, prod, true},
+		{"and within and", prodAndAWS, prodAndAWS, true},
+		{"eq not within and", prod, prodAndAWS, false},
+		{"or within in", prodOrStg, prodStaging, true},
+		{"in within or", prodStaging, prodOrStg, false},
+		{"or not within eq", prodOrStg, prod, false},
+		{"equal not", notProd, notProd, true},
+		{"not not within eq", notProd, staging, false},
+		{"legacy within its expression", "environment=prod", prod, true},
+	}
+	for _, tc := range cases {
+		got, err := PredicateWithin(tc.child, tc.parent)
+		if err != nil || got != tc.want {
+			t.Errorf("%s: PredicateWithin(%s, %s) = %v, %v; want %v", tc.name, tc.child, tc.parent, got, err, tc.want)
+		}
+	}
+	if _, err := PredicateWithin("nonsense", prod); !errors.Is(err, ErrBadPredicate) {
+		t.Errorf("malformed child: err = %v, want ErrBadPredicate", err)
+	}
+	if _, err := PredicateWithin(prod, "nonsense"); !errors.Is(err, ErrBadPredicate) {
+		t.Errorf("malformed parent: err = %v, want ErrBadPredicate", err)
+	}
+}
