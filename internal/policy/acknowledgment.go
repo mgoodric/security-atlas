@@ -291,13 +291,9 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 			}
 			return fmt.Errorf("policy_ack: load policy: %w", perr)
 		}
-		// A policy row is one version, so policy_version_id is the row id.
-		if in.PolicyVersionID != nil && *in.PolicyVersionID != uuid.UUID(policyRow.ID.Bytes) {
-			return ErrAckVersionMismatch
-		}
-		if policyRow.Status != StatePublished {
-			return ErrAckPolicyNotPublished
-		}
+		// The roster check runs before the version and published checks, so
+		// a caller off the roster gets 403 without learning whether this
+		// version is current or published (#2762).
 		required := policyRow.AcknowledgmentRequiredRoles
 		if required == nil {
 			required = []string{}
@@ -312,6 +308,13 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 		}
 		if !onRoster {
 			return ErrAckNotRequired
+		}
+		// A policy row is one version, so policy_version_id is the row id.
+		if in.PolicyVersionID != nil && *in.PolicyVersionID != uuid.UUID(policyRow.ID.Bytes) {
+			return ErrAckVersionMismatch
+		}
+		if policyRow.Status != StatePublished {
+			return ErrAckPolicyNotPublished
 		}
 		// Idempotency probe: existing row with same token deduplicates.
 		existing, gerr := q.GetAcknowledgmentByToken(ctx, dbx.GetAcknowledgmentByTokenParams{

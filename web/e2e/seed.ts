@@ -195,7 +195,19 @@ export type FixtureName =
   | "board-pack-detail"
   // Slice 160 / #2711 — a tenant of the spec's own with zero controls,
   // for control-detail-empty.spec.ts's empty states.
-  | "control-detail-empty";
+  | "control-detail-empty"
+  // #2755 — one tenant of its own per list spec whose assertions #2755
+  // restored, so counts, filters and empty states never read rows that
+  // other specs add to the demo tenant. Each file names its tenant UUID.
+  | "audit-periods-vendors-export"
+  | "audits-list"
+  | "calendar"
+  | "evidence-list"
+  | "evidence-pagination"
+  | "exceptions-list"
+  | "metrics-dashboard"
+  | "policies-list"
+  | "risks-list";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
