@@ -188,6 +188,11 @@ jobs:
               # #2394 — the spec web/lib/api/generated/openapi.d.ts is
               # generated from.
               - 'docs/openapi.yaml'
+              # #2676 — stock control bundles and the framework crosswalk.
+              # Go-embedded data read by Go · lint (lint-soc2-coverage), the
+              # internal/control + scfimport unit tests and the self-host leg.
+              - 'controls/**'
+              - 'data/crosswalks/**'
 
       # #2099 — tier classification. A separate step because
       # `predicate-quantifier` is per step, and the `code` filter above must
@@ -229,6 +234,9 @@ jobs:
               - '!cmd/**'
               - '!pkg/**'
               - '!connectors/**'
+              # #2676 — Go-embedded data; no web test reads it.
+              - '!controls/**'
+              - '!data/crosswalks/**'
               - '!**/*.py'
               - '!oscal-bridge/**'
               - '!pyproject.toml'
