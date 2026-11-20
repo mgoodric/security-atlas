@@ -297,6 +297,14 @@ func keepReviewedAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID,
 		return UploadResult{}, false, fmt.Errorf("lookup prior version: %w", err)
 	}
 	if prior.BundleManifestHash == b.ManifestHashHex {
+		// The tenant already has the shipped manifest, so nothing is held
+		// back; clear any row an earlier shipped manifest left (#2599).
+		if err := q.ClearStockControlHoldback(ctx, dbx.ClearStockControlHoldbackParams{
+			TenantID: pgUUID(tenantID),
+			BundleID: b.Manifest.BundleID,
+		}); err != nil {
+			return UploadResult{}, false, fmt.Errorf("clear held-back stock control: %w", err)
+		}
 		return UploadResult{}, false, nil
 	}
 	approved, err := q.ApprovedRemapLineageRevision(ctx, dbx.ApprovedRemapLineageRevisionParams{

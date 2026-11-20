@@ -192,6 +192,10 @@ type Querier interface {
 	// First half of moving the default: the partial unique index allows one
 	// default per tenant, so the old one is cleared before the new one is set.
 	ClearRiskCategoryDefault(ctx context.Context, arg ClearRiskCategoryDefaultParams) error
+	// Issue #2599: the boot seed found the tenant's active revision already is
+	// the shipped manifest, so nothing is held back any more. The row named an
+	// earlier shipped manifest; without this it would be listed for good.
+	ClearStockControlHoldback(ctx context.Context, arg ClearStockControlHoldbackParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CloseIncident(ctx context.Context, arg CloseIncidentParams) (Incident, error)
