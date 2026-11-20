@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
@@ -46,7 +47,8 @@ type HeldBackStockControl struct {
 
 // ListHeldBackStockControls returns the tenant's held-back stock controls,
 // ordered by bundle_id. RLS and an explicit tenant filter keep it to the
-// caller's tenant.
+// caller's tenant. A bundle that no longer ships is left out (#2599): the
+// boot seed never uploads it again, so its row is never cleared.
 func (s *Store) ListHeldBackStockControls(ctx context.Context) ([]HeldBackStockControl, error) {
 	out := []HeldBackStockControl{}
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -55,6 +57,9 @@ func (s *Store) ListHeldBackStockControls(ctx context.Context) ([]HeldBackStockC
 			return fmt.Errorf("list held-back stock controls: %w", err)
 		}
 		for _, r := range rows {
+			if !scfimport.IsShippedStockBundle(r.BundleID) {
+				continue
+			}
 			out = append(out, heldBackFromRow(r))
 		}
 		return nil

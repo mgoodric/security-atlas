@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/auth/password"
 )
 
@@ -197,7 +198,7 @@ func countOrgData(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (OrgData, 
 			(SELECT count(*) FROM evidence_records WHERE tenant_id = $1),
 			(SELECT count(*) FROM policies WHERE tenant_id = $1 AND created_by IS DISTINCT FROM $3),
 			(SELECT count(*) FROM framework_versions WHERE tenant_id = $1)
-	`, tenantID, stockControlBundleIDs, stockPolicyCreatedBy).Scan(
+	`, tenantID, scfimport.StockControlBundleIDs, stockPolicyCreatedBy).Scan(
 		&od.Controls, &od.Risks, &od.Evidence, &od.Policies, &od.FrameworkVersions,
 	)
 	if err != nil {

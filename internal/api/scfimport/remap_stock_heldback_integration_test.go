@@ -13,6 +13,8 @@ package scfimport_test
 //     manifest). The next boot seed keeps v3: v3 descends from an approved
 //     revision. Before #2358 only the approved revision itself was kept, and
 //     the shipped manifest superseded v3.
+//   - #2599: a bundle that no longer ships is left out of the list; its
+//     row stays, since the boot seed never uploads that bundle again.
 
 import (
 	"context"
@@ -167,5 +169,101 @@ func TestHeldBack2358_ReviewedStockControlListedAndEditsKept(t *testing.T) {
 	if len(hs) != 1 || hs[0].ActiveControlID != v3.ControlID.String() || hs[0].ActiveVersion != 3 ||
 		hs[0].ApprovedControlID != approvedID.String() {
 		t.Fatalf("held back after the edit = %+v; want v3 held behind approved %s", hs, approvedID)
+	}
+
+	// #2599: the bundle stops shipping. Its row stays, since the boot seed
+	// never uploads the bundle again, and the list leaves it out.
+	const retired = "soc2_retired_2599"
+	renameBundle := func(from, to string) {
+		t.Helper()
+		if _, err := admin.Exec(ctx, `UPDATE controls SET bundle_id = $3 WHERE tenant_id = $1 AND bundle_id = $2`, tenant, from, to); err != nil {
+			t.Fatalf("rename controls bundle: %v", err)
+		}
+		if _, err := admin.Exec(ctx, `UPDATE stock_control_holdbacks SET bundle_id = $3 WHERE tenant_id = $1 AND bundle_id = $2`, tenant, from, to); err != nil {
+			t.Fatalf("rename holdback bundle: %v", err)
+		}
+	}
+	holdbackRows := func() int {
+		t.Helper()
+		var n int
+		if err := admin.QueryRow(ctx, `SELECT count(*) FROM stock_control_holdbacks WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+			t.Fatalf("count holdbacks: %v", err)
+		}
+		return n
+	}
+	renameBundle(stockCC81Bundle, retired)
+	if hs := heldBack(tenant); len(hs) != 0 {
+		t.Fatalf("held back after the bundle stopped shipping = %+v; want none", hs)
+	}
+	if n := holdbackRows(); n != 1 {
+		t.Fatalf("holdback rows after the bundle stopped shipping = %d; want the row kept, 1", n)
+	}
+	renameBundle(retired, stockCC81Bundle)
+	if hs := heldBack(tenant); len(hs) != 1 {
+		t.Fatalf("held back after the bundle ships again = %+v; want one control", hs)
+	}
+}
+
+// #2599: a boot that finds the tenant's active revision already is the
+// shipped manifest has nothing to hold back, and deletes the row an earlier
+// shipped manifest left. Without that the row was listed for good.
+func TestHeldBack2599_AppliedShippedManifestClearsRow(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	truncateCatalog(t, admin)
+	ctx := context.Background()
+
+	stockYAML, err := os.ReadFile(filepath.Join("..", "..", "..", "controls", "soc2", stockCC81Bundle, "control.yaml"))
+	if err != nil {
+		t.Fatalf("read stock manifest: %v", err)
+	}
+	bootSeed := func(tenant string) control.UploadResult {
+		t.Helper()
+		b, err := control.FinalizeBundleForHTTP(stockYAML)
+		if err != nil {
+			t.Fatalf("bundle: %v", err)
+		}
+		res, err := control.NewStore(app).Upload(withTenant(t, tenant), b, "oauth_client:bootstrap")
+		if err != nil {
+			t.Fatalf("upload: %v", err)
+		}
+		return res
+	}
+	c, err := scfimport.Load("testdata/remap-stock-release-a.json")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	importRelease(t, admin, c)
+	tenant := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "stock_control_holdbacks", "controls")
+	other := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "stock_control_holdbacks", "controls")
+	active := bootSeed(tenant).ControlID
+	otherActive := bootSeed(other).ControlID
+
+	// Each tenant has a row naming an earlier shipped manifest.
+	earlier := strings.Repeat("0", 64)
+	for tn, id := range map[string]uuid.UUID{tenant: active, other: otherActive} {
+		if _, err := admin.Exec(ctx, `
+			INSERT INTO stock_control_holdbacks (tenant_id, bundle_id, approved_control_id, shipped_manifest_hash)
+			VALUES ($1, $2, $3, $4)`, tn, stockCC81Bundle, id, earlier); err != nil {
+			t.Fatalf("seed holdback row: %v", err)
+		}
+	}
+	rows := func(tn string) int {
+		t.Helper()
+		var n int
+		if err := admin.QueryRow(ctx, `SELECT count(*) FROM stock_control_holdbacks WHERE tenant_id = $1`, tn).Scan(&n); err != nil {
+			t.Fatalf("count holdbacks: %v", err)
+		}
+		return n
+	}
+
+	if res := bootSeed(tenant); res.KeptReviewedAnchor || res.ControlID != active {
+		t.Fatalf("boot seed = %+v; want the active %s unchanged and no hold", res, active)
+	}
+	if n := rows(tenant); n != 0 {
+		t.Fatalf("holdback rows after the boot = %d; want the row deleted", n)
+	}
+	if n := rows(other); n != 1 {
+		t.Fatalf("other tenant's holdback rows = %d; want its row kept, 1", n)
 	}
 }
