@@ -34,12 +34,14 @@ FOR UPDATE;
 -- Cursor pagination on created_at DESC, id DESC. The cursor is the
 -- (created_at, id) of the last row of the previous page; when the cursor
 -- timestamp is NULL (sqlc.narg), the first page is returned. Tombstoned
--- rows are excluded.
+-- rows are excluded. #2618: `q` narrows to titles containing it, ignoring
+-- case; strpos rather than ILIKE, so `%` and `_` in it match literally.
 SELECT *
 FROM action_plans
 WHERE tenant_id = $1
   AND tombstoned_at IS NULL
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
+  AND (sqlc.narg('q')::text IS NULL OR strpos(lower(title), lower(sqlc.narg('q')::text)) > 0)
   AND (
         sqlc.narg('cursor_created_at')::timestamptz IS NULL
         OR (created_at, id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)

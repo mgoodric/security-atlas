@@ -84,7 +84,7 @@ The HTTP API exposes:
 | `GET /v1/metrics/{id}/observations?since` | The observation series (computed + manual)    |
 | `POST /v1/metrics/{id}/inputs`            | Submit a manual value (admin role; auditable) |
 | `GET /v1/metrics/{id}/target`             | The target + warning + critical thresholds    |
-| `PUT /v1/metrics/{id}/target`             | Set or update the target (admin role)         |
+| `PUT /v1/metrics/{id}/target`             | Set the target (admin, grc_engineer; audited) |
 
 ## Worked example: when _Audit readiness_ dips
 

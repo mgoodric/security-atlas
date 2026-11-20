@@ -39,6 +39,18 @@ describe("fetchActionPlansList", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/action-plans");
   });
 
+  it("sends a trimmed title search as q, and omits a blank one (#2618)", async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ action_plans: [], count: 0 }),
+    );
+    await fetchActionPlansList({ q: "  aws keys ", limit: 25 });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/action-plans?q=aws+keys&limit=25",
+    );
+    await fetchActionPlansList({ q: "   " });
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/action-plans");
+  });
+
   it("forwards status, limit, and cursor", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ action_plans: [], count: 0 }),

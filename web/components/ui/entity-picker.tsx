@@ -32,7 +32,7 @@
 // named "not available"; nothing from its list is shown.
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   Combobox,
@@ -46,6 +46,7 @@ import { useSessionTenant } from "@/components/session-tenant-context";
 import { usePeopleDirectory } from "@/components/ui/person";
 import { APIError } from "@/lib/api/base";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
+import { useDebounced } from "@/lib/use-debounced";
 import { fetchEvidenceList, searchEvidence } from "@/lib/api/evidence";
 import { fetchPoliciesList } from "@/lib/api/policies";
 import { fetchRisksListWithRollUps } from "@/lib/api/risks";
@@ -93,16 +94,6 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 async function fetchEvidenceForPicker() {
   return (await fetchEvidenceList({ limit: EVIDENCE_LIMIT })).evidence;
-}
-
-// useDebounced returns `value` once it has stopped changing for `ms`.
-function useDebounced(value: string, ms: number): string {
-  const [settled, setSettled] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setSettled(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return settled;
 }
 
 // The evidence list holds only the newest records, so once the caller

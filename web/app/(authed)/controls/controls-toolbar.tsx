@@ -31,12 +31,14 @@ import { useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { EntityPicker } from "@/components/ui/entity-picker";
+import { Input } from "@/components/ui/input";
 import type { ActionPlan } from "@/lib/api/action-plans";
 
 import {
   exceptionRequestHref,
   type BulkActionGates,
   type BulkMessage,
+  type Progress,
 } from "./bulk-actions";
 import { SELECTION_CAP } from "./selection";
 
@@ -47,10 +49,21 @@ export type SelectionBarProps = {
   onClear: () => void;
   onAssignOwner: (ownerUserId: string) => void;
   onEvaluate: () => void;
+  /** A running bulk evaluate's progress (#2618); null when none runs. */
+  evaluateProgress: Progress | null;
+  /** Stops a running bulk evaluate; the items not yet run are cancelled. */
+  onCancelEvaluate: () => void;
   /** The plans offered by the link picker; undefined while loading. */
   plans: ActionPlan[] | undefined;
   /** Asked for when the link picker opens, so plans load on demand. */
   onWantPlans: () => void;
+  /** The link picker's title search, run server-side (#2618). */
+  planQuery: string;
+  onPlanQuery: (q: string) => void;
+  /** More plans match than are loaded; `onMorePlans` loads a page. */
+  hasMorePlans: boolean;
+  loadingMorePlans: boolean;
+  onMorePlans: () => void;
   onLinkPlan: (planId: string) => void;
   /** The action in flight, if any; every action is disabled meanwhile. */
   busy: "assign" | "evaluate" | "link" | null;
@@ -69,8 +82,15 @@ export function SelectionBar({
   onClear,
   onAssignOwner,
   onEvaluate,
+  evaluateProgress,
+  onCancelEvaluate,
   plans,
   onWantPlans,
+  planQuery,
+  onPlanQuery,
+  hasMorePlans,
+  loadingMorePlans,
+  onMorePlans,
   onLinkPlan,
   busy,
 }: SelectionBarProps) {
@@ -115,6 +135,27 @@ export function SelectionBar({
           >
             {busy === "evaluate" ? "Evaluating…" : "Evaluate now"}
           </Button>
+        ) : null}
+        {busy === "evaluate" && evaluateProgress ? (
+          <>
+            <span
+              data-testid="controls-bulk-evaluate-progress"
+              role="status"
+              aria-live="polite"
+              className="text-xs text-muted-foreground"
+            >
+              {evaluateProgress.succeeded} of {evaluateProgress.total} evaluated
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="controls-bulk-evaluate-cancel"
+              onClick={onCancelEvaluate}
+            >
+              Cancel
+            </Button>
+          </>
         ) : null}
         {gates.linkPlan ? (
           <Button
@@ -216,6 +257,21 @@ export function SelectionBar({
           data-testid="controls-bulk-link-panel"
         >
           <label className="space-y-1">
+            <span className="block text-xs font-medium">Find a plan</span>
+            <Input
+              type="search"
+              aria-label="Find an action plan by title"
+              data-testid="controls-bulk-plan-search"
+              placeholder="Search plan titles"
+              value={planQuery}
+              onChange={(e) => {
+                onPlanQuery(e.target.value);
+                setPlanId("");
+              }}
+              className="h-8 min-w-48"
+            />
+          </label>
+          <label className="space-y-1">
             <span className="block text-xs font-medium">Action plan</span>
             <select
               aria-label="Action plan"
@@ -234,13 +290,31 @@ export function SelectionBar({
               ))}
             </select>
           </label>
+          {hasMorePlans ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="controls-bulk-plan-more"
+              disabled={loadingMorePlans}
+              onClick={onMorePlans}
+            >
+              {loadingMorePlans ? "Loading…" : "Load more plans"}
+            </Button>
+          ) : null}
           {plans !== undefined && plans.length === 0 ? (
-            <span className="text-xs text-muted-foreground">
-              No action plans yet.{" "}
-              <Link href="/action-plans/new" className="underline">
-                Create one
-              </Link>
-            </span>
+            planQuery.trim() !== "" ? (
+              <span className="text-xs text-muted-foreground">
+                No plan title matches.
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                No action plans yet.{" "}
+                <Link href="/action-plans/new" className="underline">
+                  Create one
+                </Link>
+              </span>
+            )
           ) : null}
           <Button
             type="button"

@@ -21,7 +21,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 
 import { PageShell } from "@/components/shell/page-shell";
 import { ScopePicker } from "@/components/scope/scope-picker";
@@ -38,9 +38,12 @@ import { runPerItem, type Refusal } from "../../controls/bulk-actions";
 import {
   DEFAULT_DAYS,
   MAX_DAYS,
+  bulkIdempotencyKey,
   dayAfter,
+  idempotencyKeyFor,
   validateRequest,
   type RequestErrors,
+  type SentKey,
 } from "../lifecycle";
 
 export default function NewExceptionPage() {
@@ -84,6 +87,7 @@ function RequestForm() {
   const [errors, setErrors] = useState<RequestErrors>({});
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const sentKey = useRef<SentKey | null>(null);
 
   const controlsQ = useQuery({
     queryKey: ["controls-list", "tenant"],
@@ -111,10 +115,21 @@ function RequestForm() {
     }
     setErrors({});
     setSubmitting(true);
+    // #2618: a resubmit of the same form reuses the key, so a send that
+    // timed out after the platform filed it is replayed, not duplicated.
+    const sent = idempotencyKeyFor(
+      sentKey.current,
+      JSON.stringify({ ...r.body, control_id: bulk ? "" : r.body.control_id }),
+      () => crypto.randomUUID(),
+    );
+    sentKey.current = sent;
     if (bulk) {
       const body = r.body;
       const res = await runPerItem(bulkIds, (id) =>
-        createException({ ...body, control_id: id }),
+        createException(
+          { ...body, control_id: id },
+          bulkIdempotencyKey(sent.key, id),
+        ),
       );
       await qc.invalidateQueries({ queryKey: ["exceptions"] });
       if (res.refused.length === 0) {
@@ -132,7 +147,7 @@ function RequestForm() {
       return;
     }
     try {
-      const { exception } = await createException(r.body);
+      const { exception } = await createException(r.body, sent.key);
       await qc.invalidateQueries({ queryKey: ["exceptions"] });
       toast("Exception requested");
       router.push(`/exceptions/${encodeURIComponent(exception.id)}`);

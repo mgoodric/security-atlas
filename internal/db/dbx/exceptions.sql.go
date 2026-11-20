@@ -368,6 +368,40 @@ func (q *Queries) GetExceptionByID(ctx context.Context, arg GetExceptionByIDPara
 	return i, err
 }
 
+const getExceptionIdempotencyKey = `-- name: GetExceptionIdempotencyKey :one
+SELECT exception_id, request_hash
+FROM exception_idempotency_keys
+WHERE tenant_id = $1
+  AND requested_by = $2
+  AND idempotency_key = $3
+  AND created_at > $4::timestamptz
+`
+
+type GetExceptionIdempotencyKeyParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	RequestedBy    string             `json:"requested_by"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	NotBefore      pgtype.Timestamptz `json:"not_before"`
+}
+
+type GetExceptionIdempotencyKeyRow struct {
+	ExceptionID pgtype.UUID `json:"exception_id"`
+	RequestHash string      `json:"request_hash"`
+}
+
+// #2618: the exception a key created, while the key is inside its window.
+func (q *Queries) GetExceptionIdempotencyKey(ctx context.Context, arg GetExceptionIdempotencyKeyParams) (GetExceptionIdempotencyKeyRow, error) {
+	row := q.db.QueryRow(ctx, getExceptionIdempotencyKey,
+		arg.TenantID,
+		arg.RequestedBy,
+		arg.IdempotencyKey,
+		arg.NotBefore,
+	)
+	var i GetExceptionIdempotencyKeyRow
+	err := row.Scan(&i.ExceptionID, &i.RequestHash)
+	return i, err
+}
+
 const listExceptionAuditLog = `-- name: ListExceptionAuditLog :many
 SELECT id, tenant_id, exception_id, action, actor, from_state, to_state, reason, occurred_at, subject_module
 FROM exception_audit_log
@@ -671,6 +705,62 @@ func (q *Queries) ListTenantsWithActiveExceptions(ctx context.Context) ([]pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockExceptionIdempotencyKey = `-- name: LockExceptionIdempotencyKey :exec
+SELECT pg_advisory_xact_lock(
+    12,
+    hashtext($1::text || '|' || $2::text || '|' || $3::text)
+)
+`
+
+type LockExceptionIdempotencyKeyParams struct {
+	TenantID       string `json:"tenant_id"`
+	RequestedBy    string `json:"requested_by"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+// #2618: serialises two requests carrying the same Idempotency-Key, so the
+// second waits for the first to commit and then replays it. Released at
+// the end of the transaction. Namespace 12 is
+// advisorylock.ExceptionIdempotencyKey.
+func (q *Queries) LockExceptionIdempotencyKey(ctx context.Context, arg LockExceptionIdempotencyKeyParams) error {
+	_, err := q.db.Exec(ctx, lockExceptionIdempotencyKey, arg.TenantID, arg.RequestedBy, arg.IdempotencyKey)
+	return err
+}
+
+const putExceptionIdempotencyKey = `-- name: PutExceptionIdempotencyKey :exec
+INSERT INTO exception_idempotency_keys (
+    tenant_id, requested_by, idempotency_key, request_hash, exception_id, created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tenant_id, requested_by, idempotency_key) DO UPDATE
+SET request_hash = EXCLUDED.request_hash,
+    exception_id = EXCLUDED.exception_id,
+    created_at   = EXCLUDED.created_at
+`
+
+type PutExceptionIdempotencyKeyParams struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	RequestedBy    string             `json:"requested_by"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	ExceptionID    pgtype.UUID        `json:"exception_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+// #2618: records the key against the exception it created. A key past its
+// window is overwritten.
+func (q *Queries) PutExceptionIdempotencyKey(ctx context.Context, arg PutExceptionIdempotencyKeyParams) error {
+	_, err := q.db.Exec(ctx, putExceptionIdempotencyKey,
+		arg.TenantID,
+		arg.RequestedBy,
+		arg.IdempotencyKey,
+		arg.RequestHash,
+		arg.ExceptionID,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const revokeException = `-- name: RevokeException :one

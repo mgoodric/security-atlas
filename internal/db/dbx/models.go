@@ -2425,6 +2425,16 @@ type ExceptionAuditLog struct {
 	SubjectModule string             `json:"subject_module"`
 }
 
+// Idempotency-Key -> exception for POST /v1/exceptions (#2618). A repeat inside the window replays the recorded exception.
+type ExceptionIdempotencyKey struct {
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	RequestedBy    string             `json:"requested_by"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	RequestHash    string             `json:"request_hash"`
+	ExceptionID    pgtype.UUID        `json:"exception_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type FeatureFlag struct {
 	TenantID      pgtype.UUID        `json:"tenant_id"`
 	FlagKey       string             `json:"flag_key"`

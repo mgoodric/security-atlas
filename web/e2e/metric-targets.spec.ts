@@ -11,7 +11,8 @@
 //      value) sends 0.8 / 0.7 / 0.6 and turns the badge green, never red;
 //      reopened, the dialog shows the percentages again;
 //   2. a viewer sees no Set target, and the board card's "No target set"
-//      is text, not a link to the form.
+//      is text, not a link to the form;
+//   3. a grc_engineer sees Set target (#2572).
 //
 // Neutral test strings only (P0-A9 / GitGuardian).
 
@@ -70,6 +71,17 @@ const VIEWER_ME = {
   has_tenant_role: true,
   owner_roles: ["viewer"],
   roles: ["viewer"],
+};
+
+// #2572: a grc_engineer's /api/me. is_approver, not is_tenant_admin.
+const GRC_ENGINEER_ME = {
+  ...VIEWER_ME,
+  display_name: "Gail GRC",
+  email: "grc@example.test",
+  tenant_role: "grc_engineer",
+  is_approver: true,
+  owner_roles: ["grc_engineer"],
+  roles: ["grc_engineer"],
 };
 
 function json(body: unknown, status = 200) {
@@ -204,5 +216,21 @@ test.describe("metric targets (#2341)", () => {
     const noTarget = page.getByTestId(`board-metric-${METRIC.id}-no-target`);
     await expect(noTarget).toHaveText("No target set");
     await expect(noTarget).not.toHaveAttribute("href");
+  });
+
+  // #2572: a grc_engineer (an approver, not a tenant admin) may set a
+  // metric target, as it sets a framework posture target.
+  test("a grc_engineer is offered Set target", async ({ authedPage: page }) => {
+    await mockMetric(page);
+    await page.route("**/api/me", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      return route.fulfill(json(GRC_ENGINEER_ME));
+    });
+    await page.route("**/api/admin/me", (route) =>
+      route.fulfill(json({ is_admin: false })),
+    );
+
+    await page.goto(`/dashboards/metrics/${METRIC.id}`);
+    await expect(page.getByTestId("metric-target-set")).toBeVisible();
   });
 });

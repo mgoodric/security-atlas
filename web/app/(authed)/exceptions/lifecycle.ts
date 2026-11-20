@@ -222,3 +222,25 @@ export function statusPillClass(status: string): string {
       return "bg-muted text-muted-foreground";
   }
 }
+
+/** The Idempotency-Key a request form last sent, and for which body. */
+export type SentKey = { body: string; key: string };
+
+/**
+ * #2618 — the Idempotency-Key for submitting `body`. Submitting the same
+ * body again (a retry after a timeout or an error) reuses the last key,
+ * so the platform replays what the first send filed instead of filing a
+ * duplicate. A changed body is a new request and gets a fresh key.
+ */
+export function idempotencyKeyFor(
+  last: SentKey | null,
+  body: string,
+  freshKey: () => string,
+): SentKey {
+  return last && last.body === body ? last : { body, key: freshKey() };
+}
+
+/** The per-control key in a bulk request: one exception per control. */
+export function bulkIdempotencyKey(key: string, controlId: string): string {
+  return `${key}:${controlId}`;
+}

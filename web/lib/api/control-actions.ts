@@ -20,10 +20,18 @@ export class ControlActionError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Seconds from Retry-After on a 429, when the platform sent one. */
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "ControlActionError";
   }
+}
+
+/** The integer-seconds form of Retry-After; anything else is undefined. */
+export function parseRetryAfter(raw: string | null): number | undefined {
+  if (!raw || !/^\d+$/.test(raw.trim())) return undefined;
+  return Number(raw.trim());
 }
 
 async function errorFrom(res: Response, fallback: string): Promise<never> {
@@ -34,7 +42,11 @@ async function errorFrom(res: Response, fallback: string): Promise<never> {
   } catch {
     // keep the fallback
   }
-  throw new ControlActionError(message, res.status);
+  throw new ControlActionError(
+    message,
+    res.status,
+    parseRetryAfter(res.headers.get("Retry-After")),
+  );
 }
 
 /** bundleDownloadHref is the Download bundle link for a control. */

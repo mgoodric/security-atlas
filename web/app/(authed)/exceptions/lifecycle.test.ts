@@ -10,8 +10,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createException } from "@/lib/api/exceptions";
 
 import {
+  bulkIdempotencyKey,
   dayAfter,
   dayStart,
+  idempotencyKeyFor,
   MAX_DAYS,
   nextAction,
   validateAction,
@@ -128,6 +130,56 @@ describe("createException", () => {
     const init = spy.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual(body);
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBeUndefined();
+  });
+
+  test("sends the Idempotency-Key it is given (#2618)", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ exception: { id: "e1" } }), {
+        status: 201,
+      }),
+    );
+    await createException(
+      {
+        control_id: CONTROL,
+        scope_cell_predicate: { op: "true" },
+        justification: "x",
+        compensating_controls: [],
+        expires_at: "2027-01-01T00:00:00Z",
+      },
+      "key-1",
+    );
+    const init = spy.mock.calls[0]?.[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBe("key-1");
+  });
+});
+
+describe("idempotencyKeyFor (#2618)", () => {
+  let n = 0;
+  const fresh = () => `k${++n}`;
+
+  test("a first submit gets a fresh key", () => {
+    expect(idempotencyKeyFor(null, "b1", fresh).key).toMatch(/^k\d+$/);
+  });
+
+  test("resubmitting the same body reuses the key", () => {
+    const first = idempotencyKeyFor(null, "b1", fresh);
+    expect(idempotencyKeyFor(first, "b1", fresh).key).toBe(first.key);
+  });
+
+  test("a changed body gets a new key", () => {
+    const first = idempotencyKeyFor(null, "b1", fresh);
+    const second = idempotencyKeyFor(first, "b2", fresh);
+    expect(second.key).not.toBe(first.key);
+    expect(second.body).toBe("b2");
+  });
+
+  test("a bulk request keys each control apart", () => {
+    expect(bulkIdempotencyKey("k", "c1")).not.toBe(
+      bulkIdempotencyKey("k", "c2"),
+    );
   });
 });
 

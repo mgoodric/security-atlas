@@ -41,13 +41,21 @@
 
 import {
   keepPreviousData,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   EmptyState,
@@ -90,6 +98,7 @@ import {
 } from "@/lib/api/action-plans";
 import { useSeesPage } from "@/components/modules-context";
 import { getMe } from "@/lib/api/me";
+import { useDebounced } from "@/lib/use-debounced";
 import { APIError } from "@/lib/api/base";
 import {
   CONTROLS_EXPORT_FORMATS,
@@ -149,6 +158,7 @@ import {
   runPerItem,
   type BulkMessage,
   type PerItemResult,
+  type Progress,
 } from "./bulk-actions";
 import {
   isOverCap,
@@ -213,6 +223,10 @@ const CONTROLS_PAGE_SIZE = 50;
 // fresh attempt never shows the previous result. Greppable at module
 // scope per the slice-227 CONTROLS_PAGE_SIZE precedent.
 const BULK_ASSIGN_MESSAGE_TTL_MS = 6000;
+
+// #2618 — plans per page in the bulk link picker; "Load more" fetches the
+// next page from the same search.
+const PLAN_PICKER_PAGE = 25;
 
 // Slice 227 — URL query-string key for the 1-indexed page index. The
 // `page` key is sibling to the filter keys above; the filter-change
@@ -637,12 +651,31 @@ function ControlsPageInner() {
     },
     [queryClient],
   );
+  // #2618 — evaluation is rate-limited per principal, so a bulk evaluate
+  // waits out each 429's Retry-After and retries. It shows "n of N
+  // evaluated" while it runs and can be cancelled.
+  const [evalProgress, setEvalProgress] = useState<Progress | null>(null);
+  const evalAbort = useRef<AbortController | null>(null);
   const bulkEvaluateMutation = useMutation({
-    mutationFn: (controlIds: string[]) =>
-      runPerItem(controlIds, (id) => evaluateControl(id)),
+    mutationFn: (controlIds: string[]) => {
+      const ctl = new AbortController();
+      evalAbort.current = ctl;
+      setEvalProgress({ succeeded: 0, settled: 0, total: controlIds.length });
+      return runPerItem(controlIds, (id) => evaluateControl(id), {
+        signal: ctl.signal,
+        onProgress: setEvalProgress,
+      });
+    },
     onSuccess: (res) =>
       afterPerItem(res, perItemMessage(res, "evaluated", labelOf)),
+    onSettled: () => {
+      evalAbort.current = null;
+      setEvalProgress(null);
+    },
   });
+  const onCancelEvaluate = useCallback(() => {
+    evalAbort.current?.abort();
+  }, []);
   const bulkLinkMutation = useMutation({
     mutationFn: (vars: { controlIds: string[]; planId: string }) =>
       runPerItem(vars.controlIds, (id) =>
@@ -652,13 +685,25 @@ function ControlsPageInner() {
       afterPerItem(res, perItemMessage(res, "linked to the plan", labelOf)),
   });
 
-  // The link picker's plans load once it is first opened.
+  // The link picker's plans load once it is first opened. #2618: a
+  // server-side title search and a page at a time, so a tenant with more
+  // plans than one page can still reach every plan.
   const [wantPlans, setWantPlans] = useState(false);
-  const plansQ = useQuery({
-    queryKey: ["action-plans", "bulk-link-picker"],
-    queryFn: () => fetchActionPlansList({ limit: 100 }),
+  const [planQuery, setPlanQuery] = useState("");
+  const settledPlanQuery = useDebounced(planQuery.trim(), 250);
+  const plansQ = useInfiniteQuery({
+    queryKey: ["action-plans", "bulk-link-picker", settledPlanQuery],
+    queryFn: ({ pageParam }) =>
+      fetchActionPlansList({
+        q: settledPlanQuery,
+        limit: PLAN_PICKER_PAGE,
+        cursor: pageParam,
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: wantPlans && gates.linkPlan,
   });
+  const pickerPlans = plansQ.data?.pages.flatMap((p) => p.action_plans);
 
   const busy = bulkAssignMutation.isPending
     ? "assign"
@@ -1453,8 +1498,15 @@ function ControlsPageInner() {
           onClear={onClearSelection}
           onAssignOwner={onAssignOwner}
           onEvaluate={onEvaluate}
-          plans={plansQ.data?.action_plans}
+          evaluateProgress={evalProgress}
+          onCancelEvaluate={onCancelEvaluate}
+          plans={pickerPlans}
           onWantPlans={() => setWantPlans(true)}
+          planQuery={planQuery}
+          onPlanQuery={setPlanQuery}
+          hasMorePlans={plansQ.hasNextPage}
+          loadingMorePlans={plansQ.isFetchingNextPage}
+          onMorePlans={() => void plansQ.fetchNextPage()}
           onLinkPlan={onLinkPlan}
           busy={busy}
         />
