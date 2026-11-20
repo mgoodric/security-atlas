@@ -93,8 +93,10 @@ func (s *PackStore) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRo
 
 // ListFailingEvaluations returns the open findings for the pack — the latest
 // failing control evaluation per (control, scope_cell) as of `periodEnd`
-// (decision D4). Board-pack-owned read; same data semantics as slice 030's
-// AuditPeriod-bound aggregator but pinned to the calendar-quarter horizon.
+// (decision D4), counting only cells in each control's latest evaluation run
+// as of that horizon (#2688). Board-pack-owned read; same data semantics as
+// slice 030's AuditPeriod-bound aggregator but pinned to the calendar-quarter
+// horizon.
 func (s *PackStore) ListFailingEvaluations(ctx context.Context, periodEnd time.Time) ([]Finding, error) {
 	// The pack's period_end is a DATE; the control_evaluations horizon is a
 	// TIMESTAMPTZ. Treat the horizon as the END of the period_end day
