@@ -40,7 +40,8 @@ var categoryRefRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$|^[0-9a-fA-F]{
 // accept, is an error naming it. Empty values are dropped. The kept
 // entries are then read together as one GET /v1/risks query, so a view
 // whose entries are each fine but disagree (a review_due_from after its
-// review_due_to) is refused too (#2550).
+// review_due_to) is refused too (#2550); parsePageFilter owns that check
+// (#2693).
 func ValidateSavedView(params map[string]string) (map[string]string, error) {
 	out := make(map[string]string, len(params))
 	q := url.Values{}
@@ -56,25 +57,33 @@ func ValidateSavedView(params map[string]string) (map[string]string, error) {
 			q.Set(k, v)
 		}
 	}
-	f, msg := parsePageFilter(q)
-	if msg != "" {
+	if _, msg := parsePageFilter(q); msg != "" {
 		return nil, errors.New(msg)
-	}
-	if f.DueFrom != nil && f.DueTo != nil && f.DueFrom.After(*f.DueTo) {
-		return nil, errors.New("review_due_from must not be after review_due_to")
 	}
 	return out, nil
 }
 
+// errInvertedReviewDue is GET /v1/risks's 400 for a review_due_from after
+// its review_due_to (#2693).
+const errInvertedReviewDue = "review_due_from must not be after review_due_to"
+
 // SanitizeSavedView keeps the entries of a stored view that are still
 // valid. A view saved before a filter value or column was retired loses
-// that entry rather than failing the register.
+// that entry rather than failing the register, and one saved with an
+// inverted review_due range (before #2692 refused it) loses both ends of
+// the range (#2693).
 func SanitizeSavedView(params map[string]string) map[string]string {
 	out := make(map[string]string, len(params))
 	for k, v := range params {
 		if v != "" && checkSavedViewEntry(k, v) == nil {
 			out[k] = v
 		}
+	}
+	if _, msg := parsePageFilter(url.Values{
+		"review_due_from": {out["review_due_from"]}, "review_due_to": {out["review_due_to"]},
+	}); msg == errInvertedReviewDue {
+		delete(out, "review_due_from")
+		delete(out, "review_due_to")
 	}
 	return out
 }
