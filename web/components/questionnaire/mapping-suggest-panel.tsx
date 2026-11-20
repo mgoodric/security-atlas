@@ -8,6 +8,7 @@ import {
   parseMappingSuggest,
   type MappingSuggestViewModel,
 } from "@/lib/questionnaire/mapping-suggest";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 interface MappingSuggestPanelProps {
   questionnaireID: string;
@@ -55,13 +56,7 @@ export function MappingSuggestPanel({
         { method: "POST" },
       );
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          // body not JSON
-        }
+        const msg = await upstreamErrorMessage(res);
         setActionError(msg);
         return;
       }

@@ -6,6 +6,7 @@
 // the client SELECTION_CAP is ergonomics, not the security boundary.
 
 import { APIError } from "./base";
+import { upstreamErrorMessage } from "./_shared";
 
 export type BulkAssignOwnerResponse = {
   owner_user_id: string;
@@ -32,13 +33,7 @@ export async function bulkAssignOwner(
     }),
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as BulkAssignOwnerResponse;

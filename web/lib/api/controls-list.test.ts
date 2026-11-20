@@ -102,7 +102,7 @@ describe("active control count (issue 1832)", () => {
 
   test("the badge surfaces a BFF error rather than a zero", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ error: "boom" }), { status: 502 }),
+      new Response(JSON.stringify({ error: "boom" }), { status: 400 }),
     );
     await expect(fetchMyControlsTotal()).rejects.toThrow("boom");
   });
@@ -246,7 +246,7 @@ describe("fetchControlsCatalog (issue 1740)", () => {
 
   test("throws when a page fails", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ error: "boom" }), { status: 502 }),
+      new Response(JSON.stringify({ error: "boom" }), { status: 400 }),
     );
     await expect(fetchControlsCatalog()).rejects.toThrow("boom");
   });

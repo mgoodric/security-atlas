@@ -29,6 +29,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { VendorReviewOutcome, VendorReviewWrite } from "@/lib/api/vendors";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 const OUTCOMES: { value: VendorReviewOutcome; label: string }[] = [
   { value: "pass", label: "Pass" },
@@ -85,10 +86,7 @@ export default function RecordVendorReviewPage({
         return;
       }
       if (!res.ok) {
-        const detail = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(detail.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
       // Slice 691 — refresh the detail surface the operator returns to.
       // Await the detail + history invalidations so their refetch is in

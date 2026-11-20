@@ -40,6 +40,7 @@ import {
   rejectRequestBody,
   runProgress,
 } from "@/lib/questionnaire/review-queue";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 interface ReviewQueueProps {
   questionnaireID: string;
@@ -138,13 +139,7 @@ export function ReviewQueue({
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          // body not JSON
-        }
+        const msg = await upstreamErrorMessage(res);
         setError(msg);
         return;
       }

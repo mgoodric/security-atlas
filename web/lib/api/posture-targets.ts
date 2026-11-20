@@ -15,6 +15,7 @@
 
 import { APIError } from "./base";
 import { thresholdBadgeColor, type ThresholdColor } from "./metrics";
+import { upstreamErrorMessage } from "./_shared";
 
 export type PostureDirection =
   | "higher_is_better"
@@ -168,13 +169,7 @@ export async function setPostureTarget(
     },
   );
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as PostureTarget;

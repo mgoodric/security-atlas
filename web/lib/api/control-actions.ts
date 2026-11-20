@@ -3,6 +3,7 @@
 // a BFF route under /api/controls, which forwards the httpOnly bearer.
 
 import type { ControlStateResponse } from "@/lib/api/control-detail";
+import { upstreamErrorMessage } from "./_shared";
 
 /** The bundle upload's response (POST /v1/controls:upload-bundle). */
 export interface BundleUploadResult {
@@ -35,13 +36,7 @@ export function parseRetryAfter(raw: string | null): number | undefined {
 }
 
 async function errorFrom(res: Response, fallback: string): Promise<never> {
-  let message = fallback;
-  try {
-    const body = (await res.json()) as { error?: string };
-    if (body?.error) message = body.error;
-  } catch {
-    // keep the fallback
-  }
+  const message = await upstreamErrorMessage(res, fallback);
   throw new ControlActionError(
     message,
     res.status,
