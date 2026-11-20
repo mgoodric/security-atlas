@@ -452,6 +452,27 @@ describe("metric target scale", () => {
     expect(metricTargetScale(unit, latest)).toBe(want);
   });
 
+  test.each([
+    // A stored target above 1 is points, whatever the latest value.
+    ["percent", 0, 90, "points"],
+    ["percent", 0.5, 90, "points"],
+    ["percent", undefined, 90, "points"],
+    ["percent", 0, 0.9, "fraction"],
+    ["ratio", 0, 40, "points"],
+    ["count", 0, 90, "raw"],
+  ] as const)("%s latest=%s stored=%s -> %s", (unit, latest, stored, want) => {
+    expect(metricTargetScale(unit, latest, stored)).toBe(want);
+  });
+
+  test("points: latest 0, stored 90, re-saving keeps 90", () => {
+    // The dialog shows the stored target, the operator saves it unchanged.
+    const shown = metricTargetInputFromStored("90", "percent", 0, 90);
+    expect(shown).toBe("90");
+    expect(metricTargetStoredFromInput(Number(shown), "percent", 0, 90)).toBe(
+      90,
+    );
+  });
+
   test("points: typed percentage is stored and shown as typed", () => {
     expect(metricTargetStoredFromInput(90, "percent", 85)).toBe(90);
     expect(metricTargetInputFromStored("90", "percent", 85)).toBe("90");

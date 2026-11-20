@@ -45,22 +45,37 @@ type Fields = {
   notes: string;
 };
 
+// The saved target_value as a number, which takes part in picking the
+// scale (#2572); undefined when no target is set.
+function storedTargetOf(current: MetricTarget | null): number | undefined {
+  const v = current?.target_value;
+  return v === undefined || v === "" ? undefined : Number(v);
+}
+
 function initialFields(
   current: MetricTarget | null,
   unit: string,
   latest: number | undefined,
 ): Fields {
+  const stored = storedTargetOf(current);
   return {
-    target: metricTargetInputFromStored(current?.target_value, unit, latest),
+    target: metricTargetInputFromStored(
+      current?.target_value,
+      unit,
+      latest,
+      stored,
+    ),
     warning: metricTargetInputFromStored(
       current?.warning_threshold,
       unit,
       latest,
+      stored,
     ),
     critical: metricTargetInputFromStored(
       current?.critical_threshold,
       unit,
       latest,
+      stored,
     ),
     direction: current?.direction ?? "higher_is_better",
     notes: current?.notes ?? "",
@@ -105,6 +120,7 @@ export function MetricTargetDialog({
     direction: fields.direction,
   };
   const problem = metricTargetError(input, unit);
+  const storedTarget = storedTargetOf(current);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -114,16 +130,19 @@ export function MetricTargetDialog({
           input.target_value,
           unit,
           latest,
+          storedTarget,
         ),
         warning_threshold: metricTargetStoredFromInput(
           input.warning_threshold,
           unit,
           latest,
+          storedTarget,
         ),
         critical_threshold: metricTargetStoredFromInput(
           input.critical_threshold,
           unit,
           latest,
+          storedTarget,
         ),
         notes: fields.notes.trim() === "" ? undefined : fields.notes.trim(),
       }),
@@ -139,9 +158,9 @@ export function MetricTargetDialog({
     setFields((f) => ({ ...f, [k]: v }));
 
   // A percent or ratio metric is entered as a percentage and stored on
-  // its observations' scale, fractions or points (#2572); the helpers
-  // convert both ways.
-  const scale = metricTargetScale(unit, latest);
+  // its scale, fractions or points, picked from the latest observation and
+  // the saved target (#2572); the helpers convert both ways.
+  const scale = metricTargetScale(unit, latest, storedTarget);
   const percent = scale !== "raw";
   const unitSuffix = percent ? " (%)" : "";
 

@@ -487,17 +487,23 @@ const roundTiny = (n: number) => Math.round(n * 1e6) / 1e6;
 export type MetricTargetScale = "fraction" | "points" | "raw";
 
 /**
- * metricTargetScale picks the scale from the unit and the metric's latest
- * observation. `formatValue` shows a percent or ratio value above 1 as
- * percentage points, so an observation above 1 means the series is in
- * points. With no observation the evaluators' fraction is assumed.
+ * metricTargetScale picks the scale from the unit, the metric's latest
+ * observation and its stored target value. `formatValue` shows a percent
+ * or ratio value above 1 as percentage points, so either one above 1 means
+ * the metric is on the points scale. The stored target counts as well as
+ * the observation: a points metric whose latest value happens to be at or
+ * below 1 would otherwise read as fractions, and re-saving a target of 90
+ * would silently store 0.9. With neither above 1, the evaluators' fraction
+ * is assumed.
  */
 export function metricTargetScale(
   unit: string,
   latest?: number,
+  storedTarget?: number,
 ): MetricTargetScale {
   if (unit !== "percent" && unit !== "ratio") return "raw";
-  return latest !== undefined && latest > 1 ? "points" : "fraction";
+  const above1 = (n?: number) => n !== undefined && Number.isFinite(n) && n > 1;
+  return above1(latest) || above1(storedTarget) ? "points" : "fraction";
 }
 
 /**
@@ -506,16 +512,21 @@ export function metricTargetScale(
  * operator thinks in percentages, and typing 0.9 for 90% invites a 100x
  * mistake. On the fraction scale, like `formatValue`, a stored value above
  * 1 is already in percentage points and is shown as it is. Other units
- * pass through.
+ * pass through. `storedTarget` is the saved target_value, which takes part
+ * in picking the scale (`metricTargetScale`) for every field.
  */
 export function metricTargetInputFromStored(
   stored: string | undefined,
   unit: string,
   latest?: number,
+  storedTarget?: number,
 ): string {
   if (stored === undefined || stored === "") return "";
   const n = Number(stored);
-  if (metricTargetScale(unit, latest) !== "fraction" || !Number.isFinite(n)) {
+  if (
+    metricTargetScale(unit, latest, storedTarget) !== "fraction" ||
+    !Number.isFinite(n)
+  ) {
     return stored;
   }
   return String(n <= 1 ? roundTiny(n * 100) : n);
@@ -523,15 +534,16 @@ export function metricTargetInputFromStored(
 
 /**
  * metricTargetStoredFromInput is the reverse: a percentage is saved on
- * the scale the metric's observations use (`metricTargetScale`), so the
- * threshold badge compares like with like. Other units pass through.
+ * the scale the metric uses (`metricTargetScale`), so the threshold badge
+ * compares like with like. Other units pass through.
  */
 export function metricTargetStoredFromInput(
   value: number,
   unit: string,
   latest?: number,
+  storedTarget?: number,
 ): number {
-  return metricTargetScale(unit, latest) === "fraction"
+  return metricTargetScale(unit, latest, storedTarget) === "fraction"
     ? roundTiny(value / 100)
     : value;
 }

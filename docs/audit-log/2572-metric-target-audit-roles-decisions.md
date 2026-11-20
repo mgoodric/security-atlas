@@ -60,8 +60,11 @@ tenant admin.
 **Decision.** `metricTargetScale(unit, latest)` picks `fraction`, `points`
 or `raw`. A percent or ratio metric whose latest observation is above 1 is
 on the points scale: the typed percentage is stored as typed (90), not as a
-fraction (0.9). With no observation, or one at or below 1, the evaluators'
-fraction scale is assumed, as before.
+fraction (0.9). A stored target above 1 also means points, so the existing
+target wins over an observation at or below 1: without that, re-saving a
+points metric's target of 90 after a 0 observation would silently store 0.9
+(found in review of #2707). With neither above 1, the evaluators' fraction
+scale is assumed, as before.
 
 **Why.** `thresholdBadgeColor` compares raw numbers, so a 0.9 target against
 an 85 observation always grades green. Picking the scale from the
