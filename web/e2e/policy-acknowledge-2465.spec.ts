@@ -1,9 +1,10 @@
 // #2465 — Playwright E2E for acknowledging a policy from the web app.
 //
 //   1. A published policy on the caller's pending list shows the "Your
-//      acknowledgment" card; clicking Acknowledge POSTs the BFF with no
-//      body (an ack is always the caller's own) and the card then says
-//      the version was acknowledged.
+//      acknowledgment" card; clicking Acknowledge POSTs the BFF with only
+//      the version it shows (an ack is always the caller's own; #2668
+//      pins the version) and the card then says the version was
+//      acknowledged.
 //   2. A published policy not on the pending list (outside the caller's
 //      audience, or already acknowledged) shows no card and no button.
 //   3. The policy list names the policies waiting for the caller, each
@@ -67,7 +68,8 @@ const PENDING_BODY = {
 
 test.describe("policy acknowledgment (#2465)", () => {
   test.beforeEach(async ({ authedPage: page }) => {
-    await page.route("**/api/me/acknowledgments", (route) =>
+    // `**` after the path also matches the detail page's ?include=current.
+    await page.route("**/api/me/acknowledgments**", (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -143,7 +145,9 @@ test.describe("policy acknowledgment (#2465)", () => {
     );
     await expect(page.getByTestId("policy-action-acknowledge")).toHaveCount(0);
     expect(posts).toHaveLength(1);
-    expect(posts[0] ?? "").toBe("");
+    expect(JSON.parse(posts[0] ?? "null")).toEqual({
+      policy_version_id: PENDING_BODY.pending[0].policy_version_id,
+    });
   });
 
   test("a policy not waiting for the caller offers no Acknowledge button", async ({
@@ -155,6 +159,87 @@ test.describe("policy acknowledgment (#2465)", () => {
     );
     await expect(page.getByTestId("policy-detail-my-ack")).toHaveCount(0);
     await expect(page.getByTestId("policy-action-acknowledge")).toHaveCount(0);
+  });
+
+  // #2668 — after a reload the platform's ?include=current list carries
+  // the ack, so the card still says which version was acknowledged.
+  test("an acknowledged policy still says so after a reload", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/me/acknowledgments**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          pending: [],
+          count: 0,
+          window_seconds: 31536000,
+          current: [
+            {
+              policy_id: OTHER_ID,
+              policy_version_id: OTHER_ID,
+              title: "Engineering Standards",
+              version: "2.0",
+              acknowledged_at: "2026-11-18T10:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+    await page.goto(`/policies/${OTHER_ID}`);
+    await expect(page.getByTestId("policy-detail-my-ack-done")).toContainText(
+      "You acknowledged version 2.0 on",
+    );
+    await expect(page.getByTestId("policy-action-acknowledge")).toHaveCount(0);
+  });
+
+  test("an ack whose evidence was not recorded says so", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/policies/${PENDING_ID}/acknowledge`, (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "00000000-0000-0000-0000-00000000b466",
+          policy_id: PENDING_ID,
+          policy_version_id: PENDING_ID,
+          user_id: "00000000-0000-0000-0000-00000000c465",
+          acknowledged_at: "2026-11-18T10:00:00Z",
+          ack_token: "tok-2668",
+          deduplicated: false,
+          evidence_emission_ok: false,
+          evidence_emission_error: "ingest unavailable",
+        }),
+      }),
+    );
+    await page.goto(`/policies/${PENDING_ID}`);
+    await page.getByTestId("policy-action-acknowledge").click();
+    await expect(page.getByTestId("toast")).toContainText(
+      "Policy acknowledged, but its evidence record was not saved",
+    );
+    await expect(page.getByTestId("policy-detail-my-ack-done")).toBeVisible();
+  });
+
+  test("a version re-published since the page loaded is refused", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/policies/${PENDING_ID}/acknowledge`, (route) =>
+      route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error:
+            "policy_version_id is not the version this policy id names; reload the policy and acknowledge the version shown",
+        }),
+      }),
+    );
+    await page.goto(`/policies/${PENDING_ID}`);
+    await page.getByTestId("policy-action-acknowledge").click();
+    await expect(page.getByTestId("toast")).toContainText(
+      "Could not acknowledge policy",
+    );
+    await expect(page.getByTestId("policy-detail-my-ack-done")).toHaveCount(0);
   });
 
   test("the policy list names the policies waiting for the caller", async ({

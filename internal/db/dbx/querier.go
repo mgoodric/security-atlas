@@ -1234,6 +1234,10 @@ type Querier interface {
 	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
 	// Read a user's webhook-channel master opt-in. Missing row = OPTED-OUT.
 	GetWebhookOptIn(ctx context.Context, arg GetWebhookOptInParams) (bool, error)
+	// Reports whether idp_config_id names one of the tenant's own oidc_idp_configs
+	// (#2643). Runs under RLS, so another tenant's config reads as absent: a
+	// foreign id and a nonexistent one are indistinguishable to the caller.
+	GroupRoleMappingIdpConfigExists(ctx context.Context, arg GroupRoleMappingIdpConfigExistsParams) (bool, error)
 	// Reports whether the user holds a SPECIFIC role via a manual assignment. Used
 	// by the resolver so a group-derived grant does not duplicate a manual row, and
 	// so a revoke never deletes a role the user also holds manually.

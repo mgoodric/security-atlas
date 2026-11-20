@@ -304,10 +304,22 @@ export type PendingAcknowledgment = {
   last_acknowledged_at?: string | null;
 };
 
+/** #2668 — a policy the caller has acknowledged, for its current version,
+ *  within the year (`currentItem` in the Go handler). */
+export type CurrentAcknowledgment = {
+  policy_id: string;
+  policy_version_id: string;
+  title: string;
+  version: string;
+  acknowledged_at: string;
+};
+
 export type MyAcknowledgmentsResponse = {
   pending: PendingAcknowledgment[];
   count: number;
   window_seconds: number;
+  /** Present because the fetch asks for `?include=current` (#2668). */
+  current?: CurrentAcknowledgment[];
 };
 
 export type PolicyAcknowledgment = {
@@ -316,6 +328,8 @@ export type PolicyAcknowledgment = {
   policy_version_id: string;
   acknowledged_at: string;
   deduplicated: boolean;
+  /** False when the ack was recorded but its evidence record was not. */
+  evidence_emission_ok: boolean;
 };
 
 /** The one query key for the caller's pending list, shared by the policy
@@ -323,14 +337,21 @@ export type PolicyAcknowledgment = {
 export const MY_ACKS_QUERY_KEY = ["me", "acknowledgments"] as const;
 
 export async function fetchMyAcknowledgments(): Promise<MyAcknowledgmentsResponse> {
-  return bffControlFetch<MyAcknowledgmentsResponse>("/api/me/acknowledgments");
+  return bffControlFetch<MyAcknowledgmentsResponse>(
+    "/api/me/acknowledgments?include=current",
+  );
 }
 
-// The platform records the ack for the caller only; no body is sent.
+// The platform records the ack for the caller only. The body pins the
+// version the caller was shown (the pending item's `policy_version_id`):
+// if the policy was re-published since, the platform answers 409 rather
+// than record an ack of a version they never saw (#2668).
 export async function acknowledgePolicy(
   id: string,
+  policyVersionId: string,
 ): Promise<PolicyAcknowledgment> {
   return bffPostJSON<PolicyAcknowledgment>(
     `/api/policies/${encodeURIComponent(id)}/acknowledge`,
+    { policy_version_id: policyVersionId },
   );
 }

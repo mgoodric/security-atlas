@@ -64,6 +64,7 @@ import {
 import { Markdown } from "@/components/markdown";
 
 import {
+  acknowledgedToast,
   audienceLabel,
   isDraft,
   myAckState,
@@ -146,14 +147,21 @@ export default function PolicyDetailPage({
   });
 
   const acknowledge = useMutation({
-    mutationFn: () => acknowledgePolicy(id),
-    onSuccess: async () => {
+    // The version id is the one the card shows, so a re-publish since the
+    // page loaded is a 409, not an ack of a version never seen (#2668).
+    mutationFn: (policyVersionId: string) =>
+      acknowledgePolicy(id, policyVersionId),
+    onSuccess: async (ack) => {
       await qc.invalidateQueries({ queryKey: MY_ACKS_QUERY_KEY });
       void qc.invalidateQueries({ queryKey: ["policy", id] });
       void qc.invalidateQueries({ queryKey: ["policies"] });
-      toast("Policy acknowledged");
+      toast(acknowledgedToast(ack));
     },
     onError: (err) => {
+      // A 409 means the policy changed under the page; refetch so the card
+      // shows what is in force now.
+      void qc.invalidateQueries({ queryKey: MY_ACKS_QUERY_KEY });
+      void qc.invalidateQueries({ queryKey: ["policy", id] });
       toast(`Could not acknowledge policy: ${(err as Error).message}`);
     },
   });
@@ -225,7 +233,12 @@ export default function PolicyDetailPage({
   const draft = isDraft(policy);
   const busy = confirming !== null || transition.isPending || discard.isPending;
   const base = `/policies/${encodeURIComponent(id)}`;
-  const ackState = myAckState(policy, myAcks.data?.pending, acknowledge.data);
+  const ackState = myAckState(
+    policy,
+    myAcks.data?.pending,
+    acknowledge.data,
+    myAcks.data?.current,
+  );
 
   return (
     <DetailHeader
@@ -498,7 +511,7 @@ export default function PolicyDetailPage({
                   </div>
                 </div>
                 <Button
-                  onClick={() => acknowledge.mutate()}
+                  onClick={() => acknowledge.mutate(ackState.policyVersionId)}
                   disabled={acknowledge.isPending}
                   data-testid="policy-action-acknowledge"
                 >
