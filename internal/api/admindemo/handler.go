@@ -236,7 +236,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isEnabled() {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "demo seed not enabled on this deployment")
 		return
 	}
 	if !h.allowInvocation(w, r) {
@@ -359,7 +359,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isEnabled() {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "demo seed not enabled on this deployment")
 		return
 	}
 	if !h.allowInvocation(w, r) {

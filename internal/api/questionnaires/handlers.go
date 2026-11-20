@@ -45,7 +45,7 @@ import (
 // Handler bundles the slice-155 questionnaire routes against the Store, plus
 // the slice-441 AI-suggestion routes against the qaisuggest.Service. The
 // suggestion service is OPTIONAL — when nil (e.g. a deployment that has not
-// wired local inference) the suggest/approve routes return 503 rather than
+// wired local inference) the suggest/approve routes return 409 rather than
 // panicking, so the rest of the questionnaire surface is unaffected.
 type Handler struct {
 	store          *questionnaire.Store
@@ -396,7 +396,7 @@ func (h *Handler) AISuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.suggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI suggestion is not enabled on this deployment")
 		return
 	}
 	qid, err := uuid.Parse(chi.URLParam(r, "qid"))
@@ -439,7 +439,7 @@ func (h *Handler) AIApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.suggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI suggestion is not enabled on this deployment")
 		return
 	}
 	var req aiApproveRequest
@@ -494,7 +494,7 @@ func (h *Handler) AIReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.suggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI suggestion is not enabled on this deployment")
 		return
 	}
 	var req aiRejectRequest
@@ -544,7 +544,7 @@ func (h *Handler) StartAnswerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.answerRuns == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "questionnaire answer runs are not enabled on this deployment")
 		return
 	}
 	qnID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -574,7 +574,7 @@ func (h *Handler) GetAnswerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.answerRuns == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "questionnaire answer runs are not enabled on this deployment")
 		return
 	}
 	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
@@ -610,7 +610,7 @@ func (h *Handler) CancelAnswerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.answerRuns == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "questionnaire answer runs are not enabled on this deployment")
 		return
 	}
 	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
@@ -657,7 +657,7 @@ func (h *Handler) MappingSuggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.mappingSuggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI mapping suggestion is not enabled on this deployment")
 		return
 	}
 	qid, err := uuid.Parse(chi.URLParam(r, "qid"))
@@ -697,7 +697,7 @@ func (h *Handler) MappingApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.mappingSuggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI mapping suggestion is not enabled on this deployment")
 		return
 	}
 	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))
@@ -733,7 +733,7 @@ func (h *Handler) MappingReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.mappingSuggest == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "AI mapping suggestion is not enabled on this deployment")
 		return
 	}
 	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))

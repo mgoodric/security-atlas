@@ -42,7 +42,7 @@ type Handler struct {
 	svc *boardnarrative.Service
 }
 
-// New constructs a Handler. A nil service is tolerated (the routes return 503)
+// New constructs a Handler. A nil service is tolerated (the routes return 409)
 // so a deployment without AI-assist enabled still mounts cleanly.
 func New(svc *boardnarrative.Service) *Handler {
 	return &Handler{svc: svc}
@@ -80,7 +80,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.svc == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "board-narrative AI is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "board-narrative AI is not enabled on this deployment")
 		return
 	}
 	var req generateRequest
@@ -129,7 +129,7 @@ func (h *Handler) GenerateAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.svc == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "board-narrative AI is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "board-narrative AI is not enabled on this deployment")
 		return
 	}
 	var req generateRequest
@@ -178,7 +178,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.svc == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "board-narrative AI is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "board-narrative AI is not enabled on this deployment")
 		return
 	}
 	var req approveRequest

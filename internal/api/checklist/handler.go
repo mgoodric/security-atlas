@@ -142,7 +142,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.svc == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "checklist generation is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "checklist generation is not enabled on this deployment")
 		return
 	}
 	cl, err := h.svc.Generate(ctx)
@@ -209,7 +209,7 @@ func (h *Handler) ApproveSection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.svc == nil {
-		httpresp.WriteError(w, http.StatusServiceUnavailable, "checklist generation is not enabled on this deployment")
+		httpresp.WriteFeatureNotEnabled(w, "checklist generation is not enabled on this deployment")
 		return
 	}
 	sectionID, err := uuid.Parse(chi.URLParam(r, "id"))

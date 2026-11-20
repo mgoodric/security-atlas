@@ -13,6 +13,8 @@ import {
   getAdminDemoStatus,
   grantSuperAdmin,
   patchAdminSSO,
+  postAdminDemoSeed,
+  postAdminDemoTeardown,
   revokeAdminUser,
 } from "./admin";
 import { fetchApprovals } from "./approvals";
@@ -153,5 +155,43 @@ describe("error sites on upstreamErrorMessage (#2645)", () => {
   ] as const)("%s parser: 5xx generic, 4xx passes through", (_n, parse) => {
     expect(parse(false, 502, { error: LEAK }).message).not.toContain(LEAK);
     expect(parse(false, 400, { error: REFUSAL }).message).toBe(REFUSAL);
+  });
+});
+
+// #2730: a feature switched off on this deployment is a 409 with
+// `code: "feature_not_enabled"`, so its wording reaches the page. It was a
+// 503, whose body #2645 replaced with the status line.
+describe("feature_not_enabled refusals show their wording (#2730)", () => {
+  const NOT_ENABLED = "demo seed not enabled on this deployment";
+
+  function stubNotEnabled() {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ error: NOT_ENABLED, code: "feature_not_enabled" }),
+          {
+            status: 409,
+            statusText: "Conflict",
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+    );
+  }
+
+  test.each([
+    ["admin postAdminDemoSeed", () => postAdminDemoSeed("b")],
+    ["admin postAdminDemoTeardown", () => postAdminDemoTeardown("b")],
+  ] as const)("%s: a 409 shows its message", async (_n, call) => {
+    stubNotEnabled();
+    expect(await thrownMessage(call)).toBe(NOT_ENABLED);
+  });
+
+  test.each([
+    ["narrative-ai", parseGenerate],
+    ["ai-suggest", parseAISuggest],
+    ["mapping-suggest", parseMappingSuggest],
+  ] as const)("%s parser: a 409 shows its message", (_n, parse) => {
+    const body = { error: NOT_ENABLED, code: "feature_not_enabled" };
+    expect(parse(false, 409, body).message).toBe(NOT_ENABLED);
   });
 });
