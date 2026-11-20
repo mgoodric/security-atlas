@@ -568,10 +568,37 @@ func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed is_admin key: %v", err)
 	}
-	for _, verb := range []string{"rotate", "revoke"} {
-		if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+privileged.ID+"/"+verb, nil); rr.Code != http.StatusForbidden {
-			t.Errorf("tenant admin %s of an is_admin key = %d %s, want 403", verb, rr.Code, rr.Body.String())
+	// #2656: and an is_approver key.
+	approver, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{IsApprover: true}, apikeystore.Actor{})
+	if err != nil {
+		t.Fatalf("seed is_approver key: %v", err)
+	}
+	for _, key := range []struct{ kind, id string }{{"is_admin", privileged.ID}, {"is_approver", approver.ID}} {
+		for _, verb := range []string{"rotate", "revoke"} {
+			if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+key.id+"/"+verb, nil); rr.Code != http.StatusForbidden {
+				t.Errorf("tenant admin %s of an %s key = %d %s, want 403", verb, key.kind, rr.Code, rr.Body.String())
+			}
 		}
+	}
+
+	// #2656: an unbound key labelled with a non-admin canonical role is one
+	// the tenant admin could have minted, so it rotates and revokes.
+	labelled, _, err := s.keys.Issue(ctx, own.String(), apikeystore.IssueInput{OwnerRoles: []string{"grc_engineer"}}, apikeystore.Actor{})
+	if err != nil {
+		t.Fatalf("seed owner-labelled key: %v", err)
+	}
+	rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+labelled.ID+"/rotate", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tenant admin rotate of a grc_engineer-labelled key = %d %s, want 200", rr.Code, rr.Body.String())
+	}
+	var labelledSucc struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&labelledSucc); err != nil {
+		t.Fatalf("decode labelled rotate: %v", err)
+	}
+	if rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+labelledSucc.ID+"/revoke", nil); rr.Code != http.StatusNoContent {
+		t.Errorf("tenant admin revoke of a grc_engineer-labelled key = %d %s, want 204", rr.Code, rr.Body.String())
 	}
 
 	// A member's personal (user-bound) token: a tenant admin may revoke it
@@ -594,7 +621,7 @@ func TestTenantAdmin2503_CredentialsMintGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed own key: %v", err)
 	}
-	rr, _ := s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+ownKey.ID+"/rotate", nil)
+	rr, _ = s.do(t, tok, http.MethodPost, "/v1/admin/credentials/"+ownKey.ID+"/rotate", nil)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("tenant admin rotate of its own bound key = %d %s, want 200", rr.Code, rr.Body.String())
 	}
