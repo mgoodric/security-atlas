@@ -142,3 +142,70 @@ export function confirmCloseFocus(opts: {
   if (!opts.cancelled || !opts.returnFocus) return null;
   return opts.returnFocus() ?? null;
 }
+
+/** #2682 — the rows to try, in order, for focus after `removed` left the
+ *  list: the rows that followed it, then the rows before it, nearest
+ *  first. Only rows still in `after` count. The caller skips a row whose
+ *  trigger can't take focus (disabled, or none), and falls back to the
+ *  list's heading or empty state when none can. */
+export function removalFocusOrder(
+  before: readonly string[],
+  removed: string,
+  after: readonly string[],
+): string[] {
+  const at = before.indexOf(removed);
+  if (at < 0) return [...after];
+  const still = new Set(after);
+  const next = before.slice(at + 1).filter((k) => still.has(k));
+  const prev = before
+    .slice(0, at)
+    .reverse()
+    .filter((k) => still.has(k));
+  return [...next, ...prev];
+}
+
+/** A confirmed removal waiting for its row to leave the list. `before`
+ *  is the list when it was confirmed; `sawBusy` records that the action
+ *  has been seen in flight. */
+export type RemovalWatch = {
+  key: string;
+  before: readonly string[];
+  sawBusy: boolean;
+} | null;
+
+/** #2682 — advance a removal watch on each render of the list. It
+ *  resolves only once the action has been in flight and has settled
+ *  (`settled` is the caller's "not pending", and a caller keeps it
+ *  pending until its refetch is in), so a render before the mutation
+ *  starts can't drop the watch. Settled with the row still listed means
+ *  the action failed or kept the row: the watch ends with no focus move.
+ *  Settled with the row gone returns `focusOrder`. */
+export function watchRemoval(
+  watch: RemovalWatch,
+  keys: readonly string[],
+  settled: boolean,
+): { watch: RemovalWatch; focusOrder: string[] | null } {
+  if (!watch) return { watch: null, focusOrder: null };
+  if (!settled) return { watch: { ...watch, sawBusy: true }, focusOrder: null };
+  if (!watch.sawBusy) return { watch, focusOrder: null };
+  if (keys.includes(watch.key)) return { watch: null, focusOrder: null };
+  return {
+    watch: null,
+    focusOrder: removalFocusOrder(watch.before, watch.key, keys),
+  };
+}
+
+/** Focus the first candidate that takes it (`isFocused` reads back
+ *  `document.activeElement`, since a disabled button ignores focus()).
+ *  Returns the one focused, or null. */
+export function focusFirst<T extends Focusable>(
+  candidates: readonly (T | null | undefined)[],
+  isFocused: (f: T) => boolean,
+): T | null {
+  for (const c of candidates) {
+    if (!c) continue;
+    c.focus();
+    if (isFocused(c)) return c;
+  }
+  return null;
+}

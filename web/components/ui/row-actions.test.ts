@@ -16,9 +16,12 @@ import {
   confirmingItem,
   confirmOpenFocus,
   confirmPromptFor,
+  focusFirst,
   IDLE,
   reduceConfirm,
+  removalFocusOrder,
   visibleItems,
+  watchRemoval,
   type RowActionItem,
 } from "./row-actions-model";
 
@@ -276,5 +279,67 @@ describe("ConfirmInline focus", () => {
     expect(
       confirmCloseFocus({ cancelled: true, returnFocus: () => null }),
     ).toBeNull();
+  });
+});
+
+describe("focus after a confirmed removal (#2682)", () => {
+  it("tries the following rows, then the earlier ones, nearest first", () => {
+    expect(
+      removalFocusOrder(["a", "b", "c", "d"], "b", ["a", "c", "d"]),
+    ).toEqual(["c", "d", "a"]);
+  });
+
+  it("falls back to the earlier rows when the last row goes", () => {
+    expect(removalFocusOrder(["a", "b", "c"], "c", ["a", "b"])).toEqual([
+      "b",
+      "a",
+    ]);
+  });
+
+  it("skips rows that left alongside it, and is empty for the only row", () => {
+    expect(removalFocusOrder(["a", "b", "c"], "b", ["a"])).toEqual(["a"]);
+    expect(removalFocusOrder(["a"], "a", [])).toEqual([]);
+  });
+
+  it("moves focus only after the action was in flight and settled", () => {
+    const armed = { key: "b", before: ["a", "b", "c"], sawBusy: false };
+    // A render before the mutation reports pending keeps the watch.
+    let r = watchRemoval(armed, ["a", "b", "c"], true);
+    expect(r).toEqual({ watch: armed, focusOrder: null });
+    // In flight; the refetch already dropped the row, but still pending.
+    r = watchRemoval(r.watch, ["a", "c"], false);
+    expect(r.focusOrder).toBeNull();
+    expect(r.watch?.sawBusy).toBe(true);
+    // Settled with the row gone: focus the next row.
+    r = watchRemoval(r.watch, ["a", "c"], true);
+    expect(r).toEqual({ watch: null, focusOrder: ["c", "a"] });
+  });
+
+  it("drops the watch with no focus move when the row stays", () => {
+    const busy = { key: "b", before: ["a", "b"], sawBusy: true };
+    expect(watchRemoval(busy, ["a", "b"], true)).toEqual({
+      watch: null,
+      focusOrder: null,
+    });
+    expect(watchRemoval(null, ["a"], true)).toEqual({
+      watch: null,
+      focusOrder: null,
+    });
+  });
+
+  it("focuses the first candidate that takes focus", () => {
+    let active: unknown = null;
+    const take = () => {
+      const f = { focus: vi.fn(() => (active = f)) };
+      return f;
+    };
+    const refuse = { focus: vi.fn() }; // a disabled button
+    const first = take();
+    const second = take();
+    const isFocused = (f: unknown) => active === f;
+    expect(focusFirst([null, refuse, first, second], isFocused)).toBe(first);
+    expect(refuse.focus).toHaveBeenCalled();
+    expect(second.focus).not.toHaveBeenCalled();
+    expect(focusFirst([refuse, undefined], isFocused)).toBeNull();
   });
 });

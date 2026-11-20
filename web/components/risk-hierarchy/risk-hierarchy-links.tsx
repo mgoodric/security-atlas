@@ -20,11 +20,15 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
+import {
+  ConfirmInline,
+  useFocusAfterRemoval,
+  useTriggerRefs,
+} from "@/components/ui/row-actions";
 import { Select } from "@/components/ui/select";
 import {
   attachChildRisks,
@@ -98,6 +102,15 @@ export function RiskHierarchyLinks({ risk, canEdit }: Props) {
 
   const childRows = children.data?.children ?? [];
   const childIDs = new Set(childRows.map((c) => c.id));
+  const childrenHeadingRef = useRef<HTMLDivElement>(null);
+  const removal = useFocusAfterRemoval(
+    childRows.map((c) => c.id),
+    {
+      get: detachTriggers.get,
+      fallback: () => childrenHeadingRef.current,
+      settled: !detach.isPending,
+    },
+  );
   const candidates = (register.data?.risks ?? []).filter(
     (r) => r.id !== risk.id && !childIDs.has(r.id) && canBeChildOf(r, risk),
   );
@@ -141,7 +154,9 @@ export function RiskHierarchyLinks({ risk, canEdit }: Props) {
 
       <Card id="children" data-testid="risk-detail-children">
         <CardHeader className="border-b">
-          <CardTitle>Children</CardTitle>
+          <CardTitle ref={childrenHeadingRef} tabIndex={-1}>
+            Children
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {children.isLoading ? (
@@ -172,7 +187,10 @@ export function RiskHierarchyLinks({ risk, canEdit }: Props) {
                       busy={detach.isPending}
                       onCancel={() => setConfirmingDetach(null)}
                       returnFocus={() => detachTriggers.get(c.id)}
-                      onConfirm={() => detach.mutate(c.id)}
+                      onConfirm={() => {
+                        removal.arm(c.id);
+                        detach.mutate(c.id);
+                      }}
                       data-testid={`risk-detail-child-detach-${c.id}-confirm`}
                     />
                   ) : (
