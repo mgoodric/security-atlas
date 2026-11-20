@@ -67,16 +67,23 @@ test.describe("/controls list view", () => {
   test("AC-3: horizontal pill filter row narrows the result set", async ({
     authedPage: page,
   }) => {
+    // #2780 — the demo tenant's controls are shared: other specs' beforeAll
+    // seeds add controls to it while this runs, and the old version
+    // compared two row counts taken a moment apart (after networkidle) for
+    // whichever family sorted first. The test asserts membership instead,
+    // for a family this fixture seeds: before the filter a row of another
+    // family shows, after it every row is that family and this fixture's
+    // control of it is listed. No count, so no other spec's rows matter.
+    const FAMILY = "Cryptography"; // fixture anchor/control 1's family
+    const rows = page.getByTestId("list-table-row");
     await page.goto("/controls");
-    // The list loads client-side via TanStack Query — wait for the first
-    // row to render before counting, else `initial` races the fetch to 0.
-    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
-    const initial = await page.getByTestId("list-table-row").count();
-    const familyPill = page.getByLabel("Family");
-    await familyPill.selectOption({ index: 1 }); // first non-ALL option
-    await page.waitForLoadState("networkidle");
-    const filtered = await page.getByTestId("list-table-row").count();
-    expect(filtered).toBeLessThan(initial);
+    await expect(rows.filter({ hasNotText: FAMILY }).first()).toBeVisible();
+    await page.getByLabel("Family").selectOption({ label: FAMILY });
+    await page.waitForURL((u) => u.searchParams.get("family") === FAMILY);
+    // In this order: the old page stays up until the filtered one lands
+    // (keepPreviousData), and the second check rules out an empty table.
+    await expect(rows.filter({ hasNotText: FAMILY })).toHaveCount(0);
+    await expect(rows.filter({ hasText: "0E2E743-1" })).toBeVisible();
     // The filter row is horizontal (P0-A2) — verify the pill row renders.
     await expect(page.getByTestId("list-filter-pills")).toBeVisible();
   });
