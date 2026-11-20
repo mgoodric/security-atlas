@@ -43,7 +43,12 @@ WHERE tenant_id = $1
 --
 -- A row appears in the result when:
 --   1. status = 'published' AND cardinality(acknowledgment_required_roles) > 0
---   2. The caller's roles intersect required_roles, OR caller is admin.
+--   2. The caller is on the version's roster: an active users row holding
+--      a live user_roles row the audience names, or any live role when the
+--      audience is 'everyone'. This is the CountRequiredRoleUsersForVersion
+--      predicate narrowed to one user, so the pending list, the acknowledge
+--      gate (IsUserOnAckRoster) and the rate denominator are one set. No
+--      admin wildcard and no api_keys label (#2728).
 --   3. (no fresh ack exists) computed in Go: we return latest_ack_at and
 --      let the handler compare against the freshness cutoff. Pushing
 --      the cutoff into SQL too would mask "stale" from "never ack'd"
@@ -62,7 +67,7 @@ LEFT JOIN LATERAL (
     SELECT acknowledged_at
     FROM policy_acknowledgments
     WHERE tenant_id = p.tenant_id
-      AND user_id = $2
+      AND user_id = sqlc.arg('user_id')::uuid
       AND policy_version_id = p.id
     ORDER BY acknowledged_at DESC
     LIMIT 1
@@ -70,9 +75,19 @@ LEFT JOIN LATERAL (
 WHERE p.tenant_id = $1
   AND p.status = 'published'
   AND cardinality(p.acknowledgment_required_roles) > 0
-  AND (
-      sqlc.arg('is_admin')::boolean
-      OR p.acknowledgment_required_roles && sqlc.arg('owner_roles')::text[]
+  AND EXISTS (
+      SELECT 1
+      FROM user_roles ur
+      JOIN users u
+        ON u.tenant_id = ur.tenant_id
+       AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+      WHERE ur.tenant_id = p.tenant_id
+        AND u.id = sqlc.arg('user_id')::uuid
+        AND u.status = 'active'
+        AND (
+            ur.role = ANY(p.acknowledgment_required_roles)
+            OR 'everyone' = ANY(p.acknowledgment_required_roles)
+        )
   )
 ORDER BY p.title ASC, p.created_at DESC;
 
@@ -80,24 +95,51 @@ ORDER BY p.title ASC, p.created_at DESC;
 -- Single-row lookup used by POST /v1/policies/{id}/acknowledge. The
 -- handler checks status='published' itself so it can return a precise
 -- 409 (vs 404) when the row exists but is not currently in force.
+--
+-- FOR SHARE (#2728): inside Record's transaction the row stays locked until
+-- the ack row is inserted and committed, so a concurrent publish (which
+-- supersedes this row with an UPDATE) waits for an in-flight ack instead of
+-- landing between the status check and the insert. Rate reads through the
+-- same query and holds the lock only for its own short read transaction.
 SELECT *
 FROM policies
-WHERE tenant_id = $1 AND id = $2;
+WHERE tenant_id = $1 AND id = $2
+FOR SHARE;
+
+-- name: IsUserOnAckRoster :one
+-- The acknowledge gate (#2728): true when user_id is on the version's
+-- roster, the set CountRequiredRoleUsersForVersion counts. Same predicate,
+-- narrowed to one user; keep them in sync. A super admin, or a user whose
+-- only match is an api_keys label, is not on the roster and is refused.
+SELECT EXISTS (
+    SELECT 1
+    FROM user_roles ur
+    JOIN users u
+      ON u.tenant_id = ur.tenant_id
+     AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+    WHERE ur.tenant_id = $1
+      AND u.id = sqlc.arg('user_id')::uuid
+      AND u.status = 'active'
+      AND (
+          ur.role = ANY(sqlc.arg('required_roles')::text[])
+          OR 'everyone' = ANY(sqlc.arg('required_roles')::text[])
+      )
+)::boolean AS on_roster;
 
 -- name: CountRequiredRoleUsersForVersion :one
 -- Rate denominator (#2586): the distinct active users holding a live
 -- user_roles row the policy's audience names, or any live role when the
 -- audience is 'everyone'. This is the set the authz engine resolves
 -- (authz.DBRolesResolver reads the same rows and gives a user whose
--- users.status is not 'active' none) and the set policy.WithEveryone admits,
+-- users.status is not 'active' none) and the set IsUserOnAckRoster admits,
 -- so the denominator is who may acknowledge. user_roles.user_id is TEXT; a
 -- "user:<uuid>" principal is read as its bare uuid, and a row naming no
 -- users row (a key, bootstrap-admin) is not a person and is not counted.
 --
 -- Before #2586 this counted api_keys holders: a user whose role was revoked
 -- but whose key was not was counted, and a JWT-only member was missed.
--- ListPoliciesWithAckRate (policies.sql) repeats this predicate; keep them
--- in sync.
+-- ListPoliciesWithAckRate (policies.sql), ListPendingAcksForUser and
+-- IsUserOnAckRoster repeat this predicate; keep them in sync.
 SELECT COUNT(DISTINCT u.id)::bigint AS count
 FROM user_roles ur
 JOIN users u

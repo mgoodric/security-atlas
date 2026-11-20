@@ -46,9 +46,6 @@ var ownerRolesReads2505 = map[string]string{
 	"internal/auth/apikeystore/persister.go Persister.insertRow": "persists an issued key's label",
 
 	"internal/demoseed/writers.go writeRoleUsers": "seeds a demo user's api_keys label; fixture data",
-
-	"internal/policy/acknowledgment.go AckStore.ForUser": "AckCaller.OwnerRoles, which policyacks fills from authz.AckRoleLabels",
-	"internal/policy/acknowledgment.go rolesIntersect":   "AckCaller.OwnerRoles, which policyacks fills from authz.AckRoleLabels",
 }
 
 // scanOwnerRolesReads2505 returns the functions reading x.OwnerRoles.

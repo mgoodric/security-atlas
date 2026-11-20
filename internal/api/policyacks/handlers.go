@@ -49,7 +49,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -437,7 +436,7 @@ func (h *Handler) writeRecordError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, policy.ErrAckVersionMismatch):
 		httpresp.WriteError(w, http.StatusConflict, "policy_version_id is not the version this policy id names; reload the policy and acknowledge the version shown")
 	case errors.Is(err, policy.ErrAckNotRequired):
-		httpresp.WriteError(w, http.StatusForbidden, "caller's roles do not intersect the policy's acknowledgment_required_roles")
+		httpresp.WriteError(w, http.StatusForbidden, "caller is not in this policy's acknowledgment audience: no live tenant role it names")
 	case errors.Is(err, policy.ErrAckMissingUser):
 		httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
 	case errors.Is(err, policy.ErrAckMissingPolicyID):
@@ -459,18 +458,14 @@ func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore
 }
 
 // CallerFromCred hands the ack store the users(id) behind c, or "" when c
-// is not a user (the store then answers ErrAckMissingUser) (#2183).
+// is not a user (the store then answers ErrAckMissingUser) (#2183). The
+// store reads that user's live user_roles for the audience match, so the
+// credential's role claim, key label and super-admin flag play no part
+// (#2505, #2728).
 func CallerFromCred(c credstore.Credential) policy.AckCaller {
 	userID := ""
 	if u, ok := credstore.CallerUserID(c); ok {
 		userID = u.String()
 	}
-	return policy.AckCaller{
-		UserID: userID,
-		// #2505: live tenant roles plus a key's own label, never a JWT
-		// session's role claim. #2524: a member, one holding a live role
-		// (authz.TenantRoleLabels), also matches a policy aimed at everyone.
-		OwnerRoles: policy.WithEveryone(authz.AckRoleLabels(c), len(authz.TenantRoleLabels(c)) > 0),
-		IsAdmin:    c.IsAdmin,
-	}
+	return policy.AckCaller{UserID: userID}
 }

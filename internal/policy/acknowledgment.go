@@ -50,10 +50,12 @@ var (
 	// 409 (anti-criterion P0-3 — ack of superseded does not satisfy
 	// current).
 	ErrAckPolicyNotPublished = errors.New("policy_ack: target policy version is not published")
-	// ErrAckNotRequired is returned when the calling user's roles do not
-	// intersect the policy's acknowledgment_required_roles AND the user
-	// is not an admin. Handler maps to 403 (AC-3).
-	ErrAckNotRequired = errors.New("policy_ack: caller's roles do not intersect required roles")
+	// ErrAckNotRequired is returned when the calling user is not on the
+	// version's roster: no active users row holding a live user_roles row
+	// the audience names (any live role for AudienceEveryone). The super
+	// admin flag and an api_keys label do not put a user on it (#2728).
+	// Handler maps to 403 (AC-3).
+	ErrAckNotRequired = errors.New("policy_ack: caller is not in the policy's acknowledgment audience")
 	// ErrAckMissingUser is returned when cred.UserID is empty. Handler
 	// would already have 401'd via the auth middleware; this is a
 	// defensive shoulder-tap.
@@ -70,33 +72,19 @@ var (
 
 // AudienceEveryone is the acknowledgment_required_roles value that aims a
 // policy at every member of the tenant (#2524). A caller matches it when it
-// is a member, meaning it holds a live role (see WithEveryone).
+// is a member, meaning it holds a live user_roles row (#2728).
 const AudienceEveryone = "everyone"
-
-// WithEveryone returns labels plus AudienceEveryone when member is true, so
-// a policy aimed at everyone intersects every member. A caller that is not a
-// member (no live role) gets labels unchanged and matches no "everyone"
-// policy (#2524).
-func WithEveryone(labels []string, member bool) []string {
-	if !member {
-		return labels
-	}
-	for _, l := range labels {
-		if l == AudienceEveryone {
-			return labels
-		}
-	}
-	return append(append([]string(nil), labels...), AudienceEveryone)
-}
 
 // AckCaller is the slice-034 credential subset the ack store needs.
 // Decoupled from the full credstore.Credential so unit tests can build
 // a minimal caller and the API package boundary stays clean (this
 // package has no dependency on internal/api/credstore).
+//
+// It carries the user id only. Who must acknowledge is read from the
+// live user_roles rows behind that id, the roster the rate counts, not
+// from the credential's roles or admin flag (#2728).
 type AckCaller struct {
-	UserID     string
-	OwnerRoles []string
-	IsAdmin    bool
+	UserID string
 }
 
 // Pending describes one policy that requires acknowledgment from the
@@ -162,9 +150,9 @@ func (s *AckStore) WithClock(fn func() time.Time) *AckStore {
 }
 
 // PendingForUser returns the policies that require an acknowledgment
-// from caller, sorted by title ASC. A policy is "pending" when the
-// caller's roles intersect acknowledgment_required_roles (or the caller
-// is admin) AND there is no fresh (<= AcknowledgmentFreshness) ack of
+// from the calling user, sorted by title ASC. A policy is "pending" when the
+// caller is on its roster (an active user holding a live user_roles row the
+// audience names, #2728) AND there is no fresh (<= AcknowledgmentFreshness) ack of
 // the current published version.
 //
 // Single-query implementation via ListPendingAcksForUser (LEFT JOIN
@@ -201,15 +189,9 @@ func (s *AckStore) ForUser(ctx context.Context, caller AckCaller) (UserAcks, err
 	}
 	var out UserAcks
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		roles := caller.OwnerRoles
-		if roles == nil {
-			roles = []string{}
-		}
 		rows, qerr := q.ListPendingAcksForUser(ctx, dbx.ListPendingAcksForUserParams{
-			TenantID:   pgUUID(tenantID),
-			UserID:     pgUUID(userID),
-			IsAdmin:    caller.IsAdmin,
-			OwnerRoles: roles,
+			TenantID: pgUUID(tenantID),
+			UserID:   pgUUID(userID),
 		})
 		if qerr != nil {
 			return fmt.Errorf("policy_ack: list pending: %w", qerr)
@@ -266,8 +248,11 @@ type RecordInput struct {
 	ObservedAt time.Time
 }
 
-// Record inserts a new ack row after validating the caller is eligible
-// and the policy is currently published. Idempotency: a re-call within
+// Record inserts a new ack row after validating the caller is on the
+// version's roster and the policy is currently published. The policy row
+// is read FOR SHARE, so a concurrent publish waits for this transaction
+// rather than superseding the version between the check and the insert
+// (#2728). Idempotency: a re-call within
 // the same UTC day with the same (user_id, policy_version_id) returns
 // the existing row with Deduplicated=true.
 //
@@ -309,7 +294,19 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 		if policyRow.Status != StatePublished {
 			return ErrAckPolicyNotPublished
 		}
-		if !rolesIntersect(in.Caller, policyRow.AcknowledgmentRequiredRoles) {
+		required := policyRow.AcknowledgmentRequiredRoles
+		if required == nil {
+			required = []string{}
+		}
+		onRoster, rerr := q.IsUserOnAckRoster(ctx, dbx.IsUserOnAckRosterParams{
+			TenantID:      pgUUID(tenantID),
+			UserID:        pgUUID(userID),
+			RequiredRoles: required,
+		})
+		if rerr != nil {
+			return fmt.Errorf("policy_ack: roster check: %w", rerr)
+		}
+		if !onRoster {
 			return ErrAckNotRequired
 		}
 		// Idempotency probe: existing row with same token deduplicates.
@@ -485,25 +482,6 @@ func (s *AckStore) inTx(ctx context.Context, fn func(context.Context, *dbx.Queri
 		return fmt.Errorf("policy_ack: commit: %w", err)
 	}
 	return nil
-}
-
-func rolesIntersect(caller AckCaller, required []string) bool {
-	if caller.IsAdmin {
-		return true
-	}
-	if len(required) == 0 || len(caller.OwnerRoles) == 0 {
-		return false
-	}
-	set := make(map[string]struct{}, len(required))
-	for _, r := range required {
-		set[r] = struct{}{}
-	}
-	for _, r := range caller.OwnerRoles {
-		if _, ok := set[r]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func ackFromRow(r dbx.PolicyAcknowledgment, deduped bool) Ack {
