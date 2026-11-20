@@ -16,20 +16,9 @@
 // swaps in the viewer's form. Rendering the viewer's form during
 // hydration would mismatch the server HTML.
 
-import { useSyncExternalStore } from "react";
-
 import { formatTimestamp, type TimestampStyle } from "@/lib/relative-time";
+import { useHydrated } from "@/lib/use-hydrated";
 import { cn } from "@/lib/utils";
-
-const noopSubscribe = () => () => {};
-
-function useHydrated(): boolean {
-  return useSyncExternalStore(
-    noopSubscribe,
-    () => true,
-    () => false,
-  );
-}
 
 export function Timestamp({
   value,
