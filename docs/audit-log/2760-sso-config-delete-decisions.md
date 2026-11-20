@@ -91,7 +91,10 @@ per GET.
 
 ## D7 — A login racing the delete
 
-**Decision.** The delete reads the config `FOR UPDATE`. A reconcile that
+**Decision.** The delete takes the admin-roster lock first, then reads the
+config `FOR UPDATE`. That is the resolver's order (roster lock, then the
+FK `KEY SHARE` on the config when it inserts a derivation); the reverse
+order could deadlock a reconcile against a delete. A reconcile that
 records a derivation against it takes an FK `KEY SHARE` lock on the same
 row: if it commits first its row is revoked by the delete; if it waits it
 then fails the FK and that sign-in errors.

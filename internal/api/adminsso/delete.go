@@ -76,6 +76,15 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		if lErr := q.LockAdminSSO(ctx, uuidToPgtype(tenantID)); lErr != nil {
 			return fmt.Errorf("lock sso: %w", lErr)
 		}
+		// Lock order: the admin-roster lock BEFORE the config row lock.
+		// Resolver.Derive takes the roster lock and then, inserting a
+		// derivation, the FK KEY SHARE lock on the config row. Taking the
+		// config FOR UPDATE first and the roster lock second would let a
+		// concurrent reconcile and this delete each wait on the other.
+		guard, lErr := users.LockAdmins(ctx, q, tenantID)
+		if lErr != nil {
+			return lErr
+		}
 		// FOR UPDATE on the config row: a reconcile recording a derivation
 		// against it (an FK KEY SHARE lock) either commits first, and its
 		// row is revoked below, or waits and then fails the FK.
@@ -91,10 +100,6 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		configID := uuidFromPgtype(cur.ID)
 
-		guard, lErr := users.LockAdmins(ctx, q, tenantID)
-		if lErr != nil {
-			return lErr
-		}
 		preview, pErr := grouprole.PreviewConfigDelete(ctx, q, tenantID, configID)
 		if pErr != nil {
 			return pErr
