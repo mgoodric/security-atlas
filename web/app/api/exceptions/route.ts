@@ -63,7 +63,8 @@ export async function GET(req: Request): Promise<Response> {
 // #2113 — POST /api/exceptions files an exception (the request form). The
 // body passes through as sent; the platform validates it, including
 // refusing a null scope predicate, and derives the requester from the
-// bearer.
+// bearer. #2618: the Idempotency-Key header passes through too, so a retry
+// after a timeout replays the first request instead of filing a duplicate.
 export async function POST(req: Request): Promise<Response> {
   let body: unknown;
   try {
@@ -71,5 +72,10 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
-  return forwardJSON("/v1/exceptions", { method: "POST", jsonBody: body });
+  const key = req.headers.get("Idempotency-Key");
+  return forwardJSON("/v1/exceptions", {
+    method: "POST",
+    jsonBody: body,
+    headers: key ? { "Idempotency-Key": key } : undefined,
+  });
 }

@@ -574,17 +574,19 @@ FROM action_plans
 WHERE tenant_id = $1
   AND tombstoned_at IS NULL
   AND ($2::text IS NULL OR status = $2::text)
+  AND ($3::text IS NULL OR strpos(lower(title), lower($3::text)) > 0)
   AND (
-        $3::timestamptz IS NULL
-        OR (created_at, id) < ($3::timestamptz, $4::uuid)
+        $4::timestamptz IS NULL
+        OR (created_at, id) < ($4::timestamptz, $5::uuid)
       )
 ORDER BY created_at DESC, id DESC
-LIMIT $5
+LIMIT $6
 `
 
 type ListActionPlansParams struct {
 	TenantID        pgtype.UUID        `json:"tenant_id"`
 	Status          *string            `json:"status"`
+	Q               *string            `json:"q"`
 	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
 	CursorID        pgtype.UUID        `json:"cursor_id"`
 	RowLimit        int32              `json:"row_limit"`
@@ -593,11 +595,13 @@ type ListActionPlansParams struct {
 // Cursor pagination on created_at DESC, id DESC. The cursor is the
 // (created_at, id) of the last row of the previous page; when the cursor
 // timestamp is NULL (sqlc.narg), the first page is returned. Tombstoned
-// rows are excluded.
+// rows are excluded. #2618: `q` narrows to titles containing it, ignoring
+// case; strpos rather than ILIKE, so `%` and `_` in it match literally.
 func (q *Queries) ListActionPlans(ctx context.Context, arg ListActionPlansParams) ([]ActionPlan, error) {
 	rows, err := q.db.Query(ctx, listActionPlans,
 		arg.TenantID,
 		arg.Status,
+		arg.Q,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.RowLimit,

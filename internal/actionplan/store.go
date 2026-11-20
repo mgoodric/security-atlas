@@ -238,6 +238,8 @@ func (s *Store) GetWithLinkage(ctx context.Context, id uuid.UUID) (ActionPlan, L
 // ListFilter narrows List. Empty fields are ignored.
 type ListFilter struct {
 	Status string
+	// Query narrows to plans whose title contains it, ignoring case (#2618).
+	Query string
 	// Limit is the page size (already clamped by the handler, but clamped
 	// again here for defense in depth).
 	Limit int
@@ -256,6 +258,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ActionPlan, erro
 		rows, err := q.ListActionPlans(ctx, dbx.ListActionPlansParams{
 			TenantID:        pgUUID(tenantID),
 			Status:          nilIfEmpty(filter.Status),
+			Q:               nilIfEmpty(filter.Query),
 			CursorCreatedAt: pgTimestamptzPtr(filter.CursorCreatedAt),
 			CursorID:        pgUUIDPtr(uuidPtrOrNilDefault(filter.CursorID)),
 			RowLimit:        int32(limit),

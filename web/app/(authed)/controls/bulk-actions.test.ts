@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_RATE_LIMIT_ATTEMPTS,
   NO_BULK_ACTIONS,
+  abortableSleep,
   anyBulkAction,
   bulkActionGates,
   exceptionRequestHref,
@@ -85,9 +87,115 @@ describe("runPerItem", () => {
         await new Promise((res) => setTimeout(res, 1));
         live -= 1;
       },
-      3,
+      { concurrency: 3 },
     );
     expect(peak).toBe(3);
+  });
+
+  const rateLimited = (wait?: number) =>
+    Object.assign(new Error("too many evaluations; retry later"), {
+      status: 429,
+      retryAfterSeconds: wait,
+    });
+
+  it("waits out a Retry-After and retries the rate-limited item (#2618)", async () => {
+    const tries = new Map<string, number>();
+    const waits: number[] = [];
+    const progress: number[] = [];
+    const r = await runPerItem(
+      ["a", "b", "c"],
+      async (id) => {
+        const n = (tries.get(id) ?? 0) + 1;
+        tries.set(id, n);
+        if (id === "b" && n < 3) throw rateLimited(10);
+      },
+      {
+        concurrency: 1,
+        sleep: async (ms) => {
+          waits.push(ms);
+        },
+        onProgress: (p) => progress.push(p.succeeded),
+      },
+    );
+    expect(r).toEqual({ succeeded: ["a", "b", "c"], refused: [] });
+    expect(tries.get("b")).toBe(3);
+    expect(waits.length).toBeGreaterThanOrEqual(2);
+    expect(Math.max(...waits)).toBeLessThanOrEqual(10_000);
+    expect(progress).toEqual([1, 2, 3]);
+  });
+
+  it("refuses as rate-limited when there is no Retry-After to wait for", async () => {
+    let calls = 0;
+    const r = await runPerItem(["a"], async () => {
+      calls += 1;
+      throw rateLimited(undefined);
+    });
+    expect(calls).toBe(1);
+    expect(r.refused).toEqual([
+      {
+        id: "a",
+        reason: "too many evaluations; retry later",
+        kind: "rate_limited",
+        retryAfterSeconds: undefined,
+      },
+    ]);
+  });
+
+  it("stops retrying after MAX_RATE_LIMIT_ATTEMPTS", async () => {
+    let calls = 0;
+    const r = await runPerItem(
+      ["a"],
+      async () => {
+        calls += 1;
+        throw rateLimited(5);
+      },
+      { sleep: async () => {} },
+    );
+    expect(calls).toBe(MAX_RATE_LIMIT_ATTEMPTS);
+    expect(r.refused[0]).toMatchObject({
+      kind: "rate_limited",
+      retryAfterSeconds: 5,
+    });
+  });
+
+  it("cancels the items not yet run when the signal aborts", async () => {
+    const ctl = new AbortController();
+    const ran: string[] = [];
+    const r = await runPerItem(
+      ["a", "b", "c"],
+      async (id) => {
+        ran.push(id);
+        if (id === "a") ctl.abort();
+      },
+      { concurrency: 1, signal: ctl.signal },
+    );
+    expect(ran).toEqual(["a"]);
+    expect(r.succeeded).toEqual(["a"]);
+    expect(r.refused.map((x) => [x.id, x.kind])).toEqual([
+      ["b", "cancelled"],
+      ["c", "cancelled"],
+    ]);
+  });
+
+  it("cancels an item waiting out a Retry-After", async () => {
+    const ctl = new AbortController();
+    const r = await runPerItem(
+      ["a"],
+      async () => {
+        throw rateLimited(60);
+      },
+      {
+        signal: ctl.signal,
+        sleep: (ms, signal) => {
+          const p = abortableSleep(ms, signal);
+          ctl.abort();
+          return p;
+        },
+      },
+    );
+    expect(r.refused).toEqual([
+      { id: "a", reason: "Cancelled", kind: "cancelled" },
+    ]);
   });
 
   it("handles an empty batch", async () => {
@@ -119,6 +227,31 @@ describe("summarize / perItemMessage", () => {
     );
     expect(m.kind).toBe("error");
     expect(m.refusals).toEqual([{ label: "Control C", reason: "forbidden" }]);
+  });
+
+  it("collapses rate-limited and cancelled refusals into one line each (#2618)", () => {
+    const m = perItemMessage(
+      {
+        succeeded: ["a"],
+        refused: [
+          { id: "b", reason: "forbidden" },
+          { id: "c", reason: "x", kind: "rate_limited", retryAfterSeconds: 10 },
+          { id: "d", reason: "x", kind: "rate_limited", retryAfterSeconds: 60 },
+          { id: "e", reason: "Cancelled", kind: "cancelled" },
+        ],
+      },
+      "evaluated",
+      (id) => id.toUpperCase(),
+    );
+    expect(m.text).toBe("1 control evaluated, 4 refused.");
+    expect(m.refusals).toEqual([
+      { label: "B", reason: "forbidden" },
+      {
+        label: "2 controls not evaluated",
+        reason: "rate limit reached, retry in ~60s",
+      },
+      { label: "1 control not evaluated", reason: "cancelled" },
+    ]);
   });
 });
 

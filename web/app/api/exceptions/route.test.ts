@@ -26,7 +26,7 @@ vi.mock("next/headers", () => ({
     }),
 }));
 
-import { GET } from "./route";
+import { GET, POST } from "./route";
 
 function makeRequest(url: string): Request {
   return new Request(url);
@@ -200,5 +200,43 @@ describe("GET /api/exceptions", () => {
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
     expect(calledURL).toBe("http://atlas:8080/v1/exceptions");
     expect(calledURL).not.toContain("evil-tenant-9999");
+  });
+});
+
+describe("POST /api/exceptions", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mockCookieGet.mockReset();
+    process.env.ATLAS_HTTP_URL = "http://atlas:8080";
+  });
+
+  function post(headers: Record<string, string>): Request {
+    return new Request("http://localhost/api/exceptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ control_id: "c1" }),
+    });
+  }
+
+  test("forwards the Idempotency-Key header (#2618)", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-177" });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 201 }));
+    await POST(post({ "Idempotency-Key": "k-2618" }));
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBe("k-2618");
+  });
+
+  test("sends no Idempotency-Key when the caller sent none", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-177" });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("{}", { status: 201 }));
+    await POST(post({}));
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Idempotency-Key"]).toBeUndefined();
   });
 });

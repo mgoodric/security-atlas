@@ -307,7 +307,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/action-plans:
     get:
-      summary: GET /v1/action-plans
+      summary: GET /v1/action-plans — paged by cursor, filterable by ?status= and ?q= (title contains, any case; #2618)
       tags: [action-plans]
       operationId: get-v1-action-plans
       security:
@@ -3521,7 +3521,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/exceptions
+      summary: POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618)
       tags: [exceptions]
       operationId: post-v1-exceptions
       security:

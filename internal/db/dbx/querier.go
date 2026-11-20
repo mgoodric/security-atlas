@@ -919,6 +919,8 @@ type Querier interface {
 	// partial UNIQUE index `evidence_records_tenant_idem_uniq` enforces it.
 	GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvidenceRecordByIdempotencyParams) (EvidenceRecord, error)
 	GetExceptionByID(ctx context.Context, arg GetExceptionByIDParams) (Exception, error)
+	// #2618: the exception a key created, while the key is inside its window.
+	GetExceptionIdempotencyKey(ctx context.Context, arg GetExceptionIdempotencyKeyParams) (GetExceptionIdempotencyKeyRow, error)
 	// Slice 059 — per-tenant feature flags + capability toggles queries.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -1671,7 +1673,8 @@ type Querier interface {
 	// Cursor pagination on created_at DESC, id DESC. The cursor is the
 	// (created_at, id) of the last row of the previous page; when the cursor
 	// timestamp is NULL (sqlc.narg), the first page is returned. Tombstoned
-	// rows are excluded.
+	// rows are excluded. #2618: `q` narrows to titles containing it, ignoring
+	// case; strpos rather than ILIKE, so `%` and `_` in it match literally.
 	ListActionPlans(ctx context.Context, arg ListActionPlansParams) ([]ActionPlan, error)
 	// AC-27 audit-period-freezing snapshot: only plans created on or before the
 	// period's frozen_at horizon are included in the period's snapshot. Live
@@ -3473,6 +3476,11 @@ type Querier interface {
 	// hashtext maps the hex key into it, and a hash collision only
 	// over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// #2618: serialises two requests carrying the same Idempotency-Key, so the
+	// second waits for the first to commit and then replays it. Released at
+	// the end of the transaction. Namespace 12 is
+	// advisorylock.ExceptionIdempotencyKey.
+	LockExceptionIdempotencyKey(ctx context.Context, arg LockExceptionIdempotencyKeyParams) error
 	// Serialises framework-scope activation against audit-period freeze on one
 	// (tenant, framework version) for the rest of the transaction (#2078).
 	// Activate takes it before reading the latest freeze; Freeze takes it
@@ -3619,6 +3627,9 @@ type Querier interface {
 	// explicitly so the publish writes the final, operator-reviewed snapshot in
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// #2618: records the key against the exception it created. A key past its
+	// window is overwritten.
+	PutExceptionIdempotencyKey(ctx context.Context, arg PutExceptionIdempotencyKeyParams) error
 	// Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
 	// whose code now resolves to a different anchor row because a new SCF
 	// release was imported (#1768 mints new anchor rows per release), moves the

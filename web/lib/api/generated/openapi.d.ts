@@ -283,7 +283,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/action-plans */
+        /** GET /v1/action-plans — paged by cursor, filterable by ?status= and ?q= (title contains, any case; */
         get: operations["get-v1-action-plans"];
         put?: never;
         /** POST /v1/action-plans */
@@ -2979,7 +2979,7 @@ export interface paths {
         /** GET /v1/exceptions — the tenant's exceptions, filterable by ?status= and ?control_id= (#2140) */
         get: operations["get-v1-exceptions"];
         put?: never;
-        /** POST /v1/exceptions */
+        /** POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618) */
         post: operations["post-v1-exceptions"];
         delete?: never;
         options?: never;

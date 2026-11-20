@@ -174,3 +174,34 @@ SELECT *
 FROM exception_audit_log
 WHERE tenant_id = $1 AND exception_id = $2
 ORDER BY occurred_at ASC, id ASC;
+
+-- name: LockExceptionIdempotencyKey :exec
+-- #2618: serialises two requests carrying the same Idempotency-Key, so the
+-- second waits for the first to commit and then replays it. Released at
+-- the end of the transaction. Namespace 12 is
+-- advisorylock.ExceptionIdempotencyKey.
+SELECT pg_advisory_xact_lock(
+    12,
+    hashtext(sqlc.arg(tenant_id)::text || '|' || sqlc.arg(requested_by)::text || '|' || sqlc.arg(idempotency_key)::text)
+);
+
+-- name: GetExceptionIdempotencyKey :one
+-- #2618: the exception a key created, while the key is inside its window.
+SELECT exception_id, request_hash
+FROM exception_idempotency_keys
+WHERE tenant_id = $1
+  AND requested_by = $2
+  AND idempotency_key = $3
+  AND created_at > sqlc.arg(not_before)::timestamptz;
+
+-- name: PutExceptionIdempotencyKey :exec
+-- #2618: records the key against the exception it created. A key past its
+-- window is overwritten.
+INSERT INTO exception_idempotency_keys (
+    tenant_id, requested_by, idempotency_key, request_hash, exception_id, created_at
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tenant_id, requested_by, idempotency_key) DO UPDATE
+SET request_hash = EXCLUDED.request_hash,
+    exception_id = EXCLUDED.exception_id,
+    created_at   = EXCLUDED.created_at;

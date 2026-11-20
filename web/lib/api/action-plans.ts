@@ -95,6 +95,8 @@ export type ActionPlansRefListResponse = {
 
 export type ActionPlansListFilters = {
   status?: ActionPlanStatus | "";
+  /** Titles containing this, ignoring case (#2618). */
+  q?: string;
   limit?: number;
   cursor?: string;
 };
@@ -119,6 +121,7 @@ export async function fetchActionPlansList(
 ): Promise<ActionPlansListResponse> {
   const qs = new URLSearchParams();
   if (filters.status) qs.set("status", filters.status);
+  if (filters.q?.trim()) qs.set("q", filters.q.trim());
   if (filters.limit) qs.set("limit", String(filters.limit));
   if (filters.cursor) qs.set("cursor", filters.cursor);
   const url = qs.toString()

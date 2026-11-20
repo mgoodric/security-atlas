@@ -102,6 +102,9 @@ var (
 	// ErrNotFound is returned when an id doesn't resolve under the active
 	// tenant context. RLS-friendly: same shape as "in another tenant".
 	ErrNotFound = errors.New("exception: not found")
+	// ErrIdempotencyKeyReused is returned when an Idempotency-Key inside
+	// its window arrives with a different request body (#2618).
+	ErrIdempotencyKeyReused = errors.New("exception: Idempotency-Key was already used with a different request")
 	// ErrWrongState is returned when a transition is requested from a
 	// state that doesn't permit it (e.g. approve on a denied row).
 	// HTTP 409.
@@ -244,34 +247,56 @@ type CreateInput struct {
 	// Now is the request-time clock used to enforce the 365-day cap.
 	// Defaults to time.Now() when zero -- callers override only in tests.
 	Now time.Time
+	// IdempotencyKey, when set, makes the create idempotent (#2618): a
+	// repeat of the key by the same requester inside IdempotencyWindow
+	// returns the exception the first request created. RequestHash
+	// identifies the request body; the same key with a different hash is
+	// ErrIdempotencyKeyReused.
+	IdempotencyKey string
+	RequestHash    string
 }
+
+// IdempotencyWindow is how long an Idempotency-Key on POST /v1/exceptions
+// is remembered (#2618). A client retry after a timeout lands well inside
+// it; a key reused after it files a new exception.
+const IdempotencyWindow = 24 * time.Hour
 
 // Create inserts a new exception in `requested` state and writes the
 // matching audit-log row. AC-1 + AC-2 + AC-7.
 func (s *Store) Create(ctx context.Context, in CreateInput) (Exception, error) {
+	out, _, err := s.CreateIdempotent(ctx, in)
+	return out, err
+}
+
+// CreateIdempotent is Create that also reports whether the result is a
+// replay: true when in.IdempotencyKey matched an earlier request inside
+// IdempotencyWindow and nothing new was filed (#2618). Two requests with
+// one key are serialised on a transaction-scoped advisory lock, so the
+// second waits for the first and replays it.
+func (s *Store) CreateIdempotent(ctx context.Context, in CreateInput) (Exception, bool, error) {
 	if in.Now.IsZero() {
 		in.Now = time.Now().UTC()
 	}
 	if in.ControlID == uuid.Nil {
-		return Exception{}, ErrControlRequired
+		return Exception{}, false, ErrControlRequired
 	}
 	if in.Justification == "" {
-		return Exception{}, ErrJustificationRequired
+		return Exception{}, false, ErrJustificationRequired
 	}
 	if in.RequestedBy == "" {
-		return Exception{}, ErrRequesterRequired
+		return Exception{}, false, ErrRequesterRequired
 	}
 	if in.ExpiresAt.IsZero() {
-		return Exception{}, ErrExpiresAtRequired
+		return Exception{}, false, ErrExpiresAtRequired
 	}
 	if !in.ExpiresAt.After(in.Now) {
-		return Exception{}, ErrExpiresAtInPast
+		return Exception{}, false, ErrExpiresAtInPast
 	}
 	// AC-2 + anti-criterion P0: 365-day cap. Computed from the request-time
 	// clock, NOT requested_at-from-the-DB (which defaults to now()) -- the
 	// two could drift by milliseconds and tip a borderline create over.
 	if in.ExpiresAt.After(in.Now.Add(MaxLifetime)) {
-		return Exception{}, ErrExpiresAtExceedsCap
+		return Exception{}, false, ErrExpiresAtExceedsCap
 	}
 	if in.CompensatingControls == nil {
 		in.CompensatingControls = []string{}
@@ -282,7 +307,18 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Exception, error) {
 	}
 
 	var out Exception
+	replayed := false
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		if in.IdempotencyKey != "" {
+			prior, found, err := replayIdempotent(ctx, q, tenantID, in)
+			if err != nil {
+				return err
+			}
+			if found {
+				out, replayed = prior, true
+				return nil
+			}
+		}
 		id := uuid.New()
 		row, err := q.CreateException(ctx, dbx.CreateExceptionParams{
 			ID:                   pgUUID(id),
@@ -313,12 +349,61 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Exception, error) {
 		}); alErr != nil {
 			return fmt.Errorf("write requested audit log: %w", alErr)
 		}
+		if in.IdempotencyKey != "" {
+			if err := q.PutExceptionIdempotencyKey(ctx, dbx.PutExceptionIdempotencyKeyParams{
+				TenantID:       pgUUID(tenantID),
+				RequestedBy:    in.RequestedBy,
+				IdempotencyKey: in.IdempotencyKey,
+				RequestHash:    in.RequestHash,
+				ExceptionID:    row.ID,
+				CreatedAt:      pgTimestamptz(in.Now),
+			}); err != nil {
+				return fmt.Errorf("record idempotency key: %w", err)
+			}
+		}
 		// Slice 126: fan out to the external sink.
 		emitSinkException(ctx, tenantID, uuid.UUID(row.ID.Bytes), auditID,
 			ActionRequested, in.RequestedBy, "", StateRequested, "")
 		return nil
 	})
-	return out, err
+	return out, replayed, err
+}
+
+// replayIdempotent takes the key's lock and returns the exception an
+// earlier request with in.IdempotencyKey created, if one did inside
+// IdempotencyWindow. The lock is held until the transaction ends, so a
+// concurrent request with the same key waits here and then finds the row.
+func replayIdempotent(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, in CreateInput) (Exception, bool, error) {
+	if err := q.LockExceptionIdempotencyKey(ctx, dbx.LockExceptionIdempotencyKeyParams{
+		TenantID:       tenantID.String(),
+		RequestedBy:    in.RequestedBy,
+		IdempotencyKey: in.IdempotencyKey,
+	}); err != nil {
+		return Exception{}, false, fmt.Errorf("lock idempotency key: %w", err)
+	}
+	key, err := q.GetExceptionIdempotencyKey(ctx, dbx.GetExceptionIdempotencyKeyParams{
+		TenantID:       pgUUID(tenantID),
+		RequestedBy:    in.RequestedBy,
+		IdempotencyKey: in.IdempotencyKey,
+		NotBefore:      pgTimestamptz(in.Now.Add(-IdempotencyWindow)),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Exception{}, false, nil
+	}
+	if err != nil {
+		return Exception{}, false, fmt.Errorf("read idempotency key: %w", err)
+	}
+	if key.RequestHash != in.RequestHash {
+		return Exception{}, false, ErrIdempotencyKeyReused
+	}
+	row, err := q.GetExceptionByID(ctx, dbx.GetExceptionByIDParams{
+		TenantID: pgUUID(tenantID),
+		ID:       key.ExceptionID,
+	})
+	if err != nil {
+		return Exception{}, false, fmt.Errorf("read replayed exception: %w", err)
+	}
+	return exceptionFromRow(row), true, nil
 }
 
 // Approve transitions requested -> approved. AC-3 + AC-7.

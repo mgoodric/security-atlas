@@ -168,6 +168,8 @@ sql:
       - "migrations/sql/20261260000000_vendor_audit_log.sql"
       # #2384: an optional admin-chosen label on an API key.
       - "migrations/sql/20261265000000_api_keys_label.sql"
+      # #2618: Idempotency-Key -> exception for POST /v1/exceptions.
+      - "migrations/sql/20261270000000_exception_idempotency_keys.sql"
     queries: "internal/db/queries"
     gen:
       go:

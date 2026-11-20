@@ -186,9 +186,14 @@ func (h *Handler) CreateActionPlan(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"action_plan": planWireFrom(created)})
 }
 
+// maxListQueryLen bounds ?q on the action-plan list (#2618): a title
+// search, not a document.
+const maxListQueryLen = 200
+
 // ListActionPlans handles GET /v1/action-plans (AC-11). Keyset pagination:
 //
 //	?status=draft|in_progress|blocked|completed|verified
+//	?q=<text>                                  (title contains, any case; #2618)
 //	?limit=25                                  (default 25, max 100)
 //	?cursor=<created_at_rfc3339>,<id>          (opaque "next" cursor)
 func (h *Handler) ListActionPlans(w http.ResponseWriter, r *http.Request) {
@@ -200,9 +205,16 @@ func (h *Handler) ListActionPlans(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	filter := actionplan.ListFilter{Status: strings.TrimSpace(r.URL.Query().Get("status"))}
+	filter := actionplan.ListFilter{
+		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+		Query:  strings.TrimSpace(r.URL.Query().Get("q")),
+	}
 	if filter.Status != "" && !actionplan.ValidStatus(filter.Status) {
 		httpresp.WriteError(w, http.StatusBadRequest, "status is not a valid action plan status")
+		return
+	}
+	if len(filter.Query) > maxListQueryLen {
+		httpresp.WriteError(w, http.StatusBadRequest, "q is too long")
 		return
 	}
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
