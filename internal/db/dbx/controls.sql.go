@@ -51,6 +51,24 @@ func (q *Queries) ApprovedRemapLineageRevision(ctx context.Context, arg Approved
 	return id, err
 }
 
+const clearStockControlHoldback = `-- name: ClearStockControlHoldback :exec
+DELETE FROM stock_control_holdbacks
+WHERE tenant_id = $1 AND bundle_id = $2
+`
+
+type ClearStockControlHoldbackParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	BundleID string      `json:"bundle_id"`
+}
+
+// Issue #2599: the boot seed found the tenant's active revision already is
+// the shipped manifest, so nothing is held back any more. The row named an
+// earlier shipped manifest; without this it would be listed for good.
+func (q *Queries) ClearStockControlHoldback(ctx context.Context, arg ClearStockControlHoldbackParams) error {
+	_, err := q.db.Exec(ctx, clearStockControlHoldback, arg.TenantID, arg.BundleID)
+	return err
+}
+
 const countActiveControls = `-- name: CountActiveControls :one
 WITH latest_eval AS (
     SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
