@@ -302,6 +302,12 @@ export type PendingAcknowledgment = {
   required_roles: string[];
   /** An earlier acknowledgment: of an older version, or over a year ago. */
   last_acknowledged_at?: string | null;
+  /** #2736 — `overdue` once a lapsed ack lapsed, or once the grace period
+   *  after the effective date has ended for one never made; `due_soon`
+   *  before then. Needs-attention bands the item the same way. */
+  status?: "overdue" | "due_soon";
+  /** #2736 — when the acknowledgement is (or was) due. */
+  due_at?: string | null;
 };
 
 /** #2668 — a policy the caller has acknowledged, for its current version,

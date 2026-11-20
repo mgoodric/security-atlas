@@ -91,6 +91,10 @@ type pendingItem struct {
 	EffectiveDate      *string    `json:"effective_date,omitempty"`
 	RequiredRoles      []string   `json:"required_roles"`
 	LastAcknowledgedAt *time.Time `json:"last_acknowledged_at,omitempty"`
+	// Status and DueAt are policy.Pending.Due, the rule
+	// GET /v1/needs-attention bands the item by (#2736).
+	Status string     `json:"status"`
+	DueAt  *time.Time `json:"due_at,omitempty"`
 }
 
 // currentItem is a policy the caller has acknowledged, for its current
@@ -166,6 +170,7 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+	now := h.store.Now()
 	acks, err := h.store.ForUser(ctx, CallerFromCred(cred))
 	if err != nil {
 		if errors.Is(err, policy.ErrAckMissingUser) {
@@ -195,6 +200,7 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 			t := *p.LastAcknowledgedAt
 			item.LastAcknowledgedAt = &t
 		}
+		item.DueAt, item.Status = p.Due(now)
 		out.Pending = append(out.Pending, item)
 	}
 	out.Count = len(out.Pending)

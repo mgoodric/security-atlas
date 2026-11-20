@@ -399,15 +399,10 @@ func (h *Handler) ackItems(r *http.Request, cred credstore.Credential) ([]Item, 
 }
 
 // AckItems turns the caller's pending acknowledgements into items they
-// own. A lapsed ack (the last one is older than
-// policy.AcknowledgmentFreshness) is overdue from the day it lapsed; a
-// policy never acknowledged has no due date, so it is due soon, dated from
-// its effective date.
-//
-// The store matches acks to the current version only (a re-publish is a
-// new policies row), so a pending row's ack is always lapsed. An ack that
-// would lapse after now is not a lapse of this version and counts as none,
-// rather than an overdue item due in the future.
+// own, banded and dated by policy.Pending.Due, the rule
+// GET /v1/me/acknowledgments reports (#2736): a lapsed ack is overdue from
+// the day it lapsed; a policy never acknowledged is due soon until
+// policy.AckGraceDays after its effective date, and overdue after.
 func AckItems(pending []policy.Pending, caller string, now time.Time) []Item {
 	out := make([]Item, 0, len(pending))
 	for _, p := range pending {
@@ -417,14 +412,10 @@ func AckItems(pending []policy.Pending, caller string, now time.Time) []Item {
 			Link: links["policy"] + id, Action: "Acknowledge",
 			Owner: &Owner{UserID: caller},
 		}
-		var due time.Time
-		if p.LastAcknowledgedAt != nil {
-			due = p.LastAcknowledgedAt.UTC().Add(policy.AcknowledgmentFreshness)
-		}
-		if p.LastAcknowledgedAt != nil && !due.After(now) {
-			it.Band, it.DueAt = BandOverdue, &due
-		} else {
-			it.Band, it.Since = BandDueSoon, p.EffectiveDate
+		due, state := p.Due(now)
+		it.Band, it.DueAt = BandDueSoon, due
+		if state == policy.AckOverdue {
+			it.Band = BandOverdue
 		}
 		out = append(out, it)
 	}
