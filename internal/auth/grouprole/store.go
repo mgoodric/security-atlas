@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -16,6 +17,11 @@ import (
 
 // ErrMappingNotFound is returned when a mapping id is not present in the tenant.
 var ErrMappingNotFound = errors.New("grouprole: mapping not found")
+
+// ErrUnknownIDPConfig is returned by Create when idp_config_id is not one of
+// the tenant's own oidc_idp_configs (#2643). A nonexistent id and another
+// tenant's id return the same error, so the create is no existence oracle.
+var ErrUnknownIDPConfig = errors.New("grouprole: unknown idp config")
 
 // Mapping is the admin-facing view of one oidc_idp_group_mappings row.
 type Mapping struct {
@@ -63,6 +69,17 @@ func (s *Store) Create(ctx context.Context, in CreateMappingInput, by Actor) (Ma
 	}
 	var out Mapping
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		if cfg := ptrUUIDToPg(in.IDPConfigID); cfg.Valid {
+			exists, eErr := q.GroupRoleMappingIdpConfigExists(ctx, dbx.GroupRoleMappingIdpConfigExistsParams{
+				TenantID: tID, ID: cfg,
+			})
+			if eErr != nil {
+				return fmt.Errorf("grouprole: look up idp config: %w", eErr)
+			}
+			if !exists {
+				return ErrUnknownIDPConfig
+			}
+		}
 		row, cErr := q.InsertGroupRoleMapping(ctx, dbx.InsertGroupRoleMappingParams{
 			TenantID:    tID,
 			IdpConfigID: ptrUUIDToPg(in.IDPConfigID),
@@ -70,6 +87,10 @@ func (s *Store) Create(ctx context.Context, in CreateMappingInput, by Actor) (Ma
 			Role:        in.Role,
 			CreatedBy:   ptrUUIDToPg(in.CreatedBy),
 		})
+		if isFKViolation(cErr) {
+			// The config was deleted between the lookup and the insert.
+			return ErrUnknownIDPConfig
+		}
 		if cErr != nil {
 			return fmt.Errorf("grouprole: insert mapping: %w", cErr)
 		}
@@ -177,6 +198,12 @@ func mappingFromRow(r dbx.OidcIdpGroupMapping) Mapping {
 		m.IDPConfigID = &cfg
 	}
 	return m
+}
+
+// isFKViolation reports a foreign-key violation (SQLSTATE 23503).
+func isFKViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
 func ptrUUIDToPg(u *uuid.UUID) pgtype.UUID {

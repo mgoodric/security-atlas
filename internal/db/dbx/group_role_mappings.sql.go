@@ -80,6 +80,28 @@ func (q *Queries) GetGroupRoleMapping(ctx context.Context, arg GetGroupRoleMappi
 	return i, err
 }
 
+const groupRoleMappingIdpConfigExists = `-- name: GroupRoleMappingIdpConfigExists :one
+SELECT EXISTS (
+    SELECT 1 FROM oidc_idp_configs
+    WHERE tenant_id = $1 AND id = $2
+) AS config_exists
+`
+
+type GroupRoleMappingIdpConfigExistsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// Reports whether idp_config_id names one of the tenant's own oidc_idp_configs
+// (#2643). Runs under RLS, so another tenant's config reads as absent: a
+// foreign id and a nonexistent one are indistinguishable to the caller.
+func (q *Queries) GroupRoleMappingIdpConfigExists(ctx context.Context, arg GroupRoleMappingIdpConfigExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, groupRoleMappingIdpConfigExists, arg.TenantID, arg.ID)
+	var config_exists bool
+	err := row.Scan(&config_exists)
+	return config_exists, err
+}
+
 const hasManualRole = `-- name: HasManualRole :one
 SELECT EXISTS (
     SELECT 1 FROM user_roles
