@@ -20,6 +20,7 @@ import { redirect } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AuditShell } from "@/components/audit/audit-shell";
+import { Term } from "@/components/help/term";
 import { PageShell } from "@/components/shell/page-shell";
 import { resolveAuditPeriod } from "@/lib/api/audit-server";
 
@@ -44,8 +45,9 @@ export default async function ControlWorkspacePage({
           <Alert>
             <AlertTitle>No audit period assigned</AlertTitle>
             <AlertDescription>
-              You are signed in but not assigned to any audit period, so this
-              control cannot be opened for testing.
+              You are signed in but not an{" "}
+              <Term id="assigned-auditor">assigned auditor</Term> on any audit
+              period, so this control cannot be opened for testing.
             </AlertDescription>
           </Alert>
         </PageShell>

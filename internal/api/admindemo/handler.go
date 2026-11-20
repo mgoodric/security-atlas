@@ -182,6 +182,9 @@ type seedResponse struct {
 	AuditPeriods int    `json:"audit_periods"`
 	Samples      int    `json:"samples"`
 	Idempotent   bool   `json:"idempotent"`
+	// SwitchedOn lists the module and feature switches the seed turned
+	// on so the seeded data is shown (#2590).
+	SwitchedOn []string `json:"switched_on,omitempty"`
 }
 
 // teardownResponse is the JSON body for POST /v1/admin/demo/teardown.
@@ -318,6 +321,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		AuditPeriods: res.AuditPeriods,
 		Samples:      res.Samples,
 		Idempotent:   res.Idempotent,
+		SwitchedOn:   res.SwitchedOn,
 	})
 
 }
