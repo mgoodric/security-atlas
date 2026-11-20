@@ -3,6 +3,7 @@ package moduleaccess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 
@@ -149,6 +150,24 @@ func TestViewer_ModulesFailsClosedOnFlagError(t *testing.T) {
 	v := Viewer{r: r, flags: flagsErr{}, access: Access{Exempt: true}}
 	if _, err := v.Modules(); err == nil {
 		t.Fatal("Modules: want error, got nil")
+	}
+}
+
+// #2575: an unreadable switch answers 503, any other viewer error 500.
+func TestWriteError(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		err  error
+		want int
+	}{
+		{fmt.Errorf("wrapped: %w", featureflag.ErrStoreUnavailable), 503},
+		{errors.New("access read failed"), 500},
+	} {
+		rec := httptest.NewRecorder()
+		WriteError(rec, httptest.NewRequest("GET", "/v1/activity", nil), "op", c.err)
+		if rec.Code != c.want {
+			t.Errorf("WriteError(%v) = %d; want %d", c.err, rec.Code, c.want)
+		}
 	}
 }
 

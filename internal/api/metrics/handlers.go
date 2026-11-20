@@ -176,7 +176,7 @@ func (h *Handler) ListCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	set, err := h.moduleSet(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "metrics module access", err)
+		moduleaccess.WriteError(w, r, "metrics module access", err)
 		return
 	}
 	out := make([]metricWire, 0, len(rows))
@@ -216,7 +216,7 @@ func (h *Handler) GetCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	set, err := h.moduleSet(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "metrics module access", err)
+		moduleaccess.WriteError(w, r, "metrics module access", err)
 		return
 	}
 	// #2173: a hidden module's metric reads as absent, not forbidden.
@@ -289,7 +289,7 @@ func (h *Handler) GetCascade(w http.ResponseWriter, r *http.Request) {
 	// carry no category, so the catalog supplies it.
 	set, err := h.moduleSet(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "metrics module access", err)
+		moduleaccess.WriteError(w, r, "metrics module access", err)
 		return
 	}
 	catalog, err := dbx.New(h.pool).ListMetricsCatalog(r.Context(), dbx.ListMetricsCatalogParams{})
@@ -437,7 +437,7 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 	}
 	set, err := h.moduleSet(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "metrics module access", err)
+		moduleaccess.WriteError(w, r, "metrics module access", err)
 		return
 	}
 	// #2477: a hidden module's metric takes no input; it reads as absent.

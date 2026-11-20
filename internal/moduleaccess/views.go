@@ -1,11 +1,13 @@
 package moduleaccess
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/identity"
@@ -213,4 +215,15 @@ func (v Viewer) Hidden(routes map[string]string) (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// WriteError answers a request whose Viewer read failed. A module switch
+// the flag store could not read is 503 "module_state_unavailable", as
+// ModuleGate answers (#2575); any other error is 500.
+func WriteError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if errors.Is(err, featureflag.ErrStoreUnavailable) {
+		httperr.WriteCodedStatus(w, r, http.StatusServiceUnavailable, op, err, "module_state_unavailable")
+		return
+	}
+	httperr.WriteInternal(w, r, op, err)
 }

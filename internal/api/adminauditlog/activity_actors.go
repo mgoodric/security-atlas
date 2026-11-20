@@ -62,7 +62,7 @@ func (h *Handler) ActivityActors(w http.ResponseWriter, r *http.Request) {
 		modules, err = viewer.Modules()
 	}
 	if err != nil {
-		httperr.WriteInternal(w, r, "activity module access", err)
+		moduleaccess.WriteError(w, r, "activity module access", err)
 		return
 	}
 
