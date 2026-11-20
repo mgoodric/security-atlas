@@ -39,3 +39,31 @@ func countModuleStateError(ctx context.Context, module string) {
 // ModuleStateErrors returns how many requests ModuleGate has answered 503
 // for a failed module-state read since the process started.
 func ModuleStateErrors() uint64 { return moduleStateErrors.n.Load() }
+
+// strictReadErrors counts EnabledStrict reads that failed on a flag-store
+// error (#2575). Each is a background sweep that skipped a tenant, or a
+// request answered with an error, rather than one that guessed the switch
+// from its seed default.
+var strictReadErrors struct {
+	once    sync.Once
+	counter metric.Int64Counter
+	n       atomic.Uint64
+}
+
+func countStrictReadError(ctx context.Context, key string) {
+	strictReadErrors.n.Add(1)
+	strictReadErrors.once.Do(func() {
+		c, err := otel.Meter(meterName).Int64Counter("atlas.module_switch.strict_read_errors",
+			metric.WithDescription("Module switch reads that failed closed because the flag store could not be read"))
+		if err == nil {
+			strictReadErrors.counter = c
+		}
+	})
+	if c := strictReadErrors.counter; c != nil {
+		c.Add(ctx, 1, metric.WithAttributes(attribute.String("flag_key", key)))
+	}
+}
+
+// StrictReadErrors returns how many EnabledStrict reads have failed on a
+// flag-store error since the process started.
+func StrictReadErrors() uint64 { return strictReadErrors.n.Load() }

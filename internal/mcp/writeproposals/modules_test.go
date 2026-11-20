@@ -6,11 +6,30 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 )
+
+type switchesDown struct{}
+
+func (switchesDown) SwitchedOnStrict(context.Context, uuid.UUID, string) (bool, error) {
+	return false, featureflag.ErrStoreUnavailable
+}
+
+// #2575: a switch that cannot be read refuses the proposal (it stays
+// pending) rather than apply it into a module that may be off.
+func TestModuleOffStoreDown(t *testing.T) {
+	t.Parallel()
+	s := NewStore(nil).WithSwitches(switchesDown{})
+	p := Proposal{TenantID: uuid.New(), ToolName: ToolCreateRisk, State: StateAIProposed}
+	if err := s.moduleOff(context.Background(), p); !errors.Is(err, featureflag.ErrStoreUnavailable) {
+		t.Fatalf("err = %v; want ErrStoreUnavailable", err)
+	}
+}
 
 type switchesOff map[string]bool
 
-func (s switchesOff) SwitchedOn(_ context.Context, _ uuid.UUID, key string) (bool, error) {
+func (s switchesOff) SwitchedOnStrict(_ context.Context, _ uuid.UUID, key string) (bool, error) {
 	return !s[key], nil
 }
 

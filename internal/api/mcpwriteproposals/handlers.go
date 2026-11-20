@@ -44,6 +44,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -297,6 +298,10 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 			Error: "The module this proposal writes into is switched off. It stays pending; switch the module on in Admin > Features to apply it.",
 			Code:  "module_switched_off",
 		})
+	case errors.Is(err, featureflag.ErrStoreUnavailable):
+		// #2575: the module switch could not be read. The proposal stays
+		// pending rather than apply into a module that may be off.
+		httperr.WriteCodedStatus(w, r, http.StatusServiceUnavailable, "module switch", err, "module_state_unavailable")
 	default:
 		if status, code, ok := applyErrStatus(err); ok {
 			if status >= http.StatusInternalServerError {

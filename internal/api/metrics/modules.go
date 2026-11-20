@@ -59,7 +59,7 @@ func seesMetric(set moduleaccess.ModuleSet, id, category string) bool {
 func (h *Handler) hideMetric(w http.ResponseWriter, r *http.Request, id string) bool {
 	set, err := h.moduleSet(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "metrics module access", err)
+		moduleaccess.WriteError(w, r, "metrics module access", err)
 		return true
 	}
 	category := ""

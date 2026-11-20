@@ -1,11 +1,13 @@
 package moduleaccess
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/identity"
@@ -134,7 +136,7 @@ func (v Viewer) SeesModule(key string) (bool, error) {
 		if !v.access.Has(key) {
 			return false, nil
 		}
-		return featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
+		return featureflag.EnabledStrict(v.r.Context(), v.flags, m.FlagKey)
 	}
 	return true, nil
 }
@@ -158,7 +160,7 @@ func (v Viewer) Modules() (ModuleSet, error) {
 				hidden[m.Key] = true
 				continue
 			}
-			on, err := featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
+			on, err := featureflag.EnabledStrict(v.r.Context(), v.flags, m.FlagKey)
 			if err != nil {
 				return ModuleSet{}, err
 			}
@@ -172,7 +174,7 @@ func (v Viewer) Modules() (ModuleSet, error) {
 			if len(f.Routes) == 0 {
 				continue
 			}
-			on, err := featureflag.Enabled(v.r.Context(), v.flags, f.FlagKey)
+			on, err := featureflag.EnabledStrict(v.r.Context(), v.flags, f.FlagKey)
 			if err != nil {
 				return ModuleSet{}, err
 			}
@@ -220,4 +222,15 @@ func (v Viewer) Hidden(routes map[string]string) (map[string]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// WriteError answers a request whose Viewer read failed. A module switch
+// the flag store could not read is 503 "module_state_unavailable", as
+// ModuleGate answers (#2575); any other error is 500.
+func WriteError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if errors.Is(err, featureflag.ErrStoreUnavailable) {
+		httperr.WriteCodedStatus(w, r, http.StatusServiceUnavailable, op, err, "module_state_unavailable")
+		return
+	}
+	httperr.WriteInternal(w, r, op, err)
 }

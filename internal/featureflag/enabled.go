@@ -77,9 +77,17 @@ func Enabled(ctx context.Context, looker Looker, key string) (bool, error) {
 // reminder notifiers, the digests, the board pack generator) reads
 // through it and skips the tenant on an error, because a missed reminder
 // costs less than one sent for a switched-off module (#2548). Request
-// paths keep Enabled.
+// paths keep Enabled where the gate has already read the switch
+// strictly; a request that reads switches the gate did not (the activity
+// log and metrics module filters, MCP proposal confirm) reads through
+// EnabledStrict too (#2575). A store error is counted
+// (atlas.module_switch.strict_read_errors).
 func EnabledStrict(ctx context.Context, looker Looker, key string) (bool, error) {
-	return lookup(ctx, looker, key)
+	on, err := lookup(ctx, looker, key)
+	if errors.Is(err, ErrStoreUnavailable) {
+		countStrictReadError(ctx, key)
+	}
+	return on, err
 }
 
 // lookup is Enabled without the Seed-default fallback: a flag-store error
