@@ -3,7 +3,7 @@
 // These tests cover the gate logic WITHOUT a Postgres dependency:
 //
 //   - Status route shape (enabled / disabled)
-//   - Env-var gate returns 503 when unset
+//   - Env-var gate returns 409 feature_not_enabled when unset
 //   - Admin gate returns 401 when no credential, 403 when not admin
 //   - Rate limiter returns 429 on second call inside window
 //
@@ -25,6 +25,7 @@ import (
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -301,34 +302,46 @@ func TestSeedTeardown_SuperAdminPasses(t *testing.T) {
 
 // --- Env-var gate ---
 
-// ISC-3: env-var unset → 503 with documented error message.
-func TestSeed_EnvDisabledGets503(t *testing.T) {
+// ISC-3: env-var unset → 409 feature_not_enabled with documented error
+// message. A 4xx so the web client shows the wording (#2730).
+func TestSeed_EnvDisabledGets409(t *testing.T) {
 	t.Parallel()
 
 	h := New(nil, func() bool { return false })
 	w := httptest.NewRecorder()
 	h.Seed(w, requestWithAdmin(http.MethodPost, "/v1/admin/demo/seed"))
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status code = %d, want 503; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status code = %d, want 409; body=%s", w.Code, w.Body.String())
 	}
 	var body map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body["error"] != "demo seed not enabled on this deployment" {
 		t.Fatalf("error message = %q; want exact phrase", body["error"])
 	}
+	if body["code"] != httpresp.CodeFeatureNotEnabled {
+		t.Fatalf("code = %q; want %q", body["code"], httpresp.CodeFeatureNotEnabled)
+	}
 }
 
-// ISC-9 parallel: env unset for teardown also gets 503.
-func TestTeardown_EnvDisabledGets503(t *testing.T) {
+// ISC-9 parallel: env unset for teardown also gets 409 feature_not_enabled.
+func TestTeardown_EnvDisabledGets409(t *testing.T) {
 	t.Parallel()
 
 	h := New(nil, func() bool { return false })
 	w := httptest.NewRecorder()
 	h.Teardown(w, requestWithAdmin(http.MethodPost, "/v1/admin/demo/teardown"))
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status code = %d, want 503; body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status code = %d, want 409; body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	if body["error"] != "demo seed not enabled on this deployment" {
+		t.Fatalf("error message = %q; want exact phrase", body["error"])
+	}
+	if body["code"] != httpresp.CodeFeatureNotEnabled {
+		t.Fatalf("code = %q; want %q", body["code"], httpresp.CodeFeatureNotEnabled)
 	}
 }
 

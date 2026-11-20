@@ -97,7 +97,7 @@ func TestComposeForwardsDemoSeedFlagToAtlas(t *testing.T) {
 	if !ok {
 		t.Fatalf("docker-compose.yml: the `atlas` service does not forward %s.\n"+
 			"Without the passthrough, setting it in .env has no effect and\n"+
-			"/v1/admin/demo/seed returns 503 on every self-host deployment —\n"+
+			"/v1/admin/demo/seed returns 409 on every self-host deployment —\n"+
 			"the OE-553 half-wire. Add `%s: ${%s:-}` to the atlas environment block.",
 			demoEnableEnvVar, demoEnableEnvVar, demoEnableEnvVar)
 	}

@@ -10,12 +10,15 @@
 // TRIPLE-GATE (defense in depth — order matters):
 //
 //  1. Env-var gate: handlers read `ATLAS_ENABLE_DEMO_SEED`. Unset
-//     -> 503 {error: "demo seed not enabled on this deployment"}.
-//     This is the load-bearing edge-deployment-only gate. The
-//     env var is set on the `atlas-edge` docker-compose profile
-//     only; production deployments never set it. 503 (NOT 404)
-//     is intentional: the path exists, the feature is disabled.
-//     Non-admin callers never see 503 because the admin gate
+//     -> 409 {error: "demo seed not enabled on this deployment",
+//     code: "feature_not_enabled"}. This is the load-bearing
+//     edge-deployment-only gate. The env var is set on the
+//     `atlas-edge` docker-compose profile only; production
+//     deployments never set it. 409 (NOT 404) is intentional: the
+//     path exists, the feature is disabled. A 4xx, not a 503: it is a
+//     refusal about configuration, not a server failure, and the web
+//     client shows a 4xx's wording but replaces every 5xx body (#2730).
+//     Non-admin callers never see 409 because the admin gate
 //     short-circuits first (admin OPA -> 403 from authzmw; the
 //     handler's super_admin check also runs before the env gate).
 //
