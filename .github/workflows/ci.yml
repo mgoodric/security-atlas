@@ -1936,7 +1936,7 @@ jobs:
           done
       - name: Run Playwright tests
         working-directory: web
-        run: npx playwright test
+        run: npx playwright test e2e/help-panel.spec.ts --repeat-each 50 --retries 0 --project chromium # TEMP #2752 repro, reverted before merge
       # #2080 — the route sweep's axe findings (serious + critical) are
       # REPORTED, not enforced: one JSON per route, uploaded on every run
       # whether or not the suite passed.
