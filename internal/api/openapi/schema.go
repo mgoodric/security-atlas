@@ -10,18 +10,26 @@
 //
 // Reflection reads only what encoding/json reads: the json tag name,
 // omitempty (an omitempty field is optional, every other field is
-// required), "-" (skipped) and the field's Go type. A Go type this
+// required), ",string" (a quoted bool or number is a string), "-"
+// (skipped) and the field's Go type. A type that encodes itself
+// (json.Marshaler, encoding.TextMarshaler) is documented only through an
+// entry in knownTypes: its Go kind says nothing about its wire shape (a
+// uuid.UUID is a [16]byte but encodes as a string). A Go type this
 // emitter does not know is an error, never a guess.
 
 package openapi
 
 import (
+	"encoding"
+	"encoding/json"
 	"fmt"
 	"io"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ResponseSchema documents one operation's 200 response body.
@@ -67,13 +75,16 @@ func collectSchemas() (map[string]reflect.Type, error) {
 	out := map[string]reflect.Type{}
 	var walk func(t reflect.Type) error
 	walk = func(t reflect.Type) error {
+		if _, ok := knownTypes[t]; ok {
+			return nil
+		}
+		if err := refuseMarshaler(t); err != nil {
+			return err
+		}
 		switch t.Kind() {
 		case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
 			return walk(t.Elem())
 		case reflect.Struct:
-			if t == timeType {
-				return nil
-			}
 			name := schemaName(t)
 			if name == "" {
 				return fmt.Errorf("openapi: anonymous struct %s has no schema name", t)
@@ -104,7 +115,35 @@ func collectSchemas() (map[string]reflect.Type, error) {
 	return out, nil
 }
 
-var timeType = reflect.TypeOf(time.Time{})
+// knownTypes maps a type that encodes itself to the schema lines of what
+// it writes. An empty list is the empty schema: any JSON value.
+// schema_test.go checks each entry against encoding/json.
+var knownTypes = map[reflect.Type][]string{
+	reflect.TypeOf(time.Time{}):       {"type: string", "format: date-time"},
+	reflect.TypeOf(uuid.UUID{}):       {"type: string", "format: uuid"},
+	reflect.TypeOf(json.RawMessage{}): {},
+}
+
+var (
+	jsonMarshalerType = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
+	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
+	stringType        = reflect.TypeOf("")
+)
+
+// refuseMarshaler errors when t, or *t, encodes itself and has no
+// knownTypes entry (pgtype.*, for example). A pointer is judged by its
+// element, which is what encoding/json writes when it is not nil.
+func refuseMarshaler(t reflect.Type) error {
+	if t.Kind() == reflect.Pointer {
+		return nil
+	}
+	for _, m := range []reflect.Type{jsonMarshalerType, textMarshalerType} {
+		if t.Implements(m) || reflect.PointerTo(t).Implements(m) {
+			return fmt.Errorf("openapi: %s implements %s; add it to knownTypes with the schema of what it writes", t, m)
+		}
+	}
+	return nil
+}
 
 type jsonField struct {
 	Name     string
@@ -113,35 +152,79 @@ type jsonField struct {
 }
 
 // jsonFields lists t's fields as encoding/json encodes them, in
-// declaration order. Embedded fields are flattened.
+// declaration order. Embedded structs, and pointers to them, are
+// flattened. The fields of an embedded pointer are optional: when it is
+// nil, encoding/json omits them all.
 func jsonFields(t reflect.Type) []jsonField {
 	var out []jsonField
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		if !f.IsExported() {
-			continue
-		}
 		tag := f.Tag.Get("json")
 		if tag == "-" {
 			continue
 		}
 		name, opts, _ := strings.Cut(tag, ",")
-		if f.Anonymous && name == "" && f.Type.Kind() == reflect.Struct {
-			out = append(out, jsonFields(f.Type)...)
+		if f.Anonymous && name == "" {
+			et := f.Type
+			if et.Kind() == reflect.Pointer {
+				et = et.Elem()
+			}
+			// An unexported embedded struct's exported fields are
+			// promoted too, as encoding/json does.
+			if et.Kind() == reflect.Struct {
+				inner := jsonFields(et)
+				if f.Type.Kind() == reflect.Pointer {
+					for j := range inner {
+						inner[j].Required = false
+					}
+				}
+				out = append(out, inner...)
+				continue
+			}
+		}
+		if !f.IsExported() {
 			continue
 		}
 		if name == "" {
 			name = f.Name
 		}
-		omit := false
+		omit, quoted := false, false
 		for _, o := range strings.Split(opts, ",") {
-			if o == "omitempty" || o == "omitzero" {
+			switch o {
+			case "omitempty", "omitzero":
 				omit = true
+			case "string":
+				quoted = true
 			}
 		}
-		out = append(out, jsonField{Name: name, Required: !omit, Type: f.Type})
+		ft := f.Type
+		if quoted {
+			ft = quotedType(ft)
+		}
+		out = append(out, jsonField{Name: name, Required: !omit, Type: ft})
 	}
 	return out
+}
+
+// quotedType is the type a ",string" field is on the wire. encoding/json
+// quotes a bool, integer or float, directly or through an unnamed
+// pointer; on any other type the option has no effect.
+func quotedType(t reflect.Type) reflect.Type {
+	elem, ptr := t, false
+	if t.Name() == "" && t.Kind() == reflect.Pointer {
+		elem, ptr = t.Elem(), true
+	}
+	switch elem.Kind() {
+	case reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64:
+		if ptr {
+			return reflect.PointerTo(stringType)
+		}
+		return stringType
+	}
+	return t
 }
 
 // writeSchemaComponents emits every collected schema under
@@ -219,6 +302,18 @@ func enumFor(schema, field string) []string {
 
 // writeTypeSchema writes the schema body for t at indent.
 func writeTypeSchema(b *strings.Builder, t reflect.Type, indent string) error {
+	if lines, ok := knownTypes[t]; ok {
+		if len(lines) == 0 {
+			fmt.Fprintf(b, "%s{}\n", indent)
+		}
+		for _, l := range lines {
+			fmt.Fprintf(b, "%s%s\n", indent, l)
+		}
+		return nil
+	}
+	if err := refuseMarshaler(t); err != nil {
+		return err
+	}
 	switch t.Kind() {
 	case reflect.String:
 		fmt.Fprintf(b, "%stype: string\n", indent)
@@ -230,6 +325,12 @@ func writeTypeSchema(b *strings.Builder, t reflect.Type, indent string) error {
 	case reflect.Float32, reflect.Float64:
 		fmt.Fprintf(b, "%stype: number\n", indent)
 	case reflect.Slice, reflect.Array:
+		if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8 {
+			// encoding/json writes a []byte as a base64 string.
+			fmt.Fprintf(b, "%stype: string\n", indent)
+			fmt.Fprintf(b, "%scontentEncoding: base64\n", indent)
+			return nil
+		}
 		// A nil slice encodes as null; the wire structs listed in
 		// ResponseSchemas always send an array, which is what this says.
 		fmt.Fprintf(b, "%stype: array\n", indent)
@@ -253,11 +354,6 @@ func writeTypeSchema(b *strings.Builder, t reflect.Type, indent string) error {
 		s := inner.String()
 		fmt.Fprintf(b, "%s  - %s", indent, strings.TrimPrefix(s, indent+"    "))
 	case reflect.Struct:
-		if t == timeType {
-			fmt.Fprintf(b, "%stype: string\n", indent)
-			fmt.Fprintf(b, "%sformat: date-time\n", indent)
-			return nil
-		}
 		fmt.Fprintf(b, "%s$ref: \"#/components/schemas/%s\"\n", indent, schemaName(t))
 	default:
 		return fmt.Errorf("unsupported Go type %s", t)
