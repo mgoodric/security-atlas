@@ -11,7 +11,10 @@
 //  3. overdue: policy, risk and vendor reviews, action plans and periodic
 //     control reviews the compliance calendar marks overdue;
 //  4. due_soon: the same calendar items, plus expiring exceptions, due
-//     within DueSoonDays;
+//     within DueSoonDays, and the caller's own policy acknowledgements
+//     (TypePolicyAck, #2587): a lapsed one is overdue, one never made is
+//     due soon. They come from the ack store, not the calendar, whose ack
+//     lapse events are one per policy and day for many people;
 //  5. ownership_gap: in-scope controls with no assigned owner and open
 //     risks with no owner, listed for `for=all` only.
 //
@@ -135,11 +138,15 @@ type Response struct {
 	Offset     int            `json:"offset"`
 }
 
+// TypePolicyAck is a policy waiting for the caller's acknowledgement.
+const TypePolicyAck = "policy_ack"
+
 // ItemTypes lists every item type a `?type=` filter may name: the record
-// types of the due-based and control bands, and the approval types.
+// types of the due-based and control bands, the caller's policy
+// acknowledgements, and the approval types.
 var ItemTypes = []string{
 	"control", "policy", "risk", "vendor", "action_plan", "exception",
-	"risk_acceptance", "framework_scope",
+	TypePolicyAck, "risk_acceptance", "framework_scope",
 }
 
 // CountTypes counts ranked items by type.

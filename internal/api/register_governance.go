@@ -34,8 +34,11 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	// generic UUID-id route.
 	// #2269: activating or revoking an exception re-evaluates its control
 	// once the change commits, so the control's state follows at once.
+	// #2688: the re-evaluation is tracked in s.background, which RunHTTP
+	// drains on shutdown.
 	exceptionsH := exceptionsapi.New(exception.NewStore(s.dbPool).WithReevaluate(
-		eval.ExceptionChangeReevaluator(eval.NewEngineFactory(s.dbPool), s.installLogger())))
+		eval.ExceptionChangeReevaluator(eval.NewEngineFactory(s.dbPool), s.installLogger())).
+		WithWaitGroup(&s.background))
 	root.Post("/v1/exceptions", exceptionsH.CreateException)
 	root.Get("/v1/exceptions", exceptionsH.ListExceptions)
 	root.Get("/v1/exceptions/expiring", exceptionsH.Expiring)

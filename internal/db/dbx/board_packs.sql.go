@@ -140,14 +140,25 @@ func (q *Queries) ListBoardPacks(ctx context.Context, tenantID pgtype.UUID) ([]B
 }
 
 const listFailingEvaluationsForPack = `-- name: ListFailingEvaluationsForPack :many
-SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, last_observed_at FROM (
-    SELECT DISTINCT ON (control_id, scope_cell_id)
-        id, tenant_id, control_id, scope_cell_id, eval_run_id,
-        evaluated_at, result, freshness_status, last_observed_at
+WITH control_latest_run AS (
+    SELECT DISTINCT ON (control_id)
+        control_id, eval_run_id
     FROM control_evaluations
     WHERE tenant_id = $1
       AND evaluated_at <= $2
-    ORDER BY control_id, scope_cell_id, evaluated_at DESC, created_at DESC
+    ORDER BY control_id, evaluated_at DESC, created_at DESC
+)
+SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, last_observed_at FROM (
+    SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
+        ce.id, ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.eval_run_id,
+        ce.evaluated_at, ce.result, ce.freshness_status, ce.last_observed_at
+    FROM control_evaluations ce
+    JOIN control_latest_run lr
+      ON lr.control_id = ce.control_id
+     AND lr.eval_run_id = ce.eval_run_id
+    WHERE ce.tenant_id = $1
+      AND ce.evaluated_at <= $2
+    ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ) latest
 WHERE latest.result = 'fail'
 ORDER BY latest.control_id ASC, latest.scope_cell_id ASC
@@ -183,6 +194,12 @@ type ListFailingEvaluationsForPackRow struct {
 // AuditPeriod-bound export pinned to a frozen_at horizon. Same data
 // semantics as slice 030 (a failing control evaluation IS a finding for
 // v1), but a distinct, conflict-free query surface.
+//
+// #2688: only cells in each control's latest evaluation run as of the
+// horizon count, the bound #2526 put on ListFailingEvaluationsAsOf. A run
+// writes one row per scope cell the control applies to at that moment, so
+// a cell that stopped applying has no row in the latest run, and its older
+// failing row is not an open finding.
 func (q *Queries) ListFailingEvaluationsForPack(ctx context.Context, arg ListFailingEvaluationsForPackParams) ([]ListFailingEvaluationsForPackRow, error) {
 	rows, err := q.db.Query(ctx, listFailingEvaluationsForPack, arg.TenantID, arg.EvaluatedAt)
 	if err != nil {

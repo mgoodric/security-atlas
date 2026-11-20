@@ -2517,6 +2517,12 @@ type Querier interface {
 	// AuditPeriod-bound export pinned to a frozen_at horizon. Same data
 	// semantics as slice 030 (a failing control evaluation IS a finding for
 	// v1), but a distinct, conflict-free query surface.
+	//
+	// #2688: only cells in each control's latest evaluation run as of the
+	// horizon count, the bound #2526 put on ListFailingEvaluationsAsOf. A run
+	// writes one row per scope cell the control applies to at that moment, so
+	// a cell that stopped applying has no row in the latest run, and its older
+	// failing row is not an open finding.
 	ListFailingEvaluationsForPack(ctx context.Context, arg ListFailingEvaluationsForPackParams) ([]ListFailingEvaluationsForPackRow, error)
 	// AC-10 read accessor. Returns every audit-log row for the tenant, newest
 	// first. The application paginates in-memory when needed (audit-log
