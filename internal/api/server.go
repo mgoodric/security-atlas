@@ -66,7 +66,10 @@ type Server struct {
 	// evaluateRatePerMin is the per-principal limit on POST
 	// /v1/controls/{id}/evaluate (#2479); 0 uses the controlstate default.
 	evaluateRatePerMin int
-	artifactStore      *artifact.Store
+	// needsAttentionWarnRows is the large-read warning threshold for
+	// GET /v1/needs-attention (#2698); 0 uses the handler default.
+	needsAttentionWarnRows int
+	artifactStore          *artifact.Store
 	// evidencePublisher is the slice-015 substrate. When non-nil the
 	// push HTTP handler routes through JetStream; nil falls back to
 	// direct Service.Process.
@@ -323,6 +326,11 @@ type Config struct {
 	// controlstate.DefaultEvaluateRatePerMin. cmd/atlas reads it from
 	// ATLAS_EVALUATE_RATE_PER_MIN.
 	EvaluateRatePerMin int
+	// NeedsAttentionWarnRows is the row count past which one
+	// GET /v1/needs-attention source read logs a warning (#2698). 0 uses
+	// needsattention.DefaultWarnRows. cmd/atlas reads it from
+	// ATLAS_NEEDS_ATTENTION_WARN_ROWS.
+	NeedsAttentionWarnRows int
 	// ArtifactStore, when non-nil, wires the slice-036 S3 artifact store
 	// into the HTTP server. Routes POST /v1/artifacts:upload and
 	// GET /v1/artifacts/{id} only mount when this is populated.
@@ -376,17 +384,18 @@ func New(cfg Config) *Server {
 	connectorsv1.RegisterConnectorRegistryServiceServer(grpcServer, connectors.New(connReg))
 
 	srv := &Server{
-		GRPC:               grpcServer,
-		credStore:          cred,
-		registry:           reg,
-		idemStore:          idem,
-		connectorRegistry:  connReg,
-		ingestService:      cfg.IngestService,
-		evidencePushRate:   cfg.EvidencePushRate,
-		evaluateRatePerMin: cfg.EvaluateRatePerMin,
-		artifactStore:      cfg.ArtifactStore,
-		evidencePublisher:  cfg.EvidencePublisher,
-		versionFieldsFn:    cfg.VersionFieldsFn,
+		GRPC:                   grpcServer,
+		credStore:              cred,
+		registry:               reg,
+		idemStore:              idem,
+		connectorRegistry:      connReg,
+		ingestService:          cfg.IngestService,
+		evidencePushRate:       cfg.EvidencePushRate,
+		evaluateRatePerMin:     cfg.EvaluateRatePerMin,
+		needsAttentionWarnRows: cfg.NeedsAttentionWarnRows,
+		artifactStore:          cfg.ArtifactStore,
+		evidencePublisher:      cfg.EvidencePublisher,
+		versionFieldsFn:        cfg.VersionFieldsFn,
 	}
 	srv.issuerPolicy, srv.issuerPolicyErr = oidc.IssuerPolicyFromEnv()
 	// #2121: the ResetBootstrap RPC runs the reset-bootstrap endpoint's

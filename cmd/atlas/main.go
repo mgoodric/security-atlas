@@ -26,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
+	"github.com/mgoodric/security-atlas/internal/api/needsattention"
 	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/artifact"
@@ -330,6 +331,9 @@ func main() {
 		VersionFieldsFn: versionFields,
 		// #2479: per-principal limit on POST /v1/controls/{id}/evaluate.
 		EvaluateRatePerMin: positiveIntEnv(logger, "ATLAS_EVALUATE_RATE_PER_MIN", controlstateapi.DefaultEvaluateRatePerMin),
+		// #2698: warn when one needs-attention source read passes this
+		// many rows, the size #2555 D1 says to revisit the uncapped reads.
+		NeedsAttentionWarnRows: positiveIntEnv(logger, "ATLAS_NEEDS_ATTENTION_WARN_ROWS", needsattention.DefaultWarnRows),
 	}
 	if streamPub != nil {
 		cfg.EvidencePublisher = streamPub
