@@ -7,8 +7,8 @@ diagrams: []
 ---
 
 A super admin looks after the install as a whole rather than one
-tenant. Super admins open the Admin pages, create tenants, and grant or
-demote other super admins. Super admin isn't a role inside a tenant: on
+tenant. Super admins open every Admin page, including the install-wide ones,
+create tenants, and grant or demote other super admins. Super admin isn't a role inside a tenant: on
 its own it gives no right to read or change a tenant's programme. To
 work in a tenant, a super admin still needs a role there, given on the
 Users page.

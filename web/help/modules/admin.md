@@ -12,9 +12,10 @@ product are switched on. Day-to-day programme work happens elsewhere.
 
 ## Who can open it
 
-Only a super admin can open the Admin pages. A role of admin inside a
-tenant is not enough on its own, and anyone else sees a page explaining
-that they need a super admin.
+An admin of a tenant opens the pages that configure their own tenant:
+SSO, Users, API keys, Features and Audit. A super admin opens those and
+the install-wide pages too: Super admins, Tenants and Demo. Anyone else
+sees a page explaining that they need an admin.
 
 ## What is here
 
