@@ -464,9 +464,10 @@ export async function revokeAdminUser(
 //   POST   /v1/admin/demo/seed       -> seed summary
 //   POST   /v1/admin/demo/teardown   -> {tenant_slug, status: "deleted"}
 //
-// 503 from /seed or /teardown means the env-var gate is unset. The
-// frontend distinguishes the "feature disabled" 503 (banner) from
-// the "transient" 5xx (error toast) via the /status probe.
+// 409 {code: "feature_not_enabled"} from /seed or /teardown means the
+// env-var gate is unset (#2730; a 503 before). The frontend shows the
+// "feature disabled" banner from the /status probe; a 409 that races it
+// shows its wording in the error Alert, and a 5xx shows the status line.
 
 export type DemoStatusResponse = {
   enabled: boolean;
