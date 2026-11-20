@@ -11,6 +11,7 @@
 import AxeBuilder from "@axe-core/playwright";
 
 import { expect, test } from "./fixtures";
+import { clickHelp } from "./help";
 
 const DOCS_PAGE = "https://mgoodric.github.io/security-atlas/help/controls/";
 
@@ -25,7 +26,7 @@ test.describe("How this works panel (#2143)", () => {
     await expect(button).toHaveAccessibleName("How this works: Controls");
     await expect(panel).toHaveCount(0);
 
-    await button.click();
+    await clickHelp(button);
     await expect(panel).toBeVisible();
     await expect(panel).toHaveAttribute("role", "dialog");
     await expect(panel).toHaveAttribute("aria-modal", "true");
@@ -66,7 +67,7 @@ test.describe("How this works panel (#2143)", () => {
   }) => {
     await page.goto("/controls");
     const button = page.getByTestId("help-button");
-    await button.click();
+    await clickHelp(button);
     await page.getByTestId("help-panel-close").click();
     await expect(page.getByTestId("help-panel")).toHaveCount(0);
     await expect(button).toBeFocused();
@@ -74,7 +75,7 @@ test.describe("How this works panel (#2143)", () => {
 
   test("axe passes on the open panel", async ({ authedPage: page }) => {
     await page.goto("/controls");
-    await page.getByTestId("help-button").click();
+    await clickHelp(page.getByTestId("help-button"));
     await expect(page.getByTestId("help-panel")).toBeVisible();
     const results = await new AxeBuilder({ page })
       .include('[data-testid="help-panel"]')
@@ -103,7 +104,7 @@ test.describe("How this works panel (#2143)", () => {
           ),
         )
         .toBe(theme === "dark");
-      await page.getByTestId("help-button").click();
+      await clickHelp(page.getByTestId("help-button"));
 
       const figure = page.locator(
         '[data-testid="help-lifecycle"][data-lifecycle="exception"]',

@@ -11,12 +11,13 @@ description: |
   The k8s connector reads every namespace's NetworkPolicy objects, plus
   Cilium and Calico policy CRDs where those CNIs are installed, and emits
   one k8s.networkpolicy_coverage.v1 record per namespace. A namespace
-  passes when an all-pods policy denies ingress, egress or both by default.
-  It fails when it has no policy at all, or only per-pod allow rules with
-  no default-deny. A namespace whose read errored is inconclusive. Each
-  record carries the default_deny_ingress and default_deny_egress flags,
-  so a namespace that is open in one direction stays visible. The query
-  below fails the control when any in-window namespace fails.
+  passes when all-pods policies deny both ingress and egress by default.
+  It fails when either direction is open: no policy at all, only per-pod
+  allow rules, or default-deny in one direction only. A namespace whose
+  read errored is inconclusive. Each record also carries the
+  default_deny_ingress and default_deny_egress flags, so the open
+  direction is visible. The query below fails the control when any
+  in-window namespace fails.
 
   Crosswalk references: ISO/IEC 27001:2022 A.8.22 (segregation of
   networks) and PCI DSS 4.0 1.4.1 (network controls between trusted and
@@ -24,9 +25,9 @@ description: |
   intersects. The bundled SOC 2 crosswalk maps no TSC criterion to NET-06,
   so this control adds no SOC 2 coverage.
 
-  To link the connector's records to this control, run atlas-k8s with
-  --netpol-control network_segmentation_default_deny; its default,
-  scf:NET-06, is stored as a free-form reference.
+  The connector's --netpol-control default is this control's bundle id,
+  so its records link here on default flags. An explicit
+  --netpol-control value overrides it.
 
 scf_anchor_id: NET-06
 control_family: NET

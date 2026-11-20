@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -170,7 +169,7 @@ type Server struct {
 	// background tracks work a handler starts and does not wait for, such
 	// as the exception Activate/Revoke re-evaluation (#2688). RunHTTP
 	// waits for it after the listener has shut down.
-	background sync.WaitGroup
+	background backgroundGroup
 }
 
 // AttachAuthPool wires the BYPASSRLS migrate-role pool used by the
