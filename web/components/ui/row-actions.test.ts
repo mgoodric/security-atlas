@@ -17,6 +17,7 @@ import {
   confirmOpenFocus,
   confirmPromptFor,
   focusFirst,
+  focusWasLost,
   IDLE,
   reduceConfirm,
   removalFocusOrder,
@@ -341,5 +342,28 @@ describe("focus after a confirmed removal (#2682)", () => {
     expect(refuse.focus).toHaveBeenCalled();
     expect(second.focus).not.toHaveBeenCalled();
     expect(focusFirst([refuse, undefined], isFocused)).toBeNull();
+  });
+
+  it("repairs focus only when it was lost with the row", () => {
+    const body = {};
+    // The removed row's button had focus: the browser drops it to
+    // <body>, or the element stays active but is detached.
+    expect(focusWasLost({ active: body, body, activeConnected: true })).toBe(
+      true,
+    );
+    expect(focusWasLost({ active: null, body, activeConnected: false })).toBe(
+      true,
+    );
+    expect(focusWasLost({ active: {}, body, activeConnected: false })).toBe(
+      true,
+    );
+  });
+
+  it("leaves focus alone when the user moved it while the delete was in flight", () => {
+    const body = {};
+    const searchBox = {};
+    expect(
+      focusWasLost({ active: searchBox, body, activeConnected: true }),
+    ).toBe(false);
   });
 });

@@ -52,6 +52,7 @@ import {
   confirmOpenFocus,
   confirmPromptFor,
   focusFirst,
+  focusWasLost,
   IDLE,
   isDisabled,
   reduceConfirm,
@@ -361,6 +362,13 @@ export function useFocusAfterRemoval(
     );
     watch.current = next;
     if (!focusOrder) return;
+    const active = document.activeElement;
+    const lost = focusWasLost({
+      active,
+      body: document.body,
+      activeConnected: active?.isConnected ?? false,
+    });
+    if (!lost) return;
     const { get, fallback } = latest.current;
     focusFirst(
       [...focusOrder.map(get), fallback()],

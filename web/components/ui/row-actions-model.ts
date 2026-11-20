@@ -195,6 +195,22 @@ export function watchRemoval(
   };
 }
 
+/** #2682 — whether focus was lost with the removed row, so moving it is
+ *  a repair and not a steal. Lost means nothing is focused, the page
+ *  itself is (`<body>`, where a browser puts focus when the focused
+ *  element is removed), or the focused element is no longer in the
+ *  document. Anything else means the user moved focus while the delete
+ *  was in flight, and it stays where they put it. */
+export function focusWasLost(opts: {
+  active: object | null;
+  body: object | null;
+  activeConnected: boolean;
+}): boolean {
+  return (
+    opts.active === null || opts.active === opts.body || !opts.activeConnected
+  );
+}
+
 /** Focus the first candidate that takes it (`isFocused` reads back
  *  `document.activeElement`, since a disabled button ignores focus()).
  *  Returns the one focused, or null. */
