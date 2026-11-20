@@ -30,7 +30,7 @@ describe("GET /api/me/acknowledgments (#2465)", () => {
 
   test("no session is 401 without an upstream call", async () => {
     const spy = vi.spyOn(globalThis, "fetch");
-    const res = await GET();
+    const res = await GET(new Request("http://web/api/me/acknowledgments"));
     expect(res.status).toBe(401);
     expect(spy).not.toHaveBeenCalled();
   });
@@ -52,7 +52,7 @@ describe("GET /api/me/acknowledgments (#2465)", () => {
         });
       },
     );
-    const res = await GET();
+    const res = await GET(new Request("http://web/api/me/acknowledgments"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(body);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
@@ -60,5 +60,32 @@ describe("GET /api/me/acknowledgments (#2465)", () => {
     expect(
       (calls[0].init?.headers as Record<string, string>).Authorization,
     ).toBe(`Bearer ${TEST_BEARER_TOKEN}`);
+  });
+
+  // #2668 — include=current is passed through; nothing else is.
+  test.each([
+    [
+      "?include=current",
+      "http://atlas:8080/v1/me/acknowledgments?include=current",
+    ],
+    ["?include=other", "http://atlas:8080/v1/me/acknowledgments"],
+    [
+      "?include=current&x=1",
+      "http://atlas:8080/v1/me/acknowledgments?include=current",
+    ],
+  ])("query %s reaches %s", async (query, upstream) => {
+    cookieStore.set(ATLAS_JWT_COOKIE, TEST_BEARER_TOKEN);
+    const urls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL) => {
+        urls.push(String(input));
+        return new Response(JSON.stringify({ pending: [], count: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      },
+    );
+    await GET(new Request(`http://web/api/me/acknowledgments${query}`));
+    expect(urls).toEqual([upstream]);
   });
 });
