@@ -28,7 +28,7 @@
 -- policy_audit_log stays append-only (its trigger is untouched) and keeps
 -- its RLS policies. Runs as the migrate role, which bypasses RLS.
 --
--- Reversible via 20261272000000_policy_audience_generic_to_everyone.down.sql
+-- Reversible via 20261273000000_policy_audience_generic_to_everyone.down.sql
 -- (schema only, and only while no 'audience_mapped' row exists).
 
 ALTER TABLE policy_audit_log

@@ -171,7 +171,7 @@ sql:
       # #2618: Idempotency-Key -> exception for POST /v1/exceptions.
       - "migrations/sql/20261270000000_exception_idempotency_keys.sql"
       # #2588: policy_audit_log records generic audiences mapped to everyone.
-      - "migrations/sql/20261272000000_policy_audience_generic_to_everyone.sql"
+      - "migrations/sql/20261273000000_policy_audience_generic_to_everyone.sql"
     queries: "internal/db/queries"
     gen:
       go:

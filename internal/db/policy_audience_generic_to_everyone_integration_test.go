@@ -1,6 +1,6 @@
 //go:build integration
 
-// #2588 — 20261272000000_policy_audience_generic_to_everyone maps the
+// #2588 — 20261273000000_policy_audience_generic_to_everyone maps the
 // generic free-text audiences ('employee', 'all', 'all_staff',
 // 'contractor') to 'everyone', leaves every other value alone, writes one
 // 'audience_mapped' policy_audit_log row per changed policy with the before
@@ -22,7 +22,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const policyAudienceGenericUp = "../../migrations/sql/20261272000000_policy_audience_generic_to_everyone.sql"
+const policyAudienceGenericUp = "../../migrations/sql/20261273000000_policy_audience_generic_to_everyone.sql"
 
 func TestPolicyAudienceGenericToEveryoneMigration(t *testing.T) {
 	if adminPool == nil {
