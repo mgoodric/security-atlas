@@ -261,23 +261,25 @@ func (s *Store) Revoke(ctx context.Context, tenantID string, id uuid.UUID, by Ac
 	if err != nil {
 		return err
 	}
-	cur, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}})
+	cur, err := q.GetAPIKeyByIDForUpdate(ctx, dbx.GetAPIKeyByIDForUpdateParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUnknownKey
 		}
 		return err
 	}
+	if cur.RevokedAt.Valid {
+		// Already revoked: leave revoked_at where the first revoke put it.
+		return nil
+	}
 	if err := q.RevokeAPIKey(ctx, dbx.RevokeAPIKeyParams{TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true}}); err != nil {
 		return err
 	}
-	if !cur.RevokedAt.Valid {
-		before := keyAuditOf(credentialFromRow(cur))
-		after := before
-		after.Revoked = true
-		if err := writeAudit(ctx, q, tIDU, by, AuditActionKeyRevoke, before, after); err != nil {
-			return err
-		}
+	before := keyAuditOf(credentialFromRow(cur))
+	after := before
+	after.Revoked = true
+	if err := writeAudit(ctx, q, tIDU, by, AuditActionKeyRevoke, before, after); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
