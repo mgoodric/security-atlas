@@ -7,7 +7,6 @@
 import { expect, type Locator } from "@playwright/test";
 
 export async function clickHelp(button: Locator) {
-  // TEMP #2752 red run: click without waiting, as before the fix.
-  await expect(button).toBeVisible();
+  await expect(button).toHaveAttribute("data-help-ready", "true");
   await button.click();
 }

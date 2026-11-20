@@ -16,12 +16,6 @@ import { clickHelp } from "./help";
 const DOCS_PAGE = "https://mgoodric.github.io/security-atlas/help/controls/";
 
 test.describe("How this works panel (#2143)", () => {
-  // TEMP #2752: slow the CPU so hydration lags the SSR paint, as it does
-  // mid-suite in CI. Reverted before merge.
-  test.beforeEach(async ({ page }) => {
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-  });
   test("on Controls, ? opens the Controls help; Escape closes it and focus returns", async ({
     authedPage: page,
   }) => {
