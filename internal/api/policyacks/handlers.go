@@ -264,7 +264,8 @@ func decodeAckRequest(r *http.Request) (*uuid.UUID, error) {
 // Acknowledge serves POST /v1/policies/{id}/acknowledge.
 //
 // Flow (anti-criterion P0 honored):
-//  1. Auth gate: cred.UserID == "" => 401.
+//  1. Auth gate: no credential => 401; a credential not bound to a
+//     user (a machine actor) => 403 (#2586).
 //  2. Parse id; reject malformed.
 //  3. Reserve the ack row via AckStore.Record. Returns:
 //     ErrAckPolicyNotPublished => 409 (P0-3).
@@ -283,8 +284,12 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if cred.UserID == "" {
-		httpresp.WriteError(w, http.StatusUnauthorized, "credential carries no user id")
+	// #2586: an ack is a person attesting. A machine credential (an unbound
+	// key, the bootstrap key) names no users row, so it is refused here,
+	// before Record, rather than failing there on its non-uuid id. An
+	// unbound key with a live label otherwise matches an "everyone" policy.
+	if _, isUser := credstore.CallerUserID(cred); !isUser {
+		httpresp.WriteError(w, http.StatusForbidden, "only a person can acknowledge a policy; this credential is not bound to a user")
 		return
 	}
 	policyID, err := uuid.Parse(chi.URLParam(r, "id"))
