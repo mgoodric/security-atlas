@@ -232,6 +232,7 @@ export default function MetricDetailPage({
                   metricName={metric.name}
                   unit={metric.unit}
                   current={target}
+                  latest={parseValue(latest)}
                 />
               </CardAction>
             ) : null}

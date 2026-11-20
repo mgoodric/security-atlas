@@ -1060,6 +1060,10 @@ type Querier interface {
 	GetMetricCatalog(ctx context.Context, id string) (MetricsCatalog, error)
 	// Returns the tenant's target row for one metric. ErrNoRows when unset.
 	GetMetricTarget(ctx context.Context, metricID string) (MetricTarget, error)
+	// The tenant's target row for one metric, locked until the transaction
+	// ends, so the before value an audit row records is the one the upsert
+	// replaces (#2572). ErrNoRows when unset.
+	GetMetricTargetForUpdate(ctx context.Context, metricID string) (MetricTarget, error)
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)

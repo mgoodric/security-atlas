@@ -126,3 +126,22 @@ allow if {
     input.action == "revoke"
     input.resource.type == "risks"
 }
+
+# #2572: grc_engineer sets a metric's target (PUT /v1/metrics/{id}/target),
+# as it sets a framework posture target (#2136); the handler gate is the
+# same IsTenantApprover. Bound to that one path: "metrics" is not in
+# grc_writable_resources, so manual input (POST /v1/metrics/{id}/inputs)
+# stays admin's.
+allow if {
+    has_role("grc_engineer")
+    input.action == "write"
+    input.resource.type == "metrics"
+    input.request.method == "PUT"
+    parts := split(input.request.path, "/")
+    count(parts) == 5
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "metrics"
+    parts[3] != ""
+    parts[4] == "target"
+}

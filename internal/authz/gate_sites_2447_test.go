@@ -208,7 +208,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"me/profile.go profileWireFrom": notRoute([]string{admin2447, approver2447},
 			"reports is_tenant_admin and is_approver on /v1/me; not a gate"),
 		"metrics/handlers.go Handler.CreateInput":  site(adm, r2447(post, "/v1/metrics/"+id+"/inputs")),
-		"metrics/handlers.go Handler.UpsertTarget": site(adm, r2447(put, "/v1/metrics/"+id+"/target")),
+		"metrics/handlers.go Handler.UpsertTarget": site(apr, r2447(put, "/v1/metrics/"+id+"/target")),
 		"oscalcomponents/handler.go Handler.MapScfAnchor": site(adm,
 			r2447(patch, "/v1/oscal/component-claims/"+id+"/scf-anchor")),
 		"oscalcomponents/handler.go Handler.disposition": site(adm,

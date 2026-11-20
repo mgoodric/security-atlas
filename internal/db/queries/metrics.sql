@@ -145,6 +145,15 @@ SELECT *
 FROM metric_targets
 WHERE metric_id = $1;
 
+-- name: GetMetricTargetForUpdate :one
+-- The tenant's target row for one metric, locked until the transaction
+-- ends, so the before value an audit row records is the one the upsert
+-- replaces (#2572). ErrNoRows when unset.
+SELECT *
+FROM metric_targets
+WHERE metric_id = $1
+FOR UPDATE;
+
 -- name: UpsertMetricTarget :one
 -- Idempotent upsert keyed on (tenant_id, metric_id). The tenant_id is
 -- passed explicitly so the WITH CHECK clauses can verify against the
