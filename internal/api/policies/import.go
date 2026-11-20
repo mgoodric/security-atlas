@@ -3,6 +3,7 @@ package policies
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -121,6 +122,20 @@ func parseImportFiles(files []importFileReq) ([]policy.ImportInput, []policy.Imp
 				SourceFile: name,
 				Status:     policy.ImportStatusFailed,
 				Reason:     err.Error(),
+			})
+			continue
+		}
+		// #2586: an imported policy's audience is held to the same enum as
+		// POST /v1/policies. A free-text value ("employee") matches no
+		// member, so no one would ever be asked to acknowledge it. The file
+		// fails with every unrecognised value named; under partial the
+		// rest of the import still commits.
+		if bad := unknownAudiences(in.AcknowledgmentRequiredRoles); len(bad) > 0 {
+			failures = append(failures, policy.ImportResult{
+				SourceFile: name,
+				Status:     policy.ImportStatusFailed,
+				Reason: fmt.Sprintf("acknowledgment_required_roles: unrecognised audience %s; choose from %s",
+					strings.Join(bad, ", "), strings.Join(AudienceValues(), ", ")),
 			})
 			continue
 		}
