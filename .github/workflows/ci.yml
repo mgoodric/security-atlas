@@ -656,6 +656,12 @@ jobs:
           check-latest: true
           cache: true
       - name: Warm headless Chrome in the background (#2743)
+        # WORKAROUND (ADR 0032) for a GitHub-hosted runner-image behaviour
+        # this repo cannot change. Remove it (with the wait step below) when
+        # the runner image ships a warm Chrome, or PDF rendering moves to a
+        # CHROME_DEBUG_URL headless-shell service, whichever comes first.
+        # Removal ticket: #2751.
+        #
         # The first Chrome launch on a fresh runner is slow, and only the
         # first: on leg B3 the first PDF render (TestExportPDF_SmokeTest)
         # took 7-90s across 25 runs and hit the 90s render deadline twice,
