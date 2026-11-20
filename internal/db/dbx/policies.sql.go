@@ -626,15 +626,16 @@ const listPoliciesWithAckRate = `-- name: ListPoliciesWithAckRate :many
 WITH ack_cells AS (
     SELECT
         p.id AS policy_id,
-        (SELECT COUNT(DISTINCT k.issued_by)::bigint
-         FROM api_keys k
-         WHERE k.tenant_id = p.tenant_id
-           AND k.revoked_at IS NULL
-           AND k.issued_by IS NOT NULL
+        (SELECT COUNT(DISTINCT u.id)::bigint
+         FROM user_roles ur
+         JOIN users u
+           ON u.tenant_id = ur.tenant_id
+          AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+         WHERE ur.tenant_id = p.tenant_id
+           AND u.status = 'active'
            AND (
-               k.is_admin = true
-               OR k.owner_roles && p.acknowledgment_required_roles
-               -- #2524: an "everyone" audience counts every live key holder.
+               ur.role = ANY(p.acknowledgment_required_roles)
+               -- #2524: an "everyone" audience counts every live member.
                OR 'everyone' = ANY(p.acknowledgment_required_roles)
            )
         ) AS ack_denominator,
@@ -645,13 +646,15 @@ WITH ack_cells AS (
            AND pa.acknowledged_at >= $2::timestamptz
            AND EXISTS (
                SELECT 1
-               FROM api_keys k
-               WHERE k.tenant_id = pa.tenant_id
-                 AND k.issued_by = pa.user_id
-                 AND k.revoked_at IS NULL
+               FROM user_roles ur
+               JOIN users u
+                 ON u.tenant_id = ur.tenant_id
+                AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+               WHERE ur.tenant_id = pa.tenant_id
+                 AND u.id = pa.user_id
+                 AND u.status = 'active'
                  AND (
-                     k.is_admin = true
-                     OR k.owner_roles && p.acknowledgment_required_roles
+                     ur.role = ANY(p.acknowledgment_required_roles)
                      OR 'everyone' = ANY(p.acknowledgment_required_roles)
                  )
            )
@@ -731,9 +734,8 @@ type ListPoliciesWithAckRateRow struct {
 //     the subqueries so non-published rows return NULL for both
 //     columns (the handler renders `ack_rate: null`).
 //  3. The denominator subquery mirrors CountRequiredRoleUsersForVersion
-//     verbatim (distinct issued_by in api_keys whose owner_roles
-//     intersect the policy's acknowledgment_required_roles, OR is_admin).
-//     Revoked keys excluded.
+//     verbatim (#2586: distinct active users holding a live user_roles
+//     row the audience names, or any live role for 'everyone').
 //  4. The numerator subquery mirrors CountFreshAcksForVersion verbatim
 //     (distinct user_ids in policy_acknowledgments for THIS policy
 //     version, acknowledged_at >= freshness_cutoff, gated on the same
@@ -742,7 +744,7 @@ type ListPoliciesWithAckRateRow struct {
 //
 // Constitutional invariants:
 //
-//	#6 RLS: policies + api_keys + policy_acknowledgments are tenant-scoped
+//	#6 RLS: policies + user_roles + users + policy_acknowledgments are tenant-scoped
 //	   under FORCE ROW LEVEL SECURITY. The tenant GUC the slice-033
 //	   middleware sets filters every table this query touches.
 //	#9 Manual evidence first-class: this query is uniform whether the

@@ -85,29 +85,34 @@ FROM policies
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: CountRequiredRoleUsersForVersion :one
--- Rate denominator: distinct user_ids in api_keys whose owner_roles
--- intersect the policy's acknowledgment_required_roles OR are flagged
--- is_admin (admin wildcard). Excludes revoked keys. A user with two
--- credentials counts once.
+-- Rate denominator (#2586): the distinct active users holding a live
+-- user_roles row the policy's audience names, or any live role when the
+-- audience is 'everyone'. This is the set the authz engine resolves
+-- (authz.DBRolesResolver reads the same rows and gives a user whose
+-- users.status is not 'active' none) and the set policy.WithEveryone admits,
+-- so the denominator is who may acknowledge. user_roles.user_id is TEXT; a
+-- "user:<uuid>" principal is read as its bare uuid, and a row naming no
+-- users row (a key, bootstrap-admin) is not a person and is not counted.
 --
--- slice-035 (OPA-RBAC) graduates this: replace api_keys with a proper
--- user-role binding table. Until then this is the stand-in per GLOSSARY.md
--- "Policy acknowledgment (slice 023)".
-SELECT COUNT(DISTINCT k.issued_by)::bigint AS count
-FROM api_keys k
-WHERE k.tenant_id = $1
-  AND k.revoked_at IS NULL
-  AND k.issued_by IS NOT NULL
+-- Before #2586 this counted api_keys holders: a user whose role was revoked
+-- but whose key was not was counted, and a JWT-only member was missed.
+-- ListPoliciesWithAckRate (policies.sql) repeats this predicate; keep them
+-- in sync.
+SELECT COUNT(DISTINCT u.id)::bigint AS count
+FROM user_roles ur
+JOIN users u
+  ON u.tenant_id = ur.tenant_id
+ AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+WHERE ur.tenant_id = $1
+  AND u.status = 'active'
   AND (
-      k.is_admin = true
-      OR k.owner_roles && sqlc.arg('required_roles')::text[]
-      -- #2524: an "everyone" audience counts every live key holder.
+      ur.role = ANY(sqlc.arg('required_roles')::text[])
       OR 'everyone' = ANY(sqlc.arg('required_roles')::text[])
   );
 
 -- name: CountFreshAcksForVersion :one
 -- Rate numerator: distinct user_ids who (a) are in the denominator set
--- per the same role predicate AND (b) have at least one ack of
+-- per the same live-role predicate AND (b) have at least one ack of
 -- policy_version_id with acknowledged_at >= the freshness cutoff.
 --
 -- The cutoff is a parameter (not `now() - interval '365 days'`) so tests
@@ -119,13 +124,15 @@ WHERE pa.tenant_id = $1
   AND pa.acknowledged_at >= sqlc.arg('freshness_cutoff')::timestamptz
   AND EXISTS (
       SELECT 1
-      FROM api_keys k
-      WHERE k.tenant_id = pa.tenant_id
-        AND k.issued_by = pa.user_id
-        AND k.revoked_at IS NULL
+      FROM user_roles ur
+      JOIN users u
+        ON u.tenant_id = ur.tenant_id
+       AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+      WHERE ur.tenant_id = pa.tenant_id
+        AND u.id = pa.user_id
+        AND u.status = 'active'
         AND (
-            k.is_admin = true
-            OR k.owner_roles && sqlc.arg('required_roles')::text[]
+            ur.role = ANY(sqlc.arg('required_roles')::text[])
             OR 'everyone' = ANY(sqlc.arg('required_roles')::text[])
         )
   );
