@@ -13,12 +13,12 @@ import (
 )
 
 // #2587: a pending acknowledgement is the caller's item. A lapsed ack is
-// overdue from the day it lapsed; a policy never acknowledged is due soon,
-// with no due date, dated from its effective date.
+// overdue from the day it lapsed; a policy never acknowledged is due soon
+// until policy.AckGraceDays after its effective date (#2736).
 func TestAckItems2587(t *testing.T) {
 	t.Parallel()
 	caller := uuid.NewString()
-	effective := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	effective := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
 	acked := time.Date(2025, 10, 1, 9, 0, 0, 0, time.UTC)
 	never := policy.Pending{PolicyID: uuid.New(), Title: "never acknowledged", EffectiveDate: &effective}
 	lapsed := policy.Pending{PolicyID: uuid.New(), Title: "lapsed", LastAcknowledgedAt: &acked}
@@ -29,8 +29,8 @@ func TestAckItems2587(t *testing.T) {
 		t.Fatalf("AckItems: %d items; want 2", len(got))
 	}
 	n, l := got[0], got[1]
-	if n.Band != BandDueSoon || n.DueAt != nil || n.Since == nil || !n.Since.Equal(effective) {
-		t.Errorf("never acknowledged: band %q due %v since %v; want due_soon, no due date, since %s", n.Band, n.DueAt, n.Since, effective)
+	if want := effective.AddDate(0, 0, policy.AckGraceDays); n.Band != BandDueSoon || n.DueAt == nil || !n.DueAt.Equal(want) {
+		t.Errorf("never acknowledged: band %q due %v; want due_soon, due %s", n.Band, n.DueAt, want)
 	}
 	if want := acked.Add(policy.AcknowledgmentFreshness); l.Band != BandOverdue || l.DueAt == nil || !l.DueAt.Equal(want) {
 		t.Errorf("lapsed: band %q due %v; want overdue, due %s", l.Band, l.DueAt, want)
@@ -59,15 +59,51 @@ func TestAckItems2587(t *testing.T) {
 }
 
 // An ack that would lapse after now is not a lapse of this version: the
-// item is never acknowledged, not overdue with a future due date.
+// item is never acknowledged, due on the effective date plus the grace,
+// not overdue with the lapse's future due date.
 func TestAckItems2587_UnlapsedAckIsNone(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 	recent := now.Add(-24 * time.Hour)
-	effective := now.Add(-48 * time.Hour)
+	effective := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
 	got := AckItems([]policy.Pending{{PolicyID: uuid.New(), Title: "re-published", LastAcknowledgedAt: &recent, EffectiveDate: &effective}}, uuid.NewString(), now)
-	if len(got) != 1 || got[0].Band != BandDueSoon || got[0].DueAt != nil || got[0].Since == nil || !got[0].Since.Equal(effective) {
-		t.Errorf("unlapsed ack: %+v; want one due_soon item, no due date, since the effective date", got)
+	want := time.Date(2026, 12, 2, 0, 0, 0, 0, time.UTC)
+	if len(got) != 1 || got[0].Band != BandDueSoon || got[0].DueAt == nil || !got[0].DueAt.Equal(want) {
+		t.Errorf("unlapsed ack: %+v; want one due_soon item, due %s", got, want)
+	}
+}
+
+// #2736: a policy ignored past its grace period is overdue, due on the
+// effective date plus the grace, and ranks ahead of one still in its grace
+// period: doing nothing no longer ranks better than lapsing.
+func TestAckItems2736_IgnoredIsOverdue(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	ignored := time.Date(2024, 11, 1, 0, 0, 0, 0, time.UTC)
+	edge := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC) // grace day is today: due soon
+	past := time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC) // grace day was yesterday: overdue
+	got := AckItems([]policy.Pending{
+		{PolicyID: uuid.New(), Title: "edge", EffectiveDate: &edge},
+		{PolicyID: uuid.New(), Title: "ignored", EffectiveDate: &ignored},
+		{PolicyID: uuid.New(), Title: "past", EffectiveDate: &past},
+	}, uuid.NewString(), now)
+	want := map[string]struct {
+		band string
+		due  time.Time
+	}{
+		"edge":    {BandDueSoon, time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)},
+		"ignored": {BandOverdue, time.Date(2024, 11, 15, 0, 0, 0, 0, time.UTC)},
+		"past":    {BandOverdue, time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)},
+	}
+	for _, it := range got {
+		w := want[it.Title]
+		if it.Band != w.band || it.DueAt == nil || !it.DueAt.Equal(w.due) {
+			t.Errorf("%s: band %q due %v; want %s, due %s", it.Title, it.Band, it.DueAt, w.band, w.due)
+		}
+	}
+	ranked := Rank(got, ForAll, nil)
+	if ranked[0].Title != "ignored" || ranked[1].Title != "past" || ranked[2].Title != "edge" {
+		t.Errorf("rank: %s, %s, %s; want ignored, past, edge", ranked[0].Title, ranked[1].Title, ranked[2].Title)
 	}
 }
 
