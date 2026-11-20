@@ -57,9 +57,9 @@
 # Assertions (both modes):
 #   1. `docker compose up` brings every service to running/healthy.
 #   2. atlas /health returns 200.
-#   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 63
-#      SOC 2 control-bundle uploads all succeeded).
-#   4. `controls` ends up with the 63 seeded control rows.
+#   3. atlas-bootstrap exits 0 (migrations + seed + SCF import + the 64
+#      stock control-bundle uploads all succeeded).
+#   4. `controls` ends up with the 64 seeded control rows.
 #   5. `decision_audit_log` ends up with at least one row — every
 #      authenticated control-bundle upload in phase 6 passes through the
 #      OPA authz middleware, which writes one decision row per request.
@@ -517,10 +517,10 @@ db_count() {
     docker exec -i "${PG_CID}" psql -U postgres -d security_atlas -t -A -c "$1" 2>/dev/null | tr -d '[:space:]'
 }
 
-# Assertion 4: 63 control rows.
+# Assertion 4: 64 control rows.
 CONTROLS="$(db_count 'SELECT count(*) FROM controls')"
-[ "${CONTROLS}" = "63" ] || fail "controls row count = ${CONTROLS}, want 63"
-log "controls table has 63 rows"
+[ "${CONTROLS}" = "64" ] || fail "controls row count = ${CONTROLS}, want 64"
+log "controls table has 64 rows"
 
 # Assertion 5: decision_audit_log has at least one row — proves phase 6's
 # authenticated control-bundle upload path ran AND slice 065 bug #1's fix
@@ -618,7 +618,7 @@ rm -f "${LOGIN_RESP}"
 BOOTSTRAP_TENANT_ID="00000000-0000-4000-8000-000000000001"
 NIL_TENANT_ID="00000000-0000-0000-0000-000000000000"
 IN_TENANT="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${BOOTSTRAP_TENANT_ID}'")"
-[ "${IN_TENANT}" = "63" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 63"
+[ "${IN_TENANT}" = "64" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 64"
 IN_NIL="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${NIL_TENANT_ID}'")"
 [ "${IN_NIL}" = "0" ] || fail "controls in the all-zeros tenant = ${IN_NIL}, want 0"
 UNBOUND="$(db_count "SELECT count(*) FROM oauth_clients WHERE name LIKE 'atlas-bootstrap-controls-%' AND bound_tenant_id IS DISTINCT FROM '${BOOTSTRAP_TENANT_ID}'")"
@@ -632,8 +632,8 @@ CONTROLS_CODE="$(curl -sS -o "${CONTROLS_RESP}" -w "%{http_code}" \
     || fail "GET /v1/controls: HTTP ${CONTROLS_CODE} (want 200); body: $(head -c 400 "${CONTROLS_RESP}")"
 API_COUNT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("count", -1))' "${CONTROLS_RESP}")"
 rm -f "${CONTROLS_RESP}"
-[ "${API_COUNT}" = "63" ] || fail "default user's GET /v1/controls count = ${API_COUNT}, want 63"
-log "default user sees the 63 stock controls in the bootstrap tenant; none in the all-zeros tenant"
+[ "${API_COUNT}" = "64" ] || fail "default user's GET /v1/controls count = ${API_COUNT}, want 64"
+log "default user sees the 64 stock controls in the bootstrap tenant; none in the all-zeros tenant"
 
 # ---------------------------------------------------------------------
 # Assertion 8b (security-atlas#1721): the bootstrap imports the bundled

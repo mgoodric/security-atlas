@@ -235,6 +235,11 @@ records on the old code, pass `--netpol-control scf:NET-03`.
 
 ISO A.8.22 no longer maps to the stock `soc2_cc6_6_boundary_protection` (NET-03) control. It reports as uncovered until a control is anchored on NET-06.
 
+The stock `network_segmentation_default_deny` control (#2648) is anchored on
+`NET-06`, so ISO A.8.22 and PCI 1.4.1 are covered again once the bootstrap
+has uploaded it. To link NetworkPolicy records to it, pass
+`--netpol-control network_segmentation_default_deny`.
+
 A connector run on its defaults picks up the new code when you upgrade it. If
 you pass one of these flags with the old value, by hand or in a scheduler or
 manifest, change it to the new code: in SCF 2026.3 the old code names a

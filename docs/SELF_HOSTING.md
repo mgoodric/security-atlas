@@ -40,7 +40,7 @@ volume is modest.
 The `deploy/docker/docker-compose.yml` bundle brings up the **whole
 platform** on one host — Postgres, NATS JetStream, MinIO, the `atlas`
 server, and the Next.js frontend — and seeds it on first boot
-(migrations, default tenant/scope/user, the SCF catalog, and the 63 SOC 2
+(migrations, default tenant/scope/user, the SCF catalog, and the 64 stock
 control bundles). It is the bundle behind the "installable + first
 evidence in 4 hours" acceptance criterion; the end-to-end walkthrough
 lives in the [Getting started guide](../docs-site/docs/getting-started.md).
@@ -142,7 +142,7 @@ deployment:
 - **`migrations/fixtures/scf-sample.json`** — a small SCF sample, enough
   for the bundled SOC 2 crosswalk and the stock controls, not the full
   ~1,400-anchor catalog.
-- **`controls/soc2/`** — the 63 stock SOC 2 control bundles.
+- **`controls/soc2/`** — the 64 stock control bundles.
 
 Two variables in `deploy/docker/.env` override them. Both are paths
 **inside the bootstrap container**, where your clone is mounted
