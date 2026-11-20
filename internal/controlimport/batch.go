@@ -183,6 +183,10 @@ type Stager struct {
 	// inlineSlotWait bounds how long an inline run waits for a slot before
 	// it is deferred to the background (#2329).
 	inlineSlotWait time.Duration
+	// backgroundSlotWait bounds how long a background run waits for a slot
+	// (#2569). Its context never ends, so without it the queued runs are
+	// bounded only by upload rate.
+	backgroundSlotWait time.Duration
 }
 
 // MaxConcurrentSuggestionRuns is the default cap on suggestion runs in
@@ -200,6 +204,9 @@ func NewStager(store BatchStore) *Stager {
 		asyncThreshold: AsyncSuggestThreshold,
 		runs:           newRunSlots(MaxConcurrentSuggestionRuns),
 		inlineSlotWait: InlineSlotWait,
+		// The sweeper fails a batch pending this long anyway, so a run
+		// still waiting then gives up and fails it itself.
+		backgroundSlotWait: DefaultStaleSuggestionsAfter,
 	}
 }
 
@@ -308,8 +315,12 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		go s.suggestInBackground(context.WithoutCancel(ctx), created, rerankBudget(rerank, rerankBackgroundBudget))
 		return created, nil
 	}
-	rows, err := s.suggestHeld(ctx, created, rerankBudget(rerank, rerankInlineBudget))
-	releaseSlot()
+	rows, err := func() ([]RowSuggestions, error) {
+		// Deferred so a panic in the run, which the HTTP server recovers,
+		// still frees the slot (#2569).
+		defer releaseSlot()
+		return s.suggestHeld(ctx, created, rerankBudget(rerank, rerankInlineBudget))
+	}()
 	if err != nil {
 		// The batch and its rows are committed; only the candidates failed.
 		slog.ErrorContext(ctx, "controlimport: suggest candidates", "batch_id", created.ID, "error", err)
