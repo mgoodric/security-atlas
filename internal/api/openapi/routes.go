@@ -355,7 +355,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/decisions/{id}/links/{kind}", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "POST /v1/decisions/{id}/links/{kind}"},
 	{Method: "POST", Path: "/v1/decisions/{id}/supersede", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "POST /v1/decisions/{id}/supersede"},
 	{Method: "POST", Path: "/v1/evidence:push", Tag: "evidence", Tier: "bearer", Internal: false, Summary: "POST /v1/evidence:push"},
-	{Method: "POST", Path: "/v1/exceptions", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618)"},
+	{Method: "POST", Path: "/v1/exceptions", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618); a replay (Idempotent-Replayed: true) returns the exception as it is now, not as first filed, so it may already be approved, denied or active (#2714)"},
 	{Method: "POST", Path: "/v1/incidents", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "POST /v1/incidents"},
 	{Method: "POST", Path: "/v1/incidents/{id}/close", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "POST /v1/incidents/{id}/close"},
 	{Method: "POST", Path: "/v1/framework-scopes", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes"},

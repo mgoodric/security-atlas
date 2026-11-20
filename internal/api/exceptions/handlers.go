@@ -206,14 +206,16 @@ func validIdempotencyKey(key string) bool {
 }
 
 // requestHash identifies a create request's content, so one key sent with
-// a different body is refused rather than replayed. The predicate is
-// compacted and the expiry normalised to UTC, so formatting differences
-// between two sends of one request do not count as a change.
+// a different body is refused rather than replayed. Equivalent spellings
+// of one request hash the same (#2714): the predicate is re-encoded with
+// its object keys sorted, an omitted predicate counts as {} (its stored
+// spelling), compensating_controls omitted, null and [] are one value, and
+// the expiry is normalised to UTC. The order of compensating_controls
+// still counts.
 func requestHash(controlID uuid.UUID, req createReq) string {
-	var predicate bytes.Buffer
-	if err := json.Compact(&predicate, req.ScopeCellPredicate); err != nil {
-		predicate.Reset()
-		predicate.Write(req.ScopeCellPredicate)
+	compensating := req.CompensatingControls
+	if compensating == nil {
+		compensating = []string{}
 	}
 	canonical, _ := json.Marshal(struct {
 		ControlID            string   `json:"control_id"`
@@ -223,13 +225,33 @@ func requestHash(controlID uuid.UUID, req createReq) string {
 		ExpiresAt            string   `json:"expires_at"`
 	}{
 		ControlID:            controlID.String(),
-		ScopeCellPredicate:   predicate.String(),
+		ScopeCellPredicate:   canonicalPredicate(req.ScopeCellPredicate),
 		Justification:        req.Justification,
-		CompensatingControls: req.CompensatingControls,
+		CompensatingControls: compensating,
 		ExpiresAt:            req.ExpiresAt.UTC().Format(time.RFC3339Nano),
 	})
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])
+}
+
+// canonicalPredicate re-encodes a predicate with sorted object keys
+// (encoding/json sorts map keys) and numbers kept as their literal text.
+// Input that does not decode is hashed as sent.
+func canonicalPredicate(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return "{}"
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return string(raw)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
 }
 
 // ListExceptions handles GET /v1/exceptions, filterable by ?status= and

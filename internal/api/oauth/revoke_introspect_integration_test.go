@@ -485,5 +485,56 @@ func TestIntegrationRevoke_SelfRevocation_RejectOtherUser(t *testing.T) {
 	}
 }
 
+// TestIntegrationRevoke_SelfRevocationLastsUntilExp (#2714): sign-out
+// self-revokes the session JWT, and the jti stays on the denylist until
+// the token's own exp. The row records exactly that exp, a sweep before
+// it leaves the row in place, and a second revocation cannot move it.
+func TestIntegrationRevoke_SelfRevocationLastsUntilExp(t *testing.T) {
+	srv, signer, revoked, _, _ := newRevokeIntrospectServer(t)
+	pool := openTokenIntegrationPool(t)
+	ctx := context.Background()
+
+	tok, claims := mintJWTForTest(t, signer, "user:alice-revoke-ttl")
+	selfRevoke := func() {
+		t.Helper()
+		form := url.Values{}
+		form.Set("token", tok)
+		resp, _ := postFormAt(t, srv.URL+oauth.PathRevoke, form, map[string]string{"Authorization": "Bearer " + tok})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("self-revoke status = %d, want 200", resp.StatusCode)
+		}
+	}
+	storedExp := func() time.Time {
+		t.Helper()
+		var exp time.Time
+		if err := pool.QueryRow(ctx,
+			`SELECT expires_at FROM oauth_revoked_tokens WHERE jti = $1`, claims.ID).Scan(&exp); err != nil {
+			t.Fatalf("read revoked row: %v", err)
+		}
+		return exp
+	}
+
+	selfRevoke()
+	if got, want := storedExp().Unix(), claims.ExpiresAt; got != want {
+		t.Fatalf("expires_at = %d, want the token's exp %d", got, want)
+	}
+
+	if _, err := revoked.Sweep(ctx); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	isRevoked, err := revoked.IsRevoked(ctx, claims.ID)
+	if err != nil {
+		t.Fatalf("IsRevoked: %v", err)
+	}
+	if !isRevoked {
+		t.Fatal("a sweep before exp dropped the revoked jti")
+	}
+
+	selfRevoke()
+	if got, want := storedExp().Unix(), claims.ExpiresAt; got != want {
+		t.Fatalf("expires_at after a second revoke = %d, want %d", got, want)
+	}
+}
+
 // ensure tenancy package imported for the integration server signature
 var _ = tenancy.GUCName
