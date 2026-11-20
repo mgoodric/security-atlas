@@ -20,8 +20,8 @@ import (
 
 const (
 	metricTargetAuditPrior = "../../migrations/sql/20261263000000_group_mapping_api_key_audit.sql"
-	metricTargetAuditUp    = "../../migrations/sql/20261266000000_metric_target_audit.sql"
-	metricTargetAuditDown  = "../../migrations/sql/20261266000000_metric_target_audit.down.sql"
+	metricTargetAuditUp    = "../../migrations/sql/20261267000000_metric_target_audit.sql"
+	metricTargetAuditDown  = "../../migrations/sql/20261267000000_metric_target_audit.down.sql"
 	metricTargetAuditSet   = "metric_target_set"
 )
 
@@ -38,14 +38,14 @@ func TestMetricTargetAuditMigration_KeepsEveryAction(t *testing.T) {
 	}
 	for _, a := range prior {
 		if !inCurrent[a] {
-			t.Errorf("action %q from 20261263000000 is missing from 20261266000000", a)
+			t.Errorf("action %q from 20261263000000 is missing from 20261267000000", a)
 		}
 	}
 	if !inCurrent[metricTargetAuditSet] {
-		t.Errorf("20261266000000 does not add %q", metricTargetAuditSet)
+		t.Errorf("20261267000000 does not add %q", metricTargetAuditSet)
 	}
 	if len(current) != len(prior)+1 {
-		t.Errorf("20261266000000 lists %d actions, want %d", len(current), len(prior)+1)
+		t.Errorf("20261267000000 lists %d actions, want %d", len(current), len(prior)+1)
 	}
 
 	down, err := os.ReadFile(metricTargetAuditDown)
@@ -69,7 +69,7 @@ func TestMetricTargetAuditMigration_KeepsEveryAction(t *testing.T) {
 
 	for _, a := range current {
 		if !insertsAction(ctx, t, tx, a) {
-			t.Errorf("me_audit_log refuses action %q after 20261266000000", a)
+			t.Errorf("me_audit_log refuses action %q after 20261267000000", a)
 		}
 	}
 

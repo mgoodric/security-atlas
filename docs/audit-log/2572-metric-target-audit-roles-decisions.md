@@ -17,7 +17,7 @@ had the points scale been considered; the cases are added here.
 **Decision.** `PUT /v1/metrics/{id}/target` writes one `me_audit_log` row
 in the upsert's transaction: `user_id` (uuid.Nil for a caller that is not a
 user), `actor_principal` (#2329), `before` (JSON null the first time) and
-`after`. Migration `20261266000000_metric_target_audit` extends the action
+`after`. Migration `20261267000000_metric_target_audit` extends the action
 CHECK, rewritten in full from `20261263000000` with every value kept.
 
 **Why.** The LLM settings, control import settings and the #2609 admin

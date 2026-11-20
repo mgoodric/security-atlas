@@ -619,7 +619,7 @@ func (h *Handler) UpsertTarget(w http.ResponseWriter, r *http.Request) {
 
 // AuditActionTargetSet is the me_audit_log action a target upsert writes
 // (#2572). CHECK constraint extended in migration
-// 20261266000000_metric_target_audit.sql.
+// 20261267000000_metric_target_audit.sql.
 const AuditActionTargetSet = "metric_target_set"
 
 // targetAudit is one side of a metric_target_set audit row: the target's

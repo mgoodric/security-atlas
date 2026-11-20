@@ -1,23 +1,21 @@
--- security-atlas -- #2572: setting a metric's target is audited.
+-- Reverses 20261267000000_metric_target_audit.sql: restores the
+-- me_audit_log action CHECK of 20261263000000_group_mapping_api_key_audit.sql.
 --
--- A metric target (target value, warning and critical thresholds,
--- direction, owner, notes) decides how a metric's tile and badge colour,
--- the same kind of setting as a framework posture target (#2136), which is
--- already audited. PUT /v1/metrics/{id}/target now writes one me_audit_log
--- row in the same transaction as the upsert, with the actor (user_id +
--- actor_principal, #2329) and the before and after value:
---
---   'metric_target_set'  PUT /v1/metrics/{id}/target
---
--- before is JSON null the first time a metric's target is set. There is no
--- delete route for a metric target, so there is no delete action.
---
--- The CHECK is rewritten in full from the latest definition
--- (20261263000000_group_mapping_api_key_audit.sql): every existing value is
--- kept and the new one is appended. internal/db/metric_target_audit_integration_test.go
--- inserts every value to prove none was dropped.
---
--- Reversible via 20261266000000_metric_target_audit.down.sql.
+-- Metric target audit rows are audit evidence. They are not deleted here;
+-- archive and remove them deliberately first, or this refuses to apply.
+
+DO $$
+DECLARE
+    n BIGINT;
+BEGIN
+    SELECT count(*) INTO n FROM me_audit_log
+     WHERE action = 'metric_target_set';
+    IF n > 0 THEN
+        RAISE EXCEPTION 'me_audit_log holds % metric target audit row(s); refusing to delete audit evidence', n
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261267000000.';
+    END IF;
+END
+$$;
 
 ALTER TABLE me_audit_log
     DROP CONSTRAINT IF EXISTS me_audit_log_action_check;
@@ -69,6 +67,5 @@ ALTER TABLE me_audit_log
         'group_role_mapping_delete',
         'api_key_issue',
         'api_key_rotate',
-        'api_key_revoke',
-        'metric_target_set'
+        'api_key_revoke'
     ));
