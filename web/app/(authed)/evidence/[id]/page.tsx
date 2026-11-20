@@ -207,7 +207,8 @@ function RecordCard({ evidence: ev }: { evidence: EvidenceDetail }) {
             <Timestamp value={ev.ingested_at} style="datetime" />
           </Field>
           <Field label="Observer" testId="evidence-detail-observer">
-            <span className="font-mono">
+            {/* #2684: names render in the body font, not monospace. */}
+            <span>
               <SourceAttribution
                 source={ev.source_attribution}
                 fallbackActor={ev.credential_id}
@@ -215,8 +216,9 @@ function RecordCard({ evidence: ev }: { evidence: EvidenceDetail }) {
             </span>
           </Field>
           <Field label="Source" testId="evidence-detail-source">
-            <span className="font-mono">
-              <SourceAttribution source={ev.source} /> · {ev.ingestion_path}
+            <span>
+              <SourceAttribution source={ev.source} /> ·{" "}
+              <span className="font-mono">{ev.ingestion_path}</span>
             </span>
           </Field>
           <Field label="Scope cell" testId="evidence-detail-scope">
