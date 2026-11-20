@@ -19,10 +19,10 @@ you tick **Grant admin privileges on this credential**. You can narrow a
 key to a scope and to the kinds of evidence it may push. A key never
 approves anything, so approvals always need a person.
 
-A key bound to a person, rather than to a program, uses that person's
-current roles instead. When their roles are revoked or their account is
-turned off, the key loses its access too. Keys issued from this page are
-program keys.
+A key bound to a person, rather than to a program, stops working when that
+person's account is turned off; a viewer or auditor key bound to a person
+uses that person's current roles. Keys issued from this page are program
+keys.
 
 ## Common tasks
 
