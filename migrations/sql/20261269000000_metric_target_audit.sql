@@ -17,7 +17,7 @@
 -- kept and the new one is appended. internal/db/metric_target_audit_integration_test.go
 -- inserts every value to prove none was dropped.
 --
--- Reversible via 20261267000000_metric_target_audit.down.sql.
+-- Reversible via 20261269000000_metric_target_audit.down.sql.
 
 ALTER TABLE me_audit_log
     DROP CONSTRAINT IF EXISTS me_audit_log_action_check;

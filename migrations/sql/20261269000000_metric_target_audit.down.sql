@@ -1,4 +1,4 @@
--- Reverses 20261267000000_metric_target_audit.sql: restores the
+-- Reverses 20261269000000_metric_target_audit.sql: restores the
 -- me_audit_log action CHECK of 20261263000000_group_mapping_api_key_audit.sql.
 --
 -- Metric target audit rows are audit evidence. They are not deleted here;
@@ -12,7 +12,7 @@ BEGIN
      WHERE action = 'metric_target_set';
     IF n > 0 THEN
         RAISE EXCEPTION 'me_audit_log holds % metric target audit row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261267000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261269000000.';
     END IF;
 END
 $$;
