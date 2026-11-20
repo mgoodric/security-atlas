@@ -189,11 +189,11 @@ export type FixtureName =
   // in risks-create.spec.ts and create-toasts.spec.ts list a user when the
   // spec runs alone or first.
   | "owner-picker"
-  // Slice 218 — a no-row stub for board-pack-detail.spec.ts, whose
-  // assertions are still commented out.
+  // Slice 218 / #2711 — one draft quarter-end board pack, for
+  // board-pack-detail.spec.ts's breadcrumb.
   | "board-pack-detail"
-  // Slice 160 — no rows, for control-detail-empty.spec.ts's bogus-id
-  // empty state (its assertions are still commented out).
+  // Slice 160 / #2711 — a tenant of the spec's own with zero controls,
+  // for control-detail-empty.spec.ts's empty states.
   | "control-detail-empty";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");

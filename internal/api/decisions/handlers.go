@@ -296,18 +296,23 @@ func (h *Handler) GetDecision(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreErr(w, r, "get decision", err)
 		return
 	}
-	// #2174: links into Exceptions are left out when the caller cannot see
-	// that module (the decision log belongs to Risk; risks, controls and
-	// scope predicates are Risk's own or core). A failed access read fails
-	// closed (500).
+	h.writeDecision(w, r, d, lk)
+}
+
+// writeDecision writes one decision with its linkage. #2174: links into
+// Exceptions are left out when the caller cannot see that module (the
+// decision log belongs to Risk; risks, controls and scope predicates are
+// Risk's own or core). A failed access read fails closed: 503
+// module_state_unavailable when the flag store is down (#2702), else 500.
+func (h *Handler) writeDecision(w http.ResponseWriter, r *http.Request, d decision.Decision, lk decision.Linkage) {
 	viewer, err := h.views.For(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "decision link modules", err)
+		moduleaccess.WriteError(w, r, "decision link modules", err)
 		return
 	}
 	sees, err := viewer.Sees("/v1/exceptions")
 	if err != nil {
-		httperr.WriteInternal(w, r, "decision link modules", err)
+		moduleaccess.WriteError(w, r, "decision link modules", err)
 		return
 	}
 	if !sees {
@@ -317,7 +322,6 @@ func (h *Handler) GetDecision(w http.ResponseWriter, r *http.Request) {
 		"decision": decisionWireFrom(d),
 		"linkage":  linkageWireFrom(lk),
 	})
-
 }
 
 // AuditLog handles GET /v1/decisions/{id}/audit-log (AC-3 read).

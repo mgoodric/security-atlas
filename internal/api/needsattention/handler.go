@@ -19,7 +19,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/api/policyacks"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -129,7 +128,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.collect(r, cred, tenantID)
 	if err != nil {
-		httperr.WriteInternal(w, r, "needs attention", err)
+		moduleaccess.WriteError(w, r, "needs attention", err)
 		return
 	}
 	mine := mineFor(cred)

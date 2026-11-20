@@ -40,11 +40,12 @@ func (h *Handler) WithModules(v *moduleaccess.Views) *Handler {
 // into a module the caller cannot see (#2174): a switched-off module, or
 // one outside their module access. The links stay stored; an empty list
 // says nothing about how many were left out. A failed access read fails
-// closed (500).
+// closed: 503 module_state_unavailable when the flag store is down
+// (#2702), else 500.
 func (h *Handler) writeDetail(w http.ResponseWriter, r *http.Request, status int, d incident.Detail) {
 	viewer, err := h.views.For(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "incident link modules", err)
+		moduleaccess.WriteError(w, r, "incident link modules", err)
 		return
 	}
 	for path, ids := range map[string]*[]uuid.UUID{
@@ -53,7 +54,7 @@ func (h *Handler) writeDetail(w http.ResponseWriter, r *http.Request, status int
 	} {
 		sees, err := viewer.Sees(path)
 		if err != nil {
-			httperr.WriteInternal(w, r, "incident link modules", err)
+			moduleaccess.WriteError(w, r, "incident link modules", err)
 			return
 		}
 		if !sees {
@@ -74,11 +75,11 @@ const (
 // whether it answered. It runs before the store, and the answer names only
 // the field, so it is the same whether the ids exist or not: a caller
 // cannot probe a hidden module's records through it. A failed access read
-// fails closed (500).
+// fails closed, as writeDetail does.
 func (h *Handler) refuseHiddenLinks(w http.ResponseWriter, r *http.Request, ids parsedLinks) bool {
 	viewer, err := h.views.For(r)
 	if err != nil {
-		httperr.WriteInternal(w, r, "incident link modules", err)
+		moduleaccess.WriteError(w, r, "incident link modules", err)
 		return true
 	}
 	for _, l := range []struct {
@@ -93,7 +94,7 @@ func (h *Handler) refuseHiddenLinks(w http.ResponseWriter, r *http.Request, ids 
 		}
 		sees, err := viewer.Sees(l.path)
 		if err != nil {
-			httperr.WriteInternal(w, r, "incident link modules", err)
+			moduleaccess.WriteError(w, r, "incident link modules", err)
 			return true
 		}
 		if !sees {
