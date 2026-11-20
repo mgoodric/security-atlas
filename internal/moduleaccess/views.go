@@ -127,7 +127,7 @@ func (v Viewer) SeesModule(key string) (bool, error) {
 		if !v.access.Has(key) {
 			return false, nil
 		}
-		return featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
+		return featureflag.EnabledStrict(v.r.Context(), v.flags, m.FlagKey)
 	}
 	return true, nil
 }
@@ -151,7 +151,7 @@ func (v Viewer) Modules() (ModuleSet, error) {
 				hidden[m.Key] = true
 				continue
 			}
-			on, err := featureflag.Enabled(v.r.Context(), v.flags, m.FlagKey)
+			on, err := featureflag.EnabledStrict(v.r.Context(), v.flags, m.FlagKey)
 			if err != nil {
 				return ModuleSet{}, err
 			}
@@ -165,7 +165,7 @@ func (v Viewer) Modules() (ModuleSet, error) {
 			if len(f.Routes) == 0 {
 				continue
 			}
-			on, err := featureflag.Enabled(v.r.Context(), v.flags, f.FlagKey)
+			on, err := featureflag.EnabledStrict(v.r.Context(), v.flags, f.FlagKey)
 			if err != nil {
 				return ModuleSet{}, err
 			}
