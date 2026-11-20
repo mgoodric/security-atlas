@@ -27,6 +27,7 @@ import {
   type AISuggestViewModel,
   parseAISuggest,
 } from "@/lib/questionnaire/ai-suggest";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 interface AISuggestPanelProps {
   questionnaireID: string;
@@ -89,13 +90,7 @@ export function AISuggestPanel({
         },
       );
       if (!res.ok) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const j = (await res.json()) as { error?: string };
-          if (j.error) msg = j.error;
-        } catch {
-          // body not JSON
-        }
+        const msg = await upstreamErrorMessage(res);
         setApproveError(msg);
         return;
       }

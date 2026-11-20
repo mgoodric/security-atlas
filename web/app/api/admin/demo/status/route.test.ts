@@ -86,7 +86,7 @@ describe("GET /api/admin/demo/status", () => {
     expect(body.error).toBe("admin role required");
   });
 
-  test("upstream 5xx propagates with same status", async () => {
+  test("upstream 5xx propagates its status, not its body (#2645)", async () => {
     cookieStore.set(ATLAS_JWT_COOKIE, "bearer");
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "platform unavailable" }), {
@@ -99,6 +99,6 @@ describe("GET /api/admin/demo/status", () => {
     const res = await GET();
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("platform unavailable");
+    expect(body.error).toBe("500 Internal Server Error");
   });
 });

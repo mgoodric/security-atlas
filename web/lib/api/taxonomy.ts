@@ -9,6 +9,7 @@
 
 import { APIError } from "./base";
 import { fetchRiskCategories, type RiskCategory } from "./risks";
+import { upstreamErrorMessage } from "./_shared";
 
 export type { RiskCategory } from "./risks";
 
@@ -36,13 +37,7 @@ async function call<T>(
     cache: "no-store",
   });
   if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
-    } catch {
-      // body not JSON — keep the status line
-    }
+    const msg = await upstreamErrorMessage(res);
     throw new APIError(res.status, msg);
   }
   if (res.status === 204) return undefined as T;

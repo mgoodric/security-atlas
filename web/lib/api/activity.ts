@@ -21,6 +21,7 @@ import {
   renderActorLabel,
   truncateActorId,
 } from "@/lib/api/audit-log";
+import { upstreamErrorMessage } from "./_shared";
 
 export {
   AUDIT_LOG_KINDS as ACTIVITY_KINDS,
@@ -80,13 +81,8 @@ export async function fetchActivity(
     signal,
   });
   if (!res.ok) {
-    let detail = "";
-    try {
-      const body = (await res.json()) as { error?: string };
-      detail = body.error ?? "";
-    } catch {
-      // body is empty / non-JSON — fall through with status-only detail
-    }
+    // Empty on a 5xx or a non-JSON body: status-only detail.
+    const detail = await upstreamErrorMessage(res, "");
     throw new AuditLogFetchError(res.status, detail);
   }
   return (await res.json()) as UnifiedListResponse;

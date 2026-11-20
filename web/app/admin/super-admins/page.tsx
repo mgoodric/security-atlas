@@ -66,8 +66,9 @@ import type { SuperAdminRow } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
 import { Term } from "@/components/help/term";
 import { Timestamp } from "@/components/ui/timestamp";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
-type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
+type SuperAdminListResponse = { items: SuperAdminRow[] };
 
 const GRANT_KINDS: readonly EntityKind[] = ["user"];
 
@@ -84,10 +85,10 @@ export default function SuperAdminsPage() {
       const res = await fetch("/api/admin/super-admins", {
         cache: "no-store",
       });
-      const body = (await res.json()) as SuperAdminListResponse;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
+      const body = (await res.json()) as SuperAdminListResponse;
       return body.items ?? [];
     },
   });
@@ -102,11 +103,10 @@ export default function SuperAdminsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userID }),
       });
-      const body = (await res.json()) as { error?: string } & SuperAdminRow;
       if (!res.ok) {
-        throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+        throw new Error(await upstreamErrorMessage(res));
       }
-      return body;
+      return (await res.json()) as SuperAdminRow;
     },
     onSuccess: async () => {
       setGrantUserID("");
@@ -127,13 +127,7 @@ export default function SuperAdminsPage() {
         { method: "DELETE" },
       );
       if (!res.ok && res.status !== 204) {
-        let msg = `${res.status} ${res.statusText}`;
-        try {
-          const body = (await res.json()) as { error?: string };
-          if (body?.error) msg = body.error;
-        } catch {
-          // ignore
-        }
+        const msg = await upstreamErrorMessage(res);
         throw new Error(msg);
       }
     },

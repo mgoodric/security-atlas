@@ -19,6 +19,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import type { ImportBatch } from "@/lib/api/control-imports";
+import { upstreamErrorMessage } from "@/lib/api/_shared";
 
 type Framework = { id: string; name: string; slug: string };
 
@@ -33,11 +34,12 @@ async function upload(form: FormData): Promise<ImportBatch> {
     method: "POST",
     body: form,
   });
-  const body = (await res.json().catch(() => ({}))) as {
-    error?: string;
-  } & Partial<ImportBatch>;
-  if (!res.ok) throw new Error(body.error ?? `upload failed (${res.status})`);
-  return body as ImportBatch;
+  if (!res.ok) {
+    throw new Error(
+      await upstreamErrorMessage(res, `upload failed (${res.status})`),
+    );
+  }
+  return (await res.json()) as ImportBatch;
 }
 
 export default function ControlImportUploadPage() {
