@@ -184,6 +184,33 @@ describe("signOut revokes the session (#2618)", () => {
     quiet.mockRestore();
   });
 
+  test("a hung revoke times out and still signs out", async () => {
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    cookieValues.set(ATLAS_JWT_COOKIE, "session-jwt");
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            signal = init?.signal ?? undefined;
+            signal?.addEventListener("abort", () => reject(signal?.reason));
+          }),
+      ),
+    );
+    vi.useFakeTimers();
+    try {
+      const out = redirectOf(signOut());
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(await out).toBe("/login");
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(signal?.aborted).toBe(true);
+    expect(deleteCookie).toHaveBeenCalledWith(ATLAS_JWT_COOKIE);
+    quiet.mockRestore();
+  });
+
   test("calls nothing when there is no session cookie", async () => {
     const calls = stubRevoke(new Response(null, { status: 200 }));
     expect(await redirectOf(signOut())).toBe("/login");

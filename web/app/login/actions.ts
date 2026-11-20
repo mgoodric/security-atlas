@@ -123,6 +123,8 @@ export async function signOut(): Promise<void> {
   redirect("/login");
 }
 
+const REVOKE_TIMEOUT_MS = 3000;
+
 async function revokeSession(token: string, reqHeaders: Headers) {
   try {
     const res = await fetch(`${apiBaseURL()}/oauth/revoke`, {
@@ -136,6 +138,9 @@ async function revokeSession(token: string, reqHeaders: Headers) {
       },
       body: new URLSearchParams({ token }).toString(),
       cache: "no-store",
+      // A hung API must not hold sign-out open; past this the cookie is
+      // deleted anyway.
+      signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS),
     });
     if (!res.ok) {
       console.error(`signOut: session revoke answered ${res.status}`);
