@@ -73,21 +73,27 @@ func schemaName(t reflect.Type) string {
 // component name is an error.
 func collectSchemas() (map[string]reflect.Type, error) {
 	out := map[string]reflect.Type{}
-	var walk func(t reflect.Type) error
-	walk = func(t reflect.Type) error {
+	// path names where t sits, from the response struct down, so an
+	// error points at the field to fix: "Report.items[].at".
+	var walk func(t reflect.Type, path string) error
+	walk = func(t reflect.Type, path string) error {
 		if _, ok := knownTypes[t]; ok {
 			return nil
 		}
 		if err := refuseMarshaler(t); err != nil {
-			return err
+			return fmt.Errorf("openapi: %s: %w", path, err)
 		}
 		switch t.Kind() {
-		case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
-			return walk(t.Elem())
+		case reflect.Pointer:
+			return walk(t.Elem(), path)
+		case reflect.Slice, reflect.Array:
+			return walk(t.Elem(), path+"[]")
+		case reflect.Map:
+			return walk(t.Elem(), path+"{}")
 		case reflect.Struct:
 			name := schemaName(t)
 			if name == "" {
-				return fmt.Errorf("openapi: anonymous struct %s has no schema name", t)
+				return fmt.Errorf("openapi: %s: anonymous struct %s has no schema name", path, t)
 			}
 			if prev, ok := out[name]; ok {
 				if prev != t {
@@ -97,7 +103,7 @@ func collectSchemas() (map[string]reflect.Type, error) {
 			}
 			out[name] = t
 			for _, f := range jsonFields(t) {
-				if err := walk(f.Type); err != nil {
+				if err := walk(f.Type, path+"."+f.Name); err != nil {
 					return err
 				}
 			}
@@ -108,7 +114,7 @@ func collectSchemas() (map[string]reflect.Type, error) {
 		if s.Type.Kind() != reflect.Struct {
 			return nil, fmt.Errorf("openapi: response type for %s %s is %s, want a struct", s.Method, s.Path, s.Type)
 		}
-		if err := walk(s.Type); err != nil {
+		if err := walk(s.Type, schemaName(s.Type)); err != nil {
 			return nil, err
 		}
 	}
@@ -134,12 +140,21 @@ var (
 // knownTypes entry (pgtype.*, for example). A pointer is judged by its
 // element, which is what encoding/json writes when it is not nil.
 func refuseMarshaler(t reflect.Type) error {
+	if m := marshalerOf(t); m != nil {
+		return fmt.Errorf("%s implements %s; add it to knownTypes with the schema of what it writes", t, m)
+	}
+	return nil
+}
+
+// marshalerOf is the marshaler interface t, or *t, implements, or nil.
+// A pointer is never judged itself, only through its element.
+func marshalerOf(t reflect.Type) reflect.Type {
 	if t.Kind() == reflect.Pointer {
 		return nil
 	}
 	for _, m := range []reflect.Type{jsonMarshalerType, textMarshalerType} {
 		if t.Implements(m) || reflect.PointerTo(t).Implements(m) {
-			return fmt.Errorf("openapi: %s implements %s; add it to knownTypes with the schema of what it writes", t, m)
+			return m
 		}
 	}
 	return nil
@@ -149,70 +164,166 @@ type jsonField struct {
 	Name     string
 	Required bool
 	Type     reflect.Type
+
+	index  []int // field index sequence from the listed struct
+	tagged bool  // the name came from a json tag
+}
+
+// embeddedStruct is an anonymous struct whose fields are promoted into
+// the struct jsonFields lists.
+type embeddedStruct struct {
+	typ   reflect.Type
+	index []int
+	// optional: reached through an embedded pointer. When it is nil,
+	// encoding/json omits every field under it.
+	optional bool
 }
 
 // jsonFields lists t's fields as encoding/json encodes them, in
-// declaration order. Embedded structs, and pointers to them, are
-// flattened. The fields of an embedded pointer are optional: when it is
-// nil, encoding/json omits them all.
+// declaration order. It follows encoding/json's typeFields: embedded
+// structs, and pointers to them, are flattened breadth first, and when
+// two fields share a JSON name the shallower one wins, then the tagged
+// one; two at one depth that tie on the tag are both dropped.
 func jsonFields(t reflect.Type) []jsonField {
-	var out []jsonField
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		tag := f.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		name, opts, _ := strings.Cut(tag, ",")
-		if f.Anonymous && name == "" {
-			et := f.Type
-			if et.Kind() == reflect.Pointer {
-				et = et.Elem()
-			}
-			// An unexported embedded struct's exported fields are
-			// promoted too, as encoding/json does.
-			if et.Kind() == reflect.Struct {
-				inner := jsonFields(et)
-				if f.Type.Kind() == reflect.Pointer {
-					for j := range inner {
-						inner[j].Required = false
-					}
-				}
-				out = append(out, inner...)
+	var fields []jsonField
+	next := []embeddedStruct{{typ: t}}
+	// count and nextCount: how often each struct type is embedded at
+	// the current and the next depth.
+	var count, nextCount map[reflect.Type]int
+	visited := map[reflect.Type]bool{}
+	for len(next) > 0 {
+		var current []embeddedStruct
+		current, next = next, nil
+		count, nextCount = nextCount, map[reflect.Type]int{}
+		for _, e := range current {
+			// A type embedded at two depths is listed at the shallower
+			// one only, which also ends embedding cycles.
+			if visited[e.typ] {
 				continue
 			}
-		}
-		if !f.IsExported() {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		omit, quoted := false, false
-		for _, o := range strings.Split(opts, ",") {
-			switch o {
-			case "omitempty", "omitzero":
-				omit = true
-			case "string":
-				quoted = true
+			visited[e.typ] = true
+			for i := 0; i < e.typ.NumField(); i++ {
+				f := e.typ.Field(i)
+				if f.Anonymous {
+					et := f.Type
+					if et.Kind() == reflect.Pointer {
+						et = et.Elem()
+					}
+					// An unexported embedded struct's exported fields
+					// are promoted; an unexported embedded non-struct is
+					// skipped.
+					if !f.IsExported() && et.Kind() != reflect.Struct {
+						continue
+					}
+				} else if !f.IsExported() {
+					continue
+				}
+				tag := f.Tag.Get("json")
+				if tag == "-" {
+					continue
+				}
+				name, opts, _ := strings.Cut(tag, ",")
+				index := append(append([]int(nil), e.index...), i)
+				ft := f.Type
+				if ft.Name() == "" && ft.Kind() == reflect.Pointer {
+					ft = ft.Elem()
+				}
+				if name == "" && f.Anonymous && ft.Kind() == reflect.Struct {
+					nextCount[ft]++
+					if nextCount[ft] == 1 {
+						next = append(next, embeddedStruct{
+							typ:      ft,
+							index:    index,
+							optional: e.optional || f.Type.Kind() == reflect.Pointer,
+						})
+					}
+					continue
+				}
+				omit, quoted := false, false
+				for _, o := range strings.Split(opts, ",") {
+					switch o {
+					case "omitempty", "omitzero":
+						omit = true
+					case "string":
+						quoted = true
+					}
+				}
+				jf := jsonField{
+					Name:     name,
+					Required: !omit && !e.optional,
+					Type:     f.Type,
+					index:    index,
+					tagged:   name != "",
+				}
+				if jf.Name == "" {
+					jf.Name = f.Name
+				}
+				if quoted {
+					jf.Type = quotedType(f.Type)
+				}
+				fields = append(fields, jf)
+				// One struct embedded twice at this depth: its fields
+				// collide with each other, so a second copy makes the
+				// dominance pass below drop both.
+				if count[e.typ] > 1 {
+					fields = append(fields, jf)
+				}
 			}
 		}
-		ft := f.Type
-		if quoted {
-			ft = quotedType(ft)
-		}
-		out = append(out, jsonField{Name: name, Required: !omit, Type: ft})
 	}
+
+	sort.Slice(fields, func(i, j int) bool {
+		a, b := fields[i], fields[j]
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if len(a.index) != len(b.index) {
+			return len(a.index) < len(b.index)
+		}
+		if a.tagged != b.tagged {
+			return a.tagged
+		}
+		return compareIndex(a.index, b.index) < 0
+	})
+	out := fields[:0]
+	for i := 0; i < len(fields); {
+		j := i + 1
+		for j < len(fields) && fields[j].Name == fields[i].Name {
+			j++
+		}
+		// The first of a name dominates unless the second ties it on
+		// both depth and tag.
+		if j-i == 1 || len(fields[i].index) != len(fields[i+1].index) || fields[i].tagged != fields[i+1].tagged {
+			out = append(out, fields[i])
+		}
+		i = j
+	}
+	sort.Slice(out, func(i, j int) bool { return compareIndex(out[i].index, out[j].index) < 0 })
 	return out
+}
+
+// compareIndex orders two field index sequences as declaration order.
+func compareIndex(a, b []int) int {
+	for k := 0; k < len(a) && k < len(b); k++ {
+		if a[k] != b[k] {
+			return a[k] - b[k]
+		}
+	}
+	return len(a) - len(b)
 }
 
 // quotedType is the type a ",string" field is on the wire. encoding/json
 // quotes a bool, integer or float, directly or through an unnamed
-// pointer; on any other type the option has no effect.
+// pointer; on any other type the option has no effect. Nor does it on a
+// type that encodes itself: the marshaler wins, so the type is kept for
+// refuseMarshaler to judge.
 func quotedType(t reflect.Type) reflect.Type {
 	elem, ptr := t, false
 	if t.Name() == "" && t.Kind() == reflect.Pointer {
 		elem, ptr = t.Elem(), true
+	}
+	if marshalerOf(elem) != nil {
+		return t
 	}
 	switch elem.Kind() {
 	case reflect.Bool,
