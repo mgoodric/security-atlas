@@ -27,7 +27,8 @@ type ForwardInit = {
 };
 
 // forwardJSON proxies a JSON request to the platform. Returns a
-// NextResponse carrying the upstream status + body verbatim.
+// NextResponse carrying the upstream status, and its body verbatim except
+// on a 5xx (see upstreamBody).
 export async function forwardJSON(
   upstreamPath: string,
   init?: ForwardInit,
@@ -69,10 +70,23 @@ export async function forwardJSON(
   // that long before retrying, so the hint must survive the proxy.
   const retryAfter = upstream.headers.get("Retry-After");
   if (retryAfter) outHeaders["Retry-After"] = retryAfter;
-  return new NextResponse(hasNullBody ? null : text, {
-    status: upstream.status,
-    headers: outHeaders,
-  });
+  return new NextResponse(
+    hasNullBody ? null : upstreamBody(upstream.status, text),
+    { status: upstream.status, headers: outHeaders },
+  );
+}
+
+// UPSTREAM_5XX_BODY replaces every platform 5xx body a forwarder relays.
+export const UPSTREAM_5XX_BODY = JSON.stringify({ error: "platform error" });
+
+// upstreamBody is the body a forwarder relays for a platform answer. A 4xx
+// body is the platform's refusal worded for the user and passes through. A
+// 5xx body is the server's own failure, and a Go handler that wrote
+// `err.Error()` there would put internals on the wire, so it is replaced
+// (#2704). upstreamErrorMessage already hides it in the browser; this keeps
+// it off the wire too. The status is unchanged.
+export function upstreamBody(status: number, text: string): string {
+  return status >= 500 ? UPSTREAM_5XX_BODY : text;
 }
 
 // noStore returns a copy of `res` with `Cache-Control: no-store` (and a
@@ -118,7 +132,7 @@ export async function forwardMultipart(
     cache: "no-store",
   });
   const text = await upstream.text();
-  return new NextResponse(text, {
+  return new NextResponse(upstreamBody(upstream.status, text), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

@@ -339,7 +339,7 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 			Result: "error:snapshot",
 			Reason: snapErr.Error(),
 		})
-		httperr.WriteInternal(w, r, "compose dashboard snapshot", snapErr)
+		moduleaccess.WriteError(w, r, "compose dashboard snapshot", snapErr)
 		return
 	}
 
