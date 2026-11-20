@@ -54,6 +54,15 @@ cross-references slice 050 sanitization rules and slice 057 P0-A2):
 | `sidebar-nav.sql`                   | `web/e2e/sidebar-nav.spec.ts`                                   |
 | `framework-scope-self-approval.sql` | `web/e2e/framework-scope-self-approval.spec.ts`                 |
 | `owner-picker.sql`                  | `web/e2e/risks-create.spec.ts`, `web/e2e/create-toasts.spec.ts` |
+| `audit-periods-vendors-export.sql`  | `web/e2e/audit-periods-vendors-export.spec.ts`                  |
+| `audits-list.sql`                   | `web/e2e/audits-list.spec.ts`                                   |
+| `calendar.sql`                      | `web/e2e/calendar.spec.ts`                                      |
+| `evidence-list.sql`                 | `web/e2e/evidence-list.spec.ts`                                 |
+| `evidence-pagination.sql`           | `web/e2e/evidence-pagination.spec.ts`                           |
+| `exceptions-list.sql`               | `web/e2e/exceptions-list.spec.ts`                               |
+| `metrics-dashboard.sql`             | `web/e2e/metrics-dashboard.spec.ts`                             |
+| `policies-list.sql`                 | `web/e2e/policies-list.spec.ts`                                 |
+| `risks-list.sql`                    | `web/e2e/risks-list.spec.ts`                                    |
 
 Each file builds on `fixtures/walkthroughs/00-seed.sql` (the harness
 applies that file first, then the per-spec file). All inserts use
