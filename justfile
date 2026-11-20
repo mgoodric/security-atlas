@@ -99,9 +99,14 @@ fmt-go:
     gofmt -w .
     goimports -w -local "$(go list -m)" .
 
-# Format frontend (prettier)
+# Format frontend (prettier). Runs the pre-commit prettier hook, so web/ is
+# formatted by the one pinned prettier (.pre-commit-config.yaml rev). web/
+# pins no prettier of its own, and an ad-hoc `npx prettier` is the latest
+# release, which lays out unions and empty for-clauses differently and
+# would undo the hook's output (#2583). pre-commit exits 1 when it rewrites
+# files, so a second run decides: 0 once the tree is formatted.
 fmt-frontend:
-    cd web && npm run fmt --if-present
+    pre-commit run prettier --files $(git ls-files web) >/dev/null || pre-commit run prettier --files $(git ls-files web)
 
 # Format Python (ruff format)
 fmt-python:
