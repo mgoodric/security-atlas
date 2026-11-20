@@ -37,6 +37,13 @@ func NewViews(access *Store, flags featureflag.Looker) *Views {
 	return &Views{access: access, flags: flags}
 }
 
+// Wired reports whether v reads both stores. An unwired Views (nil, or
+// built without a store) admits every module, which only a unit-test
+// server may do; the HTTP server refuses to start on one (#2555).
+func (v *Views) Wired() bool {
+	return v != nil && v.access != nil && v.flags != nil
+}
+
 // Viewer is one caller's answer: Sees reports whether an item owned by a
 // route's module may be shown to them.
 type Viewer struct {
