@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -206,6 +207,9 @@ type Store struct {
 	// reevaluate, when set, re-evaluates a control after one of its
 	// exceptions is activated or revoked (#2269). See WithReevaluate.
 	reevaluate Reevaluator
+	// background, when set, tracks each re-evaluation goroutine so the
+	// server's shutdown can wait for it (#2688). See WithWaitGroup.
+	background *sync.WaitGroup
 }
 
 // Reevaluator re-evaluates one control in one tenant. eval builds it
@@ -226,12 +230,26 @@ func (s *Store) WithReevaluate(r Reevaluator) *Store {
 	return s
 }
 
+// WithWaitGroup tracks each re-evaluation goroutine WithReevaluate starts
+// in wg, so a shutdown that waits on wg does not cut one off mid-write
+// (#2688). The owner must stop calling Activate and Revoke before it calls
+// wg.Wait; the HTTP server does, by waiting only after Shutdown returns.
+func (s *Store) WithWaitGroup(wg *sync.WaitGroup) *Store {
+	s.background = wg
+	return s
+}
+
 // afterStateChange runs the reevaluator for a committed transition.
 func (s *Store) afterStateChange(ctx context.Context, x Exception) {
 	if s.reevaluate == nil {
 		return
 	}
-	go s.reevaluate(context.WithoutCancel(ctx), x.TenantID, x.ControlID)
+	run := func() { s.reevaluate(context.WithoutCancel(ctx), x.TenantID, x.ControlID) }
+	if s.background == nil {
+		go run()
+		return
+	}
+	s.background.Go(run)
 }
 
 // CreateInput is the API shape for POST /v1/exceptions. The store

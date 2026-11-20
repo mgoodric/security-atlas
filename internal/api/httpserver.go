@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -392,12 +393,35 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		err := srv.Shutdown(shutdownCtx)
+		// No handler is running once Shutdown returns, so nothing adds to
+		// s.background while this waits (#2688).
+		if werr := waitBackground(shutdownCtx, &s.background); err == nil {
+			err = werr
+		}
+		return err
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
+	}
+}
+
+// waitBackground waits for wg, or until ctx is done, whichever is first. It
+// shares RunHTTP's shutdown grace, so a stuck re-evaluation cannot hold the
+// process open past it; it reports that case rather than hiding it.
+func waitBackground(ctx context.Context, wg *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("api: background work still running at shutdown: %w", ctx.Err())
 	}
 }
 
