@@ -156,10 +156,7 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 	// AC-5: rate limit per credential. Honors Retry-After.
 	if h.limiter != nil {
 		if ok, wait := h.limiter.Allow(cred.ID); !ok {
-			// Rounded to the nearest second, unlike the shared
-			// RetryAfterSeconds (which rounds up): kept as it was
-			// before #2497.
-			ratelimit.SetRetryAfter(w, int(wait.Seconds()+0.5))
+			ratelimit.SetRetryAfter(w, ratelimit.RetryAfterSeconds(wait))
 			httpresp.WriteJSON(w, http.StatusTooManyRequests, errorBody{Error: "rate limit exceeded", Code: "rate_limited"})
 			return
 		}
