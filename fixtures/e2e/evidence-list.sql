@@ -21,8 +21,13 @@
 --
 -- The rows are shaped the way the push path writes them
 -- (internal/evidence/ingest/ingest.go): server-observed fields in
--- `provenance`, the client's actor claim in `source_attribution`, and
--- `scope_id` NULL.
+-- `provenance`, the client's actor claim in `source_attribution`, the
+-- pushed scope in `scope_canonical`, and `scope_id` NULL.
+--
+-- #2771 scope: records ...01, ...02 and ...05 were pushed in the seeded
+-- cell (prod · us-east-1; ...05 also names us-west-2), ...03 and ...04 in
+-- dev, and ...06 carries no scope, like a record pushed before scope
+-- capture. The Scope pill narrows the six to three.
 
 \set ON_ERROR_STOP on
 
@@ -106,7 +111,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO evidence_records (
     id, tenant_id, control_id, control_ref, observed_at, provenance, result,
     payload, hash, ingestion_path, source_attribution, evidence_kind,
-    schema_version
+    schema_version, scope_canonical
 )
 SELECT
     v.id::uuid,
@@ -127,15 +132,16 @@ SELECT
     'push',
     jsonb_build_object('actor_type', 'connector', 'actor_id', v.actor),
     v.kind,
-    '1.0.0'
+    '1.0.0',
+    v.scope::jsonb
 FROM (VALUES
-    ('00000000-0000-0000-0000-2755c1000001', interval '1 hour',  'pass',         'e2e.config_check.v1',  'test-connector-a'),
-    ('00000000-0000-0000-0000-2755c1000002', interval '2 hours', 'fail',         'e2e.config_check.v1',  'test-connector-a'),
-    ('00000000-0000-0000-0000-2755c1000003', interval '1 day',   'na',           'e2e.access_review.v1', 'test-connector-b'),
-    ('00000000-0000-0000-0000-2755c1000004', interval '2 days',  'inconclusive', 'e2e.access_review.v1', 'test-connector-b'),
-    ('00000000-0000-0000-0000-2755c1000005', interval '10 days', 'pass',         'e2e.config_check.v1',  'test-connector-a'),
-    ('00000000-0000-0000-0000-2755c1000006', interval '20 days', 'pass',         'e2e.config_check.v1',  'test-connector-a')
-) AS v (id, age, result, kind, actor)
+    ('00000000-0000-0000-0000-2755c1000001', interval '1 hour',  'pass',         'e2e.config_check.v1',  'test-connector-a', '[{"key":"environment","values":["prod"]},{"key":"geography","values":["us-east-1"]}]'),
+    ('00000000-0000-0000-0000-2755c1000002', interval '2 hours', 'fail',         'e2e.config_check.v1',  'test-connector-a', '[{"key":"environment","values":["prod"]},{"key":"geography","values":["us-east-1"]}]'),
+    ('00000000-0000-0000-0000-2755c1000003', interval '1 day',   'na',           'e2e.access_review.v1', 'test-connector-b', '[{"key":"environment","values":["dev"]},{"key":"geography","values":["us-east-1"]}]'),
+    ('00000000-0000-0000-0000-2755c1000004', interval '2 days',  'inconclusive', 'e2e.access_review.v1', 'test-connector-b', '[{"key":"environment","values":["dev"]},{"key":"geography","values":["us-east-1"]}]'),
+    ('00000000-0000-0000-0000-2755c1000005', interval '10 days', 'pass',         'e2e.config_check.v1',  'test-connector-a', '[{"key":"environment","values":["prod"]},{"key":"geography","values":["us-east-1","us-west-2"]}]'),
+    ('00000000-0000-0000-0000-2755c1000006', interval '20 days', 'pass',         'e2e.config_check.v1',  'test-connector-a', NULL)
+) AS v (id, age, result, kind, actor, scope)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

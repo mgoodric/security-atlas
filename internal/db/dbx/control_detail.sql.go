@@ -371,28 +371,38 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 }
 
 const listEvidencePaged = `-- name: ListEvidencePaged :many
-SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash, result,
-       source_attribution
-FROM evidence_records
-WHERE tenant_id = $1
-  AND observed_at >= $2
-  AND observed_at <= $3
+SELECT er.id, er.tenant_id, er.control_id, er.control_ref, er.scope_id,
+       er.observed_at, er.evidence_kind, er.provenance, er.hash, er.result,
+       er.source_attribution
+FROM evidence_records er
+WHERE er.tenant_id = $1
+  AND er.observed_at >= $2
+  AND er.observed_at <= $3
   AND ($4::text IS NULL
-       OR evidence_kind = $4::text)
+       OR er.evidence_kind = $4::text)
   AND ($5::text IS NULL
-       OR result::text = $5::text)
+       OR er.result::text = $5::text)
   AND ($6::text IS NULL
-       OR source_attribution->>'actor_type' = $6::text)
+       OR er.source_attribution->>'actor_type' = $6::text)
   AND ($7::text IS NULL
-       OR source_attribution->>'actor_id' = $7::text)
+       OR er.source_attribution->>'actor_id' = $7::text)
   AND ($8::uuid IS NULL
-       OR scope_id = $8::uuid)
+       OR er.scope_canonical @> (
+            SELECT COALESCE(
+                     (SELECT jsonb_agg(jsonb_build_object(
+                                 'key', d.key,
+                                 'values', jsonb_build_array(d.value)))
+                      FROM jsonb_each(sc.dimensions) AS d),
+                     '[]'::jsonb)
+            FROM scope_cells sc
+            WHERE sc.id = $8::uuid
+              AND sc.tenant_id = $1
+          ))
   AND (
-        observed_at < $9
-        OR (observed_at = $9 AND id < $10)
+        er.observed_at < $9
+        OR (er.observed_at = $9 AND er.id < $10)
       )
-ORDER BY observed_at DESC, id DESC
+ORDER BY er.observed_at DESC, er.id DESC
 LIMIT $11
 `
 
@@ -440,10 +450,19 @@ type ListEvidencePagedRow struct {
 // {actor_type, actor_id, session_id} shape there).
 //
 // Slice 234: a fifth optional filter `scope_cell_id` narrows to one
-// scope cell. Pattern mirrors slice 224's `scope_cell_id` filter on the
-// anchors rollup query (`scf_anchors.sql`). Out-of-tenant cell ids return
-// zero rows naturally because the row's `scope_id` is itself tenant-
-// scoped — no 404 leak.
+// scope cell. #2771: a record is in the cell when the scope it was pushed
+// with (`scope_canonical`, [{key, values[]}]) covers every one of the
+// cell's dimensions: for each (k, v) in scope_cells.dimensions, the
+// record has key k with v among its values. That is the cartesian-cell
+// reading scope.MatchRecordScope applies to credentials. jsonb `@>` does
+// the per-element subset test against a pattern built once from the
+// cell (an uncorrelated subquery, so Postgres runs it as an InitPlan).
+// `scope_id` (FK to `scopes`) is NULL on every pushed record and is not
+// consulted. Rows with no scope_canonical (pushed before slice 474)
+// never match. The subquery requires the cell in the caller's tenant: an
+// out-of-tenant or unknown cell id yields NULL, and `@> NULL` matches
+// nothing, never the whole ledger. Cost notes in
+// docs/audit-log/2771-evidence-filter-pills-decisions.md.
 //
 // Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
 // decomposed (observed_at, id) predicate, same +1 probe-row idiom.

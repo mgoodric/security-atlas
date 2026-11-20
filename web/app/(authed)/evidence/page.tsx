@@ -71,6 +71,7 @@ import {
   ALL,
   NONE,
   SCOPE_CELL_CAP,
+  SCOPE_FILTER_HINT,
   SOURCE_DELIM,
   buildControlOptions,
   buildKindOptions,
@@ -818,6 +819,17 @@ function EvidencePageInner() {
             224 banner above the controls table). The banner fires when
             the tenant has more cells than `SCOPE_CELL_CAP`; the
             dropdown still works for the first 50 cells. */}
+        {/* #2771 — the Scope filter matches the scope a record was
+            pushed with; older records carry none and drop out, so say
+            so while the filter is narrowing. */}
+        {filters.scopeCellId !== ALL ? (
+          <p
+            className="mb-3 text-xs text-muted-foreground"
+            data-testid="evidence-scope-hint"
+          >
+            {SCOPE_FILTER_HINT}
+          </p>
+        ) : null}
         {scopeCellsCapped ? (
           <Alert data-testid="evidence-scope-cells-capped" className="mb-3">
             <AlertTitle>
