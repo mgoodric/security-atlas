@@ -370,9 +370,20 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	if err := s.configErr(); err != nil {
 		return err
 	}
+	// #2555: without the OPA engine the authz middleware is skipped and the
+	// combined views (calendar.ReadableTypes, needs-attention) admit every
+	// item type. That is the unit-server shape; a served binary refuses it.
+	if s.authzEngine == nil {
+		return errors.New("api: HTTP server requires an authz engine (call Server.AttachAuthz before RunHTTP)")
+	}
+	handler := s.httpHandler()
+	// #2555: an unwired Views admits every module (moduleaccess.Views.For).
+	if !s.moduleViews.Wired() {
+		return errors.New("api: HTTP server built without module views; the combined views would show every module")
+	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           s.httpHandler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)
