@@ -294,10 +294,10 @@ mappings:
     strength: 0.9
     rationale: "Facility entry controls for the CDE map to SCF Physical Access Control — shared with SOC 2 CC6.4 and ISO A.7.2."
   - requirement_code: 9.4.1
-    scf_anchor: DCH-27
-    relationship_type: intersects_with
-    strength: 0.7
-    rationale: "Physically securing media containing cardholder data overlaps with SCF Media & Data Retention."
+    scf_anchor: DCH-14
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Physically securing all media with cardholder data maps to SCF Physically Secure All Media Containing Sensitive / Regulated Data (DCH-14), which SCF 2026.3 itself maps to PCI DSS 4.0.1 9.4.1."
   # --- Req 10: Log and monitor ---
   - requirement_code: 10.2.1
     scf_anchor: MON-04

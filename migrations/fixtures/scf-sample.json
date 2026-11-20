@@ -176,6 +176,12 @@
       "description": "Data and assets are classified by sensitivity, and each class has handling rules."
     },
     {
+      "scf_id": "DCH-14",
+      "family": "DCH",
+      "title": "Physically Secure All Media Containing Sensitive / Regulated Data",
+      "description": "Media holding sensitive or regulated data are kept under physical protection, such as locked storage or controlled areas."
+    },
+    {
       "scf_id": "DCH-16",
       "family": "DCH",
       "title": "Media Transportation",
