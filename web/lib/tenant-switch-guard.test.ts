@@ -18,6 +18,11 @@
 //   3. The server code that writes the atlas_jwt cookie is the known
 //      list below, each entry naming the client reset that covers it.
 //      A new writer fails here until someone names its reset.
+//   4. No setQueryData() inside a mutate(vars, { onSuccess }) call.
+//      tenantGuardedMutationCache() stops useMutation's own onSuccess for
+//      a mutation that started before a switch, but cannot reach a
+//      callback passed to mutate(); a cache write there would land in
+//      the new tenant's view.
 //
 // The scan reads code, not comments, the same way
 // lib/no-origin-self-fetch.test.ts does.
@@ -95,6 +100,39 @@ function missingResets(src: string): number {
   return Math.max(0, count(code, SWITCH_CALL) - count(code, RESET_CALL));
 }
 
+const MUTATE_CALL = /\.mutate(?:Async)?\(/g;
+
+/**
+ * The text of each mutate()/mutateAsync() call in src: from the opening
+ * paren to its match. Parens inside string literals are not special-cased;
+ * an unbalanced one ends the scan at the end of the file, which can only
+ * widen a call and so over-flag, never under-flag.
+ */
+function mutateCalls(src: string): string[] {
+  const calls: string[] = [];
+  for (const m of src.matchAll(MUTATE_CALL)) {
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let end = src.length;
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === "(") depth++;
+      else if (src[i] === ")" && --depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+    calls.push(src.slice(open, end));
+  }
+  return calls;
+}
+
+/** A mutate() call that writes the cache from its own onSuccess. */
+function writesFromMutateCallback(src: string): boolean {
+  return mutateCalls(stripComments(src)).some(
+    (call) => /\bonSuccess\b/.test(call) && /\bsetQueryData\b/.test(call),
+  );
+}
+
 describe("#2715: every tenant-cookie path resets the browser query cache", () => {
   const files = SCANNED_DIRS.flatMap((d) => walk(join(WEB_ROOT, d)));
   const rel = (f: string) => relative(WEB_ROOT, f).split(sep).join("/");
@@ -164,6 +202,52 @@ describe("#2715: every tenant-cookie path resets the browser query cache", () =>
         "make sure the browser calls forgetTenantCaches() after it, then add " +
         "it to COOKIE_WRITERS with the reset that covers it.",
     ).toEqual(Object.keys(COOKIE_WRITERS).sort());
+  });
+
+  test("no mutate(vars, { onSuccess }) callback writes the query cache", () => {
+    // The scan does find mutate() calls with callbacks today.
+    expect(
+      [...code.values()].some((src) =>
+        mutateCalls(src).some((c) => /\bonSuccess\b/.test(c)),
+      ),
+    ).toBe(true);
+    const offenders = [...code]
+      .filter(([, src]) => writesFromMutateCallback(src))
+      .map(([p]) => p);
+    expect(
+      offenders,
+      "These files call setQueryData from a callback passed to mutate(). " +
+        "A mutation in flight across a tenant switch still runs that " +
+        "callback (tenantGuardedMutationCache cannot reach it), writing the " +
+        "old tenant's data. Move the write into useMutation's onSuccess.",
+    ).toEqual([]);
+  });
+
+  test("the mutate-callback detector sees a write and nothing else", () => {
+    const bad = [
+      "save.mutate(days, {",
+      "  onSuccess: (d) => {",
+      '    qc.setQueryData(["risks", "review-cadence"], d);',
+      "  },",
+      "});",
+    ].join("\n");
+    expect(writesFromMutateCallback(bad)).toBe(true);
+    expect(
+      writesFromMutateCallback(
+        "await save.mutateAsync(x, { onSuccess: () => qc.setQueryData(k, (p) => p) });",
+      ),
+    ).toBe(true);
+
+    const invalidates =
+      "save.mutate(days, { onSuccess: () => qc.invalidateQueries({ queryKey: k }) });";
+    expect(writesFromMutateCallback(invalidates)).toBe(false);
+
+    // A write in useMutation's own onSuccess is the guarded form.
+    const guarded = [
+      "useMutation({ mutationFn: save, onSuccess: (d) => qc.setQueryData(k, d) });",
+      "save.mutate(days);",
+    ].join("\n");
+    expect(writesFromMutateCallback(guarded)).toBe(false);
   });
 
   test("the detector counts a switch with no reset (guards against a dead regex)", () => {
