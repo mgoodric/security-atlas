@@ -1,10 +1,15 @@
 // #2621 — after a tenant switch no cached view renders the old tenant's
 // data: every query shows its loading state, then the new tenant's.
 
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import {
+  MutationObserver,
+  QueryClient,
+  QueryObserver,
+} from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
 import { peopleDirectoryQuery } from "./people-cache";
+import { getQueryClient } from "./queryClient";
 import { forgetTenantCaches } from "./tenant-cache";
 
 const TENANT_A = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -48,5 +53,115 @@ describe("forgetTenantCaches", () => {
     expect(seen).not.toContain("tenant A title");
     expect(seen[0]).toBeUndefined();
     unsubscribe();
+  });
+
+  // #2715 — pins resetQueries' cancel of an in-flight fetch: an answer
+  // the old tenant asked for, arriving after the switch, never renders.
+  it("drops a tenant-A fetch that resolves after the reset", async () => {
+    const qc = new QueryClient();
+    const pending: Record<string, (v: string) => void> = {};
+    let tenant = "A";
+    const queryFn = () => {
+      const asked = tenant;
+      return new Promise<string>((resolve) => {
+        pending[asked] = resolve;
+      });
+    };
+    const observer = new QueryObserver(qc, { queryKey: ["title"], queryFn });
+    const seen: (string | undefined)[] = [];
+    const unsubscribe = observer.subscribe((r) => seen.push(r.data));
+    await vi.waitFor(() => expect(pending.A).toBeDefined());
+
+    tenant = "B";
+    forgetTenantCaches(qc);
+    await vi.waitFor(() => expect(pending.B).toBeDefined());
+    pending.A("tenant A title");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(observer.getCurrentResult().data).toBeUndefined();
+
+    pending.B("tenant B title");
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().data).toBe("tenant B title"),
+    );
+    expect(seen).not.toContain("tenant A title");
+    expect(qc.getQueryData(["title"])).toBe("tenant B title");
+    unsubscribe();
+  });
+});
+
+// #2715 — a mutation in flight across the switch does not write the old
+// tenant's response into the cache. These run the app's real QueryClient
+// (getQueryClient() builds a fresh one outside the browser) through a
+// MutationObserver, the path useMutation takes, so a change in
+// query-core's callback ordering fails here.
+describe("tenantGuardedMutationCache", () => {
+  function deferredMutation(qc: QueryClient, key: string[]) {
+    let resolve: ((v: string) => void) | undefined;
+    const settled = vi.fn();
+    const observer = new MutationObserver(qc, {
+      mutationFn: () =>
+        new Promise<string>((r) => {
+          resolve = r;
+        }),
+      onSuccess: (v: string) => {
+        qc.setQueryData(key, v);
+      },
+      onSettled: settled,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    const done = observer.mutate(undefined);
+    const started = () => vi.waitFor(() => expect(resolve).toBeDefined());
+    return {
+      observer,
+      done,
+      settled,
+      unsubscribe,
+      started,
+      resolve: (v: string) => resolve!(v),
+    };
+  }
+
+  it("drops the onSuccess of a mutation that started before the switch", async () => {
+    const qc = getQueryClient();
+    const m = deferredMutation(qc, ["risks", "review-cadence"]);
+    await m.started();
+
+    forgetTenantCaches(qc);
+    m.resolve("tenant A: 90 days");
+    await expect(m.done).resolves.toBe("tenant A: 90 days");
+
+    expect(qc.getQueryData(["risks", "review-cadence"])).toBeUndefined();
+    // The server write did succeed: no false "save failed".
+    expect(m.observer.getCurrentResult().status).toBe("success");
+    expect(m.observer.getCurrentResult().error).toBeNull();
+    // onSettled still runs, so UI resets (spinners, flags) still happen.
+    expect(m.settled).toHaveBeenCalledTimes(1);
+    m.unsubscribe();
+  });
+
+  it("lets a mutation that started after the switch write", async () => {
+    const qc = getQueryClient();
+    forgetTenantCaches(qc);
+    const m = deferredMutation(qc, ["vendors", "initial-review-window"]);
+    await m.started();
+
+    m.resolve("tenant B: 30 days");
+    await m.done;
+
+    expect(qc.getQueryData(["vendors", "initial-review-window"])).toBe(
+      "tenant B: 30 days",
+    );
+    expect(m.settled).toHaveBeenCalledTimes(1);
+    m.unsubscribe();
+  });
+
+  it("lets a mutation write when no switch happened", async () => {
+    const qc = getQueryClient();
+    const m = deferredMutation(qc, ["k"]);
+    await m.started();
+    m.resolve("same tenant");
+    await m.done;
+    expect(qc.getQueryData(["k"])).toBe("same tenant");
+    m.unsubscribe();
   });
 });

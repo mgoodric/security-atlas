@@ -16,10 +16,62 @@
 // /api/me/tenants answers, so the hash would need a second source of
 // truth for it. A reset on the one path that changes the tenant is
 // enough; sign-out and re-login are covered by <ForgetPreviousSession>.
+//
+// #2715 — a mutation in flight across the switch is the other way old
+// data gets back in: its onSuccess runs after the reset and writes the
+// old tenant's response into a key the new tenant's view reads (e.g.
+// ["risks", "review-cadence"]). Clearing the mutation cache does not stop
+// it; query-core calls options.onSuccess whether or not the mutation is
+// still cached. tenantGuardedMutationCache() drops that onSuccess instead.
+// See docs/audit-log/2715-tenant-switch-mutation-guard-decisions.md.
 
-import type { QueryClient } from "@tanstack/react-query";
+import {
+  MutationCache,
+  type Mutation,
+  type QueryClient,
+} from "@tanstack/react-query";
+
+// The tenant epoch of each guarded cache: bumped by every reset.
+const epochs = new WeakMap<MutationCache, number>();
+// The epoch each mutation started in.
+const startedIn = new WeakMap<Mutation<unknown, unknown, unknown>, number>();
 
 /** Resets every cached query, so nothing the old tenant fetched renders. */
 export function forgetTenantCaches(qc: QueryClient): void {
+  const mc = qc.getMutationCache();
+  epochs.set(mc, (epochs.get(mc) ?? 0) + 1);
   void qc.resetQueries();
+}
+
+/**
+ * The browser QueryClient's MutationCache. A mutation that started before
+ * the last forgetTenantCaches() keeps its result and its onSettled, but
+ * its onSuccess does not run, so it cannot write the old tenant's response
+ * into the cache.
+ *
+ * Callbacks passed to mutate(vars, { onSuccess }) live on the observer,
+ * which query-core keeps private, and are NOT stopped. Write to the cache
+ * from useMutation's own onSuccess (tenant-switch-guard.test.ts flags a
+ * setQueryData in the other form).
+ */
+export function tenantGuardedMutationCache(): MutationCache {
+  const cache: MutationCache = new MutationCache({
+    onMutate: (_variables, mutation) => {
+      startedIn.set(mutation, epochs.get(cache) ?? 0);
+    },
+    onSuccess: (_data, _variables, _context, mutation) => {
+      // Read from @tanstack/query-core 5.100.10, Mutation.execute: it
+      // awaits this config.onSuccess, THEN reads this.options.onSuccess,
+      // so replacing the options here is what stops the stale write. The
+      // late-write test in tenant-cache.test.ts runs the real
+      // QueryClient and fails if that ordering changes.
+      //
+      // A mutation with no stamp (restored from a persister, which this
+      // app does not use) counts as stale: fail closed.
+      if (startedIn.get(mutation) !== (epochs.get(cache) ?? 0)) {
+        mutation.setOptions({ ...mutation.options, onSuccess: undefined });
+      }
+    },
+  });
+  return cache;
 }
