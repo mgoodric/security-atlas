@@ -202,7 +202,7 @@ func (p *Persister) RevokeAudited(ctx context.Context, cred credstore.Credential
 			if err != nil {
 				return err
 			}
-			row, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tid, ID: keyID})
+			row, err := q.GetAPIKeyByIDForUpdate(ctx, dbx.GetAPIKeyByIDForUpdateParams{TenantID: tid, ID: keyID})
 			if err != nil {
 				return err
 			}

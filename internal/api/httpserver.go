@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -377,6 +376,7 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	if s.authzEngine == nil {
 		return errors.New("api: HTTP server requires an authz engine (call Server.AttachAuthz before RunHTTP)")
 	}
+	s.background.logger = s.installLogger()
 	handler := s.httpHandler()
 	// #2555: an unwired Views admits every module (moduleaccess.Views.For).
 	if !s.moduleViews.Wired() {
@@ -394,9 +394,11 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err := srv.Shutdown(shutdownCtx)
-		// No handler is running once Shutdown returns, so nothing adds to
-		// s.background while this waits (#2688).
-		if werr := waitBackground(shutdownCtx, &s.background); err == nil {
+		// A Shutdown that hit its deadline leaves handlers running. wait
+		// closes s.background before it waits, so a late Activate or
+		// Revoke runs its re-evaluation untracked instead of adding to the
+		// group mid-Wait (#2688, #2748).
+		if werr := s.background.wait(shutdownCtx); err == nil {
 			err = werr
 		}
 		return err
@@ -405,23 +407,6 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 			return nil
 		}
 		return err
-	}
-}
-
-// waitBackground waits for wg, or until ctx is done, whichever is first. It
-// shares RunHTTP's shutdown grace, so a stuck re-evaluation cannot hold the
-// process open past it; it reports that case rather than hiding it.
-func waitBackground(ctx context.Context, wg *sync.WaitGroup) error {
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("api: background work still running at shutdown: %w", ctx.Err())
 	}
 }
 
