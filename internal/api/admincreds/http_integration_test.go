@@ -501,3 +501,87 @@ func TestList_MintedByDropsKeysPastRotationGrace(t *testing.T) {
 		t.Errorf("minted_by list = %d items; want 3", len(resp.Items))
 	}
 }
+
+// #2656: an unbound key labelled admin, with a TTL, a scope and kinds, is a
+// tenant admin by its label. It mints and rotates only keys no wider than
+// itself, against the real store. Revoke is not bound: it grants nothing.
+func TestKeyCallerMintBound2656(t *testing.T) {
+	tenantID := uuid.New()
+	_, store, _ := newHandler(t, tenantID)
+	defer cleanupTenant(tenantID)
+	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	const prod = `{"op":"eq","dim":"environment","value":"prod"}`
+	kinds := []string{"sast.scan_result"}
+	issue := func(in apikeystore.IssueInput) credstore.Credential {
+		t.Helper()
+		c, _, err := store.Issue(ctx, tenantID.String(), in, apikeystore.Actor{})
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		return c
+	}
+	caller := issue(apikeystore.IssueInput{
+		OwnerRoles: []string{"admin"}, TTL: time.Hour, ScopePredicate: prod, AllowedKinds: kinds,
+	})
+	if caller.UserID != caller.ID {
+		t.Fatalf("caller key is bound (UserID %q); want an unbound key", caller.UserID)
+	}
+
+	h := admincreds.New(store)
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(w, req.WithContext(authctx.WithCredential(req.Context(), caller)))
+		})
+	})
+	r.Use(tenancymw.Middleware)
+	r.Post("/v1/admin/credentials", h.Issue)
+	r.Post("/v1/admin/credentials/{id}/rotate", h.Rotate)
+	r.Post("/v1/admin/credentials/{id}/revoke", h.Revoke)
+	do := func(path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		var buf []byte
+		if body != nil {
+			buf, _ = json.Marshal(body)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(buf)))
+		return w
+	}
+
+	for name, req := range map[string]admincreds.IssueRequest{
+		"never expires":     {TTLSeconds: 0, ScopePredicate: prod, AllowedKinds: kinds},
+		"outlives caller":   {TTLSeconds: 7200, ScopePredicate: prod, AllowedKinds: kinds},
+		"unrestricted":      {TTLSeconds: 60, AllowedKinds: kinds},
+		"every kind":        {TTLSeconds: 60, ScopePredicate: prod},
+		"another kind":      {TTLSeconds: 60, ScopePredicate: prod, AllowedKinds: []string{"access_review.completion"}},
+		"other environment": {TTLSeconds: 60, ScopePredicate: `{"op":"eq","dim":"environment","value":"staging"}`, AllowedKinds: kinds},
+	} {
+		if w := do("/v1/admin/credentials", req); w.Code != http.StatusForbidden {
+			t.Errorf("issue %s: want 403, got %d: %s", name, w.Code, w.Body.String())
+		}
+	}
+	narrower := admincreds.IssueRequest{
+		TTLSeconds:     60,
+		ScopePredicate: `{"op":"and","args":[` + prod + `,{"op":"eq","dim":"cloud_account","value":"aws:1"}]}`,
+		AllowedKinds:   kinds,
+	}
+	if w := do("/v1/admin/credentials", narrower); w.Code != http.StatusCreated {
+		t.Fatalf("issue a narrower key: want 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	wide := issue(apikeystore.IssueInput{})
+	if w := do("/v1/admin/credentials/"+wide.ID+"/rotate", nil); w.Code != http.StatusForbidden {
+		t.Errorf("rotate an unbounded key: want 403, got %d: %s", w.Code, w.Body.String())
+	}
+	within := issue(apikeystore.IssueInput{TTL: time.Minute, ScopePredicate: prod, AllowedKinds: kinds})
+	if w := do("/v1/admin/credentials/"+within.ID+"/rotate", nil); w.Code != http.StatusOK {
+		t.Errorf("rotate a key within the caller: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := do("/v1/admin/credentials/"+wide.ID+"/revoke", nil); w.Code != http.StatusNoContent {
+		t.Errorf("revoke an unbounded key: want 204, got %d: %s", w.Code, w.Body.String())
+	}
+}

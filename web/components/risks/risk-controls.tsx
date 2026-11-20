@@ -24,14 +24,18 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EntityMultiPicker } from "@/components/ui/entity-picker";
-import { ConfirmInline, useTriggerRefs } from "@/components/ui/row-actions";
+import {
+  ConfirmInline,
+  useFocusAfterRemoval,
+  useTriggerRefs,
+} from "@/components/ui/row-actions";
 import { useToast } from "@/components/ui/toast";
 import { fetchControlState } from "@/lib/api/control-detail";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
@@ -117,11 +121,19 @@ export function RiskControls({ risk, canEdit }: Props) {
   });
 
   const toLink = selected.filter((cid) => !linked.includes(cid));
+  const headingRef = useRef<HTMLDivElement>(null);
+  const removal = useFocusAfterRemoval(linked, {
+    get: unlinkTriggers.get,
+    fallback: () => headingRef.current,
+    settled: !unlink.isPending,
+  });
 
   return (
     <Card data-testid="risk-controls">
       <CardHeader className="flex flex-row items-center justify-between border-b">
-        <CardTitle>Linked controls</CardTitle>
+        <CardTitle ref={headingRef} tabIndex={-1}>
+          Linked controls
+        </CardTitle>
         {editable && !picking ? (
           <Button
             type="button"
@@ -177,7 +189,10 @@ export function RiskControls({ risk, canEdit }: Props) {
                     busy={unlink.isPending}
                     onCancel={() => setConfirming(null)}
                     returnFocus={() => unlinkTriggers.get(cid)}
-                    onConfirm={() => unlink.mutate(cid)}
+                    onConfirm={() => {
+                      removal.arm(cid);
+                      unlink.mutate(cid);
+                    }}
                     data-testid={`risk-controls-unlink-confirm-${cid}`}
                   />
                 ) : (

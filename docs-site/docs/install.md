@@ -12,7 +12,7 @@ The `deploy/docker/docker-compose.yml` bundle is the **whole platform on
 one host**: Postgres 16, NATS JetStream, MinIO, the `atlas` server, and
 the Next.js frontend. On first boot a one-shot `atlas-bootstrap`
 container applies migrations, seeds the default tenant + scope cell +
-local user, imports the SCF catalog, and uploads the 63 SOC 2 control
+local user, imports the SCF catalog, and uploads the 64 stock control
 bundles.
 
 No container runtime on the host? Follow the
@@ -165,7 +165,7 @@ new client.
   solo operator starts from. Add scope dimensions as your environment
   grows.
 - The full SCF catalog — the spine every framework maps through.
-- 63 SOC 2 control bundles — each is a control definition plus its
+- 64 stock control bundles — each is a control definition plus its
   `evidence_query`. Forkable as-is.
 
 ## Verifying your install
