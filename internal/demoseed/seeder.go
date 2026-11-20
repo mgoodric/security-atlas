@@ -202,6 +202,7 @@ type Result struct {
 	STRMEdges         int      // slice 682 / ATLAS-037 (posture spine: fw_to_scf_edges)
 	ControlsAnchored  int      // slice 682 / ATLAS-037 (controls carrying scf_anchor_id)
 	EvidenceKindsUsed []string // for D3 surface — which kinds got rows
+	SwitchedOn        []string // #2590: module and feature switches the seed turned on
 	Idempotent        bool     // true if no rows were INSERTed (already-seeded path)
 	InPlace           bool     // #1765: seeded into an existing tenant, not a new demo tenant
 	RecordedRows      int      // #1765: rows recorded in demo_seed_rows for teardown (in place only)
@@ -354,6 +355,12 @@ func (s *Seeder) writeDataset(ctx context.Context, tx pgx.Tx, fixtures *fixtureS
 	); err != nil {
 		return Result{}, err
 	}
+	// #2590: the modules that own the seeded rows are switched on in the
+	// same transaction, so the demo never holds data its pages refuse.
+	switchedOn, err := switchOnSeededModules(ctx, tx, fixtures.tenant.ID, in.ActorUserID)
+	if err != nil {
+		return Result{}, err
+	}
 
 	// Domain rows — each helper returns the number of rows it inserted
 	// so the Result is honest about scale.
@@ -467,6 +474,7 @@ func (s *Seeder) writeDataset(ctx context.Context, tx pgx.Tx, fixtures *fixtureS
 		STRMEdges:         edgeCount,
 		ControlsAnchored:  ctrlAnchored,
 		EvidenceKindsUsed: kindsUsed,
+		SwitchedOn:        switchedOn,
 	}, nil
 }
 
@@ -660,6 +668,13 @@ var teardownTables = []string{
 	"vendors",
 	"board_briefs",
 	"board_packs",
+	// #2590: the module switches the seed turned on, and their audit
+	// rows. No foreign key ties them to the tenant row, so a
+	// whole-tenant teardown sweeps them explicitly. In place, only a
+	// switch row the seed created is recorded, so teardown returns that
+	// switch to its default; a row the seed updated stays on.
+	"feature_flags",
+	"feature_flag_audit_log",
 	"me_audit_log",
 	"user_roles",
 	// api_keys carry the role-holder users' roster roles (slice 678).
