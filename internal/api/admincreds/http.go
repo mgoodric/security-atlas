@@ -409,8 +409,7 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 // caller (uuid.Nil for a caller that is not a user) and the acting
 // credential's principal (#2329).
 func auditActor(cred credstore.Credential) apikeystore.Actor {
-	u, _ := credstore.CallerUserID(cred)
-	return apikeystore.Actor{UserID: u, Principal: credstore.PrincipalOf(cred)}
+	return apikeystore.ActorOf(cred)
 }
 
 // mintWithinCaller reports why cred may not hold a key with these flags and

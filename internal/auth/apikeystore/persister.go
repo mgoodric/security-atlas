@@ -129,6 +129,98 @@ func (p *Persister) Revoke(id, tenantID string) error {
 	})
 }
 
+// InsertAudited is Insert with the api_key_issue audit row naming by
+// written in the same transaction (#2652), the gRPC admin twin of
+// Store.Issue.
+func (p *Persister) InsertAudited(ctx context.Context, rec credstore.PersistedCredential, by credstore.Credential) error {
+	ctx, cancel := context.WithTimeout(ctx, persistTimeout)
+	defer cancel()
+	tid, err := uuidToPg(rec.Cred.TenantID)
+	if err != nil {
+		return err
+	}
+	return p.withTenantTx(ctx, rec.Cred.TenantID, func(q *dbx.Queries) error {
+		if err := p.insertRow(ctx, q, rec); err != nil {
+			return err
+		}
+		return writeAudit(ctx, q, tid, ActorOf(by), AuditActionKeyIssue,
+			map[string]any{}, keyAuditOf(rec.Cred))
+	})
+}
+
+// RotateAudited is Rotate with the api_key_rotate audit row naming by
+// written in the same transaction (#2652), in Store.Rotate's shape. A
+// predecessor with no api_keys row (a memory-only bootstrap credential)
+// only gets its successor inserted; the row still records it.
+func (p *Persister) RotateAudited(ctx context.Context, successor credstore.PersistedCredential, predecessor credstore.Credential, predecessorPersisted bool, retiresAt time.Time, by credstore.Credential) error {
+	ctx, cancel := context.WithTimeout(ctx, persistTimeout)
+	defer cancel()
+	tid, err := uuidToPg(predecessor.TenantID)
+	if err != nil {
+		return err
+	}
+	return p.withTenantTx(ctx, predecessor.TenantID, func(q *dbx.Queries) error {
+		if err := p.insertRow(ctx, q, successor); err != nil {
+			return err
+		}
+		if predecessorPersisted {
+			predID, err := keyIDToPg(predecessor.ID)
+			if err != nil {
+				return err
+			}
+			if err := q.SetAPIKeyRetiresAt(ctx, dbx.SetAPIKeyRetiresAtParams{
+				TenantID:  tid,
+				ID:        predID,
+				RetiresAt: pgtype.Timestamptz{Time: retiresAt, Valid: true},
+			}); err != nil {
+				return err
+			}
+		}
+		retired := predecessor
+		retired.RetiresAt = retiresAt
+		return writeAudit(ctx, q, tid, ActorOf(by), AuditActionKeyRotate,
+			map[string]any{"predecessor": keyAuditOf(predecessor)},
+			map[string]any{"predecessor": keyAuditOf(retired), "successor": keyAuditOf(successor.Cred)})
+	})
+}
+
+// RevokeAudited is Revoke with the api_key_revoke audit row naming by
+// written in the same transaction (#2652), in Store.Revoke's shape. A key
+// whose row is already revoked (by another replica) changes nothing and
+// writes no row. A credential with no api_keys row gets the row only.
+func (p *Persister) RevokeAudited(ctx context.Context, cred credstore.Credential, persisted bool, by credstore.Credential) error {
+	ctx, cancel := context.WithTimeout(ctx, persistTimeout)
+	defer cancel()
+	tid, err := uuidToPg(cred.TenantID)
+	if err != nil {
+		return err
+	}
+	return p.withTenantTx(ctx, cred.TenantID, func(q *dbx.Queries) error {
+		cur := cred
+		if persisted {
+			keyID, err := keyIDToPg(cred.ID)
+			if err != nil {
+				return err
+			}
+			row, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tid, ID: keyID})
+			if err != nil {
+				return err
+			}
+			if row.RevokedAt.Valid {
+				return nil
+			}
+			if err := q.RevokeAPIKey(ctx, dbx.RevokeAPIKeyParams{TenantID: tid, ID: keyID}); err != nil {
+				return err
+			}
+			cur = credentialFromRow(row)
+		}
+		before := keyAuditOf(cur)
+		after := before
+		after.Revoked = true
+		return writeAudit(ctx, q, tid, ActorOf(by), AuditActionKeyRevoke, before, after)
+	})
+}
+
 // LoadActive returns every credential that should authenticate right now:
 // not revoked, not expired, not past its rotation grace. Runs on the
 // BYPASSRLS authPool because it executes at boot, before any tenant
@@ -281,3 +373,4 @@ func keyIDToPg(keyID string) (pgtype.UUID, error) {
 
 // Compile-time interface check.
 var _ credstore.Persister = (*Persister)(nil)
+var _ credstore.AuditedPersister = (*Persister)(nil)
