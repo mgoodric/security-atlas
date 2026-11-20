@@ -14,6 +14,11 @@ import (
 // the Go wire struct (#2394). Every other operation keeps the Ack
 // placeholder. The SCF remap review page's operations come first; add an
 // entry here when a web BFF module moves onto the generated types.
+//
+// The schema documents every slice as an array, never null, but
+// encoding/json writes a nil slice as null. A handler listed here must
+// allocate each slice it returns (make([]T, 0), not var s []T), and its
+// test should encode a real response and check for null arrays.
 var ResponseSchemas = []ResponseSchema{
 	{Method: "GET", Path: "/v1/controls/remap-proposals", Type: reflect.TypeOf(controls.RemapProposalsResponse{})},
 	{Method: "POST", Path: "/v1/controls/remap-proposals/approve-unchanged", Type: reflect.TypeOf(control.RemapBulkResult{})},

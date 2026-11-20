@@ -2,10 +2,15 @@ package openapi
 
 import (
 	"bytes"
+	"encoding/json"
+	"net"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type schemaInner struct {
@@ -82,6 +87,108 @@ func TestSchemaComponentsRefuseUnknownTypes(t *testing.T) {
 	withSchemas(t, []ResponseSchema{{Method: "GET", Path: "/x", Type: reflect.TypeOf(bad{})}}, nil)
 	if err := writeSchemaComponents(&bytes.Buffer{}); err == nil {
 		t.Fatal("want an error for a chan field")
+	}
+}
+
+type schemaEmbedded struct {
+	Extra string `json:"extra"`
+}
+
+type schemaWire struct {
+	*schemaEmbedded
+	ID      uuid.UUID       `json:"id"`
+	MaybeID *uuid.UUID      `json:"maybe_id"`
+	Raw     json.RawMessage `json:"raw"`
+	Blob    []byte          `json:"blob"`
+	Big     int64           `json:"big,string"`
+	MaybeN  *int            `json:"maybe_n,string"`
+	Flag    bool            `json:"flag,string,omitempty"`
+	Name    string          `json:"name,string"`
+}
+
+// #2622: types that encode themselves, ",string" and embedded pointers
+// are documented as encoding/json writes them.
+func TestSchemaComponentsFollowEncodingJSON(t *testing.T) {
+	withSchemas(t, []ResponseSchema{{Method: "GET", Path: "/x", Type: reflect.TypeOf(schemaWire{})}}, nil)
+	var buf bytes.Buffer
+	if err := writeSchemaComponents(&buf); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		// extra comes from a nil-able embedded pointer, so it is optional.
+		"      required:\n        - id\n        - maybe_id\n        - raw\n        - blob\n        - big\n        - maybe_n\n        - name\n      additionalProperties: false\n",
+		"        extra:\n          type: string\n",
+		"        id:\n          type: string\n          format: uuid\n",
+		"        maybe_id:\n          oneOf:\n            - type: \"null\"\n            - type: string\n              format: uuid\n",
+		"        raw:\n          {}\n",
+		"        blob:\n          type: string\n          contentEncoding: base64\n",
+		"        big:\n          type: string\n",
+		"        maybe_n:\n          oneOf:\n            - type: \"null\"\n            - type: string\n",
+		"        flag:\n          type: string\n",
+		"        name:\n          type: string\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("schema missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "schemaEmbedded:") {
+		t.Error("embedded pointer struct documented as its own component, not flattened")
+	}
+	if strings.Contains(got, "integer") {
+		t.Errorf("a uuid or ,string field documented as an integer:\n%s", got)
+	}
+
+	// The wire agrees: encoding/json writes each of these as a string.
+	n := 7
+	enc, err := json.Marshal(schemaWire{
+		schemaEmbedded: &schemaEmbedded{Extra: "e"},
+		ID:             uuid.New(),
+		Raw:            json.RawMessage(`{"a":1}`),
+		Blob:           []byte("hi"),
+		Big:            42,
+		MaybeN:         &n,
+		Flag:           true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(enc, &wire); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"extra", "id", "blob", "big", "maybe_n", "flag", "name"} {
+		if _, ok := wire[k].(string); !ok {
+			t.Errorf("encoding/json wrote %s as %T, the schema says string", k, wire[k])
+		}
+	}
+	if _, ok := wire["raw"].(map[string]any); !ok {
+		t.Errorf("encoding/json wrote raw as %T, want the embedded object", wire["raw"])
+	}
+}
+
+func TestSchemaComponentsRefuseUnmappedMarshalers(t *testing.T) {
+	type withPgtype struct {
+		At pgtype.Timestamptz `json:"at"`
+	}
+	type withText struct {
+		IP net.IP `json:"ip"`
+	}
+	type withPtr struct {
+		S *pgtype.Text `json:"s"`
+	}
+	type inSlice struct {
+		Xs []pgtype.UUID `json:"xs"`
+	}
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(withPgtype{}), reflect.TypeOf(withText{}),
+		reflect.TypeOf(withPtr{}), reflect.TypeOf(inSlice{}),
+	} {
+		withSchemas(t, []ResponseSchema{{Method: "GET", Path: "/x", Type: typ}}, nil)
+		err := writeSchemaComponents(&bytes.Buffer{})
+		if err == nil || !strings.Contains(err.Error(), "knownTypes") {
+			t.Errorf("%s: want a knownTypes error, got %v", typ, err)
+		}
 	}
 }
 
