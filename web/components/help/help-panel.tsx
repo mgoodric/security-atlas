@@ -25,6 +25,7 @@ import {
   useContext,
   useId,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -146,9 +147,20 @@ function LifecycleFigure({ lc }: { lc: HelpLifecycle }) {
   );
 }
 
+const subscribeNever = () => () => {};
+
 export function HelpButton() {
   const { mod, open, setOpen } = useHelp();
   const termsHeadingId = useId();
+  // #2752 — the SSR'd **?** is visible before PageShell's subtree
+  // hydrates, so a click in that window opens nothing. This reads false
+  // on the server and during hydration, true once hydrated; e2e waits on
+  // the `data-help-ready` attribute before clicking.
+  const ready = useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false,
+  );
 
   if (!mod) return null;
 
@@ -161,6 +173,7 @@ export function HelpButton() {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
         data-testid="help-button"
+        data-help-ready={ready ? "true" : undefined}
         aria-label={`How this works: ${mod.title}`}
         title="How this works"
         className={cn(

@@ -29,6 +29,7 @@ import type { Browser, Page } from "@playwright/test";
 
 import { ATLAS_JWT_COOKIE } from "../lib/auth";
 import { expect, test } from "./fixtures";
+import { clickHelp } from "./help";
 import { seedFromFixture } from "./seed";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000002157";
@@ -170,7 +171,7 @@ test("an assigned auditor works the period's population and evidence, and nothin
     .getByTestId("audit-period-bar")
     .getByTestId("help-button");
   await expect(help).toHaveAccessibleName("How this works: Audit workspace");
-  await help.click();
+  await clickHelp(help);
   await expect(auditor.getByTestId("help-panel")).toBeVisible();
   await auditor.keyboard.press("Escape");
   await auditor.context().close();
