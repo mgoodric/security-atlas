@@ -3,6 +3,7 @@
 // Coverage:
 //   - Categories: add, rename, archive and set default; delete is disabled,
 //     with the counts, for a category in use, and works for an unused one.
+//   - A keyboard delete moves focus to a neighbouring row (#2682).
 //   - Themes: create, rename and delete an organisation theme; built-in
 //     themes are labelled and have no edit controls.
 //   - A non-admin sees both lists and no edit control, and the page sends
@@ -273,6 +274,55 @@ test.describe("/risks/taxonomy (#1818)", () => {
     await expect(page.getByTestId("category-row-financial")).toHaveCount(0);
     expect(m.writes).toContain("DELETE /api/risks/categories/financial");
     expect(m.writes).not.toContain("DELETE /api/risks/categories/privacy");
+  });
+
+  // #2682 — a keyboard delete leaves focus on a neighbour, not <body>:
+  // the next row's Delete, else the previous row's (skipping disabled
+  // ones), else the list heading.
+  test("categories: a keyboard delete moves focus to a neighbour", async ({
+    authedPage: page,
+  }) => {
+    const m = newModel();
+    m.categories.push(category("legal", "Legal"));
+    await mockMe(page, ["admin"], true);
+    await mockTaxonomy(page, m);
+
+    await page.goto("/risks/taxonomy");
+    const section = page.getByTestId("taxonomy-categories");
+    await expect(section.getByTestId("category-row-financial")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Financial goes; Legal, the next row, takes focus.
+    await page.getByTestId("category-delete-financial").focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByTestId("category-delete-confirm-financial-cancel"),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      page.getByTestId("category-delete-confirm-financial-ok"),
+    ).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("category-row-financial")).toHaveCount(0);
+    await expect(page.getByTestId("category-delete-legal")).toBeFocused();
+
+    // Legal, now last, goes; the rows above can't be deleted (Privacy in
+    // use, Operational the default), so the heading takes focus.
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByTestId("category-delete-confirm-legal-cancel"),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("category-row-legal")).toHaveCount(0);
+    await expect(
+      section.getByRole("heading", { name: "Categories" }),
+    ).toBeFocused();
+    expect(m.writes).toEqual([
+      "DELETE /api/risks/categories/financial",
+      "DELETE /api/risks/categories/legal",
+    ]);
   });
 
   test("themes: create, rename, delete; built-ins are read-only", async ({
