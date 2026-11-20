@@ -37,8 +37,23 @@ func TestAssess_Verdicts(t *testing.T) {
 		want CoverageResult
 	}{
 		{
-			"default-deny-ingress-pass",
+			// #2745: default-deny in one direction leaves the other open.
+			"default-deny-ingress-only-fail",
 			RawNamespace{Name: "prod", Policies: []RawPolicy{defaultDenyIngress()}},
+			ResultFail,
+		},
+		{
+			"default-deny-egress-only-fail",
+			RawNamespace{Name: "prod", Policies: []RawPolicy{{
+				Name: "deny-egress", PolicyTypes: []string{PolicyTypeEgress}, SelectsAllPods: true,
+			}}},
+			ResultFail,
+		},
+		{
+			"default-deny-split-across-policies-pass",
+			RawNamespace{Name: "prod", Policies: []RawPolicy{defaultDenyIngress(), {
+				Name: "deny-egress", PolicyTypes: []string{PolicyTypeEgress}, SelectsAllPods: true,
+			}}},
 			ResultPass,
 		},
 		{
@@ -208,8 +223,17 @@ func TestAssess_CNIPolicyEstablishesDefaultDeny(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Assess: %v", err)
 			}
-			if got[0].Result != ResultPass {
-				t.Fatalf("CNI default-deny should PASS; got %q (%s)", got[0].Result, got[0].Reason)
+			c := got[0]
+			credited := c.DefaultDenyIngress
+			if tc.dir == PolicyTypeEgress {
+				credited = c.DefaultDenyEgress
+			}
+			if !credited {
+				t.Fatalf("CNI default-deny %s not credited; got %+v", tc.dir, c)
+			}
+			// One direction only, so the namespace still fails (#2745).
+			if c.Result != ResultFail {
+				t.Fatalf("one-direction CNI default-deny should FAIL; got %q (%s)", c.Result, c.Reason)
 			}
 		})
 	}

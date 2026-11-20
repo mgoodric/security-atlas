@@ -161,7 +161,7 @@ record.`,
 	cmd.Flags().StringVar(&f.apiServer, "api-server", "", "Kubernetes API server URL (env: KUBERNETES_API_SERVER)")
 	cmd.Flags().StringVar(&f.rbacControl, "rbac-control", "scf:IAC-10", "control_id to attach to k8s.rbac_binding.v1 records")
 	cmd.Flags().StringVar(&f.workloadControl, "workload-control", "scf:CFG-04", "control_id to attach to k8s.workload_security_context.v1 records")
-	cmd.Flags().StringVar(&f.netpolControl, "netpol-control", "scf:NET-06", "control_id to attach to k8s.networkpolicy_coverage.v1 records")
+	cmd.Flags().StringVar(&f.netpolControl, "netpol-control", "network_segmentation_default_deny", "control_id to attach to k8s.networkpolicy_coverage.v1 records (default: the stock NET-06 segmentation control's bundle id)")
 	cmd.Flags().StringVar(&f.pssControl, "pss-control", "scf:CFG-04", "control_id to attach to k8s.pod_security_admission.v1 records")
 	cmd.Flags().StringVar(&f.secretControl, "secret-control", "scf:CRY-02", "control_id to attach to k8s.secret_inventory.v1 records")
 	cmd.Flags().StringVar(&f.webhookControl, "webhook-control", "scf:CFG-04", "control_id to attach to k8s.admission_webhook.v1 records")
