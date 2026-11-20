@@ -59,7 +59,9 @@
 // is NEVER written as a literal in this file (no `eyJ*` literal that
 // GitGuardian would flag).
 
-import { expect, test, type Page } from "./fixtures";
+import type { Page } from "@playwright/test";
+
+import { expect, test } from "./fixtures";
 import { seedFromFixture } from "./seed";
 
 const TENANT_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
