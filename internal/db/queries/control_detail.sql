@@ -41,7 +41,8 @@
 -- the population draw resolve. The handler sets it for a period-scoped
 -- caller; every other caller keeps the slice-012 OR resolution.
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash, result
+       observed_at, evidence_kind, provenance, hash, result,
+       source_attribution
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3))
@@ -91,7 +92,8 @@ WHERE tenant_id = $1
 -- Window default (last 30 days) is still applied by the handler, not the
 -- query — the handler passes the resolved cutoff timestamps verbatim.
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash, result
+       observed_at, evidence_kind, provenance, hash, result,
+       source_attribution
 FROM evidence_records
 WHERE tenant_id = $1
   AND observed_at >= $2

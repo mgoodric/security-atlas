@@ -29,7 +29,7 @@
 //     - `since`: preset window key (`24h` / `7d` / `30d` / `audit`),
 //       mapped to an RFC3339 cutoff client-side via `sinceCutoff`.
 
-import type { Anchor } from "@/lib/api/anchors";
+import type { AnchorWithState } from "@/lib/api/anchors";
 import type { ScopeCell } from "@/lib/api/controls-list";
 import type { EvidenceResultEnum } from "@/lib/api/evidence";
 import { enumLabel } from "@/lib/labels/enum-labels";
@@ -44,7 +44,7 @@ export const ALL = "all" as const;
 export const NONE = "" as const;
 
 export type EvidenceFilters = {
-  /** Selected control anchor id (UUID), or `NONE` for "no control filter"
+  /** Selected tenant control id (UUID), or `NONE` for "no control filter"
    *  (tenant-wide list). Post-slice-106 the page is happy to render a
    *  tenant-wide list when `NONE`. */
   controlId: string;
@@ -133,15 +133,22 @@ export function clearFilters(): EvidenceFilters {
  * Slice 106: the first option is "All controls" (NONE — meaning the
  * tenant-wide path), rather than the slice-099 "Select a control…"
  * gate. The rest are anchors sorted by scf_id for stable ordering.
+ *
+ * #2771: the option value is the tenant control behind the anchor
+ * (`control_id`), because `GET /v1/evidence?control_id=` matches the
+ * tenant control id, not the SCF anchor id. An anchor with no tenant
+ * control has no evidence to narrow to and is left out.
  */
 export function buildControlOptions(
-  anchors: Anchor[],
+  anchors: AnchorWithState[],
 ): { value: string; label: string }[] {
-  const sorted = [...anchors].sort((a, b) => a.scf_id.localeCompare(b.scf_id));
+  const sorted = anchors
+    .filter((a) => typeof a.control_id === "string" && a.control_id !== "")
+    .sort((a, b) => a.scf_id.localeCompare(b.scf_id));
   return [
     { value: NONE, label: "All controls" },
     ...sorted.map((a) => ({
-      value: a.id,
+      value: a.control_id as string,
       label: `${a.scf_id} · ${a.name}`,
     })),
   ];

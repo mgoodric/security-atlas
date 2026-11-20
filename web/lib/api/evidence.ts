@@ -33,6 +33,10 @@ export type EvidenceRecord = {
   // by connector — we render a summary client-side. `null` when the row
   // has no provenance metadata recorded.
   source: Record<string, unknown> | null;
+  // #2771: the pusher's actor claim ({actor_type, actor_id, session_id}),
+  // what the Source column shows and the source_actor_* filters match.
+  // `null` when the record carries none.
+  source_attribution: Record<string, unknown> | null;
   content_hash: string;
   scope_cell: string | null;
   /**

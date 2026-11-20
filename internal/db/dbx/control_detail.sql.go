@@ -245,7 +245,8 @@ func (q *Queries) ListControlEvaluationHistoryPaged(ctx context.Context, arg Lis
 const listEvidenceForControlPaged = `-- name: ListEvidenceForControlPaged :many
 
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash, result
+       observed_at, evidence_kind, provenance, hash, result,
+       source_attribution
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3))
@@ -272,16 +273,17 @@ type ListEvidenceForControlPagedParams struct {
 }
 
 type ListEvidenceForControlPagedRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	ControlID    pgtype.UUID        `json:"control_id"`
-	ControlRef   string             `json:"control_ref"`
-	ScopeID      pgtype.UUID        `json:"scope_id"`
-	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
-	EvidenceKind *string            `json:"evidence_kind"`
-	Provenance   []byte             `json:"provenance"`
-	Hash         string             `json:"hash"`
-	Result       EvidenceResult     `json:"result"`
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ControlID         pgtype.UUID        `json:"control_id"`
+	ControlRef        string             `json:"control_ref"`
+	ScopeID           pgtype.UUID        `json:"scope_id"`
+	ObservedAt        pgtype.Timestamptz `json:"observed_at"`
+	EvidenceKind      *string            `json:"evidence_kind"`
+	Provenance        []byte             `json:"provenance"`
+	Hash              string             `json:"hash"`
+	Result            EvidenceResult     `json:"result"`
+	SourceAttribution []byte             `json:"source_attribution"`
 }
 
 // Slice 064 — control-detail backend read endpoints.
@@ -356,6 +358,7 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 			&i.Provenance,
 			&i.Hash,
 			&i.Result,
+			&i.SourceAttribution,
 		); err != nil {
 			return nil, err
 		}
@@ -369,7 +372,8 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 
 const listEvidencePaged = `-- name: ListEvidencePaged :many
 SELECT id, tenant_id, control_id, control_ref, scope_id,
-       observed_at, evidence_kind, provenance, hash, result
+       observed_at, evidence_kind, provenance, hash, result,
+       source_attribution
 FROM evidence_records
 WHERE tenant_id = $1
   AND observed_at >= $2
@@ -407,16 +411,17 @@ type ListEvidencePagedParams struct {
 }
 
 type ListEvidencePagedRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	TenantID     pgtype.UUID        `json:"tenant_id"`
-	ControlID    pgtype.UUID        `json:"control_id"`
-	ControlRef   string             `json:"control_ref"`
-	ScopeID      pgtype.UUID        `json:"scope_id"`
-	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
-	EvidenceKind *string            `json:"evidence_kind"`
-	Provenance   []byte             `json:"provenance"`
-	Hash         string             `json:"hash"`
-	Result       EvidenceResult     `json:"result"`
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ControlID         pgtype.UUID        `json:"control_id"`
+	ControlRef        string             `json:"control_ref"`
+	ScopeID           pgtype.UUID        `json:"scope_id"`
+	ObservedAt        pgtype.Timestamptz `json:"observed_at"`
+	EvidenceKind      *string            `json:"evidence_kind"`
+	Provenance        []byte             `json:"provenance"`
+	Hash              string             `json:"hash"`
+	Result            EvidenceResult     `json:"result"`
+	SourceAttribution []byte             `json:"source_attribution"`
 }
 
 // Slice 106: tenant-wide evidence ledger window with optional filters. Used
@@ -476,6 +481,7 @@ func (q *Queries) ListEvidencePaged(ctx context.Context, arg ListEvidencePagedPa
 			&i.Provenance,
 			&i.Hash,
 			&i.Result,
+			&i.SourceAttribution,
 		); err != nil {
 			return nil, err
 		}

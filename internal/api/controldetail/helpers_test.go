@@ -458,6 +458,8 @@ func TestEvidenceWireFrom_RoundTrip(t *testing.T) {
 		Provenance:   []byte(`{"connector_id":"aws"}`),
 		Hash:         "sha256:abc",
 		Result:       dbx.EvidenceResultPass,
+		// #2771: the actor claim the Source column and pill read.
+		SourceAttribution: []byte(`{"actor_type":"connector","actor_id":"aws"}`),
 	}
 	out := evidenceWireFrom(row)
 	if out.EvidenceID != id.String() {
@@ -480,6 +482,9 @@ func TestEvidenceWireFrom_RoundTrip(t *testing.T) {
 	}
 	if string(out.Source) != `{"connector_id":"aws"}` {
 		t.Fatalf("Source = %q, want passthrough", string(out.Source))
+	}
+	if string(out.SourceAttribution) != `{"actor_type":"connector","actor_id":"aws"}` {
+		t.Fatalf("SourceAttribution = %q, want passthrough", string(out.SourceAttribution))
 	}
 }
 
@@ -512,13 +517,14 @@ func TestEvidenceWireFromListRow_RoundTrip(t *testing.T) {
 	scopeID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
 	kind := "access_review.completion.v1"
 	row := dbx.ListEvidencePagedRow{
-		ID:           pgUUID(id),
-		ScopeID:      pgUUID(scopeID),
-		ObservedAt:   pgTimestamptz(time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC)),
-		EvidenceKind: &kind,
-		Provenance:   []byte(`{"runner":"r1"}`),
-		Hash:         "sha256:xyz",
-		Result:       dbx.EvidenceResultInconclusive,
+		ID:                pgUUID(id),
+		ScopeID:           pgUUID(scopeID),
+		ObservedAt:        pgTimestamptz(time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC)),
+		EvidenceKind:      &kind,
+		Provenance:        []byte(`{"runner":"r1"}`),
+		Hash:              "sha256:xyz",
+		Result:            dbx.EvidenceResultInconclusive,
+		SourceAttribution: []byte(`{"actor_type":"user","actor_id":"u1"}`),
 	}
 	out := evidenceWireFromListRow(row)
 	if out.EvidenceID != id.String() {
@@ -532,6 +538,9 @@ func TestEvidenceWireFromListRow_RoundTrip(t *testing.T) {
 	}
 	if out.ScopeCell == nil || *out.ScopeCell != scopeID.String() {
 		t.Fatalf("ScopeCell = %v, want %q", out.ScopeCell, scopeID.String())
+	}
+	if string(out.SourceAttribution) != `{"actor_type":"user","actor_id":"u1"}` {
+		t.Fatalf("SourceAttribution = %q, want passthrough", string(out.SourceAttribution))
 	}
 }
 
