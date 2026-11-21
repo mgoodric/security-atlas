@@ -255,7 +255,7 @@ func TestUnifiedAuditLog_RiskRowsCarryNoFieldValues_1954(t *testing.T) {
 	}
 
 	// OPA, which denies these roles /v1/risks in production
-	// (policies/authz), is not wired in test servers, so that denial is
+	// (internal/authz/rego_bundle), is not wired in test servers, so that denial is
 	// not asserted here. What is asserted is that the audit surfaces
 	// these roles can read never carry the values.
 

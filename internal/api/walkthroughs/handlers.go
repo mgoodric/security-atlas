@@ -12,7 +12,7 @@
 //   - Write paths (POST) require IsAdmin OR OwnerRoles contains
 //     "grc_engineer". The slice-035 OPA middleware also enforces
 //     resource_type="walkthroughs" + the period-assignment ABAC predicate
-//     for auditors (per policies/authz/auditor.rego, added by this slice).
+//     for auditors (per internal/authz/rego_bundle/auditor.rego, added by this slice).
 //   - Read paths additionally allow the "auditor" role (period-scoped via
 //     the OPA layer).
 //

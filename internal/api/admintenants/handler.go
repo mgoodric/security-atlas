@@ -7,7 +7,7 @@
 //
 // Authority gate: super_admin only (slice 143 P0-CT-1). The handler
 // reads `jwtmw.FromContext().SuperAdmin` as the load-bearing check;
-// the slice-035 OPA middleware via policies/authz/super_admin.rego is
+// the slice-035 OPA middleware via internal/authz/rego_bundle/super_admin.rego is
 // the second leg (the rego file extends the slice-142 super_admin
 // management surface to admit the `tenants` resource segment).
 //
