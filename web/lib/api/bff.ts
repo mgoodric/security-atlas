@@ -85,6 +85,12 @@ export const UPSTREAM_5XX_BODY = JSON.stringify({ error: "platform error" });
 // `err.Error()` there would put internals on the wire, so it is replaced
 // (#2704). upstreamErrorMessage already hides it in the browser; this keeps
 // it off the wire too. The status is unchanged.
+//
+// Every BFF relay goes through here; bff-relay-sites.test.ts fails on one
+// that does not (#2757). A 5xx `code` is masked with the rest: no web code
+// reads one today. If the UI comes to need one (e.g.
+// `module_state_unavailable`, #2744), allowlist that code here rather than
+// relaying raw 5xx bodies.
 export function upstreamBody(status: number, text: string): string {
   return status >= 500 ? UPSTREAM_5XX_BODY : text;
 }

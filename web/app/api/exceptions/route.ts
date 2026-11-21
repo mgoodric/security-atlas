@@ -17,7 +17,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { forwardJSON } from "@/lib/api/bff";
+import { forwardJSON, upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // FORWARD_PARAMS are the query keys the BFF is willing to forward to
@@ -54,7 +54,7 @@ export async function GET(req: Request): Promise<Response> {
     },
   );
   const body = await upstream.text();
-  return new NextResponse(body, {
+  return new NextResponse(upstreamBody(upstream.status, body), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

@@ -30,6 +30,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import {
   ATLAS_JWT_COOKIE,
   ATLAS_JWT_COOKIE_LIFETIME_SECONDS,
@@ -99,10 +100,13 @@ export async function POST(req: Request): Promise<Response> {
 
   if (!upstream.ok) {
     const text = await upstream.text();
-    return new NextResponse(text || `${upstream.status}`, {
-      status: upstream.status,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new NextResponse(
+      upstreamBody(upstream.status, text || `${upstream.status}`),
+      {
+        status: upstream.status,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   let parsed: { access_token?: string; expires_in?: number };

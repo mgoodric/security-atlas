@@ -24,7 +24,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { rejectNonUUID } from "@/lib/api/bff";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 import { parseBoundedForm, readBoundedUpload } from "@/lib/api/upload";
 
 // MAX_UPLOAD_BYTES mirrors questionnaire.MaxUploadBytes (5 MiB), which the
@@ -62,7 +62,7 @@ export async function POST(
     },
   );
   const text = await upstream.text();
-  return new NextResponse(text, {
+  return new NextResponse(upstreamBody(upstream.status, text), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });

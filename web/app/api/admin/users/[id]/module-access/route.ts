@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-import { rejectNonUUID } from "@/lib/api/bff";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,10 +47,15 @@ export async function PUT(
   );
   const text = await upstream.text();
   try {
-    return NextResponse.json(text ? JSON.parse(text) : null, {
+    return NextResponse.json(
+      text ? JSON.parse(upstreamBody(upstream.status, text)) : null,
+      {
+        status: upstream.status,
+      },
+    );
+  } catch {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
     });
-  } catch {
-    return new NextResponse(text, { status: upstream.status });
   }
 }

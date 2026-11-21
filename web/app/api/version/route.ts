@@ -15,6 +15,7 @@
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 
 export async function GET() {
   try {
@@ -26,7 +27,7 @@ export async function GET() {
       cache: "no-store",
     });
     const text = await upstream.text();
-    return new NextResponse(text, {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
       headers: {
         "Content-Type": "application/json",

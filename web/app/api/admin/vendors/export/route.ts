@@ -14,6 +14,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 const PASSTHROUGH_HEADERS = [
@@ -40,7 +41,7 @@ export async function GET(request: Request): Promise<Response> {
 
   if (!upstream.ok) {
     const text = await upstream.text();
-    return new NextResponse(text, {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
       headers: {
         "Content-Type":

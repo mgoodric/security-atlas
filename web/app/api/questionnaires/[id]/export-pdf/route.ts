@@ -18,7 +18,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-import { rejectNonUUID } from "@/lib/api/bff";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 
 export async function POST(
   _req: NextRequest,
@@ -45,6 +45,15 @@ export async function POST(
   // application/pdf — the upstream sets the right header.
   const contentType =
     upstream.headers.get("Content-Type") ?? "application/octet-stream";
+  if (!upstream.ok) {
+    return new NextResponse(
+      upstreamBody(upstream.status, await upstream.text()),
+      {
+        status: upstream.status,
+        headers: { "Content-Type": contentType },
+      },
+    );
+  }
   const buf = await upstream.arrayBuffer();
   return new NextResponse(buf, {
     status: upstream.status,
