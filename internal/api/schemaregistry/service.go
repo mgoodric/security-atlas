@@ -160,33 +160,71 @@ func (s *Service) LoadFromDB(ctx context.Context) error {
 	s.redaction = map[string][]string{}
 	s.cache = New(nil)
 	for _, r := range rows {
-		compiled, err := compileSchema(r.SchemaJson)
-		if err != nil {
-			return fmt.Errorf("compile %s/%s: %w", r.Kind, r.Semver, err)
-		}
-		key := cacheKey(r.Kind, r.Semver)
-		s.compiled[key] = compiled
-		s.byKey[key] = storedSchema{
+		if err := s.addGlobalLocked(storedSchema{
 			id:                r.ID,
 			kind:              r.Kind,
 			semver:            r.Semver,
 			schemaJSON:        r.SchemaJson,
 			owner:             r.Owner,
 			defaultSCFAnchors: r.DefaultScfAnchors,
+		}); err != nil {
+			return err
 		}
-		// Slice 015: extract x-redaction-rules. A malformed list is
-		// fatal at load — we'd rather refuse to start than silently
-		// fail-open on secret redaction.
-		rules, rerr := redact.ExtractRulesFromSchema(r.SchemaJson)
-		if rerr != nil {
-			return fmt.Errorf("redaction rules %s/%s: %w", r.Kind, r.Semver, rerr)
-		}
-		if len(rules) > 0 {
-			s.redaction[key] = rules
-		}
-		s.cache.Register(r.Kind, r.Semver)
 	}
 	return nil
+}
+
+// addGlobalLocked compiles one global schema row into the caches. The
+// caller holds s.mu for writing.
+func (s *Service) addGlobalLocked(row storedSchema) error {
+	compiled, err := compileSchema(row.schemaJSON)
+	if err != nil {
+		return fmt.Errorf("compile %s/%s: %w", row.kind, row.semver, err)
+	}
+	key := cacheKey(row.kind, row.semver)
+	s.compiled[key] = compiled
+	s.byKey[key] = row
+	// Slice 015: extract x-redaction-rules. A malformed list is
+	// fatal at load — we'd rather refuse to start than silently
+	// fail-open on secret redaction.
+	rules, rerr := redact.ExtractRulesFromSchema(row.schemaJSON)
+	if rerr != nil {
+		return fmt.Errorf("redaction rules %s/%s: %w", row.kind, row.semver, rerr)
+	}
+	if len(rules) > 0 {
+		s.redaction[key] = rules
+	}
+	s.cache.Register(row.kind, row.semver)
+	return nil
+}
+
+// NewEmbedded returns a Service with no database, holding only the
+// bundled platform schemas from root (normally PlatformSchemasFS()). Its
+// ValidatePayload is the code the push path runs, so a connector's tests
+// can check its payloads against the registered schema without Postgres
+// (#2815). Tenant-private kinds and every write method need the pool and
+// are unavailable: a lookup that would reach the database reports
+// ErrUnknownKind.
+func NewEmbedded(root fs.FS) (*Service, error) {
+	schemas, err := LoadPlatformSchemas(root)
+	if err != nil {
+		return nil, fmt.Errorf("load platform schemas: %w", err)
+	}
+	s := NewService(nil)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ps := range schemas {
+		if err := s.addGlobalLocked(storedSchema{
+			kind:              ps.Kind,
+			semver:            ps.Semver,
+			schemaJSON:        ps.SchemaJSON,
+			owner:             ps.Owner,
+			defaultSCFAnchors: ps.DefaultSCFAnchors,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return s, nil
 }
 
 // IsRegisteredForTenant implements ingest.TenantAwareRegistry (slice 015).
@@ -581,8 +619,9 @@ func (s *Service) lookupCompiled(ctx context.Context, tenantID, kind, version st
 	s.mu.RUnlock()
 
 	// Slow path: hit the DB. Lets a private kind registered via Register
-	// resolve without a full LoadFromDB refresh.
-	if tenantID != "" {
+	// resolve without a full LoadFromDB refresh. A NewEmbedded Service has
+	// no pool and stops here.
+	if tenantID != "" && s.pool != nil {
 		row, err := s.Get(ctx, tenantID, kind, version)
 		if err == nil && row.TenantID == tenantID {
 			compiled, err := compileSchema(row.SchemaJSON)
