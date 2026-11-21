@@ -4,7 +4,12 @@
 import { describe, expect, test } from "vitest";
 
 import { csfVersionFromFrameworks } from "@/lib/api/self.server";
-import { buildNav, NAV_GROUPS, type NavFacts } from "@/lib/nav";
+import {
+  buildNav,
+  NAV_GROUPS,
+  type NavFacts,
+  UNLISTED_ROUTES,
+} from "@/lib/nav";
 import { PAGE_TITLES } from "@/lib/page-titles";
 
 type State = "on" | "switched_off";
@@ -73,10 +78,7 @@ describe("buildNav — groups", () => {
         "Controls",
         ["Controls", "Evidence", "Exceptions", "Implementation checklist"],
       ],
-      [
-        "Risks",
-        ["Risk register", "Risk hierarchy", "Risk taxonomy", "Action plans"],
-      ],
+      ["Risks", ["Risk register", "Risk taxonomy", "Action plans"]],
       [
         "Audit",
         [
@@ -111,10 +113,23 @@ describe("buildNav — groups", () => {
     }
   });
 
-  test("every titled route is in exactly one group", () => {
+  test("every titled route is in exactly one group, or deliberately unlisted", () => {
     const routes = NAV_GROUPS.flatMap((g) => g.routes);
     expect(new Set(routes).size).toBe(routes.length);
-    expect([...routes].sort()).toEqual(Object.keys(PAGE_TITLES).sort());
+    for (const route of UNLISTED_ROUTES) {
+      expect(routes).not.toContain(route);
+    }
+    expect([...routes, ...UNLISTED_ROUTES].sort()).toEqual(
+      Object.keys(PAGE_TITLES).sort(),
+    );
+  });
+
+  // Slice 100 F-3 / #2774: the hierarchy opens from /risks, not the
+  // sidebar, for every caller.
+  test("Risk hierarchy is never listed", () => {
+    expect(
+      labels(facts({ me: ME.superAdmin, modules: ALL_ON, csfVersionId: CSF })),
+    ).not.toContain("Risk hierarchy");
   });
 
   test("CSF assessment links to the loaded framework version", () => {
@@ -168,8 +183,8 @@ describe("buildNav — gates", () => {
   // The restructure must not show a viewer or an auditor anything the
   // flat pre-#2081 nav hid: no Admin, no flag-gated entry with its flag
   // off. These are the entries such a caller saw before, under the new
-  // labels, plus the four pages that were URL-only (Exceptions,
-  // Implementation checklist, Risk hierarchy, Framework scopes).
+  // labels, plus the three pages that were URL-only (Exceptions,
+  // Implementation checklist, Framework scopes).
   for (const role of ["viewer", "auditor"] as const) {
     test(`${role}: no Admin and no gated entry with flags off`, () => {
       expect(labels(facts({ me: ME[role], modules: DEFAULTS }))).toEqual([
@@ -183,7 +198,6 @@ describe("buildNav — gates", () => {
         "Exceptions",
         "Implementation checklist",
         "Risk register",
-        "Risk hierarchy",
         "Risk taxonomy",
         "Action plans",
         "Audit periods",
