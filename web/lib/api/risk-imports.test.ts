@@ -174,6 +174,44 @@ describe("row fields", () => {
     ]);
   });
 
+  it("shows an accepted row as proposed, with its accepter as history (#2842)", () => {
+    expect(
+      mappedFields(
+        row({
+          treatment: "accept",
+          justification: "Fix costs more than the exposure",
+          proposed_until: "2027-06-30",
+          historical_accepter: "Jo",
+        }),
+      ),
+    ).toEqual([
+      ["Title", "Vendor outage"],
+      ["Category", "operational"],
+      ["Treatment", "accept (proposed)"],
+      ["Justification", "Fix costs more than the exposure"],
+      ["Proposed until", "2027-06-30"],
+      ["Accepter (historical)", "Jo"],
+    ]);
+  });
+
+  it("shows a downgraded treatment with the register's, and control links", () => {
+    expect(
+      mappedFields(
+        row({
+          treatment: "untreated",
+          requested_treatment: "mitigate",
+          linked_control_ids: [],
+          unresolved_controls: ["NO-SUCH"],
+        }),
+      ),
+    ).toEqual([
+      ["Title", "Vendor outage"],
+      ["Category", "operational"],
+      ["Treatment", "untreated (register: mitigate)"],
+      ["Unresolved controls", "NO-SUCH"],
+    ]);
+  });
+
   it("lists unmapped values by header, blanks left out", () => {
     expect(
       unmappedEntries(

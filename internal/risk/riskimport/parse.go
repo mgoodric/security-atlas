@@ -9,7 +9,8 @@
 //
 // The tracer (#2839) maps the organisation risk ID, title, description,
 // category and review due; #2841 adds the inherent and residual scores, read
-// in the shape of the batch's one methodology (scores.go). Every other
+// in the shape of the batch's one methodology (scores.go); #2842 adds the
+// treatment, acceptance and control links (treatment.go). Every other
 // column is kept on the staged row as an unmapped value and never written
 // into the description.
 package riskimport
@@ -90,9 +91,20 @@ type StagedRisk struct {
 	// InherentScore and ResidualScore are in the batch methodology's shape,
 	// as the risk will hold them; nil is unscored (a nil residual takes the
 	// create path's default).
-	InherentScore json.RawMessage   `json:"inherent_score,omitempty"`
-	ResidualScore json.RawMessage   `json:"residual_score,omitempty"`
-	Unmapped      map[string]string `json:"unmapped"`
+	InherentScore json.RawMessage `json:"inherent_score,omitempty"`
+	ResidualScore json.RawMessage `json:"residual_score,omitempty"`
+	// Treatment is the register's, read as written; staging downgrades a
+	// mitigate or transfer the row cannot back (applyTreatmentRules).
+	Treatment dbx.RiskTreatment `json:"treatment"`
+	// Justification and ProposedUntil are an accepted row's proposal.
+	Justification string     `json:"justification,omitempty"`
+	ProposedUntil *time.Time `json:"proposed_until,omitempty"`
+	// HistoricalAccepter is the register's accepter, kept as history: an
+	// import never records who accepted a risk (#2371).
+	HistoricalAccepter  string            `json:"historical_accepter,omitempty"`
+	InstrumentReference string            `json:"instrument_reference,omitempty"`
+	ControlRefs         []string          `json:"control_refs,omitempty"`
+	Unmapped            map[string]string `json:"unmapped"`
 }
 
 // RejectedRow is a data row that could not be staged, with the reason.
@@ -155,6 +167,20 @@ var fieldAliases = map[string][]string{
 	},
 	FieldResidualLossEventFrequency: {"residual_loss_event_frequency", "residual loss event frequency", "residual lef"},
 	FieldResidualLossMagnitude:      {"residual_loss_magnitude", "residual loss magnitude", "residual lm"},
+	FieldTreatment:                  {"treatment", "risk treatment", "treatment decision", "risk response"},
+	FieldJustification: {
+		"justification", "acceptance justification", "acceptance_justification", "acceptance rationale", "rationale",
+	},
+	FieldAcceptedUntil: {
+		"accepted_until", "accepted until", "accepted until date", "acceptance expiry", "acceptance expires",
+		"acceptance end date",
+	},
+	FieldAccepter:            {"accepter", "acceptor", "accepted by", "risk accepter", "risk acceptor"},
+	FieldInstrumentReference: {"instrument_reference", "instrument reference", "instrument", "transfer instrument", "transfer reference"},
+	FieldLinkedControls: {
+		"linked_controls", "linked controls", "linked_control_ids", "linked control ids", "controls",
+		"control ids", "mitigating controls",
+	},
 }
 
 // ParseCSV parses a risk register CSV into staged rows.
@@ -424,6 +450,7 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 	s := StagedRisk{RowNumber: rowNumber, Unmapped: map[string]string{}}
 	var reviewDue string
 	scoreCells := map[string]string{}
+	var tc treatmentCells
 	for i, c := range cols {
 		if i >= len(row) {
 			break
@@ -440,6 +467,18 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 			s.Category = val
 		case FieldReviewDue:
 			reviewDue = val
+		case FieldTreatment:
+			tc.treatment = val
+		case FieldJustification:
+			tc.justification = val
+		case FieldAcceptedUntil:
+			tc.acceptedUntil = val
+		case FieldAccepter:
+			tc.accepter = val
+		case FieldInstrumentReference:
+			tc.instrument = val
+		case FieldLinkedControls:
+			tc.controls = val
 		case "":
 			if c.key != "" && val != "" {
 				s.Unmapped[c.key] = val
@@ -476,6 +515,9 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 		return reject(RejectInvalidScore, detail)
 	}
 	s.InherentScore, s.ResidualScore = inherent, residual
+	if reason, detail, ok := readTreatment(&s, tc); !ok {
+		return reject(reason, detail)
+	}
 	if key != "" {
 		firstRowForRef[key] = rowNumber
 	}
