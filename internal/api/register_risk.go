@@ -8,10 +8,12 @@ import (
 	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
+	riskimportsapi "github.com/mgoodric/security-atlas/internal/api/risks/riskimports"
 	themesapi "github.com/mgoodric/security-atlas/internal/api/themes"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
+	"github.com/mgoodric/security-atlas/internal/risk/riskimport"
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
@@ -69,6 +71,12 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// routes (/aggregate, /{id}/aggregation) declared before the generic
 	// /v1/risks/{id} so chi's declaration-order match keeps them ahead.
 	root.Post("/v1/risks/aggregate", risksH.Aggregate)
+	// #2839: risk register import — upload a CSV/XLSX register, get back a
+	// staged batch (every row staged or rejected with a reason), and a
+	// person with approver rights approves the pending rows into risks
+	// through risksStore. Literal /v1/risks/imports segments, declared
+	// before the generic /v1/risks/{id}.
+	riskimportsapi.New(riskimport.NewStore(s.dbPool, risksStore)).RegisterRoutes(root)
 	root.Get("/v1/risks/{id}/aggregation", risksH.LiveAggregation)
 	// Slice 020: POST /v1/risks/{id}/controls — link a control to a risk.
 	// Literal-suffix route declared before the generic /v1/risks/{id} so
