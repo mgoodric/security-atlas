@@ -298,7 +298,8 @@ INSERT INTO policy_audit_log (
     policy_title, policy_version,
     previous_state, new_state,
     body_sha256, editors,
-    previous_linked_control_ids, new_linked_control_ids
+    previous_linked_control_ids, new_linked_control_ids,
+    previous_source_attribution
 )
 VALUES (
     sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
@@ -307,7 +308,8 @@ VALUES (
     sqlc.narg('policy_title'), sqlc.narg('policy_version'),
     sqlc.narg('previous_state'), sqlc.narg('new_state'),
     sqlc.narg('body_sha256'), sqlc.narg('editors'),
-    sqlc.narg('previous_linked_control_ids'), sqlc.narg('new_linked_control_ids')
+    sqlc.narg('previous_linked_control_ids'), sqlc.narg('new_linked_control_ids'),
+    sqlc.narg('previous_source_attribution')
 )
 RETURNING *;
 
@@ -572,3 +574,78 @@ WHERE tenant_id = sqlc.arg('tenant_id')
   AND status = 'published'
   AND sync_missing_since IS NOT NULL
 ORDER BY sync_missing_since, id;
+
+-- name: GetImportedPolicyForTakeover :one
+-- #2854 — on a page's first sync, the published imported policy in the
+-- tenant with the page's title, which the page takes over. The import
+-- does not chain versions, so a title can have several published imported
+-- rows: the one with the page's version wins, then the latest published.
+-- FOR UPDATE holds it against a concurrent run for another source, which
+-- then re-reads it as no longer imported.
+SELECT *
+FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'imported'
+  AND status = 'published'
+  AND title = sqlc.arg('title')
+ORDER BY (version = sqlc.arg('version')::text) DESC, published_at DESC NULLS LAST, id
+LIMIT 1
+FOR UPDATE;
+
+-- name: GetAuthoredPolicyByTitle :one
+-- #2854 — a policy authored in security-atlas (not imported, not synced)
+-- with the page's title, which a sync never takes over. Only read to say
+-- so in the run report.
+SELECT id, status
+FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution NOT IN ('imported', 'synced')
+  AND status <> 'superseded'
+  AND title = sqlc.arg('title')
+ORDER BY created_at DESC, id
+LIMIT 1;
+
+-- name: TakeOverImportedPolicy :one
+-- #2854 — the page's first sync carries the version an imported policy
+-- already has: the imported row becomes the page's synced row in place,
+-- so its acknowledgements and control links stay where they are. Its body
+-- and version are not rewritten. synced_body_sha256 is the hash of the
+-- body it was published with; a page body that differs is recorded as
+-- drift (sync_drift_body_sha256 non-NULL), as a later run would. The
+-- historical approver stays the import's. imported_by and imported_at are
+-- cleared, as policies_imported_fields_chk requires off imported rows.
+UPDATE policies
+SET source_attribution = 'synced',
+    imported_by = NULL,
+    imported_at = NULL,
+    source_url = sqlc.arg('source_url'),
+    sync_site = sqlc.arg('sync_site'),
+    sync_space = sqlc.arg('sync_space'),
+    sync_page_id = sqlc.arg('sync_page_id'),
+    synced_body_sha256 = sqlc.arg('synced_body_sha256'),
+    synced_by = sqlc.arg('synced_by'),
+    synced_at = now(),
+    sync_drift_detected_at = CASE WHEN sqlc.narg('sync_drift_body_sha256')::text IS NULL THEN NULL ELSE now() END,
+    sync_drift_body_sha256 = sqlc.narg('sync_drift_body_sha256'),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'imported'
+  AND status = 'published'
+RETURNING *;
+
+-- name: SupersedeImportedPolicy :one
+-- #2854 — the page's first sync carries a different version from the
+-- imported policy it takes over: the imported row is superseded, in the
+-- same transaction as InsertSyncedPolicy writes the synced version as its
+-- next version. It stays 'imported'. next_review_at is left as it was, as
+-- SupersedeSyncedPolicy leaves it.
+UPDATE policies
+SET status = 'superseded',
+    superseded_at = now(),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'imported'
+  AND status = 'published'
+RETURNING *;

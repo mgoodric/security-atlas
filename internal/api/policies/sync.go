@@ -66,9 +66,11 @@ type syncResultWire struct {
 	PolicyID string `json:"policy_id,omitempty"`
 	Version  string `json:"version,omitempty"`
 	// PredecessorID is the superseded policy a new_version result chains
-	// to (#2851).
+	// to (#2851), or the imported policy a taken_over result superseded
+	// as its next version (#2854).
 	PredecessorID string `json:"predecessor_id,omitempty"`
-	// DriftDetectedAt is when drift on a drift result was first seen.
+	// DriftDetectedAt is when drift on a drift result, or on a policy a
+	// taken_over result took over in place, was first seen.
 	DriftDetectedAt *time.Time `json:"drift_detected_at,omitempty"`
 	// MissingSince is when a run first found a missing result's page
 	// absent (#2853).
@@ -78,6 +80,7 @@ type syncResultWire struct {
 type syncRespWire struct {
 	Created    int              `json:"created"`
 	NewVersion int              `json:"new_version"`
+	TakenOver  int              `json:"taken_over"`
 	Unchanged  int              `json:"unchanged"`
 	Drift      int              `json:"drift"`
 	Skipped    int              `json:"skipped"`
@@ -92,7 +95,8 @@ type syncRespWire struct {
 // in internal/api authenticates the key for this path and refuses every
 // other caller, and the handler checks the purpose again. Each new page
 // becomes a published, synced policy, a version bump the next version
-// and a body change without one drift. A previously synced page absent
+// and a body change without one drift. A page's first sync takes over an
+// imported policy with its title (#2854). A previously synced page absent
 // from the push is reported missing and its policy left in force
 // (#2853); see policy.Store.Sync.
 //
@@ -220,10 +224,10 @@ func wireFromSyncReport(r policy.SyncReport) syncRespWire {
 		if res.Policy != nil {
 			rw.PolicyID = res.Policy.ID.String()
 			rw.Version = res.Policy.Version
-			if res.Status == policy.SyncStatusNewVersion && res.Policy.PredecessorID != nil {
+			if (res.Status == policy.SyncStatusNewVersion || res.Status == policy.SyncStatusTakenOver) && res.Policy.PredecessorID != nil {
 				rw.PredecessorID = res.Policy.PredecessorID.String()
 			}
-			if res.Status == policy.SyncStatusDrift {
+			if res.Status == policy.SyncStatusDrift || res.Status == policy.SyncStatusTakenOver {
 				rw.DriftDetectedAt = res.Policy.SyncDriftDetectedAt
 			}
 			if res.Status == policy.SyncStatusMissing {
@@ -235,6 +239,8 @@ func wireFromSyncReport(r policy.SyncReport) syncRespWire {
 			out.Created++
 		case policy.SyncStatusNewVersion:
 			out.NewVersion++
+		case policy.SyncStatusTakenOver:
+			out.TakenOver++
 		case policy.SyncStatusUnchanged:
 			out.Unchanged++
 		case policy.SyncStatusDrift:

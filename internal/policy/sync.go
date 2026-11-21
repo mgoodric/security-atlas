@@ -29,6 +29,12 @@ const (
 	// No version was written; the drift is recorded on the policy
 	// (#2851).
 	SyncStatusDrift = "drift"
+	// SyncStatusTakenOver: the page's first sync found a published,
+	// imported policy with its title, and took it over instead of starting
+	// a second history (#2854). With the same version the imported row
+	// became the page's synced row in place; with another version the
+	// synced version was published as its next version, superseding it.
+	SyncStatusTakenOver = "taken_over"
 	// SyncStatusSkipped: the page was not synced; Reason says why.
 	SyncStatusSkipped = "skipped"
 	// SyncStatusMissing: a page with a published synced policy is absent
@@ -43,6 +49,10 @@ const syncMissingReason = "the page is no longer in this source's labelled set: 
 
 // auditActionSynced is the policy_audit_log action for a synced write.
 const auditActionSynced = "synced"
+
+// auditActionSyncTakeover is the policy_audit_log action written on an
+// imported policy a page took over (#2854).
+const auditActionSyncTakeover = "sync_takeover"
 
 // SyncSource names where a sync run's pages come from: one Confluence site
 // and space. A page is identified by its id within its source.
@@ -88,6 +98,14 @@ type SyncReport struct {
 // without a version bump writes no version and records drift on the
 // policy instead (#2851). Drift clears when a later run's body matches
 // again or arrives with a new version.
+//
+// A page's first sync takes over a published, imported policy with the
+// page's title (#2854), so an adopter who imported before syncing keeps
+// one history per policy: the same version is taken over in place,
+// another version is published as its next version. A policy authored in
+// security-atlas is never taken over; the page starts a new policy and the
+// result's Reason says so. Each takeover writes a 'sync_takeover' audit
+// row on the imported policy naming its previous attribution and the key.
 //
 // The push is the source's full set, so a page with a published synced
 // policy that the run does not carry is missing (#2853): the row records
@@ -152,11 +170,9 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			})
 			switch {
 			case errors.Is(err, pgx.ErrNoRows):
-				written, err := syncCreate(ctx, q, tenantID, src, p, hash, keyID)
-				if err != nil {
+				if res, err = syncFirst(ctx, q, tenantID, src, p, hash, keyID); err != nil {
 					return err
 				}
-				res.Status, res.Policy = SyncStatusCreated, &written
 			case err != nil:
 				return fmt.Errorf("sync: look up page %q: %w", p.PageID, err)
 			case cur.Version != p.In.Version:
@@ -256,6 +272,155 @@ func syncMarkMissing(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, sr
 		})
 	}
 	return out, nil
+}
+
+// syncFirst handles a page with no synced policy in its source: it takes
+// over the tenant's published imported policy with the page's title, if
+// there is one, or else publishes the page as a new policy (#2854).
+func syncFirst(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string) (SyncResult, error) {
+	res := SyncResult{PageID: p.PageID, Title: p.In.Title}
+	imported, err := q.GetImportedPolicyForTakeover(ctx, dbx.GetImportedPolicyForTakeoverParams{
+		TenantID: pgUUID(tenantID), Title: p.In.Title, Version: p.In.Version,
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return res, fmt.Errorf("sync: look up imported policy for page %q: %w", p.PageID, err)
+	case imported.Version == p.In.Version:
+		taken, err := syncTakeOverInPlace(ctx, q, tenantID, src, p, imported, hash, keyID)
+		if err != nil {
+			return res, err
+		}
+		res.Status, res.Policy = SyncStatusTakenOver, &taken
+		res.Reason = fmt.Sprintf("took over imported policy %s (version %q) in place; it is now managed by this page", uuid.UUID(imported.ID.Bytes), imported.Version)
+		if taken.SyncDriftDetectedAt != nil {
+			res.Reason += ". The page body differs from the imported text, so it is reported as drift; bump the page's version to publish it"
+		}
+		return res, nil
+	default:
+		// The chain is linear, as for a synced version bump: an in-tool
+		// draft of the next version already holding the imported row's
+		// successor slot skips this page.
+		lock, err := q.LockSyncedPolicyForSuccessor(ctx, dbx.LockSyncedPolicyForSuccessorParams{
+			TenantID: pgUUID(tenantID), ID: imported.ID,
+		})
+		if err != nil {
+			return res, fmt.Errorf("sync: lock imported policy for page %q: %w", p.PageID, err)
+		}
+		if lock.SuccessorID.Valid {
+			existing := policyFromRow(imported)
+			status := ""
+			if lock.SuccessorStatus != nil {
+				status = *lock.SuccessorStatus
+			}
+			res.Status, res.Policy = SyncStatusSkipped, &existing
+			res.Reason = fmt.Sprintf("imported policy %s (version %q) already has a next version in security-atlas (policy %s, %s); discard it before version %q can take it over",
+				uuid.UUID(imported.ID.Bytes), imported.Version, uuid.UUID(lock.SuccessorID.Bytes), status, p.In.Version)
+			return res, nil
+		}
+		written, err := syncTakeOverAsNextVersion(ctx, q, tenantID, src, p, imported, hash, keyID)
+		if err != nil {
+			return res, err
+		}
+		res.Status, res.Policy = SyncStatusTakenOver, &written
+		res.Reason = fmt.Sprintf("took over imported policy %s (version %q); version %q is its next version and supersedes it", uuid.UUID(imported.ID.Bytes), imported.Version, p.In.Version)
+		return res, nil
+	}
+
+	written, err := syncCreate(ctx, q, tenantID, src, p, hash, keyID)
+	if err != nil {
+		return res, err
+	}
+	res.Status, res.Policy = SyncStatusCreated, &written
+	authored, err := q.GetAuthoredPolicyByTitle(ctx, dbx.GetAuthoredPolicyByTitleParams{
+		TenantID: pgUUID(tenantID), Title: p.In.Title,
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return res, fmt.Errorf("sync: look up authored policy for page %q: %w", p.PageID, err)
+	default:
+		res.Reason = fmt.Sprintf("policy %s (%s) has this title but was authored in security-atlas, so it was not taken over; this page started a new policy",
+			uuid.UUID(authored.ID.Bytes), authored.Status)
+	}
+	return res, nil
+}
+
+// syncTakeOverInPlace makes the imported row the page's synced row: same
+// id, version and body, so acknowledgements and control links stay on
+// it. A page body that differs from the imported text is recorded as
+// drift, since what staff acknowledged is not rewritten.
+func syncTakeOverInPlace(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, imported dbx.Policy, hash, keyID string) (Policy, error) {
+	rowHash := bodySHA256(imported.BodyMd)
+	var drift *string
+	if rowHash != hash {
+		drift = &hash
+	}
+	row, err := q.TakeOverImportedPolicy(ctx, dbx.TakeOverImportedPolicyParams{
+		TenantID:            pgUUID(tenantID),
+		ID:                  imported.ID,
+		SourceUrl:           stringPtr(p.In.SourceURL),
+		SyncSite:            &src.Site,
+		SyncSpace:           &src.Space,
+		SyncPageID:          &p.PageID,
+		SyncedBodySha256:    &rowHash,
+		SyncedBy:            &keyID,
+		SyncDriftBodySha256: drift,
+	})
+	if err != nil {
+		return Policy{}, fmt.Errorf("sync: take over imported policy for page %q: %w", p.PageID, err)
+	}
+	if err := syncAuditTakeover(ctx, q, tenantID, p, row, imported.SourceAttribution, keyID, &rowHash); err != nil {
+		return Policy{}, err
+	}
+	return policyFromRow(row), nil
+}
+
+// syncTakeOverAsNextVersion supersedes the imported row and publishes the
+// page's version as its next version, carrying its control links, as a
+// synced version bump does.
+func syncTakeOverAsNextVersion(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, imported dbx.Policy, hash, keyID string) (Policy, error) {
+	superseded, err := q.SupersedeImportedPolicy(ctx, dbx.SupersedeImportedPolicyParams{
+		TenantID: pgUUID(tenantID), ID: imported.ID,
+	})
+	if err != nil {
+		return Policy{}, fmt.Errorf("sync: supersede imported policy for page %q: %w", p.PageID, err)
+	}
+	links := imported.LinkedControlIds
+	if links == nil {
+		links = []pgtype.UUID{}
+	}
+	written, err := syncInsert(ctx, q, tenantID, src, p, hash, keyID, imported.ID, links)
+	if err != nil {
+		return Policy{}, err
+	}
+	if err := syncAuditTakeover(ctx, q, tenantID, p, superseded, imported.SourceAttribution, keyID, nil); err != nil {
+		return Policy{}, err
+	}
+	return written, nil
+}
+
+// syncAuditTakeover writes the 'sync_takeover' row on the taken-over
+// policy: the key as actor, the page id as source file, the page URL, and
+// the attribution the policy had before.
+func syncAuditTakeover(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, p SyncPage, row dbx.Policy, prevAttribution, keyID string, bodyHash *string) error {
+	if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+		TenantID:                  pgUUID(tenantID),
+		PolicyID:                  row.ID,
+		Action:                    auditActionSyncTakeover,
+		Actor:                     keyID,
+		SourceFile:                p.PageID,
+		HistoricalApproverName:    row.HistoricalApproverName,
+		HistoricalApprovedAt:      row.HistoricalApprovedAt,
+		SourceUrl:                 stringPtr(p.In.SourceURL),
+		PolicyTitle:               &row.Title,
+		PolicyVersion:             &row.Version,
+		BodySha256:                bodyHash,
+		PreviousSourceAttribution: &prevAttribution,
+	}); err != nil {
+		return fmt.Errorf("sync: takeover audit log: %w", err)
+	}
+	return nil
 }
 
 func syncCreate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string) (Policy, error) {

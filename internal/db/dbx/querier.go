@@ -870,6 +870,10 @@ type Querier interface {
 	// middleware. Returns just the period UUIDs so the resolver can stuff
 	// them into input.user.attrs.audit_period_ids without joining anything.
 	GetAuditPeriodIDsForUser(ctx context.Context, arg GetAuditPeriodIDsForUserParams) ([]pgtype.UUID, error)
+	// #2854 — a policy authored in security-atlas (not imported, not synced)
+	// with the page's title, which a sync never takes over. Only read to say
+	// so in the run report.
+	GetAuthoredPolicyByTitle(ctx context.Context, arg GetAuthoredPolicyByTitleParams) (GetAuthoredPolicyByTitleRow, error)
 	// Fetch one frozen brief by id. RLS scopes the lookup to the caller's
 	// tenant — a cross-tenant id returns ErrNoRows (the handler maps that to
 	// 404). The returned `content` + `narrative_md` are the verbatim frozen
@@ -1060,6 +1064,13 @@ type Querier interface {
 	// caller's tenant; a cross-tenant or non-component-definition id returns
 	// ErrNoRows.
 	GetImportedComponentDefinitionByID(ctx context.Context, arg GetImportedComponentDefinitionByIDParams) (ImportedCatalog, error)
+	// #2854 — on a page's first sync, the published imported policy in the
+	// tenant with the page's title, which the page takes over. The import
+	// does not chain versions, so a title can have several published imported
+	// rows: the one with the page's version wins, then the latest published.
+	// FOR UPDATE holds it against a concurrent run for another source, which
+	// then re-reads it as no longer imported.
+	GetImportedPolicyForTakeover(ctx context.Context, arg GetImportedPolicyForTakeoverParams) (Policy, error)
 	GetIncidentByID(ctx context.Context, arg GetIncidentByIDParams) (Incident, error)
 	// The engine's "when did this rule last fire, and into which window"
 	// lookup. Used to decide whether the current write falls inside an
@@ -4054,6 +4065,12 @@ type Querier interface {
 	// disambiguates that into a 409. The old row is never deleted (P0
 	// anti-criterion); only its status + superseded_by + updated_at change.
 	SupersedeDecision(ctx context.Context, arg SupersedeDecisionParams) (Decision, error)
+	// #2854 — the page's first sync carries a different version from the
+	// imported policy it takes over: the imported row is superseded, in the
+	// same transaction as InsertSyncedPolicy writes the synced version as its
+	// next version. It stays 'imported'. next_review_at is left as it was, as
+	// SupersedeSyncedPolicy leaves it.
+	SupersedeImportedPolicy(ctx context.Context, arg SupersedeImportedPolicyParams) (Policy, error)
 	// Part 1 of the two-step Publish: marks the prior 'published' row as
 	// 'superseded'. Used inside the same transaction as PublishApprovedPolicy
 	// (which publishes the successor row in place) so the chain transition is
@@ -4079,6 +4096,15 @@ type Querier interface {
 	// new version is what the page holds now. next_review_at is left as it
 	// was, as SupersedePolicyAtPublish leaves it (#2009).
 	SupersedeSyncedPolicy(ctx context.Context, arg SupersedeSyncedPolicyParams) (Policy, error)
+	// #2854 — the page's first sync carries the version an imported policy
+	// already has: the imported row becomes the page's synced row in place,
+	// so its acknowledgements and control links stay where they are. Its body
+	// and version are not rewritten. synced_body_sha256 is the hash of the
+	// body it was published with; a page body that differs is recorded as
+	// drift (sync_drift_body_sha256 non-NULL), as a later run would. The
+	// historical approver stays the import's. imported_by and imported_at are
+	// cleared, as policies_imported_fields_chk requires off imported rows.
+	TakeOverImportedPolicy(ctx context.Context, arg TakeOverImportedPolicyParams) (Policy, error)
 	// Names are unique across the built-ins and the tenant's own themes; the
 	// two partial unique indexes only cover each namespace on its own.
 	ThemeNameTaken(ctx context.Context, arg ThemeNameTakenParams) (bool, error)
