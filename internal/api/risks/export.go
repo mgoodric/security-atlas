@@ -155,6 +155,9 @@ type riskRow struct {
 	// names a user by their email's local-part.
 	OwnerUserID *uuid.UUID
 	OwnerName   string
+	// ExternalRef is the organisation's own risk ID, blank when unset
+	// (#2838).
+	ExternalRef string
 }
 
 // NewExportHandler constructs the slice 136 export handler. The pool
@@ -435,6 +438,9 @@ func riskExportHeader() []string {
 		// free-text treatment_owner. Appended for the same reason.
 		"owner_user_id",
 		"owner_name",
+		// #2838: the organisation's own risk ID. Appended for the same
+		// reason.
+		"external_ref",
 	}
 }
 
@@ -507,6 +513,7 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 				r.ClosureReason,
 				owner,
 				r.OwnerName,
+				r.ExternalRef,
 			}
 			if !yield(row) {
 				return
@@ -613,6 +620,9 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 		}
 		if r.ClosureReason != nil {
 			out[i].ClosureReason = string(*r.ClosureReason)
+		}
+		if r.ExternalRef != nil {
+			out[i].ExternalRef = *r.ExternalRef
 		}
 		if c, ok := categoryOf[uuid.UUID(r.CategoryID.Bytes)]; ok {
 			out[i].Category, out[i].CategoryName = c.Slug, c.Name

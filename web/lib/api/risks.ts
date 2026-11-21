@@ -42,6 +42,9 @@ export type Risk = {
   accepted_until?: string | null;
   accepter: string;
   instrument_reference: string;
+  // #2838: the organisation's own risk ID ("R-014"), or null when unset.
+  // Unique within the tenant.
+  external_ref?: string | null;
   linked_control_ids: string[];
   created_at: string;
   updated_at: string;
@@ -481,6 +484,8 @@ export type RiskCreateInput = {
   review_due_at?: string | null;
   instrument_reference?: string;
   linked_control_ids?: string[];
+  // #2838: the organisation's own risk ID, unique within the tenant (409).
+  external_ref?: string;
 };
 
 // ----- #2104: risk record editing + audit trail -----
@@ -501,6 +506,8 @@ export type RiskPatchInput = {
   owner_user_id?: string | null;
   review_due_at?: string;
   instrument_reference?: string;
+  // #2838: a string sets the organisation risk ID; null clears it.
+  external_ref?: string | null;
 };
 
 // One row of GET /v1/risks/{id}/audit-log, newest first. For

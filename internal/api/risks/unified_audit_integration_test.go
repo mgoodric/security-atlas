@@ -102,8 +102,9 @@ func TestUnifiedAuditLog_ShowsRiskRows_1954(t *testing.T) {
 				t.Errorf("fields_changed changed_fields = %s, want [title]", changed)
 			}
 		case "created":
-			// #2835: the risk's creation, naming its initial fields only.
-			if changed != "[category_id owner_user_id title treatment treatment_owner]" {
+			// #2835: the risk's creation, naming its initial fields only;
+			// external_ref joined them in #2838.
+			if changed != "[category_id external_ref owner_user_id title treatment treatment_owner]" {
 				t.Errorf("created changed_fields = %s", changed)
 			}
 		}
