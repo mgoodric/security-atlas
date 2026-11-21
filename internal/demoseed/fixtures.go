@@ -127,6 +127,7 @@ type evidenceFixture struct {
 	ObservedAt   time.Time
 	Result       string // pass | fail | na | inconclusive
 	EvidenceKind string // e.g. "osquery.host_posture"
+	SchemaVer    string // registered schema semver the payload matches
 	FreshnessCl  string // realtime | daily | weekly | monthly | quarterly | annual
 	Payload      map[string]any
 	Provenance   map[string]any
@@ -709,7 +710,7 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 		kind := evidenceKindsPool[i%len(evidenceKindsPool)]
 		result := evidenceResults[i%len(evidenceResults)]
 		freshness := evidenceFreshness[i%len(evidenceFreshness)]
-		payload := buildEvidencePayload(kind, i)
+		payload := buildEvidencePayload(kind, i, result)
 		provenance := map[string]any{
 			"connector":     kindToConnector(kind),
 			"connector_run": fmt.Sprintf("demo-run-%d", i),
@@ -727,6 +728,7 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 			ObservedAt:   obs,
 			Result:       result,
 			EvidenceKind: kind,
+			SchemaVer:    evidenceSchemaVersions[kind],
 			FreshnessCl:  freshness,
 			Payload:      payload,
 			Provenance:   provenance,
@@ -1217,21 +1219,23 @@ var ownerRoles = []string{
 // seeds (out of the 15 registered in internal/api/schemaregistry).
 // Selection criteria: span the major connector surfaces (host posture,
 // SaaS posture, access reviews, SAST, change reviews, manual).
+// Each is spelled as the registry and the connectors spell it, with
+// the .v<major> suffix, so demo rows match what real ingest stores (#2863).
 //
 // Documented in docs/audit-log/205-demo-seed-data-decisions.md D3.
 var evidenceKindsPool = []string{
-	"osquery.host_posture",
-	"github.repo_protection",
-	"github.audit_event",
-	"github.scim_user",
-	"okta.app_assignment",
-	"okta.mfa_policy",
-	"okta.user_lifecycle",
-	"aws.s3.bucket_encryption_state",
-	"access_review.completion",
-	"sast.scan_result",
-	"manual.attestation",
-	"manual.upload",
+	"osquery.host_posture.v1",
+	"github.repo_protection.v1",
+	"github.audit_event.v1",
+	"github.scim_user.v1",
+	"okta.app_assignment.v1",
+	"okta.mfa_policy.v1",
+	"okta.user_lifecycle.v1",
+	"aws.s3.bucket_encryption_state.v1",
+	"access_review.completion.v1",
+	"sast.scan_result.v1",
+	"manual.attestation.v1",
+	"manual.upload.v1",
 }
 
 var evidenceResults = []string{"pass", "pass", "pass", "pass", "pass", "pass", "pass", "fail", "inconclusive", "na"}
@@ -1247,101 +1251,156 @@ func kindToConnector(kind string) string {
 	return parts[0]
 }
 
-// buildEvidencePayload synthesizes a plausible payload for the given
-// evidence_kind. Shapes match the JSON Schemas under
-// internal/api/schemaregistry/schemas/ (loose match — schema-validator
-// is not invoked, but the keys present in the payload are the
-// load-bearing ones a reader of the schema would expect).
-func buildEvidencePayload(kind string, idx int) map[string]any {
+// evidenceSchemaVersions pins the registered schema version each demo
+// evidence_kind is written at. writeEvidence stamps it on the row's
+// schema_version, and TestDemoEvidencePayloads_MatchRegisteredSchemas runs
+// every payload buildEvidencePayload makes through the ingest validator at
+// that version, so the demo rows cannot drift from the schemas under
+// internal/api/schemaregistry/schemas/ (#2863). The rows are written raw,
+// not through ingest (see writeEvidence), so that test is the only check.
+var evidenceSchemaVersions = map[string]string{
+	"osquery.host_posture.v1":           "1.0.0",
+	"github.repo_protection.v1":         "1.0.0",
+	"github.audit_event.v1":             "1.0.0",
+	"github.scim_user.v1":               "1.0.0",
+	"okta.app_assignment.v1":            "1.0.0",
+	"okta.mfa_policy.v1":                "1.0.0",
+	"okta.user_lifecycle.v1":            "1.0.0",
+	"aws.s3.bucket_encryption_state.v1": "1.1.0",
+	"access_review.completion.v1":       "1.0.0",
+	"sast.scan_result.v1":               "1.0.0",
+	"manual.attestation.v1":             "1.2.0",
+	"manual.upload.v1":                  "1.0.0",
+}
+
+// buildEvidencePayload synthesizes a payload for the given evidence_kind
+// that the registered schema at evidenceSchemaVersions[kind] accepts.
+// result is the row's verdict; kinds whose payload states the verdict
+// (S3 encryption, manual attestation) are built to agree with it.
+func buildEvidencePayload(kind string, idx int, result string) map[string]any {
+	asset := fictionalAssets[idx%len(fictionalAssets)]
 	switch kind {
-	case "osquery.host_posture":
+	case "osquery.host_posture.v1":
 		return map[string]any{
-			"hostname":         fictionalAssets[idx%len(fictionalAssets)],
-			"os_version":       "Ubuntu 22.04 LTS",
-			"disk_encryption":  true,
-			"firewall_enabled": true,
-			"agent_version":    "osquery-5.10.2",
+			"host_uuid":               fmt.Sprintf("00000000-0000-4000-8000-%012d", idx),
+			"hostname":                asset,
+			"platform":                "ubuntu",
+			"os_version":              "Ubuntu 22.04 LTS",
+			"disk_encryption_enabled": true,
+			"screen_lock_enabled":     true,
+			"firewall_enabled":        true,
+			"mdm_enrolled":            true,
 		}
-	case "github.repo_protection":
+	case "github.repo_protection.v1":
 		return map[string]any{
-			"repo":               "demo-org/" + fictionalAssets[idx%len(fictionalAssets)],
-			"default_branch":     "main",
-			"require_pr_reviews": true,
-			"required_approvers": 2,
-			"enforce_admins":     true,
+			"repo_full_name":             "demo-org/" + asset,
+			"default_branch":             "main",
+			"required_reviews":           2,
+			"require_code_owner_reviews": true,
+			"enforce_admins":             true,
 		}
-	case "github.audit_event":
+	case "github.audit_event.v1":
 		return map[string]any{
-			"actor":   fictionalPeople[idx%len(fictionalPeople)].First,
-			"action":  "team.add_member",
-			"repo":    "demo-org/" + fictionalAssets[idx%len(fictionalAssets)],
-			"created": fmt.Sprintf("2026-0%d-15T12:00:00Z", 1+(idx%9)),
+			"event_type": "team",
+			"action":     "team.add_member",
+			"actor":      strings.ToLower(fictionalPeople[idx%len(fictionalPeople)].First),
+			"created_at": fmt.Sprintf("2026-0%d-15T12:00:00Z", 1+(idx%9)),
+			"org":        "demo-org",
+			"repo":       "demo-org/" + asset,
 		}
-	case "github.scim_user":
+	case "github.scim_user.v1":
 		return map[string]any{
-			"user_id":          fmt.Sprintf("scim-%d", idx),
-			"email":            fmt.Sprintf("user%d@%s", idx, personEmailDomain),
-			"active":           idx%5 != 0,
-			"provisioned_from": "okta",
+			"scim_user_id":  fmt.Sprintf("scim-%d", idx),
+			"user_name":     fmt.Sprintf("user%d", idx),
+			"active":        idx%5 != 0,
+			"org":           "demo-org",
+			"primary_email": fmt.Sprintf("user%d@%s", idx, personEmailDomain),
 		}
-	case "okta.app_assignment":
+	case "okta.app_assignment.v1":
 		return map[string]any{
-			"app":         "GitHub Enterprise",
-			"user":        fmt.Sprintf("user%d@%s", idx, personEmailDomain),
-			"assigned_at": fmt.Sprintf("2026-0%d-01T00:00:00Z", 1+(idx%9)),
-			"groups":      []string{"engineering", "security"},
+			"app_id":               fmt.Sprintf("0oa-demo-%d", idx%4),
+			"app_name":             "GitHub Enterprise",
+			"sign_on_mode":         "SAML_2_0",
+			"status":               "ACTIVE",
+			"assigned_group_ids":   []string{"00g-engineering", "00g-security"},
+			"assigned_group_count": 2,
 		}
-	case "okta.mfa_policy":
+	case "okta.mfa_policy.v1":
 		return map[string]any{
-			"policy_name":   "Production MFA Policy",
-			"factor_types":  []string{"webauthn", "okta_verify"},
-			"enforced":      true,
-			"users_covered": 142,
+			"policy_id":         "00p-demo-mfa",
+			"policy_name":       "Production MFA Policy",
+			"mfa_required":      true,
+			"factors_allowed":   []string{"webauthn", "okta_verify"},
+			"applies_to_groups": []string{"00g-everyone"},
 		}
-	case "okta.user_lifecycle":
+	case "okta.user_lifecycle.v1":
 		return map[string]any{
-			"user":   fmt.Sprintf("user%d@%s", idx, personEmailDomain),
-			"event":  "USER.LIFECYCLE.DEACTIVATE",
-			"actor":  "auto-deprovision",
-			"reason": "termination",
+			"user_id":        fmt.Sprintf("00u-demo-%d", idx),
+			"login":          fmt.Sprintf("user%d@%s", idx, personEmailDomain),
+			"status":         "DEPROVISIONED",
+			"primary_email":  fmt.Sprintf("user%d@%s", idx, personEmailDomain),
+			"deactivated_at": fmt.Sprintf("2026-0%d-20T09:00:00Z", 1+(idx%9)),
 		}
-	case "aws.s3.bucket_encryption_state":
-		return map[string]any{
-			"bucket":            fictionalAssets[idx%len(fictionalAssets)] + "-bucket",
-			"region":            "us-east-1",
-			"sse_algorithm":     "aws:kms",
-			"kms_key_id":        "alias/atlas-demo",
-			"bucket_versioning": true,
+	case "aws.s3.bucket_encryption_state.v1":
+		p := map[string]any{
+			"bucket_name": asset + "-bucket",
+			"account_id":  "111122223333",
+			"region":      "us-east-1",
 		}
-	case "access_review.completion":
-		return map[string]any{
-			"reviewer":       fictionalPeople[idx%len(fictionalPeople)].First + " " + fictionalPeople[idx%len(fictionalPeople)].Last,
-			"system":         fictionalAssets[idx%len(fictionalAssets)],
-			"users_reviewed": 47,
-			"removals":       3,
-			"completed_at":   fmt.Sprintf("2026-0%d-15T17:00:00Z", 1+(idx%9)),
+		switch result {
+		case "fail":
+			p["encryption_enabled"] = false
+		case "inconclusive":
+			p["encryption_enabled"] = false
+			p["reason"] = "get bucket encryption: AccessDenied"
+		default:
+			p["encryption_enabled"] = true
+			// Alternate per pool cycle: idx%len(pool) is fixed for a
+			// kind, so idx%2 alone would give every S3 row one algorithm.
+			if (idx/len(evidenceKindsPool))%2 == 0 {
+				p["sse_algorithm"] = "aws:kms"
+				p["kms_key_id"] = "alias/atlas-demo"
+				p["bucket_key_enabled"] = true
+			} else {
+				p["sse_algorithm"] = "AES256"
+			}
 		}
-	case "sast.scan_result":
+		return p
+	case "access_review.completion.v1":
 		return map[string]any{
-			"repo":           "demo-org/" + fictionalAssets[idx%len(fictionalAssets)],
-			"scanner":        "semgrep",
-			"critical":       0,
-			"high":           idx % 3,
-			"medium":         idx % 7,
-			"scan_completed": fmt.Sprintf("2026-0%d-12T08:00:00Z", 1+(idx%9)),
+			"review_id":          fmt.Sprintf("ar-%s-%d", asset, idx),
+			"completed_by":       fictionalUserEmail(idx),
+			"reviewer_role":      ownerRoles[idx%len(ownerRoles)],
+			"users_reviewed":     47,
+			"users_terminated":   3,
+			"users_role_changed": 1,
 		}
-	case "manual.attestation":
+	case "sast.scan_result.v1":
 		return map[string]any{
-			"attester":    fictionalUserEmail(idx),
-			"control_ref": fictionalAssets[idx%len(fictionalAssets)],
-			"statement":   "I attest the documented procedure was followed during the period.",
+			"tool":                  "semgrep",
+			"tool_version":          "1.85.0",
+			"ruleset":               "p/default",
+			"findings_count":        idx%3 + idx%7,
+			"scanned_files":         1200 + idx,
+			"scan_duration_seconds": 42.5,
 		}
-	case "manual.upload":
+	case "manual.attestation.v1":
+		p := map[string]any{
+			"attestor":  fictionalUserEmail(idx),
+			"statement": "I attest the documented procedure for " + asset + " was followed during the period.",
+		}
+		if result == "fail" {
+			p["result"] = "fail"
+			p["fail_reason"] = "Procedure step skipped for one change during the period."
+		}
+		return p
+	case "manual.upload.v1":
 		return map[string]any{
-			"uploader":    fictionalUserEmail(idx),
-			"filename":    fmt.Sprintf("evidence-%d.pdf", idx),
-			"size_bytes":  102400 + idx*1024,
-			"description": "Quarterly compliance report upload.",
+			"uploaded_by":  fictionalUserEmail(idx),
+			"filename":     fmt.Sprintf("evidence-%d.pdf", idx),
+			"content_type": "application/pdf",
+			"size_bytes":   102400 + idx*1024,
+			"description":  "Quarterly compliance report upload.",
 		}
 	default:
 		return map[string]any{"note": "demo placeholder"}
