@@ -7,6 +7,11 @@
 // PATCH /api/admin/sso  -> upstream PATCH /v1/admin/sso
 //                          Returns { config: AdminSSOConfig } on success,
 //                          or { error } from upstream verbatim on failure.
+// DELETE /api/admin/sso -> upstream DELETE /v1/admin/sso (#2760)
+//                          Removes the config, its group-role mappings and
+//                          the group-derived roles only it derived. The
+//                          upstream body (counts) and status (404 unset, 409
+//                          last admin) pass through.
 //
 // The bearer cookie translates to an Authorization header on the upstream
 // hop. Per slice 051 D1, tenant_id is NEVER passed in the body — the
@@ -27,6 +32,7 @@ import {
   getAdminSSO,
   patchAdminSSO,
 } from "@/lib/api/admin";
+import { forwardJSON, noStore } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function GET() {
@@ -86,4 +92,8 @@ export async function PATCH(req: NextRequest) {
       { status: e.status ?? 500 },
     );
   }
+}
+
+export async function DELETE(): Promise<Response> {
+  return noStore(await forwardJSON("/v1/admin/sso", { method: "DELETE" }));
 }
