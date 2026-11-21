@@ -120,9 +120,11 @@ func (r *Resolver) Derive(ctx context.Context, in DeriveInput) (DeriveResult, er
 		}
 	}
 
-	// 2. Load the user's current group-derived roles.
-	currentRoles, err := q.ListGroupDerivedRoles(ctx, dbx.ListGroupDerivedRolesParams{
-		TenantID: tID, UserID: in.UserID,
+	// 2. Load the roles THIS source already derives for the user (#2760). A
+	//    role another source derives is not in the diff, so this source's
+	//    reconcile never revokes it.
+	currentRoles, err := q.ListGroupDerivedRolesForSource(ctx, dbx.ListGroupDerivedRolesForSourceParams{
+		TenantID: tID, UserID: in.UserID, IdpConfigID: idpCfg,
 	})
 	if err != nil {
 		return DeriveResult{}, fmt.Errorf("grouprole: list current derived: %w", err)
@@ -142,34 +144,43 @@ func (r *Resolver) Derive(ctx context.Context, in DeriveInput) (DeriveResult, er
 	//    are re-read, so a concurrent reconcile of the same user that
 	//    committed while we waited is seen.
 	adminCount := 0
-	userHoldsManualAdmin := false
+	userKeepsAdmin := false
 	if revokesAdmin(target, current) {
 		guard, err := users.LockAdmins(ctx, q, tenantID)
 		if err != nil {
 			return DeriveResult{}, fmt.Errorf("grouprole: %w", err)
 		}
 		adminCount = guard.Before()
-		currentRoles, err = q.ListGroupDerivedRoles(ctx, dbx.ListGroupDerivedRolesParams{
-			TenantID: tID, UserID: in.UserID,
+		currentRoles, err = q.ListGroupDerivedRolesForSource(ctx, dbx.ListGroupDerivedRolesForSourceParams{
+			TenantID: tID, UserID: in.UserID, IdpConfigID: idpCfg,
 		})
 		if err != nil {
 			return DeriveResult{}, fmt.Errorf("grouprole: list current derived: %w", err)
 		}
 		current = setOf(currentRoles)
-		userHoldsManualAdmin, err = q.HasManualRole(ctx, dbx.HasManualRoleParams{
+		userKeepsAdmin, err = q.HasManualRole(ctx, dbx.HasManualRoleParams{
 			TenantID: tID, UserID: in.UserID, Role: roleAdmin,
 		})
 		if err != nil {
 			return DeriveResult{}, fmt.Errorf("grouprole: check manual admin: %w", err)
 		}
+		if !userKeepsAdmin {
+			// Another source deriving admin keeps it too (#2760).
+			userKeepsAdmin, err = q.GroupRoleHasOtherSource(ctx, dbx.GroupRoleHasOtherSourceParams{
+				TenantID: tID, UserID: in.UserID, Role: roleAdmin, IdpConfigID: idpCfg,
+			})
+			if err != nil {
+				return DeriveResult{}, fmt.Errorf("grouprole: check other admin source: %w", err)
+			}
+		}
 	}
 
 	// 4. Compute the pure plan.
 	plan := planReconcile(reconcileState{
-		target:               target,
-		current:              current,
-		tenantAdminCount:     adminCount,
-		userHoldsManualAdmin: userHoldsManualAdmin,
+		target:           target,
+		current:          current,
+		tenantAdminCount: adminCount,
+		userKeepsAdmin:   userKeepsAdmin,
 	})
 
 	// 5. Apply grants.
@@ -182,18 +193,21 @@ func (r *Resolver) Derive(ctx context.Context, in DeriveInput) (DeriveResult, er
 		}); err != nil {
 			return DeriveResult{}, fmt.Errorf("grouprole: grant %s: %w", role, err)
 		}
+		if err := q.InsertGroupRoleSource(ctx, dbx.InsertGroupRoleSourceParams{
+			TenantID: tID, UserID: in.UserID, Role: role, IdpConfigID: idpCfg,
+		}); err != nil {
+			return DeriveResult{}, fmt.Errorf("grouprole: record source of %s: %w", role, err)
+		}
 		if err := r.audit(ctx, q, tID, in, role, "grant", triggeringGroup[role]); err != nil {
 			return DeriveResult{}, err
 		}
 	}
 
-	// 6. Apply revokes. The DELETE is origin='group-derived'-scoped, so a manual
-	//    row with the same (tenant, user, role) is never removed (AC-4).
+	// 6. Apply revokes: this source's derivation, then the user_roles row
+	//    only when no other source still derives the role (#2760).
 	for _, role := range plan.revokes {
-		if _, err := q.DeleteGroupDerivedRole(ctx, dbx.DeleteGroupDerivedRoleParams{
-			TenantID: tID, UserID: in.UserID, Role: role,
-		}); err != nil {
-			return DeriveResult{}, fmt.Errorf("grouprole: revoke %s: %w", role, err)
+		if _, err := revokeSource(ctx, q, tID, in.UserID, role, idpCfg); err != nil {
+			return DeriveResult{}, err
 		}
 		if err := r.audit(ctx, q, tID, in, role, "revoke", ""); err != nil {
 			return DeriveResult{}, err
@@ -210,6 +224,35 @@ func (r *Resolver) Derive(ctx context.Context, in DeriveInput) (DeriveResult, er
 		SuppressedRevokes: plan.suppressedRevokes,
 		ResolvedRoles:     sortedKeys(target),
 	}, nil
+}
+
+// revokeSource removes one source's derivation of the user's role and, when
+// no other source derives it, the group-derived user_roles row (#2760). It
+// reports whether that row was removed. The row DELETE is
+// origin='group-derived'-scoped, so a manual row with the same (tenant,
+// user, role) is never removed (AC-4).
+func revokeSource(ctx context.Context, q *dbx.Queries, tID pgtype.UUID, userID, role string, idpCfg pgtype.UUID) (bool, error) {
+	if _, err := q.DeleteGroupRoleSource(ctx, dbx.DeleteGroupRoleSourceParams{
+		TenantID: tID, UserID: userID, Role: role, IdpConfigID: idpCfg,
+	}); err != nil {
+		return false, fmt.Errorf("grouprole: remove source of %s: %w", role, err)
+	}
+	still, err := q.GroupRoleHasSource(ctx, dbx.GroupRoleHasSourceParams{
+		TenantID: tID, UserID: userID, Role: role,
+	})
+	if err != nil {
+		return false, fmt.Errorf("grouprole: check sources of %s: %w", role, err)
+	}
+	if still {
+		return false, nil
+	}
+	n, err := q.DeleteGroupDerivedRole(ctx, dbx.DeleteGroupDerivedRoleParams{
+		TenantID: tID, UserID: userID, Role: role,
+	})
+	if err != nil {
+		return false, fmt.Errorf("grouprole: revoke %s: %w", role, err)
+	}
+	return n > 0, nil
 }
 
 // audit appends one group_role_audit_log row for a grant/revoke (AC-7).

@@ -662,12 +662,34 @@ paths AS (
     FROM tuples
     WHERE tuples.kind = 'decision' AND tuples.target_type <> ''
 ),
+lits AS (
+    SELECT coalesce(array_agg(DISTINCT seg), '{}'::text[]) AS segs
+    FROM patterns, unnest(patterns.segs) AS seg
+    WHERE seg <> '*'
+),
+keyed AS (
+    SELECT paths.path,
+           array_to_string(ARRAY(
+               SELECT CASE
+                   WHEN u.seg = ANY(lits.segs)
+                     OR (strpos(u.seg, ':') > 0
+                         AND EXISTS (SELECT 1 FROM unnest(lits.segs) AS l(seg)
+                                     WHERE starts_with(u.seg, l.seg || ':')))
+                   THEN u.seg
+                   ELSE '*'
+               END
+               FROM unnest(string_to_array(paths.path, '/')) WITH ORDINALITY AS u(seg, ord)
+               ORDER BY u.ord
+           ), '/') AS route_key
+    FROM paths
+    CROSS JOIN lits
+),
 matches AS (
-    SELECT paths.path, patterns.owner, patterns.visible,
+    SELECT keys.route_key, patterns.owner, patterns.visible,
            cardinality(patterns.segs) * 1000
              + cardinality(array_remove(patterns.segs, '*')) AS score
-    FROM paths
-    CROSS JOIN LATERAL string_to_array(paths.path, '/') AS s
+    FROM (SELECT DISTINCT keyed.route_key FROM keyed) AS keys
+    CROSS JOIN LATERAL string_to_array(keys.route_key, '/') AS s
     CROSS JOIN patterns
     WHERE cardinality(s) >= cardinality(patterns.segs)
       AND NOT EXISTS (
@@ -681,18 +703,23 @@ matches AS (
           END
       )
 ),
-resolved AS (
-    SELECT best.path,
+resolved_keys AS (
+    SELECT best.route_key,
            CASE WHEN count(DISTINCT best.owner) > 1 THEN 'ambiguous'
                 WHEN bool_and(best.visible) THEN 'visible'
                 ELSE 'hidden'
            END AS status
     FROM (
-        SELECT matches.path, matches.owner, matches.visible, matches.score, max(matches.score) OVER (PARTITION BY matches.path) AS top
+        SELECT matches.route_key, matches.owner, matches.visible, matches.score, max(matches.score) OVER (PARTITION BY matches.route_key) AS top
         FROM matches
     ) AS best
     WHERE best.score = best.top
-    GROUP BY best.path
+    GROUP BY best.route_key
+),
+resolved AS (
+    SELECT keyed.path, resolved_keys.status
+    FROM keyed
+    JOIN resolved_keys ON resolved_keys.route_key = keyed.route_key
 )
 SELECT DISTINCT tuples.actor_id::text AS actor_id
 FROM tuples
@@ -747,6 +774,14 @@ type ListUnifiedAuditMachineActorsParams struct {
 // path when that resolves, else by `/v1/<target_type>`, as decisionRoute
 // does. `TestActivityActors_ModuleFilterMatchesGo` checks this against
 // entrySeen for every registry route.
+//
+// Paths carry IDs, so a window holds thousands of distinct paths (#2789).
+// `keyed` collapses each path to a route key before matching: a segment
+// that equals no registry literal, and is no `<literal>:<verb>`, becomes
+// `*`. That segment matches a pattern's `*` and none of its literals, and
+// so does `*` itself (no literal is `*`), so a path and its key resolve
+// alike; only the distinct keys go through `matches`. Measurements:
+// docs/audit-log/2789-activity-actors-route-key-decisions.md.
 //
 // RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
 // atlas_app and takes no tenant parameter.

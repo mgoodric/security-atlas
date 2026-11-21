@@ -46,6 +46,12 @@ func TestGroupMappingIDPConfigFKMigration_PreCheck(t *testing.T) {
 			t.Fatalf("admin Begin: %v", err)
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
+		// #2760's user_role_group_sources FK targets the UNIQUE this
+		// migration drops and re-adds; drop it first (rolled back below).
+		if _, err := tx.Exec(ctx,
+			`ALTER TABLE user_role_group_sources DROP CONSTRAINT IF EXISTS user_role_group_sources_idp_config_fk`); err != nil {
+			t.Fatalf("drop #2760 FK: %v", err)
+		}
 		fn(ctx, tx)
 	}
 	seedConfig := func(ctx context.Context, tx pgx.Tx, tenant string) string {
