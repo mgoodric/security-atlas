@@ -4530,7 +4530,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift; per-page report (created, new_version, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force) (#2850, */
+        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift, a page's first sync takes over a published imported policy with its title; per-page report (created, new_version, taken_over, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force) (#2850, */
         post: operations["post-v1-policies_sync"];
         delete?: never;
         options?: never;

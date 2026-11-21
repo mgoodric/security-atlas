@@ -390,6 +390,37 @@ func (q *Queries) DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyPa
 	return i, err
 }
 
+const getAuthoredPolicyByTitle = `-- name: GetAuthoredPolicyByTitle :one
+SELECT id, status
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution NOT IN ('imported', 'synced')
+  AND status <> 'superseded'
+  AND title = $2
+ORDER BY created_at DESC, id
+LIMIT 1
+`
+
+type GetAuthoredPolicyByTitleParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Title    string      `json:"title"`
+}
+
+type GetAuthoredPolicyByTitleRow struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+// #2854 — a policy authored in security-atlas (not imported, not synced)
+// with the page's title, which a sync never takes over. Only read to say
+// so in the run report.
+func (q *Queries) GetAuthoredPolicyByTitle(ctx context.Context, arg GetAuthoredPolicyByTitleParams) (GetAuthoredPolicyByTitleRow, error) {
+	row := q.db.QueryRow(ctx, getAuthoredPolicyByTitle, arg.TenantID, arg.Title)
+	var i GetAuthoredPolicyByTitleRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
 const getPolicyByID = `-- name: GetPolicyByID :one
 SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 FROM policies
@@ -641,7 +672,8 @@ INSERT INTO policy_audit_log (
     policy_title, policy_version,
     previous_state, new_state,
     body_sha256, editors,
-    previous_linked_control_ids, new_linked_control_ids
+    previous_linked_control_ids, new_linked_control_ids,
+    previous_source_attribution
 )
 VALUES (
     $1, $2, $3, $4, $5,
@@ -650,30 +682,32 @@ VALUES (
     $11, $12,
     $13, $14,
     $15, $16,
-    $17, $18
+    $17, $18,
+    $19
 )
-RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids
+RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution
 `
 
 type InsertPolicyAuditLogParams struct {
-	TenantID                 pgtype.UUID        `json:"tenant_id"`
-	PolicyID                 pgtype.UUID        `json:"policy_id"`
-	Action                   string             `json:"action"`
-	Actor                    string             `json:"actor"`
-	SourceFile               string             `json:"source_file"`
-	HistoricalApproverName   *string            `json:"historical_approver_name"`
-	HistoricalApprovedAt     pgtype.Date        `json:"historical_approved_at"`
-	SourceUrl                *string            `json:"source_url"`
-	PreviousNextReviewAt     pgtype.Timestamptz `json:"previous_next_review_at"`
-	NewNextReviewAt          pgtype.Timestamptz `json:"new_next_review_at"`
-	PolicyTitle              *string            `json:"policy_title"`
-	PolicyVersion            *string            `json:"policy_version"`
-	PreviousState            *string            `json:"previous_state"`
-	NewState                 *string            `json:"new_state"`
-	BodySha256               *string            `json:"body_sha256"`
-	Editors                  []string           `json:"editors"`
-	PreviousLinkedControlIds []pgtype.UUID      `json:"previous_linked_control_ids"`
-	NewLinkedControlIds      []pgtype.UUID      `json:"new_linked_control_ids"`
+	TenantID                  pgtype.UUID        `json:"tenant_id"`
+	PolicyID                  pgtype.UUID        `json:"policy_id"`
+	Action                    string             `json:"action"`
+	Actor                     string             `json:"actor"`
+	SourceFile                string             `json:"source_file"`
+	HistoricalApproverName    *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt      pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                 *string            `json:"source_url"`
+	PreviousNextReviewAt      pgtype.Timestamptz `json:"previous_next_review_at"`
+	NewNextReviewAt           pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle               *string            `json:"policy_title"`
+	PolicyVersion             *string            `json:"policy_version"`
+	PreviousState             *string            `json:"previous_state"`
+	NewState                  *string            `json:"new_state"`
+	BodySha256                *string            `json:"body_sha256"`
+	Editors                   []string           `json:"editors"`
+	PreviousLinkedControlIds  []pgtype.UUID      `json:"previous_linked_control_ids"`
+	NewLinkedControlIds       []pgtype.UUID      `json:"new_linked_control_ids"`
+	PreviousSourceAttribution *string            `json:"previous_source_attribution"`
 }
 
 // #1747 — append one row to the policy audit log.
@@ -697,6 +731,7 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		arg.Editors,
 		arg.PreviousLinkedControlIds,
 		arg.NewLinkedControlIds,
+		arg.PreviousSourceAttribution,
 	)
 	var i PolicyAuditLog
 	err := row.Scan(
@@ -723,6 +758,7 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		&i.NewAudience,
 		&i.PreviousLinkedControlIds,
 		&i.NewLinkedControlIds,
+		&i.PreviousSourceAttribution,
 	)
 	return i, err
 }
@@ -852,6 +888,92 @@ func (q *Queries) InsertSyncedPolicy(ctx context.Context, arg InsertSyncedPolicy
 		&i.SyncMissingSince,
 	)
 	return i, err
+}
+
+const listImportedPoliciesForTakeover = `-- name: ListImportedPoliciesForTakeover :many
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'imported'
+  AND status = 'published'
+  AND title = $2
+ORDER BY published_at DESC NULLS LAST, id
+FOR UPDATE
+`
+
+type ListImportedPoliciesForTakeoverParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Title    string      `json:"title"`
+}
+
+// #2854 — on a page's first sync, every published imported policy in the
+// tenant with the page's title. The page takes over the policy only when
+// there is exactly one; the import does not chain versions, so a title
+// can carry several, and then the sync refuses to choose. FOR UPDATE locks
+// the rows until the run commits. A concurrent run for another source
+// that reads the same title waits on the lock; under READ COMMITTED its
+// read then re-checks the committed row, which is no longer a published
+// imported one, and leaves it out. There is no LIMIT, so the waiting run
+// sees every remaining candidate, not an empty result.
+func (q *Queries) ListImportedPoliciesForTakeover(ctx context.Context, arg ListImportedPoliciesForTakeoverParams) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listImportedPoliciesForTakeover, arg.TenantID, arg.Title)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMissingSyncedPolicies = `-- name: ListMissingSyncedPolicies :many
@@ -1246,7 +1368,7 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 }
 
 const listPolicyAuditLog = `-- name: ListPolicyAuditLog :many
-SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids
+SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC
@@ -1291,6 +1413,7 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 			&i.NewAudience,
 			&i.PreviousLinkedControlIds,
 			&i.NewLinkedControlIds,
+			&i.PreviousSourceAttribution,
 		); err != nil {
 			return nil, err
 		}
@@ -1861,6 +1984,76 @@ func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyFor
 	return i, err
 }
 
+const supersedeImportedPolicy = `-- name: SupersedeImportedPolicy :one
+UPDATE policies
+SET status = 'superseded',
+    superseded_at = now(),
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND source_attribution = 'imported'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
+`
+
+type SupersedeImportedPolicyParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #2854 — the page's first sync carries a different version from the
+// imported policy it takes over: the imported row is superseded, in the
+// same transaction as InsertSyncedPolicy writes the synced version as its
+// next version. It stays 'imported'. next_review_at is left as it was, as
+// SupersedeSyncedPolicy leaves it.
+func (q *Queries) SupersedeImportedPolicy(ctx context.Context, arg SupersedeImportedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, supersedeImportedPolicy, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+	)
+	return i, err
+}
+
 const supersedePolicyAtPublish = `-- name: SupersedePolicyAtPublish :one
 UPDATE policies
 SET status = 'superseded',
@@ -1965,6 +2158,106 @@ type SupersedeSyncedPolicyParams struct {
 // was, as SupersedePolicyAtPublish leaves it (#2009).
 func (q *Queries) SupersedeSyncedPolicy(ctx context.Context, arg SupersedeSyncedPolicyParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, supersedeSyncedPolicy, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+	)
+	return i, err
+}
+
+const takeOverImportedPolicy = `-- name: TakeOverImportedPolicy :one
+UPDATE policies
+SET source_attribution = 'synced',
+    imported_by = NULL,
+    imported_at = NULL,
+    source_url = $1,
+    sync_site = $2,
+    sync_space = $3,
+    sync_page_id = $4,
+    synced_body_sha256 = $5,
+    synced_by = $6,
+    synced_at = now(),
+    sync_drift_detected_at = CASE WHEN $7::text IS NULL THEN NULL ELSE now() END,
+    sync_drift_body_sha256 = $7,
+    updated_at = now()
+WHERE tenant_id = $8
+  AND id = $9
+  AND source_attribution = 'imported'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
+`
+
+type TakeOverImportedPolicyParams struct {
+	SourceUrl           *string     `json:"source_url"`
+	SyncSite            *string     `json:"sync_site"`
+	SyncSpace           *string     `json:"sync_space"`
+	SyncPageID          *string     `json:"sync_page_id"`
+	SyncedBodySha256    *string     `json:"synced_body_sha256"`
+	SyncedBy            *string     `json:"synced_by"`
+	SyncDriftBodySha256 *string     `json:"sync_drift_body_sha256"`
+	TenantID            pgtype.UUID `json:"tenant_id"`
+	ID                  pgtype.UUID `json:"id"`
+}
+
+// #2854 — the page's first sync carries the version an imported policy
+// already has: the imported row becomes the page's synced row in place,
+// so its acknowledgements and control links stay where they are. Its body
+// and version are not rewritten. synced_body_sha256 is the hash of the
+// body it was published with; a page body that differs is recorded as
+// drift (sync_drift_body_sha256 non-NULL), as a later run would. The
+// historical approver stays the import's. imported_by and imported_at are
+// cleared, as policies_imported_fields_chk requires off imported rows.
+func (q *Queries) TakeOverImportedPolicy(ctx context.Context, arg TakeOverImportedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, takeOverImportedPolicy,
+		arg.SourceUrl,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.SyncPageID,
+		arg.SyncedBodySha256,
+		arg.SyncedBy,
+		arg.SyncDriftBodySha256,
+		arg.TenantID,
+		arg.ID,
+	)
 	var i Policy
 	err := row.Scan(
 		&i.ID,

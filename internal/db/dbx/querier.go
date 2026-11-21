@@ -870,6 +870,10 @@ type Querier interface {
 	// middleware. Returns just the period UUIDs so the resolver can stuff
 	// them into input.user.attrs.audit_period_ids without joining anything.
 	GetAuditPeriodIDsForUser(ctx context.Context, arg GetAuditPeriodIDsForUserParams) ([]pgtype.UUID, error)
+	// #2854 — a policy authored in security-atlas (not imported, not synced)
+	// with the page's title, which a sync never takes over. Only read to say
+	// so in the run report.
+	GetAuthoredPolicyByTitle(ctx context.Context, arg GetAuthoredPolicyByTitleParams) (GetAuthoredPolicyByTitleRow, error)
 	// Fetch one frozen brief by id. RLS scopes the lookup to the caller's
 	// tenant — a cross-tenant id returns ErrNoRows (the handler maps that to
 	// 404). The returned `content` + `narrative_md` are the verbatim frozen
@@ -2750,6 +2754,16 @@ type Querier interface {
 	// Every defined-component for one imported component-definition, ordered for
 	// stable rendering.
 	ListImportedComponentsForDefinition(ctx context.Context, arg ListImportedComponentsForDefinitionParams) ([]ImportedComponent, error)
+	// #2854 — on a page's first sync, every published imported policy in the
+	// tenant with the page's title. The page takes over the policy only when
+	// there is exactly one; the import does not chain versions, so a title
+	// can carry several, and then the sync refuses to choose. FOR UPDATE locks
+	// the rows until the run commits. A concurrent run for another source
+	// that reads the same title waits on the lock; under READ COMMITTED its
+	// read then re-checks the committed row, which is no longer a published
+	// imported one, and leaves it out. There is no LIMIT, so the waiting run
+	// sees every remaining candidate, not an empty result.
+	ListImportedPoliciesForTakeover(ctx context.Context, arg ListImportedPoliciesForTakeoverParams) ([]Policy, error)
 	// Enumerate every resolved profile baseline for the tenant, most recent
 	// first (index-served by idx_imported_catalogs_tenant_profiles).
 	ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
@@ -4056,6 +4070,12 @@ type Querier interface {
 	// disambiguates that into a 409. The old row is never deleted (P0
 	// anti-criterion); only its status + superseded_by + updated_at change.
 	SupersedeDecision(ctx context.Context, arg SupersedeDecisionParams) (Decision, error)
+	// #2854 — the page's first sync carries a different version from the
+	// imported policy it takes over: the imported row is superseded, in the
+	// same transaction as InsertSyncedPolicy writes the synced version as its
+	// next version. It stays 'imported'. next_review_at is left as it was, as
+	// SupersedeSyncedPolicy leaves it.
+	SupersedeImportedPolicy(ctx context.Context, arg SupersedeImportedPolicyParams) (Policy, error)
 	// Part 1 of the two-step Publish: marks the prior 'published' row as
 	// 'superseded'. Used inside the same transaction as PublishApprovedPolicy
 	// (which publishes the successor row in place) so the chain transition is
@@ -4081,6 +4101,15 @@ type Querier interface {
 	// new version is what the page holds now. next_review_at is left as it
 	// was, as SupersedePolicyAtPublish leaves it (#2009).
 	SupersedeSyncedPolicy(ctx context.Context, arg SupersedeSyncedPolicyParams) (Policy, error)
+	// #2854 — the page's first sync carries the version an imported policy
+	// already has: the imported row becomes the page's synced row in place,
+	// so its acknowledgements and control links stay where they are. Its body
+	// and version are not rewritten. synced_body_sha256 is the hash of the
+	// body it was published with; a page body that differs is recorded as
+	// drift (sync_drift_body_sha256 non-NULL), as a later run would. The
+	// historical approver stays the import's. imported_by and imported_at are
+	// cleared, as policies_imported_fields_chk requires off imported rows.
+	TakeOverImportedPolicy(ctx context.Context, arg TakeOverImportedPolicyParams) (Policy, error)
 	// Names are unique across the built-ins and the tenant's own themes; the
 	// two partial unique indexes only cover each namespace on its own.
 	ThemeNameTaken(ctx context.Context, arg ThemeNameTakenParams) (bool, error)
