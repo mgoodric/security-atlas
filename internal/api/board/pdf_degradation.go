@@ -4,42 +4,50 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	board "github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
-// pdfDegradation classifies a PDF-render error into the graceful 503 path,
-// returning the HTTP status, a client-safe message, and ok=true when the
-// error is one of the three documented degradation modes. A non-degradation
-// error (a genuine bug) returns ok=false so the caller falls through to a 500
-// (slice 475 AC-1).
+// chromeAbsentMsg is the refusal for a deployment with no chrome installed.
+const chromeAbsentMsg = "PDF export is not enabled on this deployment: chrome is not installed"
+
+// writePDFDegradation answers a PDF-render error that is one of the three
+// documented degradation modes and reports true; a genuine bug returns false
+// so the caller falls through to a 500 (slice 475 AC-1).
 //
-// The three modes — chrome absent, render deadline exceeded, render queue
-// saturated — ALL map to 503 (the already-documented graceful path) so a
-// slow/contended/missing chrome never produces a 500 or a hung request. The
-// distinct messages let the operator tell the modes apart from the client
-// side; the WARN log (logPDFDegradation) carries the same distinction
-// server-side (AC-5).
-func pdfDegradation(err error) (status int, msg string, ok bool) {
+//   - chrome absent: 409 feature_not_enabled. Retrying cannot install chrome,
+//     so this is a refusal about the deployment, not a server failure (#2786).
+//   - render deadline exceeded, render queue saturated: 503 with Retry-After.
+//     Both clear on their own once the renders ahead finish.
+//
+// A WARN distinguishing the mode is logged either way (slice 475 AC-5). kind
+// is the artifact ("board-brief" / "board-pack").
+func writePDFDegradation(w http.ResponseWriter, r *http.Request, kind string, err error) bool {
+	var msg string
 	switch {
 	case errors.Is(err, board.ErrChromeUnavailable):
-		return http.StatusServiceUnavailable,
-			"PDF rendering unavailable: chrome browser not found", true
+		logPDFDegradation(r, kind, err)
+		httpresp.WriteFeatureNotEnabled(w, chromeAbsentMsg)
+		return true
 	case errors.Is(err, pdfrender.ErrRenderDeadline):
-		return http.StatusServiceUnavailable,
-			"PDF rendering unavailable: render deadline exceeded, retry shortly", true
+		msg = "PDF rendering unavailable: render deadline exceeded, retry shortly"
 	case errors.Is(err, pdfrender.ErrQueueSaturated):
-		return http.StatusServiceUnavailable,
-			"PDF rendering busy: too many concurrent renders, retry shortly", true
+		msg = "PDF rendering busy: too many concurrent renders, retry shortly"
 	default:
-		return 0, "", false
+		return false
 	}
+	logPDFDegradation(r, kind, err)
+	w.Header().Set("Retry-After", strconv.Itoa(pdfrender.RetryAfterSeconds))
+	httpresp.WriteError(w, http.StatusServiceUnavailable, msg)
+	return true
 }
 
 // logPDFDegradation emits a WARN distinguishing the degradation mode (AC-5).
-// kind is the artifact ("board-brief" / "board-pack"); the reason string is
-// derived from the typed error so the three modes are searchable in logs.
+// The reason string is derived from the typed error so the three modes are
+// searchable in logs.
 func logPDFDegradation(r *http.Request, kind string, err error) {
 	slog.WarnContext(r.Context(), "pdf render degraded",
 		"artifact", kind,
