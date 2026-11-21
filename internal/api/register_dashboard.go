@@ -61,8 +61,8 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	// dashboardStoreForExport (shared with the per-panel reads
 	// above), the risks store, and the freshness + drift stores
 	// declared above. The handler runs the slice 035 OPA admit
-	// (`dashboard_export` action — added by the slice 269 OPA admit
-	// extension), which the handler asks again itself, PLUS a
+	// (`read` on the `dashboard` resource — added by the slice 269 OPA
+	// admit extension), which the handler asks again itself, PLUS a
 	// handler-level `hasDashboardExportAccess` twin; admin,
 	// grc_engineer and auditor (#2350). Every
 	// terminal outcome writes one `me_audit_log` row with

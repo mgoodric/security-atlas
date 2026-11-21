@@ -86,6 +86,7 @@ type syncResp struct {
 	Unchanged  int `json:"unchanged"`
 	Drift      int `json:"drift"`
 	Skipped    int `json:"skipped"`
+	Missing    int `json:"missing"`
 	Results    []struct {
 		PageID          string     `json:"page_id"`
 		Title           string     `json:"title"`
@@ -95,16 +96,23 @@ type syncResp struct {
 		Version         string     `json:"version"`
 		PredecessorID   string     `json:"predecessor_id"`
 		DriftDetectedAt *time.Time `json:"drift_detected_at"`
+		MissingSince    *time.Time `json:"missing_since"`
 	} `json:"results"`
 }
 
 func postSync(t *testing.T, s setupResult, key string, want int, pages ...map[string]any) syncResp {
 	t.Helper()
+	return postSyncFrom(t, s, key, "SEC", want, pages...)
+}
+
+// postSyncFrom pushes pages as the full set of one space of the test site.
+func postSyncFrom(t *testing.T, s setupResult, key, space string, want int, pages ...map[string]any) syncResp {
+	t.Helper()
 	if pages == nil {
 		pages = []map[string]any{}
 	}
 	body, _ := json.Marshal(map[string]any{
-		"source": map[string]string{"site": "acme.atlassian.net", "space": "SEC"},
+		"source": map[string]string{"site": "acme.atlassian.net", "space": space},
 		"pages":  pages,
 	})
 	raw := s.do(t, http.MethodPost, "/v1/policies:sync", body, key, want)

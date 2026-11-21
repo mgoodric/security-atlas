@@ -390,10 +390,18 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 		}
 	}
 
-	// Bands 1 and 5, and every item's owner.
+	// Bands 1, 3 (synced policies whose page is missing) and 6, and every
+	// item's owner.
 	err = h.inTx(ctx, tenantID, func(tx pgx.Tx) error {
 		q := dbx.New(tx)
 		tid := pgtype.UUID{Bytes: tenantID, Valid: true}
+		if visible["policy"] {
+			rows, err := q.ListMissingSyncedPolicies(ctx, tid)
+			if err != nil {
+				return fmt.Errorf("list missing synced policies: %w", err)
+			}
+			items = append(items, MissingSourceItems(rows)...)
+		}
 		if visible["control"] {
 			ctl, n, err := controlItems(ctx, tx, q, tid)
 			if err != nil {
@@ -624,6 +632,27 @@ func ControlItems(rows []dbx.ListActiveControlsWithStateRow, created map[uuid.UU
 				Link: links["control"] + id, Action: "Assign owner", Since: since,
 			})
 		}
+	}
+	return out
+}
+
+// MissingSourceItems lists the published synced policies whose source
+// page a sync run found absent as band-3 items (#2853), owned by the
+// policy's owner role and dated from when the page was first found
+// missing.
+func MissingSourceItems(rows []dbx.ListMissingSyncedPoliciesRow) []Item {
+	out := make([]Item, 0, len(rows))
+	for _, r := range rows {
+		id := uuid.UUID(r.ID.Bytes).String()
+		it := Item{
+			Band: BandSourceMissing, Type: "policy", ID: id, Title: r.Title,
+			Link: links["policy"] + id, Action: "Restore source page",
+			Since: timePtr(r.SyncMissingSince),
+		}
+		if r.OwnerRole != "" {
+			it.Owner = &Owner{Role: r.OwnerRole}
+		}
+		out = append(out, it)
 	}
 	return out
 }

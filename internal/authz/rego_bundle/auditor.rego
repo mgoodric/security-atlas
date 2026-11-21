@@ -192,8 +192,8 @@ auditor_readable_resources := {
     # the slice 269 cross-tenant isolation integration test is
     # the merge-blocking evidence. The handler-level
     # `hasDashboardExportAccess` predicate is the defense-in-
-    # depth twin (admin + approver only); the OPA rule here is
-    # the upstream production gate.
+    # depth twin (admin + grc_engineer + auditor, #2350); the OPA
+    # rule here is the upstream production gate.
     "dashboard",
 }
 
