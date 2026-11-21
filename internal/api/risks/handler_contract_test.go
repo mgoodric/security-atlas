@@ -121,6 +121,7 @@ func TestContract_Risks(t *testing.T) {
 	// Row 1 — fully populated: opaque inherent/residual blobs, a two-element
 	// linked_control_ids array, and the nullable review_due_at / accepted_until
 	// BOTH set (pins their present-on-wire shape).
+	fullExternalRef := "R-014"
 	full := risk.Risk{
 		ID:                  uuid.MustParse(contractRiskID),
 		Title:               "Unpatched perimeter dependency",
@@ -136,6 +137,7 @@ func TestContract_Risks(t *testing.T) {
 		AcceptedUntil:       &acceptedUntil,
 		Accepter:            "ciso",
 		InstrumentReference: "JIRA-410",
+		ExternalRef:         &fullExternalRef,
 		LinkedControlIDs:    []uuid.UUID{uuid.MustParse(contractCtrlA), uuid.MustParse(contractCtrlB)},
 		CreatedAt:           created,
 		UpdatedAt:           updated,

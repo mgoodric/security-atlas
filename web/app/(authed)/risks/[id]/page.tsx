@@ -288,6 +288,17 @@ export default function RiskDetailPage({
       }
       status={
         <>
+          {risk.external_ref ? (
+            // #2838: the organisation's own risk ID, as their register names it.
+            <Badge
+              variant="outline"
+              className="font-mono"
+              title="Your organisation's risk ID"
+              data-testid="risk-detail-external-ref"
+            >
+              {risk.external_ref}
+            </Badge>
+          ) : null}
           {closed ? (
             <Badge variant="outline" data-testid="risk-detail-closed">
               Closed

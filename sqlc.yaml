@@ -176,6 +176,8 @@ sql:
       - "migrations/sql/20261273000000_policy_audience_generic_to_everyone.sql"
       # #2849: api_keys.purpose gains policy-sync.
       - "migrations/sql/20261275000000_api_keys_purpose_policy_sync.sql"
+      # #2838: risks.external_ref, the organisation's own risk ID.
+      - "migrations/sql/20261278000000_risks_external_ref.sql"
       - "migrations/sql/20261279000000_policy_sync.sql"
     queries: "internal/db/queries"
     gen:

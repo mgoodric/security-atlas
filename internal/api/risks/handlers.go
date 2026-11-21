@@ -151,6 +151,9 @@ type createReq struct {
 	// unit's level; with neither it is a team risk with no unit.
 	Level     string  `json:"level"`
 	OrgUnitID *string `json:"org_unit_id"`
+	// ExternalRef is the organisation's own risk ID ("R-014"), optional
+	// and unique within the tenant (#2838).
+	ExternalRef string `json:"external_ref"`
 }
 
 type riskWire struct {
@@ -185,8 +188,10 @@ type riskWire struct {
 	Accepter            string          `json:"accepter"`
 	InstrumentReference string          `json:"instrument_reference"`
 	LinkedControlIDs    []string        `json:"linked_control_ids"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
+	// ExternalRef is the organisation's own risk ID, or null (#2838).
+	ExternalRef *string   `json:"external_ref"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	// Slice 067 (AC-2): hierarchy + severity fields surfaced so the
 	// slice-056 org tree and downstream panels can attribute a risk
 	// without a second round-trip. Additive — existing fields and
@@ -302,6 +307,7 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		Level:               dbx.RiskLevel(req.Level),
 		OrgUnitID:           orgUnitID,
 		OwnerUserID:         ownerUserID,
+		ExternalRef:         req.ExternalRef,
 	}
 	// Only a person proposes (#2623).
 	in.Proposer = credstore.PrincipalOf(cred)
@@ -329,6 +335,10 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, risk.ErrOwnerNotActiveUser):
 			httpresp.WriteError(w, http.StatusUnprocessableEntity, "owner_user_id: target owner is not an active user in this tenant")
+		case errors.Is(err, risk.ErrExternalRefTaken):
+			writeExternalRefTaken(w)
+		case risk.IsRecordValidation(err):
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "create risk", err)
 		}
@@ -686,6 +696,9 @@ type patchReq struct {
 	OwnerUserID         json.RawMessage `json:"owner_user_id"`
 	ReviewDueAt         json.RawMessage `json:"review_due_at"`
 	InstrumentReference *string         `json:"instrument_reference"`
+	// ExternalRef sets the organisation risk ID or clears it (null or "")
+	// (#2838).
+	ExternalRef json.RawMessage `json:"external_ref"`
 }
 
 // patchRefusedFields are the risk fields PATCH does not change (#2104):
@@ -699,14 +712,15 @@ var patchRefusedFields = []string{
 
 // patchFieldList names the fields PATCH /v1/risks/{id} accepts.
 const patchFieldList = "level, org_unit_id, category, title, description, methodology, " +
-	"inherent_score, treatment_owner, owner_user_id, review_due_at, instrument_reference"
+	"inherent_score, treatment_owner, owner_user_id, review_due_at, instrument_reference, external_ref"
 
 // PatchRisk handles PATCH /v1/risks/{id}: move a risk between hierarchy
 // levels and org units (#1749), onto another category (#1812), and change
 // its record fields (#2104): title, description, methodology,
 // inherent_score, treatment_owner, owner_user_id, review_due_at,
-// instrument_reference. An owner_user_id that is not an active user of the
-// tenant is a 422 (#2129).
+// instrument_reference, external_ref. An owner_user_id that is not an
+// active user of the tenant is a 422 (#2129); an external_ref another risk
+// of the tenant already carries is a 409 (#2838).
 // A treatment or acceptance field is a 400 naming it, as is any other
 // unknown field. Each change writes one risk_audit_log row naming the
 // caller, with the before and after values; a PATCH that changes nothing
@@ -765,6 +779,8 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, risk.ErrOwnerNotActiveUser):
 			httpresp.WriteError(w, http.StatusUnprocessableEntity, "owner_user_id: target owner is not an active user in this tenant")
+		case errors.Is(err, risk.ErrExternalRefTaken):
+			writeExternalRefTaken(w)
 		default:
 			httperr.WriteInternal(w, r, "update risk", err)
 		}
@@ -772,6 +788,15 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", riskETag(updated.UpdatedAt))
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(updated)})
+}
+
+// writeExternalRefTaken is the 409 for an organisation risk ID another
+// risk of the tenant already carries (#2838).
+func writeExternalRefTaken(w http.ResponseWriter) {
+	httpresp.WriteJSON(w, http.StatusConflict, map[string]string{
+		"error": "external_ref is already used by another risk in this tenant",
+		"code":  "external_ref_taken",
+	})
 }
 
 // maxPatchBytes caps a PATCH /v1/risks/{id} body (#2311). The record
@@ -877,6 +902,16 @@ func decodePatch(body []byte) (risk.PlacementInput, string) {
 				return risk.PlacementInput{}, "owner_user_id must be a UUID or null"
 			}
 			f.OwnerUserID = &ownerID
+		}
+	}
+	if req.ExternalRef != nil {
+		f.ExternalRefSet = true
+		if string(req.ExternalRef) != "null" {
+			var s string
+			if err := json.Unmarshal(req.ExternalRef, &s); err != nil {
+				return risk.PlacementInput{}, "external_ref must be a string or null"
+			}
+			f.ExternalRef = &s
 		}
 	}
 	if req.ReviewDueAt != nil {
@@ -1026,6 +1061,7 @@ func riskWireFrom(r risk.Risk) riskWire {
 		ResidualScore:       jsonRaw(r.ResidualScore),
 		Accepter:            r.Accepter,
 		InstrumentReference: r.InstrumentReference,
+		ExternalRef:         r.ExternalRef,
 		CreatedAt:           r.CreatedAt,
 		UpdatedAt:           r.UpdatedAt,
 	}

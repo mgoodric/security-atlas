@@ -127,6 +127,9 @@ function toCreateInput(
     treatment: s.treatment,
     owner_user_id: s.owner_user_id,
   };
+  // #2838: the organisation's own risk ID, sent only when given.
+  const externalRef = s.external_ref.trim();
+  if (externalRef) body.external_ref = externalRef;
   // #2511: "Score later" omits the score; the platform logs the risk
   // unscored.
   if (!s.score_later) {
@@ -329,6 +332,23 @@ export function RiskForm(props: Props) {
             {fieldErrors.title}
           </p>
         )}
+      </div>
+
+      <div>
+        <label className={LABEL_CLASS} htmlFor="risk-external-ref">
+          Risk ID
+        </label>
+        <Input
+          id="risk-external-ref"
+          name="external_ref"
+          value={state.external_ref}
+          onChange={(e) => update("external_ref", e.target.value)}
+          placeholder="Your register's ID, e.g. R-014"
+          maxLength={128}
+          className="max-w-xs font-mono"
+          data-testid="risks-form-external-ref"
+        />
+        <p className={HELP_CLASS}>Optional. Unique within your organisation.</p>
       </div>
 
       <div>

@@ -239,16 +239,14 @@ func TestRiskExportHeader_StatusAndClosureReason(t *testing.T) {
 	}
 }
 
-// #2450: the owner user and their name are appended last, beside the
-// free-text treatment_owner, so existing positions hold. A risk with no
-// owner user leaves both empty.
+// #2450: the owner user and their name are appended after closure_reason,
+// beside the free-text treatment_owner, so existing positions hold. A risk
+// with no owner user leaves both empty.
 func TestRiskExportHeader_OwnerUserAndName(t *testing.T) {
 	header := riskExportHeader()
-	if got := header[len(header)-2]; got != "owner_user_id" {
-		t.Errorf("second-to-last column = %q; want owner_user_id", got)
-	}
-	if got := header[len(header)-1]; got != "owner_name" {
-		t.Errorf("last column = %q; want owner_name", got)
+	user, name := col(t, header, "owner_user_id"), col(t, header, "owner_name")
+	if reason := col(t, header, "closure_reason"); user != reason+1 || name != reason+2 {
+		t.Errorf("owner_user_id, owner_name at %d, %d; want %d, %d (after closure_reason)", user, name, reason+1, reason+2)
 	}
 	owner := uuid.New()
 	rows := []riskRow{
@@ -261,12 +259,32 @@ func TestRiskExportHeader_OwnerUserAndName(t *testing.T) {
 		if len(cells) != len(header) {
 			t.Fatalf("row has %d cells; header has %d", len(cells), len(header))
 		}
-		got = append(got, [3]string{cells[text], cells[len(header)-2], cells[len(header)-1]})
+		got = append(got, [3]string{cells[text], cells[user], cells[name]})
 	}
 	want := [][3]string{{"", owner.String(), "Alice Owner"}, {"risk team", "", ""}}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("row %d treatment_owner, owner_user_id, owner_name = %v; want %v", i, got[i], want[i])
 		}
+	}
+}
+
+// #2838: the organisation risk ID is appended last, so existing positions
+// hold. A risk without one exports an empty cell.
+func TestRiskExportHeader_ExternalRef(t *testing.T) {
+	header := riskExportHeader()
+	if got := header[len(header)-1]; got != "external_ref" {
+		t.Errorf("last column = %q; want external_ref", got)
+	}
+	rows := []riskRow{{ID: uuid.New(), ExternalRef: "R-014"}, {ID: uuid.New()}}
+	var got []string
+	for cells := range risksToRowIter(rows) {
+		if len(cells) != len(header) {
+			t.Fatalf("row has %d cells; header has %d", len(cells), len(header))
+		}
+		got = append(got, cells[len(header)-1])
+	}
+	if want := []string{"R-014", ""}; got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("external_ref cells = %q; want %q", got, want)
 	}
 }

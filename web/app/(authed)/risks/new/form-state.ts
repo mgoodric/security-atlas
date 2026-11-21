@@ -47,6 +47,8 @@ export type FormState = {
   review_due: string;
   // #2104: edit mode only; create has no input for it.
   instrument_reference: string;
+  // #2838: the organisation's own risk ID; empty is unset.
+  external_ref: string;
   // #2391: create with treatment=accept proposes the acceptance, so it
   // carries the proposal's justification and proposed expiry
   // (YYYY-MM-DD). The edit form never sends them.
@@ -73,6 +75,7 @@ export function initialState(): FormState {
     linked_control_ids: [],
     review_due: "",
     instrument_reference: "",
+    external_ref: "",
     justification: "",
     proposed_until: "",
   };
@@ -125,6 +128,7 @@ export function riskToFormState(risk: Risk): FormState {
     ? ""
     : (risk.owner_unlinked ?? risk.treatment_owner ?? "").trim();
   s.instrument_reference = risk.instrument_reference;
+  s.external_ref = risk.external_ref ?? "";
   s.linked_control_ids = risk.linked_control_ids;
   s.review_due = utcDay(risk.review_due_at);
   s.score_later = isUnscored(risk.inherent_score);
@@ -156,6 +160,11 @@ export function toPatchInput(initial: FormState, s: FormState): RiskPatchInput {
   const instrument = s.instrument_reference.trim();
   if (instrument !== initial.instrument_reference.trim()) {
     body.instrument_reference = instrument;
+  }
+  // #2838: an emptied risk ID clears it (null).
+  const externalRef = s.external_ref.trim();
+  if (externalRef !== initial.external_ref.trim()) {
+    body.external_ref = externalRef || null;
   }
   if (s.review_due && s.review_due !== initial.review_due) {
     body.review_due_at = `${s.review_due}T00:00:00Z`;

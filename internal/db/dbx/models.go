@@ -3193,6 +3193,7 @@ type Risk struct {
 	ClosedAt                pgtype.Timestamptz    `json:"closed_at"`
 	ClosedBy                string                `json:"closed_by"`
 	OwnerUserID             pgtype.UUID           `json:"owner_user_id"`
+	ExternalRef             *string               `json:"external_ref"`
 }
 
 type RiskAggregation struct {
