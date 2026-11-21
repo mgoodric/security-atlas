@@ -273,8 +273,9 @@ func (h *HTTPHandler) ReceiptStatusHTTP(w http.ResponseWriter, r *http.Request) 
 func (h *HTTPHandler) dispatch(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) (ingest.Receipt, ingest.Decision, error) {
 	if h.pub != nil {
 		// #2873: the consumer refuses an owner-only kind only after this
-		// push was answered; refuse it here so the pusher sees the error.
-		if err := ingest.RefuseOwnedKind(rec.GetEvidenceKind()); err != nil {
+		// push was answered; refuse (and audit) it here so the pusher sees
+		// the error.
+		if err := h.svc.RefuseOwnedKind(ctx, rec, cred); err != nil {
 			return ingest.Receipt{}, ingest.DecisionRejectedScopeViolation, err
 		}
 		return h.pub.Publish(ctx, rec, cred)

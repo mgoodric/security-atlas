@@ -202,16 +202,6 @@ func OwnedKind(kind string) bool {
 	return contains(unbound.Kinds(), kind)
 }
 
-// RefuseOwnedKind returns ErrOwnedKind for an owner-only kind and nil
-// otherwise. A push transport that answers before Process runs (the
-// JetStream publisher) calls it so the pusher is refused synchronously.
-func RefuseOwnedKind(kind string) error {
-	if OwnedKind(kind) {
-		return fmt.Errorf("%w: %s", ErrOwnedKind, kind)
-	}
-	return nil
-}
-
 // SystemCredential is the credential a domain writer ingests under: a
 // fixed system id, the tenant, and the only evidence kinds it may write,
 // so the credential kind-scope check bounds it like a connector key.
@@ -402,11 +392,39 @@ func (s *Service) WithPath(path string) *Service {
 
 // WithOwnedKind returns a copy of s that may write the owner-only kind
 // (OwnedKind). Only that kind's platform handler builds one; every other
-// Service refuses the kind with ErrOwnedKind (#2873).
+// Service refuses the kind with ErrOwnedKind (#2873). It panics on a kind
+// that is not owner-only: granting an ordinary kind is a wiring mistake,
+// and a typo would otherwise leave the owner unable to write its kind.
 func (s *Service) WithOwnedKind(kind string) *Service {
+	if !OwnedKind(kind) {
+		panic(fmt.Sprintf("ingest: WithOwnedKind(%q): not an owner-only kind", kind))
+	}
 	copy := *s
 	copy.ownedKind = kind
 	return &copy
+}
+
+// RefuseOwnedKind refuses rec when its kind is owner-only and s was not
+// built for it, writing the rejected_scope_violation audit row (credential,
+// kind, idempotency key) the way Process does. It returns nil otherwise. A
+// push transport that answers before Process runs (the JetStream publisher)
+// calls it so the pusher is refused synchronously and the attempt is still
+// audited (#2873).
+func (s *Service) RefuseOwnedKind(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) error {
+	return s.refuseOwnedKind(ctx, rec, cred, pgtype.UUID{})
+}
+
+func (s *Service) refuseOwnedKind(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) error {
+	kind := rec.GetEvidenceKind()
+	if !OwnedKind(kind) || (s != nil && kind == s.ownedKind) {
+		return nil
+	}
+	// A nil Service still refuses; it has no pool to audit with.
+	if s != nil {
+		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), kind, DecisionRejectedScopeViolation,
+			fmt.Sprintf("kind %s is written only by its platform handler", kind), recordID)
+	}
+	return fmt.Errorf("%w: %s", ErrOwnedKind, kind)
 }
 
 // Process runs the ingestion stage for one EvidenceRecord:
@@ -588,10 +606,8 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	}
 
 	// #2873: an owner-only kind comes only from its platform handler.
-	if OwnedKind(rec.EvidenceKind) && rec.EvidenceKind != s.ownedKind {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
-			fmt.Sprintf("kind %s is written only by its platform handler", rec.EvidenceKind), recordID)
-		return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: %s", ErrOwnedKind, rec.EvidenceKind)
+	if err := s.refuseOwnedKind(ctx, rec, cred, recordID); err != nil {
+		return nil, DecisionRejectedScopeViolation, err
 	}
 
 	// AC-8: observed_at skew check (replay protection).

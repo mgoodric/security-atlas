@@ -62,16 +62,30 @@ record, got 0`), so the handler's path is pinned.
 
 - With a publisher wired, the HTTP push answers before the consumer runs
   `Process`, so the pusher would get a receipt for a record the consumer then
-  refuses. `HTTPHandler.dispatch` calls `ingest.RefuseOwnedKind` first. That
-  refusal writes no `evidence_audit_log` row, the same as the publisher's other
-  pre-publish refusals. The consumer still refuses the kind if a message
-  carrying it arrives some other way.
+  refuses. `HTTPHandler.dispatch` calls `Service.RefuseOwnedKind` first. It
+  writes the same `rejected_scope_violation` audit row (credential id, kind,
+  idempotency key) that `Process` does, so a forgery attempt is audited on
+  either topology (review of #2909). The consumer still refuses the kind if a
+  message carrying it arrives some other way.
+
+## D5 — `WithOwnedKind` panics on a kind that is not owner-only
+
+- Granting an ordinary kind is a wiring mistake, and a misspelled owner kind
+  would leave the handler unable to write its own records. Both fail at
+  startup instead of on the first acknowledgement (review of #2909).
 
 ## Tests
 
 - `internal/evidence/ingest/owned_kind_test.go` (unit, pool-free): a generic
   Service refuses the kind with `ErrOwnedKind`/`rejected_scope_violation`; a
-  `WithOwnedKind` copy passes the check; other kinds are unaffected.
+  `WithOwnedKind` copy passes the check; other kinds are unaffected;
+  `RefuseOwnedKind` agrees on a built and a nil Service; `WithOwnedKind`
+  panics on an ordinary kind.
+- `internal/api/evidence/owned_kind_publish_2873_integration_test.go`: with a
+  publisher wired, the forged push gets 403 `scope_violation`, the publisher
+  receives nothing, and one `rejected_scope_violation` audit row names the
+  credential, kind and idempotency key. With the refusal made audit-free, the
+  row count was 0.
 - `internal/api/policyacks/push_refused_2873_integration_test.go`: HTTP push
   gets 403, gRPC push gets `PermissionDenied`, no record lands, then an
   acknowledgement through the handler writes one. The #2817 test still shows

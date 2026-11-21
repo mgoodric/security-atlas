@@ -59,11 +59,42 @@ func TestOwnedKind_OtherKindsUnaffected(t *testing.T) {
 	if _, _, err := ownedKindFixture(t).Process(context.Background(), rec, cred); !errors.Is(err, errStopAfterMarshal) {
 		t.Fatalf("generic push of %s: err=%v, want it to reach the ledger marshal", rec.EvidenceKind, err)
 	}
-	// The publish-path guard agrees with Process.
-	if err := RefuseOwnedKind(rec.EvidenceKind); err != nil {
-		t.Fatalf("RefuseOwnedKind(%s) = %v, want nil", rec.EvidenceKind, err)
+}
+
+// The publish-path guard agrees with Process, on a built Service and on a
+// nil one.
+func TestOwnedKind_RefuseOwnedKind(t *testing.T) {
+	t.Parallel()
+	cred := credstore.Credential{ID: "push-key", TenantID: "11111111-1111-1111-1111-111111111111"}
+	ordinary := fixedFixture(t)
+	ack := fixedFixture(t)
+	ack.EvidenceKind = ackKind
+	svc := ownedKindFixture(t)
+	var nilSvc *Service
+
+	for name, s := range map[string]*Service{"built": svc, "nil": nilSvc} {
+		if err := s.RefuseOwnedKind(context.Background(), ordinary, cred); err != nil {
+			t.Errorf("%s: RefuseOwnedKind(%s) = %v, want nil", name, ordinary.EvidenceKind, err)
+		}
+		if err := s.RefuseOwnedKind(context.Background(), ack, cred); !errors.Is(err, ErrOwnedKind) {
+			t.Errorf("%s: RefuseOwnedKind(%s) = %v, want ErrOwnedKind", name, ackKind, err)
+		}
 	}
-	if err := RefuseOwnedKind(ackKind); !errors.Is(err, ErrOwnedKind) {
-		t.Fatalf("RefuseOwnedKind(%s) = %v, want ErrOwnedKind", ackKind, err)
+	if err := svc.WithOwnedKind(ackKind).RefuseOwnedKind(context.Background(), ack, cred); err != nil {
+		t.Errorf("owner copy: RefuseOwnedKind(%s) = %v, want nil", ackKind, err)
+	}
+}
+
+func TestOwnedKind_WithOwnedKindPanicsOnOrdinaryKind(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"secret.scan.v1", "", "policy.acknowledgment.v2"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("WithOwnedKind(%q) did not panic", kind)
+				}
+			}()
+			ownedKindFixture(t).WithOwnedKind(kind)
+		}()
 	}
 }
