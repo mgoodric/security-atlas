@@ -9,9 +9,10 @@
 // attachment header so the browser drops a file named
 // board-pack-{period}.pdf.
 //
-// 503 from upstream (Chrome unavailable on the server) is forwarded as a
-// JSON error so the UI can surface the reason — the existing detail page
-// pattern.
+// A non-2xx from upstream is forwarded as a JSON error so the UI can surface
+// the reason — the existing detail page pattern. No Chrome on the server is a
+// 409 feature_not_enabled whose message passes through; a busy or timed-out
+// render is a 503 whose Retry-After is passed through (#2786).
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -41,9 +42,14 @@ export async function GET(
   );
   if (!upstream.ok) {
     const text = await upstream.text();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const ra = upstream.headers.get("Retry-After");
+    if (ra) headers["Retry-After"] = ra;
     return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
-      headers: { "Content-Type": "application/json" },
+      headers,
     });
   }
   const bytes = await upstream.arrayBuffer();
