@@ -7,14 +7,17 @@
 // becomes a risk only when a person approves it, and the risk is created
 // through risk.Store, so every create-time rule applies.
 //
-// This is the tracer (#2839): it maps the organisation risk ID, title,
-// description, category and review due. Every other column is kept on the
-// staged row as an unmapped value and never written into the description.
+// The tracer (#2839) maps the organisation risk ID, title, description,
+// category and review due; #2841 adds the inherent and residual scores, read
+// in the shape of the batch's one methodology (scores.go). Every other
+// column is kept on the staged row as an unmapped value and never written
+// into the description.
 package riskimport
 
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +27,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/xlsxbound"
 )
@@ -77,13 +81,18 @@ const blankHeaderColumnTemplate = "column %d"
 // required; the rest are optional. Unmapped holds the value of every column
 // no field took, keyed by its header.
 type StagedRisk struct {
-	RowNumber   int               `json:"row_number"`
-	ExternalRef string            `json:"external_ref,omitempty"`
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	Category    string            `json:"category"`
-	ReviewDue   *time.Time        `json:"review_due,omitempty"`
-	Unmapped    map[string]string `json:"unmapped"`
+	RowNumber   int        `json:"row_number"`
+	ExternalRef string     `json:"external_ref,omitempty"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Category    string     `json:"category"`
+	ReviewDue   *time.Time `json:"review_due,omitempty"`
+	// InherentScore and ResidualScore are in the batch methodology's shape,
+	// as the risk will hold them; nil is unscored (a nil residual takes the
+	// create path's default).
+	InherentScore json.RawMessage   `json:"inherent_score,omitempty"`
+	ResidualScore json.RawMessage   `json:"residual_score,omitempty"`
+	Unmapped      map[string]string `json:"unmapped"`
 }
 
 // RejectedRow is a data row that could not be staged, with the reason.
@@ -95,16 +104,21 @@ type RejectedRow struct {
 }
 
 type ParseResult struct {
-	Risks           []StagedRisk  `json:"risks"`
-	Rejected        []RejectedRow `json:"rejected"`
-	UnmappedColumns []string      `json:"unmapped_columns"`
+	// Methodology is the batch's, resolved from ParseOptions.Methodology.
+	Methodology     dbx.RiskMethodology `json:"methodology"`
+	Risks           []StagedRisk        `json:"risks"`
+	Rejected        []RejectedRow       `json:"rejected"`
+	UnmappedColumns []string            `json:"unmapped_columns"`
 }
 
 // ParseOptions tunes header detection. ColumnMap maps a canonical field name
 // to the header text used in the file; a mapped field overrides alias
-// detection for that field.
+// detection for that field. Methodology is the batch's; empty is the
+// platform default (ResolveMethodology). Only its score fields are read, and
+// a column whose header names another methodology's score stays unmapped.
 type ParseOptions struct {
-	ColumnMap map[string]string
+	ColumnMap   map[string]string
+	Methodology dbx.RiskMethodology
 }
 
 // fieldAliases are the header spellings each field is recognised by. The
@@ -128,6 +142,19 @@ var fieldAliases = map[string][]string{
 		"review_due", "review due", "review_due_at", "review due at", "review date",
 		"next review", "next review date", "next review due",
 	},
+	FieldInherentLikelihood: {"inherent_likelihood", "inherent likelihood", "likelihood"},
+	FieldInherentImpact:     {"inherent_impact", "inherent impact", "impact"},
+	FieldResidualLikelihood: {"residual_likelihood", "residual likelihood"},
+	FieldResidualImpact:     {"residual_impact", "residual impact"},
+	FieldInherentLossEventFrequency: {
+		"inherent_loss_event_frequency", "inherent loss event frequency", "loss event frequency",
+		"inherent lef", "lef",
+	},
+	FieldInherentLossMagnitude: {
+		"inherent_loss_magnitude", "inherent loss magnitude", "loss magnitude", "inherent lm", "lm",
+	},
+	FieldResidualLossEventFrequency: {"residual_loss_event_frequency", "residual loss event frequency", "residual lef"},
+	FieldResidualLossMagnitude:      {"residual_loss_magnitude", "residual loss magnitude", "residual lm"},
 }
 
 // ParseCSV parses a risk register CSV into staged rows.
@@ -253,6 +280,9 @@ func newHeaderMatcher(opts ParseOptions) (headerMatcher, error) {
 		if _, ok := fieldAliases[field]; !ok {
 			return nil, fmt.Errorf("%w: unknown field %q (want one of %s)", ErrInvalidColumnMap, field, strings.Join(FieldNames(), ", "))
 		}
+		if !scoreFieldApplies(field, opts.Methodology) {
+			return nil, fmt.Errorf("%w: field %q is not a %s score field", ErrInvalidColumnMap, field, opts.Methodology)
+		}
 		norm := normalizeHeader(header)
 		if norm == "" {
 			return nil, fmt.Errorf("%w: field %q maps to an empty header", ErrInvalidColumnMap, field)
@@ -272,8 +302,10 @@ func newHeaderMatcher(opts ParseOptions) (headerMatcher, error) {
 			return field
 		}
 		field := matchAlias(norm)
-		if mappedFields[field] {
-			// An explicit mapping for this field wins over alias detection.
+		if mappedFields[field] || !scoreFieldApplies(field, opts.Methodology) {
+			// An explicit mapping for this field wins over alias
+			// detection, and another methodology's score column is
+			// kept as unmapped.
 			return ""
 		}
 		return field
@@ -294,6 +326,11 @@ func parseRows(rows [][]string, opts ParseOptions) (*ParseResult, error) {
 	if len(rows) > MaxRows {
 		return nil, ErrTooManyRows
 	}
+	methodology, err := ResolveMethodology(string(opts.Methodology))
+	if err != nil {
+		return nil, err
+	}
+	opts.Methodology = methodology
 	match, err := newHeaderMatcher(opts)
 	if err != nil {
 		return nil, err
@@ -315,6 +352,7 @@ func parseRows(rows [][]string, opts ParseOptions) (*ParseResult, error) {
 		}
 	}
 	out := &ParseResult{
+		Methodology:     methodology,
 		Risks:           make([]StagedRisk, 0, len(data)),
 		Rejected:        make([]RejectedRow, 0),
 		UnmappedColumns: make([]string, 0),
@@ -329,7 +367,7 @@ func parseRows(rows [][]string, opts ParseOptions) (*ParseResult, error) {
 		if isBlankRow(row) {
 			continue
 		}
-		staged, rej, ok := rowToRisk(row, cols, headerIdx+idx+2, firstRowForRef)
+		staged, rej, ok := rowToRisk(row, cols, methodology, headerIdx+idx+2, firstRowForRef)
 		if !ok {
 			out.Rejected = append(out.Rejected, rej)
 			continue
@@ -382,9 +420,10 @@ func columnHasValue(data [][]string, i int) bool {
 
 // rowToRisk reads one data row and applies the row checks. It records the
 // row's organisation risk ID for in-file duplicate detection when it passes.
-func rowToRisk(row []string, cols []column, rowNumber int, firstRowForRef map[string]int) (StagedRisk, RejectedRow, bool) {
+func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, rowNumber int, firstRowForRef map[string]int) (StagedRisk, RejectedRow, bool) {
 	s := StagedRisk{RowNumber: rowNumber, Unmapped: map[string]string{}}
 	var reviewDue string
+	scoreCells := map[string]string{}
 	for i, c := range cols {
 		if i >= len(row) {
 			break
@@ -405,6 +444,9 @@ func rowToRisk(row []string, cols []column, rowNumber int, firstRowForRef map[st
 			if c.key != "" && val != "" {
 				s.Unmapped[c.key] = val
 			}
+		default:
+			// Only the batch methodology's score fields are mapped.
+			scoreCells[c.field] = val
 		}
 	}
 	reject := func(reason, detail string) (StagedRisk, RejectedRow, bool) {
@@ -429,6 +471,11 @@ func rowToRisk(row []string, cols []column, rowNumber int, firstRowForRef map[st
 		}
 		s.ReviewDue = &d
 	}
+	inherent, residual, detail, ok := scoresFromCells(methodology, scoreCells)
+	if !ok {
+		return reject(RejectInvalidScore, detail)
+	}
+	s.InherentScore, s.ResidualScore = inherent, residual
 	if key != "" {
 		firstRowForRef[key] = rowNumber
 	}

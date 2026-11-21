@@ -6206,7 +6206,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/imports:
     post:
-      summary: POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header) as a staged import batch; every row is staged or rejected with a reason; capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839)
+      summary: POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header, methodology nist_800_30 (default) | qualitative_5x5 | fair, else 400) as a staged import batch; every row is staged or rejected with a reason; inherent and residual scores are read from columns in the methodology's shape (likelihood and impact 1..5, or FAIR loss event frequency and loss magnitude), a row with none imports unscored and a row with an invalid score is rejected (invalid_score); capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839)
       tags: [risks]
       operationId: post-v1-risks-imports
       security:
@@ -6220,7 +6220,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/imports/{id}:
     get:
-      summary: GET /v1/risks/imports/{id} — a risk import batch with its counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839)
+      summary: GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839)
       tags: [risks]
       operationId: get-v1-risks-imports-id
       security:
