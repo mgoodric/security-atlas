@@ -124,9 +124,9 @@ func TestCheckFreshnessCases_DetectsDrift(t *testing.T) {
 		b.WriteString("CASE c.freshness_class\n")
 		for _, class := range FreshnessClasses() {
 			d, _ := FreshnessMaxAge(class)
-			b.WriteString(fmt.Sprintf("  WHEN '%s' THEN INTERVAL '%d days'\n", class, int(d/(24*time.Hour))))
+			fmt.Fprintf(&b, "  WHEN '%s' THEN INTERVAL '%d days'\n", class, int(d/(24*time.Hour)))
 		}
-		b.WriteString(fmt.Sprintf("  ELSE INTERVAL '%d days'\nEND", int(defaultFreshnessMaxAge/(24*time.Hour))))
+		fmt.Fprintf(&b, "  ELSE INTERVAL '%d days'\nEND", int(defaultFreshnessMaxAge/(24*time.Hour)))
 		return b.String()
 	}()
 
