@@ -441,10 +441,15 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, str
 	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
-	// Slice 197: JWT bearers via slice 190 path.
-	bearer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
+	// Slice 197: JWT bearers via slice 190 path. The author creates and
+	// submits, which takes admin or grc_engineer (#2664), so it holds the
+	// approver flag too; it still cannot approve what it submitted (the
+	// second-person rule, #2101).
+	authorClaims := testjwt.ApproverFor(uuid.MustParse(tenant))
+	authorClaims.Subject = "user:" + uuid.NewString()
+	bearer := srv.IssueTestJWT(t, authorClaims)
 	// #2101: only a person approves, so the approver carries the production
-	// "user:<uuid>" subject; the viewer that submits is someone else.
+	// "user:<uuid>" subject; the author that submits is someone else.
 	approverClaims := testjwt.ApproverFor(uuid.MustParse(tenant))
 	approverClaims.Subject = "user:" + uuid.NewString()
 	approver := srv.IssueTestJWT(t, approverClaims)
@@ -516,7 +521,7 @@ func TestHTTP_FullLifecycle(t *testing.T) {
 		t.Fatalf("PATCH submit: status %d; body %s", resp.StatusCode, payload)
 	}
 
-	// AC-7: approve — bearer (non-approver) should be 403.
+	// AC-7: approve — the author approving its own submission is 403.
 	resp, _ = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", bearer, "")
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("approve with non-approver: status %d; want 403", resp.StatusCode)
