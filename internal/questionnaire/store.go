@@ -232,7 +232,7 @@ type AnswerParams struct {
 	QuestionID      string
 	AnswerValue     string
 	Narrative       string
-	Citations       []any
+	Citations       []Citation // from ParseCitations; titles are overwritten (#2653)
 	AuthoredBy      string
 	SaveToLibrary   bool
 	SCFAnchorIDHint string // used only when SaveToLibrary is true
@@ -256,6 +256,9 @@ func (s *Store) UpsertAnswer(ctx context.Context, p AnswerParams) (*Answer, erro
 		return nil, err
 	}
 	q := dbx.New(tx)
+	if err := resolveCitations(ctx, tx, p.Citations); err != nil {
+		return nil, err
+	}
 	citations, err := json.Marshal(p.Citations)
 	if err != nil {
 		return nil, fmt.Errorf("questionnaire: marshal citations: %w", err)

@@ -63,7 +63,9 @@ func (s *Server) registerQuestionnaire(root *chi.Mux) {
 	// tenant context; every produced draft stays unapproved.
 	answerRunStore := questionnaire.NewAnswerRunStore(s.dbPool)
 	answerRunSvc := questionnaire.NewAnswerRunService(answerRunStore, qaiSvc)
-	questionnairesH := questionnairesapi.NewWithAIAndAnswerRuns(questionnaireStore, qaiSvc, qmapSvc, answerRunSvc)
+	// #2653: the answer PATCH asks OPA whether the caller may read each
+	// record it cites.
+	questionnairesH := questionnairesapi.NewWithAIAndAnswerRuns(questionnaireStore, qaiSvc, qmapSvc, answerRunSvc).WithAuthz(s.authzEngine)
 	questionnairesH.RegisterRoutes(root)
 	// Slice 471: role-scoped control-implementation checklist generator v0
 	// (cited, non-binding). The which-control -> which-role split is
