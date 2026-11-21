@@ -42,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/redact"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -167,6 +168,10 @@ var (
 	ErrScopeViolation      = errors.New("ingest: credential not authorized for this push")
 	ErrObservedAtSkew      = errors.New("ingest: observed_at outside permitted skew window")
 	ErrOversized           = errors.New("ingest: payload exceeds inline size limit; use payload_uri")
+	// ErrOwnedKind refuses an owner-only kind (OwnedKind) on a Service
+	// not built for it with WithOwnedKind (#2873). It wraps
+	// ErrScopeViolation, so both transports answer 403 / PermissionDenied.
+	ErrOwnedKind = fmt.Errorf("%w: evidence kind is written only by its platform handler", ErrScopeViolation)
 	// ErrUnavailable is returned by ProcessInTx on a nil *Service: the
 	// domain store was built without an ingest service (#1830).
 	ErrUnavailable = errors.New("ingest: no ingest service wired")
@@ -185,6 +190,26 @@ func ForDomainWriter(svc *Service) *Service {
 		return nil
 	}
 	return svc.WithPath(DomainWriterPath)
+}
+
+// OwnedKind reports whether kind may be written only by its platform
+// handler, never by a generic push (#2873). The owner-only kinds are the
+// unbound kinds (internal/evidence/unbound): an unbound record counts for
+// every control that queries its kind, tenant-wide, so a push credential
+// that could send one would forge that evidence for all of them. Today that
+// is policy.acknowledgment.v1, written by internal/api/policyacks.
+func OwnedKind(kind string) bool {
+	return contains(unbound.Kinds(), kind)
+}
+
+// RefuseOwnedKind returns ErrOwnedKind for an owner-only kind and nil
+// otherwise. A push transport that answers before Process runs (the
+// JetStream publisher) calls it so the pusher is refused synchronously.
+func RefuseOwnedKind(kind string) error {
+	if OwnedKind(kind) {
+		return fmt.Errorf("%w: %s", ErrOwnedKind, kind)
+	}
+	return nil
 }
 
 // SystemCredential is the credential a domain writer ingests under: a
@@ -258,6 +283,9 @@ type Service struct {
 	// to "push" — connector / webhook callers can construct a Service
 	// with a different path tag via WithPath.
 	path string
+	// ownedKind is the one owner-only kind (OwnedKind) this copy may
+	// write; "" on every Service except the owning handler's (#2873).
+	ownedKind string
 	// marshalLedger is the protojson-marshal seam for the bytes that
 	// LAND in the ledger (and feed the canonjson hash). Slice 379
 	// (F-ING-1 closure) split the protojson marshal sites into two
@@ -369,6 +397,15 @@ func (s *Service) WithClock(clock func() time.Time) *Service {
 func (s *Service) WithPath(path string) *Service {
 	copy := *s
 	copy.path = path
+	return &copy
+}
+
+// WithOwnedKind returns a copy of s that may write the owner-only kind
+// (OwnedKind). Only that kind's platform handler builds one; every other
+// Service refuses the kind with ErrOwnedKind (#2873).
+func (s *Service) WithOwnedKind(kind string) *Service {
+	copy := *s
+	copy.ownedKind = kind
 	return &copy
 }
 
@@ -548,6 +585,13 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	if msg := missingField(rec); msg != "" {
 		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, msg, recordID)
 		return nil, DecisionRejectedValidation, fmt.Errorf("%w: %s", ErrMissingField, msg)
+	}
+
+	// #2873: an owner-only kind comes only from its platform handler.
+	if OwnedKind(rec.EvidenceKind) && rec.EvidenceKind != s.ownedKind {
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
+			fmt.Sprintf("kind %s is written only by its platform handler", rec.EvidenceKind), recordID)
+		return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: %s", ErrOwnedKind, rec.EvidenceKind)
 	}
 
 	// AC-8: observed_at skew check (replay protection).

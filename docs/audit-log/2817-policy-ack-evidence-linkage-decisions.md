@@ -134,7 +134,9 @@ matches.
 ## Not changed (filed or noted elsewhere)
 
 - Push trust: any push credential can send an unbound `policy.acknowledgment.v1`
-  record that counts for all three controls. Filed separately by the dispatcher.
+  record that counts for all three controls. Filed separately by the dispatcher
+  as #2873, which refuses the kind on every path but the acknowledgement
+  handler's (`docs/audit-log/2873-owned-ack-kind-decisions.md`).
 - Overclaim: one acknowledgement now passes cc1_5, whose description says
   "every active user, all stock policies". Noted on #2820, with completeness
   pending #2834.
