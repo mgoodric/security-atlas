@@ -40,7 +40,15 @@ external_refs:
 		{"key order and comments", "# a comment\n" + replace(base, "title: \"Test control\"\n", "") + "title: \"Test control\"\n", true},
 		{"title changed", replace(base, `title: "Test control"`, `title: "Renamed"`), false},
 		{"implementation type changed", replace(base, "implementation_type: automated", "implementation_type: semi_automated"), false},
-		{"nested query description changed", replace(base, `description: "query prose"`, `description: "other prose"`), false},
+		{"query description changed", replace(base, `description: "query prose"`, `description: "other prose"`), true},
+		{"query description removed", replace(base, "    description: \"query prose\"\n", ""), true},
+		{"query description and control description changed", replace(replace(base, `description: "query prose"`, `description: "other prose"`), `description: "Original prose."`, `description: "New."`), true},
+		{"query expression changed", replace(base, `expression: "allow"`, `expression: "deny"`), false},
+		{"query id renamed", replace(base, "id: q1", "id: q1_renamed"), false},
+		{"query language changed", replace(base, "language: rego", "language: sql"), false},
+		{"query evidence_kind added", replace(base, "    language: rego\n", "    language: rego\n    evidence_kind: manual.upload.v1\n"), false},
+		{"query added", replace(base, "external_refs:", "  - id: q2\n    language: rego\n    expression: \"allow\"\nexternal_refs:"), false},
+		{"query description changed alongside expression", replace(replace(base, `description: "query prose"`, `description: "other prose"`), `expression: "allow"`, `expression: "deny"`), false},
 		{"field added", base + "owner_role: ciso\n", false},
 		{"external ref id changed", replace(base, "id: RA-03", "id: RA-04"), true},
 		{"external ref added", base + "  - system: soc2\n    kind: tested_under\n    id: CC3.1\n", true},
@@ -60,6 +68,48 @@ external_refs:
 			}
 			if got != tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Issue #2891: the stock-bundle CI tripwire prints these, so a reviewer
+// sees which field makes an upload supersede.
+func TestSupersedingFields_NamesTheFields(t *testing.T) {
+	t.Parallel()
+	const base = `bundle_id: c1
+title: "T"
+description: "prose"
+freshness_class: monthly
+evidence_queries:
+  - id: q1
+    language: rego
+    expression: "allow"
+    description: "query prose"
+  - id: q2
+    language: rego
+    expression: "allow"
+`
+	cases := []struct {
+		name string
+		next string
+		want []string
+	}{
+		{"prose only", replace(replace(base, `"query prose"`, `"new"`), `"prose"`, `"new"`), nil},
+		{"freshness and expression", replace(replace(base, "monthly", "annual"), "expression: \"allow\"\n    description", "expression: \"deny\"\n    description"), []string{"evidence_queries[q1].expression", "freshness_class"}},
+		{"query id renamed", replace(base, "id: q2", "id: q3"), []string{"evidence_queries[q2].id"}},
+		{"query removed", strings.TrimSuffix(base, "  - id: q2\n    language: rego\n    expression: \"allow\"\n"), []string{"evidence_queries"}},
+		{"queries reordered", "bundle_id: c1\ntitle: \"T\"\nfreshness_class: monthly\nevidence_queries:\n  - id: q2\n    language: rego\n    expression: \"allow\"\n  - id: q1\n    language: rego\n    expression: \"allow\"\n", []string{"evidence_queries[q1].id", "evidence_queries[q2].id"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := SupersedingFields([]byte(base), []byte(tc.next))
+			if err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
 	}

@@ -27,8 +27,9 @@ The control id and version are unchanged and nothing is superseded. Because
 the hash moves with the YAML, uploading the same bytes again is still a no-op.
 
 Any other difference supersedes exactly as before, including a `title`
-change and a nested `evidence_queries[].description` change (that one is
-part of a query's definition, not the control's prose).
+change. (This originally named a nested `evidence_queries[].description`
+change as superseding too, as part of a query's definition. #2891 reversed
+that; see D4.)
 
 **What counts as description-only.** The comparison is on decoded values, so
 rewording, reflowing (quoted string to block scalar), adding or removing the
@@ -91,3 +92,46 @@ edits no longer mint new ids, but it does not fix it. Real content changes
 still supersede. Whether ingest should refuse such a push or redirect it to
 the bundle's active version is filed as
 [#1910](https://github.com/mgoodric/security-atlas/issues/1910).
+
+## D4 — `evidence_queries[].description` updates in place too (#2891)
+
+**Decision (Matt, 2026-11-21).** A query's `description` joins the in-place
+set. The evaluator never reads it; it is prose about the query, the same kind
+of text as the control's own `description`. D1 called it part of the query's
+definition, and that reading cost real data: #2864 reworded the query
+description on nine stock bundles (cc1_4, cc6_3, cc6_5, cc9_1, p1_1, p4_2,
+p6_2, p6_4, p8_1), and `deploy/docker/bootstrap/bootstrap.sh` re-uploads every
+stock bundle on each start. Under D1 the next start of any existing tenant
+would have superseded all nine, and seven are `manual.upload.v1` controls
+whose uploaded evidence would have appeared to vanish. No real deployment had
+upgraded past #2864 when this landed.
+
+**Shape.** `SupersedingFields` (`internal/control/supersede.go`) strips the
+top-level in-place keys, then `description` from each `evidence_queries[]`
+entry, and compares the rest. Entries compare in order, so a query's `id`,
+`language`, `expression`, `evidence_kind` or any other key still supersedes,
+as do adding, removing, renaming or reordering a query. Order-insensitive
+matching by id was rejected: it would make a pure reorder update in place,
+which widens the rule past what #2891 asked for. The in-place UPDATE now also
+rewrites the stored `evidence_queries` JSONB, which carries the description.
+The prior manifest goes to `control_manifest_revisions` as for D1.
+
+**Tripwire.** `cmd/scripts/stock-supersede-check` (CI job
+`stock-supersede-check`, in merge-gate) runs `SupersedingFields`, the same
+function `Store.Upload` calls, over every `controls/**/control.yaml` against
+the PR base, keyed by `bundle_id`. A supersede fails the job and is listed
+with the fields that cause it. It passes only when the PR carries the
+`supersedes-stock` label and a `docs/audit-log/*.md` the PR adds or changes
+names the bundle. The scan covers all of `controls/`, not only the
+`controls/soc2/` set bootstrap uploads by default: anything shipped there may
+have been uploaded by an operator, and the wider scope fails closed.
+
+**cc1_4 still supersedes, on purpose.** #2864 also moved
+`soc2_cc1_4_competence_training` from `freshness_class: monthly` to `annual`
+(#2816 D-log, D3). That changes evaluation, so a new version is the correct
+outcome. The tripwire, run with `--base 434c74b2^`, reports exactly that one
+bundle (`freshness_class`), down from nine. The upgrade note is in the
+changelog: re-assign cc1_4's owner and re-upload its evidence.
+
+`detection_tier_actual = manual_review` (found reading #2864 after merge) ·
+`detection_tier_target = contract` (now `stock-supersede-check`).
