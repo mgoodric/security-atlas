@@ -14,8 +14,14 @@ import (
 const countEvidenceForControlWindow = `-- name: CountEvidenceForControlWindow :one
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3))
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3)
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($7::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $4
   AND observed_at <= $5
 `
@@ -27,6 +33,7 @@ type CountEvidenceForControlWindowParams struct {
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	IDOnly       bool               `json:"id_only"`
+	UnboundKinds []string           `json:"unbound_kinds"`
 }
 
 // #2470: the `total` of GET /v1/evidence?control_id=. Counts the rows
@@ -41,6 +48,7 @@ func (q *Queries) CountEvidenceForControlWindow(ctx context.Context, arg CountEv
 		arg.ObservedAt,
 		arg.ObservedAt_2,
 		arg.IDOnly,
+		arg.UnboundKinds,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -248,16 +256,22 @@ SELECT id, tenant_id, control_id, control_ref, scope_id,
        observed_at, evidence_kind, provenance, hash, result,
        source_attribution
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3))
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3)
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($7::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $4
   AND observed_at <= $5
   AND (
-        observed_at < $7
-        OR (observed_at = $7 AND id < $8)
+        observed_at < $8
+        OR (observed_at = $8 AND evidence_records.id < $9)
       )
 ORDER BY observed_at DESC, id DESC
-LIMIT $9
+LIMIT $10
 `
 
 type ListEvidenceForControlPagedParams struct {
@@ -267,6 +281,7 @@ type ListEvidenceForControlPagedParams struct {
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	IDOnly       bool               `json:"id_only"`
+	UnboundKinds []string           `json:"unbound_kinds"`
 	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
 	CursorID     pgtype.UUID        `json:"cursor_id"`
 	RowLimit     int32              `json:"row_limit"`
@@ -328,6 +343,8 @@ type ListEvidenceForControlPagedRow struct {
 // control_id = $2 set the auditor hydrator (audit.Store.ControlPeriods) and
 // the population draw resolve. The handler sets it for a period-scoped
 // caller; every other caller keeps the slice-012 OR resolution.
+// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+// the control's evidence_queries declare (internal/evidence/unbound).
 func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error) {
 	rows, err := q.db.Query(ctx, listEvidenceForControlPaged,
 		arg.TenantID,
@@ -336,6 +353,7 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 		arg.ObservedAt,
 		arg.ObservedAt_2,
 		arg.IDOnly,
+		arg.UnboundKinds,
 		arg.CursorTs,
 		arg.CursorID,
 		arg.RowLimit,

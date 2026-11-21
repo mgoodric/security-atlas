@@ -40,17 +40,25 @@
 -- control_id = $2 set the auditor hydrator (audit.Store.ControlPeriods) and
 -- the population draw resolve. The handler sets it for a period-scoped
 -- caller; every other caller keeps the slice-012 OR resolution.
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
 SELECT id, tenant_id, control_id, control_ref, scope_id,
        observed_at, evidence_kind, provenance, hash, result,
        source_attribution
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3))
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3)
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $4
   AND observed_at <= $5
   AND (
         observed_at < sqlc.arg(cursor_ts)
-        OR (observed_at = sqlc.arg(cursor_ts) AND id < sqlc.arg(cursor_id))
+        OR (observed_at = sqlc.arg(cursor_ts) AND evidence_records.id < sqlc.arg(cursor_id))
       )
 ORDER BY observed_at DESC, id DESC
 LIMIT sqlc.arg(row_limit);
@@ -62,8 +70,14 @@ LIMIT sqlc.arg(row_limit);
 -- per-control list ignores scope_cell_id, so the count does too.
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3))
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3)
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $4
   AND observed_at <= $5;
 

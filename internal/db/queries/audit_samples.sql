@@ -37,10 +37,18 @@ ORDER BY created_at DESC, id ASC;
 -- evaluates the JSON-AST against scope cells in memory and intersects with
 -- evidence_records.scope_id. v1 keeps the SQL simple; future slices can
 -- push the predicate down into a JSONB index.
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
 SELECT COUNT(*)::bigint AS row_count
 FROM evidence_records
-WHERE tenant_id = $1
-  AND control_id = $2
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz);
@@ -53,10 +61,18 @@ WHERE tenant_id = $1
 --
 -- Returns just the evidence_record_id (and observed_at for scope intersection)
 -- to keep the round-trip small; the handler hydrates after the shuffle.
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
 SELECT id, scope_id
 FROM evidence_records
-WHERE tenant_id = $1
-  AND control_id = $2
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz, 'infinity'::timestamptz)
@@ -138,6 +154,16 @@ FROM samples s
 JOIN populations p
     ON p.tenant_id = s.tenant_id AND p.id = s.population_id
 WHERE s.tenant_id = $1 AND s.id = $2;
+
+-- name: ListControlIDsDeclaringEvidenceKind :many
+-- #2817: the controls whose evidence_queries declare evidence_kind. An
+-- unbound record of a kind in internal/evidence/unbound belongs to each of
+-- them, so the authz hydrator looks for its periods on all of them.
+SELECT id FROM controls
+WHERE tenant_id = $1
+  AND evidence_queries @> jsonb_build_array(
+        jsonb_build_object('evidence_kind', sqlc.arg(evidence_kind)::text))
+ORDER BY id;
 
 -- name: ListPeriodPopulationsForControl :many
 -- #2157: the populations on one control that are attached to an audit

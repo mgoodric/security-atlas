@@ -840,7 +840,7 @@ func (q *Queries) ListActiveControlsForExport(ctx context.Context, arg ListActiv
 
 const listActiveControlsForPortfolio = `-- name: ListActiveControlsForPortfolio :many
 WITH matched_controls AS (
-    SELECT c.id, c.scf_anchor_id, c.title, c.control_family, c.bundle_id
+    SELECT c.id, c.scf_anchor_id, c.title, c.control_family, c.bundle_id, c.evidence_queries
     FROM controls c
     WHERE c.tenant_id = $1
       AND c.superseded_by IS NULL
@@ -864,7 +864,11 @@ ranked_controls AS (
     FROM matched_controls c
     LEFT JOIN evidence_records e
         ON e.tenant_id = $1
-       AND (e.control_id = c.id OR e.control_ref = c.id::text)
+       AND (e.control_id = c.id OR e.control_ref = c.id::text
+           OR (e.control_id IS NULL
+               AND e.evidence_kind = ANY($5::text[])
+               AND c.evidence_queries @> jsonb_build_array(
+                     jsonb_build_object('evidence_kind', e.evidence_kind))))
     LEFT JOIN evidence_freshness ef
         ON ef.tenant_id = $1
        AND ef.control_id = c.id
@@ -892,10 +896,11 @@ LIMIT $2
 `
 
 type ListActiveControlsForPortfolioParams struct {
-	TenantID  pgtype.UUID   `json:"tenant_id"`
-	Limit     int32         `json:"limit"`
-	Family    *string       `json:"family"`
-	AnchorIds []pgtype.UUID `json:"anchor_ids"`
+	TenantID     pgtype.UUID   `json:"tenant_id"`
+	Limit        int32         `json:"limit"`
+	Family       *string       `json:"family"`
+	AnchorIds    []pgtype.UUID `json:"anchor_ids"`
+	UnboundKinds []string      `json:"unbound_kinds"`
 }
 
 type ListActiveControlsForPortfolioRow struct {
@@ -944,12 +949,15 @@ type ListActiveControlsForPortfolioRow struct {
 // RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
 // the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the
 // GUC so the read is tenant-scoped (invariant #6).
+// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+// the control's evidence_queries declare (internal/evidence/unbound).
 func (q *Queries) ListActiveControlsForPortfolio(ctx context.Context, arg ListActiveControlsForPortfolioParams) ([]ListActiveControlsForPortfolioRow, error) {
 	rows, err := q.db.Query(ctx, listActiveControlsForPortfolio,
 		arg.TenantID,
 		arg.Limit,
 		arg.Family,
 		arg.AnchorIds,
+		arg.UnboundKinds,
 	)
 	if err != nil {
 		return nil, err

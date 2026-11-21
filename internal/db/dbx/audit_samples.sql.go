@@ -14,11 +14,17 @@ import (
 const countPopulationEvidence = `-- name: CountPopulationEvidence :one
 SELECT COUNT(*)::bigint AS row_count
 FROM evidence_records
-WHERE tenant_id = $1
-  AND control_id = $2
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($5::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE($5::timestamptz, 'infinity'::timestamptz)
+  AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
 `
 
 type CountPopulationEvidenceParams struct {
@@ -26,6 +32,7 @@ type CountPopulationEvidenceParams struct {
 	ControlID    pgtype.UUID        `json:"control_id"`
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
+	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
 }
 
@@ -38,12 +45,15 @@ type CountPopulationEvidenceParams struct {
 // evaluates the JSON-AST against scope cells in memory and intersects with
 // evidence_records.scope_id. v1 keeps the SQL simple; future slices can
 // push the predicate down into a JSONB index.
+// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+// the control's evidence_queries declare (internal/evidence/unbound).
 func (q *Queries) CountPopulationEvidence(ctx context.Context, arg CountPopulationEvidenceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countPopulationEvidence,
 		arg.TenantID,
 		arg.ControlID,
 		arg.ObservedAt,
 		arg.ObservedAt_2,
+		arg.UnboundKinds,
 		arg.FrozenAt,
 	)
 	var row_count int64
@@ -254,6 +264,42 @@ func (q *Queries) InsertSampleEvidence(ctx context.Context, arg InsertSampleEvid
 	return err
 }
 
+const listControlIDsDeclaringEvidenceKind = `-- name: ListControlIDsDeclaringEvidenceKind :many
+SELECT id FROM controls
+WHERE tenant_id = $1
+  AND evidence_queries @> jsonb_build_array(
+        jsonb_build_object('evidence_kind', $2::text))
+ORDER BY id
+`
+
+type ListControlIDsDeclaringEvidenceKindParams struct {
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	EvidenceKind string      `json:"evidence_kind"`
+}
+
+// #2817: the controls whose evidence_queries declare evidence_kind. An
+// unbound record of a kind in internal/evidence/unbound belongs to each of
+// them, so the authz hydrator looks for its periods on all of them.
+func (q *Queries) ListControlIDsDeclaringEvidenceKind(ctx context.Context, arg ListControlIDsDeclaringEvidenceKindParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listControlIDsDeclaringEvidenceKind, arg.TenantID, arg.EvidenceKind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPeriodPopulationsForControl = `-- name: ListPeriodPopulationsForControl :many
 SELECT id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, frozen_at, row_count, created_by, created_at, audit_period_id FROM populations
 WHERE tenant_id = $1
@@ -305,11 +351,17 @@ func (q *Queries) ListPeriodPopulationsForControl(ctx context.Context, arg ListP
 const listPopulationEvidenceIDs = `-- name: ListPopulationEvidenceIDs :many
 SELECT id, scope_id
 FROM evidence_records
-WHERE tenant_id = $1
-  AND control_id = $2
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($5::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at >= $3
   AND observed_at <= $4
-  AND observed_at <= COALESCE($5::timestamptz, 'infinity'::timestamptz)
+  AND observed_at <= COALESCE($6::timestamptz, 'infinity'::timestamptz)
 ORDER BY id
 `
 
@@ -318,6 +370,7 @@ type ListPopulationEvidenceIDsParams struct {
 	ControlID    pgtype.UUID        `json:"control_id"`
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
+	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
 }
 
@@ -333,12 +386,15 @@ type ListPopulationEvidenceIDsRow struct {
 //
 // Returns just the evidence_record_id (and observed_at for scope intersection)
 // to keep the round-trip small; the handler hydrates after the shuffle.
+// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+// the control's evidence_queries declare (internal/evidence/unbound).
 func (q *Queries) ListPopulationEvidenceIDs(ctx context.Context, arg ListPopulationEvidenceIDsParams) ([]ListPopulationEvidenceIDsRow, error) {
 	rows, err := q.db.Query(ctx, listPopulationEvidenceIDs,
 		arg.TenantID,
 		arg.ControlID,
 		arg.ObservedAt,
 		arg.ObservedAt_2,
+		arg.UnboundKinds,
 		arg.FrozenAt,
 	)
 	if err != nil {
