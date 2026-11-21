@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -132,5 +133,23 @@ func TestValidateEvidenceKinds_SkipsEmptyKind(t *testing.T) {
 	}
 	if err := b.ValidateEvidenceKinds(context.Background(), reg); err != nil {
 		t.Fatalf("expected ok for empty kind; got %v", err)
+	}
+}
+
+func TestUnkindedQueryWarnings(t *testing.T) {
+	t.Parallel()
+	m := Manifest{EvidenceQueries: []EvidenceQuery{
+		{ID: "kinded", Language: "rego", Expression: "x", EvidenceKind: "okta.mfa_policy.v1"},
+		{ID: "kindless", Language: "sql", Expression: "y"},
+	}}
+	got := m.UnkindedQueryWarnings()
+	if len(got) != 1 {
+		t.Fatalf("warnings = %q, want one for the kindless query", got)
+	}
+	if !strings.Contains(got[0], "evidence_queries[1] (kindless)") || !strings.Contains(got[0], "declares no evidence_kind") {
+		t.Fatalf("warning = %q", got[0])
+	}
+	if w := (&Manifest{}).UnkindedQueryWarnings(); w != nil {
+		t.Fatalf("no queries: warnings = %q, want none", w)
 	}
 }

@@ -367,6 +367,7 @@ func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, 
 		if b.Manifest.SCFRelease == "" {
 			result.Warnings = append(result.Warnings, SCFReleaseDeprecationWarning)
 		}
+		result.Warnings = append(result.Warnings, b.Manifest.UnkindedQueryWarnings()...)
 
 		// 2. Marshal JSONB fields.
 		applJSON, err := b.Manifest.ApplicabilityExprJSON()
