@@ -194,10 +194,12 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 }
 
 // boundKeyCeiling returns the most a labelled API key bound to a user may
-// hold (#2431), or nil when cred is not one. Each label entry gives the role
-// it derives on an unbound key: a canonical role gives itself, and a free-text
-// owner-role label (slice 011, e.g. "platform-eng") gives control_owner.
-// Mixed labels union their entries.
+// hold (#2431), or nil when cred is not one. A canonical role entry gives
+// itself, and a free-text owner-role label (slice 011, e.g. "platform-eng")
+// gives control_owner. Mixed labels union their entries. Unlike an unbound
+// key's label (#2596), free text keeps its control_owner entry here: the
+// ceiling only narrows the owner's live roles, it grants nothing (Matt,
+// 2026-11-20).
 //
 // Decide intersects the ceiling with the owner's live roles, so a {viewer}
 // key minted for an admin acts as a viewer, not an admin. An owner holding
