@@ -34,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -355,9 +356,10 @@ func (s *Store) ControlState(ctx context.Context, periodID, controlID uuid.UUID)
 		// uses COALESCE(..., 'infinity') so the call falls through to
 		// live state.
 		rows, err := q.ListEvidenceForPeriodControl(ctx, dbx.ListEvidenceForPeriodControlParams{
-			TenantID:  pgUUID(tenantID),
-			ControlID: pgUUID(controlID),
-			FrozenAt:  p.FrozenAt,
+			UnboundKinds: unbound.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			FrozenAt:     p.FrozenAt,
 		})
 		if err != nil {
 			return fmt.Errorf("list evidence for period control: %w", err)

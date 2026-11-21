@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -136,10 +137,11 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.ControlTitle = ctrl.Title
 
 		total, err := q.CountEvidenceRecordsByControlBeforeHorizon(ctx, dbx.CountEvidenceRecordsByControlBeforeHorizonParams{
-			TenantID:   pgUUID(tenantID),
-			ControlID:  pgUUID(controlID),
-			ControlRef: controlID.String(),
-			FrozenAt:   period.FrozenAt,
+			UnboundKinds: unbound.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
+			FrozenAt:     period.FrozenAt,
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: count frozen evidence: %w", err)
@@ -147,12 +149,13 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.TotalCount = int(total)
 
 		recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-			TenantID:   pgUUID(tenantID),
-			ControlID:  pgUUID(controlID),
-			ControlRef: controlID.String(),
-			FrozenAt:   period.FrozenAt,
-			Limit:      MaxCitedExcerpts,
-			Offset:     0,
+			UnboundKinds: unbound.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
+			FrozenAt:     period.FrozenAt,
+			Limit:        MaxCitedExcerpts,
+			Offset:       0,
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: list frozen evidence: %w", err)
@@ -224,12 +227,13 @@ func (s *PeriodStore) ResolveBeforeHorizon(ctx context.Context, id, controlID uu
 		offset := int32(0)
 		for {
 			recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-				TenantID:   pgUUID(tenantID),
-				ControlID:  pgUUID(controlID),
-				ControlRef: controlID.String(),
-				FrozenAt:   horizon,
-				Limit:      pageSize,
-				Offset:     offset,
+				UnboundKinds: unbound.Kinds(),
+				TenantID:     pgUUID(tenantID),
+				ControlID:    pgUUID(controlID),
+				ControlRef:   controlID.String(),
+				FrozenAt:     horizon,
+				Limit:        pageSize,
+				Offset:       offset,
 			})
 			if err != nil {
 				return fmt.Errorf("evidencesummary: resolve frozen evidence: %w", err)

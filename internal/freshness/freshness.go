@@ -36,6 +36,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/eval"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -85,7 +86,10 @@ func (s *Store) Refresh(ctx context.Context) (int, error) {
 	now := s.now()
 	written := 0
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		rows, err := q.ListControlsWithLatestEvidence(ctx, pgUUID(tenantID))
+		rows, err := q.ListControlsWithLatestEvidence(ctx, dbx.ListControlsWithLatestEvidenceParams{
+			TenantID:     pgUUID(tenantID),
+			UnboundKinds: unbound.Kinds(),
+		})
 		if err != nil {
 			return fmt.Errorf("list controls with latest evidence: %w", err)
 		}
