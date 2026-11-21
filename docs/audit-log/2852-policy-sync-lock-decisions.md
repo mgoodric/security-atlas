@@ -67,7 +67,9 @@ could ever be linked to a synced policy. The dispatcher confirmed the shape:
   says nothing about links.
 - Authorisation is the generic OPA `write` on `policies`, as for draft edit.
   The action is derived from the path (`internal/authz/input.go`), so no
-  policy change was needed. A viewer gets 403.
+  policy change was needed. A viewer gets 403. The handler also checks
+  `authz.IsTenantApprover`, as #2664 made the other policy write handlers
+  do, so it is listed in `gateSites2447` and `routes2428`.
 - Ids are deduplicated, and each must be a control in the tenant
   (`checkLinkedControls`).
 - The route is exempt from the sync lock: it is the one change a synced row
