@@ -70,7 +70,8 @@ atlas-osquery scopes
 
 ## Evidence shape
 
-One `osquery.host_posture.v1` record per host. Schema 1.0.0 declares:
+One `osquery.host_posture.v1` record per host, at schema 1.1.0
+(additive over 1.0.0, #2912):
 
 - `host_uuid` (required)
 - `hostname` (required)
@@ -80,11 +81,32 @@ One `osquery.host_posture.v1` record per host. Schema 1.0.0 declares:
 - `screen_lock_enabled`
 - `firewall_enabled`
 - `mdm_enrolled`
+- `last_seen_at` (1.1.0): the host's own last check-in, Fleet's `seen_time`
+- `reason` (1.1.0): why the result is what it is
 
 Schema is `additionalProperties: false` — the connector emits only the
 declared fields. The slice's issue spec mentions `edr_running` and
-`os_patch_level`; these are not in the frozen 1.0.0 schema and are not
-emitted here. An additive minor bump (1.1.0) is a future slice's call.
+`os_patch_level`; these are not in the schema and are not emitted here.
+
+**A posture boolean is present only when the connector read it.** `false`
+means observed off; an absent key means not read. In Fleet mode:
+
+| Field                     | Source in Fleet's Get host response                                             |
+| ------------------------- | ------------------------------------------------------------------------------- |
+| `disk_encryption_enabled` | `disk_encryption_enabled`; Fleet omits it when unknown, and so does the record  |
+| `mdm_enrolled`            | `mdm.enrollment_status`: `On (...)` is true, `Off`/`Pending` false, else absent |
+| `last_seen_at`            | `seen_time` (from the list, refined by the detail call)                         |
+| `screen_lock_enabled`     | none: Fleet documents no such field, so it is never emitted                     |
+| `firewall_enabled`        | none: Fleet documents no such field, so it is never emitted                     |
+
+So a Fleet host's `result` is `fail` (disk encryption off) or
+`inconclusive` (screen lock not reported), never `pass`. A host whose detail
+fetch fails is `inconclusive` with no posture booleans at all.
+
+`observed_at` is the connector's pull time, hour-truncated. It is not the
+host's last check-in (Fleet lists offline hosts too); read `last_seen_at`
+for that. It cannot be `seen_time` because ingest rejects an `observed_at`
+more than 24 h from receipt.
 
 ### Scope tagging (AC-4)
 

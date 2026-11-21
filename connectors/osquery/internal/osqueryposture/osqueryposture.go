@@ -4,10 +4,11 @@
 //
 //   - Fleet API mode (developer docs at fleetdm.com/docs/rest-api/rest-api).
 //     Two-call pull: GET /api/v1/fleet/hosts (paginated list) +
-//     GET /api/v1/fleet/hosts/{id} (per-host detail, including the disk
-//     encryption + MDM enrolment fields not returned in the list). The
-//     per-host call is what surfaces the boolean policy fields the
-//     evidence schema declares — the list endpoint alone is not enough.
+//     GET /api/v1/fleet/hosts/{id} (per-host detail). The documented
+//     Get host response carries `disk_encryption_enabled` (omitted when
+//     Fleet does not know it), `mdm.enrollment_status` and `seen_time`.
+//     It carries no firewall or screen-lock field, so in Fleet mode those
+//     two are never read and never emitted (#2912).
 //
 //   - Local osqueryd extension socket mode. The connector dials a
 //     Unix-domain socket and submits a Thrift-shaped osquery SQL query.
@@ -18,10 +19,12 @@
 //
 // The package emits canonical HostPosture values; the cmd layer translates
 // each to an evidencev1.EvidenceRecord with the existing slice-014
-// osquery.host_posture.v1 schema (host_uuid, hostname, platform,
+// osquery.host_posture.v1 schema at 1.1.0 (host_uuid, hostname, platform,
 // os_version, disk_encryption_enabled, screen_lock_enabled,
-// firewall_enabled, mdm_enrolled). The 1.0.0 schema declares
-// additionalProperties:false so this package emits only those fields.
+// firewall_enabled, mdm_enrolled, last_seen_at, reason). The schema
+// declares additionalProperties:false so this package emits only those
+// fields. A posture field the connector did not read is nil and is left
+// out of the payload, never sent as false (#2912).
 package osqueryposture
 
 import (
@@ -50,15 +53,28 @@ const (
 // HostPosture is one record the cmd layer turns into an evidence record.
 // Field names map 1:1 to the osquery.host_posture.v1 schema declared by
 // slice 014. Nothing outside the schema's declared properties is emitted.
+//
+// The four posture booleans are tri-state: nil means the connector could
+// not read the value (the detail fetch failed, or the source has no such
+// field), and the cmd layer omits it from the payload. A payload-reading
+// check must not see an unread firewall as a firewall that is off (#2912).
 type HostPosture struct {
 	HostUUID              string
 	Hostname              string
 	Platform              string // "darwin", "linux", "windows"
 	OSVersion             string
-	DiskEncryptionEnabled bool
-	ScreenLockEnabled     bool
-	FirewallEnabled       bool
-	MDMEnrolled           bool
+	DiskEncryptionEnabled *bool
+	ScreenLockEnabled     *bool
+	FirewallEnabled       *bool
+	MDMEnrolled           *bool
+
+	// LastSeen is when the host last checked in with Fleet (Fleet's
+	// `seen_time`). Zero when unknown. It is not ObservedAt: Fleet lists
+	// offline hosts too, so the pull time says only that the connector
+	// ran, and ingest rejects an observed_at more than 24h from receipt
+	// (internal/evidence/ingest MaxObservedAtSkew), so an offline host's
+	// last-seen time cannot be the record's observed_at.
+	LastSeen time.Time
 
 	// Result + Reason are computed by evaluate(). Result derives from the
 	// minimum-baseline rule defined below; the evaluator (slice 015) owns
@@ -82,24 +98,37 @@ type HostListEntry struct {
 	ComputerName string `json:"computer_name"`
 	Platform     string `json:"platform"`
 	OSVersion    string `json:"os_version"`
+	// SeenTime is Fleet's last check-in time (RFC 3339, e.g.
+	// "2021-08-19T21:14:58Z"). Read from the list so a host whose detail
+	// fetch fails still reports when it was last seen.
+	SeenTime string `json:"seen_time"`
 }
 
-// HostDetail is the per-host detail response. Field names map to the
-// schema's declared booleans. JSON tags allow direct decode from Fleet's
-// nested {"host": {...}} envelope via rawHostDetail.
+// HostDetail is the per-host detail response, decoded from Fleet's
+// {"host": {...}} envelope via rawHostDetail. Only fields the documented
+// Get host response carries are declared: there is no firewall or
+// screen-lock field, and MDM enrolment is the nested
+// mdm.enrollment_status string, not a boolean.
 type HostDetail struct {
-	ID                    uint64 `json:"id"`
-	UUID                  string `json:"uuid"`
-	Hostname              string `json:"hostname"`
-	ComputerName          string `json:"computer_name"`
-	Platform              string `json:"platform"`
-	OSVersion             string `json:"os_version"`
-	DiskEncryptionEnabled bool   `json:"disk_encryption_enabled"`
-	// Fleet's REST payload uses "screenlock_enabled"; the schema we emit
-	// uses "screen_lock_enabled". The tag here matches the wire shape.
-	ScreenLockEnabled bool `json:"screenlock_enabled"`
-	FirewallEnabled   bool `json:"firewall_enabled"`
-	MDMEnrolled       bool `json:"mdm_enrolled"`
+	ID           uint64 `json:"id"`
+	UUID         string `json:"uuid"`
+	Hostname     string `json:"hostname"`
+	ComputerName string `json:"computer_name"`
+	Platform     string `json:"platform"`
+	OSVersion    string `json:"os_version"`
+	SeenTime     string `json:"seen_time"`
+	// DiskEncryptionEnabled is nil when Fleet omits the key, which its
+	// docs say happens when it doesn't know the status, and for Linux
+	// hosts reporting an unencrypted root volume.
+	DiskEncryptionEnabled *bool    `json:"disk_encryption_enabled"`
+	MDM                   *HostMDM `json:"mdm"`
+}
+
+// HostMDM is the subset of Fleet's host `mdm` object the connector reads.
+type HostMDM struct {
+	// EnrollmentStatus examples in Fleet's docs: "On (manual)",
+	// "On (automatic)", "Pending".
+	EnrollmentStatus string `json:"enrollment_status"`
 }
 
 // FleetAPI is the narrow Fleet surface Pull depends on. The concrete REST
@@ -142,6 +171,7 @@ func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time) ([]H
 			Hostname:   firstNonEmpty(h.Hostname, h.ComputerName),
 			Platform:   normalizePlatform(h.Platform),
 			OSVersion:  h.OSVersion,
+			LastSeen:   parseSeenTime(h.SeenTime),
 			ObservedAt: now(),
 		}
 		detail, err := api.GetHost(ctx, h.ID)
@@ -171,7 +201,9 @@ func PullFromLocal(ctx context.Context, q LocalQueryer, now func() time.Time) ([
 	// os_version exposes platform + version; disk_encryption exposes
 	// encrypted on darwin/linux; screenlock + alf (macOS app firewall)
 	// approximate the schema booleans. The query joins these so we get
-	// one row per local host. Tests inject the row directly.
+	// one row per local host. A NULL column (table absent on the
+	// platform, or no joined row) stays unread. Tests inject the row
+	// directly.
 	rows, err := q.Query(ctx, localPostureSQL)
 	if err != nil {
 		return nil, fmt.Errorf("local osqueryd query: %w", err)
@@ -191,6 +223,7 @@ func PullFromLocal(ctx context.Context, q LocalQueryer, now func() time.Time) ([
 			ScreenLockEnabled:     parseBool(r["screen_lock_enabled"]),
 			FirewallEnabled:       parseBool(r["firewall_enabled"]),
 			MDMEnrolled:           parseBool(r["mdm_enrolled"]),
+			LastSeen:              now(),
 			ObservedAt:            now(),
 		}
 		row.Result, row.Reason = evaluate(row)
@@ -208,10 +241,10 @@ SELECT
   s.computer_name             AS computer_name,
   o.platform                  AS platform,
   o.version                   AS os_version,
-  COALESCE(d.encrypted, '0')  AS disk_encryption_enabled,
-  COALESCE(sc.enabled, '0')   AS screen_lock_enabled,
-  COALESCE(a.global_state, '0') AS firewall_enabled,
-  COALESCE(m.enrolled, '0')   AS mdm_enrolled
+  d.encrypted                 AS disk_encryption_enabled,
+  sc.enabled                  AS screen_lock_enabled,
+  a.global_state              AS firewall_enabled,
+  m.enrolled                  AS mdm_enrolled
 FROM system_info s
 LEFT JOIN os_version o
 LEFT JOIN disk_encryption d ON d.name = s.hostname
@@ -222,21 +255,30 @@ LIMIT 1;
 `
 
 // evaluate computes pass/fail. v1 baseline: disk encryption AND screen
-// lock both enabled = PASS. Either off = FAIL. Inconclusive when both
-// booleans came back unset and the platform is unknown. The connector
-// keeps this rule shallow; the evaluator owns the policy ladder.
+// lock both observed enabled = PASS. Either observed off = FAIL. Anything
+// unread and nothing observed off = INCONCLUSIVE, with the unread fields
+// named in the reason. In Fleet mode screen lock is never read, so a
+// Fleet host is FAIL (disk encryption off) or INCONCLUSIVE, never PASS.
+// The connector keeps this rule shallow; the evaluator owns the policy
+// ladder.
 func evaluate(p HostPosture) (Result, string) {
 	switch {
-	case p.DiskEncryptionEnabled && p.ScreenLockEnabled:
-		return ResultPass, "disk_encryption+screen_lock"
-	case !p.DiskEncryptionEnabled && !p.ScreenLockEnabled && p.Platform == "":
-		return ResultInconclusive, "no platform / no booleans"
-	case !p.DiskEncryptionEnabled:
+	case isFalse(p.DiskEncryptionEnabled):
 		return ResultFail, "disk_encryption_disabled"
-	default:
+	case isFalse(p.ScreenLockEnabled):
 		return ResultFail, "screen_lock_disabled"
+	case p.DiskEncryptionEnabled == nil && p.ScreenLockEnabled == nil:
+		return ResultInconclusive, "disk_encryption and screen_lock not reported"
+	case p.DiskEncryptionEnabled == nil:
+		return ResultInconclusive, "disk_encryption not reported"
+	case p.ScreenLockEnabled == nil:
+		return ResultInconclusive, "screen_lock not reported"
+	default:
+		return ResultPass, "disk_encryption+screen_lock"
 	}
 }
+
+func isFalse(b *bool) bool { return b != nil && !*b }
 
 // ---- Fleet REST client ----
 
@@ -368,11 +410,46 @@ func fillFromDetail(p *HostPosture, d *HostDetail) {
 	if d.Platform != "" {
 		p.Platform = normalizePlatform(d.Platform)
 	}
+	if t := parseSeenTime(d.SeenTime); !t.IsZero() {
+		p.LastSeen = t
+	}
 	p.DiskEncryptionEnabled = d.DiskEncryptionEnabled
-	p.ScreenLockEnabled = d.ScreenLockEnabled
-	p.FirewallEnabled = d.FirewallEnabled
-	p.MDMEnrolled = d.MDMEnrolled
+	if d.MDM != nil {
+		p.MDMEnrolled = mdmEnrolled(d.MDM.EnrollmentStatus)
+	}
+	// Screen lock and firewall: the Get host response has no such field,
+	// so both stay nil (unread).
 }
+
+// mdmEnrolled maps Fleet's mdm.enrollment_status to a boolean. "On (...)"
+// is enrolled; "Off" and "Pending" are not; anything else, including an
+// empty string, is unread rather than guessed.
+func mdmEnrolled(status string) *bool {
+	s := strings.ToLower(strings.TrimSpace(status))
+	switch {
+	case s == "on" || strings.HasPrefix(s, "on "):
+		return boolPtr(true)
+	case s == "off" || s == "pending":
+		return boolPtr(false)
+	default:
+		return nil
+	}
+}
+
+// parseSeenTime parses Fleet's RFC 3339 seen_time. An empty or
+// unparsable value is unknown (zero), never the pull time.
+func parseSeenTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}
+
+func boolPtr(b bool) *bool { return &b }
 
 // normalizePlatform collapses Fleet/osquery vendor strings to the
 // canonical {"darwin", "linux", "windows"} set the schema documents.
@@ -393,13 +470,17 @@ func normalizePlatform(in string) string {
 }
 
 // parseBool accepts the common osquery-row boolean shapes: "1", "true",
-// "yes" (case-insensitive). Everything else is false.
-func parseBool(s string) bool {
+// "yes", "on" are true; "0", "false", "no", "off" are false
+// (case-insensitive). Anything else, including an empty (NULL) column,
+// is unread.
+func parseBool(s string) *bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "1", "true", "yes", "on":
-		return true
+		return boolPtr(true)
+	case "0", "false", "no", "off":
+		return boolPtr(false)
 	default:
-		return false
+		return nil
 	}
 }
 

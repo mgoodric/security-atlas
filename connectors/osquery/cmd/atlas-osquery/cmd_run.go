@@ -188,12 +188,23 @@ func buildHostPostureRecord(p osqueryposture.HostPosture, org, env, controlID st
 	if p.OSVersion != "" {
 		pm["os_version"] = p.OSVersion
 	}
-	// The four declared boolean policy fields are always emitted (their
-	// zero value is meaningful — "false" means policy off, not absent).
-	pm["disk_encryption_enabled"] = p.DiskEncryptionEnabled
-	pm["screen_lock_enabled"] = p.ScreenLockEnabled
-	pm["firewall_enabled"] = p.FirewallEnabled
-	pm["mdm_enrolled"] = p.MDMEnrolled
+	// A posture boolean is emitted only when the connector read it: false
+	// means observed off, and an absent key means not read. Fleet's Get
+	// host response has no firewall or screen-lock field, so those two
+	// are absent on every Fleet record (#2912).
+	putBool(pm, "disk_encryption_enabled", p.DiskEncryptionEnabled)
+	putBool(pm, "screen_lock_enabled", p.ScreenLockEnabled)
+	putBool(pm, "firewall_enabled", p.FirewallEnabled)
+	putBool(pm, "mdm_enrolled", p.MDMEnrolled)
+	// last_seen_at (1.1.0) is the host's own last check-in, so a check can
+	// tell an offline host from a fresh one. observed_at stays the pull
+	// time: ingest rejects an observed_at more than 24h from receipt.
+	if !p.LastSeen.IsZero() {
+		pm["last_seen_at"] = p.LastSeen.UTC().Format(time.RFC3339)
+	}
+	if p.Reason != "" {
+		pm["reason"] = p.Reason
+	}
 
 	payload, err := structpb.NewStruct(pm)
 	if err != nil {
@@ -208,7 +219,7 @@ func buildHostPostureRecord(p osqueryposture.HostPosture, org, env, controlID st
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idemKey,
 		EvidenceKind:   "osquery.host_posture.v1",
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  HostPostureSchemaVersion,
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{org}},
@@ -234,10 +245,20 @@ func buildHostPostureRecord(p osqueryposture.HostPosture, org, env, controlID st
 	}, nil
 }
 
+// HostPostureSchemaVersion is the osquery.host_posture.v1 schema the
+// connector pushes. 1.1.0 adds last_seen_at and reason (#2912).
+const HostPostureSchemaVersion = "1.1.0"
+
+func putBool(pm map[string]any, key string, b *bool) {
+	if b != nil {
+		pm[key] = *b
+	}
+}
+
 // inferDataClassification: MDM-enrolled → restricted; otherwise unknown.
 // Single canonical hook so the test and the doc agree.
 func inferDataClassification(p osqueryposture.HostPosture) string {
-	if p.MDMEnrolled {
+	if p.MDMEnrolled != nil && *p.MDMEnrolled {
 		return "restricted"
 	}
 	return "unknown"

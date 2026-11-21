@@ -104,13 +104,16 @@ func TestMapResult(t *testing.T) {
 // TestInferDataClassification covers both branches of the per-host
 // classification ladder.
 func TestInferDataClassification(t *testing.T) {
-	managed := osqueryposture.HostPosture{MDMEnrolled: true}
+	managed := osqueryposture.HostPosture{MDMEnrolled: ptr(true)}
 	if got := inferDataClassification(managed); got != "restricted" {
 		t.Errorf("MDM-enrolled = %q; want restricted", got)
 	}
-	unmanaged := osqueryposture.HostPosture{MDMEnrolled: false}
+	unmanaged := osqueryposture.HostPosture{MDMEnrolled: ptr(false)}
 	if got := inferDataClassification(unmanaged); got != "unknown" {
 		t.Errorf("un-enrolled = %q; want unknown", got)
+	}
+	if got := inferDataClassification(osqueryposture.HostPosture{}); got != "unknown" {
+		t.Errorf("enrolment unread = %q; want unknown", got)
 	}
 }
 
