@@ -1,6 +1,6 @@
 //go:build integration
 
-// #2661 — 20261278000000_user_roles_canonical_user_id: a user_roles.user_id
+// #2661 — 20261279000000_user_roles_canonical_user_id: a user_roles.user_id
 // that reads as a uuid must be the canonical lowercase hyphenated form, so
 // the u.id::text = ur.user_id deactivation guard can never miss it. Non-uuid
 // principals are unaffected, and the migration's pre-check refuses to apply
@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	userRolesCanonicalUp   = "../../migrations/sql/20261278000000_user_roles_canonical_user_id.sql"
-	userRolesCanonicalDown = "../../migrations/sql/20261278000000_user_roles_canonical_user_id.down.sql"
+	userRolesCanonicalUp   = "../../migrations/sql/20261279000000_user_roles_canonical_user_id.sql"
+	userRolesCanonicalDown = "../../migrations/sql/20261279000000_user_roles_canonical_user_id.down.sql"
 )
 
 func TestUserRolesCanonicalUserID(t *testing.T) {
