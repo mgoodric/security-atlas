@@ -127,4 +127,74 @@ test.describe("#2503 — an organisation admin manages its own users", () => {
     await page.goto("/admin/tenants");
     await expect(page.getByTestId("admin-platform-forbidden")).toBeVisible();
   });
+
+  // #2760: the SSO page's delete confirms with the mapping and role counts
+  // GET reports, and fires DELETE only from the confirm. The browser-side
+  // /api/admin/sso calls are mocked; the page shell is the real platform.
+  test("its SSO delete confirms with the mapping and role counts", async ({
+    page,
+  }) => {
+    let deletes = 0;
+    let deleted = false;
+    await page.route("**/api/admin/sso", async (route) => {
+      const method = route.request().method();
+      if (method === "DELETE") {
+        deletes++;
+        deleted = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            config_id: "cfg-2760",
+            mapping_count: 2,
+            revoked_role_count: 5,
+            affected_user_count: 3,
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          config: deleted
+            ? null
+            : {
+                id: "cfg-2760",
+                name: "primary",
+                issuer_url: "https://idp.example",
+                client_id: "cid",
+                redirect_url: "https://app.example/cb",
+                allowed_email_domains: [],
+                trust_unverified_email_for_link: false,
+                created_at: "2026-11-20T00:00:00Z",
+                updated_at: "2026-11-20T00:00:00Z",
+                mapping_count: 2,
+                derived_role_count: 5,
+              },
+        }),
+      });
+    });
+
+    await signInAs(page, await mintTenantAdminJWT());
+    await page.goto("/admin/sso");
+    await page.getByTestId("sso-delete-trigger").click();
+    const dialog = page.getByTestId("sso-delete-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("sso-delete-mapping-count")).toHaveText(
+      /2 group-role mappings/,
+    );
+    await expect(dialog.getByTestId("sso-delete-role-count")).toHaveText(
+      /5 group-derived roles/,
+    );
+    expect(deletes).toBe(0);
+
+    await dialog.getByTestId("sso-delete-confirm").click();
+    await expect(dialog).toBeHidden();
+    expect(deletes).toBe(1);
+    await expect(page.getByTestId("sso-delete-card")).toHaveCount(0);
+    await expect(page.getByTestId("sso-delete-success")).toHaveText(
+      /Removed 2 mappings and revoked 5 roles from 3 users/,
+    );
+  });
 });

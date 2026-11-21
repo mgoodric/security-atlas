@@ -49,7 +49,8 @@ type reconcileState struct {
 	// validated group set (the DESIRED group-derived role set). Already
 	// de-duplicated.
 	target map[string]struct{}
-	// current is the user's EXISTING group-derived roles (origin='group-derived').
+	// current is the roles THIS source already derives for the user (its
+	// user_role_group_sources rows, #2760), not every group-derived role.
 	current map[string]struct{}
 	// manual is the set of roles the user ALSO holds via a manual admin
 	// assignment (origin='manual'). A revoke must never delete a role the user
@@ -58,11 +59,12 @@ type reconcileState struct {
 	// tenantAdminCount is the number of DISTINCT users currently holding the
 	// admin role in the tenant (any origin). The last-admin guard reads it.
 	tenantAdminCount int
-	// userHoldsAdminElsewhere is true when this user holds admin via a path
-	// that survives this reconciliation — i.e. a manual admin grant. If the
-	// user keeps admin manually, revoking the group-derived admin can never
-	// strand the tenant, so the guard does not fire.
-	userHoldsManualAdmin bool
+	// userKeepsAdmin is true when this user holds admin via a path that
+	// survives this reconciliation: a manual admin grant, or another source
+	// that also derives admin (#2760). If the user keeps admin, revoking this
+	// source's derivation can never strand the tenant, so the guard does not
+	// fire.
+	userKeepsAdmin bool
 }
 
 // reconcilePlan is the pure output: the exact grants + revokes to apply, plus
@@ -135,13 +137,14 @@ func revokesAdmin(target, current map[string]struct{}) bool {
 
 // wouldStrandLastAdmin reports whether revoking THIS user's group-derived admin
 // role would remove the tenant's final admin (AC-5 / P0-509-3). It returns true
-// only when the user does not also hold admin manually (a manual admin grant
-// survives the re-derivation, so the tenant is not stranded) AND the tenant has
+// only when the user does not keep admin another way (a manual admin grant,
+// or another source deriving admin, survives the re-derivation, so the tenant
+// is not stranded) AND the tenant has
 // at most one admin user. A count of 1 means this user is the only admin;
 // 0 is defensive (should not happen if the user currently holds group-derived
 // admin, but treating <=1 as "stranding" is the conservative fail-safe).
 func wouldStrandLastAdmin(st reconcileState) bool {
-	if st.userHoldsManualAdmin {
+	if st.userKeepsAdmin {
 		return false
 	}
 	return st.tenantAdminCount <= 1
