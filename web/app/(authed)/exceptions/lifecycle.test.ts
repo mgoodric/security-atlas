@@ -14,6 +14,7 @@ import {
   dayAfter,
   dayStart,
   idempotencyKeyFor,
+  isWholeControl,
   MAX_DAYS,
   nextAction,
   validateAction,
@@ -215,6 +216,21 @@ describe("nextAction", () => {
       expect(nextAction(s)).toBeNull();
     }
   });
+});
+
+// #2600: {"op":"true"} and the legacy {} / null all read as the whole
+// control; anything narrower, or not a predicate object, does not.
+test("isWholeControl", () => {
+  expect(isWholeControl({ op: "true" })).toBe(true);
+  expect(isWholeControl({})).toBe(true);
+  expect(isWholeControl(null)).toBe(true);
+  expect(isWholeControl(undefined)).toBe(true);
+  expect(isWholeControl({ op: "true", extra: 1 })).toBe(false);
+  expect(isWholeControl({ op: "eq", dim: "environment", value: "prod" })).toBe(
+    false,
+  );
+  expect(isWholeControl([])).toBe(false);
+  expect(isWholeControl("true")).toBe(false);
 });
 
 test("dayStart rejects malformed days", () => {
