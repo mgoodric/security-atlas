@@ -244,3 +244,19 @@ export function idempotencyKeyFor(
 export function bulkIdempotencyKey(key: string, controlId: string): string {
   return `${key}:${controlId}`;
 }
+
+/**
+ * #2600 — whether a stored predicate covers the whole control: the
+ * explicit `{"op":"true"}` new exceptions store, or the legacy `{}` and
+ * null spellings the platform reads the same way. The detail page shows
+ * these as "Whole control".
+ */
+export function isWholeControl(predicate: unknown): boolean {
+  if (predicate === null || predicate === undefined) return true;
+  if (typeof predicate !== "object" || Array.isArray(predicate)) return false;
+  const keys = Object.keys(predicate);
+  return (
+    keys.length === 0 ||
+    (keys.length === 1 && (predicate as { op?: unknown }).op === "true")
+  );
+}

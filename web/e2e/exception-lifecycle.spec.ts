@@ -223,6 +223,10 @@ test.describe("exception lifecycle in the app (#2113)", () => {
       "Exception requested",
     );
     await expect(page.getByTestId("exception-status")).toHaveText("requested");
+    // #2600: the always-true predicate reads as the whole control.
+    await expect(
+      page.getByTestId("exception-scope-whole-control"),
+    ).toContainText("Whole control");
     expect(store.created).toHaveLength(1);
     expect(store.created[0]).toMatchObject({
       control_id: seeded.controlId,

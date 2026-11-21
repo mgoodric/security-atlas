@@ -16,16 +16,26 @@
 package exception_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/exceptions"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/scope"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 type exceptionBody struct {
@@ -191,6 +201,43 @@ func TestHTTP_ExceptionCreate_RefusesNullPredicate(t *testing.T) {
 	}
 }
 
+// #2600: an omitted or {} predicate is stored as the explicit whole
+// control, {"op":"true"}; an over-deep predicate is refused; a body past
+// 1 MiB gets 413.
+func TestHTTP_ExceptionCreate_WholeControlAndSizeCaps(t *testing.T) {
+	a, _ := newExceptionAPI(t)
+	requester := a.bearer("user:" + uuid.New().String())
+	expires := time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339)
+	withPred := func(pred string) string {
+		return fmt.Sprintf(`{"control_id":%q,"scope_cell_predicate":%s,"justification":"vendor blocker","expires_at":%q}`,
+			a.ctrl, pred, expires)
+	}
+	omitted := fmt.Sprintf(`{"control_id":%q,"justification":"vendor blocker","expires_at":%q}`, a.ctrl, expires)
+
+	for name, body := range map[string]string{"omitted": omitted, "{}": withPred(`{}`)} {
+		code, raw := a.do(http.MethodPost, "/v1/exceptions", requester, body)
+		if code != http.StatusCreated {
+			t.Fatalf("%s predicate: status %d body=%s", name, code, raw)
+		}
+		got := decodeException(t, raw).Exception.ScopeCellPredicate
+		var stored map[string]any
+		if err := json.Unmarshal(got, &stored); err != nil || len(stored) != 1 || stored["op"] != "true" {
+			t.Fatalf("%s predicate stored as %s, want {\"op\":\"true\"}", name, got)
+		}
+	}
+
+	deep := strings.Repeat(`{"op":"not","arg":`, scope.MaxExprDepth) + `{"op":"true"}` + strings.Repeat(`}`, scope.MaxExprDepth)
+	if code, raw := a.do(http.MethodPost, "/v1/exceptions", requester, withPred(deep)); code != http.StatusBadRequest ||
+		!strings.Contains(string(raw), "deeper than") {
+		t.Fatalf("over-deep predicate: status %d (want 400) body=%s", code, raw)
+	}
+
+	huge := fmt.Sprintf(`{"control_id":%q,"justification":%q,"expires_at":%q}`, a.ctrl, strings.Repeat("x", 1<<20), expires)
+	if code, raw := a.do(http.MethodPost, "/v1/exceptions", requester, huge); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body: status %d (want 413) body=%.200s", code, raw)
+	}
+}
+
 // #2343: approve, deny, activate and revoke are people-only moves. A
 // machine credential with the approver role gets 403 on each, and the
 // exception stays where it was.
@@ -199,7 +246,53 @@ func TestHTTP_ExceptionLifecycle_MachineCredentialRefused(t *testing.T) {
 	allowSelf(false)
 	requester := a.bearer("user:" + uuid.New().String())
 	approver := a.bearer("user:" + uuid.New().String())
-	machine := a.bearer("oauth_client:ci")
+	// #2600: every machine shape, not only an OAuth client. The OAuth
+	// client and the bootstrap admin reach the router as JWTs whose
+	// subject names them. An unbound API key cannot authenticate on the
+	// HTTP router (it admits JWTs only), so it is the credential credstore
+	// issues (a key_ id that is also its UserID, approver flag set), put
+	// on the request context and handed to the handler directly.
+	unbound, _, err := a.srv.IssueBootstrapApproverCredential(a.tenant)
+	if err != nil {
+		t.Fatalf("issue unbound key: %v", err)
+	}
+	if !strings.HasPrefix(unbound.ID, "key_") || unbound.UserID != unbound.ID || !unbound.IsApprover {
+		t.Fatalf("unbound key = %+v, want an approver key_ id bound to no user", unbound)
+	}
+	handler := exceptions.New(exception.NewStore(dbtest.NewAppPool(t)))
+	viaHandler := func(verb, id, body string) (int, []byte) {
+		ctx, err := tenancy.WithTenant(authctx.WithCredential(context.Background(), unbound), a.tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", id)
+		var rdr io.Reader = http.NoBody
+		if body != "" {
+			rdr = strings.NewReader(body)
+		}
+		req := httptest.NewRequest(http.MethodPatch, "/v1/exceptions/"+id+"/"+verb, rdr)
+		req = req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		map[string]http.HandlerFunc{
+			"approve": handler.Approve, "deny": handler.Deny,
+			"activate": handler.Activate, "revoke": handler.Revoke,
+		}[verb](rec, req)
+		return rec.Code, rec.Body.Bytes()
+	}
+	viaRouter := func(bearer string) func(verb, id, body string) (int, []byte) {
+		return func(verb, id, body string) (int, []byte) {
+			return a.do(http.MethodPatch, "/v1/exceptions/"+id+"/"+verb, bearer, body)
+		}
+	}
+	machines := []struct {
+		name string
+		call func(verb, id, body string) (int, []byte)
+	}{
+		{"OAuth client", viaRouter(a.bearer("oauth_client:ci"))},
+		{"bootstrap admin", viaRouter(a.bearer("bootstrap-admin"))},
+		{"unbound key", viaHandler},
+	}
 
 	requested := a.request(requester)
 	approved := a.request(requester)
@@ -208,21 +301,23 @@ func TestHTTP_ExceptionLifecycle_MachineCredentialRefused(t *testing.T) {
 	}
 	active := a.activeException(requester, approver)
 
-	for _, tc := range []struct {
-		verb, id, body, state string
-	}{
-		{"approve", requested, "", "requested"},
-		{"deny", requested, `{"reason":"no"}`, "requested"},
-		{"activate", approved, "{}", "approved"},
-		{"revoke", active, `{"reason":"done"}`, "active"},
-	} {
-		code, raw := a.do(http.MethodPatch, "/v1/exceptions/"+tc.id+"/"+tc.verb, machine, tc.body)
-		if code != http.StatusForbidden || !strings.Contains(string(raw), "only a person can "+tc.verb) {
-			t.Fatalf("machine %s: status %d (want 403) body=%s", tc.verb, code, raw)
-		}
-		code, raw = a.do(http.MethodGet, "/v1/exceptions/"+tc.id, approver, "")
-		if code != http.StatusOK || decodeException(t, raw).Exception.Status != tc.state {
-			t.Fatalf("after machine %s: status %d body=%s, want still %s", tc.verb, code, raw, tc.state)
+	for _, m := range machines {
+		for _, tc := range []struct {
+			verb, id, body, state string
+		}{
+			{"approve", requested, "", "requested"},
+			{"deny", requested, `{"reason":"no"}`, "requested"},
+			{"activate", approved, "{}", "approved"},
+			{"revoke", active, `{"reason":"done"}`, "active"},
+		} {
+			code, raw := m.call(tc.verb, tc.id, tc.body)
+			if code != http.StatusForbidden || !strings.Contains(string(raw), "only a person can "+tc.verb) {
+				t.Fatalf("%s %s: status %d (want 403) body=%s", m.name, tc.verb, code, raw)
+			}
+			code, raw = a.do(http.MethodGet, "/v1/exceptions/"+tc.id, approver, "")
+			if code != http.StatusOK || decodeException(t, raw).Exception.Status != tc.state {
+				t.Fatalf("after %s %s: status %d body=%s, want still %s", m.name, tc.verb, code, raw, tc.state)
+			}
 		}
 	}
 }

@@ -173,8 +173,9 @@ function EvidencePageInner() {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
     const urlKey = URL_KEYS[key];
-    const sentinel = key === "controlId" ? NONE : ALL;
-    if (next[key] === sentinel) {
+    // The default value stays out of the URL. For Since that is "30d"
+    // (#2794), so "All time" is written as since_preset=all.
+    if (next[key] === DEFAULT_FILTERS[key]) {
       sp.delete(urlKey);
     } else {
       sp.set(urlKey, next[key]);

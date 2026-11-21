@@ -3,6 +3,7 @@ package scope
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -139,6 +140,50 @@ func TestValidateExpr(t *testing.T) {
 		if (err == nil) != ok || (err != nil && !errors.Is(err, ErrBadPredicate)) {
 			t.Errorf("ValidateExpr(%s) = %v, want ok=%v", in, err, ok)
 		}
+	}
+}
+
+// nestedNot returns depth "not" nodes wrapped around a "true" leaf, so the
+// tree is depth+1 levels deep.
+func nestedNot(depth int) string {
+	return strings.Repeat(`{"op":"not","arg":`, depth) + `{"op":"true"}` + strings.Repeat(`}`, depth)
+}
+
+// wideOr returns an "or" with n "true" args: n+1 nodes, two levels deep.
+func wideOr(n int) string {
+	return `{"op":"or","args":[` + strings.TrimSuffix(strings.Repeat(`{"op":"true"},`, n), ",") + `]}`
+}
+
+// #2600: the parser caps depth and node count, for exceptions and for
+// credential predicates alike.
+func TestValidateExpr_SizeCap(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		expr string
+		ok   bool
+	}{
+		{"at depth cap", nestedNot(MaxExprDepth - 1), true},
+		{"past depth cap", nestedNot(MaxExprDepth), false},
+		{"far past depth cap", nestedNot(5000), false},
+		{"at node cap", wideOr(MaxExprNodes - 1), true},
+		{"past node cap", wideOr(MaxExprNodes), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateExpr([]byte(tc.expr))
+			if (err == nil) != tc.ok || (err != nil && !errors.Is(err, ErrBadPredicate)) {
+				t.Errorf("ValidateExpr = %v, want ok=%v", err, tc.ok)
+			}
+			ok, err := MatchRecordScope(tc.expr, map[string][]string{"environment": {"prod"}})
+			if tc.ok == (err != nil) {
+				t.Errorf("MatchRecordScope err = %v, want ok=%v", err, tc.ok)
+			}
+			if !tc.ok && ok {
+				t.Error("MatchRecordScope admitted an over-cap predicate")
+			}
+		})
 	}
 }
 
