@@ -1,9 +1,10 @@
 # osquery.host_posture.v1 records, shaped as the osquery connector emits
-# them (connectors/osquery/cmd/atlas-osquery/cmd_run.go
-# buildHostPostureRecord): all four booleans are always present. `result`
-# is the connector's own verdict, disk encryption plus screen lock. The
-# query decides on `firewall_enabled`, so a record can pass here and fail
-# there, or the reverse.
+# them at schema 1.2.0 (connectors/osquery/cmd/atlas-osquery/cmd_run.go
+# buildHostPostureRecord): a posture boolean is present only when the
+# connector read it, so an absent `firewall_enabled` means "not read".
+# `result` is the connector's own verdict, disk encryption plus screen
+# lock. The query decides on `firewall_enabled`, so a record can pass here
+# and fail there, or the reverse.
 cases:
   - name: every-host-firewall-on-passes
     expected_state: pass
@@ -19,7 +20,9 @@ cases:
           disk_encryption_enabled: true
           screen_lock_enabled: true
           firewall_enabled: true
+          firewall_source: fleet_policy:macOS firewall on
           mdm_enrolled: true
+          last_seen_at: 2026-11-21T05:40:00Z
       - result: fail
         evidence_kind: osquery.host_posture.v1
         observed_at: 2026-11-21T06:00:00Z
@@ -28,9 +31,9 @@ cases:
           hostname: bob-thinkpad
           platform: linux
           disk_encryption_enabled: false
-          screen_lock_enabled: true
           firewall_enabled: true
-          mdm_enrolled: false
+          firewall_source: fleet_policy:Linux ufw active
+          last_seen_at: 2026-11-21T05:50:00Z
 
   - name: one-host-firewall-off-fails
     description: the connector's verdict passes this host; the firewall is off
@@ -44,10 +47,7 @@ cases:
           host_uuid: 11111111-1111-1111-1111-111111111111
           hostname: alice-mbp
           platform: darwin
-          disk_encryption_enabled: true
-          screen_lock_enabled: true
           firewall_enabled: true
-          mdm_enrolled: true
       - result: pass
         evidence_kind: osquery.host_posture.v1
         observed_at: 2026-11-21T06:00:00Z
@@ -60,24 +60,76 @@ cases:
           firewall_enabled: false
           mdm_enrolled: true
 
-  - name: unread-host-counts-as-firewall-off
-    description: a failed Fleet detail fetch is pushed inconclusive with firewall_enabled false
-    expected_state: fail
+  - name: absent-firewall-is-inconclusive
+    description: Fleet has no firewall field and no firewall policy is named, so the connector omits it
+    expected_state: inconclusive
     evaluated_at: 2026-11-21T12:00:00Z
     records:
-      - result: inconclusive
+      - result: pass
         evidence_kind: osquery.host_posture.v1
         observed_at: 2026-11-21T06:00:00Z
         payload:
           host_uuid: 44444444-4444-4444-4444-444444444444
           hostname: dave-mbp
           platform: darwin
-          disk_encryption_enabled: false
-          screen_lock_enabled: false
-          firewall_enabled: false
-          mdm_enrolled: false
+          disk_encryption_enabled: true
+          mdm_enrolled: true
+          last_seen_at: 2026-11-21T05:00:00Z
+          reason: "not reported: firewall_enabled, screen_lock_enabled"
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 55555555-5555-5555-5555-555555555555
+          hostname: erin-mbp
+          reason: "fleet host detail: 502 Bad Gateway"
 
-  - name: missing-firewall-field-fails
+  - name: absent-plus-on-is-inconclusive
+    description: a host outside a macOS-only firewall policy is unread, so the estate is not shown all on
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          platform: darwin
+          firewall_enabled: true
+          firewall_source: fleet_policy:macOS firewall on
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: bob-thinkpad
+          platform: linux
+
+  - name: absent-plus-one-off-fails
+    description: one host observed off fails the control even though another is unread
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 44444444-4444-4444-4444-444444444444
+          hostname: dave-mbp
+          platform: darwin
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          platform: darwin
+          firewall_enabled: false
+          firewall_source: fleet_policy:macOS firewall on
+
+  - name: non-boolean-firewall-fails
+    description: a value that is present but not true counts as off
     expected_state: fail
     evaluated_at: 2026-11-21T12:00:00Z
     records:
@@ -87,6 +139,7 @@ cases:
         payload:
           host_uuid: 55555555-5555-5555-5555-555555555555
           hostname: erin-mbp
+          firewall_enabled: "true"
 
   - name: latest-record-per-host-decides-on
     description: the firewall was turned on after an earlier in-window record had it off
@@ -127,6 +180,105 @@ cases:
           host_uuid: 33333333-3333-3333-3333-333333333333
           hostname: carol-surface
           firewall_enabled: false
+
+  - name: last-seen-decides-before-observed-at
+    description: the record pulled later carries an older host check-in, so the earlier pull is the host's latest state
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          firewall_enabled: false
+          last_seen_at: 2026-11-21T05:00:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          firewall_enabled: true
+          last_seen_at: 2026-11-21T03:00:00Z
+
+  - name: tie-with-any-false-fails
+    description: two latest records with equal last_seen_at and observed_at disagree
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          firewall_enabled: true
+          last_seen_at: 2026-11-21T05:00:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          firewall_enabled: false
+          last_seen_at: 2026-11-21T05:00:00Z
+
+  - name: tie-with-on-and-absent-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          firewall_enabled: true
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+
+  - name: record-without-host-uuid-is-left-out
+    description: the off record has no host_uuid, so it is not grouped as a host and the identified host passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          firewall_enabled: true
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          hostname: nobody-mbp
+          firewall_enabled: false
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: ""
+          hostname: blank-mbp
+          firewall_enabled: false
+
+  - name: only-records-without-host-uuid-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          hostname: nobody-mbp
+          firewall_enabled: true
 
   - name: no-record-is-inconclusive
     expected_state: inconclusive

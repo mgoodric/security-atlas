@@ -9,18 +9,30 @@ description: |
 
   What runs today: a SQL query over the payloads of osquery's
   `osquery.host_posture.v1` records, one per host per connector run. It
-  takes each host's latest in-window record (by `host_uuid`) and passes the
-  control when every one of them has `firewall_enabled` true. One host
-  whose latest record has `firewall_enabled` false, or missing, fails the
-  control. No in-window record leaves it inconclusive. The connector's
-  per-record verdict, which is disk encryption plus screen lock, is not
-  used.
+  takes each host's latest in-window record, keyed by `host_uuid` and
+  ordered by the host's own `last_seen_at`, then by the record's
+  `observed_at`. A host whose latest record has `firewall_enabled` false
+  fails the control, whatever the other hosts report. Otherwise the
+  control passes only when every host's latest record has
+  `firewall_enabled` true, and is inconclusive when any host's latest
+  record has no `firewall_enabled`. No in-window record also leaves it
+  inconclusive. The connector's per-record verdict, which is disk
+  encryption plus screen lock, is not used.
 
-  A host whose posture the connector could not read (its Fleet host-detail
-  call failed) is still pushed, with `firewall_enabled` false and an
-  inconclusive verdict. This query counts it as firewall off, so one such
-  host fails the control until the connector stops reporting unread fields
-  as false.
+  Why a missing field is inconclusive and not a fail: the connector
+  writes `firewall_enabled` only when it read the firewall state, so an
+  absent key means "not read", not "off". Fleet's Get host API has no
+  firewall field. A Fleet-sourced record carries `firewall_enabled` only
+  when the operator names a firewall Fleet policy for the connector, and
+  `firewall_source` then names it (`fleet_policy:<name>`). A host the
+  policy does not target (a Linux host under a macOS-only policy, say),
+  or a host whose Fleet detail fetch failed, has no `firewall_enabled`.
+  With no firewall policy named, every Fleet host is unread and the
+  control stays inconclusive.
+
+  Records without a `host_uuid` are left out. When a host's latest
+  records tie on both times, the host counts as on only if every tied
+  record says true, and any tied false fails it.
 
   Not checked: which firewall is on, or its rules; that the host is a
   production or managed endpoint (every reporting host counts). Only the
@@ -40,11 +52,30 @@ evidence_queries:
     evidence_kind: osquery.host_posture.v1
     description: "Every host's latest posture record reports the host firewall enabled"
     expression: |
-      SELECT coalesce(bool_and(
-               coalesce(payload->'firewall_enabled' = 'true'::jsonb, false)
-             ), false)
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_off) THEN 'fail'
+               WHEN bool_and(all_on) THEN 'pass'
+               ELSE 'inconclusive'
+             END
       FROM (
-        SELECT DISTINCT ON (payload->>'host_uuid') payload
-        FROM evidence
-        ORDER BY payload->>'host_uuid', observed_at DESC
-      ) AS latest
+        SELECT host,
+               bool_or(coalesce(fw IS NOT NULL AND fw <> 'true'::jsonb, false)) AS any_off,
+               bool_and(coalesce(fw = 'true'::jsonb, false)) AS all_on
+        FROM (
+          SELECT payload->>'host_uuid' AS host,
+                 payload->'firewall_enabled' AS fw,
+                 rank() OVER (
+                   PARTITION BY payload->>'host_uuid'
+                   ORDER BY CASE
+                              WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}'
+                                THEN (payload->>'last_seen_at')::timestamptz
+                            END DESC NULLS LAST,
+                            observed_at DESC
+                 ) AS recency
+          FROM evidence
+          WHERE coalesce(payload->>'host_uuid', '') <> ''
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY host
+      ) AS per_host
