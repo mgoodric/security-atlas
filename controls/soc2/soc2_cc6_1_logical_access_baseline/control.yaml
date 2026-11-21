@@ -8,25 +8,27 @@ description: |
   phishing-resistant factor.
 
   What runs today: a SQL query over the payloads of the Okta connector's
-  `okta.mfa_policy.v1` snapshots, one per MFA enrollment policy. It takes
+  `okta.mfa_policy.v2` snapshots, one per MFA enrollment policy. It takes
   each policy's latest in-window snapshot and passes the control when at
-  least one of them has `mfa_required` true, lists `everyone` (in any
-  case) in `applies_to_groups`, and lists `webauthn` in `factors_allowed`.
-  Otherwise the control fails: MFA not required, a policy scoped to other
-  groups only, or only SMS, voice, email, OTP or push factors. No in-window
-  snapshot leaves it inconclusive. The connector's per-record verdict is
-  not used.
-
-  Until #2901 lands, this fails on real Okta tenants: the connector reports
-  group ids, not `everyone`, and doesn't emit `webauthn`.
+  least one of them has `status` ACTIVE, `mfa_required` true,
+  `applies_to_everyone` true, and `webauthn` in `factors_allowed`. The
+  connector sets `applies_to_everyone` when the policy's group ids include
+  the org's Everyone group, and reports every FIDO factor (WebAuthn, U2F)
+  as `webauthn`, from Classic and Identity Engine policies alike.
+  Otherwise the control fails: an inactive policy, MFA not required, a
+  policy scoped to other groups only, or only SMS, voice, email, OTP or
+  push factors. No in-window v2 snapshot leaves it inconclusive, including
+  when only `okta.mfa_policy.v1` snapshots arrived (an Okta connector older
+  than #2901): v1 snapshots are not read. The connector's per-record
+  verdict is not used.
 
   Not checked: Okta Verify with number matching also resists phishing, but
   the snapshot records only the factor key (`okta_verify`), not whether
-  number matching is on, so `okta_verify` does not count. An inactive
-  policy counts the same as an active one. A higher-priority policy scoped
-  to a subset of users can override the Everyone policy for them, and that
-  is not seen. Only the records the control receives are checked; a policy
-  the connector did not report is not seen.
+  number matching is on, so `okta_verify` does not count. A higher-priority
+  policy scoped to a subset of users can override the Everyone policy for
+  them; the snapshot carries `priority`, but the query does not use it.
+  Only the records the control receives are checked; a policy the
+  connector did not report is not seen.
 
 scf_anchor_id: IAC-01
 control_family: IAC
@@ -38,23 +40,20 @@ freshness_class: daily
 evidence_queries:
   - id: mfa_policy_everyone_phishing_resistant
     language: sql
-    evidence_kind: okta.mfa_policy.v1
-    description: "An Okta MFA policy requires MFA, applies to everyone, and allows WebAuthn"
+    evidence_kind: okta.mfa_policy.v2
+    description: "An active Okta MFA policy requires MFA, applies to everyone, and allows WebAuthn"
     expression: |
-      SELECT coalesce(bool_or(
-               payload->'mfa_required' = 'true'::jsonb
-               AND payload->'factors_allowed' ? 'webauthn'
-               AND EXISTS (
-                 SELECT 1
-                 FROM jsonb_array_elements_text(
-                   CASE WHEN jsonb_typeof(payload->'applies_to_groups') = 'array'
-                        THEN payload->'applies_to_groups'
-                        ELSE '[]'::jsonb
-                   END
-                 ) AS grp(group_name)
-                 WHERE lower(group_name) = 'everyone'
-               )
-             ), false)
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(
+                 payload->>'status' = 'ACTIVE'
+                 AND payload->'mfa_required' = 'true'::jsonb
+                 AND payload->'applies_to_everyone' = 'true'::jsonb
+                 AND jsonb_typeof(payload->'factors_allowed') = 'array'
+                 AND payload->'factors_allowed' ? 'webauthn'
+               ) THEN 'pass'
+               ELSE 'fail'
+             END
       FROM (
         SELECT DISTINCT ON (payload->>'policy_id') payload
         FROM evidence

@@ -9,7 +9,7 @@
 //
 // Authority gate: super_admin only (slice 142 P0). The handler reads
 // `jwtmw.FromContext().SuperAdmin` as the load-bearing check; the
-// slice-035 OPA middleware via policies/authz/super_admin.rego is the
+// slice-035 OPA middleware via internal/authz/rego_bundle/super_admin.rego is the
 // second leg.
 //
 // LOAD-BEARING DESIGN: last-super_admin safety rail. The DELETE handler
@@ -606,7 +606,7 @@ func (h *Handler) inTx(ctx context.Context, fn func(context.Context, pgx.Tx) err
 
 // requireSuperAdmin returns true when the caller carries the
 // super_admin bit. Defense-in-depth on top of the OPA policy gate
-// (policies/authz/super_admin.rego).
+// (internal/authz/rego_bundle/super_admin.rego).
 //
 // The only authority that grants super_admin is the verified JWT's
 // `atlas:super_admin` claim — that bit can be set ONLY by the slice-

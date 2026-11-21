@@ -1229,7 +1229,7 @@ var evidenceKindsPool = []string{
 	"github.audit_event.v1",
 	"github.scim_user.v1",
 	"okta.app_assignment.v1",
-	"okta.mfa_policy.v1",
+	"okta.mfa_policy.v2",
 	"okta.user_lifecycle.v1",
 	"aws.s3.bucket_encryption_state.v1",
 	"access_review.completion.v1",
@@ -1264,7 +1264,7 @@ var evidenceSchemaVersions = map[string]string{
 	"github.audit_event.v1":             "1.0.0",
 	"github.scim_user.v1":               "1.0.0",
 	"okta.app_assignment.v1":            "1.0.0",
-	"okta.mfa_policy.v1":                "1.0.0",
+	"okta.mfa_policy.v2":                "2.0.0",
 	"okta.user_lifecycle.v1":            "1.0.0",
 	"aws.s3.bucket_encryption_state.v1": "1.1.0",
 	"access_review.completion.v1":       "1.0.0",
@@ -1325,13 +1325,16 @@ func buildEvidencePayload(kind string, idx int, result string) map[string]any {
 			"assigned_group_ids":   []string{"00g-engineering", "00g-security"},
 			"assigned_group_count": 2,
 		}
-	case "okta.mfa_policy.v1":
+	case "okta.mfa_policy.v2":
 		return map[string]any{
-			"policy_id":         "00p-demo-mfa",
-			"policy_name":       "Production MFA Policy",
-			"mfa_required":      true,
-			"factors_allowed":   []string{"webauthn", "okta_verify"},
-			"applies_to_groups": []string{"00g-everyone"},
+			"policy_id":           "00p-demo-mfa",
+			"policy_name":         "Production MFA Policy",
+			"status":              "ACTIVE",
+			"priority":            1,
+			"mfa_required":        true,
+			"factors_allowed":     []string{"okta_verify", "webauthn"},
+			"applies_to_groups":   []string{"00g-everyone"},
+			"applies_to_everyone": true,
 		}
 	case "okta.user_lifecycle.v1":
 		return map[string]any{

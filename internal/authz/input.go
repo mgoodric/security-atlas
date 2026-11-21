@@ -12,7 +12,7 @@ import (
 )
 
 // Input is the canonical decision input passed to OPA. The schema is
-// documented in policies/authz/helpers.rego and must stay in sync with
+// documented in internal/authz/rego_bundle/helpers.rego and must stay in sync with
 // it.
 type Input struct {
 	User     UserInput     `json:"user"`
@@ -49,7 +49,7 @@ type RequestInput struct {
 
 // transitionActions enumerates the path-terminal segments that the
 // middleware promotes from action="write" to a more specific action
-// (e.g. action="approve"). Matches the policies/authz/helpers.rego
+// (e.g. action="approve"). Matches the internal/authz/rego_bundle/helpers.rego
 // transition_actions set.
 var transitionActions = map[string]bool{
 	"submit":        true,
@@ -91,7 +91,7 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 			strings.HasPrefix(cred.UserID, "oauth_client:"),
 		// is_super_admin: slice 142. Surfaces the platform-global
 		// super_admin bit from the verified JWT's `atlas:super_admin`
-		// claim. The policies/authz/super_admin.rego rule keys on this
+		// claim. The internal/authz/rego_bundle/super_admin.rego rule keys on this
 		// attribute. Falls back to false when no JWT is on the context
 		// (legacy bearer path; super_admin is JWT-only at v1).
 		"is_super_admin": jwtmw.FromContext(r.Context()) != nil &&

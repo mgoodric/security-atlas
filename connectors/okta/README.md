@@ -2,11 +2,22 @@
 
 Emits three evidence kinds:
 
-| Kind                     | Profile | Source                                                 |
-| ------------------------ | ------- | ------------------------------------------------------ |
-| `okta.mfa_policy.v1`     | pull    | `GET /api/v1/policies?type=MFA_ENROLL`                 |
-| `okta.app_assignment.v1` | pull    | `GET /api/v1/apps` + `GET /api/v1/apps/{id}/groups`    |
-| `okta.user_lifecycle.v1` | pull    | `GET /api/v1/users` + `GET /api/v1/users/{id}/factors` |
+| Kind                     | Profile | Source                                                                   |
+| ------------------------ | ------- | ------------------------------------------------------------------------ |
+| `okta.mfa_policy.v2`     | pull    | `GET /api/v1/policies?type=MFA_ENROLL` + `GET /api/v1/groups` (Everyone) |
+| `okta.app_assignment.v1` | pull    | `GET /api/v1/apps` + `GET /api/v1/apps/{id}/groups`                      |
+| `okta.user_lifecycle.v1` | pull    | `GET /api/v1/users` + `GET /api/v1/users/{id}/factors`                   |
+
+`okta.mfa_policy.v2` (#2901) replaces v1, which the connector no longer
+emits. One record per MFA enrollment policy, of any status. It reads both
+settings shapes Okta returns: Classic `settings.factors` and Identity
+Engine `settings.authenticators[]`. Every FIDO key (`fido_webauthn`,
+`fido_u2f`, `webauthn`) is reported as `webauthn`, and the password is
+left out of `factors_allowed` and `mfa_required`. `applies_to_groups`
+carries Okta group ids; `applies_to_everyone` says whether one of them is
+the org's Everyone group, found as the `BUILT_IN` group named `Everyone`.
+Okta hides that group from a Group Administrator token, and the pull stops
+with an error rather than guess.
 
 ## Auth — least-privilege Okta admin scopes
 
@@ -15,12 +26,12 @@ the built-in **Read-only Administrator** role. The token must grant
 exactly the read-only resource permissions listed below and no more. The
 `atlas-okta scopes` subcommand prints this list at runtime.
 
-| Token kind                       | Name                 | Access | Gates                                                       |
-| -------------------------------- | -------------------- | ------ | ----------------------------------------------------------- |
-| API token (Read-only Admin role) | `okta.users.read`    | Read   | `okta.user_lifecycle.v1` (GET /api/v1/users + factors)      |
-| API token (Read-only Admin role) | `okta.groups.read`   | Read   | `okta.app_assignment.v1` (GET /api/v1/apps/{id}/groups)     |
-| API token (Read-only Admin role) | `okta.apps.read`     | Read   | `okta.app_assignment.v1` (GET /api/v1/apps)                 |
-| API token (Read-only Admin role) | `okta.policies.read` | Read   | `okta.mfa_policy.v1` (GET /api/v1/policies?type=MFA_ENROLL) |
+| Token kind                       | Name                 | Access | Gates                                                                                        |
+| -------------------------------- | -------------------- | ------ | -------------------------------------------------------------------------------------------- |
+| API token (Read-only Admin role) | `okta.users.read`    | Read   | `okta.user_lifecycle.v1` (GET /api/v1/users + factors)                                       |
+| API token (Read-only Admin role) | `okta.groups.read`   | Read   | `okta.app_assignment.v1` (GET /api/v1/apps/{id}/groups) + `okta.mfa_policy.v2` (Everyone id) |
+| API token (Read-only Admin role) | `okta.apps.read`     | Read   | `okta.app_assignment.v1` (GET /api/v1/apps)                                                  |
+| API token (Read-only Admin role) | `okta.policies.read` | Read   | `okta.mfa_policy.v2` (GET /api/v1/policies?type=MFA_ENROLL)                                  |
 
 **Banned admin roles:** Super Administrator, Organization Administrator,
 Application Administrator (write tier), Group Administrator (write tier),
