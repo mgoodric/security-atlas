@@ -58,7 +58,7 @@ export const NAV_GROUPS: readonly {
   },
   {
     label: "Risks",
-    routes: ["/risks", "/risks/hierarchy", "/risks/taxonomy", "/action-plans"],
+    routes: ["/risks", "/risks/taxonomy", "/action-plans"],
   },
   {
     label: "Audit",
@@ -86,6 +86,13 @@ export const NAV_GROUPS: readonly {
     routes: ["/settings", "/admin"],
   },
 ];
+
+// Titled pages the sidebar deliberately leaves out. Each is reached from
+// another page instead.
+//
+//   * /risks/hierarchy — from the /risks page header (slice 100, audit
+//     F-3). #2081 listed it; #2774 took it back out.
+export const UNLISTED_ROUTES: readonly TitledRoute[] = ["/risks/hierarchy"];
 
 export type NavFacts = {
   /** The caller's `/v1/me` body; decides the Admin entry. */
