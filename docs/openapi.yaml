@@ -6258,6 +6258,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/imports/{id}/rows/{row}/approve:
+    post:
+      summary: POST /v1/risks/imports/{id}/rows/{row}/approve — approve one staged row, creating it as a risk through the risk store or marking it duplicate; no body; a tenant approver who is a person must approve (403 otherwise); 409 when already decided, 422 when the risk store refuses the row's values; audit-logged (#2847)
+      tags: [risks]
+      operationId: post-v1-risks-imports-id-rows-row-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: row
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/imports/{id}/rows/{row}/reject:
     post:
       summary: POST /v1/risks/imports/{id}/rows/{row}/reject — reject a staged row; body {reason} (required); a tenant approver who is a person must reject; audit-logged (#2839)
