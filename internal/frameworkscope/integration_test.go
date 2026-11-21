@@ -435,6 +435,14 @@ func TestRLS_OtherTenantCannotSee(t *testing.T) {
 
 func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, string) {
 	t.Helper()
+	ts, bearer, approver, _ := setupHTTPServerWithViewer(t, tenant)
+	return ts, bearer, approver
+}
+
+// setupHTTPServerWithViewer is setupHTTPServer plus a viewer bearer, for
+// the end-to-end refusals of a caller who is neither author nor approver.
+func setupHTTPServerWithViewer(t *testing.T, tenant string) (*httptest.Server, string, string, string) {
+	t.Helper()
 	// dbtest.NewAppPool self-closes via its own t.Cleanup; registering it
 	// before the server-teardown cleanup below means LIFO ordering closes
 	// the httptest server first, while the pool is still open.
@@ -453,6 +461,7 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, str
 	approverClaims := testjwt.ApproverFor(uuid.MustParse(tenant))
 	approverClaims.Subject = "user:" + uuid.NewString()
 	approver := srv.IssueTestJWT(t, approverClaims)
+	viewer := srv.IssueTestJWT(t, testjwt.ViewerFor(uuid.MustParse(tenant)))
 	handler := srv.HTTPHandlerForTests()
 	if handler == nil {
 		t.Fatal("HTTPHandlerForTests nil; AttachDB ineffective")
@@ -461,7 +470,7 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, str
 	t.Cleanup(func() {
 		ts.Close()
 	})
-	return ts, bearer, approver
+	return ts, bearer, approver, viewer
 }
 
 func doJSON(t *testing.T, method, url, bearer, body string) (*http.Response, []byte) {
@@ -496,7 +505,7 @@ func TestHTTP_FullLifecycle(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 
-	ts, bearer, approver := setupHTTPServer(t, tenant)
+	ts, bearer, approver, viewer := setupHTTPServerWithViewer(t, tenant)
 
 	// AC-5: create draft.
 	body := fmt.Sprintf(`{"framework_version_id":%q,"name":"SOC 2 system","predicate":{"op":"true"}}`, fvID.String())
@@ -521,10 +530,16 @@ func TestHTTP_FullLifecycle(t *testing.T) {
 		t.Fatalf("PATCH submit: status %d; body %s", resp.StatusCode, payload)
 	}
 
-	// AC-7: approve — the author approving its own submission is 403.
-	resp, _ = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", bearer, "")
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("approve with non-approver: status %d; want 403", resp.StatusCode)
+	// AC-7: approve — the author approving its own submission is 403, by
+	// the second-person rule.
+	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", bearer, "")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), frameworkscope.ErrSelfApproval.Error()) {
+		t.Fatalf("approve by its own submitter: status %d body %s; want 403 naming the second-person rule", resp.StatusCode, payload)
+	}
+	// A viewer is refused by role.
+	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", viewer, "")
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(payload), "approver role required") {
+		t.Fatalf("approve by a viewer: status %d body %s; want 403 approver role required", resp.StatusCode, payload)
 	}
 	// Approver succeeds.
 	resp, payload = doJSON(t, http.MethodPatch, ts.URL+"/v1/framework-scopes/"+id+"/approve", approver, "")
