@@ -318,10 +318,12 @@ WHERE c.tenant_id = @tenant_id AND c.id = @control_id AND c.superseded_by IS NUL
 -- name: UpdateControlMetadataInPlace :execrows
 -- Issues #1908, #1958, #2023: a re-upload whose manifest differs from the
 -- active row's only in `description`, `external_refs` and/or
--- `anchor_fit_note` updates that row in
--- place instead of versioning, so every control-keyed row (owners,
--- evidence, exceptions, links) stays attached. The hash moves with the
--- YAML so a repeat upload is a no-op.
+-- `anchor_fit_note`, plus evidence_queries[].description (#2891), updates
+-- that row in place instead of versioning, so every control-keyed row
+-- (owners, evidence, exceptions, links) stays attached. evidence_queries
+-- is rewritten so the stored copy carries the new query descriptions; the
+-- caller has already checked nothing else in it changed. The hash moves
+-- with the YAML so a repeat upload is a no-op.
 UPDATE controls
 SET description = $3,
     external_refs = $4,
@@ -330,6 +332,7 @@ SET description = $3,
     bundle_uploaded_at = now(),
     bundle_uploaded_by = $7,
     anchor_fit_note = $8,
+    evidence_queries = $9,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 

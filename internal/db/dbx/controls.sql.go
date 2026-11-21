@@ -2064,6 +2064,7 @@ SET description = $3,
     bundle_uploaded_at = now(),
     bundle_uploaded_by = $7,
     anchor_fit_note = $8,
+    evidence_queries = $9,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL
 `
@@ -2077,14 +2078,17 @@ type UpdateControlMetadataInPlaceParams struct {
 	BundleManifestHash string      `json:"bundle_manifest_hash"`
 	BundleUploadedBy   *string     `json:"bundle_uploaded_by"`
 	AnchorFitNote      *string     `json:"anchor_fit_note"`
+	EvidenceQueries    []byte      `json:"evidence_queries"`
 }
 
 // Issues #1908, #1958, #2023: a re-upload whose manifest differs from the
 // active row's only in `description`, `external_refs` and/or
-// `anchor_fit_note` updates that row in
-// place instead of versioning, so every control-keyed row (owners,
-// evidence, exceptions, links) stays attached. The hash moves with the
-// YAML so a repeat upload is a no-op.
+// `anchor_fit_note`, plus evidence_queries[].description (#2891), updates
+// that row in place instead of versioning, so every control-keyed row
+// (owners, evidence, exceptions, links) stays attached. evidence_queries
+// is rewritten so the stored copy carries the new query descriptions; the
+// caller has already checked nothing else in it changed. The hash moves
+// with the YAML so a repeat upload is a no-op.
 func (q *Queries) UpdateControlMetadataInPlace(ctx context.Context, arg UpdateControlMetadataInPlaceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateControlMetadataInPlace,
 		arg.TenantID,
@@ -2095,6 +2099,7 @@ func (q *Queries) UpdateControlMetadataInPlace(ctx context.Context, arg UpdateCo
 		arg.BundleManifestHash,
 		arg.BundleUploadedBy,
 		arg.AnchorFitNote,
+		arg.EvidenceQueries,
 	)
 	if err != nil {
 		return 0, err
