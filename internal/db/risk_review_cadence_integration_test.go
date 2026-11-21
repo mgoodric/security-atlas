@@ -87,6 +87,14 @@ func TestRiskReviewCadenceMigration_BackfillsRisksWithoutReviewDate(t *testing.T
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The down migration narrows the me_audit_log CHECK, so rows other tests
+	// wrote with any action it does not list would block it (#2865). Clear
+	// them inside this rolled-back transaction.
+	if _, err := tx.Exec(ctx, `DELETE FROM me_audit_log WHERE NOT (action = ANY($1))`,
+		meAuditActions(t, riskReviewCadenceDown)); err != nil {
+		t.Fatalf("clear rows the down migration's CHECK refuses: %v", err)
+	}
+
 	// Back to the pre-#2059 schema: nothing defaults review_due_at.
 	if _, err := tx.Exec(ctx, string(down)); err != nil {
 		t.Fatalf("apply down migration: %v", err)

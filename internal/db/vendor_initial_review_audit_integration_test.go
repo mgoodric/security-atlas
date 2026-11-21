@@ -123,16 +123,22 @@ func TestVendorInitialReviewAuditMigration_KeepsEveryAction(t *testing.T) {
 
 	// The down migration refuses while a new-value row exists (audit
 	// evidence is not deleted), then narrows the CHECK once it is gone.
+	// Rows other tests wrote with actions the down CHECK does not list are
+	// cleared too, so only that row blocks (#2865).
+	downActions := meAuditActions(t, vendorInitialReviewAuditDown)
 	sp, err := tx.Begin(ctx)
 	if err != nil {
 		t.Fatalf("savepoint: %v", err)
+	}
+	if _, err := sp.Exec(ctx, `DELETE FROM me_audit_log WHERE NOT (action = ANY($1)) AND action <> $2`, downActions, vendorInitialReviewAction); err != nil {
+		t.Fatalf("narrow to %s rows: %v", vendorInitialReviewAction, err)
 	}
 	if _, err := sp.Exec(ctx, string(down)); err == nil {
 		t.Error("down migration applied while a tenant_vendor_initial_review_update row exists")
 	}
 	_ = sp.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, `DELETE FROM me_audit_log WHERE action = $1`, vendorInitialReviewAction); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM me_audit_log WHERE NOT (action = ANY($1))`, downActions); err != nil {
 		t.Fatalf("clear new-value rows: %v", err)
 	}
 	if _, err := tx.Exec(ctx, string(down)); err != nil {
