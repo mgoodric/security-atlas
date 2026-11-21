@@ -355,7 +355,9 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 			SessionId: cred.ID,
 		},
 	}
-	pathed := h.ingester.WithPath(IngestionPath)
+	// #2873: this handler is the kind's only writer; every other ingest
+	// path refuses it.
+	pathed := h.ingester.WithPath(IngestionPath).WithOwnedKind(EvidenceKind)
 	receipt, _, ierr := pathed.Process(ctx, rec, cred)
 	if ierr != nil {
 		h.writeAckResp(w, ack, false, ierr)
