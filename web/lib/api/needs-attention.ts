@@ -11,6 +11,7 @@ export type NeedsAttentionView = "me" | "all";
 export type NeedsAttentionBand =
   | "failing"
   | "approval"
+  | "source_missing"
   | "overdue"
   | "due_soon"
   | "ownership_gap";
@@ -79,6 +80,7 @@ const TYPE_LABELS: Record<string, string> = {
 const BAND_LABELS: Record<NeedsAttentionBand, string> = {
   failing: "Failing",
   approval: "Approval",
+  source_missing: "Source missing",
   overdue: "Overdue",
   due_soon: "Due soon",
   ownership_gap: "No owner",

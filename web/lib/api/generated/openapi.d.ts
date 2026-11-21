@@ -4113,7 +4113,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134) */
+        /** GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134) */
         get: operations["get-v1-needs-attention"];
         put?: never;
         post?: never;
@@ -4530,7 +4530,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift; per-page report (created, new_version, unchanged, drift, skipped with reason) (#2850, */
+        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift; per-page report (created, new_version, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force) (#2850, */
         post: operations["post-v1-policies_sync"];
         delete?: never;
         options?: never;

@@ -2,22 +2,25 @@
 // ranked list of what needs someone's attention, for the dashboard's
 // front door (#2072).
 //
-// Items come in five bands, in this order:
+// Items come in six bands, in this order:
 //
 //  1. failing: in-scope controls whose rolled-up state is fail;
 //  2. approval: records waiting for the caller's approval, read through
 //     the approvals handler (#2119), so the band lists exactly what
 //     GET /v1/approvals lists;
-//  3. overdue: policy, risk and vendor reviews, action plans and periodic
+//  3. source_missing: published synced policies whose page a policy sync
+//     run found absent, because it lost its label or was deleted (#2853).
+//     The policy stays in force; the item says the source has gone;
+//  4. overdue: policy, risk and vendor reviews, action plans and periodic
 //     control reviews the compliance calendar marks overdue;
-//  4. due_soon: the same calendar items, plus expiring exceptions, due
+//  5. due_soon: the same calendar items, plus expiring exceptions, due
 //     within DueSoonDays, and the caller's own policy acknowledgements
 //     (TypePolicyAck, #2587): a lapsed one is overdue, one never made is
 //     due soon until policy.AckGraceDays after the policy took effect and
 //     overdue after (#2736). They come from the ack store, not the
 //     calendar, whose ack lapse events are one per policy and day for
 //     many people;
-//  5. ownership_gap: in-scope controls with no assigned owner and open
+//  6. ownership_gap: in-scope controls with no assigned owner and open
 //     risks with no owner, listed for `for=all` only.
 //
 // Within a band the oldest item comes first (earliest due date, else
@@ -34,20 +37,21 @@ import (
 	"time"
 )
 
-// The five bands, in rank order.
+// The six bands, in rank order.
 const (
-	BandFailing      = "failing"
-	BandApproval     = "approval"
-	BandOverdue      = "overdue"
-	BandDueSoon      = "due_soon"
-	BandOwnershipGap = "ownership_gap"
+	BandFailing       = "failing"
+	BandApproval      = "approval"
+	BandSourceMissing = "source_missing"
+	BandOverdue       = "overdue"
+	BandDueSoon       = "due_soon"
+	BandOwnershipGap  = "ownership_gap"
 )
 
 // Bands lists the bands in rank order.
-var Bands = []string{BandFailing, BandApproval, BandOverdue, BandDueSoon, BandOwnershipGap}
+var Bands = []string{BandFailing, BandApproval, BandSourceMissing, BandOverdue, BandDueSoon, BandOwnershipGap}
 
 var bandRank = map[string]int{
-	BandFailing: 1, BandApproval: 2, BandOverdue: 3, BandDueSoon: 4, BandOwnershipGap: 5,
+	BandFailing: 1, BandApproval: 2, BandSourceMissing: 3, BandOverdue: 4, BandDueSoon: 5, BandOwnershipGap: 6,
 }
 
 // The two views.
