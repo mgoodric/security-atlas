@@ -5,10 +5,10 @@
 //
 //   - every stock bundle's tests/ cases run through bundletest.Run inside a
 //     tenant transaction, as the upload gate runs them; and
-//   - cc6_1, the tracer, and each later check (cc6_6, #2822) are evaluated
-//     by the live engine against evidence records in the ledger, so the
-//     query is shown to decide the stored control state and not only the
-//     fixture runner's.
+//   - cc6_1, the tracer, and each later check (cc6_6, #2822; both cc8_1
+//     bundles, #2823) are evaluated by the live engine against evidence
+//     records in the ledger, so the query is shown to decide the stored
+//     control state and not only the fixture runner's.
 
 package control_test
 
@@ -238,6 +238,78 @@ func TestCC66_EngineEvaluatesHostFirewallPayload(t *testing.T) {
 			ctrl := seedStockBundleControl(t, admin, tenant, cc66Bundle)
 			for _, r := range tc.records {
 				seedStockEvidence(t, admin, tenant, ctrl, "osquery.host_posture.v1", observed, r.connectorResult, payload(r))
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if states[0].Result != tc.want {
+				t.Errorf("result = %q, want %q", states[0].Result, tc.want)
+			}
+		})
+	}
+}
+
+// #2823: both cc8_1 checks decide on each repo's latest protection payload,
+// not on the GitHub connector's verdict (required_reviews >= 1).
+func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	observed := time.Now().UTC().Add(-2 * time.Hour)
+
+	type rec struct {
+		connectorResult string
+		repo            string
+		reviews         int
+		admins          bool
+	}
+	payload := func(r rec) map[string]any {
+		return map[string]any{
+			"repo_full_name":             r.repo,
+			"default_branch":             "main",
+			"required_reviews":           r.reviews,
+			"require_code_owner_reviews": false,
+			"require_signed_commits":     false,
+			"require_linear_history":     false,
+			"enforce_admins":             r.admins,
+		}
+	}
+	const r1, r2 = "acme/api", "acme/infra"
+	// connectorResult is the GitHub verdict (required_reviews >= 1). The
+	// queries must ignore it.
+	cases := []struct {
+		bundle  string
+		name    string
+		records []rec
+		want    string
+	}{
+		{"soc2_cc8_1_change_management", "reviewed and admin-enforced", []rec{{"pass", r1, 1, true}, {"fail", r2, 2, true}}, eval.ResultPass},
+		{"soc2_cc8_1_change_management", "admins not enforced", []rec{{"pass", r1, 1, true}, {"pass", r2, 1, false}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "no approving review", []rec{{"pass", r1, 0, true}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "unread repo counts as off", []rec{{"inconclusive", r1, 0, false}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "no record", nil, eval.ResultInconclusive},
+		{"soc2_cc8_1_configuration_change_control", "reviewed, admins not enforced", []rec{{"fail", r1, 1, false}, {"pass", r2, 2, true}}, eval.ResultPass},
+		{"soc2_cc8_1_configuration_change_control", "no approving review", []rec{{"pass", r1, 1, true}, {"pass", r2, 0, true}}, eval.ResultFail},
+		{"soc2_cc8_1_configuration_change_control", "unread repo counts as off", []rec{{"inconclusive", r1, 0, false}}, eval.ResultFail},
+		{"soc2_cc8_1_configuration_change_control", "no record", nil, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.bundle+"/"+tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, tc.bundle)
+			for _, r := range tc.records {
+				seedStockEvidence(t, admin, tenant, ctrl, "github.repo_protection.v1", observed, r.connectorResult, payload(r))
 			}
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)

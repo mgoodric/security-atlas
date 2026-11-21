@@ -1,6 +1,6 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc8_1_change_management
-title: "Production-deploying repositories enforce branch protection"
+title: "Repositories require an approving review, enforced on admins"
 description: |
   Changes to infrastructure, data, software and procedures reach
   production only by a controlled, approved path (TSC CC8.1). The intended
@@ -8,19 +8,30 @@ description: |
   protection on its production branch: required pull-request reviews,
   status checks, no force-push and protection enforced on admins.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the GitHub
-  connector's `github.repo_protection.v1`, one per repository's default
-  branch, whose verdict is that at least one approving review is required:
-  a branch requiring one passes, and a branch requiring none or having no
-  protection fails. Status checks, force-push, admin enforcement and which
-  repos deploy to production are not checked.
+  What runs today: a SQL query over the payloads of the GitHub connector's
+  `github.repo_protection.v1` records, one per repository's default branch
+  per connector run. It takes each repository's latest in-window record
+  (by `repo_full_name`) and passes the control when every one of them has
+  `required_reviews` of at least 1 and `enforce_admins` true. One
+  repository whose latest record requires no approving review, does not
+  enforce protection on admins, or lacks either field fails the control.
+  No in-window record leaves it inconclusive. The connector's per-record
+  verdict is not used.
 
-  Pending: protection enforced on admins, in SQL over the record's
-  existing fields (#2823); and required status checks, the force-push
-  setting and the deploys-to-production topic, which the connector does
-  not emit yet (#2827).
+  A repository with no branch protection is pushed with
+  `required_reviews` 0, so it fails. A repository whose protection the
+  connector could not read (any error other than 404) is also pushed with
+  `required_reviews` 0 and `enforce_admins` false, so it fails too, until
+  the connector stops reporting unread fields as off.
+
+  Pending, because the connector does not emit the fields yet (#2827):
+  required status checks (the protection's required status checks
+  contexts), force pushes blocked (`allow_force_pushes`), and limiting the
+  check to repositories that deploy to production (a deploys-to-production
+  topic or custom property). Until then every repository the connector
+  reads counts. Only the records the control receives are checked: a
+  repository that never reported is not seen, which waits on an inventory
+  (#2834).
 
 scf_anchor_id: CHG-02
 control_family: CHG
@@ -30,28 +41,23 @@ lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: prod_repos_have_branch_protection
-    language: rego
+  - id: every_repo_requires_review_enforced_on_admins
+    language: sql
     evidence_kind: github.repo_protection.v1
-    description: "Every prod-deploying repo has protected main branch with PR reviews and status checks"
+    description: "Every repository's latest protection record requires an approving review and enforces protection on admins"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT coalesce(bool_and(ok), false)
+      FROM (
+        SELECT DISTINCT ON (payload->>'repo_full_name') ok
+        FROM (
+          SELECT payload, observed_at,
+                 coalesce(payload->>'repo_full_name' <> '', false)
+                 AND CASE WHEN jsonb_typeof(payload->'required_reviews') = 'number'
+                          THEN (payload->'required_reviews')::numeric >= 1
+                          ELSE false
+                     END
+                 AND coalesce(payload->'enforce_admins' = 'true'::jsonb, false) AS ok
+          FROM evidence
+        ) AS checked
+        ORDER BY payload->>'repo_full_name', observed_at DESC, ok
+      ) AS latest
