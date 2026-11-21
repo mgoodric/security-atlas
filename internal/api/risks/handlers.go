@@ -297,8 +297,10 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 	}
 	// A create proposing an acceptance records its creator as the proposer,
 	// as the propose transition does, so they cannot approve it (#2371).
+	// Only a person proposes (#2623).
 	if cred, ok := authctx.CredentialFromContext(r.Context()); ok {
 		in.Proposer = credstore.PrincipalOf(cred)
+		in.ProposerIsPerson = credstore.MinterUserID(cred) != ""
 	}
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
@@ -312,6 +314,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			})
 		case errors.Is(err, risk.ErrScoreNotNumeric):
 			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		case risk.IsApprovalRefusal(err):
+			httpresp.WriteError(w, http.StatusForbidden, err.Error())
 		case risk.IsTransitionInput(err),
 			errors.Is(err, risk.ErrInvalidMethodology),
 			errors.Is(err, risk.ErrInherentScoreInvalid),

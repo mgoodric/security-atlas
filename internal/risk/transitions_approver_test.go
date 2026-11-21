@@ -3,8 +3,10 @@ package risk
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/mgoodric/security-atlas/internal/approval"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
 // TestCheckAcceptanceApprover pins how an acceptance approval maps the
@@ -45,5 +47,38 @@ func TestCheckAcceptanceApprover(t *testing.T) {
 	}
 	if !errors.Is(ErrAcceptanceProposerUnknown, ErrTransitionState) {
 		t.Fatal("ErrAcceptanceProposerUnknown must wrap ErrTransitionState so it renders as 409")
+	}
+}
+
+// TestValidateProposal_PeopleOnly (#2623): proposing an acceptance is for
+// people only. A machine proposer is refused with a 403-class error before
+// any other check, at create (CreateProposal) as on the transition, so a
+// machine with an otherwise invalid body is still told it is a machine.
+func TestValidateProposal_PeopleOnly(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	machine := ProposeAcceptanceInput{
+		Justification: "within appetite", ProposedUntil: now.AddDate(0, 1, 0), Proposer: "key_x",
+	}
+	if _, err := ValidateProposal(machine, now); !errors.Is(err, ErrAcceptanceProposerNotPerson) || !IsApprovalRefusal(err) {
+		t.Fatalf("machine proposer: err = %v, want ErrAcceptanceProposerNotPerson (an approval refusal)", err)
+	}
+	if _, err := ValidateProposal(ProposeAcceptanceInput{Proposer: "key_x"}, now); !errors.Is(err, ErrAcceptanceProposerNotPerson) {
+		t.Fatalf("machine proposer, empty body: err = %v, want ErrAcceptanceProposerNotPerson", err)
+	}
+	if _, err := CreateProposal(dbx.RiskAcceptanceStatusProposed, machine, now); !errors.Is(err, ErrAcceptanceProposerNotPerson) {
+		t.Fatalf("machine create: err = %v, want ErrAcceptanceProposerNotPerson", err)
+	}
+	// A create that proposes nothing is not a proposal: no person needed.
+	if _, err := CreateProposal(dbx.RiskAcceptanceStatusApproved, ProposeAcceptanceInput{Proposer: "key_x"}, now); err != nil {
+		t.Fatalf("machine create, not proposed: err = %v, want nil", err)
+	}
+	person := machine
+	person.Proposer, person.ProposerIsPerson = "11111111-1111-1111-1111-111111111111", true
+	if _, err := ValidateProposal(person, now); err != nil {
+		t.Fatalf("person proposer: err = %v, want nil", err)
+	}
+	if _, err := CreateProposal(dbx.RiskAcceptanceStatusProposed, person, now); err != nil {
+		t.Fatalf("person create: err = %v, want nil", err)
 	}
 }

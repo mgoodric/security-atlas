@@ -32,8 +32,27 @@ func treatmentTenant(t *testing.T, admin *pgxpool.Pool) string {
 }
 
 // proposeAndConfirm files a proposal through the default appliers and
-// confirms it, returning the confirm error.
+// confirms it as an unbound key (a machine), returning the confirm error.
 func proposeAndConfirm(t *testing.T, store *writeproposals.Store, ctx context.Context, tool string, input string) (writeproposals.Proposal, error) {
+	t.Helper()
+	key := "key_" + uuid.NewString()
+	return proposeAndConfirmBy(t, store, ctx, tool, input, writeproposals.Confirmer{
+		Approver: approval.Approver{CredentialID: key},
+	})
+}
+
+// proposeAndConfirmAsPerson is proposeAndConfirm with a person confirming
+// (a key bound to a user): only a person proposes an acceptance (#2623).
+func proposeAndConfirmAsPerson(t *testing.T, store *writeproposals.Store, ctx context.Context, tool string, input string) (writeproposals.Proposal, error) {
+	t.Helper()
+	key, person := "key_"+uuid.NewString(), uuid.NewString()
+	return proposeAndConfirmBy(t, store, ctx, tool, input, writeproposals.Confirmer{
+		Approver:  approval.Approver{UserID: person, CredentialID: key},
+		Principal: person,
+	})
+}
+
+func proposeAndConfirmBy(t *testing.T, store *writeproposals.Store, ctx context.Context, tool, input string, by writeproposals.Confirmer) (writeproposals.Proposal, error) {
 	t.Helper()
 	created, err := store.Create(ctx, writeproposals.CreateInput{
 		ToolName:       tool,
@@ -45,7 +64,7 @@ func proposeAndConfirm(t *testing.T, store *writeproposals.Store, ctx context.Co
 	if err != nil {
 		t.Fatalf("Create %s proposal: %v", tool, err)
 	}
-	return store.Confirm(ctx, created.ID, "key_"+uuid.NewString())
+	return store.ConfirmAs(ctx, created.ID, by.CredentialID, by)
 }
 
 func readTreatment(t *testing.T, admin *pgxpool.Pool, id string) (string, *string) {
@@ -120,15 +139,22 @@ func TestApplyRiskTreatment_UntreatedDefaultAndValidation(t *testing.T) {
 	}
 
 	// A proposed acceptance runs the propose transition (#2105): it needs
-	// a justification and a proposed expiry.
-	_, err = proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
+	// a justification and a proposed expiry, and a person confirming
+	// (#2623).
+	_, err = proposeAndConfirmAsPerson(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
 		`{"risk_id":"`+riskID+`","treatment":"accept","acceptance_status":"proposed"}`)
 	if !risk.IsTransitionInput(err) {
 		t.Fatalf("proposal without justification: want transition input error, got %v", err)
 	}
-	if _, err := proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment,
-		`{"risk_id":"`+riskID+`","treatment":"accept","acceptance_status":"proposed",`+
-			`"justification":"Compensated by the WAF","accepted_until":"2099-01-31"}`); err != nil {
+	proposed := `{"risk_id":"` + riskID + `","treatment":"accept","acceptance_status":"proposed",` +
+		`"justification":"Compensated by the WAF","accepted_until":"2099-01-31"}`
+	if _, err := proposeAndConfirm(t, store, ctx, writeproposals.ToolUpdateRiskTreatment, proposed); !errors.Is(err, risk.ErrAcceptanceProposerNotPerson) {
+		t.Fatalf("proposed accept confirmed by a machine: want ErrAcceptanceProposerNotPerson, got %v", err)
+	}
+	if tr, _ := readTreatment(t, admin, riskID); tr != "mitigate" {
+		t.Fatalf("after refused machine propose: treatment = %q; want mitigate", tr)
+	}
+	if _, err := proposeAndConfirmAsPerson(t, store, ctx, writeproposals.ToolUpdateRiskTreatment, proposed); err != nil {
 		t.Fatalf("proposed accept: %v", err)
 	}
 	if tr, st := readTreatment(t, admin, riskID); tr != "accept" || st == nil || *st != "proposed" {
