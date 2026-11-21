@@ -240,7 +240,7 @@ func requestHash(controlID uuid.UUID, req createReq) string {
 // as sent (omitted or null hash as null). A key recorded by that build
 // replays when it matches, so a retry across the upgrade is not refused.
 //
-// TODO(remove after next release): once every key recorded before #2714
+// TODO(remove after next release, #2803): once every key recorded before #2714
 // is past IdempotencyWindow, delete this and CreateInput.LegacyRequestHash.
 func legacyRequestHash(controlID uuid.UUID, req createReq) string {
 	var predicate bytes.Buffer

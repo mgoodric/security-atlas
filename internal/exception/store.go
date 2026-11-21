@@ -282,7 +282,7 @@ type CreateInput struct {
 	// LegacyRequestHash is the same request hashed the #2618 way, before
 	// #2714 made the hash canonical. A key recorded before the upgrade
 	// replays when it matches.
-	// TODO(remove after next release): drop with legacyRequestHash in
+	// TODO(remove after next release, #2803): drop with legacyRequestHash in
 	// internal/api/exceptions once no key from before #2714 can be inside
 	// IdempotencyWindow.
 	LegacyRequestHash string

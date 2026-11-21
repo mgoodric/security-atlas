@@ -54,10 +54,10 @@ against the literal JSON the #2618 build hashed.
 `TestHTTP_ExceptionCreate_LegacyHashedKeyReplays` checks the replay end to
 end, and it was observed failing with the fallback disabled.
 
-The fallback is temporary. It is marked `TODO(remove after next release)`:
-once every key recorded before #2714 is past the 24h window, a follow-up
-deletes `legacyRequestHash` and `CreateInput.LegacyRequestHash`. The
-removal ticket is filed by the dispatcher.
+The fallback is temporary. It is marked
+`TODO(remove after next release, #2803)`: once every key recorded before
+#2714 is past the 24h window, #2803 deletes `legacyRequestHash` and
+`CreateInput.LegacyRequestHash`.
 
 The first draft of this PR documented only the unsorted-predicate case and
 accepted a 422 for it. Review found the effect covered nearly every
