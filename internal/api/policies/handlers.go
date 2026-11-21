@@ -185,9 +185,13 @@ type policyWire struct {
 	// SyncDrift is set on a synced policy whose page body changed without
 	// a version bump (#2851); absent when the policy is in step.
 	SyncDrift *policySyncDriftWire `json:"sync_drift,omitempty"`
-	CreatedAt time.Time            `json:"created_at"`
-	UpdatedAt time.Time            `json:"updated_at"`
-	Warnings  []string             `json:"warnings,omitempty"`
+	// SyncMissingSince is set on a synced policy whose page a sync run
+	// found absent (#2853): it lost its label or was deleted. The policy
+	// stays in force.
+	SyncMissingSince *time.Time `json:"sync_missing_since,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	Warnings         []string   `json:"warnings,omitempty"`
 }
 
 // policySyncDriftWire is a synced policy's drift (#2851): when a sync run
@@ -475,6 +479,7 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		ImportedBy:                  r.ImportedBy,
 		ImportedAt:                  timestamptzPtr(r.ImportedAt),
 		SyncDrift:                   syncDriftWire(timestamptzPtr(r.SyncDriftDetectedAt), r.SyncDriftBodySha256),
+		SyncMissingSince:            timestamptzPtr(r.SyncMissingSince),
 		CreatedAt:                   r.CreatedAt.Time,
 		UpdatedAt:                   r.UpdatedAt.Time,
 	}
@@ -1137,6 +1142,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		ImportedBy:                  p.ImportedBy,
 		ImportedAt:                  p.ImportedAt,
 		SyncDrift:                   syncDriftWire(p.SyncDriftDetectedAt, p.SyncDriftBodySHA256),
+		SyncMissingSince:            p.SyncMissingSince,
 		CreatedAt:                   p.CreatedAt,
 		UpdatedAt:                   p.UpdatedAt,
 	}

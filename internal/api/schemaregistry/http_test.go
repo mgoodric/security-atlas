@@ -151,3 +151,58 @@ func assertNoInternalRegistryDetail(t *testing.T, body string) {
 		}
 	}
 }
+
+// registerRecorder accepts every Register call and records whether the
+// handler reached it.
+type registerRecorder struct {
+	stubRegistryHTTPService
+	called *bool
+}
+
+func (s registerRecorder) Register(_ context.Context, req RegisterRequest) (RegisteredSchema, error) {
+	*s.called = true
+	if !req.IsAdmin {
+		return RegisteredSchema{}, ErrUnauthorized
+	}
+	return RegisteredSchema{Kind: req.Kind, Semver: req.Semver, SchemaJSON: json.RawMessage(req.SchemaJSON)}, nil
+}
+
+// TestRegisterHTTP_TenantAdminGate2674 pins POST /v1/schemas to
+// authz.IsTenantAdmin (#2674): the admin flag or the live tenant admin role
+// registers; every other live role, and a JWT session's admin claim with no
+// live role, is refused before the service is called.
+func TestRegisterHTTP_TenantAdminGate2674(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		cred credstore.Credential
+		want int
+	}{
+		{"admin flag", credstore.Credential{ID: "key_admin", IsAdmin: true}, http.StatusCreated},
+		{"live admin", credstore.Credential{ID: "jwt:1", UserID: "u1", TenantRoles: []string{"admin"}}, http.StatusCreated},
+		{"live grc_engineer", credstore.Credential{ID: "jwt:2", UserID: "u2", TenantRoles: []string{"grc_engineer"}}, http.StatusForbidden},
+		{"live control_owner", credstore.Credential{ID: "jwt:3", UserID: "u3", TenantRoles: []string{"control_owner"}}, http.StatusForbidden},
+		{"live auditor", credstore.Credential{ID: "jwt:4", UserID: "u4", TenantRoles: []string{"auditor"}}, http.StatusForbidden},
+		{"live viewer", credstore.Credential{ID: "jwt:5", UserID: "u5", TenantRoles: []string{"viewer"}}, http.StatusForbidden},
+		{"JWT admin claim, no live role", credstore.Credential{ID: "jwt:6", UserID: "u6", OwnerRoles: []string{"admin"}}, http.StatusForbidden},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			called := false
+			h := (&HTTPHandler{svc: registerRecorder{called: &called}, defaultLimit: 100, maxLimit: 500}).Routes()
+			body := `{"kind":"acme.thing.v1","semver":"1.0.0","owner":"secops","schema":{"type":"object"}}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/schemas", strings.NewReader(body))
+			cred := c.cred
+			cred.TenantID = "22222222-2222-4222-8222-222222222222"
+			req = req.WithContext(authctx.WithCredential(req.Context(), cred))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != c.want {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, c.want, rec.Body.String())
+			}
+			if wantCalled := c.want == http.StatusCreated; called != wantCalled {
+				t.Fatalf("Register called = %v, want %v", called, wantCalled)
+			}
+		})
+	}
+}

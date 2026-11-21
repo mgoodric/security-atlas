@@ -148,6 +148,7 @@ SELECT
     p.historical_approver_name, p.historical_approved_at, p.source_url,
     p.imported_by, p.imported_at, p.self_approved,
     p.sync_drift_detected_at, p.sync_drift_body_sha256,
+    p.sync_missing_since,
     ac.ack_denominator,
     ac.ack_numerator
 FROM policies p
@@ -457,6 +458,7 @@ SET status = 'superseded',
     superseded_at = now(),
     sync_drift_detected_at = NULL,
     sync_drift_body_sha256 = NULL,
+    sync_missing_since = NULL,
     updated_at = now()
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = sqlc.arg('id')
@@ -513,3 +515,60 @@ LEFT JOIN policies s
 WHERE p.tenant_id = sqlc.arg('tenant_id')
   AND p.id = sqlc.arg('id')
 FOR UPDATE OF p;
+
+-- name: ClearSyncedPolicyMissing :exec
+-- #2853 — the pages of this run are present: any missing state recorded
+-- on their published synced rows by an earlier run is cleared. Rows not
+-- marked missing are left alone, so updated_at moves only on a change.
+UPDATE policies
+SET sync_missing_since = NULL,
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = sqlc.arg('sync_site')
+  AND sync_space = sqlc.arg('sync_space')
+  AND sync_page_id = ANY(sqlc.arg('present_page_ids')::text[])
+  AND sync_missing_since IS NOT NULL;
+
+-- name: MarkSyncedPoliciesMissing :exec
+-- #2853 — every published synced row of this source whose page is absent
+-- from the run, not yet marked, gets sync_missing_since = now(). A row
+-- already marked keeps the time it was first found missing and is not
+-- rewritten. The policy itself is untouched: still published, and
+-- acknowledgements continue.
+UPDATE policies
+SET sync_missing_since = now(),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = sqlc.arg('sync_site')
+  AND sync_space = sqlc.arg('sync_space')
+  AND NOT (sync_page_id = ANY(sqlc.arg('present_page_ids')::text[]))
+  AND sync_missing_since IS NULL;
+
+-- name: ListSyncedPoliciesMissingFromSource :many
+-- #2853 — the published synced rows of one source whose page a run found
+-- absent, for that run's report. Read after MarkSyncedPoliciesMissing in
+-- the same transaction.
+SELECT *
+FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = sqlc.arg('sync_site')
+  AND sync_space = sqlc.arg('sync_space')
+  AND sync_missing_since IS NOT NULL
+ORDER BY sync_page_id;
+
+-- name: ListMissingSyncedPolicies :many
+-- #2853 — the published synced policies whose page a sync run found
+-- absent, for GET /v1/needs-attention.
+SELECT id, title, owner_role, sync_missing_since
+FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_missing_since IS NOT NULL
+ORDER BY sync_missing_since, id;

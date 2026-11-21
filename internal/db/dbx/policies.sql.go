@@ -21,7 +21,7 @@ SET status = 'approved',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'under_review'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type ApprovePolicyParams struct {
@@ -82,6 +82,7 @@ func (q *Queries) ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (P
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -95,7 +96,7 @@ WHERE tenant_id = $1
   AND id = $2
   AND source_attribution = 'synced'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type ClearSyncedPolicyDriftParams struct {
@@ -148,8 +149,42 @@ func (q *Queries) ClearSyncedPolicyDrift(ctx context.Context, arg ClearSyncedPol
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
+}
+
+const clearSyncedPolicyMissing = `-- name: ClearSyncedPolicyMissing :exec
+UPDATE policies
+SET sync_missing_since = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND sync_page_id = ANY($4::text[])
+  AND sync_missing_since IS NOT NULL
+`
+
+type ClearSyncedPolicyMissingParams struct {
+	TenantID       pgtype.UUID `json:"tenant_id"`
+	SyncSite       *string     `json:"sync_site"`
+	SyncSpace      *string     `json:"sync_space"`
+	PresentPageIds []string    `json:"present_page_ids"`
+}
+
+// #2853 — the pages of this run are present: any missing state recorded
+// on their published synced rows by an earlier run is cleared. Rows not
+// marked missing are left alone, so updated_at moves only on a change.
+func (q *Queries) ClearSyncedPolicyMissing(ctx context.Context, arg ClearSyncedPolicyMissingParams) error {
+	_, err := q.db.Exec(ctx, clearSyncedPolicyMissing,
+		arg.TenantID,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.PresentPageIds,
+	)
+	return err
 }
 
 const countTenantControls = `-- name: CountTenantControls :one
@@ -193,7 +228,7 @@ VALUES (
     $9, $10,
     'draft', $11, $12, COALESCE($13::text[], '{}')
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type CreatePolicyParams struct {
@@ -284,6 +319,7 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Pol
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -293,7 +329,7 @@ DELETE FROM policies
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type DeleteDraftPolicyParams struct {
@@ -349,12 +385,13 @@ func (q *Queries) DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyPa
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
 
 const getPolicyByID = `-- name: GetPolicyByID :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 FROM policies
 WHERE tenant_id = $1 AND id = $2
 `
@@ -407,12 +444,13 @@ func (q *Queries) GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (P
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
 
 const getSyncedPolicyByPage = `-- name: GetSyncedPolicyByPage :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 FROM policies
 WHERE tenant_id = $1
   AND source_attribution = 'synced'
@@ -479,6 +517,7 @@ func (q *Queries) GetSyncedPolicyByPage(ctx context.Context, arg GetSyncedPolicy
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -504,7 +543,7 @@ VALUES (
     $13, $14, $15,
     $12, now()
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type ImportPublishedPolicyParams struct {
@@ -589,6 +628,7 @@ func (q *Queries) ImportPublishedPolicy(ctx context.Context, arg ImportPublished
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -710,7 +750,7 @@ VALUES (
     $17, $18, $19, $20,
     $13, now()
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type InsertSyncedPolicyParams struct {
@@ -809,12 +849,57 @@ func (q *Queries) InsertSyncedPolicy(ctx context.Context, arg InsertSyncedPolicy
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
 
+const listMissingSyncedPolicies = `-- name: ListMissingSyncedPolicies :many
+SELECT id, title, owner_role, sync_missing_since
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_missing_since IS NOT NULL
+ORDER BY sync_missing_since, id
+`
+
+type ListMissingSyncedPoliciesRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	Title            string             `json:"title"`
+	OwnerRole        string             `json:"owner_role"`
+	SyncMissingSince pgtype.Timestamptz `json:"sync_missing_since"`
+}
+
+// #2853 — the published synced policies whose page a sync run found
+// absent, for GET /v1/needs-attention.
+func (q *Queries) ListMissingSyncedPolicies(ctx context.Context, tenantID pgtype.UUID) ([]ListMissingSyncedPoliciesRow, error) {
+	rows, err := q.db.Query(ctx, listMissingSyncedPolicies, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMissingSyncedPoliciesRow
+	for rows.Next() {
+		var i ListMissingSyncedPoliciesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.OwnerRole,
+			&i.SyncMissingSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPolicies = `-- name: ListPolicies :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 FROM policies
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -871,6 +956,7 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 			&i.SyncedAt,
 			&i.SyncDriftDetectedAt,
 			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -883,7 +969,7 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 }
 
 const listPoliciesUnderReview = `-- name: ListPoliciesUnderReview :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 FROM policies
 WHERE tenant_id = $1
   AND status = 'under_review'
@@ -941,6 +1027,7 @@ func (q *Queries) ListPoliciesUnderReview(ctx context.Context, tenantID pgtype.U
 			&i.SyncedAt,
 			&i.SyncDriftDetectedAt,
 			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -1003,6 +1090,7 @@ SELECT
     p.historical_approver_name, p.historical_approved_at, p.source_url,
     p.imported_by, p.imported_at, p.self_approved,
     p.sync_drift_detected_at, p.sync_drift_body_sha256,
+    p.sync_missing_since,
     ac.ack_denominator,
     ac.ack_numerator
 FROM policies p
@@ -1049,6 +1137,7 @@ type ListPoliciesWithAckRateRow struct {
 	SelfApproved                bool               `json:"self_approved"`
 	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
 	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
+	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
 	AckDenominator              *int64             `json:"ack_denominator"`
 	AckNumerator                *int64             `json:"ack_numerator"`
 }
@@ -1142,6 +1231,7 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 			&i.SelfApproved,
 			&i.SyncDriftDetectedAt,
 			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
 			&i.AckDenominator,
 			&i.AckNumerator,
 		); err != nil {
@@ -1215,18 +1305,18 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 const listPolicyVersionChain = `-- name: ListPolicyVersionChain :many
 WITH RECURSIVE chain AS (
     -- Anchor: the policy itself.
-    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
     FROM policies p0
     WHERE p0.tenant_id = $1 AND p0.id = $2
 
     UNION ALL
 
     -- Walk forward: any row whose predecessor_id is the current chain tip.
-    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at, p.historical_approver_name, p.historical_approved_at, p.source_url, p.imported_by, p.imported_at, p.self_approved, p.draft_editors, p.sync_site, p.sync_space, p.sync_page_id, p.synced_body_sha256, p.synced_by, p.synced_at, p.sync_drift_detected_at, p.sync_drift_body_sha256
+    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at, p.historical_approver_name, p.historical_approved_at, p.source_url, p.imported_by, p.imported_at, p.self_approved, p.draft_editors, p.sync_site, p.sync_space, p.sync_page_id, p.synced_body_sha256, p.synced_by, p.synced_at, p.sync_drift_detected_at, p.sync_drift_body_sha256, p.sync_missing_since
     FROM policies p
     INNER JOIN chain c ON p.predecessor_id = c.id AND p.tenant_id = c.tenant_id
 )
-SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at, chain.historical_approver_name, chain.historical_approved_at, chain.source_url, chain.imported_by, chain.imported_at, chain.self_approved, chain.draft_editors, chain.sync_site, chain.sync_space, chain.sync_page_id, chain.synced_body_sha256, chain.synced_by, chain.synced_at, chain.sync_drift_detected_at, chain.sync_drift_body_sha256
+SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at, chain.historical_approver_name, chain.historical_approved_at, chain.source_url, chain.imported_by, chain.imported_at, chain.self_approved, chain.draft_editors, chain.sync_site, chain.sync_space, chain.sync_page_id, chain.synced_body_sha256, chain.synced_by, chain.synced_at, chain.sync_drift_detected_at, chain.sync_drift_body_sha256, chain.sync_missing_since
 FROM chain
 ORDER BY chain.created_at ASC, chain.id ASC
 `
@@ -1276,6 +1366,7 @@ type ListPolicyVersionChainRow struct {
 	SyncedAt                    pgtype.Timestamptz `json:"synced_at"`
 	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
 	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
+	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
 }
 
 // Returns the version chain for a policy id by walking predecessor_id.
@@ -1331,6 +1422,89 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 			&i.SyncedAt,
 			&i.SyncDriftDetectedAt,
 			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSyncedPoliciesMissingFromSource = `-- name: ListSyncedPoliciesMissingFromSource :many
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND sync_missing_since IS NOT NULL
+ORDER BY sync_page_id
+`
+
+type ListSyncedPoliciesMissingFromSourceParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	SyncSite  *string     `json:"sync_site"`
+	SyncSpace *string     `json:"sync_space"`
+}
+
+// #2853 — the published synced rows of one source whose page a run found
+// absent, for that run's report. Read after MarkSyncedPoliciesMissing in
+// the same transaction.
+func (q *Queries) ListSyncedPoliciesMissingFromSource(ctx context.Context, arg ListSyncedPoliciesMissingFromSourceParams) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listSyncedPoliciesMissingFromSource, arg.TenantID, arg.SyncSite, arg.SyncSpace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
 		); err != nil {
 			return nil, err
 		}
@@ -1400,6 +1574,41 @@ func (q *Queries) LockSyncedPolicyForSuccessor(ctx context.Context, arg LockSync
 	return i, err
 }
 
+const markSyncedPoliciesMissing = `-- name: MarkSyncedPoliciesMissing :exec
+UPDATE policies
+SET sync_missing_since = now(),
+    updated_at = now()
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND NOT (sync_page_id = ANY($4::text[]))
+  AND sync_missing_since IS NULL
+`
+
+type MarkSyncedPoliciesMissingParams struct {
+	TenantID       pgtype.UUID `json:"tenant_id"`
+	SyncSite       *string     `json:"sync_site"`
+	SyncSpace      *string     `json:"sync_space"`
+	PresentPageIds []string    `json:"present_page_ids"`
+}
+
+// #2853 — every published synced row of this source whose page is absent
+// from the run, not yet marked, gets sync_missing_since = now(). A row
+// already marked keeps the time it was first found missing and is not
+// rewritten. The policy itself is untouched: still published, and
+// acknowledgements continue.
+func (q *Queries) MarkSyncedPoliciesMissing(ctx context.Context, arg MarkSyncedPoliciesMissingParams) error {
+	_, err := q.db.Exec(ctx, markSyncedPoliciesMissing,
+		arg.TenantID,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.PresentPageIds,
+	)
+	return err
+}
+
 const policyTitleVersionExists = `-- name: PolicyTitleVersionExists :one
 SELECT EXISTS (
     SELECT 1 FROM policies
@@ -1433,7 +1642,7 @@ SET status = 'published',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'approved'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type PublishApprovedPolicyParams struct {
@@ -1499,6 +1708,7 @@ func (q *Queries) PublishApprovedPolicy(ctx context.Context, arg PublishApproved
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -1513,7 +1723,7 @@ WHERE tenant_id = $2
   AND source_attribution = 'synced'
   AND status = 'published'
   AND sync_drift_body_sha256 IS DISTINCT FROM $1
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type SetSyncedPolicyDriftParams struct {
@@ -1573,6 +1783,7 @@ func (q *Queries) SetSyncedPolicyDrift(ctx context.Context, arg SetSyncedPolicyD
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -1588,7 +1799,7 @@ WHERE tenant_id = $1
   AND (status = 'draft'
        OR (status = 'under_review'
            AND (submitted_by LIKE 'jwt:%' OR submitted_by LIKE 'key\_%')))
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type SubmitPolicyForReviewParams struct {
@@ -1645,6 +1856,7 @@ func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyFor
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -1657,7 +1869,7 @@ SET status = 'superseded',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type SupersedePolicyAtPublishParams struct {
@@ -1721,6 +1933,7 @@ func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePol
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -1731,12 +1944,13 @@ SET status = 'superseded',
     superseded_at = now(),
     sync_drift_detected_at = NULL,
     sync_drift_body_sha256 = NULL,
+    sync_missing_since = NULL,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
   AND source_attribution = 'synced'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type SupersedeSyncedPolicyParams struct {
@@ -1792,6 +2006,7 @@ func (q *Queries) SupersedeSyncedPolicy(ctx context.Context, arg SupersedeSynced
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -1812,7 +2027,7 @@ SET title = $1,
 WHERE tenant_id = $8
   AND id = $9
   AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type UpdateDraftPolicyParams struct {
@@ -1884,6 +2099,7 @@ func (q *Queries) UpdateDraftPolicy(ctx context.Context, arg UpdateDraftPolicyPa
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -1895,7 +2111,7 @@ SET next_review_at = $1,
 WHERE tenant_id = $2
   AND id = $3
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type UpdatePolicyNextReviewAtParams struct {
@@ -1951,6 +2167,7 @@ func (q *Queries) UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicy
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }
@@ -1963,7 +2180,7 @@ WHERE tenant_id = $2
   AND id = $3
   AND source_attribution = 'synced'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 `
 
 type UpdateSyncedPolicyLinksParams struct {
@@ -2019,6 +2236,7 @@ func (q *Queries) UpdateSyncedPolicyLinks(ctx context.Context, arg UpdateSyncedP
 		&i.SyncedAt,
 		&i.SyncDriftDetectedAt,
 		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
 	)
 	return i, err
 }

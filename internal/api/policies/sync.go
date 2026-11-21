@@ -70,6 +70,9 @@ type syncResultWire struct {
 	PredecessorID string `json:"predecessor_id,omitempty"`
 	// DriftDetectedAt is when drift on a drift result was first seen.
 	DriftDetectedAt *time.Time `json:"drift_detected_at,omitempty"`
+	// MissingSince is when a run first found a missing result's page
+	// absent (#2853).
+	MissingSince *time.Time `json:"missing_since,omitempty"`
 }
 
 type syncRespWire struct {
@@ -78,6 +81,7 @@ type syncRespWire struct {
 	Unchanged  int              `json:"unchanged"`
 	Drift      int              `json:"drift"`
 	Skipped    int              `json:"skipped"`
+	Missing    int              `json:"missing"`
 	Results    []syncResultWire `json:"results"`
 }
 
@@ -88,7 +92,9 @@ type syncRespWire struct {
 // in internal/api authenticates the key for this path and refuses every
 // other caller, and the handler checks the purpose again. Each new page
 // becomes a published, synced policy, a version bump the next version
-// and a body change without one drift; see policy.Store.Sync.
+// and a body change without one drift. A previously synced page absent
+// from the push is reported missing and its policy left in force
+// (#2853); see policy.Store.Sync.
 //
 // Response: 200 with the per-page report. 400 when the request itself is
 // malformed (no source, too many pages); a bad page is reported, not
@@ -220,6 +226,9 @@ func wireFromSyncReport(r policy.SyncReport) syncRespWire {
 			if res.Status == policy.SyncStatusDrift {
 				rw.DriftDetectedAt = res.Policy.SyncDriftDetectedAt
 			}
+			if res.Status == policy.SyncStatusMissing {
+				rw.MissingSince = res.Policy.SyncMissingSince
+			}
 		}
 		switch res.Status {
 		case policy.SyncStatusCreated:
@@ -232,6 +241,8 @@ func wireFromSyncReport(r policy.SyncReport) syncRespWire {
 			out.Drift++
 		case policy.SyncStatusSkipped:
 			out.Skipped++
+		case policy.SyncStatusMissing:
+			out.Missing++
 		}
 		out.Results = append(out.Results, rw)
 	}
