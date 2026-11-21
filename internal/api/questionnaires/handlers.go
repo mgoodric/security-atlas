@@ -362,9 +362,7 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	// NOT apply a second deadline here — the limiter owns it.
 	buf, err := questionnaire.RenderPDF(r.Context(), in)
 	if err != nil {
-		if status, msg, ok := pdfDegradation(err); ok {
-			logPDFDegradation(r, err)
-			httpresp.WriteError(w, status, msg)
+		if writePDFDegradation(w, r, err) {
 			return
 		}
 		httperr.WriteInternal(w, r, "questionnaires", err)

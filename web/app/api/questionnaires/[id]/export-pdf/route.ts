@@ -46,11 +46,16 @@ export async function POST(
   const contentType =
     upstream.headers.get("Content-Type") ?? "application/octet-stream";
   if (!upstream.ok) {
+    // A busy or timed-out render is a 503 with Retry-After (#2786); pass
+    // the hint through.
+    const headers: Record<string, string> = { "Content-Type": contentType };
+    const ra = upstream.headers.get("Retry-After");
+    if (ra) headers["Retry-After"] = ra;
     return new NextResponse(
       upstreamBody(upstream.status, await upstream.text()),
       {
         status: upstream.status,
-        headers: { "Content-Type": contentType },
+        headers,
       },
     );
   }

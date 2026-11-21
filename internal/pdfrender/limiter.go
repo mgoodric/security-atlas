@@ -66,6 +66,12 @@ const (
 	envRequirePDF     = "ATLAS_REQUIRE_PDF"
 )
 
+// RetryAfterSeconds is the Retry-After hint a handler sends with the 503 for
+// a transient degradation (ErrRenderDeadline, ErrQueueSaturated). It matches
+// DefaultQueueWait: by then a slot held by a render ahead in the queue has
+// usually freed. A missing chrome is not transient and gets no hint (#2786).
+const RetryAfterSeconds = int(DefaultQueueWait / time.Second)
+
 // RequireRealPDF reports whether ATLAS_REQUIRE_PDF is set to a true value.
 // The CI integration job sets it because its runner has Chrome: there, a
 // PDF handler test under the default limiter must get a 200 `%PDF-` body,
