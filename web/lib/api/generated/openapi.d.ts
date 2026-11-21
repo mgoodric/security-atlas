@@ -4373,7 +4373,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/policies/{id} */
+        /** GET /v1/policies/{id} — a synced policy whose page body changed without a version bump carries sync_drift (detected_at, source_body_sha256) (#2851) */
         get: operations["get-v1-policies-id"];
         put?: never;
         post?: never;
@@ -4513,7 +4513,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, with a per-page report (created, unchanged, skipped with reason) (#2850) */
+        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift; per-page report (created, new_version, unchanged, drift, skipped with reason) (#2850, */
         post: operations["post-v1-policies_sync"];
         delete?: never;
         options?: never;

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -59,17 +60,26 @@ func TestParseSyncPages(t *testing.T) {
 
 func TestWireFromSyncReport(t *testing.T) {
 	t.Parallel()
-	id := uuid.New()
+	id, prev := uuid.New(), uuid.New()
+	drifted := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
 	out := wireFromSyncReport(policy.SyncReport{Results: []policy.SyncResult{
 		{PageID: "1", Status: policy.SyncStatusCreated, Policy: &policy.Policy{ID: id, Version: "2.0"}},
 		{PageID: "2", Status: policy.SyncStatusUnchanged, Policy: &policy.Policy{ID: id, Version: "1.0"}},
 		{PageID: "3", Status: policy.SyncStatusSkipped, Reason: "bad"},
+		{PageID: "4", Status: policy.SyncStatusNewVersion, Policy: &policy.Policy{ID: id, Version: "3.0", PredecessorID: &prev}},
+		{PageID: "5", Status: policy.SyncStatusDrift, Reason: "edited", Policy: &policy.Policy{ID: id, Version: "1.0", SyncDriftDetectedAt: &drifted}},
 	}})
-	if out.Created != 1 || out.Unchanged != 1 || out.Skipped != 1 || len(out.Results) != 3 {
+	if out.Created != 1 || out.NewVersion != 1 || out.Unchanged != 1 || out.Drift != 1 || out.Skipped != 1 || len(out.Results) != 5 {
 		t.Fatalf("out = %+v", out)
 	}
 	if out.Results[0].PolicyID != id.String() || out.Results[0].Version != "2.0" || out.Results[2].PolicyID != "" || out.Results[2].Reason != "bad" {
 		t.Errorf("results = %+v", out.Results)
+	}
+	if r := out.Results[3]; r.Status != "new_version" || r.PredecessorID != prev.String() || r.DriftDetectedAt != nil {
+		t.Errorf("new_version result = %+v", r)
+	}
+	if r := out.Results[4]; r.Status != "drift" || r.DriftDetectedAt == nil || !r.DriftDetectedAt.Equal(drifted) || r.PredecessorID != "" {
+		t.Errorf("drift result = %+v", r)
 	}
 }
 
