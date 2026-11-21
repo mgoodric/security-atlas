@@ -198,6 +198,7 @@ var stockManifestHashes = map[string]string{
 	"b982d1137459b073a71d2fcd3e5c11767138476ad1d77f40c443b5ac1d469d35": "soc2_cc6_2_new_user_provisioning",
 	"bbbb354c6e06abbb980787200773e4fdca7acee24360ea695c1a96d71b7714d2": "soc2_cc9_1_business_continuity",
 	"bcf61592da5e9b62d9e80ee4c780dc1341e1fc5e783af6cb34da7ccc157bba77": "soc2_cc8_1_configuration_change_control",
+	"bd20c57b2f88eac3f0174e852ba33b7c7f33e558535824cae3d6bddd9d07caac": "soc2_cc6_6_boundary_protection",
 	"bd57fb23a144a07df33fcd3fcacbc44d46dccf451812c7d8462f9fc037a0acb5": "soc2_cc2_2_internal_communication",
 	"bfb2421c160b438688290e1a7dc0630e37f86fba53d645b806b40070e99fb563": "soc2_cc3_4_change_risk_reassessment",
 	"c105266cd7a6e7a3fb043159417933fa17e9581062ba2e20baf98b916ed56a31": "soc2_cc7_3_security_event_evaluation",

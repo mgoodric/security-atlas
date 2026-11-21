@@ -193,7 +193,9 @@ func TestCC61_EngineEvaluatesMFAPolicyPayload(t *testing.T) {
 const cc66Bundle = "soc2_cc6_6_boundary_protection"
 
 // #2822: cc6_6 decides on each host's latest firewall_enabled, not on the
-// osquery connector's verdict (disk encryption plus screen lock).
+// osquery connector's verdict (disk encryption plus screen lock). #2920: an
+// absent firewall_enabled (not read) is inconclusive, and an observed off
+// still fails.
 func TestCC66_EngineEvaluatesHostFirewallPayload(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -203,18 +205,21 @@ func TestCC66_EngineEvaluatesHostFirewallPayload(t *testing.T) {
 	type rec struct {
 		connectorResult string
 		host            string
-		firewall        bool
+		firewall        string // "on", "off", or "" for not read
 	}
 	payload := func(r rec) map[string]any {
-		return map[string]any{
+		p := map[string]any{
 			"host_uuid":               r.host,
 			"hostname":                "host-" + r.host[:4],
 			"platform":                "darwin",
 			"disk_encryption_enabled": true,
-			"screen_lock_enabled":     true,
-			"firewall_enabled":        r.firewall,
 			"mdm_enrolled":            true,
 		}
+		if r.firewall != "" {
+			p["firewall_enabled"] = r.firewall == "on"
+			p["firewall_source"] = "fleet_policy:macOS firewall on"
+		}
+		return p
 	}
 	const h1, h2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
 	// connectorResult is the osquery verdict (disk encryption plus screen
@@ -224,9 +229,10 @@ func TestCC66_EngineEvaluatesHostFirewallPayload(t *testing.T) {
 		records []rec
 		want    string
 	}{
-		{"every host firewall on", []rec{{"fail", h1, true}, {"pass", h2, true}}, eval.ResultPass},
-		{"one host firewall off", []rec{{"pass", h1, true}, {"pass", h2, false}}, eval.ResultFail},
-		{"unread host counts as off", []rec{{"inconclusive", h1, false}}, eval.ResultFail},
+		{"every host firewall on", []rec{{"fail", h1, "on"}, {"pass", h2, "on"}}, eval.ResultPass},
+		{"one host firewall off", []rec{{"pass", h1, "on"}, {"pass", h2, "off"}}, eval.ResultFail},
+		{"unread host is inconclusive", []rec{{"inconclusive", h1, ""}}, eval.ResultInconclusive},
+		{"unread host plus one off fails", []rec{{"pass", h1, ""}, {"pass", h2, "off"}}, eval.ResultFail},
 		{"no record", nil, eval.ResultInconclusive},
 	}
 	for _, tc := range cases {
