@@ -3,11 +3,21 @@ bundle_id: soc2_cc5_3_policies_procedures
 title: "Core security policies acknowledged in current version"
 description: |
   Expectations are set in written policy and carried out through
-  documented procedures (TSC CC5.3). Operationally this resolves to: the
-  v1 policy library is current (each policy has been reviewed within its
-  review cadence), and active users have acknowledged the current version.
-  The evidence query reads the `policy.acknowledgment` ledger and asserts
-  the population of acknowledgments matches active users for each policy.
+  documented procedures (TSC CC5.3). The intended test is that each policy
+  in the library is within its review cadence and every active user has
+  acknowledged the version in force.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the tenant's
+  `policy.acknowledgment.v1` acknowledgements (#2869), and each one is
+  recorded as pass. The control therefore passes on any acknowledgement of
+  any policy in the weekly window of 30 days. Policy versions, review
+  dates and users are not checked.
+
+  Pending: acknowledgements referencing the policy version in force
+  (#2832); and every active user having acknowledged it, which needs a
+  user inventory (#2834).
 
 scf_anchor_id: GOV-02
 control_family: GOV

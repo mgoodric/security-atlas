@@ -3,11 +3,21 @@ bundle_id: soc2_cc6_3_periodic_access_review
 title: "Quarterly access review completed for in-scope systems"
 description: |
   Regular review of accounts and their privileges covers the
-  change-and-revoke side of TSC CC6.3. The query reads the
-  `access_review.completion` ledger and asserts each in-scope system has a
-  completed review record within the last 120 days (a 90-day quarterly
-  cadence plus the engine's 30-day grace). The reviewer and remediation
-  actions are captured in the evidence record.
+  change-and-revoke side of TSC CC6.3. The intended test is that each
+  in-scope system has a completed access review within the quarter, with
+  the reviewer and remediation actions captured in the record.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the platform's
+  `access_review.completion.v1`, written as pass when a review campaign is
+  completed. The control passes when any completed review is in the
+  quarterly window of 120 days (a 90-day cadence plus the engine's 30-day
+  grace). Which systems were reviewed is not checked.
+
+  Pending: a completed review within 90 days, in SQL over the record's
+  existing fields (#2824); and every in-scope system reviewed, which needs
+  a system inventory (#2834).
 
 scf_anchor_id: IAC-12
 control_family: IAC

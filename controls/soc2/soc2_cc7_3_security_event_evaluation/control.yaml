@@ -4,10 +4,21 @@ title: "Security-relevant GitHub events are reviewed within review SLA"
 description: |
   Security events are triaged to decide whether they amount to, or could
   become, an incident (TSC CC7.3). For a SaaS startup the highest-signal
-  evaluable event stream is GitHub's audit log — branch protection
-  toggles, secret scanning alerts, repo visibility changes, key/token
-  creation. The query asserts every security-tagged GitHub event in the
-  period was acknowledged in the evidence ledger within 24 hours.
+  evaluable event stream is GitHub's audit log: branch protection toggles,
+  secret scanning alerts, repo visibility changes, key and token creation.
+  The intended test is that every security-tagged GitHub event in the
+  period was acknowledged within 24 hours.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the GitHub
+  connector's `github.audit_event.v1` webhook events, which it emits as
+  inconclusive by design, leaving the decision to the platform. This
+  control is therefore inconclusive whatever the events contain.
+
+  Pending: an acknowledgement within 24 hours for each security-tagged
+  event. No source records acknowledgements yet; it needs a design (#2834
+  or its own).
 
 scf_anchor_id: MON-04
 control_family: MON

@@ -3,10 +3,21 @@ bundle_id: soc2_pi1_2_input_completeness
 title: "Input validation is exercised by SAST and contract tests"
 description: |
   Inputs are checked so that only complete, accurate data enters
-  processing (TSC PI1.2). The SAST scanner is configured with
-  input-validation taint rules; the evidence query asserts every in-scope
-  repo's most recent scan surfaces zero unsuppressed findings in the rule
-  set covering injection, deserialization, and schema-violation patterns.
+  processing (TSC PI1.2). The intended test is that every in-scope repo's
+  most recent SAST scan has zero unsuppressed findings in the
+  input-validation rule set (injection, deserialisation and
+  schema-violation patterns).
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are
+  `sast.scan_result.v1`. No bundled connector emits that kind; the verdict
+  is whatever the pusher (for example `atlas-cli evidence push --result`)
+  states. Findings and rule sets are not checked.
+
+  Pending: findings with severity, rule id and suppression in a new
+  `sast.scan_result` schema version, to select the input-validation rules
+  (#2831).
 
 scf_anchor_id: TDA-05
 control_family: TDA
