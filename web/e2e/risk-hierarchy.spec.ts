@@ -179,15 +179,25 @@ test.describe("risk hierarchy view", () => {
       "theme-heatmap-panel",
       "decision-timeline-panel",
     ];
-    const boxes = [];
     for (const id of panels) {
       await expect(page.getByTestId(id)).toBeVisible();
-      boxes.push(await page.getByTestId(id).boundingBox());
     }
-    const [tree, heatmap, timeline] = boxes.map((b) => {
-      expect(b).not.toBeNull();
-      return b!;
-    });
+    // #2793: measure only once every panel holds its seeded content. A
+    // panel still in its loading state has a different height, so boxes
+    // read while the tree was loading put the heatmap above the tree's
+    // bottom edge. The three rects are read in one evaluate, from one
+    // layout, rather than three round-trips apart.
+    await expect(page.getByTestId("org-tree-node")).toHaveCount(2);
+    await expect(page.getByTestId("theme-heatmap-row")).toHaveCount(2);
+    await expect(page.getByTestId("decision-timeline-row")).toHaveCount(3);
+    const [tree, heatmap, timeline] = await page.evaluate((ids) => {
+      return ids.map((id) => {
+        const el = document.querySelector(`[data-testid="${id}"]`);
+        if (!el) throw new Error(`missing panel ${id}`);
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      });
+    }, panels);
     expect(Math.abs(tree.x - heatmap.x)).toBeLessThan(1);
     expect(Math.abs(heatmap.x - timeline.x)).toBeLessThan(1);
     expect(heatmap.y).toBeGreaterThanOrEqual(tree.y + tree.height);
