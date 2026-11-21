@@ -83,8 +83,9 @@ func freshnessMaxAge(class string) (time.Duration, bool) {
 // FreshnessMaxAge is the exported accessor for the canvas §2.3 freshness
 // model — the class -> max-acceptable-evidence-age mapping. It exists so
 // sibling packages (slice 016's freshness read model) reuse the SAME mapping
-// rather than redefining it: the table lives in exactly one place,
-// freshnessMaxAgeTable above. An unknown or empty class falls back to the
+// rather than redefining it. The one other copy is the CASE blocks in
+// internal/db/queries/calendar.sql, pinned to this table by
+// calendar_freshness_sync_test.go (#2868). An unknown or empty class falls back to the
 // `monthly` (90d) default; the returned bool reports whether the class was a
 // known member of the table. Callers may surface that in logging but never
 // need to special-case it — the returned duration is always usable.
