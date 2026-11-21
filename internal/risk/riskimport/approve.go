@@ -86,13 +86,16 @@ type pendingRow struct {
 
 // lockedRow is a locked pending row with what approval needs.
 type lockedRow struct {
-	BatchID     string
-	RowNumber   int
-	ExternalRef string
-	Title       string
-	Description string
-	Category    string
-	ReviewDue   *time.Time
+	BatchID       string
+	RowNumber     int
+	ExternalRef   string
+	Title         string
+	Description   string
+	Category      string
+	ReviewDue     *time.Time
+	Methodology   dbx.RiskMethodology
+	InherentScore []byte
+	ResidualScore []byte
 }
 
 // ApprovePending approves every pending row of the batch. A row that fails
@@ -238,6 +241,11 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			CategoryRef: row.Category,
 			ReviewDueAt: row.ReviewDue,
 			ExternalRef: row.ExternalRef,
+			// The batch's one methodology, and the scores staged in its
+			// shape; an unscored row creates an unscored risk (#2841).
+			Methodology:   row.Methodology,
+			InherentScore: row.InherentScore,
+			ResidualScore: row.ResidualScore,
 			// The approving person creates the risk and is named on its
 			// `created` audit row (#2835).
 			Actor:            in.Approver,
@@ -304,14 +312,17 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 	var r lockedRow
 	var status string
 	var reviewDue *time.Time
+	var inherent, residual *string
 	err := tx.QueryRow(ctx, `
-		SELECT batch_id::text, row_number, COALESCE(external_ref, ''), title, description,
-		       category_slug, review_due, status
-		FROM risk_import_rows
-		WHERE id = $1::uuid AND batch_id = $2::uuid
-		FOR UPDATE
+		SELECT r.batch_id::text, r.row_number, COALESCE(r.external_ref, ''), r.title, r.description,
+		       r.category_slug, r.review_due, r.inherent_score::text, r.residual_score::text,
+		       b.methodology, r.status
+		FROM risk_import_rows r
+		JOIN risk_import_batches b ON b.tenant_id = r.tenant_id AND b.id = r.batch_id
+		WHERE r.id = $1::uuid AND r.batch_id = $2::uuid
+		FOR UPDATE OF r
 	`, rowID, batchID).Scan(&r.BatchID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description,
-		&r.Category, &reviewDue, &status)
+		&r.Category, &reviewDue, &inherent, &residual, &r.Methodology, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedRow{}, ErrRowNotFound
 	}
@@ -325,6 +336,7 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 		d := reviewDue.UTC()
 		r.ReviewDue = &d
 	}
+	r.InherentScore, r.ResidualScore = rawJSON(inherent), rawJSON(residual)
 	return r, nil
 }
 
