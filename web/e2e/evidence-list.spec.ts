@@ -16,8 +16,8 @@
 // state surfaces "Clear filters" + "Set up a connector →" when filters
 // return zero rows, a row click opens the record (the evidence detail
 // page since #2137), the hash cell is click-to-copy, the Since pill
-// narrows. Three filter-pill tests are `fixme` on product defects named
-// at each one.
+// narrows, and the Control, Scope and Source pills narrow to their
+// matching records (#2771).
 
 import { createHash } from "node:crypto";
 
@@ -37,6 +37,10 @@ const NEWEST_ID = "00000000-0000-0000-0000-2755c1000001";
 const NEWEST_HASH = createHash("sha256").update(NEWEST_ID).digest("hex");
 const SEEDED_ROWS = 6;
 const ROWS_IN_LAST_7_DAYS = 4;
+// Records pushed in the seeded cell (prod · us-east-1), and records
+// pushed by test-connector-a.
+const ROWS_IN_SEEDED_CELL = 3;
+const ROWS_FROM_CONNECTOR_A = 4;
 
 const PUSH_DOC =
   "https://mgoodric.github.io/security-atlas/primitives/evidence/#pushing-evidence-from-your-own-tools";
@@ -76,28 +80,27 @@ test.describe("/evidence list view", () => {
     );
   });
 
-  // The Control pill's options are SCF anchor ids (`buildControlOptions`
-  // uses `anchor.id`, not `anchor.control_id`), but GET /v1/evidence
-  // matches control_id against the tenant control id, so picking any
-  // option narrows a real ledger to zero rows. #2771.
-  test.fixme(
-    "AC-3: selecting a control narrows the ledger (slice 106 — filter, not gate)",
-    async ({ page }) => {
-      await page.goto("/evidence");
-      await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-        SEEDED_ROWS,
-        { timeout: 30_000 },
-      );
-      await page
-        .getByTestId("list-filter-pills")
-        .getByLabel("Control")
-        .selectOption({ index: 1 });
-      await expect(page).toHaveURL(/[?&]control_id=/);
-      await expect(table(page).getByTestId("list-table-row")).not.toHaveCount(
-        0,
-      );
-    },
-  );
+  // #2771: the Control pill's option value is the tenant control behind
+  // the anchor, the id GET /v1/evidence?control_id= matches.
+  test("AC-3: selecting a control narrows the ledger (slice 106 — filter, not gate)", async ({
+    page,
+  }) => {
+    await page.goto("/evidence");
+    await expect(table(page).getByTestId("list-table-row")).toHaveCount(
+      SEEDED_ROWS,
+      { timeout: 30_000 },
+    );
+    await page
+      .getByTestId("list-filter-pills")
+      .getByLabel("Control")
+      .selectOption({ index: 1 });
+    await expect(page).toHaveURL(
+      new RegExp(`[?&]control_id=${CONTROL_WITH_ROWS}`),
+    );
+    await expect(table(page).getByTestId("list-table-row")).toHaveCount(
+      SEEDED_ROWS,
+    );
+  });
 
   test("AC-5 result-cell: each row renders its result enum value (slice 106)", async ({
     page,
@@ -240,46 +243,50 @@ test.describe("/evidence list view", () => {
     expect(page.url()).not.toContain("since=");
   });
 
-  // The Scope pill offers scope_cells ids, but the ledger filters on
-  // evidence_records.scope_id, a FK to `scopes` that the push path leaves
-  // NULL, so picking a cell narrows every real ledger to zero rows
-  // (verified: GET /api/evidence?scope_cell_id=<seeded cell> returns 0).
-  // #2771.
-  test.fixme(
-    "slice 234 — Scope pill narrows the ledger to one cell",
-    async ({ page }) => {
-      await page.goto("/evidence");
-      await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-        SEEDED_ROWS,
-        { timeout: 30_000 },
-      );
-      await page
-        .getByTestId("list-filter-pills")
-        .getByLabel("Scope")
-        .selectOption({ index: 1 });
-      await expect(page).toHaveURL(/[?&]scope_cell_id=/);
-      await expect(table(page).getByTestId("list-table-row")).not.toHaveCount(
-        0,
-      );
-    },
-  );
+  // #2771: a record is in a cell when the scope it was pushed with
+  // covers the cell's dimensions. The record with no pushed scope drops
+  // out, and the hint says why.
+  test("slice 234 — Scope pill narrows the ledger to one cell", async ({
+    page,
+  }) => {
+    await page.goto("/evidence");
+    await expect(table(page).getByTestId("list-table-row")).toHaveCount(
+      SEEDED_ROWS,
+      { timeout: 30_000 },
+    );
+    await expect(page.getByTestId("evidence-scope-hint")).toHaveCount(0);
+    await page
+      .getByTestId("list-filter-pills")
+      .getByLabel("Scope")
+      .selectOption({ index: 1 });
+    await expect(page).toHaveURL(/[?&]scope_cell_id=/);
+    await expect(table(page).getByTestId("list-table-row")).toHaveCount(
+      ROWS_IN_SEEDED_CELL,
+    );
+    await expect(page.getByTestId("evidence-scope-hint")).toHaveText(
+      "Scope matches the scope each record was pushed with. Records pushed before scope capture have none, so no Scope filter matches them.",
+    );
+  });
 
-  // The Source pill builds its options from each row's wire `source`,
-  // which GET /v1/evidence fills from `provenance` (no actor_type /
-  // actor_id), while the filter matches `source_attribution`. A pushed
-  // record therefore yields no option to pick. #2771.
-  test.fixme(
-    "slice 234 — Source pill sets BOTH source_actor_type + source_actor_id atomically",
-    async ({ page }) => {
-      await page.goto("/evidence");
-      await page
-        .getByTestId("list-filter-pills")
-        .getByLabel("Source")
-        .selectOption({ index: 1 });
-      await expect(page).toHaveURL(/[?&]source_actor_type=connector/);
-      await expect(page).toHaveURL(/[?&]source_actor_id=test-connector-/);
-    },
-  );
+  // #2771: the Source column and pill read the row's
+  // `source_attribution`, the column the source_actor_* filters match.
+  test("slice 234 — Source pill sets BOTH source_actor_type + source_actor_id atomically", async ({
+    page,
+  }) => {
+    await page.goto("/evidence");
+    await expect(
+      table(page).getByTestId("evidence-row-source").first(),
+    ).toHaveText("connector · test-connector-a", { timeout: 30_000 });
+    await page
+      .getByTestId("list-filter-pills")
+      .getByLabel("Source")
+      .selectOption({ index: 1 });
+    await expect(page).toHaveURL(/[?&]source_actor_type=connector/);
+    await expect(page).toHaveURL(/[?&]source_actor_id=test-connector-a/);
+    await expect(table(page).getByTestId("list-table-row")).toHaveCount(
+      ROWS_FROM_CONNECTOR_A,
+    );
+  });
 
   test("slice 234 — clearing filters drops all three new params", async ({
     page,

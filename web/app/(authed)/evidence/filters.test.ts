@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Anchor } from "@/lib/api/anchors";
+import type { AnchorWithState } from "@/lib/api/anchors";
 
 import {
   ALL,
@@ -98,13 +98,16 @@ describe("evidence filters", () => {
   });
 
   test("buildControlOptions prepends the 'All controls' sentinel (slice 106)", () => {
-    const anchors: Anchor[] = [
+    const anchors: AnchorWithState[] = [
       {
         id: "11111111-1111-1111-1111-111111111111",
         scf_id: "SCF:IAC-37",
         family: "IAC",
         name: "Multi-factor authentication",
         description: "",
+        state: null,
+        frameworks: [],
+        control_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       },
       {
         id: "22222222-2222-2222-2222-222222222222",
@@ -112,16 +115,35 @@ describe("evidence filters", () => {
         family: "CRY",
         name: "Encryption at rest",
         description: "",
+        state: null,
+        frameworks: [],
+        control_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
       },
     ];
     const opts = buildControlOptions(anchors);
     expect(opts).toHaveLength(3);
     // Slice 106: "All controls" replaces the slice-099 "Select a control…".
     expect(opts[0]).toEqual({ value: NONE, label: "All controls" });
-    // Sorted alphabetically by scf_id (CRY before IAC).
-    expect(opts[1]?.value).toBe("22222222-2222-2222-2222-222222222222");
+    // Sorted alphabetically by scf_id (CRY before IAC). #2771: the value
+    // is the tenant control id the ledger filters on, not the anchor id.
+    expect(opts[1]?.value).toBe("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     expect(opts[1]?.label).toBe("SCF:CRY-07 · Encryption at rest");
-    expect(opts[2]?.value).toBe("11111111-1111-1111-1111-111111111111");
+    expect(opts[2]?.value).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  });
+
+  test("buildControlOptions leaves out anchors with no tenant control (#2771)", () => {
+    const opts = buildControlOptions([
+      {
+        id: "33333333-3333-3333-3333-333333333333",
+        scf_id: "SCF:GOV-01",
+        family: "GOV",
+        name: "Governance program",
+        description: "",
+        state: null,
+        frameworks: [],
+      },
+    ]);
+    expect(opts).toEqual([{ value: NONE, label: "All controls" }]);
   });
 
   test("buildControlOptions handles an empty anchor list", () => {

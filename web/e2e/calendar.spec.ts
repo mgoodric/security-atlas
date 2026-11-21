@@ -27,6 +27,8 @@ import { signInToTenant } from "./tenant-session";
 const TENANT = "00000000-0000-0000-0000-2755a0000031";
 const AUDIT_PERIOD = "cccccccc-cccc-cccc-cccc-2755a0000311";
 const VENDOR = "77777777-7777-7777-7777-2755a0000311";
+const EXCEPTION = "eeeeeeee-eeee-eeee-eeee-2755a0000311";
+const POLICY = "55555555-5555-5555-5555-2755a0000311";
 const MONTH_HEADING =
   /^(January|February|March|April|May|June|July|August|September|October|November|December) \d{4}$/;
 
@@ -134,21 +136,40 @@ test.describe("compliance calendar", () => {
     await expect(dialog).toContainText("Control review: E2E calendar control");
   });
 
-  // Product bug: /exceptions/[id] now exists, but components/calendar/
-  // link-for.ts still renders exception events unlinked with a tooltip
-  // saying a detail page "is not available yet". Its header says the
-  // branch flips to a link once that page ships; it did not flip. #2772.
-  test.fixme(
-    "AC-183-1: exception events render as a static span, NOT an <a> (no 404)",
-    async () => {},
-  );
+  // Slice 183 rendered exception and policy events unlinked while their
+  // detail pages did not exist. #2772: both pages ship, so the rows link
+  // to them, and following the link lands on the real page (not a 404).
+  test("AC-183-1: exception events link to the exception detail page", async ({
+    page,
+  }) => {
+    await page.goto("/calendar");
+    const exceptionRow = agendaRow(page, "Exception on E2E calendar control");
+    await expect(exceptionRow).toBeVisible({ timeout: 30_000 });
+    const link = exceptionRow.locator("a");
+    await expect(link).toHaveAttribute("href", `/exceptions/${EXCEPTION}`);
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/exceptions/${EXCEPTION}$`));
+    await expect(page.getByTestId("exception-title")).toContainText(
+      "Exception:",
+      { timeout: 30_000 },
+    );
+  });
 
-  // Product bug: /policies/[id] now exists, but link-for.ts still renders
-  // policy events unlinked with a "not available yet" tooltip. #2772.
-  test.fixme(
-    "AC-183-2: policy events render as a static span, NOT an <a> (no 404)",
-    async () => {},
-  );
+  test("AC-183-2: policy events link to the policy detail page", async ({
+    page,
+  }) => {
+    await page.goto("/calendar");
+    const policyRow = agendaRow(page, "Policy review: E2E calendar policy");
+    await expect(policyRow).toBeVisible({ timeout: 30_000 });
+    const link = policyRow.locator("a");
+    await expect(link).toHaveAttribute("href", `/policies/${POLICY}`);
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/policies/${POLICY}$`));
+    await expect(page.getByTestId("policy-detail-title")).toHaveText(
+      "E2E calendar policy",
+      { timeout: 30_000 },
+    );
+  });
 
   test("AC-675-1: legend lists 'Vendor reviews' and the agenda surfaces vendor events", async ({
     page,
