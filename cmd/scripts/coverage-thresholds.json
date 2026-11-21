@@ -324,6 +324,7 @@
     "internal/questionnaire": 77,
     "internal/risk": 77,
     "internal/risk/aggrule": 72,
+    "internal/risk/riskimport": 81,
     "internal/scfrelease": 94,
     "internal/scfworkbook": 98,
     "internal/scim": 67,
