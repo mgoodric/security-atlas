@@ -70,6 +70,10 @@ var (
 	// credential belongs to no user (an API key, an OAuth client, the
 	// bootstrap admin). Only people approve.
 	ErrAcceptanceApproverNotPerson = errors.New("risk: only a person can approve an acceptance")
+	// ErrAcceptanceProposerNotPerson is returned when the proposing
+	// credential belongs to no user (an unbound API key, an OAuth client,
+	// the bootstrap admin). Only people propose an acceptance (#2623).
+	ErrAcceptanceProposerNotPerson = errors.New("risk: only a person can propose an acceptance; use your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
 	// ErrAcceptanceProposerUnknown is returned when the acceptance names no
 	// proposer a person can be compared with: none was recorded (proposed
 	// before #2105) or a session was (pre-#1807). No approver can be shown
@@ -86,9 +90,12 @@ func IsTransitionInput(err error) bool {
 }
 
 // IsApprovalRefusal reports whether err is the approval rule refusing the
-// approver, rendered as a 403.
+// approver, or a machine credential refused as proposer (#2623), rendered
+// as a 403.
 func IsApprovalRefusal(err error) bool {
-	return errors.Is(err, ErrAcceptanceSelfApproval) || errors.Is(err, ErrAcceptanceApproverNotPerson)
+	return errors.Is(err, ErrAcceptanceSelfApproval) ||
+		errors.Is(err, ErrAcceptanceApproverNotPerson) ||
+		errors.Is(err, ErrAcceptanceProposerNotPerson)
 }
 
 // ChangeTreatmentInput changes a risk's treatment to anything but accept.
@@ -104,6 +111,10 @@ type ProposeAcceptanceInput struct {
 	Justification string
 	ProposedUntil time.Time
 	Proposer      string
+	// ProposerIsPerson is whether the proposer is a user: a session or a
+	// key bound to a user (credstore.MinterUserID non-empty). A machine
+	// credential is refused with ErrAcceptanceProposerNotPerson (#2623).
+	ProposerIsPerson bool
 }
 
 // ApproveAcceptanceInput approves a proposed acceptance until
@@ -258,9 +269,14 @@ func ProposeAcceptanceTx(ctx context.Context, q *dbx.Queries, tenantID, id uuid.
 
 // ValidateProposal is the rule every proposed acceptance meets, whether
 // proposed on an existing risk or at create (#2391): a justification, a
-// proposed expiry after today (UTC) and a proposer. It returns the trimmed
-// justification. Its errors are ErrTransitionInput.
+// proposed expiry after today (UTC) and a proposer who is a person. It
+// returns the trimmed justification. A machine proposer is
+// ErrAcceptanceProposerNotPerson (a 403), checked first so a machine is
+// refused whatever it sends; the other errors are ErrTransitionInput.
 func ValidateProposal(in ProposeAcceptanceInput, now time.Time) (string, error) {
+	if !in.ProposerIsPerson {
+		return "", ErrAcceptanceProposerNotPerson
+	}
 	justification := strings.TrimSpace(in.Justification)
 	if justification == "" {
 		return "", fmt.Errorf("%w: justification is required", ErrTransitionInput)
