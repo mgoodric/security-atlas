@@ -260,7 +260,7 @@ func TestEngine_ThemeRemovalAndDeleteRefreshMetaRisk_1861(t *testing.T) {
 	r3 := seedRisk(t, admin, tenant, "r3", 3, 3, nil, &team1, now) // sev 9
 	r4 := seedRisk(t, admin, tenant, "r4", 5, 5, nil, &team1, now) // sev 25
 	for _, id := range []uuid.UUID{r1, r2, r3, r4} {
-		if _, err := risks.AssignThemes(ctx, id, []string{"ownership"}); err != nil {
+		if _, err := risks.AssignThemes(ctx, id, []string{"ownership"}, "test-actor"); err != nil {
 			t.Fatalf("AssignThemes %s: %v", id, err)
 		}
 	}
@@ -275,7 +275,7 @@ func TestEngine_ThemeRemovalAndDeleteRefreshMetaRisk_1861(t *testing.T) {
 	}
 
 	// Remove the theme from the highest-severity child.
-	if _, err := risks.AssignThemes(ctx, r4, nil); err != nil {
+	if _, err := risks.AssignThemes(ctx, r4, nil, "test-actor"); err != nil {
 		t.Fatalf("remove theme from r4: %v", err)
 	}
 	if children := metaChildIDs(t, admin, tenant, meta); children[r4] || len(children) != 3 {

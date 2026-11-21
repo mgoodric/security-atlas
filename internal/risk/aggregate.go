@@ -63,6 +63,9 @@ type AggregateInput struct {
 	ParentOrgUnitID  *uuid.UUID
 	SeverityFunction SeverityFunction
 	ChildRiskIDs     []uuid.UUID
+	// Actor is who aggregates, named on the parent's `created` audit row
+	// (#2835). Required.
+	Actor string
 }
 
 // AggregateResult bundles the persisted parent and the list of children
@@ -85,6 +88,9 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 	}
 	if len(in.ChildRiskIDs) == 0 {
 		return AggregateResult{}, ErrEmptyChildren
+	}
+	if in.Actor == "" {
+		return AggregateResult{}, fmt.Errorf("%w: actor is required", ErrTransitionInput)
 	}
 	if !isValidLevel(in.ParentLevel) {
 		return AggregateResult{}, ErrInvalidLevel
@@ -248,6 +254,9 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 		}
 
 		parent := riskFromRow(row)
+		if err := RecordCreatedTx(ctx, q, tenantID, parent.ID, in.Actor, createdStateOf(parent)); err != nil {
+			return err
+		}
 		parent.LinkedControlIDs = []uuid.UUID{}
 		if err := withCategoryNames(ctx, q, tenantID, &parent); err != nil {
 			return err

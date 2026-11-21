@@ -55,6 +55,7 @@ func TestRiskOff_EvidenceStillRecomputesResidualAndRollUpIsCurrent(t *testing.T)
 		t.Fatalf("LinkControl: %v", err)
 	}
 	parent, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Rolled up",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionMax,

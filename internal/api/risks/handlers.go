@@ -228,6 +228,14 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	// The creator is named on the risk's created audit row (#2835) and, for
+	// a proposed acceptance, as its proposer, so they cannot approve it
+	// (#2371).
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
+		return
+	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
@@ -295,13 +303,10 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		OrgUnitID:           orgUnitID,
 		OwnerUserID:         ownerUserID,
 	}
-	// A create proposing an acceptance records its creator as the proposer,
-	// as the propose transition does, so they cannot approve it (#2371).
 	// Only a person proposes (#2623).
-	if cred, ok := authctx.CredentialFromContext(r.Context()); ok {
-		in.Proposer = credstore.PrincipalOf(cred)
-		in.ProposerIsPerson = credstore.MinterUserID(cred) != ""
-	}
+	in.Proposer = credstore.PrincipalOf(cred)
+	in.ProposerIsPerson = credstore.MinterUserID(cred) != ""
+	in.Actor = in.Proposer
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
 		switch {

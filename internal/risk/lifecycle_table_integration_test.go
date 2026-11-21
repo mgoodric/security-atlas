@@ -30,6 +30,7 @@ const (
 func lifecycleRisk(t *testing.T, store *risk.Store, ctx context.Context, ctrl uuid.UUID, treatment dbx.RiskTreatment) uuid.UUID {
 	t.Helper()
 	in := risk.CreateInput{
+		Actor:               "test-actor",
 		Title:               "Lifecycle risk",
 		CategoryRef:         "confidentiality",
 		InherentScore:       []byte(`{"likelihood":3,"impact":4}`),

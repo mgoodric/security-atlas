@@ -118,6 +118,42 @@ describe("risk history format (#2104)", () => {
     expect(changes).toEqual([]);
   });
 
+  test("a creation and a theme change read as their fields (#2835)", () => {
+    expect(historyActionLabel("created")).toBe("Created");
+    expect(historyActionLabel("themes_changed")).toBe("Themes changed");
+    expect(
+      historyChanges(
+        entry(
+          "created",
+          {},
+          {
+            title: "New risk",
+            category_id: "6a7c829b-ad4a-4472-aaac-46e95717767f",
+            treatment: "untreated",
+            owner_user_id: null,
+            treatment_owner: "",
+          },
+        ),
+      ).map((c) => c.field),
+    ).toEqual(["Title", "Treatment"]);
+    expect(
+      historyChanges(
+        entry(
+          "themes_changed",
+          { themes: ["ownership"] },
+          { themes: ["monitoring", "ownership"] },
+        ),
+      ),
+    ).toEqual([
+      { field: "Themes", before: "ownership", after: "monitoring, ownership" },
+    ]);
+    expect(
+      historyChanges(
+        entry("themes_changed", { themes: [] }, { themes: ["ownership"] }),
+      ),
+    ).toEqual([{ field: "Themes", before: "none", after: "ownership" }]);
+  });
+
   test("a control link and unlink read as the control (#2106)", () => {
     const control = "6a7c829b-ad4a-4472-aaac-46e95717767f";
     expect(historyActionLabel("control_linked")).toBe("Control linked");

@@ -301,7 +301,7 @@ func (s *Store) finishPatch(ctx context.Context, q *dbx.Queries, tenantID uuid.U
 }
 
 // insertRiskAudit writes one risk_audit_log row in the write's transaction.
-func insertRiskAudit(ctx context.Context, q *dbx.Queries, tenantID, riskID uuid.UUID, actor, action string, before, after any) error {
+func insertRiskAudit(ctx context.Context, q AuditWriter, tenantID, riskID uuid.UUID, actor, action string, before, after any) error {
 	beforeJSON, err := json.Marshal(before)
 	if err != nil {
 		return fmt.Errorf("marshal %s before: %w", action, err)

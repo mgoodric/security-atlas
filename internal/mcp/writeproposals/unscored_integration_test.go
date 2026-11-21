@@ -28,7 +28,7 @@ func TestCreateRisk_UnscoredSameRowAsREST(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create_risk with no score: %v", err)
 	}
-	created, err := risk.NewStore(app).Create(ctx, risk.CreateInput{Title: "Unscored", CategoryRef: "operational"})
+	created, err := risk.NewStore(app).Create(ctx, risk.CreateInput{Actor: "test-actor", Title: "Unscored", CategoryRef: "operational"})
 	if err != nil {
 		t.Fatalf("risk.Store.Create with no score: %v", err)
 	}

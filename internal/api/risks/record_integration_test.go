@@ -153,8 +153,8 @@ func TestRecord_PatchRefusesTreatmentAndAcceptance(t *testing.T) {
 	if riskField(t, got, "title") != "placement risk" || riskField(t, got, "treatment") != "untreated" {
 		t.Fatalf("refused PATCH changed the risk: %v", got)
 	}
-	if n := len(auditEntries(t, env, id)); n != 0 {
-		t.Fatalf("refused PATCHes wrote %d audit rows", n)
+	if n := len(auditEntries(t, env, id)); n != 1 {
+		t.Fatalf("refused PATCHes wrote %d audit rows beside the created row", n-1)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestRecord_AuditTrail(t *testing.T) {
 	}
 
 	entries := auditEntries(t, env, id)
-	wantActions := []string{"placement_changed", "category_changed", "fields_changed", "fields_changed"}
+	wantActions := []string{"placement_changed", "category_changed", "fields_changed", "fields_changed", "created"}
 	if len(entries) != len(wantActions) {
 		t.Fatalf("got %d entries, want %d: %v", len(entries), len(wantActions), entries)
 	}

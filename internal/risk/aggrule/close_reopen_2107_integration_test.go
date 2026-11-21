@@ -35,7 +35,7 @@ func TestEngine_CloseAndReopenRefreshMetaRisk_2107(t *testing.T) {
 	r2 := seedRisk(t, admin, tenant, "r2", 3, 3, nil, &team1, now) // sev 9
 	r3 := seedRisk(t, admin, tenant, "r3", 5, 5, nil, &team1, now) // sev 25
 	for _, id := range []uuid.UUID{r1, r2, r3} {
-		if _, err := risks.AssignThemes(ctx, id, []string{"ownership"}); err != nil {
+		if _, err := risks.AssignThemes(ctx, id, []string{"ownership"}, "test-actor"); err != nil {
 			t.Fatalf("AssignThemes %s: %v", id, err)
 		}
 	}

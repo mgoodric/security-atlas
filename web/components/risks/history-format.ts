@@ -63,6 +63,8 @@ const FIELD_LABELS: Record<string, string> = {
   closed_at: "Closed at",
   // #2106: control links.
   control_id: "Control",
+  // #2835: theme changes.
+  themes: "Themes",
 };
 
 // Keys an entry carries that are not a change a reader needs to see.
@@ -94,6 +96,10 @@ export function historyActionLabel(action: string): string {
       return "Control linked";
     case "control_unlinked":
       return "Control unlinked";
+    case "created":
+      return "Created";
+    case "themes_changed":
+      return "Themes changed";
     default:
       return humanizeEnum(action);
   }
@@ -126,6 +132,7 @@ export function formatHistoryValue(field: string, v: unknown): string {
   }
   // Only a self-approval is worth a line; false reads as no change.
   if (field === "self_approved") return v === true ? "yes" : "none";
+  if (Array.isArray(v)) return v.length === 0 ? "none" : v.join(", ");
   if (typeof v === "string") return v;
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
