@@ -4961,7 +4961,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/needs-attention:
     get:
-      summary: GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134)
+      summary: GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134)
       tags: [dashboard]
       operationId: get-v1-needs-attention
       security:
@@ -5535,7 +5535,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/policies:sync:
     post:
-      summary: POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift; per-page report (created, new_version, unchanged, drift, skipped with reason) (#2850, #2851)
+      summary: POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift; per-page report (created, new_version, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force) (#2850, #2851, #2853)
       tags: [policies]
       operationId: post-v1-policies_sync
       security:

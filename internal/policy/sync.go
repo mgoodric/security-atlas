@@ -31,7 +31,15 @@ const (
 	SyncStatusDrift = "drift"
 	// SyncStatusSkipped: the page was not synced; Reason says why.
 	SyncStatusSkipped = "skipped"
+	// SyncStatusMissing: a page with a published synced policy is absent
+	// from the run, so it lost its label or was deleted (#2853). Nothing
+	// is written to the policy beyond recording when it was first found
+	// missing; it stays published and acknowledgements continue.
+	SyncStatusMissing = "missing"
 )
+
+// syncMissingReason is the report's reason on a missing result.
+const syncMissingReason = "the page is no longer in this source's labelled set: it lost its label or was deleted. The published policy stays in force; restore the label to clear this"
 
 // auditActionSynced is the policy_audit_log action for a synced write.
 const auditActionSynced = "synced"
@@ -62,7 +70,9 @@ type SyncResult struct {
 }
 
 // SyncReport is the outcome of one Sync call, one result per page in the
-// order given (skipped pages first, as the caller passes them).
+// order given (skipped pages first, as the caller passes them), then one
+// missing result per previously synced page absent from the run, by page
+// id.
 type SyncReport struct {
 	Results []SyncResult
 }
@@ -78,6 +88,13 @@ type SyncReport struct {
 // without a version bump writes no version and records drift on the
 // policy instead (#2851). Drift clears when a later run's body matches
 // again or arrives with a new version.
+//
+// The push is the source's full set, so a page with a published synced
+// policy that the run does not carry is missing (#2853): the row records
+// when it was first found missing, the report lists it, and the policy
+// is otherwise left as it is. A page the run carries, even one skipped,
+// is present, and any missing state on it is cleared. Only rows of this
+// source in the caller's tenant are considered.
 //
 // invalid are pages the caller refused (a missing or invalid property);
 // they are reported as skipped and written nowhere. Unlike Import, valid
@@ -96,6 +113,20 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			SyncSpace: src.Space,
 		}); err != nil {
 			return fmt.Errorf("sync: lock source: %w", err)
+		}
+		// Every page the run carries is present, valid or not: a page
+		// with a bad property is still labelled.
+		present := []string{}
+		for _, r := range invalid {
+			present = append(present, r.PageID)
+		}
+		for _, p := range pages {
+			present = append(present, p.PageID)
+		}
+		if err := q.ClearSyncedPolicyMissing(ctx, dbx.ClearSyncedPolicyMissingParams{
+			TenantID: pgUUID(tenantID), SyncSite: &src.Site, SyncSpace: &src.Space, PresentPageIds: present,
+		}); err != nil {
+			return fmt.Errorf("sync: clear missing: %w", err)
 		}
 		results := append([]SyncResult{}, invalid...)
 		seen := map[string]bool{}
@@ -184,13 +215,47 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			}
 			results = append(results, res)
 		}
-		report.Results = results
+		missing, err := syncMarkMissing(ctx, q, tenantID, src, present)
+		if err != nil {
+			return err
+		}
+		report.Results = append(results, missing...)
 		return nil
 	})
 	if err != nil {
 		return SyncReport{}, err
 	}
 	return report, nil
+}
+
+// syncMarkMissing records every published synced row of src whose page
+// is not in present as missing, keeping the first-sighting time of a row
+// already marked, and returns one missing result per such row.
+func syncMarkMissing(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, present []string) ([]SyncResult, error) {
+	if err := q.MarkSyncedPoliciesMissing(ctx, dbx.MarkSyncedPoliciesMissingParams{
+		TenantID: pgUUID(tenantID), SyncSite: &src.Site, SyncSpace: &src.Space, PresentPageIds: present,
+	}); err != nil {
+		return nil, fmt.Errorf("sync: mark missing: %w", err)
+	}
+	rows, err := q.ListSyncedPoliciesMissingFromSource(ctx, dbx.ListSyncedPoliciesMissingFromSourceParams{
+		TenantID: pgUUID(tenantID), SyncSite: &src.Site, SyncSpace: &src.Space,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sync: list missing: %w", err)
+	}
+	out := make([]SyncResult, 0, len(rows))
+	for _, row := range rows {
+		pol := policyFromRow(row)
+		pageID := ""
+		if row.SyncPageID != nil {
+			pageID = *row.SyncPageID
+		}
+		out = append(out, SyncResult{
+			PageID: pageID, Title: row.Title, Status: SyncStatusMissing,
+			Reason: syncMissingReason, Policy: &pol,
+		})
+	}
+	return out, nil
 }
 
 func syncCreate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string) (Policy, error) {
