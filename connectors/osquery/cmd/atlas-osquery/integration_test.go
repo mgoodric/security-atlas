@@ -144,7 +144,7 @@ func TestRun_PushesHostPosture(t *testing.T) {
 	api := osqueryposture.NewFleetClient(fleetSrv.Client(), fleetSrv.URL, creds)
 	rows, err := osqueryposture.PullFromFleet(context.Background(), api, func() time.Time {
 		return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
-	})
+	}, osqueryposture.FleetPolicies{})
 	if err != nil {
 		t.Fatalf("PullFromFleet: %v", err)
 	}
