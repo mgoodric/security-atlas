@@ -21,6 +21,14 @@
 //   - A per-query statement_timeout bounds runtime; a timeout yields
 //     inconclusive with an error, never a hang (threat-model D / AC-3).
 //
+// EVALUATION INSTANT (#2911, ADR 0028 d1): every row of `evidence` carries
+// the same `evaluated_at` timestamptz, the instant the engine evaluates at (the
+// as-of instant for a replay, the case's pinned instant for a bundle test). A
+// time-window check compares against it, never against now(): the wall clock
+// would give a replay or a frozen audit period the wrong answer and make a
+// bundle test stop passing once its fixture dates age. The stock-bundle guard
+// (SQLUsesWallClock) refuses the wall-clock functions outright.
+//
 // RESULT CONTRACT (decisions log 495 D-SQL-1): the author SQL must SELECT a
 // single column from `evidence`. The column is interpreted as:
 //
@@ -119,20 +127,22 @@ func validateSQLEvidenceQuery(expr string) error {
 // SET TRANSACTION READ ONLY + statement_timeout are scoped to this query and do
 // not leak to the engine's writes.
 //
-// The records are passed as a JSONB array parameter ($1). The author's SQL is
+// The records are passed as a JSONB array parameter ($1) and the evaluation
+// instant as $2, exposed as the constant `evaluated_at` column. The author's SQL is
 // wrapped so it can only SELECT FROM the `evidence` relation:
 //
 //	WITH evidence AS (
 //	    SELECT (r->>'result')::text AS result,
 //	           (r->>'observed_at')::timestamptz AS observed_at,
-//	           (r->'payload') AS payload
+//	           (r->'payload') AS payload,
+//	           $2::timestamptz AS evaluated_at
 //	    FROM jsonb_array_elements($1::jsonb) AS r
 //	)
 //	<author SELECT>
 //
 // The author never names a base table, so RLS + the read-only txn together
 // foreclose cross-tenant / non-evidence reach (P0-495-2).
-func evalSQLQuery(ctx context.Context, tx pgx.Tx, expr string, records []inWindowRecord) (string, error) {
+func evalSQLQuery(ctx context.Context, tx pgx.Tx, expr string, records []inWindowRecord, evaluatedAt time.Time) (string, error) {
 	if err := validateSQLEvidenceQuery(expr); err != nil {
 		return "", err
 	}
@@ -177,7 +187,7 @@ func evalSQLQuery(ctx context.Context, tx pgx.Tx, expr string, records []inWindo
 
 	wrapped := sqlEvidenceCTE + "\n" + strings.TrimRight(strings.TrimSpace(expr), ";")
 
-	rows, err := sub.Query(ctx, wrapped, recordsJSON)
+	rows, err := sub.Query(ctx, wrapped, recordsJSON, evaluatedAt.UTC())
 	if err != nil {
 		return "", classifySQLError(err)
 	}
@@ -216,9 +226,24 @@ func evalSQLQuery(ctx context.Context, tx pgx.Tx, expr string, records []inWindo
 const sqlEvidenceCTE = `WITH evidence AS (
     SELECT (r->>'result')::text AS result,
            (r->>'observed_at')::timestamptz AS observed_at,
-           (r->'payload') AS payload
+           (r->'payload') AS payload,
+           $2::timestamptz AS evaluated_at
     FROM jsonb_array_elements($1::jsonb) AS r
 )`
+
+// wallClockSQL matches the Postgres functions and special literals that read
+// the wall clock: now(), current_timestamp, clock_timestamp() and their
+// relatives, and the 'now' / 'today' / 'tomorrow' / 'yesterday' input
+// strings. A SQL evidence query that uses one gives a different verdict on
+// replay than it gave live (#2911).
+var wallClockSQL = regexp.MustCompile(`(?i)\bnow\s*\(|\b(?:current_timestamp|current_date|current_time|localtimestamp|localtime|clock_timestamp|statement_timestamp|transaction_timestamp|timeofday)\b|'\s*(?:now|today|tomorrow|yesterday)\s*'`)
+
+// SQLUsesWallClock reports whether a SQL evidence query reads the wall clock
+// instead of the `evaluated_at` column. The stock bundles under controls/ are
+// held to it by a test; the engine does not refuse a tenant's query on it.
+func SQLUsesWallClock(expr string) bool {
+	return wallClockSQL.MatchString(expr)
+}
 
 // classifySQLValue maps one selected value to a control result. A bool maps
 // true→pass / false→fail; a string must already be a result enum member;

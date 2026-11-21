@@ -110,6 +110,7 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 
 	evalRunID := uuid.New()
 	evaluatedAt := e.now()
+	instant := queryInstant(evaluatedAt, asOf)
 	written := 0
 
 	err = e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tx pgx.Tx, tenantID uuid.UUID) error {
@@ -146,7 +147,7 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		}
 
 		for _, cell := range targets {
-			row, err := e.computeRow(ctx, tx, meta, records, exceptions, cell, evalRunID, trigger, evaluatedAt)
+			row, err := e.computeRow(ctx, tx, meta, records, exceptions, cell, evalRunID, trigger, evaluatedAt, instant)
 			if err != nil {
 				return err
 			}
@@ -186,13 +187,16 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 // is a documented follow-up (slice 018's effective-scope intersection is the
 // natural home). This is faithful to AC-1's "(control × scope_cell × time)"
 // shape: state is recorded per applicable cell.
-func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, exceptions []activeException, cell *scope.Cell, evalRunID uuid.UUID, trigger string, now time.Time) (evaluationRow, error) {
+//
+// instant is the evaluation instant the queries see (queryInstant): SQL's
+// evaluated_at column and Rego's time.now_ns().
+func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, exceptions []activeException, cell *scope.Cell, evalRunID uuid.UUID, trigger string, now, instant time.Time) (evaluationRow, error) {
 	inWindow := inWindowRecords(records, meta.freshnessClass, now)
 	freshness := computeFreshness(records, meta.freshnessClass, now)
 
 	// #2111: only the latest attestation in the window speaks for the
 	// attestation outcome; automated evidence keeps "any fail fails".
-	result, err := e.evalQueries(ctx, tx, meta, latestAttestationWins(inWindow))
+	result, err := e.evalQueries(ctx, tx, meta, latestAttestationWins(inWindow), instant)
 	if err != nil {
 		return evaluationRow{}, err
 	}
@@ -257,7 +261,7 @@ func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, re
 // Per-query results combine via computeResult precedence (any fail → fail;
 // else any pass → pass; else inconclusive; else na), so a control with a mix
 // of rego + sql + jsonpath queries rolls up consistently (AC-6).
-func (e *Engine) evalQueries(ctx context.Context, tx pgx.Tx, meta controlMeta, inWindow []inWindowRecord) (string, error) {
+func (e *Engine) evalQueries(ctx context.Context, tx pgx.Tx, meta controlMeta, inWindow []inWindowRecord, instant time.Time) (string, error) {
 	if len(meta.queries) == 0 {
 		// No declared query: the per-record evidence rollup IS the result.
 		return computeResult(inWindow), nil
@@ -281,9 +285,9 @@ func (e *Engine) evalQueries(ctx context.Context, tx pgx.Tx, meta controlMeta, i
 		)
 		switch q.Language {
 		case "rego":
-			res, err = evalRegoQuery(ctx, q.Expression, records)
+			res, err = evalRegoQuery(ctx, q.Expression, records, instant)
 		case "sql":
-			res, err = evalSQLQuery(ctx, tx, q.Expression, records)
+			res, err = evalSQLQuery(ctx, tx, q.Expression, records, instant)
 		case "jsonpath":
 			res, err = evalJSONPathQuery(ctx, q.Expression, records)
 		}
@@ -353,6 +357,18 @@ func (e *Engine) EvaluateAll(ctx context.Context, trigger string, asOf time.Time
 // instant.
 func (e *Engine) Replay(ctx context.Context, asOf time.Time) (int, error) {
 	return e.EvaluateAll(ctx, TriggerReplay, asOf)
+}
+
+// queryInstant is the evaluation instant a SQL or Rego evidence query sees
+// (#2911): the evaluation's own time, or the as-of horizon when that is
+// earlier, so a replay or an audit-period re-evaluation judges a time window
+// as of that instant rather than as of the wall clock. Live evaluation passes
+// FarFuture, which is never earlier.
+func queryInstant(evaluatedAt, asOf time.Time) time.Time {
+	if asOf.Before(evaluatedAt) {
+		return asOf.UTC()
+	}
+	return evaluatedAt.UTC()
 }
 
 // FarFuture is the sentinel horizon for live evaluation — "all evidence up to
