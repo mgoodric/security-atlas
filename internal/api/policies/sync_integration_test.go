@@ -83,6 +83,7 @@ func syncPage(id, title, version, body string, props map[string]any) map[string]
 type syncResp struct {
 	Created    int `json:"created"`
 	NewVersion int `json:"new_version"`
+	TakenOver  int `json:"taken_over"`
 	Unchanged  int `json:"unchanged"`
 	Drift      int `json:"drift"`
 	Skipped    int `json:"skipped"`

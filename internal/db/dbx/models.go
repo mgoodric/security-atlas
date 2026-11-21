@@ -3081,29 +3081,30 @@ type PolicyAcknowledgment struct {
 }
 
 type PolicyAuditLog struct {
-	ID                       pgtype.UUID        `json:"id"`
-	TenantID                 pgtype.UUID        `json:"tenant_id"`
-	PolicyID                 pgtype.UUID        `json:"policy_id"`
-	Action                   string             `json:"action"`
-	Actor                    string             `json:"actor"`
-	SourceFile               string             `json:"source_file"`
-	HistoricalApproverName   *string            `json:"historical_approver_name"`
-	HistoricalApprovedAt     pgtype.Date        `json:"historical_approved_at"`
-	SourceUrl                *string            `json:"source_url"`
-	SubjectModule            string             `json:"subject_module"`
-	CreatedAt                pgtype.Timestamptz `json:"created_at"`
-	PreviousNextReviewAt     pgtype.Timestamptz `json:"previous_next_review_at"`
-	NewNextReviewAt          pgtype.Timestamptz `json:"new_next_review_at"`
-	PolicyTitle              *string            `json:"policy_title"`
-	PolicyVersion            *string            `json:"policy_version"`
-	PreviousState            *string            `json:"previous_state"`
-	NewState                 *string            `json:"new_state"`
-	BodySha256               *string            `json:"body_sha256"`
-	Editors                  []string           `json:"editors"`
-	PreviousAudience         []string           `json:"previous_audience"`
-	NewAudience              []string           `json:"new_audience"`
-	PreviousLinkedControlIds []pgtype.UUID      `json:"previous_linked_control_ids"`
-	NewLinkedControlIds      []pgtype.UUID      `json:"new_linked_control_ids"`
+	ID                        pgtype.UUID        `json:"id"`
+	TenantID                  pgtype.UUID        `json:"tenant_id"`
+	PolicyID                  pgtype.UUID        `json:"policy_id"`
+	Action                    string             `json:"action"`
+	Actor                     string             `json:"actor"`
+	SourceFile                string             `json:"source_file"`
+	HistoricalApproverName    *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt      pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                 *string            `json:"source_url"`
+	SubjectModule             string             `json:"subject_module"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	PreviousNextReviewAt      pgtype.Timestamptz `json:"previous_next_review_at"`
+	NewNextReviewAt           pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle               *string            `json:"policy_title"`
+	PolicyVersion             *string            `json:"policy_version"`
+	PreviousState             *string            `json:"previous_state"`
+	NewState                  *string            `json:"new_state"`
+	BodySha256                *string            `json:"body_sha256"`
+	Editors                   []string           `json:"editors"`
+	PreviousAudience          []string           `json:"previous_audience"`
+	NewAudience               []string           `json:"new_audience"`
+	PreviousLinkedControlIds  []pgtype.UUID      `json:"previous_linked_control_ids"`
+	NewLinkedControlIds       []pgtype.UUID      `json:"new_linked_control_ids"`
+	PreviousSourceAttribution *string            `json:"previous_source_attribution"`
 }
 
 type Population struct {
