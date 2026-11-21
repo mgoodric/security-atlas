@@ -275,7 +275,7 @@ func needsSQL(queries []bundletest.ManifestQuery) bool {
 func manifestQueries(bundle *control.Bundle) []bundletest.ManifestQuery {
 	out := make([]bundletest.ManifestQuery, 0, len(bundle.Manifest.EvidenceQueries))
 	for _, q := range bundle.Manifest.EvidenceQueries {
-		out = append(out, bundletest.ManifestQuery{Language: q.Language, Expression: q.Expression})
+		out = append(out, bundletest.ManifestQuery{Language: q.Language, Expression: q.Expression, EvidenceKind: q.EvidenceKind})
 	}
 	return out
 }

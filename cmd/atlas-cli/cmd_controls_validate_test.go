@@ -96,3 +96,26 @@ func TestControlsValidate_ReleaseWarnings(t *testing.T) {
 		t.Errorf("code missing from release not warned:\n%s", out)
 	}
 }
+
+// #2818: a query with no evidence_kind is warned on, and validation passes.
+func TestControlsValidate_WarnsOnQueryWithoutEvidenceKind(t *testing.T) {
+	dir := writeBundle(t, "IAC-06", "2025.2")
+	path := filepath.Join(dir, "control.yaml")
+	y, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y = append(y, []byte("evidence_queries:\n"+
+		"  - id: kinded\n    language: jsonpath\n    evidence_kind: okta.mfa_policy.v1\n    expression: \"$.a\"\n"+
+		"  - id: kindless\n    language: jsonpath\n    expression: \"$.b\"\n")...)
+	if err := os.WriteFile(path, y, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := runValidate(t, dir)
+	if !strings.Contains(out, "WARN evidence_queries[1] (kindless) declares no evidence_kind") {
+		t.Errorf("kindless query not warned:\n%s", out)
+	}
+	if strings.Contains(out, "(kinded)") {
+		t.Errorf("kinded query warned:\n%s", out)
+	}
+}
