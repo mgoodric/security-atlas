@@ -108,3 +108,48 @@ func TestInvolvedSinceCompletion_FailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// #2639: the trail orders by created_at, and a row can sort before the
+// completion it followed. An owner on a row whose before- or after-status
+// is completed or verified is refused in any order.
+func TestInvolvedSinceCompletion_OrderIndependent(t *testing.T) {
+	t.Parallel()
+	owner, colleague, completer := uuid.New(), uuid.New(), uuid.New()
+	completion := trailRow(completer, ActionStatusChanged, st(StatusInProgress, owner), st(StatusCompleted, owner))
+	handOff := trailRow(owner, ActionUpdated, st(StatusCompleted, owner), st(StatusCompleted, colleague))
+	handBack := trailRow(colleague, ActionUpdated, st(StatusCompleted, colleague), st(StatusCompleted, owner))
+	orders := map[string][]dbx.ActionPlanAuditLog{
+		"commit order":          {completion, handOff, handBack},
+		"owner changes first":   {handOff, handBack, completion},
+		"completion in between": {handOff, completion, handBack},
+	}
+	for name, trail := range orders {
+		got, err := involvedSinceCompletion(trail)
+		if err != nil {
+			t.Fatalf("%s: involvedSinceCompletion: %v", name, err)
+		}
+		for who, u := range map[string]uuid.UUID{"owner": owner, "colleague": colleague, "completer": completer} {
+			if !got[u] {
+				t.Errorf("%s: %s not refused", name, who)
+			}
+		}
+	}
+}
+
+// An owner on a row before the first completion that never touched
+// completed or verified is still allowed: the rule widens the window only
+// by closed rows.
+func TestInvolvedSinceCompletion_OpenRowsBeforeCompletionNotCounted(t *testing.T) {
+	t.Parallel()
+	early, owner, completer := uuid.New(), uuid.New(), uuid.New()
+	got, err := involvedSinceCompletion([]dbx.ActionPlanAuditLog{
+		trailRow(early, ActionUpdated, st(StatusInProgress, early), st(StatusInProgress, owner)),
+		trailRow(completer, ActionStatusChanged, st(StatusInProgress, owner), st(StatusCompleted, owner)),
+	})
+	if err != nil {
+		t.Fatalf("involvedSinceCompletion: %v", err)
+	}
+	if got[early] {
+		t.Fatal("pre-completion owner refused, want allowed")
+	}
+}

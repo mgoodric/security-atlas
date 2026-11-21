@@ -466,7 +466,10 @@ func (s *Store) Verify(ctx context.Context, id uuid.UUID, approver approval.Appr
 // reopened and completed again keeps everyone from its first round: the
 // wider set is the safe side to be wrong on. It fails closed: a trail
 // with no person's completion row, or a row whose state does not parse,
-// is ErrVerifierInvolved. trail is in ListActionPlanAuditLog order.
+// is ErrVerifierInvolved. trail is in ListActionPlanAuditLog order, but
+// the result does not rest on it: an owner on a row whose before- or
+// after-status is completed or verified counts wherever the row sorts
+// (#2639).
 func involvedSinceCompletion(trail []dbx.ActionPlanAuditLog) (map[uuid.UUID]bool, error) {
 	type state struct {
 		Status  string `json:"status"`
@@ -501,7 +504,11 @@ func involvedSinceCompletion(trail []dbx.ActionPlanAuditLog) (map[uuid.UUID]bool
 			involved[uuid.UUID(row.ActorID.Bytes)] = true
 			completed = true
 		}
-		if !completed {
+		// The window is the first completion onwards. A row whose before-
+		// or after-status is completed or verified is inside it wherever
+		// it sorts: the trail orders by created_at, and a row can sort
+		// before the completion it followed (#2639).
+		if !completed && !closedState(before.Status) && !closedState(after.Status) {
 			continue
 		}
 		// Link and unlink rows carry a target, not a plan state: no owner.
@@ -520,6 +527,11 @@ func involvedSinceCompletion(trail []dbx.ActionPlanAuditLog) (map[uuid.UUID]bool
 		return nil, fmt.Errorf("%w: no completion in the audit trail", ErrVerifierInvolved)
 	}
 	return involved, nil
+}
+
+// closedState reports whether a plan in status has been completed.
+func closedState(status string) bool {
+	return status == StatusCompleted || status == StatusVerified
 }
 
 // update applies in, after guard (when set) accepts the current row inside
