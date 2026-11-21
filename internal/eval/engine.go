@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,8 +121,10 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		// The free-form control_ref used by slice-013 pushes is the control
 		// UUID string by default; evidence pushed under that string is found
 		// by ListEvidenceForControlAsOf's (control_id = $2 OR control_ref = $3).
+		// The unbound records of the kinds the control's queries read are
+		// found alongside them (#2817).
 		controlRef := controlID.String()
-		records, err := e.store.loadEvidence(ctx, q, tenantID, controlID, controlRef, asOf)
+		records, err := e.store.loadEvidence(ctx, q, tenantID, controlID, controlRef, unboundKinds(meta.queries), asOf)
 		if err != nil {
 			return err
 		}
@@ -360,8 +363,34 @@ var FarFuture = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
 // controls.evidence_queries (JSONB). The engine only needs language +
 // expression; other fields are ignored.
 type evidenceQueryManifest struct {
-	Language   string `json:"language"`
-	Expression string `json:"expression"`
+	Language     string `json:"language"`
+	Expression   string `json:"expression"`
+	EvidenceKind string `json:"evidence_kind,omitempty"`
+}
+
+// UnboundEvidenceKinds are the evidence kinds whose records are pushed
+// bound to no control, and so reach every control whose queries declare the
+// kind (#2817). A policy acknowledgement is the one such kind: it is pushed
+// under control_id "policy:<id>:v<version>" (internal/api/policyacks), which
+// ingest cannot resolve to a control, and the stock controls that read it
+// (cc1_5, cc5_3, cc7_4) ask about acknowledgement across the tenant, not of
+// one policy. The list is closed on purpose: any other kind's unbound record
+// is a free-form control_ref and reaches only the control that names it.
+var UnboundEvidenceKinds = map[string]bool{
+	"policy.acknowledgment.v1": true,
+}
+
+// unboundKinds is the subset of queries' declared kinds in
+// UnboundEvidenceKinds, in first-declared order without repeats. It is
+// never nil, so the ledger read always binds a text[] parameter.
+func unboundKinds(queries []evidenceQueryManifest) []string {
+	out := []string{}
+	for _, q := range queries {
+		if UnboundEvidenceKinds[q.EvidenceKind] && !slices.Contains(out, q.EvidenceKind) {
+			out = append(out, q.EvidenceKind)
+		}
+	}
+	return out
 }
 
 // parseEvidenceQueries decodes a control's evidence_queries JSONB into the

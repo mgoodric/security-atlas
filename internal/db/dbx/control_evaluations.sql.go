@@ -154,16 +154,19 @@ SELECT id, tenant_id, control_id, control_ref, scope_id,
        evidence_kind, ingested_at
 FROM evidence_records
 WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= $4
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($4::text[])))
+  AND observed_at <= $5
 ORDER BY observed_at DESC, ingested_at DESC, id DESC
 `
 
 type ListEvidenceForControlAsOfParams struct {
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	ControlID  pgtype.UUID        `json:"control_id"`
-	ControlRef string             `json:"control_ref"`
-	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	UnboundKinds []string           `json:"unbound_kinds"`
+	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 }
 
 type ListEvidenceForControlAsOfRow struct {
@@ -188,12 +191,17 @@ type ListEvidenceForControlAsOfRow struct {
 // then ingested_at DESC and id DESC so records sharing an observed_at come
 // back in one fixed order (#2111: the latest attestation wins, and equal
 // timestamps must not make that choice depend on the plan).
+// unbound_kinds (#2817) adds the tenant's records of those kinds that are
+// bound to no control: a policy acknowledgement names a policy, never a
+// control, and is evidence for every control whose queries read its kind.
+// A record of such a kind that IS bound reaches only its own control.
 // This is a pure SELECT — the engine never mutates the ledger.
 func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error) {
 	rows, err := q.db.Query(ctx, listEvidenceForControlAsOf,
 		arg.TenantID,
 		arg.ControlID,
 		arg.ControlRef,
+		arg.UnboundKinds,
 		arg.ObservedAt,
 	)
 	if err != nil {

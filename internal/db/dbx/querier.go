@@ -2377,6 +2377,10 @@ type Querier interface {
 	// then ingested_at DESC and id DESC so records sharing an observed_at come
 	// back in one fixed order (#2111: the latest attestation wins, and equal
 	// timestamps must not make that choice depend on the plan).
+	// unbound_kinds (#2817) adds the tenant's records of those kinds that are
+	// bound to no control: a policy acknowledgement names a policy, never a
+	// control, and is evidence for every control whose queries read its kind.
+	// A record of such a kind that IS bound reaches only its own control.
 	// This is a pure SELECT — the engine never mutates the ledger.
 	ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error)
 	// Slice 064 — control-detail backend read endpoints.
