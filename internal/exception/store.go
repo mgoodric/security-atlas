@@ -156,6 +156,12 @@ const pgErrForeignKeyViolation = "23503"
 // and exceptions_sod all surface here.
 const pgErrCheckViolation = "23514"
 
+// WholeControlPredicate is the stored scope_cell_predicate of an
+// exception that covers every scope cell of its control. A create that
+// omits the predicate stores it (#2600); legacy rows may still hold {} or
+// null, which the evaluator reads the same way.
+const WholeControlPredicate = `{"op":"true"}`
+
 // Exception is the domain shape returned from store calls.
 type Exception struct {
 	ID                   uuid.UUID
@@ -328,7 +334,7 @@ func (s *Store) CreateIdempotent(ctx context.Context, in CreateInput) (Exception
 	}
 	predicate := in.ScopeCellPredicate
 	if len(predicate) == 0 {
-		predicate = []byte("{}") // empty predicate means "every cell"
+		predicate = []byte(WholeControlPredicate)
 	}
 
 	var out Exception

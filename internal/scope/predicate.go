@@ -39,6 +39,15 @@ import (
 // A record past it is denied rather than evaluated partially.
 const MaxPredicateCells = 4096
 
+// MaxExprDepth and MaxExprNodes cap a parsed expression's nesting and
+// size (#2600). JSON decoding alone bounds neither below Go's 10,000-level
+// nesting limit and the request body, and validate, match and implies all
+// recurse over the tree. Real predicates are a few levels deep.
+const (
+	MaxExprDepth = 32
+	MaxExprNodes = 1000
+)
+
 // ErrBadPredicate wraps every malformed-predicate error.
 var ErrBadPredicate = errors.New("scope: invalid scope predicate")
 
@@ -106,6 +115,9 @@ func parsePredicate(b []byte) (*node, error) {
 	if dec.More() {
 		return nil, fmt.Errorf("%w: trailing data after expression", ErrBadPredicate)
 	}
+	if err := checkSize(&n); err != nil {
+		return nil, err
+	}
 	if err := validate(&n); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadPredicate, err)
 	}
@@ -113,6 +125,36 @@ func parsePredicate(b []byte) (*node, error) {
 		return nil, err
 	}
 	return &n, nil
+}
+
+// checkSize refuses a tree deeper than MaxExprDepth or with more than
+// MaxExprNodes nodes. It walks iteratively, so the check itself cannot be
+// the deep recursion it guards against.
+func checkSize(root *node) error {
+	type item struct {
+		n     *node
+		depth int
+	}
+	stack := []item{{root, 1}}
+	count := 0
+	for len(stack) > 0 {
+		it := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		count++
+		if count > MaxExprNodes {
+			return fmt.Errorf("%w: expression has more than %d nodes", ErrBadPredicate, MaxExprNodes)
+		}
+		if it.depth > MaxExprDepth {
+			return fmt.Errorf("%w: expression nests deeper than %d levels", ErrBadPredicate, MaxExprDepth)
+		}
+		for i := range it.n.Args {
+			stack = append(stack, item{&it.n.Args[i], it.depth + 1})
+		}
+		if it.n.Arg != nil {
+			stack = append(stack, item{it.n.Arg, it.depth + 1})
+		}
+	}
+	return nil
 }
 
 // rejectEmptyIn refuses an "in" with no values anywhere in the tree. It
