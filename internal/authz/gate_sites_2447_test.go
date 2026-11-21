@@ -279,6 +279,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			r2447(patch, "/v1/risks/"+id+"/acceptance/revoke")),
 		"risks/riskimports/handlers.go decidingPerson": site(apr,
 			r2447(post, "/v1/risks/imports/"+id+"/approve"),
+			r2447(post, "/v1/risks/imports/"+id+"/rows/"+id+"/approve"),
 			r2447(post, "/v1/risks/imports/"+id+"/rows/"+id+"/reject")),
 		"walkthroughs/handlers.go canWrite": site(apr,
 			r2447(post, "/v1/walkthroughs"),

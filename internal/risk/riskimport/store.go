@@ -84,11 +84,11 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO risk_import_rows (
 					tenant_id, batch_id, row_number, external_ref, title, description,
-					category_slug, review_due, unmapped, status)
-				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::date, $9::jsonb, $10)
+					category_slug, review_due, unmapped, flags, status)
+				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::date, $9::jsonb, $10, $11)
 				RETURNING id::text
 			`, tenantID, b.ID, r.RowNumber, nullable(r.ExternalRef), r.Title, r.Description,
-				r.Category, nullable(r.ReviewDue), string(vals), r.Status,
+				r.Category, nullable(r.ReviewDue), string(vals), nonNil(r.Flags), r.Status,
 			).Scan(&r.ID); err != nil {
 				return fmt.Errorf("riskimport: insert staged row %d: %w", r.RowNumber, err)
 			}
@@ -109,6 +109,7 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 	}
 	for i := range b.Staged {
 		b.Staged[i].Unmapped = nonNilMap(b.Staged[i].Unmapped)
+		b.Staged[i].Flags = nonNil(b.Staged[i].Flags)
 	}
 	b.UnmappedColumns = nonNil(b.UnmappedColumns)
 	return b, nil
@@ -161,7 +162,7 @@ func (s *Store) getBatch(ctx context.Context, id string) (Batch, error) {
 func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, row_number, COALESCE(external_ref, ''), title, description, category_slug,
-		       COALESCE(to_char(review_due, 'YYYY-MM-DD'), ''), unmapped, status,
+		       COALESCE(to_char(review_due, 'YYYY-MM-DD'), ''), unmapped, flags, status,
 		       COALESCE(decided_by, ''), COALESCE(risk_id::text, ''), COALESCE(rejection_reason, '')
 		FROM risk_import_rows
 		WHERE batch_id = $1::uuid
@@ -176,13 +177,14 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 		var r BatchRow
 		var vals []byte
 		if err := rows.Scan(&r.ID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description, &r.Category,
-			&r.ReviewDue, &vals, &r.Status, &r.DecidedBy, &r.RiskID, &r.RejectionReason); err != nil {
+			&r.ReviewDue, &vals, &r.Flags, &r.Status, &r.DecidedBy, &r.RiskID, &r.RejectionReason); err != nil {
 			return nil, fmt.Errorf("riskimport: scan staged row: %w", err)
 		}
 		if err := json.Unmarshal(vals, &r.Unmapped); err != nil {
 			return nil, fmt.Errorf("riskimport: decode unmapped values: %w", err)
 		}
 		r.Unmapped = nonNilMap(r.Unmapped)
+		r.Flags = nonNil(r.Flags)
 		out = append(out, r)
 	}
 	return out, rows.Err()

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"strings"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"gopkg.in/yaml.v3"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -447,7 +445,8 @@ func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, 
 		//     `description` (prose edit, reflow, whitespace),
 		//     `external_refs` (backfilling or correcting trace ids) and/or
 		//     `anchor_fit_note` (rewording why the fit is what it is,
-		//     issue #2023) updates the active row in place. Superseding would mint a
+		//     issue #2023) and/or `evidence_queries[].description` (query
+		//     prose, issue #2891) updates the active row in place. Superseding would mint a
 		//     new control id and orphan everything keyed on the old one:
 		//     owners, evidence, evaluations, exceptions, risk and other
 		//     links (issues #1908, #1958). Any other difference still
@@ -481,6 +480,7 @@ func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, 
 					BundleManifestHash: b.ManifestHashHex,
 					BundleUploadedBy:   uploader,
 					AnchorFitNote:      b.Manifest.AnchorFitNotePtr(),
+					EvidenceQueries:    queriesJSON,
 				})
 				if err != nil {
 					return fmt.Errorf("update control metadata in place: %w", err)
@@ -857,33 +857,6 @@ func bindSCFAnchor(ctx context.Context, q scfrelease.Querier, release, ref strin
 	default:
 		return dbx.ScfAnchor{}, scfrelease.Release{}, err
 	}
-}
-
-// inPlaceManifestKeys are the top-level control.yaml keys an upload may
-// change without versioning the control: prose (issue #1908), the trace
-// to outside identifiers (issue #1958) and the anchor-fit note (issue
-// #2023). None feeds evaluation. `anchor_fit` itself is not here: a fit
-// change alters what the SCF mapping means, so it supersedes.
-var inPlaceManifestKeys = []string{"description", "external_refs", "anchor_fit_note"}
-
-// manifestsEqualIgnoringMetadata reports whether two control.yaml
-// documents are equal once the inPlaceManifestKeys are removed from each.
-// Both sides decode to generic maps, so key order, comments and formatting
-// do not count as differences; any other field change, including a nested
-// evidence_queries[].description, does.
-func manifestsEqualIgnoringMetadata(priorYAML, nextYAML []byte) (bool, error) {
-	var prior, next map[string]any
-	if err := yaml.Unmarshal(priorYAML, &prior); err != nil {
-		return false, fmt.Errorf("parse prior control manifest: %w", err)
-	}
-	if err := yaml.Unmarshal(nextYAML, &next); err != nil {
-		return false, fmt.Errorf("parse control manifest: %w", err)
-	}
-	for _, k := range inPlaceManifestKeys {
-		delete(prior, k)
-		delete(next, k)
-	}
-	return reflect.DeepEqual(prior, next), nil
 }
 
 // lookupAnchorRow returns the anchor row by uuid; thin helper so the Upload

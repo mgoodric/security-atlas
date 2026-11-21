@@ -1,0 +1,250 @@
+// #2847 — the risk import review page's states, through its pure helpers.
+
+import { describe, expect, it } from "vitest";
+
+import {
+  type BatchRow,
+  type RiskImportBatch,
+  NO_FILTER,
+  approveAllMessage,
+  batchPath,
+  batchProgress,
+  emptyRowsMessage,
+  filterRows,
+  flagLabel,
+  mappedFields,
+  rejectReasonLabel,
+  reviewMode,
+  rowPath,
+  unmappedEntries,
+} from "./risk-imports";
+
+function row(over: Partial<BatchRow>): BatchRow {
+  return {
+    id: "r",
+    row_number: 3,
+    title: "Vendor outage",
+    description: "",
+    category: "operational",
+    unmapped: {},
+    flags: [],
+    status: "pending",
+    ...over,
+  };
+}
+
+function batch(staged: BatchRow[], rejected = 0): RiskImportBatch {
+  return {
+    id: "b",
+    source_filename: "register.csv",
+    source_format: "csv",
+    uploaded_by: "user:u",
+    status: "staged",
+    total_rows: staged.length + rejected,
+    staged_count: staged.length,
+    rejected_count: rejected,
+    unmapped_columns: [],
+    created_at: "2026-11-21T00:00:00Z",
+    staged,
+    rejected: [],
+  };
+}
+
+const rows = [
+  row({ id: "a", row_number: 3, flags: ["owner_unlinked"] }),
+  row({ id: "b", row_number: 4 }),
+  row({ id: "c", row_number: 5, status: "approved", risk_id: "x" }),
+  row({
+    id: "d",
+    row_number: 6,
+    status: "rejected",
+    flags: ["treatment_downgraded", "parent_link_failed"],
+  }),
+  row({ id: "e", row_number: 7, status: "duplicate", flags: null }),
+];
+
+describe("batchProgress", () => {
+  it("tallies staged rows by decision and flags", () => {
+    expect(batchProgress(batch(rows, 2))).toEqual({
+      staged: 5,
+      approved: 1,
+      rejected: 1,
+      duplicate: 1,
+      pending: 2,
+      flagged: 2,
+      notStaged: 2,
+    });
+  });
+
+  it("treats a null staged list as empty", () => {
+    const b = { ...batch([]), staged: null };
+    expect(batchProgress(b).pending).toBe(0);
+  });
+});
+
+describe("filterRows", () => {
+  it("keeps every row with no filter", () => {
+    expect(filterRows(rows, NO_FILTER).map((r) => r.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
+  });
+
+  it("filters to flagged rows", () => {
+    expect(
+      filterRows(rows, { status: "", flaggedOnly: true }).map((r) => r.id),
+    ).toEqual(["a", "d"]);
+  });
+
+  it("combines status and flagged", () => {
+    expect(
+      filterRows(rows, { status: "pending", flaggedOnly: true }).map(
+        (r) => r.id,
+      ),
+    ).toEqual(["a"]);
+    expect(
+      filterRows(rows, { status: "pending", flaggedOnly: false }).map(
+        (r) => r.id,
+      ),
+    ).toEqual(["a", "b"]);
+  });
+
+  it("handles a null list", () => {
+    expect(filterRows(null, NO_FILTER)).toEqual([]);
+  });
+});
+
+describe("reviewMode", () => {
+  it("lets an approver decide", () => {
+    expect(reviewMode({ is_approver: true })).toBe("decide");
+  });
+
+  it("is read-only for a non-approver, and while /v1/me is unknown", () => {
+    expect(reviewMode({ is_approver: false })).toBe("read-only");
+    expect(reviewMode(undefined)).toBe("read-only");
+  });
+});
+
+describe("emptyRowsMessage", () => {
+  it("says when nothing was staged", () => {
+    expect(emptyRowsMessage(batch([], 3), NO_FILTER)).toBe(
+      "No rows were staged from this file.",
+    );
+  });
+
+  it("says when no row is flagged", () => {
+    expect(
+      emptyRowsMessage(batch([row({})]), { status: "", flaggedOnly: true }),
+    ).toBe("No staged row is flagged for review.");
+  });
+
+  it("says when the filters match nothing", () => {
+    expect(
+      emptyRowsMessage(batch([row({})]), {
+        status: "approved",
+        flaggedOnly: false,
+      }),
+    ).toBe("No staged rows match these filters.");
+  });
+});
+
+describe("row fields", () => {
+  it("lists mapped fields, leaving unset optional ones out", () => {
+    expect(mappedFields(row({}))).toEqual([
+      ["Title", "Vendor outage"],
+      ["Category", "operational"],
+    ]);
+    expect(
+      mappedFields(
+        row({
+          external_ref: "R-001",
+          review_due: "2027-01-15",
+          description: "Down a day.",
+        }),
+      ),
+    ).toEqual([
+      ["Risk ID", "R-001"],
+      ["Title", "Vendor outage"],
+      ["Category", "operational"],
+      ["Review due", "2027-01-15"],
+      ["Description", "Down a day."],
+    ]);
+  });
+
+  it("lists unmapped values by header, blanks left out", () => {
+    expect(
+      unmappedEntries(
+        row({
+          unmapped: {
+            "Target Date": "2027-03-01",
+            "Risk Owner": "a@x",
+            Notes: " ",
+          },
+        }),
+      ),
+    ).toEqual([
+      ["Risk Owner", "a@x"],
+      ["Target Date", "2027-03-01"],
+    ]);
+    expect(unmappedEntries(row({ unmapped: null }))).toEqual([]);
+  });
+});
+
+describe("labels", () => {
+  it("names the three flags and passes an unknown one through", () => {
+    expect(flagLabel("owner_unlinked")).toBe("Owner not linked to a user");
+    expect(flagLabel("treatment_downgraded")).toBe(
+      "Treatment downgraded to untreated",
+    );
+    expect(flagLabel("parent_link_failed")).toBe("Parent link failed");
+    expect(flagLabel("something_new")).toBe("something_new");
+  });
+
+  it("names upload rejection reasons", () => {
+    expect(rejectReasonLabel("unknown_category")).toBe("Unknown category");
+    expect(rejectReasonLabel("other")).toBe("other");
+  });
+});
+
+describe("approveAllMessage", () => {
+  it("summarises approvals, duplicates and skips", () => {
+    expect(
+      approveAllMessage({
+        batch_id: "b",
+        approved_count: 1,
+        approved: [],
+        duplicates: [],
+        skipped: [],
+      }),
+    ).toBe("Approved 1 row");
+    expect(
+      approveAllMessage({
+        batch_id: "b",
+        approved_count: 4,
+        approved: [],
+        duplicates: [
+          {
+            batch_id: "b",
+            row_id: "x",
+            row_number: 3,
+            status: "duplicate",
+            decided_by: "u",
+          },
+        ],
+        skipped: [{ row_id: "y", row_number: 4, reason: "archived" }],
+      }),
+    ).toBe("Approved 4 rows; 1 marked duplicate; 1 skipped");
+  });
+});
+
+describe("paths", () => {
+  it("builds BFF paths with encoded ids", () => {
+    expect(batchPath("a/b")).toBe("/api/risks/imports/a%2Fb");
+    expect(rowPath("b", "r", "approve")).toBe(
+      "/api/risks/imports/b/rows/r/approve",
+    );
+  });
+});
