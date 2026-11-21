@@ -10,7 +10,7 @@
 //   - Store.ListQuestionnaires             — multi-row + tenant scope
 //   - Store.AddQuestionsFromParse          — mapped + unmapped rows; transaction commit
 //   - Store.UpsertAnswer                   — insert path + save_to_library=true
-//                                            (the citations-pass-through branch)
+//                                            (citations: internal/api/questionnaires, #2653)
 //   - Store.ListQuestionsWithAnswers       — stitching answers onto questions
 //   - Store.SuggestForAnchorWithPool       — RLS-bound suggestion lookup
 //   - SuggestForAnchor (in-package call)   — RLS scoping: tenant A does
@@ -191,15 +191,13 @@ func TestStore_UpsertAnswer_WithLibrarySave(t *testing.T) {
 	}
 	questionID := qs[0].ID
 
-	// Upsert an answer with save_to_library=true. The Citations field is
-	// passed through opaque JSON — slice 319 covers the pass-through
-	// branch. Citation-shape validation belongs at the HTTP layer
-	// (slice 316 / canvas §4.6.5) and is enforced upstream.
+	// Upsert an answer with save_to_library=true. Citations are checked
+	// against the tenant's controls and evidence (#2653); the HTTP suite
+	// covers them with real records, so this answer cites none.
 	answer, err := store.UpsertAnswer(ctx, AnswerParams{
 		QuestionID:      questionID,
 		AnswerValue:     "yes",
 		Narrative:       "MFA enforced for all admin roles via Okta.",
-		Citations:       []any{map[string]any{"evidence_id": "ev-01"}},
 		AuthoredBy:      "alice@acme.test",
 		SaveToLibrary:   true,
 		SCFAnchorIDHint: "IAC-37",
@@ -211,8 +209,8 @@ func TestStore_UpsertAnswer_WithLibrarySave(t *testing.T) {
 	if answer.AnswerValue != "yes" || answer.Narrative == "" {
 		t.Fatalf("unexpected answer projection: %+v", answer)
 	}
-	if len(answer.Citations) != 1 {
-		t.Fatalf("expected 1 citation through pass-through, got %d", len(answer.Citations))
+	if len(answer.Citations) != 0 {
+		t.Fatalf("expected no citations, got %v", answer.Citations)
 	}
 
 	// Library should have one entry now.
