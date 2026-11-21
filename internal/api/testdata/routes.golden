@@ -246,6 +246,7 @@ PATCH /v1/org_units/{id}
 PATCH /v1/oscal/component-claims/{id}/scf-anchor
 PATCH /v1/policies/{id}
 PATCH /v1/policies/{id}/approve
+PATCH /v1/policies/{id}/controls
 PATCH /v1/policies/{id}/review-date
 PATCH /v1/policies/{id}/submit
 PATCH /v1/questionnaires/{id}/answers/{qid}
