@@ -67,6 +67,7 @@ var routes2428 = []route2428{
 	{http.MethodPatch, "/v1/risks/" + id2428 + "/acceptance/revoke", tenantApproverGate},
 	// #2839: deciding a risk import's rows.
 	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/approve", tenantApproverGate},
+	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/approve", tenantApproverGate},
 	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/reject", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist:generate", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist/sections/" + id2428 + ":approve", tenantApproverGate},
