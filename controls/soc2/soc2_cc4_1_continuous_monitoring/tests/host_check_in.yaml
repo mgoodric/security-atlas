@@ -1,0 +1,237 @@
+# osquery.host_posture.v1 records, shaped as the osquery connector emits
+# them at schema 1.2.0 (connectors/osquery/cmd/atlas-osquery/cmd_run.go
+# buildHostPostureRecord). `last_seen_at` is the host's own last check-in
+# (Fleet's `seen_time`) and is present only when Fleet gave one.
+# `observed_at` is the connector's pull time, so a fresh `observed_at` with
+# an old `last_seen_at` is an offline host Fleet still lists. `result` is
+# the connector's own verdict, disk encryption plus screen lock, which the
+# query ignores. Every case pins `evaluated_at`, so the 24-hour window is
+# fixed and the cases do not age.
+cases:
+  - name: every-host-seen-in-24h-passes
+    description: the connector's verdict fails one host; both checked in within 24 hours
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          platform: darwin
+          disk_encryption_enabled: true
+          screen_lock_enabled: true
+          mdm_enrolled: true
+          last_seen_at: 2026-11-21T05:40:00Z
+      - result: fail
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: bob-thinkpad
+          platform: linux
+          disk_encryption_enabled: false
+          last_seen_at: 2026-11-20T13:00:00Z
+
+  - name: one-host-last-seen-over-24h-fails
+    description: Fleet still lists the host, so the pull is fresh, but it last checked in 30 hours ago
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-21T05:40:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          platform: windows
+          disk_encryption_enabled: true
+          screen_lock_enabled: true
+          last_seen_at: 2026-11-20T06:00:00Z
+
+  - name: latest-record-older-than-24h-fails
+    description: the host's only in-window record was pulled three days ago; it has not reported since
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-21T05:40:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-18T10:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          last_seen_at: 2026-11-18T09:55:00Z
+
+  - name: last-seen-exactly-24h-passes
+    description: the window is inclusive at 24 hours
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-20T12:00:00Z
+
+  - name: last-seen-just-over-24h-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-20T11:59:00Z
+
+  - name: absent-last-seen-is-inconclusive
+    description: a 1.0.0 record, or a host Fleet gave no seen_time, does not show when the host reported
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-21T05:40:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 44444444-4444-4444-4444-444444444444
+          hostname: dave-mbp
+          platform: darwin
+          disk_encryption_enabled: true
+
+  - name: unparseable-last-seen-is-inconclusive
+    description: the registry does not assert format, so a non-timestamp string sorts as missing
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 44444444-4444-4444-4444-444444444444
+          hostname: dave-mbp
+          last_seen_at: yesterday afternoon
+
+  - name: absent-plus-stale-fails
+    description: one host observed stale fails the control even though another has no last_seen_at
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 44444444-4444-4444-4444-444444444444
+          hostname: dave-mbp
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          last_seen_at: 2026-11-19T06:00:00Z
+
+  - name: latest-record-per-host-decides-fresh
+    description: the host was offline on an earlier pull and has checked in since
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          last_seen_at: 2026-11-18T06:00:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          last_seen_at: 2026-11-21T08:30:00Z
+
+  - name: later-record-without-last-seen-does-not-hide-a-stale-check-in
+    description: the newest known check-in is 40 hours old; a later pull without last_seen_at sorts after it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          last_seen_at: 2026-11-19T20:00:00Z
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          reason: "fleet host detail: 502 Bad Gateway"
+
+  - name: record-without-host-uuid-is-left-out
+    description: the stale record has no host_uuid, so it is not grouped as a host and the identified host passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-21T05:40:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          hostname: nobody-mbp
+          last_seen_at: 2026-11-10T00:00:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: ""
+          hostname: blank-mbp
+          last_seen_at: 2026-11-10T00:00:00Z
+
+  - name: only-records-without-host-uuid-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          hostname: nobody-mbp
+          last_seen_at: 2026-11-21T05:40:00Z
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z

@@ -5,7 +5,7 @@
 //
 //   - every stock bundle's tests/ cases run through bundletest.Run inside a
 //     tenant transaction, as the upload gate runs them; and
-//   - cc6_1, the tracer, and each later check (cc6_6, #2822; both cc8_1
+//   - cc6_1, the tracer, and each later check (cc6_6 and cc4_1, #2822; both cc8_1
 //     bundles, #2823) are evaluated by the live engine against evidence
 //     records in the ledger, so the query is shown to decide the stored
 //     control state and not only the fixture runner's.
@@ -246,6 +246,80 @@ func TestCC66_EngineEvaluatesHostFirewallPayload(t *testing.T) {
 				seedStockEvidence(t, admin, tenant, ctrl, "osquery.host_posture.v1", observed, r.connectorResult, payload(r))
 			}
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if states[0].Result != tc.want {
+				t.Errorf("result = %q, want %q", states[0].Result, tc.want)
+			}
+		})
+	}
+}
+
+const cc41Bundle = "soc2_cc4_1_continuous_monitoring"
+
+// #2822: cc4_1 decides on each host's latest last_seen_at (Fleet's
+// seen_time) against the evaluation instant, not on the pull time
+// (observed_at) and not on the osquery connector's verdict. The replay case
+// shows the window is measured from the as-of instant, not the wall clock.
+func TestCC41_EngineEvaluatesHostCheckIn(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	now := time.Now().UTC()
+
+	type rec struct {
+		connectorResult string
+		host            string
+		observedAgo     time.Duration
+		seenAgo         time.Duration // 0 for no last_seen_at
+	}
+	payload := func(r rec) map[string]any {
+		p := map[string]any{
+			"host_uuid":               r.host,
+			"hostname":                "host-" + r.host[:4],
+			"platform":                "darwin",
+			"disk_encryption_enabled": true,
+		}
+		if r.seenAgo != 0 {
+			p["last_seen_at"] = now.Add(-r.seenAgo).Format(time.RFC3339)
+		}
+		return p
+	}
+	const h1, h2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	// connectorResult is the osquery verdict (disk encryption plus screen
+	// lock). The query must ignore it.
+	cases := []struct {
+		name    string
+		records []rec
+		asOf    time.Time
+		want    string
+	}{
+		{"every host seen in 24h", []rec{{"fail", h1, time.Hour, 2 * time.Hour}, {"pass", h2, time.Hour, 20 * time.Hour}}, eval.FarFuture, eval.ResultPass},
+		{"one host last seen 30h ago", []rec{{"pass", h1, time.Hour, 2 * time.Hour}, {"pass", h2, time.Hour, 30 * time.Hour}}, eval.FarFuture, eval.ResultFail},
+		{"latest record three days old", []rec{{"pass", h1, 72 * time.Hour, 73 * time.Hour}}, eval.FarFuture, eval.ResultFail},
+		{"no last_seen_at is inconclusive", []rec{{"pass", h1, time.Hour, 0}}, eval.FarFuture, eval.ResultInconclusive},
+		{"replay measures from the as-of instant", []rec{{"pass", h1, 50 * time.Hour, 51 * time.Hour}}, now.Add(-48 * time.Hour), eval.ResultPass},
+		{"no record", nil, eval.FarFuture, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, cc41Bundle)
+			for _, r := range tc.records {
+				seedStockEvidence(t, admin, tenant, ctrl, "osquery.host_posture.v1", now.Add(-r.observedAgo), r.connectorResult, payload(r))
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)
 			}
 			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
