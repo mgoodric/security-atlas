@@ -98,7 +98,10 @@ and themes.
   viewers. A viewer only reads; every change below is refused. Control
   owners and auditors do not see the register.
 - **Create, edit, treat, close and reopen** a risk, and **propose** an
-  acceptance: admins and GRC engineers.
+  acceptance: admins and GRC engineers. Only a person proposes an
+  acceptance, at create or later: an API key bound to no user, an OAuth
+  client or the bootstrap credential is refused. A key bound to your user
+  counts as you.
 - **Approve, reject or revoke** an acceptance: approvers, which means
   admins and GRC engineers. The approver must be someone other than the
   proposer, unless an admin has turned on self-approval, and only a

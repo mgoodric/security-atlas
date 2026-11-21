@@ -124,10 +124,13 @@ func (h *Handler) ProposeAcceptance(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return risk.Risk{}, err
 		}
+		// Only a person proposes (#2623): MinterUserID is empty for an
+		// unbound key, an OAuth client or the bootstrap admin.
 		return h.store.ProposeAcceptance(ctx.r.Context(), ctx.id, risk.ProposeAcceptanceInput{
-			Justification: req.Justification,
-			ProposedUntil: until,
-			Proposer:      credstore.PrincipalOf(ctx.cred),
+			Justification:    req.Justification,
+			ProposedUntil:    until,
+			Proposer:         credstore.PrincipalOf(ctx.cred),
+			ProposerIsPerson: credstore.MinterUserID(ctx.cred) != "",
 		})
 	})
 }

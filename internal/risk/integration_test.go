@@ -331,6 +331,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
 		Proposer:         "creator",
+		ProposerIsPerson: true,
 		Justification:    "Compensated by the edge filter.",
 		ProposedUntil:    until,
 	})
@@ -360,10 +361,10 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 	// proposed expiry is refused, as the propose transition refuses it
 	// (#2371, #2391).
 	for name, in := range map[string]risk.CreateInput{
-		"no proposer":      {Justification: "j", ProposedUntil: until},
-		"no justification": {Proposer: "creator", ProposedUntil: until},
-		"no expiry":        {Proposer: "creator", Justification: "j"},
-		"past expiry":      {Proposer: "creator", Justification: "j", ProposedUntil: time.Now().UTC().AddDate(0, 0, -1)},
+		"no proposer":      {ProposerIsPerson: true, Justification: "j", ProposedUntil: until},
+		"no justification": {Proposer: "creator", ProposerIsPerson: true, ProposedUntil: until},
+		"no expiry":        {Proposer: "creator", ProposerIsPerson: true, Justification: "j"},
+		"past expiry":      {Proposer: "creator", ProposerIsPerson: true, Justification: "j", ProposedUntil: time.Now().UTC().AddDate(0, 0, -1)},
 	} {
 		in.Title = "Pending, " + name
 		in.CategoryRef = "operational"
@@ -497,6 +498,7 @@ func TestList_Filters(t *testing.T) {
 		Treatment:        dbx.RiskTreatmentAccept,
 		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
 		Proposer:         "creator",
+		ProposerIsPerson: true,
 		Justification:    "Low exposure.",
 		ProposedUntil:    time.Now().UTC().AddDate(0, 3, 0),
 	}); err != nil {
