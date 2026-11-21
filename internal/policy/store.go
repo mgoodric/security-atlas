@@ -201,8 +201,13 @@ type Policy struct {
 	SourceURL              *string
 	ImportedBy             *string
 	ImportedAt             *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// Sync drift (#2851). Set only on a published synced row whose page
+	// body changed without a version bump: when a sync run first saw it,
+	// and the hex sha256 of the body the source holds now.
+	SyncDriftDetectedAt *time.Time
+	SyncDriftBodySHA256 *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // IsImported reports whether p was brought in by Import (#1747).
@@ -1228,6 +1233,14 @@ func policyFromRow(r dbx.Policy) Policy {
 	if r.ImportedAt.Valid {
 		t := r.ImportedAt.Time
 		out.ImportedAt = &t
+	}
+	if r.SyncDriftDetectedAt.Valid {
+		t := r.SyncDriftDetectedAt.Time
+		out.SyncDriftDetectedAt = &t
+	}
+	if r.SyncDriftBodySha256 != nil {
+		v := *r.SyncDriftBodySha256
+		out.SyncDriftBodySHA256 = &v
 	}
 	if r.CreatedAt.Valid {
 		out.CreatedAt = r.CreatedAt.Time
