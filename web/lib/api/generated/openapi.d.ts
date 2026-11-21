@@ -5908,6 +5908,10 @@ export interface components {
              */
             relevance_score: number;
         };
+        ActivityActorsResponse: {
+            actors: string[];
+            truncated: boolean;
+        };
         EdgeRemapProposal: {
             id: string;
             edge_id: string;
@@ -6562,13 +6566,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Default response envelope. */
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityActorsResponse"];
+                };
+            };
+            /** @description Error. */
             default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ack"];
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

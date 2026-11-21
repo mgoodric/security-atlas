@@ -3410,19 +3410,32 @@ type Querier interface {
 	// The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
 	// what the visibility rules read: the same window, the slice 270
 	// non-privileged predicate and the slice 669 read-telemetry predicate.
-	// One row per (actor, kind, target_type, request_path), so the handler
-	// applies the #2173 module filter exactly as it does to the feed, and an
-	// actor seen only in rows the caller may not see is not listed.
 	// `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
 	// to one query and not the other.
+	//
+	// The #2173 module filter runs here as well, before the cap (#2718), so
+	// rows from a hidden module neither use up the cap nor mark the list
+	// truncated, and an actor seen only in rows the caller may not see is not
+	// listed. The handler passes the filter as arguments (moduleRouteFilter):
+	// `hidden_kinds`, the kinds owned by a module the caller may not see, and
+	// the featureflag route registry as three parallel arrays, each pattern
+	// with its owner and whether the caller sees that owner. `resolved`
+	// places a path the way featureflag.Resolve does: a `*` segment matches
+	// one non-empty segment, the last literal also matches `<literal>:<verb>`,
+	// and the most specific match wins (most segments, then most literals).
+	// A path no pattern matches is shown; a tie between two owners is
+	// hidden, as ModuleSet.Sees hides it. A decision is placed by its request
+	// path when that resolves, else by `/v1/<target_type>`, as decisionRoute
+	// does. `TestActivityActors_ModuleFilterMatchesGo` checks this against
+	// entrySeen for every registry route.
 	//
 	// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
 	// atlas_app and takes no tenant parameter.
 	//
-	// LIMIT 1001 is the handler's 1000-tuple cap plus one (#2627): a 1001st
+	// LIMIT 1001 is the handler's 1000-actor cap plus one (#2627): a 1001st
 	// row is how the handler knows the window held more and sets `truncated`,
 	// rather than dropping actors silently.
-	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]ListUnifiedAuditMachineActorsRow, error)
+	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]string, error)
 	// The tested-under references ListAuditedUnderGaps cannot resolve (#2324):
 	// the system names no global framework with a current version, or the id
 	// names no requirement in that version. Typos and withdrawn codes land
