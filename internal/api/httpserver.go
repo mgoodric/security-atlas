@@ -135,6 +135,12 @@ func (s *Server) buildRouter() *chi.Mux {
 	// via `Server.IssueTestJWT` and pass nil for the revocation store
 	// (the middleware short-circuits revocation lookup on a nil store
 	// per `jwtmw.Middleware`).
+	// #2849: a policy-sync API key is refused with 403 on every route,
+	// ahead of the JWT middleware so a session cookie on the same request
+	// does not let it through.
+	if s.apikeyStore != nil {
+		root.Use(refusePolicySyncKeys(s.apikeyStore))
+	}
 	if s.jwtSigner != nil {
 		// Slice 191 narrowing: the JWT bypass list previously included
 		// the entire `/oauth/` prefix. Slice 191 adds two routes —

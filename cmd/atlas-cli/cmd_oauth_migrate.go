@@ -69,6 +69,11 @@ func runMigrateAPIKey(ctx context.Context, stdout, stderr io.Writer, apiKey stri
 	if err != nil {
 		return fmt.Errorf("look up source API key: %w", err)
 	}
+	// #2849: a policy-sync key may only sync policies; an OAuth client
+	// minted from it would act in its tenant without that limit.
+	if src.PolicySyncOnly() {
+		return fmt.Errorf("API key %s is a policy-sync key; it cannot be migrated to an OAuth client", src.ID)
+	}
 	_, _ = fmt.Fprintf(stdout, "source: id=%s tenant=%s admin=%t approver=%t roles=%v\n",
 		src.ID, src.TenantID, src.IsAdmin, src.IsApprover, src.OwnerRoles)
 
