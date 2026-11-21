@@ -1203,6 +1203,9 @@ type Querier interface {
 	GetSlackOptIn(ctx context.Context, arg GetSlackOptInParams) (bool, error)
 	// Single-claim lookup by dedup key — used by tests + idempotency assertions.
 	GetStalenessRollupClaim(ctx context.Context, arg GetStalenessRollupClaimParams) (StalenessRollupLog, error)
+	// #2850 — the published synced row for one page of one sync source, if
+	// any. idx_policies_synced_page makes it unique.
+	GetSyncedPolicyByPage(ctx context.Context, arg GetSyncedPolicyByPageParams) (Policy, error)
 	// #2101: the caller-tenant's Allow self-approval setting. RLS scopes the row
 	// to the current tenant. Returns ErrNoRows when no tenants row exists
 	// (bare-UUID tenant); approval.AllowSelf maps that to the default, off.
@@ -1611,6 +1614,12 @@ type Querier interface {
 	// a unique-violation the handler maps to 409. filters is the handler-
 	// validated criteria payload (threat-model T).
 	InsertSavedView(ctx context.Context, arg InsertSavedViewParams) (SavedView, error)
+	// #2850 — insert a page's first sync directly as 'published'. As with
+	// ImportPublishedPolicy, the in-tool submit/approve/publish transitions do
+	// not apply: the source's approval, kept in historical_approver_name and
+	// historical_approved_at, is the approval. approved_by stays NULL.
+	// created_by, published_by and synced_by are the policy-sync key's id.
+	InsertSyncedPolicy(ctx context.Context, arg InsertSyncedPolicyParams) (Policy, error)
 	// ===== taxonomy_audit_log (#1810) =====
 	//
 	// Append-only. Written in the same transaction as the change it records.
@@ -3587,6 +3596,11 @@ type Querier interface {
 	// (approved, activated, superseded) or unknown revision.
 	LockOpenFrameworkScope(ctx context.Context, arg LockOpenFrameworkScopeParams) (FrameworkScope, error)
 	LockOverlayEdge(ctx context.Context, arg LockOverlayEdgeParams) (FwToScfOverlayEdge, error)
+	// #2850: serialises sync runs for one source in one tenant, so an
+	// overlapping run waits for the first to commit and then finds its pages
+	// unchanged instead of creating them twice. Released at the end of the
+	// transaction. Namespace 13 is advisorylock.PolicySyncSource.
+	LockPolicySyncSource(ctx context.Context, arg LockPolicySyncSourceParams) error
 	// #1867: read a risk and hold its row against concurrent theme writes and
 	// deletes until the transaction ends, so a theme write or delete sees the
 	// themes it actually replaces. FOR NO KEY UPDATE, not FOR UPDATE: it does

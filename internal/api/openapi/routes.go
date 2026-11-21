@@ -377,6 +377,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/policies", Tag: "policies", Tier: "bearer", Internal: false, Summary: "POST /v1/policies"},
 	{Method: "POST", Path: "/v1/policies/{id}/acknowledge", Tag: "policies", Tier: "bearer", Internal: false, Summary: "POST /v1/policies/{id}/acknowledge"},
 	{Method: "POST", Path: "/v1/policies/{id}/publish", Tag: "policies", Tier: "bearer", Internal: false, Summary: "POST /v1/policies/{id}/publish"},
+	{Method: "POST", Path: "/v1/policies:sync", Tag: "policies", Tier: "bearer", Internal: false, Summary: "POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, with a per-page report (created, unchanged, skipped with reason) (#2850)"},
 	{Method: "POST", Path: "/v1/populations", Tag: "audit-samples", Tier: "bearer", Internal: false, Summary: "POST /v1/populations"},
 	{Method: "POST", Path: "/v1/questionnaires", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/answer-runs", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answer-runs"},

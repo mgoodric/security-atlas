@@ -59,3 +59,16 @@ allow if {
     input.resource.type == "controls"
     input.user.attrs.is_machine_actor == true
 }
+
+# #2850 — policy sync. The Confluence policy connector pushes its full set
+# of policy pages to POST /v1/policies:sync with a policy-sync API key
+# (#2849). Such a key holds no role (derivedRolesFor), so no role rule
+# admits it; this rule admits it to that one route. The HTTP gate
+# (internal/api refusePolicySyncKeys) already refuses the key everywhere
+# else and refuses every other caller on this route; this is the second
+# leg.
+allow if {
+    input.request.method == "POST"
+    input.request.path == "/v1/policies:sync"
+    input.user.attrs.is_policy_sync_key == true
+}
