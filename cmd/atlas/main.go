@@ -1298,14 +1298,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "atlas: exception idempotency sweeper pool: %v\n", err)
 		} else {
 			idemSweeper := exception.NewIdempotencySweeper(idemPool, pool, logger)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			run.nonFatal("exception idempotency sweeper", func() error {
 				defer idemPool.Close()
-				if err := idemSweeper.Run(ctx, exception.DefaultIdempotencySweepInterval); err != nil {
-					errs.add(fmt.Errorf("exception idempotency sweeper: %w", err))
-				}
-			}()
+				return idemSweeper.Run(ctx, exception.DefaultIdempotencySweepInterval)
+			})
 		}
 	}
 

@@ -103,8 +103,8 @@ answered.
 
 The notification and housekeeping loops do not stop the process: the
 exception expirer, the decision and personnel overdue notifiers, the
-security-awareness roster sync, the control-import sweeper and the digest
-scheduler. Each logs a failed sweep and tries again on its next tick.
+security-awareness roster sync, the control-import sweeper, the exception
+Idempotency-Key sweeper and the digest scheduler. Each logs a failed sweep and tries again on its next tick.
 
 Run `atlas` under something that restarts it. The compose bundles set
 `restart: unless-stopped` on the `atlas` service. A bare-binary deploy needs
