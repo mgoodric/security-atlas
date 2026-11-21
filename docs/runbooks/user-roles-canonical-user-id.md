@@ -1,7 +1,7 @@
 # Runbook — `user_roles` rows with a non-canonical uuid `user_id` (#2661)
 
 **Scope:** an upgrade that stops at
-`20261282000000_user_roles_canonical_user_id.sql` with:
+`20261283000000_user_roles_canonical_user_id.sql` with:
 
 ```
 ERROR:  user_roles: N row(s) store a non-canonical uuid user_id; see docs/runbooks/user-roles-canonical-user-id.md (#2661)
