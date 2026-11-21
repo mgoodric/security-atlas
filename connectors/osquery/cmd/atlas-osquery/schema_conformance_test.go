@@ -57,7 +57,27 @@ func TestBuildHostPostureRecord_ConformsAndOmitsUnread(t *testing.T) {
 				Result: osqueryposture.ResultInconclusive, Reason: "screen_lock not reported", ObservedAt: pull,
 			},
 			present: []string{"disk_encryption_enabled", "mdm_enrolled", "last_seen_at", "reason"},
-			absent:  []string{"screen_lock_enabled", "firewall_enabled"},
+			absent:  []string{"screen_lock_enabled", "firewall_enabled", "firewall_source", "screen_lock_source"},
+		},
+		// #2921: firewall and screen lock read from named Fleet policies
+		// carry their source.
+		"fleet_host_named_policies": {
+			in: osqueryposture.HostPosture{
+				HostUUID: "u4", Hostname: "mac-2", Platform: "darwin",
+				DiskEncryptionEnabled: ptr(true), MDMEnrolled: ptr(true),
+				FirewallEnabled: ptr(true), FirewallSource: "fleet_policy:Firewall enabled (macOS)",
+				ScreenLockEnabled: ptr(false), ScreenLockSource: "fleet_policy:Screen lock enabled (macOS)",
+				LastSeen: seen, Result: osqueryposture.ResultFail, Reason: "screen_lock_disabled", ObservedAt: pull,
+			},
+			present: []string{"firewall_enabled", "firewall_source", "screen_lock_enabled", "screen_lock_source"},
+		},
+		// A source without its boolean (the policy had no result) is not
+		// emitted on its own.
+		"source_without_value": {
+			in: osqueryposture.HostPosture{
+				HostUUID: "u5", Hostname: "mac-3", FirewallSource: "fleet_policy:x", ObservedAt: pull,
+			},
+			absent: []string{"firewall_enabled", "firewall_source", "screen_lock_enabled", "screen_lock_source"},
 		},
 		"detail_fetch_failed": {
 			in: osqueryposture.HostPosture{
@@ -114,7 +134,7 @@ func TestBuildHostPostureRecord_LastSeenIsNotObservedAt(t *testing.T) {
 	if got := rec.GetObservedAt().AsTime(); !got.Equal(pull) {
 		t.Errorf("observed_at = %v; want pull time %v", got, pull)
 	}
-	if rec.GetSchemaVersion() != "1.1.0" {
-		t.Errorf("schema_version = %q; want 1.1.0", rec.GetSchemaVersion())
+	if rec.GetSchemaVersion() != "1.2.0" {
+		t.Errorf("schema_version = %q; want 1.2.0", rec.GetSchemaVersion())
 	}
 }

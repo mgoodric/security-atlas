@@ -28,6 +28,8 @@ type runFlags struct {
 	token          string
 	osqueryDSocket string
 	hostPostureCtl string
+	firewallPolicy string
+	screenLockPol  string
 }
 
 // ErrLocalSocketNotWired is returned when --mode=local is selected. The
@@ -58,6 +60,12 @@ Modes:
                            /var/osquery/osquery.em. The connector reads
                            only; it never writes to or proxies the socket.
 
+Firewall and screen lock (fleet mode): Fleet's host API has no field for
+either. Name a Fleet policy you created for each with --firewall-policy
+and --screenlock-policy; each host's pass/fail result for that policy
+becomes firewall_enabled / screen_lock_enabled. Without the flag, or when
+a host has no result for the policy, the field is omitted.
+
 Auth: set FLEET_API_TOKEN in the process environment for fleet mode. The
 local mode dials a Unix socket; the root-owned socket's filesystem
 permission is the security boundary (no token).
@@ -83,6 +91,9 @@ Fleet roles required (least-privilege):
 				if f.osqueryDSocket == "" {
 					return errors.New("--osqueryd-socket is required for --mode=local")
 				}
+				if f.firewallPolicy != "" || f.screenLockPol != "" {
+					return errors.New("--firewall-policy and --screenlock-policy name Fleet policies; they apply to --mode=fleet only")
+				}
 			default:
 				return fmt.Errorf("--mode=%q invalid; want fleet or local", f.mode)
 			}
@@ -98,6 +109,8 @@ Fleet roles required (least-privilege):
 	cmd.Flags().StringVar(&f.fleetBaseURL, "fleet-base-url", "", "Fleet base URL (e.g. https://fleet.example.com) [required for fleet mode]")
 	cmd.Flags().StringVar(&f.osqueryDSocket, "osqueryd-socket", "/var/osquery/osquery.em", "local osqueryd extension socket path (mode=local)")
 	cmd.Flags().StringVar(&f.hostPostureCtl, "host-posture-control", "", "control_id to attach to osquery.host_posture.v1 records; empty (the default) routes each record to every control that queries osquery.host_posture.v1 (#2924)")
+	cmd.Flags().StringVar(&f.firewallPolicy, "firewall-policy", "", "exact name of the Fleet policy whose per-host result is firewall_enabled (mode=fleet)")
+	cmd.Flags().StringVar(&f.screenLockPol, "screenlock-policy", "", "exact name of the Fleet policy whose per-host result is screen_lock_enabled (mode=fleet)")
 	// --token accepted for ad-hoc shells but env-var is the documented
 	// preferred path so the secret never reaches shell history.
 	cmd.Flags().StringVar(&f.token, "token-env-only-do-not-pass-on-cli", "", "")
@@ -126,7 +139,10 @@ func doRun(ctx context.Context, f runFlags) error {
 	case "fleet":
 		httpClient := &http.Client{Timeout: 20 * time.Second}
 		api := osqueryposture.NewFleetClient(httpClient, f.fleetBaseURL, creds)
-		rows, err = osqueryposture.PullFromFleet(ctx, api, nil)
+		rows, err = osqueryposture.PullFromFleet(ctx, api, nil, osqueryposture.FleetPolicies{
+			Firewall:   f.firewallPolicy,
+			ScreenLock: f.screenLockPol,
+		})
 		if err != nil {
 			return fmt.Errorf("fleet pull: %w", err)
 		}
@@ -190,12 +206,19 @@ func buildHostPostureRecord(p osqueryposture.HostPosture, org, env, controlID st
 	}
 	// A posture boolean is emitted only when the connector read it: false
 	// means observed off, and an absent key means not read. Fleet's Get
-	// host response has no firewall or screen-lock field, so those two
-	// are absent on every Fleet record (#2912).
+	// host response has no firewall or screen-lock field, so on a Fleet
+	// record those two come only from a named Fleet policy (#2912, #2921),
+	// and the matching *_source says which.
 	putBool(pm, "disk_encryption_enabled", p.DiskEncryptionEnabled)
 	putBool(pm, "screen_lock_enabled", p.ScreenLockEnabled)
 	putBool(pm, "firewall_enabled", p.FirewallEnabled)
 	putBool(pm, "mdm_enrolled", p.MDMEnrolled)
+	if p.FirewallEnabled != nil && p.FirewallSource != "" {
+		pm["firewall_source"] = p.FirewallSource
+	}
+	if p.ScreenLockEnabled != nil && p.ScreenLockSource != "" {
+		pm["screen_lock_source"] = p.ScreenLockSource
+	}
 	// last_seen_at (1.1.0) is the host's own last check-in, so a check can
 	// tell an offline host from a fresh one. observed_at stays the pull
 	// time: ingest rejects an observed_at more than 24h from receipt.
@@ -246,8 +269,9 @@ func buildHostPostureRecord(p osqueryposture.HostPosture, org, env, controlID st
 }
 
 // HostPostureSchemaVersion is the osquery.host_posture.v1 schema the
-// connector pushes. 1.1.0 adds last_seen_at and reason (#2912).
-const HostPostureSchemaVersion = "1.1.0"
+// connector pushes. 1.1.0 adds last_seen_at and reason (#2912); 1.2.0 adds
+// firewall_source and screen_lock_source (#2921).
+const HostPostureSchemaVersion = "1.2.0"
 
 func putBool(pm map[string]any, key string, b *bool) {
 	if b != nil {

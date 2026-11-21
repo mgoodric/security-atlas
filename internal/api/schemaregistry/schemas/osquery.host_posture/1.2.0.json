@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/osquery.host_posture/1.2.0.json",
+  "x-evidence-kind": "osquery.host_posture.v1",
+  "x-semver": "1.2.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["END-03", "CFG-04"],
+  "title": "osquery host posture snapshot",
+  "description": "One endpoint's posture as reported by osquery / Fleet. v1.2 adds firewall_source and screen_lock_source. Fleet's Get host API has no firewall or screen-lock field, so a Fleet-sourced record carries those two only when the operator names a Fleet policy for each, and the source says which policy. v1.1 added last_seen_at (the host's own last check-in, which observed_at is not) and reason. A posture boolean is present only when the connector read it: false means observed off, and an absent key means not read.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["host_uuid", "hostname"],
+  "properties": {
+    "host_uuid": { "type": "string", "minLength": 1 },
+    "hostname": { "type": "string", "minLength": 1 },
+    "platform": { "type": "string" },
+    "os_version": { "type": "string" },
+    "disk_encryption_enabled": {
+      "type": "boolean",
+      "description": "Absent when the source did not report it. Fleet omits it when it does not know the status, and for Linux hosts reporting an unencrypted root volume."
+    },
+    "screen_lock_enabled": {
+      "type": "boolean",
+      "description": "Absent when the source did not report it. On a Fleet-sourced record, present only when the operator named a screen-lock Fleet policy and the host's result for it is pass (true) or fail (false); screen_lock_source names the policy."
+    },
+    "firewall_enabled": {
+      "type": "boolean",
+      "description": "Absent when the source did not report it. On a Fleet-sourced record, present only when the operator named a firewall Fleet policy and the host's result for it is pass (true) or fail (false); firewall_source names the policy."
+    },
+    "mdm_enrolled": {
+      "type": "boolean",
+      "description": "From Fleet's mdm.enrollment_status: true for \"On (...)\", false for \"Off\" or \"Pending\", absent otherwise."
+    },
+    "last_seen_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the host last checked in (Fleet's seen_time). The record's observed_at is when the connector pulled, and Fleet lists offline hosts too."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the result is what it is, e.g. which posture fields were not reported, or the Fleet error from the detail fetch."
+    },
+    "firewall_source": {
+      "type": "string",
+      "pattern": "^fleet_policy:.+$",
+      "description": "Where firewall_enabled was read from: fleet_policy:<policy name>. Present only alongside firewall_enabled."
+    },
+    "screen_lock_source": {
+      "type": "string",
+      "pattern": "^fleet_policy:.+$",
+      "description": "Where screen_lock_enabled was read from: fleet_policy:<policy name>. Present only alongside screen_lock_enabled."
+    }
+  }
+}

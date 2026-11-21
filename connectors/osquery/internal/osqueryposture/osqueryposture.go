@@ -6,9 +6,11 @@
 //     Two-call pull: GET /api/v1/fleet/hosts (paginated list) +
 //     GET /api/v1/fleet/hosts/{id} (per-host detail). The documented
 //     Get host response carries `disk_encryption_enabled` (omitted when
-//     Fleet does not know it), `mdm.enrollment_status` and `seen_time`.
-//     It carries no firewall or screen-lock field, so in Fleet mode those
-//     two are never read and never emitted (#2912).
+//     Fleet does not know it), `mdm.enrollment_status`, `seen_time` and
+//     `policies[]`. It carries no firewall or screen-lock field (#2912).
+//     Those two are read only from operator-written Fleet policies named
+//     in FleetPolicies: a policy's `response` of "pass" or "fail" becomes
+//     true or false, and anything else leaves the field unread (#2921).
 //
 //   - Local osqueryd extension socket mode. The connector dials a
 //     Unix-domain socket and submits a Thrift-shaped osquery SQL query.
@@ -19,9 +21,10 @@
 //
 // The package emits canonical HostPosture values; the cmd layer translates
 // each to an evidencev1.EvidenceRecord with the existing slice-014
-// osquery.host_posture.v1 schema at 1.1.0 (host_uuid, hostname, platform,
+// osquery.host_posture.v1 schema at 1.2.0 (host_uuid, hostname, platform,
 // os_version, disk_encryption_enabled, screen_lock_enabled,
-// firewall_enabled, mdm_enrolled, last_seen_at, reason). The schema
+// firewall_enabled, mdm_enrolled, last_seen_at, reason, firewall_source,
+// screen_lock_source). The schema
 // declares additionalProperties:false so this package emits only those
 // fields. A posture field the connector did not read is nil and is left
 // out of the payload, never sent as false (#2912).
@@ -67,6 +70,13 @@ type HostPosture struct {
 	ScreenLockEnabled     *bool
 	FirewallEnabled       *bool
 	MDMEnrolled           *bool
+
+	// FirewallSource and ScreenLockSource name where FirewallEnabled and
+	// ScreenLockEnabled were read from, e.g. "fleet_policy:<name>". Empty
+	// when the matching boolean is nil, or when the source is the local
+	// osquery row.
+	FirewallSource   string
+	ScreenLockSource string
 
 	// LastSeen is when the host last checked in with Fleet (Fleet's
 	// `seen_time`). Zero when unknown. It is not ObservedAt: Fleet lists
@@ -120,8 +130,27 @@ type HostDetail struct {
 	// DiskEncryptionEnabled is nil when Fleet omits the key, which its
 	// docs say happens when it doesn't know the status, and for Linux
 	// hosts reporting an unencrypted root volume.
-	DiskEncryptionEnabled *bool    `json:"disk_encryption_enabled"`
-	MDM                   *HostMDM `json:"mdm"`
+	DiskEncryptionEnabled *bool        `json:"disk_encryption_enabled"`
+	MDM                   *HostMDM     `json:"mdm"`
+	Policies              []HostPolicy `json:"policies"`
+}
+
+// HostPolicy is the subset of one Get host `policies[]` entry the
+// connector reads. Response examples in Fleet's docs: "pass", "fail", and
+// "" (no result reported for that host).
+type HostPolicy struct {
+	ID       uint64 `json:"id"`
+	Name     string `json:"name"`
+	Response string `json:"response"`
+}
+
+// FleetPolicies names the operator's Fleet policies that answer the two
+// posture questions Fleet's host API has no field for. An empty name means
+// the field is not read. The operator writes and maintains the policies;
+// the connector only reads each host's response (#2921).
+type FleetPolicies struct {
+	Firewall   string
+	ScreenLock string
 }
 
 // HostMDM is the subset of Fleet's host `mdm` object the connector reads.
@@ -146,8 +175,9 @@ type LocalQueryer interface {
 
 // PullFromFleet lists every host and fetches per-host detail. Errors
 // fetching one host's detail are recorded as Result=Inconclusive on that
-// row rather than aborting the whole run.
-func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time) ([]HostPosture, error) {
+// row rather than aborting the whole run. pol names the Fleet policies
+// firewall and screen lock are read from; the zero value reads neither.
+func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time, pol FleetPolicies) ([]HostPosture, error) {
 	if api == nil {
 		return nil, errors.New("osqueryposture: FleetAPI is nil")
 	}
@@ -181,7 +211,7 @@ func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time) ([]H
 			out = append(out, row)
 			continue
 		}
-		fillFromDetail(&row, detail)
+		fillFromDetail(&row, detail, pol)
 		row.Result, row.Reason = evaluate(row)
 		out = append(out, row)
 	}
@@ -257,8 +287,9 @@ LIMIT 1;
 // evaluate computes pass/fail. v1 baseline: disk encryption AND screen
 // lock both observed enabled = PASS. Either observed off = FAIL. Anything
 // unread and nothing observed off = INCONCLUSIVE, with the unread fields
-// named in the reason. In Fleet mode screen lock is never read, so a
-// Fleet host is FAIL (disk encryption off) or INCONCLUSIVE, never PASS.
+// named in the reason. In Fleet mode screen lock is read only from a
+// named Fleet policy, so without --screenlock-policy a Fleet host is FAIL
+// (disk encryption off) or INCONCLUSIVE, never PASS.
 // The connector keeps this rule shallow; the evaluator owns the policy
 // ladder.
 func evaluate(p HostPosture) (Result, string) {
@@ -394,7 +425,7 @@ func (e *APIError) Error() string {
 
 // ---- helpers ----
 
-func fillFromDetail(p *HostPosture, d *HostDetail) {
+func fillFromDetail(p *HostPosture, d *HostDetail, pol FleetPolicies) {
 	if d == nil {
 		return
 	}
@@ -418,7 +449,48 @@ func fillFromDetail(p *HostPosture, d *HostDetail) {
 		p.MDMEnrolled = mdmEnrolled(d.MDM.EnrollmentStatus)
 	}
 	// Screen lock and firewall: the Get host response has no such field,
-	// so both stay nil (unread).
+	// so they are read only from the operator's named policies, and stay
+	// nil (unread) otherwise.
+	if v := policyResponse(d.Policies, pol.Firewall); v != nil {
+		p.FirewallEnabled = v
+		p.FirewallSource = "fleet_policy:" + pol.Firewall
+	}
+	if v := policyResponse(d.Policies, pol.ScreenLock); v != nil {
+		p.ScreenLockEnabled = v
+		p.ScreenLockSource = "fleet_policy:" + pol.ScreenLock
+	}
+}
+
+// policyResponse reads the named policy's result for one host: "pass" is
+// true and "fail" is false. An empty name, no policy of that name, or any
+// other response (Fleet reports "" when the host has no result for the
+// policy) is nil, never a guess. Names match exactly. If more than one
+// policy carries the name (a global and a team policy, say) and their
+// results disagree, the result is nil too.
+func policyResponse(policies []HostPolicy, name string) *bool {
+	if name == "" {
+		return nil
+	}
+	var out *bool
+	for _, pl := range policies {
+		if pl.Name != name {
+			continue
+		}
+		var v bool
+		switch pl.Response {
+		case "pass":
+			v = true
+		case "fail":
+			v = false
+		default:
+			return nil
+		}
+		if out != nil && *out != v {
+			return nil
+		}
+		out = boolPtr(v)
+	}
+	return out
 }
 
 // mdmEnrolled maps Fleet's mdm.enrollment_status to a boolean. "On (...)"
