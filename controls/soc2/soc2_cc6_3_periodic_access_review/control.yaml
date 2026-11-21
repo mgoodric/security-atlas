@@ -5,9 +5,9 @@ description: |
   Regular review of accounts and their privileges covers the
   change-and-revoke side of TSC CC6.3. The query reads the
   `access_review.completion` ledger and asserts each in-scope system has a
-  completed review record within the last 90 days (i.e. quarterly
-  cadence). The reviewer and remediation actions are captured in the
-  evidence record.
+  completed review record within the last 120 days (a 90-day quarterly
+  cadence plus the engine's 30-day grace). The reviewer and remediation
+  actions are captured in the evidence record.
 
 scf_anchor_id: IAC-12
 control_family: IAC
@@ -20,7 +20,7 @@ evidence_queries:
   - id: every_in_scope_system_reviewed_in_90d
     language: rego
     evidence_kind: access_review.completion.v1
-    description: "Every in-scope system has a completed access review within 90 days"
+    description: "Every in-scope system has a completed access review within 120 days (quarterly plus 30-day grace)"
     expression: |
       package evidence.query
 

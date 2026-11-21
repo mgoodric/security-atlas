@@ -94,6 +94,8 @@ An evidence record is _a single observation about reality at a point in time_. P
 | `quarterly` | 120 d   | DR test, tabletop exercise                      |
 | `annual`    | 400 d   | Penetration test, policy reaffirmation          |
 
+Each max age is the class's cadence plus a grace period (quarterly is 90 d + 30 d, annual is 365 d + 35 d, about 13 months), so evidence produced a few weeks late in the next cycle is still fresh. Control descriptions state the max age, not the bare cadence (`docs/spec/control-bundle.md` §2.2.1; #2816).
+
 Records past `valid_until` are **stale**, not deleted. Stale evidence drives a `drift` signal; the historical record is preserved for point-in-time audit replay.
 
 ## 2.4 Scope (multidimensional)

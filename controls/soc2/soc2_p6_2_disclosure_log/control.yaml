@@ -19,7 +19,7 @@ evidence_queries:
   - id: disclosure_log_uploaded_within_quarter
     language: rego
     evidence_kind: manual.upload.v1
-    description: "A disclosure-log upload exists within the last 90 days"
+    description: "A disclosure-log upload exists within the last 120 days (quarterly plus 30-day grace)"
     expression: |
       package evidence.query
 

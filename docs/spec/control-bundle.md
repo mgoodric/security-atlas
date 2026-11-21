@@ -56,7 +56,7 @@ When uploaded as a tarball, the archive **MUST**:
 | `control_family`         | string      | SCF taxonomy family (AST, BCD, CFG, ...). Inferred from the SCF anchor if omitted.                                                                                                        |
 | `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                                                                                     |
 | `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                                                                                      |
-| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.                                                                              |
+| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI. See §2.2.1 for each class's window.                                          |
 | `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.                                                                      |
 | `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.                                                                              |
 | `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                                                                                           |
@@ -64,6 +64,31 @@ When uploaded as a tarball, the archive **MUST**:
 | `anchor_fit`             | enum        | How well `scf_anchor_id` fits the control: `exact` (default when omitted), `partial`, or `none` (no SCF control fits; the anchor is the nearest catch-all or absent). Issue #1736.        |
 | `anchor_fit_note`        | string      | Why the fit is not exact. Required when `anchor_fit` is `partial` or `none`. Editing only the note updates the control in place; changing `anchor_fit` creates a new version (#2023, §4). |
 | `external_refs`          | object[]    | Identifiers outside the platform that this control traces to. See §2.5.                                                                                                                   |
+
+#### 2.2.1 Freshness windows (the class includes a grace period)
+
+The evaluation engine keeps only evidence whose `observed_at` falls inside the
+control's window; older records are `stale`, and a control whose records are
+all stale evaluates over an empty set. The window is the class's nominal
+cadence **plus a grace period**, so a review that slips a few weeks past its
+due date is not yet stale. Write a stock or tenant description against the
+effective window in this table, not the nominal cadence:
+
+| `freshness_class` | Nominal cadence | Effective window | Grace                  |
+| ----------------- | --------------- | ---------------- | ---------------------- |
+| `realtime`        | continuous      | 24 h             | n/a                    |
+| `daily`           | 1 d             | 7 d              | 6 d                    |
+| `weekly`          | 7 d             | 30 d             | 23 d                   |
+| `monthly`         | 30 d            | 90 d             | 60 d                   |
+| `quarterly`       | 90 d            | 120 d            | 30 d                   |
+| `annual`          | 365 d           | 400 d            | 35 d (about 13 months) |
+
+The table lives in one place, `freshnessMaxAgeTable` in
+`internal/eval/state.go`, and comes from canvas §2.3. A class the table does
+not know (including `hourly`, which this enum accepts but the engine does not
+map) falls back to the `monthly` 90-day window. Why the windows carry grace,
+and why they were kept rather than narrowed to the cadence, is recorded in
+`docs/audit-log/2816-freshness-window-grace-decisions.md`.
 
 ### 2.3 Evidence queries
 

@@ -20,7 +20,7 @@ evidence_queries:
   - id: privacy_notice_review_within_365d
     language: rego
     evidence_kind: manual.upload.v1
-    description: "A privacy-notice review upload exists within the last 365 days"
+    description: "A privacy-notice review upload exists within the last 400 days (annual plus 35-day grace)"
     expression: |
       package evidence.query
 

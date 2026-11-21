@@ -10,20 +10,20 @@ description: |
   automated by inspecting completion tickets — each training assignment is
   filed as a Jira ticket tagged `security-training`, and the evidence
   query asserts every active user has an open or closed completion ticket
-  within the last 365 days.
+  within the last 400 days (annual plus the engine's 35-day grace).
 
 scf_anchor_id: SAT-04
 control_family: SAT
 implementation_type: automated
 owner_role: hr
 lifecycle_state: active
-freshness_class: monthly
+freshness_class: annual
 
 evidence_queries:
   - id: training_completion_within_365d
     language: rego
     evidence_kind: jira.ticket_evidence.v1
-    description: "Every active user has a closed security-training ticket within 365 days"
+    description: "Every active user has a closed security-training ticket within 400 days (annual plus 35-day grace)"
     expression: |
       package evidence.query
 
@@ -48,7 +48,7 @@ evidence_queries:
   - id: training_completion_records_within_365d
     language: rego
     evidence_kind: security_awareness.training_completion.v1
-    description: "Every assigned security-awareness training completion is current within 365 days"
+    description: "Every assigned security-awareness training completion is current within 400 days (annual plus 35-day grace)"
     expression: |
       package evidence.query
 
