@@ -2174,7 +2174,9 @@ type Querier interface {
 	//     interval. The mapping is the same one `internal/eval/state.go`
 	//     `FreshnessMaxAge` exposes (realtime 24h, daily 7d, weekly 30d,
 	//     monthly 90d, quarterly 120d, annual 400d). We replicate the mapping
-	//     here as a CASE expression so the SQL is self-contained.
+	//     here as a CASE expression so the SQL is self-contained. Every
+	//     `CASE c.freshness_class` block below is pinned to the Go table by
+	//     internal/eval/calendar_freshness_sync_test.go (#2868): change both.
 	//   - next_due_at = last_evaluated_at + cadence, OR now() when the
 	//     control has never been evaluated (LEFT JOIN -> NULL).
 	//   - status: 'overdue' when next_due_at < now(); 'due-soon' when

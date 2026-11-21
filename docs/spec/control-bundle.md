@@ -83,8 +83,14 @@ effective window in this table, not the nominal cadence:
 | `quarterly`       | 90 d            | 120 d            | 30 d                   |
 | `annual`          | 365 d           | 400 d            | 35 d (about 13 months) |
 
-The table lives in one place, `freshnessMaxAgeTable` in
-`internal/eval/state.go`, and comes from canvas §2.3. It is also the source of
+The table comes from canvas §2.3 and has two copies. The authority is
+`freshnessMaxAgeTable` in `internal/eval/state.go`, which evaluation reads.
+The calendar repeats it as `CASE c.freshness_class` blocks in
+`internal/db/queries/calendar.sql` to compute review due dates.
+`TestCalendarSQL_FreshnessCaseMatchesFreshnessMaxAge`
+(`internal/eval/calendar_freshness_sync_test.go`) parses those blocks and
+fails if any class window or the 90-day fallback differs from the Go table, so
+change both together (#2868). The Go table is also the source of
 the classes a bundle may declare: parse and upload refuse any class the table
 does not map, so a typo cannot silently widen a control's window (#2896). The
 one exception is `hourly`, which the engine does not map and which falls back
