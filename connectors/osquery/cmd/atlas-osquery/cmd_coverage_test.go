@@ -352,6 +352,29 @@ func TestNewRunCmd_PreRunLocalModeMissingSocket(t *testing.T) {
 	}
 }
 
+// #2921: the policy flags name Fleet policies, so --mode=local rejects them
+// rather than silently ignoring them.
+func TestNewRunCmd_PreRunLocalModeRejectsPolicyFlags(t *testing.T) {
+	for _, flag := range []string{"--firewall-policy", "--screenlock-policy"} {
+		t.Run(flag, func(t *testing.T) {
+			resetCommon(t)
+			cmd := newRunCmd()
+			if err := cmd.ParseFlags([]string{
+				"--org", "example",
+				"--environment", "prod",
+				"--mode", "local",
+				flag, "Firewall enabled (macOS)",
+			}); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			err := cmd.PreRunE(cmd, nil)
+			if err == nil || !strings.Contains(err.Error(), "--mode=fleet only") {
+				t.Errorf("err = %v; want a fleet-only rejection", err)
+			}
+		})
+	}
+}
+
 // TestNewRunCmd_PreRunInvalidMode covers PreRunE branch (e): unknown
 // --mode value.
 func TestNewRunCmd_PreRunInvalidMode(t *testing.T) {

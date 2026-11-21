@@ -19,7 +19,9 @@ import (
 // are Fleet's, and only fields the connector reads plus a few neighbours
 // are kept. Host 2 is the docs' shape with disk encryption off; host 3
 // omits disk_encryption_enabled, which the docs say Fleet does when it
-// doesn't know the status (#2912).
+// doesn't know the status (#2912). Host 1's policies[] is the docs' Get
+// host example array verbatim (ids 2, 3, 1: "fail", "", "pass"); Fleet's
+// own example names are kept so the shape stays traceable (#2921).
 const (
 	fleetListHosts = `{
 		"hosts": [
@@ -43,8 +45,16 @@ const (
 			"mdm": {"encryption_key_available": true, "enrollment_status": "On (manual)",
 			        "is_personal_enrollment": false, "name": "Fleet", "connected_to_fleet": true,
 			        "device_status": "unlocked", "pending_action": ""},
-			"policies": [{"id": 1, "name": "SomeQuery", "query": "SELECT * FROM foo;",
-			              "platform": "windows,linux", "response": "pass", "critical": false}]
+			"policies": [
+				{"id": 2, "name": "SomeQuery2", "query": "SELECT * FROM bar;",
+				 "description": "this is another query", "resolution": "fix with these other steps...",
+				 "platform": "darwin", "response": "fail", "critical": false},
+				{"id": 3, "name": "SomeQuery3", "query": "SELECT * FROM baz;",
+				 "description": "", "resolution": "", "platform": "", "response": "", "critical": false},
+				{"id": 1, "name": "SomeQuery", "query": "SELECT * FROM foo;",
+				 "description": "this is a query", "resolution": "fix with these steps...",
+				 "platform": "windows,linux", "response": "pass", "critical": false}
+			]
 		}
 	}`
 	fleetGetHost2 = `{
@@ -82,6 +92,11 @@ func fakeFleet(t *testing.T) *httptest.Server {
 
 func pullFake(t *testing.T) map[string]osqueryposture.HostPosture {
 	t.Helper()
+	return pullFakeWith(t, osqueryposture.FleetPolicies{})
+}
+
+func pullFakeWith(t *testing.T, pol osqueryposture.FleetPolicies) map[string]osqueryposture.HostPosture {
+	t.Helper()
 	srv := fakeFleet(t)
 	t.Cleanup(srv.Close)
 	creds, err := osqueryauth.Resolve(osqueryauth.ResolveOpts{Token: "fleet-test"})
@@ -91,7 +106,7 @@ func pullFake(t *testing.T) map[string]osqueryposture.HostPosture {
 	client := osqueryposture.NewFleetClient(srv.Client(), srv.URL, creds)
 	rows, err := osqueryposture.PullFromFleet(context.Background(), client, func() time.Time {
 		return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
-	})
+	}, pol)
 	if err != nil {
 		t.Fatalf("PullFromFleet: %v", err)
 	}
@@ -152,6 +167,100 @@ func TestPullFromFleet_DocumentedShapes(t *testing.T) {
 	}
 }
 
+// #2921: with policies named, firewall and screen lock come from the host's
+// policies[] response through the real HTTP decode. Host 1 passes
+// "SomeQuery" and fails "SomeQuery2"; hosts 2 and 3 carry no policies[],
+// so both fields stay unread there.
+func TestPullFromFleet_NamedPoliciesFromDocumentedShape(t *testing.T) {
+	byUUID := pullFakeWith(t, osqueryposture.FleetPolicies{Firewall: "SomeQuery", ScreenLock: "SomeQuery2"})
+	a := byUUID["392547dc-0000-0000-a87a-d701ff75bc65"]
+	if !boolIs(a.FirewallEnabled, true) || a.FirewallSource != "fleet_policy:SomeQuery" {
+		t.Errorf("mac firewall = %v (%q); want true from fleet_policy:SomeQuery", a.FirewallEnabled, a.FirewallSource)
+	}
+	if !boolIs(a.ScreenLockEnabled, false) || a.ScreenLockSource != "fleet_policy:SomeQuery2" {
+		t.Errorf("mac screen lock = %v (%q); want false from fleet_policy:SomeQuery2", a.ScreenLockEnabled, a.ScreenLockSource)
+	}
+	if a.Result != osqueryposture.ResultFail || a.Reason != "screen_lock_disabled" {
+		t.Errorf("mac result = %q (%q); want fail, screen_lock_disabled", a.Result, a.Reason)
+	}
+	for _, u := range []string{"uuid-B", "uuid-C"} {
+		h := byUUID[u]
+		if h.FirewallEnabled != nil || h.ScreenLockEnabled != nil || h.FirewallSource != "" || h.ScreenLockSource != "" {
+			t.Errorf("%s has no policies[] but firewall/screen lock read: %+v", u, h)
+		}
+	}
+
+	// Both on: the documented "pass" policy for both questions lets a
+	// Fleet host pass, which it never could before #2921.
+	pass := pullFakeWith(t, osqueryposture.FleetPolicies{Firewall: "SomeQuery", ScreenLock: "SomeQuery"})["392547dc-0000-0000-a87a-d701ff75bc65"]
+	if pass.Result != osqueryposture.ResultPass {
+		t.Errorf("mac with both policies passing = %q (%q); want pass", pass.Result, pass.Reason)
+	}
+
+	// The documented empty response is unread, not false.
+	empty := pullFakeWith(t, osqueryposture.FleetPolicies{Firewall: "SomeQuery3", ScreenLock: "SomeQuery3"})["392547dc-0000-0000-a87a-d701ff75bc65"]
+	if empty.FirewallEnabled != nil || empty.ScreenLockEnabled != nil || empty.FirewallSource != "" {
+		t.Errorf("empty policy response read as a value: %+v", empty)
+	}
+	if empty.Result != osqueryposture.ResultInconclusive || empty.Reason != "screen_lock not reported" {
+		t.Errorf("mac with empty responses = %q (%q); want inconclusive", empty.Result, empty.Reason)
+	}
+}
+
+func TestPullFromFleet_PolicyResponseRules(t *testing.T) {
+	tr, fa := true, false
+	pl := func(name, resp string) osqueryposture.HostPolicy {
+		return osqueryposture.HostPolicy{Name: name, Response: resp}
+	}
+	cases := []struct {
+		name     string
+		policy   string
+		policies []osqueryposture.HostPolicy
+		want     *bool
+	}{
+		{"pass", "fw", []osqueryposture.HostPolicy{pl("fw", "pass")}, &tr},
+		{"fail", "fw", []osqueryposture.HostPolicy{pl("fw", "fail")}, &fa},
+		{"empty_response", "fw", []osqueryposture.HostPolicy{pl("fw", "")}, nil},
+		{"unknown_response", "fw", []osqueryposture.HostPolicy{pl("fw", "error")}, nil},
+		{"missing_policy", "fw", []osqueryposture.HostPolicy{pl("other", "pass")}, nil},
+		{"no_policies", "fw", nil, nil},
+		{"not_configured", "", []osqueryposture.HostPolicy{pl("", "pass"), pl("fw", "pass")}, nil},
+		{"name_is_exact", "fw", []osqueryposture.HostPolicy{pl("FW", "pass"), pl("fw ", "pass")}, nil},
+		{"duplicates_agree", "fw", []osqueryposture.HostPolicy{pl("fw", "fail"), pl("fw", "fail")}, &fa},
+		{"duplicates_disagree", "fw", []osqueryposture.HostPolicy{pl("fw", "pass"), pl("fw", "fail")}, nil},
+		{"duplicate_unreported", "fw", []osqueryposture.HostPolicy{pl("fw", "pass"), pl("fw", "")}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{
+				hosts:  []osqueryposture.HostListEntry{{ID: 1, UUID: "u", Platform: "darwin"}},
+				detail: map[uint64]osqueryposture.HostDetail{1: {ID: 1, UUID: "u", Policies: tc.policies}},
+			}
+			rows, err := osqueryposture.PullFromFleet(context.Background(), api, nil,
+				osqueryposture.FleetPolicies{Firewall: tc.policy, ScreenLock: tc.policy})
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("PullFromFleet: %v (%d rows)", err, len(rows))
+			}
+			r := rows[0]
+			for field, got := range map[string]*bool{"firewall": r.FirewallEnabled, "screen_lock": r.ScreenLockEnabled} {
+				switch {
+				case tc.want == nil && got != nil:
+					t.Errorf("%s = %v; want unread", field, *got)
+				case tc.want != nil && (got == nil || *got != *tc.want):
+					t.Errorf("%s = %v; want %v", field, got, *tc.want)
+				}
+			}
+			wantSrc := ""
+			if tc.want != nil {
+				wantSrc = "fleet_policy:" + tc.policy
+			}
+			if r.FirewallSource != wantSrc || r.ScreenLockSource != wantSrc {
+				t.Errorf("sources = %q / %q; want %q", r.FirewallSource, r.ScreenLockSource, wantSrc)
+			}
+		})
+	}
+}
+
 func TestPullFromFleet_EvaluateLadder(t *testing.T) {
 	tr, fa := true, false
 	cases := []struct {
@@ -205,7 +314,7 @@ func TestPullFromFleet_SkipsHostWithEmptyUUID(t *testing.T) {
 			2: {ID: 2, UUID: "uuid-real", Hostname: "real", Platform: "linux"},
 		},
 	}
-	rows, err := osqueryposture.PullFromFleet(context.Background(), api, nil)
+	rows, err := osqueryposture.PullFromFleet(context.Background(), api, nil, osqueryposture.FleetPolicies{})
 	if err != nil {
 		t.Fatalf("PullFromFleet: %v", err)
 	}
@@ -224,7 +333,7 @@ func TestPullFromFleet_DetailFailureIsInconclusive(t *testing.T) {
 		},
 		err: errors.New("simulated 503"),
 	}
-	rows, err := osqueryposture.PullFromFleet(context.Background(), api, nil)
+	rows, err := osqueryposture.PullFromFleet(context.Background(), api, nil, osqueryposture.FleetPolicies{})
 	if err != nil {
 		t.Fatalf("PullFromFleet: %v", err)
 	}

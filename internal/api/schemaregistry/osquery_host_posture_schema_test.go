@@ -21,3 +21,20 @@ func TestOsqueryHostPosture110_AdditiveOver100(t *testing.T) {
 		t.Fatalf("1.1.0 is not additive over 1.0.0: %v", err)
 	}
 }
+
+// #2921: 1.2.0 adds firewall_source + screen_lock_source and must stay
+// additive over 1.1.0.
+func TestOsqueryHostPosture120_AdditiveOver110(t *testing.T) {
+	t.Parallel()
+	read := func(v string) []byte {
+		t.Helper()
+		b, err := fs.ReadFile(PlatformSchemasFS(), "osquery.host_posture/"+v+".json")
+		if err != nil {
+			t.Fatalf("read %s: %v", v, err)
+		}
+		return b
+	}
+	if err := CheckAdditiveOver(read("1.1.0"), read("1.2.0")); err != nil {
+		t.Fatalf("1.2.0 is not additive over 1.1.0: %v", err)
+	}
+}
