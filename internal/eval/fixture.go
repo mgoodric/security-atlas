@@ -61,6 +61,9 @@ var ErrFixtureSQLNeedsDB = errors.New("eval: sql evidence query requires a datab
 //     filter exactly as observed_at does on a live row.
 //   - Payload    — the record's JSONB payload bytes; the SQL + JSON-path query
 //     evaluators read it. nil/empty is fine for Rego-only fixtures.
+//   - EvidenceKind — the record's evidence_kind; a query that declares a kind
+//     sees only records of it (#2818). Empty stands for whatever kind each
+//     query reads, so a single-kind bundle's tests need not repeat it.
 //
 // It deliberately omits tenant id, scope id, hash, and every other ingestion-
 // side column: a fixture is author-supplied test data, never a ledger row, and
@@ -69,6 +72,8 @@ type FixtureRecord struct {
 	Result     string
 	ObservedAt time.Time
 	Payload    []byte
+	// EvidenceKind is optional; see the type comment.
+	EvidenceKind string
 }
 
 // FixtureQuery is one declared evidence query the runner evaluates over the
@@ -79,6 +84,9 @@ type FixtureRecord struct {
 type FixtureQuery struct {
 	Language   string
 	Expression string
+	// EvidenceKind is the query's declared evidence_kind; empty sees every
+	// record, as on the live path (#2818).
+	EvidenceKind string
 }
 
 // FixtureResult is the outcome of evaluating one fixture record set against a
@@ -129,6 +137,7 @@ func EvaluateFixture(ctx context.Context, freshnessClass string, queries []Fixtu
 			result:     r.Result,
 			observedAt: r.ObservedAt,
 			payload:    r.Payload,
+			kind:       r.EvidenceKind,
 		})
 	}
 
@@ -156,9 +165,11 @@ func EvaluateFixture(ctx context.Context, freshnessClass string, queries []Fixtu
 // uses the SAME per-language dispatch (rego|sql|jsonpath, fail-loud on anything
 // else) and the SAME computeResult precedence rollup, so a fixture run is
 // behaviourally identical to a live evaluation of the same queries over the
-// same records. The ONLY divergence: a SQL query with no transaction returns
+// same records. The divergences: a SQL query with no transaction returns
 // ErrFixtureSQLNeedsDB instead of running against the live connection the
-// engine always holds.
+// engine always holds, and a fixture record with no evidence_kind matches a
+// query of any kind (#2818), where a live record with no kind reaches only a
+// query that declares none.
 func evalFixtureQueries(ctx context.Context, queries []FixtureQuery, inWindow []inWindowRecord, tx pgx.Tx) (string, error) {
 	if len(queries) == 0 {
 		// No declared query: the per-record evidence rollup IS the result —
@@ -177,20 +188,21 @@ func evalFixtureQueries(ctx context.Context, queries []FixtureQuery, inWindow []
 			return "", &FixtureQueryError{Language: q.Language, Err: errors.New("unsupported language (engine supports rego|sql|jsonpath)")}
 		}
 
+		records := recordsOfKind(inWindow, q.EvidenceKind, true)
 		var (
 			res string
 			err error
 		)
 		switch q.Language {
 		case "rego":
-			res, err = evalRegoQuery(ctx, q.Expression, inWindow)
+			res, err = evalRegoQuery(ctx, q.Expression, records)
 		case "sql":
 			if tx == nil {
 				return "", ErrFixtureSQLNeedsDB
 			}
-			res, err = evalSQLQuery(ctx, tx, q.Expression, inWindow)
+			res, err = evalSQLQuery(ctx, tx, q.Expression, records)
 		case "jsonpath":
-			res, err = evalJSONPathQuery(ctx, q.Expression, inWindow)
+			res, err = evalJSONPathQuery(ctx, q.Expression, records)
 		}
 		if err != nil {
 			return "", &FixtureQueryError{Language: q.Language, Err: err}

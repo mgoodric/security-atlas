@@ -218,6 +218,26 @@ func attestedAt(r inWindowRecord) time.Time {
 	return r.observedAt
 }
 
+// recordsOfKind returns the records one evidence query evaluates over (ADR
+// 0028 decision 5, #2818): those of the evidence_kind its manifest declares,
+// in their original order. A query that declares no kind sees every record,
+// as every query did before #2818; the bundle validator warns on it. A record
+// with no kind reaches only such a query, except under matchUnkinded, which
+// the fixture runner sets so a test record that omits evidence_kind stands
+// for a record of whatever kind the query reads.
+func recordsOfKind(records []inWindowRecord, kind string, matchUnkinded bool) []inWindowRecord {
+	if kind == "" {
+		return records
+	}
+	out := make([]inWindowRecord, 0, len(records))
+	for _, r := range records {
+		if r.kind == kind || (matchUnkinded && r.kind == "") {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // computeResult rolls a set of in-window evidence results into a single
 // control state. The precedence, strictest first:
 //

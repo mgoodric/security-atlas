@@ -290,6 +290,9 @@ func validateBundle(out io.Writer, path string, catalogs []string) error {
 	if len(bundle.Manifest.EvidenceQueries) > 0 {
 		_, _ = fmt.Fprintf(out, "    evidence_queries=%d\n", len(bundle.Manifest.EvidenceQueries))
 	}
+	for _, w := range bundle.Manifest.UnkindedQueryWarnings() {
+		_, _ = fmt.Fprintf(out, "    WARN %s\n", w)
+	}
 	if err := bundle.ValidateApplicabilityExpr(); err != nil {
 		return err
 	}

@@ -173,7 +173,7 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 // computeRow turns a control's metadata + its ledger slice into one
 // evaluationRow for a given scope cell. The result is computed by evaluating
 // EVERY declared evidence query (rego, sql, jsonpath — slice 495) over the
-// in-window record set and rolling the per-query results up through the same
+// in-window records of its declared evidence_kind (#2818) and rolling the per-query results up through the same
 // result-precedence logic the per-record rollup uses. A control with no
 // declared query falls back to the per-record evidence rollup. Freshness is
 // always computed from raw observed_at.
@@ -273,17 +273,19 @@ func (e *Engine) evalQueries(ctx context.Context, tx pgx.Tx, meta controlMeta, i
 			return "", fmt.Errorf("control %s evidence query: unsupported language %q (engine supports rego|sql|jsonpath)", meta.id, q.Language)
 		}
 
+		// #2818: each query sees only the records of its declared kind.
+		records := recordsOfKind(inWindow, q.EvidenceKind, false)
 		var (
 			res string
 			err error
 		)
 		switch q.Language {
 		case "rego":
-			res, err = evalRegoQuery(ctx, q.Expression, inWindow)
+			res, err = evalRegoQuery(ctx, q.Expression, records)
 		case "sql":
-			res, err = evalSQLQuery(ctx, tx, q.Expression, inWindow)
+			res, err = evalSQLQuery(ctx, tx, q.Expression, records)
 		case "jsonpath":
-			res, err = evalJSONPathQuery(ctx, q.Expression, inWindow)
+			res, err = evalJSONPathQuery(ctx, q.Expression, records)
 		}
 		if err != nil {
 			return "", fmt.Errorf("control %s %s query: %w", meta.id, q.Language, err)
@@ -359,11 +361,13 @@ func (e *Engine) Replay(ctx context.Context, asOf time.Time) (int, error) {
 var FarFuture = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // evidenceQueryManifest mirrors the slice-009 EvidenceQuery shape stored in
-// controls.evidence_queries (JSONB). The engine only needs language +
-// expression; other fields are ignored.
+// controls.evidence_queries (JSONB). The engine needs language, expression
+// and evidence_kind (#2818: the query sees only records of that kind; empty
+// means every kind); other fields are ignored.
 type evidenceQueryManifest struct {
-	Language   string `json:"language"`
-	Expression string `json:"expression"`
+	Language     string `json:"language"`
+	Expression   string `json:"expression"`
+	EvidenceKind string `json:"evidence_kind,omitempty"`
 }
 
 // parseEvidenceQueries decodes a control's evidence_queries JSONB into the
