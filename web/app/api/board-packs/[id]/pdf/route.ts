@@ -9,9 +9,10 @@
 // attachment header so the browser drops a file named
 // board-pack-{period}.pdf.
 //
-// 503 from upstream (Chrome unavailable on the server) is forwarded as a
-// JSON error so the UI can surface the reason — the existing detail page
-// pattern.
+// A non-2xx from upstream is forwarded as a JSON error so the UI can surface
+// the reason — the existing detail page pattern. No Chrome on the server is a
+// 409 feature_not_enabled whose message passes through; a busy or timed-out
+// render is a 503 with Retry-After (#2786).
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";

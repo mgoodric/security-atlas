@@ -64,10 +64,31 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
     expect(init?.method).toBe("POST");
   });
 
-  test("propagates upstream 503 chrome unavailable", async () => {
+  test("passes an upstream 409 chrome-absent refusal through (#2786)", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    const refusal = {
+      error:
+        "PDF export is not enabled on this deployment: chrome is not installed",
+      code: "feature_not_enabled",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(refusal), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual(refusal);
+  });
+
+  test("propagates upstream 503 render busy", async () => {
     mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: "PDF export disabled" }), {
+      new Response(JSON.stringify({ error: "PDF export busy" }), {
         status: 503,
         headers: { "Content-Type": "application/json" },
       }),
