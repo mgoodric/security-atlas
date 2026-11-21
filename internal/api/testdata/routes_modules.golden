@@ -361,6 +361,7 @@ POST /v1/personnel-security/checklists personnel_security
 POST /v1/policies policies
 POST /v1/policies/{id}/acknowledge policies
 POST /v1/policies/{id}/publish policies
+POST /v1/policies:sync policies
 POST /v1/populations audit_periods
 POST /v1/questionnaires questionnaires
 POST /v1/questionnaires/{id}/answer-runs questionnaires

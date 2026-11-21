@@ -5513,6 +5513,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/policies:sync:
+    post:
+      summary: POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, with a per-page report (created, unchanged, skipped with reason) (#2850)
+      tags: [policies]
+      operationId: post-v1-policies_sync
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/populations:
     post:
       summary: POST /v1/populations

@@ -104,6 +104,11 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	policiesH := policiesapi.NewWithPool(policy.NewStore(s.dbPool), s.dbPool)
 	root.Post("/v1/policies", policiesH.CreatePolicy)
 	root.Get("/v1/policies", policiesH.ListPolicies)
+	// #2850: the Confluence policy connector's full-set push. Only a
+	// policy-sync key reaches it (refusePolicySyncKeys, which matches the
+	// same path as policySyncPath; the literal is what the OpenAPI drift
+	// check reads).
+	root.Post("/v1/policies:sync", policiesH.SyncPolicies)
 	root.Patch("/v1/policies/{id}/submit", policiesH.Submit)
 	root.Patch("/v1/policies/{id}/approve", policiesH.Approve)
 	root.Post("/v1/policies/{id}/publish", policiesH.Publish)
