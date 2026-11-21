@@ -182,6 +182,9 @@ type Risk struct {
 	Accepter            string
 	InstrumentReference string
 	LinkedControlIDs    []uuid.UUID
+	// ExternalRef is the organisation's own risk ID ("R-014"), nil when
+	// unset (#2838). Unique within the tenant when set.
+	ExternalRef *string
 	// Slice 052 schema additions, surfaced for slice 053 callers (theme
 	// tagging, aggregation, org-unit binding). Existing slice-019 risks
 	// have `Level=team`, `OrgUnitID=nil`, `Themes=nil`.
@@ -241,6 +244,9 @@ type CreateInput struct {
 	Accepter            string
 	InstrumentReference string
 	LinkedControlIDs    []uuid.UUID
+	// ExternalRef is the organisation's own risk ID (#2838). Trimmed; an
+	// empty value is unset. One the tenant already uses is ErrExternalRefTaken.
+	ExternalRef string
 	// Level and OrgUnitID place the risk in the hierarchy (#1749). With an
 	// org unit and no level, the risk takes the unit's level; with neither,
 	// it is a team risk with no unit. A level that differs from the unit's
@@ -311,6 +317,10 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	if in.OwnerUserID != nil {
 		in.TreatmentOwner = ""
 	}
+	externalRef, err := NormalizeExternalRef(in.ExternalRef)
+	if err != nil {
+		return Risk{}, err
+	}
 
 	var out Risk
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -354,9 +364,10 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			// The rest of the proposal, as ProposeAcceptanceTx records it.
 			AcceptanceJustification: proposal.Justification,
 			AcceptanceProposedUntil: pgDatePtr(proposal.ProposedUntil),
+			ExternalRef:             externalRef,
 		})
 		if err != nil {
-			return fmt.Errorf("create risk: %w", err)
+			return mapExternalRefErr("create risk", err)
 		}
 
 		for _, ctrlID := range in.LinkedControlIDs {
@@ -903,6 +914,7 @@ func riskFromRow(r dbx.Risk) Risk {
 		Accepter:            r.Accepter,
 		InstrumentReference: r.InstrumentReference,
 		OwnerUserID:         uuidPtr(r.OwnerUserID),
+		ExternalRef:         r.ExternalRef,
 	}
 	if r.CreatedAt.Valid {
 		risk.CreatedAt = r.CreatedAt.Time

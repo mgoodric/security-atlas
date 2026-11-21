@@ -131,3 +131,28 @@ describe("score later (#2511)", () => {
     });
   });
 });
+
+// #2838: the organisation risk ID opens as stored, is sent only when it
+// changes, and an emptied field clears it.
+describe("organisation risk ID (#2838)", () => {
+  test("opens on the stored ID, or empty when unset", () => {
+    expect(
+      riskToFormState({ ...RISK, external_ref: "R-014" }).external_ref,
+    ).toBe("R-014");
+    expect(riskToFormState({ ...RISK, external_ref: null }).external_ref).toBe(
+      "",
+    );
+    expect(riskToFormState(RISK).external_ref).toBe("");
+  });
+
+  test("sends a changed ID trimmed, and null when emptied", () => {
+    const opening = riskToFormState({ ...RISK, external_ref: "R-014" });
+    expect(toPatchInput(opening, { ...opening })).toEqual({});
+    expect(
+      toPatchInput(opening, { ...opening, external_ref: " R-015 " }),
+    ).toEqual({ external_ref: "R-015" });
+    expect(toPatchInput(opening, { ...opening, external_ref: "  " })).toEqual({
+      external_ref: null,
+    });
+  });
+});

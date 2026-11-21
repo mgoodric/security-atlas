@@ -61,13 +61,18 @@ type RecordFields struct {
 	// treatment_owner, which only ever shows as "Owner (unlinked)".
 	OwnerUserSet bool
 	OwnerUserID  *uuid.UUID
+	// ExternalRefSet marks an organisation risk ID change (#2838);
+	// ExternalRef is the new ID, nil or empty to clear it.
+	ExternalRefSet bool
+	ExternalRef    *string
 }
 
 // Empty reports whether no record field is set.
 func (f RecordFields) Empty() bool {
 	return f.Title == nil && f.Description == nil && f.Methodology == nil &&
 		f.InherentScore == nil && f.TreatmentOwner == nil &&
-		f.ReviewDueAt == nil && f.InstrumentReference == nil && !f.OwnerUserSet
+		f.ReviewDueAt == nil && f.InstrumentReference == nil && !f.OwnerUserSet &&
+		!f.ExternalRefSet
 }
 
 // recordDiff is the changed-fields half of a fields_changed audit row.
@@ -110,6 +115,17 @@ func applyRecordFields(current Risk, in RecordFields) (Risk, recordDiff, recordD
 	if in.ReviewDueAt != nil {
 		t := in.ReviewDueAt.UTC()
 		next.ReviewDueAt = &t
+	}
+	if in.ExternalRefSet {
+		raw := ""
+		if in.ExternalRef != nil {
+			raw = *in.ExternalRef
+		}
+		ref, err := NormalizeExternalRef(raw)
+		if err != nil {
+			return Risk{}, nil, nil, err
+		}
+		next.ExternalRef = ref
 	}
 
 	scoreTouched := in.Methodology != nil || in.InherentScore != nil
@@ -159,6 +175,9 @@ func applyRecordFields(current Risk, in RecordFields) (Risk, recordDiff, recordD
 		before["owner_user_id"], after["owner_user_id"] = userIDValue(current.OwnerUserID), userIDValue(next.OwnerUserID)
 	}
 	diffString("instrument_reference", current.InstrumentReference, next.InstrumentReference)
+	if !sameRef(current.ExternalRef, next.ExternalRef) {
+		before["external_ref"], after["external_ref"] = refValue(current.ExternalRef), refValue(next.ExternalRef)
+	}
 	diffString("methodology", string(current.Methodology), string(next.Methodology))
 	if !sameTime(current.ReviewDueAt, next.ReviewDueAt) {
 		before["review_due_at"], after["review_due_at"] = current.ReviewDueAt, next.ReviewDueAt
@@ -192,9 +211,10 @@ func updateRecordTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, nex
 		InstrumentReference: next.InstrumentReference,
 		AcceptanceStatus:    NullAcceptanceStatus(next.AcceptanceStatus),
 		OwnerUserID:         pgUUIDPtr(next.OwnerUserID),
+		ExternalRef:         next.ExternalRef,
 	})
 	if err != nil {
-		return Risk{}, fmt.Errorf("update risk record: %w", err)
+		return Risk{}, mapExternalRefErr("update risk record", err)
 	}
 	if err := insertRiskAudit(ctx, q, tenantID, next.ID, actor, "fields_changed", before, after); err != nil {
 		return Risk{}, err
