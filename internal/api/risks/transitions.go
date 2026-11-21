@@ -104,7 +104,7 @@ func closureWireFrom(c risk.Closure) *closureWire {
 // ChangeTreatment handles PATCH /v1/risks/{id}/treatment.
 func (h *Handler) ChangeTreatment(w http.ResponseWriter, r *http.Request) {
 	var req changeTreatmentReq
-	h.runTransition(w, r, &req, false, func(ctx transitionCtx) (risk.Risk, error) {
+	h.runTransition(w, r, &req, func(ctx transitionCtx) (risk.Risk, error) {
 		if req.Treatment == "" {
 			return risk.Risk{}, inputErr("treatment is required")
 		}
@@ -119,7 +119,7 @@ func (h *Handler) ChangeTreatment(w http.ResponseWriter, r *http.Request) {
 // ProposeAcceptance handles PATCH /v1/risks/{id}/acceptance/propose.
 func (h *Handler) ProposeAcceptance(w http.ResponseWriter, r *http.Request) {
 	var req proposeAcceptanceReq
-	h.runTransition(w, r, &req, false, func(ctx transitionCtx) (risk.Risk, error) {
+	h.runTransition(w, r, &req, func(ctx transitionCtx) (risk.Risk, error) {
 		until, err := parseDate("proposed_until", req.ProposedUntil)
 		if err != nil {
 			return risk.Risk{}, err
@@ -138,7 +138,7 @@ func (h *Handler) ProposeAcceptance(w http.ResponseWriter, r *http.Request) {
 // ApproveAcceptance handles PATCH /v1/risks/{id}/acceptance/approve.
 func (h *Handler) ApproveAcceptance(w http.ResponseWriter, r *http.Request) {
 	var req approveAcceptanceReq
-	h.runTransition(w, r, &req, true, func(ctx transitionCtx) (risk.Risk, error) {
+	h.runTransition(w, r, &req, func(ctx transitionCtx) (risk.Risk, error) {
 		until, err := parseDate("accepted_until", req.AcceptedUntil)
 		if err != nil {
 			return risk.Risk{}, err
@@ -158,7 +158,7 @@ func (h *Handler) ApproveAcceptance(w http.ResponseWriter, r *http.Request) {
 // RejectAcceptance handles PATCH /v1/risks/{id}/acceptance/reject.
 func (h *Handler) RejectAcceptance(w http.ResponseWriter, r *http.Request) {
 	var req endAcceptanceReq
-	h.runTransition(w, r, &req, true, func(ctx transitionCtx) (risk.Risk, error) {
+	h.runTransition(w, r, &req, func(ctx transitionCtx) (risk.Risk, error) {
 		return h.store.RejectAcceptance(ctx.r.Context(), ctx.id, risk.EndAcceptanceInput{
 			Reason: req.Reason,
 			Actor:  credstore.PrincipalOf(ctx.cred),
@@ -169,7 +169,7 @@ func (h *Handler) RejectAcceptance(w http.ResponseWriter, r *http.Request) {
 // RevokeAcceptance handles PATCH /v1/risks/{id}/acceptance/revoke.
 func (h *Handler) RevokeAcceptance(w http.ResponseWriter, r *http.Request) {
 	var req endAcceptanceReq
-	h.runTransition(w, r, &req, true, func(ctx transitionCtx) (risk.Risk, error) {
+	h.runTransition(w, r, &req, func(ctx transitionCtx) (risk.Risk, error) {
 		return h.store.RevokeAcceptance(ctx.r.Context(), ctx.id, risk.EndAcceptanceInput{
 			Reason: req.Reason,
 			Actor:  credstore.PrincipalOf(ctx.cred),
@@ -180,7 +180,7 @@ func (h *Handler) RevokeAcceptance(w http.ResponseWriter, r *http.Request) {
 // CloseRisk handles PATCH /v1/risks/{id}/close (#2107).
 func (h *Handler) CloseRisk(w http.ResponseWriter, r *http.Request) {
 	var req closeReq
-	h.runTransition(w, r, &req, false, func(ctx transitionCtx) (risk.Risk, error) {
+	h.runTransition(w, r, &req, func(ctx transitionCtx) (risk.Risk, error) {
 		return h.store.Close(ctx.r.Context(), ctx.id, risk.CloseInput{
 			Reason: dbx.RiskClosureReason(strings.TrimSpace(req.Reason)),
 			Note:   req.Note,
@@ -192,7 +192,7 @@ func (h *Handler) CloseRisk(w http.ResponseWriter, r *http.Request) {
 // ReopenRisk handles PATCH /v1/risks/{id}/reopen (#2107).
 func (h *Handler) ReopenRisk(w http.ResponseWriter, r *http.Request) {
 	var req reopenReq
-	h.runTransition(w, r, &req, false, func(ctx transitionCtx) (risk.Risk, error) {
+	h.runTransition(w, r, &req, func(ctx transitionCtx) (risk.Risk, error) {
 		return h.store.Reopen(ctx.r.Context(), ctx.id, risk.ReopenInput{
 			Actor: credstore.PrincipalOf(ctx.cred),
 		})
@@ -205,10 +205,11 @@ type transitionCtx struct {
 	cred credstore.Credential
 }
 
-// runTransition is the shared shape of the five handlers: resolve the
-// tenant and credential, gate on the approver role when needsApprover,
-// parse the id and an optional JSON body into req, run fn and render.
-func (h *Handler) runTransition(w http.ResponseWriter, r *http.Request, req any, needsApprover bool, fn func(transitionCtx) (risk.Risk, error)) {
+// runTransition is the shared shape of the seven handlers: resolve the
+// tenant and credential, gate on the approver role (admin or grc_engineer
+// by live role, as OPA admits every risk lifecycle move: #2664), parse the
+// id and an optional JSON body into req, run fn and render.
+func (h *Handler) runTransition(w http.ResponseWriter, r *http.Request, req any, fn func(transitionCtx) (risk.Risk, error)) {
 	if _, ok := h.tenantContext(r); !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
@@ -218,7 +219,7 @@ func (h *Handler) runTransition(w http.ResponseWriter, r *http.Request, req any,
 		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
 		return
 	}
-	if needsApprover && !authz.IsTenantApprover(cred) {
+	if !authz.IsTenantApprover(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
 		return
 	}
