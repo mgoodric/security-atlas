@@ -257,7 +257,10 @@ func setupWithLiveRoles(t *testing.T) setupResult {
 	return setupWith(t, true)
 }
 
-func setupWith(t *testing.T, liveRoles bool) setupResult {
+// setupWith builds the harness. Each attach runs on the server before its
+// router is built, for a test that needs another store wired in (the
+// policy sync tests attach the API-key store).
+func setupWith(t *testing.T, liveRoles bool, attach ...func(*api.Server)) setupResult {
 	t.Helper()
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -294,6 +297,9 @@ func setupWith(t *testing.T, liveRoles bool) setupResult {
 	approverClaims.Subject = uuid.NewString()
 	approverBearer := apiServer.IssueTestJWT(t, approverClaims)
 
+	for _, a := range attach {
+		a(apiServer)
+	}
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests nil")

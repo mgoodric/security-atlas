@@ -3057,6 +3057,12 @@ type Policy struct {
 	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
 	SelfApproved                bool               `json:"self_approved"`
 	DraftEditors                []string           `json:"draft_editors"`
+	SyncSite                    *string            `json:"sync_site"`
+	SyncSpace                   *string            `json:"sync_space"`
+	SyncPageID                  *string            `json:"sync_page_id"`
+	SyncedBodySha256            *string            `json:"synced_body_sha256"`
+	SyncedBy                    *string            `json:"synced_by"`
+	SyncedAt                    pgtype.Timestamptz `json:"synced_at"`
 }
 
 type PolicyAcknowledgment struct {

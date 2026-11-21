@@ -73,6 +73,11 @@ const (
 	// LockExceptionIdempotencyKey). Key: hashtext(tenant || '|' ||
 	// requested_by || '|' || idempotency_key).
 	ExceptionIdempotencyKey Namespace = 12
+	// PolicySyncSource serialises POST /v1/policies:sync runs for one
+	// source, so overlapping runs never create a page twice (#2850,
+	// LockPolicySyncSource). Key: hashtext(tenant || '|' || site || '|' ||
+	// space).
+	PolicySyncSource Namespace = 13
 )
 
 // Keys within IntegrationTestSeed. Distinct values; never reuse one.
@@ -106,6 +111,7 @@ func All() []Entry {
 		{FrameworkScopeFreeze, "framework_scope_freeze"},
 		{TenantSSOConfig, "tenant_sso_config"},
 		{ExceptionIdempotencyKey, "exception_idempotency_key"},
+		{PolicySyncSource, "policy_sync_source"},
 	}
 }
 

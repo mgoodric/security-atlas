@@ -44,9 +44,10 @@ const DefaultRole = "unassigned"
 
 const dateLayout = "2006-01-02"
 
-// frontMatter is the accepted key set. Dates are strings so a quoted and
+// Fields is the accepted key set: a file's YAML front matter, or a synced
+// page's properties (FromPage, #2850). Dates are strings so a quoted and
 // an unquoted YAML date parse the same way.
-type frontMatter struct {
+type Fields struct {
 	Title                       string   `yaml:"title"`
 	Version                     string   `yaml:"version"`
 	ApprovedByName              string   `yaml:"approved_by_name"`
@@ -60,6 +61,18 @@ type frontMatter struct {
 	AcknowledgmentRequiredRoles []string `yaml:"acknowledgment_required_roles"`
 }
 
+// labels name the parts of the input in error reports.
+type labels struct {
+	field string // what holds the fields
+	body  string // what holds the policy text
+	name  string // what name is
+}
+
+var (
+	fileLabels = labels{field: "front matter", body: "policy text (the Markdown after the front matter)", name: "file name"}
+	pageLabels = labels{field: "page property", body: "page body", name: "page id"}
+)
+
 // Parse turns one file into an import input. name is the file name, kept
 // for the audit record and error reports. Every error names the reason.
 func Parse(name string, content []byte) (policy.ImportInput, error) {
@@ -67,7 +80,7 @@ func Parse(name string, content []byte) (policy.ImportInput, error) {
 	if err != nil {
 		return policy.ImportInput{}, err
 	}
-	var meta frontMatter
+	var meta Fields
 	dec := yaml.NewDecoder(bytes.NewReader(fm))
 	dec.KnownFields(true)
 	if err := dec.Decode(&meta); err != nil {
@@ -76,7 +89,19 @@ func Parse(name string, content []byte) (policy.ImportInput, error) {
 		}
 		return policy.ImportInput{}, fmt.Errorf("front matter: %w", err)
 	}
+	return build(name, meta, body, fileLabels)
+}
 
+// FromPage turns one synced page into an import input (#2850) under the
+// same rules as Parse: the same required fields, date format, length caps,
+// role defaults and source URL check. name is the page id; f carries the
+// page's title and URL as Title and SourceURL beside its properties.
+func FromPage(name string, f Fields, body string) (policy.ImportInput, error) {
+	return build(name, f, body, pageLabels)
+}
+
+func build(name string, meta Fields, body string, l labels) (policy.ImportInput, error) {
+	var err error
 	in := policy.ImportInput{
 		SourceFile:                  name,
 		Title:                       strings.TrimSpace(meta.Title),
@@ -96,20 +121,20 @@ func Parse(name string, content []byte) (policy.ImportInput, error) {
 		{"effective_date", meta.EffectiveDate},
 	} {
 		if strings.TrimSpace(req.val) == "" {
-			return policy.ImportInput{}, fmt.Errorf("missing required front matter %q", req.key)
+			return policy.ImportInput{}, fmt.Errorf("missing required %s %q", l.field, req.key)
 		}
 	}
 	for _, f := range []struct{ key, val string }{
 		{"title", in.Title},
 		{"approved_by_name", in.HistoricalApproverName},
-		{"file name", name},
+		{l.name, name},
 	} {
 		if len(f.val) > policy.MaxImportFieldLen {
 			return policy.ImportInput{}, fmt.Errorf("%s is longer than %d characters", f.key, policy.MaxImportFieldLen)
 		}
 	}
 	if in.BodyMd == "" {
-		return policy.ImportInput{}, errors.New("policy text (the Markdown after the front matter) is empty")
+		return policy.ImportInput{}, fmt.Errorf("%s is empty", l.body)
 	}
 	if in.HistoricalApprovedAt, err = parseDate("approved_at", meta.ApprovedAt); err != nil {
 		return policy.ImportInput{}, err
