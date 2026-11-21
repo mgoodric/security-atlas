@@ -168,11 +168,12 @@ func TestPolicySyncMigration(t *testing.T) {
 
 	// Clear every synced row, other tests' included (the transaction rolls
 	// back). policy_audit_log is append-only, so its trigger is lifted for
-	// the delete.
+	// the delete. controls_updated rows (#2852) are written only on synced
+	// policies, and the down migration's action CHECK predates them.
 	for _, q := range []string{
 		`DELETE FROM policies WHERE source_attribution = 'synced'`,
 		`ALTER TABLE policy_audit_log DISABLE TRIGGER policy_audit_log_no_update_trg`,
-		`DELETE FROM policy_audit_log WHERE action = 'synced'`,
+		`DELETE FROM policy_audit_log WHERE action IN ('synced', 'controls_updated')`,
 		`ALTER TABLE policy_audit_log ENABLE TRIGGER policy_audit_log_no_update_trg`,
 	} {
 		if _, err := tx.Exec(ctx, q); err != nil {

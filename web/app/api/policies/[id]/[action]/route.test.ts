@@ -101,9 +101,15 @@ describe("policy write BFF routes (#2116)", () => {
       ["approve", "PATCH"],
       ["publish", "POST"],
       ["acknowledge", "POST"],
+      ["controls", "PATCH"],
     ]) {
       const calls = captureFetch(200, { policy: { id: ID } });
-      const body = action === "publish" ? { new_version: "1.0" } : undefined;
+      const body =
+        action === "publish"
+          ? { new_version: "1.0" }
+          : action === "controls"
+            ? { linked_control_ids: [ID] }
+            : undefined;
       const res = await transition(req("POST", body), {
         params: Promise.resolve({ id: ID, action }),
       });
