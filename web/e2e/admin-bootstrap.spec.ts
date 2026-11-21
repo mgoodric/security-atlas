@@ -159,63 +159,62 @@ test.describe("admin bootstrap", () => {
     }
   });
 
-  // The e2e stack (the CI Playwright job and local bring-up) sets no
-  // ATLAS_OIDC_SECRET_KEY, so PATCH /v1/admin/sso refuses any client
-  // secret with 503 and a first config cannot be saved (#2034). #2773.
-  test.fixme(
-    "SSO config saves, re-renders without the secret, and keeps it on an empty re-save",
-    async ({ page }) => {
-      await signInAsAdmin(page);
-      await page.goto("/admin/sso");
+  // Needs ATLAS_OIDC_SECRET_KEY on the atlas server: without it
+  // PATCH /v1/admin/sso refuses any client secret with 503 (#2034). The
+  // CI Playwright jobs generate a throwaway key (#2773).
+  test("SSO config saves, re-renders without the secret, and keeps it on an empty re-save", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    await page.goto("/admin/sso");
 
-      // 3b. Fill the OIDC configuration form and submit (slice 063).
-      await page.fill("input#sso-issuer-url", "https://idp.example.com", {
-        timeout: 30_000,
-      });
-      await page.fill("input#sso-client-id", "platform-rp-client");
-      await page.fill("input#sso-client-secret", "test-secret-placeholder");
-      await page.fill(
-        "input#sso-redirect-url",
-        "https://your-deployment.example/auth/oidc/callback",
-      );
-      await page.fill("input#sso-allowed-domains", "example.com");
-      await page.getByTestId("sso-save-button").click();
-      await expect(page.getByTestId("sso-save-success")).toBeVisible();
+    // 3b. Fill the OIDC configuration form and submit (slice 063).
+    await page.fill("input#sso-issuer-url", "https://idp.example.com", {
+      timeout: 30_000,
+    });
+    await page.fill("input#sso-client-id", "platform-rp-client");
+    await page.fill("input#sso-client-secret", "test-secret-placeholder");
+    await page.fill(
+      "input#sso-redirect-url",
+      "https://your-deployment.example/auth/oidc/callback",
+    );
+    await page.fill("input#sso-allowed-domains", "example.com");
+    await page.getByTestId("sso-save-button").click();
+    await expect(page.getByTestId("sso-save-success")).toBeVisible();
 
-      // 3c. Reload: the GET re-render shows the saved fields and does NOT
-      //     show client_secret (slice 034 AC-9 / write-once).
-      await page.reload();
-      await expect(page.locator("input#sso-issuer-url")).toHaveValue(
-        "https://idp.example.com",
-        { timeout: 30_000 },
-      );
-      await expect(page.locator("input#sso-client-id")).toHaveValue(
-        "platform-rp-client",
-      );
-      await expect(page.locator("input#sso-redirect-url")).toHaveValue(
-        "https://your-deployment.example/auth/oidc/callback",
-      );
-      await expect(page.locator("input#sso-allowed-domains")).toHaveValue(
-        "example.com",
-      );
-      // The backend never returns the secret; the UI never re-renders it.
-      await expect(page.locator("input#sso-client-secret")).toHaveValue("");
+    // 3c. Reload: the GET re-render shows the saved fields and does NOT
+    //     show client_secret (slice 034 AC-9 / write-once).
+    await page.reload();
+    await expect(page.locator("input#sso-issuer-url")).toHaveValue(
+      "https://idp.example.com",
+      { timeout: 30_000 },
+    );
+    await expect(page.locator("input#sso-client-id")).toHaveValue(
+      "platform-rp-client",
+    );
+    await expect(page.locator("input#sso-redirect-url")).toHaveValue(
+      "https://your-deployment.example/auth/oidc/callback",
+    );
+    await expect(page.locator("input#sso-allowed-domains")).toHaveValue(
+      "example.com",
+    );
+    // The backend never returns the secret; the UI never re-renders it.
+    await expect(page.locator("input#sso-client-secret")).toHaveValue("");
 
-      // 3d. Re-submit with an empty client_secret — the slice 062 contract
-      //     treats this as "leave existing", so the save must succeed.
-      await page.fill(
-        "input#sso-allowed-domains",
-        "example.com, sub.example.com",
-      );
-      await page.getByTestId("sso-save-button").click();
-      await expect(page.getByTestId("sso-save-success")).toBeVisible();
-      await page.reload();
-      await expect(page.locator("input#sso-allowed-domains")).toHaveValue(
-        "example.com, sub.example.com",
-        { timeout: 30_000 },
-      );
-    },
-  );
+    // 3d. Re-submit with an empty client_secret — the slice 062 contract
+    //     treats this as "leave existing", so the save must succeed.
+    await page.fill(
+      "input#sso-allowed-domains",
+      "example.com, sub.example.com",
+    );
+    await page.getByTestId("sso-save-button").click();
+    await expect(page.getByTestId("sso-save-success")).toBeVisible();
+    await page.reload();
+    await expect(page.locator("input#sso-allowed-domains")).toHaveValue(
+      "example.com, sub.example.com",
+      { timeout: 30_000 },
+    );
+  });
 
   test("non-admin sees 403 on /admin", async ({ page }) => {
     await signInAsViewer(page);
