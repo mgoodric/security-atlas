@@ -14,6 +14,12 @@
 // GET its label's own role grants (D1 in the decisions log). Nothing may
 // gain a write.
 //
+// #2596 replaced the control_owner fallback: an unbound key now derives
+// exactly the canonical roles its label names, and a free-text entry derives
+// nothing. The principals it changes (relabels) must decide as those roles
+// do; an admin or grc_engineer label widens past control_owner (Matt,
+// 2026-11-20), a free-text one narrows.
+//
 // Keys bound to a user are no longer here: #2431 caps them at their label,
 // and TestDecide2431_BoundKeyRoleMatrix covers them.
 //
@@ -74,10 +80,11 @@ func TestDecide2402_APIKeyRoleMatrix(t *testing.T) {
 	}
 
 	type principal struct {
-		name    string
-		cred    credstore.Credential
-		narrows bool // a viewer/auditor-only key: may lose control_owner-only grants
-		keepsCO bool // its owner's live roles still write, so writes stay open
+		name     string
+		cred     credstore.Credential
+		narrows  bool // a viewer/auditor-only key: may lose control_owner-only grants
+		keepsCO  bool // its owner's live roles still write, so writes stay open
+		relabels bool // #2596: derives its label's canonical roles, not control_owner
 	}
 	var principals []principal
 	for _, r := range authz.CanonicalRoles() {
@@ -85,21 +92,23 @@ func TestDecide2402_APIKeyRoleMatrix(t *testing.T) {
 		label := string(r)
 		// Keys bound to a user moved to the #2431 matrix
 		// (bound_key_ceiling_2431_integration_test.go), which caps them.
-		principals = append(principals,
-			principal{"unbound key " + label, unbound("key_u2402_"+label, label), ro, false},
-		)
+		principals = append(principals, principal{
+			"unbound key " + label, unbound("key_u2402_"+label, label), ro, false,
+			r == authz.RoleAdmin || r == authz.RoleGRCEngineer,
+		})
 	}
 	principals = append(principals,
-		principal{"unbound key viewer+auditor", unbound("key_va2402", "viewer", "auditor"), true, false},
-		principal{"unbound key viewer+owner label", unbound("key_vl2402", "viewer", "platform-eng"), false, false},
-		principal{"unbound key auditor+control_owner", unbound("key_ac2402", "auditor", "control_owner"), false, false},
-		principal{"unbound key, no label", unbound("key_e2402"), false, false},
-		principal{"admin key viewer", credstore.Credential{ID: "key_ad2402", TenantID: tenant, UserID: "key_ad2402", IsAdmin: true, OwnerRoles: []string{"viewer"}}, false, false},
-		principal{"approver key auditor", credstore.Credential{ID: "key_ap2402", TenantID: tenant, UserID: "key_ap2402", IsApprover: true, OwnerRoles: []string{"auditor"}}, false, false},
-		principal{"JWT viewer (#2381, unchanged here)", credstore.Credential{ID: "jwt:v2402", TenantID: tenant, UserID: "user:" + seedUser(authz.RoleViewer).String(), OwnerRoles: []string{"viewer"}}, false, false},
+		principal{"unbound key viewer+auditor", unbound("key_va2402", "viewer", "auditor"), true, false, false},
+		principal{"unbound key viewer+owner label", unbound("key_vl2402", "viewer", "platform-eng"), false, false, true},
+		principal{"unbound key auditor+control_owner", unbound("key_ac2402", "auditor", "control_owner"), false, false, true},
+		principal{"unbound key, owner label", unbound("key_ol2402", "platform-eng"), false, false, true},
+		principal{"unbound key, no label", unbound("key_e2402"), false, false, false},
+		principal{"admin key viewer", credstore.Credential{ID: "key_ad2402", TenantID: tenant, UserID: "key_ad2402", IsAdmin: true, OwnerRoles: []string{"viewer"}}, false, false, false},
+		principal{"approver key auditor", credstore.Credential{ID: "key_ap2402", TenantID: tenant, UserID: "key_ap2402", IsApprover: true, OwnerRoles: []string{"auditor"}}, false, false, false},
+		principal{"JWT viewer (#2381, unchanged here)", credstore.Credential{ID: "jwt:v2402", TenantID: tenant, UserID: "user:" + seedUser(authz.RoleViewer).String(), OwnerRoles: []string{"viewer"}}, false, false, false},
 	)
 
-	narrowed, gained := 0, 0
+	narrowed, gained, relabelled := 0, 0, 0
 	for _, p := range principals {
 		unboundKey := p.cred.UserID == p.cred.ID
 		lost := 0
@@ -117,6 +126,16 @@ func TestDecide2402_APIKeyRoleMatrix(t *testing.T) {
 			}
 			co := decide2239(t, ctx, coOnly, p.cred, rt, []authz.Role{authz.RoleControlOwner})
 			switch {
+			case p.relabels:
+				// #2596 (Matt, 2026-11-20): the key acts as exactly the
+				// canonical roles its label names, as the handler gates
+				// count them. An admin or grc_engineer label widens past
+				// control_owner; a free-text entry derives nothing.
+				if exp := decide2239(t, ctx, coOnly, p.cred, rt, canonical2596(p.cred)); after != exp {
+					t.Errorf("%s: %s %s allow=%v, want %v (roles %v)", p.name, rt.method, rt.path, after, exp, canonical2596(p.cred))
+				}
+				relabelled++
+				t.Logf("%s: %s %s before=%v after=%v (#2596: label roles %v)", p.name, rt.method, rt.path, before, after, canonical2596(p.cred))
 			case !p.narrows:
 				t.Errorf("%s: %s %s changed %v -> %v; #2402 must not touch this principal", p.name, rt.method, rt.path, before, after)
 			case after && rt.method == http.MethodGet && unboundKey && decide2239(t, ctx, coOnly, p.cred, rt, labelRoles(p.cred)):
@@ -147,7 +166,24 @@ func TestDecide2402_APIKeyRoleMatrix(t *testing.T) {
 	if narrowed == 0 {
 		t.Error("no key lost anything; viewer/auditor keys still derive control_owner")
 	}
-	t.Logf("%d principals narrowed; %d label-role reads gained by unbound keys", narrowed, gained)
+	if relabelled == 0 {
+		t.Error("no #2596 principal changed; labels still derive control_owner")
+	}
+	t.Logf("%d principals narrowed; %d label-role reads gained by unbound keys; %d decisions changed by #2596", narrowed, gained, relabelled)
+}
+
+// canonical2596 is the role set an unbound key derives since #2596: the
+// canonical roles its label names, free text dropped, written out
+// independently of the code under test. Empty, not nil, so decide2239 uses
+// it rather than BuildInput's.
+func canonical2596(c credstore.Credential) []authz.Role {
+	out := []authz.Role{}
+	for _, l := range c.OwnerRoles {
+		if authz.IsCanonical(authz.Role(l)) {
+			out = append(out, authz.Role(l))
+		}
+	}
+	return out
 }
 
 // labelRoles is the role set an unbound key's viewer/auditor label names.
