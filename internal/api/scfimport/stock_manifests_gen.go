@@ -78,6 +78,7 @@ var stockManifestHashes = map[string]string{
 	"4c2caeba49cdf95c330c0f40ffdd3f92dc9d2cc23d47f92e56c9775f5f8f6dc8": "soc2_cc1_5_accountability_acknowledgment",
 	"4ccff31ea607c7251a60bc55f7ce28b0a0c21fd7e7faa212f9e8565132295cf7": "soc2_cc6_3_periodic_access_review",
 	"4ce8cd199df26d90f200e225f8cf203bee26422a3dedc67feda58f0692f934e6": "soc2_cc1_4_competence_training",
+	"4cfb4c0b26ed88b464e85b8bcc1083e6d5077136aafe40d19b3eea85d0d06ddb": "soc2_cc6_6_boundary_protection",
 	"4d16ce7dd37b273878ed514f25eb4e54cbdf46656925769ac36685b66c13779d": "soc2_cc5_1_control_selection",
 	"4e07597cde42da366e572b186ceaab89f5f3c185dc7b1da0b1b5b8daa498d27e": "soc2_cc1_1_code_of_conduct",
 	"4f887020dd5d9a41126292ca58c46ce28fae50d7992d8b5a1625713d560fe952": "soc2_cc6_6_boundary_protection",
