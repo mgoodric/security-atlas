@@ -200,9 +200,9 @@ evidence_queries:
 
 A Rego evidence query lives in `package evidence.query` and assigns `result`
 (`pass | fail | na | inconclusive`). Its only input is
-`{records: [{result}]}`: the per-record verdicts the connector
-already decided. It never sees the payload; use the SQL or JSON-path languages
-to read payload fields.
+`{records: [{result, observed_at}]}`: the per-record verdicts the connector
+already decided, each with its RFC 3339 observation time. It never sees the
+payload; use the SQL or JSON-path languages to read payload fields.
 
 A minimal **manual** control:
 

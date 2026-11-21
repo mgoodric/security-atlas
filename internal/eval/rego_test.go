@@ -12,9 +12,93 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/open-policy-agent/opa/v1/rego"
 )
+
+// ===== ADR 0028 decision 3: Rego sees each record's real observed_at =====
+
+// freshnessPolicy passes only when every record was observed in the last
+// 24 h. It depends on observed_at alone, so it fails on the zero time.
+const freshnessPolicy = `
+package evidence.query
+import rego.v1
+default result := "fail"
+result := "pass" if {
+	count(input.records) > 0
+	every r in input.records {
+		r.result == "pass"
+		time.now_ns() - time.parse_rfc3339_ns(r.observed_at) < 24 * 60 * 60 * 1000000000
+	}
+}
+`
+
+func TestEvalRegoQuery_ObservedAtFreshRecordsPass(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	records := []inWindowRecord{
+		{result: "pass", observedAt: now.Add(-1 * time.Hour)},
+		{result: "pass", observedAt: now.Add(-23 * time.Hour)},
+	}
+	got, err := evalRegoQuery(context.Background(), freshnessPolicy, records)
+	if err != nil {
+		t.Fatalf("evalRegoQuery: %v", err)
+	}
+	if got != "pass" {
+		t.Fatalf("evalRegoQuery fresh = %q, want pass", got)
+	}
+}
+
+func TestEvalRegoQuery_ObservedAtStaleRecordFails(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	records := []inWindowRecord{
+		{result: "pass", observedAt: now.Add(-1 * time.Hour)},
+		{result: "pass", observedAt: now.Add(-48 * time.Hour)},
+	}
+	got, err := evalRegoQuery(context.Background(), freshnessPolicy, records)
+	if err != nil {
+		t.Fatalf("evalRegoQuery: %v", err)
+	}
+	if got != "fail" {
+		t.Fatalf("evalRegoQuery stale = %q, want fail", got)
+	}
+}
+
+// TestEvalRegoQuery_NoPayloadFieldReachesRego pins the input shape: each
+// record carries exactly {result, observed_at}, even when the engine holds
+// a payload, kind, id and ingested_at for it (ADR 0028 decision 2).
+func TestEvalRegoQuery_NoPayloadFieldReachesRego(t *testing.T) {
+	t.Parallel()
+	policy := `
+package evidence.query
+import rego.v1
+default result := "fail"
+result := "pass" if {
+	count(input.records) == 1
+	object.keys(input) == {"records"}
+	every r in input.records {
+		object.keys(r) == {"result", "observed_at"}
+	}
+}
+`
+	records := []inWindowRecord{{
+		result:     "pass",
+		observedAt: time.Now(),
+		payload:    []byte(`{"secret":"tenant-content","result":"fail"}`),
+		kind:       "osquery.host_posture.v1",
+		ingestedAt: time.Now(),
+		id:         "00000000-0000-0000-0000-000000000001",
+	}}
+	got, err := evalRegoQuery(context.Background(), policy, records)
+	if err != nil {
+		t.Fatalf("evalRegoQuery: %v", err)
+	}
+	if got != "pass" {
+		t.Fatalf("Rego input record keys are not exactly {result, observed_at}: got %q", got)
+	}
+}
 
 // ===== ISC-19: a Rego evidence query evaluates with input = records only =====
 
