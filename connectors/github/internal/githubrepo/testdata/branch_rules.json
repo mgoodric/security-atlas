@@ -1,0 +1,32 @@
+[
+  {
+    "type": "commit_message_pattern",
+    "ruleset_source_type": "Repository",
+    "ruleset_source": "monalisa/my-repo",
+    "ruleset_id": 42,
+    "parameters": {
+      "operator": "starts_with",
+      "pattern": "issue"
+    }
+  },
+  {
+    "type": "pull_request",
+    "ruleset_source_type": "Organization",
+    "ruleset_source": "my-org",
+    "ruleset_id": 73,
+    "parameters": {
+      "allowed_merge_methods": ["merge", "squash", "rebase"],
+      "dismiss_stale_reviews_on_push": true,
+      "require_code_owner_review": true,
+      "require_last_push_approval": false,
+      "required_approving_review_count": 2,
+      "required_review_thread_resolution": false
+    }
+  },
+  {
+    "type": "required_signatures",
+    "ruleset_source_type": "Organization",
+    "ruleset_source": "my-org",
+    "ruleset_id": 73
+  }
+]

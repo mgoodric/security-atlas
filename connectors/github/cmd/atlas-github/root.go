@@ -21,11 +21,11 @@ const ConnectorName = "github-connector"
 
 // SupportedKinds is the canonical list of evidence kinds slice 044 emits.
 // Three kinds:
-//   - github.repo_protection.v1 (schema shipped slice 014)
+//   - github.repo_protection.v2 (v1 schema shipped slice 014; v2 #2925)
 //   - github.audit_event.v1     (schema added this slice)
 //   - github.scim_user.v1       (schema added this slice)
 var SupportedKinds = []string{
-	"github.repo_protection.v1",
+	"github.repo_protection.v2",
 	"github.audit_event.v1",
 	"github.scim_user.v1",
 }
@@ -117,7 +117,7 @@ func sdkOpts() []sdk.Option {
 const longDescription = `security-atlas GitHub connector
 
 Emits three evidence kinds:
-  - github.repo_protection.v1 (run subcommand, pull)
+  - github.repo_protection.v2 (run subcommand, pull)
   - github.scim_user.v1       (run subcommand, pull)
   - github.audit_event.v1     (webhook subcommand, push)
 

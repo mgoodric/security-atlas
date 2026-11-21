@@ -93,6 +93,9 @@ func DefaultSeed() []KindVersion {
 		// #2815: the AWS connector pushes 1.1.0 (adds kms_key_id + reason).
 		{Kind: "aws.s3.bucket_encryption_state.v1", Version: "1.1.0"},
 		{Kind: "github.repo_protection.v1", Version: "1.0.0"},
+		// #2925: the GitHub connector pushes v2 (stable repo_id, rulesets
+		// merged in, unread protection fields omitted, not zero).
+		{Kind: "github.repo_protection.v2", Version: "2.0.0"},
 		{Kind: "github.audit_event.v1", Version: "1.0.0"},
 		{Kind: "github.scim_user.v1", Version: "1.0.0"},
 		{Kind: "okta.mfa_policy.v1", Version: "1.0.0"},

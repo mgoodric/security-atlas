@@ -406,7 +406,7 @@ func TestNewScopesCmd_RendersTable(t *testing.T) {
 	}
 	// At least one documented scope name (from githubauth.DocumentedScopes)
 	// must render. "Repository: Administration" gates the
-	// github.repo_protection.v1 evidence kind.
+	// github.repo_protection.v2 evidence kind.
 	if !strings.Contains(out, "Repository: Administration") {
 		t.Errorf("scopes output missing Repository: Administration entry: %q", out)
 	}
@@ -554,6 +554,7 @@ func TestBuildRepoProtectionRecord_AllResults(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			state := githubrepo.ProtectionState{
+				RepoID:        7,
 				RepoFullName:  "example/repo",
 				DefaultBranch: "main",
 				Result:        tc.in,
@@ -566,8 +567,8 @@ func TestBuildRepoProtectionRecord_AllResults(t *testing.T) {
 			if rec.GetResult() != tc.want {
 				t.Errorf("result = %v; want %v", rec.GetResult(), tc.want)
 			}
-			if rec.GetEvidenceKind() != "github.repo_protection.v1" {
-				t.Errorf("kind = %q; want github.repo_protection.v1", rec.GetEvidenceKind())
+			if rec.GetEvidenceKind() != "github.repo_protection.v2" {
+				t.Errorf("kind = %q; want github.repo_protection.v2", rec.GetEvidenceKind())
 			}
 		})
 	}

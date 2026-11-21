@@ -20,6 +20,14 @@ import (
 	"github.com/mgoodric/security-atlas/connectors/github/internal/idem"
 )
 
+// The kind and schema version buildRepoProtectionRecord pushes. v2 carries
+// the stable repo_id and omits protection fields the connector did not
+// read (#2925).
+const (
+	repoProtectionKind          = "github.repo_protection.v2"
+	repoProtectionSchemaVersion = "2.0.0"
+)
+
 // Package-level seams (slice 308): doRun + doWebhook reach through
 // these function variables so tests can swap in fakes for githubauth +
 // githubrepo + githubscim + sdk without hitting real GitHub or a real
@@ -73,7 +81,7 @@ func newRunCmd() *cobra.Command {
 and push to the platform.
 
 PAT scopes required:
-  - Repository: Administration: Read  (gates github.repo_protection.v1)
+  - Repository: Administration: Read  (gates github.repo_protection.v2)
   - Repository: Metadata:       Read
   - Organization: Members:      Read  (gates github.scim_user.v1)
   - Organization: Webhooks:     Read
@@ -103,9 +111,9 @@ wires the JWT signer. Use a PAT for now.`,
 	cmd.Flags().BoolVar(&f.useApp, "use-app", false, "use GitHub App auth instead of PAT (slice 045)")
 	cmd.Flags().StringVar(&f.appID, "app-id", "", "GitHub App id (env: GITHUB_APP_ID)")
 	cmd.Flags().StringVar(&f.appPrivateKey, "app-private-key", "", "GitHub App PEM private key (env: GITHUB_APP_PRIVATE_KEY)")
-	cmd.Flags().StringVar(&f.repoProtControl, "repo-protection-control", "scf:TDA-06", "control_id to attach to github.repo_protection.v1 records")
+	cmd.Flags().StringVar(&f.repoProtControl, "repo-protection-control", "scf:TDA-06", "control_id to attach to github.repo_protection.v2 records")
 	cmd.Flags().StringVar(&f.scimUserControl, "scim-user-control", "scf:IAC-22", "control_id to attach to github.scim_user.v1 records")
-	cmd.Flags().BoolVar(&f.skipRepoProt, "skip-repo-protection", false, "skip github.repo_protection.v1 pull")
+	cmd.Flags().BoolVar(&f.skipRepoProt, "skip-repo-protection", false, "skip github.repo_protection.v2 pull")
 	cmd.Flags().BoolVar(&f.skipSCIM, "skip-scim", false, "skip github.scim_user.v1 pull")
 	return cmd
 }
@@ -182,22 +190,40 @@ func doRun(ctx context.Context, f runFlags) error {
 
 func buildRepoProtectionRecord(s githubrepo.ProtectionState, org, env, controlID string) (*evidencev1.EvidenceRecord, error) {
 	now := s.ObservedAt.UTC().Truncate(time.Hour)
-	payload, err := structpb.NewStruct(map[string]any{
-		"repo_full_name":             s.RepoFullName,
-		"default_branch":             s.DefaultBranch,
-		"required_reviews":           float64(s.RequiredReviews),
+	// A field the connector did not read is omitted, never pushed as 0 or
+	// false (#2925).
+	pm := map[string]any{
+		"repo_id":        float64(s.RepoID),
+		"repo_full_name": s.RepoFullName,
+		"default_branch": s.DefaultBranch,
+	}
+	if s.RequiredReviews != nil {
+		pm["required_reviews"] = float64(*s.RequiredReviews)
+	}
+	for k, v := range map[string]*bool{
 		"require_code_owner_reviews": s.RequireCodeOwnerReviews,
 		"require_signed_commits":     s.RequireSignedCommits,
 		"require_linear_history":     s.RequireLinearHistory,
 		"enforce_admins":             s.EnforceAdmins,
-	})
+	} {
+		if v != nil {
+			pm[k] = *v
+		}
+	}
+	if s.ProtectionSource != "" {
+		pm["protection_source"] = s.ProtectionSource
+	}
+	if s.Reason != "" {
+		pm["reason"] = s.Reason
+	}
+	payload, err := structpb.NewStruct(pm)
 	if err != nil {
 		return nil, err
 	}
 	return &evidencev1.EvidenceRecord{
-		IdempotencyKey: idem.RepoProtectionKey(s.RepoFullName, now),
-		EvidenceKind:   "github.repo_protection.v1",
-		SchemaVersion:  "1.0.0",
+		IdempotencyKey: idem.RepoProtectionKey(s.RepoID, now),
+		EvidenceKind:   repoProtectionKind,
+		SchemaVersion:  repoProtectionSchemaVersion,
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{org}},

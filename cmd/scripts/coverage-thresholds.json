@@ -95,7 +95,7 @@
     "connectors/gcp/internal/idem": 98,
     "connectors/github/cmd/atlas-github": 84,
     "connectors/github/internal/githubauth": 88,
-    "connectors/github/internal/githubrepo": 73,
+    "connectors/github/internal/githubrepo": 88,
     "connectors/github/internal/githubscim": 74,
     "connectors/github/internal/githubwebhook": 83,
     "connectors/github/internal/idem": 98,
