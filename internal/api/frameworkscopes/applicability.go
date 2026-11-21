@@ -302,9 +302,8 @@ func (h *Handler) ApplicabilityAsOf(w http.ResponseWriter, r *http.Request) {
 
 // SetApplicability — PUT /v1/framework-scopes/{id}/applicability/{requirement_id}.
 func (h *Handler) SetApplicability(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
