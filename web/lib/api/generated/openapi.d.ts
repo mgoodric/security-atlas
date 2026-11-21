@@ -2980,7 +2980,7 @@ export interface paths {
         /** GET /v1/exceptions — the tenant's exceptions, filterable by ?status= and ?control_id= (#2140) */
         get: operations["get-v1-exceptions"];
         put?: never;
-        /** POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618) */
+        /** POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618); a replay (header Idempotent-Replayed set to true) returns the exception as it is now, not as first filed, so it may already be approved, denied or active (#2714) */
         post: operations["post-v1-exceptions"];
         delete?: never;
         options?: never;

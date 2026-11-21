@@ -17,11 +17,13 @@ Decision recorded on the ticket ([comment](https://github.com/mgoodric/security-
 | eval ingest subscriber                     | security awareness roster sync |
 | freshness/drift refresh subscriber         | control import sweeper         |
 | risk residual subscriber                   | digest scheduler               |
-| personnel security worker-event subscriber |                                |
+| personnel security worker-event subscriber | exception idempotency sweeper¹ |
 | eval scheduler                             |                                |
 | freshness/drift scheduler                  |                                |
 | metrics scheduler                          |                                |
 | staleness scheduler                        |                                |
+
+¹ Added by #2714 after the decision, by its rule: it is a sweeper, so it is non-fatal. It was not in the list Matt decided on.
 
 The fatal set is what serves requests or keeps the evidence and control-state read models current. A process missing one of those is wrong in a way the operator cannot see. The non-fatal set sends notifications or tidies up, and a missed sweep is retried on the next tick.
 
@@ -33,7 +35,7 @@ The classification sits at the call site in `main.go` (`run.fatal` vs `run.nonFa
 
 ## D3 — "Back off" is the loops' existing behaviour
 
-Every non-fatal loop's `Run` already logs a failed sweep and waits for its next tick (`internal/exception/expiry.go`, `internal/decision/overdue.go`, `internal/personnelsecurity/overdue.go`, `internal/securityawareness/rostersync.go`, `internal/controlimport/sweep.go`, `internal/notify/scheduler/scheduler.go`); each returns nil on context cancel. No retry wrapper was added around them. If one ever returns an error, it is recorded and printed at exit, and nothing else stops.
+Every non-fatal loop's `Run` already logs a failed sweep and waits for its next tick (`internal/exception/expiry.go`, `internal/decision/overdue.go`, `internal/personnelsecurity/overdue.go`, `internal/securityawareness/rostersync.go`, `internal/controlimport/sweep.go`, `internal/exception/idempotency_sweep.go`, `internal/notify/scheduler/scheduler.go`); each returns nil on context cancel. No retry wrapper was added around them. If one ever returns an error, it is recorded and printed at exit, and nothing else stops.
 
 ## D4 — Backup and restore-verification are unchanged
 
