@@ -68,6 +68,41 @@ func TestRefusePolicySyncKeys_FailsClosedOnLookupError(t *testing.T) {
 	}
 }
 
+// #2850: on the sync path the gate is the authentication. A request with
+// no API-key bearer (none, or a JWT) is refused with 403 there, and a key
+// lookup that fails answers 503; neither reaches the handler. The
+// policy-sync key and refused-key cases need a database and are in
+// internal/api/policies/sync_integration_test.go.
+func TestRefusePolicySyncKeys_SyncPathAdmitsOnlyKeys(t *testing.T) {
+	t.Parallel()
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+	gate := refusePolicySyncKeys(unreachableKeys(t))(next)
+	for _, tc := range []struct {
+		name, auth string
+		want       int
+	}{
+		{"no bearer", "", http.StatusForbidden},
+		{"jwt bearer", "Bearer eyJhbGciOiJFUzI1NiJ9.e30.sig", http.StatusForbidden},
+		{"basic auth", "Basic dXNlcjpwYXNz", http.StatusForbidden},
+		{"api key, lookup fails", "Bearer " + bearer.PrefixProd + "abcdef0123456789", http.StatusServiceUnavailable},
+	} {
+		reached = false
+		req := httptest.NewRequest(http.MethodPost, policySyncPath, nil)
+		if tc.auth != "" {
+			req.Header.Set("Authorization", tc.auth)
+		}
+		w := httptest.NewRecorder()
+		gate.ServeHTTP(w, req)
+		if w.Code != tc.want || reached {
+			t.Errorf("%s: status = %d (want %d), handler reached = %v", tc.name, w.Code, tc.want, reached)
+		}
+	}
+}
+
 // #2849 review: authInterceptor is a unary interceptor, and there is no
 // stream interceptor, so a streaming RPC would skip every bearer check,
 // the policy-sync refusal included. No service registers one today; this

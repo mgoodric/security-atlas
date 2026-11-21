@@ -101,6 +101,9 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 		// distinct from a tenant admin by role. admin.rego admits only an
 		// admin credential to the platform /v1/admin/* segments.
 		"is_admin_credential": cred.IsAdmin,
+		// is_policy_sync_key: #2850. The credential is a policy-sync API
+		// key, which system.rego admits to the policy sync endpoint only.
+		"is_policy_sync_key": cred.PolicySyncOnly(),
 	}
 	for k, v := range attrs {
 		userAttrs[k] = v
@@ -139,6 +142,12 @@ func BuildInput(r *http.Request, attrs map[string]interface{}) Input {
 // in-memory credstore.
 func derivedRolesFor(cred credstore.Credential) []Role {
 	switch {
+	case cred.PolicySyncOnly():
+		// #2850: a policy-sync key holds no role. system.rego admits it to
+		// POST /v1/policies:sync by its is_policy_sync_key attribute, and
+		// nothing else admits it; without this case it would take the
+		// grc_engineer default below.
+		return nil
 	case cred.IsAdmin:
 		return []Role{RoleAdmin}
 	case cred.IsApprover:

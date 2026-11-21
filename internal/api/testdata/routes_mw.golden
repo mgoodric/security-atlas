@@ -361,6 +361,7 @@ POST /v1/personnel-security/checklists 11
 POST /v1/policies 11
 POST /v1/policies/{id}/acknowledge 11
 POST /v1/policies/{id}/publish 11
+POST /v1/policies:sync 11
 POST /v1/populations 11
 POST /v1/questionnaires 11
 POST /v1/questionnaires/{id}/answer-runs 11
