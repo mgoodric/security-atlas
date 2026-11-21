@@ -37,9 +37,19 @@ func TestDBRolesResolver2483_NonCanonicalRowOfDisabledUser(t *testing.T) {
 	}
 	keys := nonCanonical2483(u)
 	for _, key := range keys {
-		if _, err := adminPool.Exec(context.Background(),
+		_, err := adminPool.Exec(context.Background(),
 			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, 'admin', 'test-2483')`,
-			tenant, key); err != nil {
+			tenant, key)
+		// A bare non-canonical uuid cannot be stored at all (#2661); the
+		// "user:" forms and the nil uuid can, and RolesFor must still refuse
+		// them below.
+		_, bareUUID := uuid.Parse(key)
+		switch {
+		case bareUUID == nil && key != uuid.Nil.String():
+			if err == nil {
+				t.Fatalf("seed user_roles %q accepted; want the canonical-uuid CHECK to refuse it", key)
+			}
+		case err != nil:
 			t.Fatalf("seed user_roles %q: %v", key, err)
 		}
 	}
