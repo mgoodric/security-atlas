@@ -25,7 +25,7 @@ BEGIN
                ~ '^(-*[0-9a-f]-*){32}$'
        AND user_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
     IF bad > 0 THEN
-        RAISE EXCEPTION 'user_roles: % row(s) store a non-canonical uuid user_id; rewrite them to lower(uuid::text) before applying this migration (#2661)', bad;
+        RAISE EXCEPTION 'user_roles: % row(s) store a non-canonical uuid user_id; see docs/runbooks/user-roles-canonical-user-id.md (#2661)', bad;
     END IF;
 END
 $$;
