@@ -21,7 +21,7 @@ forever. `exception.IdempotencySweeper` deletes rows with
 It takes the control import sweeper's two-pool shape: the migrator pool
 lists tenant IDs only, and each tenant's DELETE runs on `atlas_app` under
 `tenancy.WithTenant`, so the write is RLS-bound (invariant #6). Migration
-`20261272000000_exception_idempotency_keys_sweep.sql` adds the
+`20261274000000_exception_idempotency_keys_sweep.sql` adds the
 `tenant_delete` policy and `GRANT DELETE`. A single cross-tenant DELETE on
 the migrator role was simpler but would be the one write to this table that
 RLS does not bind.
