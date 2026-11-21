@@ -15,7 +15,7 @@
 -- its RLS policies (constitutional invariant #6); this migration adds no
 -- table.
 --
--- Reversible via 20261283000000_policy_controls_updated.down.sql.
+-- Reversible via 20261284000000_policy_controls_updated.down.sql.
 
 ALTER TABLE policy_audit_log
     DROP CONSTRAINT IF EXISTS policy_audit_log_action_check;

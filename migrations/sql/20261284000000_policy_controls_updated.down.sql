@@ -1,4 +1,4 @@
--- security-atlas -- reverse 20261283000000_policy_controls_updated.sql.
+-- security-atlas -- reverse 20261284000000_policy_controls_updated.sql.
 --
 -- policy_audit_log is append-only audit evidence, so this reversal refuses
 -- to run while any 'controls_updated' row exists, or any row carries a
@@ -14,7 +14,7 @@ BEGIN
        OR new_linked_control_ids IS NOT NULL;
     IF n > 0 THEN
         RAISE EXCEPTION 'policy_audit_log holds % controls_updated row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261283000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261284000000.';
     END IF;
 END
 $$;

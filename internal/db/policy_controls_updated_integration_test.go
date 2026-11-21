@@ -1,6 +1,6 @@
 //go:build integration
 
-// #2852 — 20261283000000_policy_controls_updated. policy_audit_log accepts
+// #2852 — 20261284000000_policy_controls_updated. policy_audit_log accepts
 // 'controls_updated' with the link lists before and after. The down
 // migration refuses while such a row exists, and once applied refuses
 // 'controls_updated' again; the up migration re-applies.
@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	policyControlsUpdatedUp   = "../../migrations/sql/20261283000000_policy_controls_updated.sql"
-	policyControlsUpdatedDown = "../../migrations/sql/20261283000000_policy_controls_updated.down.sql"
+	policyControlsUpdatedUp   = "../../migrations/sql/20261284000000_policy_controls_updated.sql"
+	policyControlsUpdatedDown = "../../migrations/sql/20261284000000_policy_controls_updated.down.sql"
 )
 
 func TestPolicyControlsUpdatedMigration(t *testing.T) {

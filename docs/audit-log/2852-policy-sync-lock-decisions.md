@@ -83,7 +83,7 @@ same way on every route that takes links. A malformed UUID is still 400.
 
 ### D6 — audit row with the link sets; a no-op writes nothing
 
-Migration `20261283000000_policy_controls_updated` adds the
+Migration `20261284000000_policy_controls_updated` adds the
 `controls_updated` action and two nullable `UUID[]` columns,
 `previous_linked_control_ids` and `new_linked_control_ids`. Each change
 writes one row naming the actor. The 2588 audience columns are the
