@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,11 @@ const calendarTypes = "exception,policy,vendor,control,risk,action_plan"
 // (#2698). cmd/atlas reads ATLAS_NEEDS_ATTENTION_WARN_ROWS.
 const DefaultWarnRows = 10_000
 
+// WarnInterval is how long one (tenant, source) pair stays quiet after a
+// large-read warning. The home page polls GET /v1/needs-attention, so an
+// unthrottled warning would repeat on every poll (#2783).
+const WarnInterval = 15 * time.Minute
+
 // Handler serves GET /v1/needs-attention.
 type Handler struct {
 	pool      *pgxpool.Pool
@@ -61,6 +67,15 @@ type Handler struct {
 	nowFn     func() time.Time
 	warnRows  int
 	logger    *slog.Logger
+
+	// warnMu guards warned: the last warning time per (tenant, source).
+	warnMu sync.Mutex
+	warned map[warnKey]time.Time
+}
+
+type warnKey struct {
+	tenant uuid.UUID
+	source string
 }
 
 // New builds a Handler on the app pool. approvals lists band 2, cal the
@@ -70,6 +85,7 @@ func New(pool *pgxpool.Pool, cal *calendar.Store, approvalsH *approvals.Handler)
 		pool: pool, calendar: cal, approvals: approvalsH,
 		nowFn:    func() time.Time { return time.Now().UTC() },
 		warnRows: DefaultWarnRows,
+		warned:   map[warnKey]time.Time{},
 	}
 }
 
@@ -91,9 +107,10 @@ func (h *Handler) WithLogger(l *slog.Logger) *Handler {
 
 // warnLarge logs a source read that returned more than warnRows rows:
 // the tenant has reached the size where the uncapped reads should be
-// revisited (#2555 D1, #2698).
+// revisited (#2555 D1, #2698). One (tenant, source) pair warns at most
+// once per WarnInterval (#2783).
 func (h *Handler) warnLarge(ctx context.Context, tenantID uuid.UUID, source string, bands []string, rows int) {
-	if rows <= h.warnRows {
+	if rows <= h.warnRows || !h.warnDue(tenantID, source) {
 		return
 	}
 	l := h.logger
@@ -106,6 +123,26 @@ func (h *Handler) warnLarge(ctx context.Context, tenantID uuid.UUID, source stri
 		slog.String("band", strings.Join(bands, ",")),
 		slog.Int("rows", rows),
 		slog.Int("threshold", h.warnRows))
+}
+
+// warnDue reports whether the (tenant, source) pair may warn now and, if
+// so, records the warning. Pairs past WarnInterval are dropped as it goes,
+// so the map holds only pairs that warned within the interval.
+func (h *Handler) warnDue(tenantID uuid.UUID, source string) bool {
+	now := h.nowFn()
+	k := warnKey{tenant: tenantID, source: source}
+	h.warnMu.Lock()
+	defer h.warnMu.Unlock()
+	if last, ok := h.warned[k]; ok && now.Sub(last) < WarnInterval {
+		return false
+	}
+	for key, at := range h.warned {
+		if now.Sub(at) >= WarnInterval {
+			delete(h.warned, key)
+		}
+	}
+	h.warned[k] = now
+	return true
 }
 
 // WithAuthz wires the OPA engine that narrows item types to the ones the
