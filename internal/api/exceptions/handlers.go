@@ -125,7 +125,13 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createReq
+	r.Body = http.MaxBytesReader(w, r.Body, maxCreateBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, "request body exceeds 1 MiB")
+			return
+		}
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -153,7 +159,7 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 
 	in := exception.CreateInput{
 		ControlID:            controlID,
-		ScopeCellPredicate:   []byte(req.ScopeCellPredicate),
+		ScopeCellPredicate:   storedPredicate(req.ScopeCellPredicate),
 		Justification:        req.Justification,
 		CompensatingControls: req.CompensatingControls,
 		// The person, not the per-token JWT credential id, so approval can
@@ -182,6 +188,23 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(IdempotentReplayedHeader, "true")
 	}
 	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"exception": exceptionWireFrom(created)})
+}
+
+// maxCreateBodyBytes caps a POST /v1/exceptions body (#2600). No router
+// middleware caps request bodies, and a predicate at scope.MaxExprNodes is
+// tens of KiB, so 1 MiB leaves room for a long justification.
+const maxCreateBodyBytes = 1 << 20
+
+// storedPredicate returns the predicate a create stores. An omitted field
+// and {} both mean the whole control, which is stored as the explicit
+// {"op":"true"} (#2600) rather than {}, whose meaning a reader has to
+// know. checkPredicate has already refused null and non-objects.
+func storedPredicate(raw json.RawMessage) []byte {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "{}" {
+		return []byte(exception.WholeControlPredicate)
+	}
+	return []byte(raw)
 }
 
 // IdempotencyKeyHeader is the request header that makes POST
@@ -593,7 +616,8 @@ func checkPredicate(raw json.RawMessage) string {
 	if !strings.HasPrefix(trimmed, "{") {
 		return "scope_cell_predicate must be a JSON object"
 	}
-	// {} is the stored spelling of the omitted field. Anything else must be
+	// {} means the field left out, stored as {"op":"true"} (storedPredicate).
+	// Anything else must be
 	// a well-formed expression in the scope grammar (#2343): {"op":"bogus"}
 	// would otherwise be stored and fail every evaluation of the control.
 	if trimmed == "{}" {
