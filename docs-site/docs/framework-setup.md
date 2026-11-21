@@ -107,7 +107,7 @@ A shape you should see:
       "id": "...",
       "bundle_id": "soc2_cc6_1_logical_access_baseline",
       "scf_id": "IAC-01",
-      "title": "Identity provider enforces MFA on all org-managed applications",
+      "title": "Identity provider requires phishing-resistant MFA for everyone",
       ...
     }
   ],
