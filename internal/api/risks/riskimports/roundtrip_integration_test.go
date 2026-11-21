@@ -40,8 +40,8 @@ func TestRiskImport_ExportRoundTrip(t *testing.T) {
 	dst := newEnvFor(t, src.admin, src.app, dbtest.SeedTenant(t, src.admin, cleanupTables()...))
 
 	wantUnmapped := strings.Join([]string{
-		"id", "methodology", "treatment", "treatment_owner", "accepter", "instrument_reference",
-		"inherent_score", "residual_score", "severity", "org_unit_id", "themes", "accepted_until",
+		"id", "methodology", "treatment_owner",
+		"inherent_score", "residual_score", "severity", "org_unit_id", "themes",
 		"created_at", "updated_at", "acceptance_status", "parent_risk_ids", "category_name", "status",
 		"closure_reason", "owner_user_id", "owner_name",
 	}, ",")

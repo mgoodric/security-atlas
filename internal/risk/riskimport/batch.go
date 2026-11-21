@@ -63,9 +63,29 @@ type BatchRow struct {
 	// InherentScore and ResidualScore are in the batch methodology's
 	// shape; absent is unscored, and an absent residual takes the create
 	// path's default.
-	InherentScore json.RawMessage   `json:"inherent_score,omitempty"`
-	ResidualScore json.RawMessage   `json:"residual_score,omitempty"`
-	Unmapped      map[string]string `json:"unmapped"`
+	InherentScore json.RawMessage `json:"inherent_score,omitempty"`
+	ResidualScore json.RawMessage `json:"residual_score,omitempty"`
+	// Treatment is what the risk is created with. RequestedTreatment is
+	// the register's when staging downgraded it to untreated (a mitigate
+	// with no resolved control link, a transfer with no instrument
+	// reference), empty otherwise.
+	Treatment          string `json:"treatment"`
+	RequestedTreatment string `json:"requested_treatment,omitempty"`
+	// Justification and ProposedUntil (YYYY-MM-DD) are an accepted row's
+	// proposal: the risk is created with a proposed acceptance, never an
+	// approved one (#2371).
+	Justification string `json:"justification,omitempty"`
+	ProposedUntil string `json:"proposed_until,omitempty"`
+	// HistoricalAccepter is who the register says accepted the risk. It is
+	// history only and never the risk's accepter.
+	HistoricalAccepter  string `json:"historical_accepter,omitempty"`
+	InstrumentReference string `json:"instrument_reference,omitempty"`
+	// LinkedControlIDs are the tenant controls the row's linked-controls
+	// cell resolved to, by control id or bundle id; UnresolvedControls the
+	// refs that matched none.
+	LinkedControlIDs   []string          `json:"linked_control_ids"`
+	UnresolvedControls []string          `json:"unresolved_controls"`
+	Unmapped           map[string]string `json:"unmapped"`
 	// Flags are the row's review flags (Flag*), empty when none.
 	Flags     []string `json:"flags"`
 	Status    string   `json:"status"`
@@ -128,6 +148,14 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if err != nil {
 		return Batch{}, fmt.Errorf("riskimport: list categories: %w", err)
 	}
+	var refs []string
+	for _, r := range parsed.Risks {
+		refs = append(refs, r.ControlRefs...)
+	}
+	controls, err := s.resolveControls(ctx, refs)
+	if err != nil {
+		return Batch{}, err
+	}
 	b := Batch{
 		SourceFilename:  in.Filename,
 		SourceFormat:    FormatOf(in.Filename),
@@ -156,12 +184,21 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 			Category:      slug,
 			InherentScore: r.InherentScore,
 			ResidualScore: r.ResidualScore,
-			Unmapped:      r.Unmapped,
-			Status:        RowStatusPending,
+			Justification: r.Justification,
+			// The register's accepter is history: a create never names
+			// an accepter (#2371).
+			HistoricalAccepter:  r.HistoricalAccepter,
+			InstrumentReference: r.InstrumentReference,
+			Unmapped:            r.Unmapped,
+			Status:              RowStatusPending,
 		}
 		if r.ReviewDue != nil {
 			row.ReviewDue = r.ReviewDue.Format(time.DateOnly)
 		}
+		if r.ProposedUntil != nil {
+			row.ProposedUntil = r.ProposedUntil.Format(time.DateOnly)
+		}
+		applyTreatmentRules(&row, r.Treatment, r.ControlRefs, controls)
 		b.Staged = append(b.Staged, row)
 	}
 	sort.SliceStable(b.Rejected, func(i, j int) bool { return b.Rejected[i].RowNumber < b.Rejected[j].RowNumber })

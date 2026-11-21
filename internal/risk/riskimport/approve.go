@@ -96,6 +96,11 @@ type lockedRow struct {
 	Methodology   dbx.RiskMethodology
 	InherentScore []byte
 	ResidualScore []byte
+	Treatment     dbx.RiskTreatment
+	Justification string
+	ProposedUntil *time.Time
+	Instrument    string
+	ControlIDs    []uuid.UUID
 }
 
 // ApprovePending approves every pending row of the batch. A row that fails
@@ -162,6 +167,7 @@ func skipReason(err error) (string, bool) {
 		errors.Is(err, risk.ErrExternalRefTaken),
 		risk.IsCategoryRefusal(err),
 		risk.IsRecordValidation(err),
+		risk.IsTreatmentValidation(err),
 		risk.IsTransitionInput(err):
 		return strings.TrimPrefix(strings.TrimPrefix(err.Error(), "riskimport: "), "risk: "), true
 	default:
@@ -235,6 +241,13 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			return finishDecision(ctx, tx, tenantID, out, "duplicate", "")
 		}
 
+		controls, err := existingControls(ctx, tx, tenantID, row.ControlIDs)
+		if err != nil {
+			return err
+		}
+		// An accepted row proposes its acceptance; the create path never
+		// approves one, and the register's accepter is not sent (#2371).
+		status, justification, until := proposalOf(row.Treatment, row.Justification, row.ProposedUntil)
 		created, err := s.risks.CreateTx(ctx, dbx.New(tx), tenantID, risk.CreateInput{
 			Title:       row.Title,
 			Description: row.Description,
@@ -246,6 +259,14 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			Methodology:   row.Methodology,
 			InherentScore: row.InherentScore,
 			ResidualScore: row.ResidualScore,
+			// The staged treatment, already downgraded where the row could
+			// not back it, under the create path's treatment rules (#2842).
+			Treatment:           row.Treatment,
+			AcceptanceStatus:    status,
+			Justification:       justification,
+			ProposedUntil:       until,
+			InstrumentReference: row.Instrument,
+			LinkedControlIDs:    controls,
 			// The approving person creates the risk and is named on its
 			// `created` audit row (#2835).
 			Actor:            in.Approver,
@@ -313,16 +334,19 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 	var status string
 	var reviewDue *time.Time
 	var inherent, residual *string
+	var proposedUntil *time.Time
 	err := tx.QueryRow(ctx, `
 		SELECT r.batch_id::text, r.row_number, COALESCE(r.external_ref, ''), r.title, r.description,
 		       r.category_slug, r.review_due, r.inherent_score::text, r.residual_score::text,
-		       b.methodology, r.status
+		       b.methodology, r.status, r.treatment, r.acceptance_justification, r.proposed_until,
+		       r.instrument_reference, r.linked_control_ids
 		FROM risk_import_rows r
 		JOIN risk_import_batches b ON b.tenant_id = r.tenant_id AND b.id = r.batch_id
 		WHERE r.id = $1::uuid AND r.batch_id = $2::uuid
 		FOR UPDATE OF r
 	`, rowID, batchID).Scan(&r.BatchID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description,
-		&r.Category, &reviewDue, &inherent, &residual, &r.Methodology, &status)
+		&r.Category, &reviewDue, &inherent, &residual, &r.Methodology, &status, &r.Treatment, &r.Justification,
+		&proposedUntil, &r.Instrument, &r.ControlIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedRow{}, ErrRowNotFound
 	}
@@ -336,8 +360,41 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 		d := reviewDue.UTC()
 		r.ReviewDue = &d
 	}
+	if proposedUntil != nil {
+		d := proposedUntil.UTC()
+		r.ProposedUntil = &d
+	}
 	r.InherentScore, r.ResidualScore = rawJSON(inherent), rawJSON(residual)
 	return r, nil
+}
+
+// existingControls keeps the staged control links whose control is still
+// an active version in the tenant, as resolveControls required at upload. A
+// control deleted or superseded since upload is dropped; when that leaves a
+// mitigate row with no link, the create path refuses it and the row stays
+// pending with the reason.
+func existingControls(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id FROM controls
+		WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND superseded_by IS NULL
+		ORDER BY id
+	`, tenantID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("riskimport: read linked controls: %w", err)
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("riskimport: scan linked control: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // riskWithExternalRef finds the tenant's risk carrying the organisation

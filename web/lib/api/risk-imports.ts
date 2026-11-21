@@ -43,6 +43,8 @@ export const REJECT_REASON_LABELS: Record<string, string> = {
   invalid_external_ref: "Invalid risk ID",
   unknown_category: "Unknown category",
   invalid_review_due: "Invalid review date",
+  invalid_treatment: "Unknown treatment",
+  invalid_acceptance: "Acceptance missing its justification or until-date",
 };
 
 export function rejectReasonLabel(reason: string): string {
@@ -57,6 +59,17 @@ export type BatchRow = {
   description: string;
   category: string;
   review_due?: string;
+  // #2842: the treatment the risk is created with, and the register's when
+  // it was downgraded to untreated. An accepted row is created proposed;
+  // historical_accepter is the register's, never the risk's accepter.
+  treatment?: string;
+  requested_treatment?: string;
+  justification?: string;
+  proposed_until?: string;
+  historical_accepter?: string;
+  instrument_reference?: string;
+  linked_control_ids?: string[] | null;
+  unresolved_controls?: string[] | null;
   unmapped: Record<string, string> | null;
   flags: string[] | null;
   status: RowStatus | string;
@@ -181,6 +194,30 @@ export function mappedFields(row: BatchRow): [string, string][] {
   out.push(["Category", row.category]);
   if (row.review_due) out.push(["Review due", row.review_due]);
   if (row.description) out.push(["Description", row.description]);
+  if (row.treatment) {
+    out.push([
+      "Treatment",
+      row.requested_treatment
+        ? `${row.treatment} (register: ${row.requested_treatment})`
+        : row.treatment === "accept"
+          ? "accept (proposed)"
+          : row.treatment,
+    ]);
+  }
+  if (row.justification) out.push(["Justification", row.justification]);
+  if (row.proposed_until) out.push(["Proposed until", row.proposed_until]);
+  if (row.historical_accepter) {
+    out.push(["Accepter (historical)", row.historical_accepter]);
+  }
+  if (row.instrument_reference) {
+    out.push(["Instrument", row.instrument_reference]);
+  }
+  if (row.linked_control_ids?.length) {
+    out.push(["Linked controls", row.linked_control_ids.join(", ")]);
+  }
+  if (row.unresolved_controls?.length) {
+    out.push(["Unresolved controls", row.unresolved_controls.join(", ")]);
+  }
   return out;
 }
 

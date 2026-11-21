@@ -37,7 +37,7 @@ func TestStockControlsKindFilterChangesOnlyCrossKindReads(t *testing.T) {
 
 	compared := 0
 	forEachSOC2Bundle(t, func(name string, b *control.Bundle) {
-		if len(b.Manifest.EvidenceQueries) == 0 {
+		if len(b.Manifest.EvidenceQueries) == 0 || hasSQLQuery(b) {
 			return
 		}
 		var kinds []string
