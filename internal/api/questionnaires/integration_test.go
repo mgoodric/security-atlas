@@ -61,6 +61,9 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"questionnaire_questions",
 		"questionnaires",
 		"answer_library",
+		"evidence_freshness",
+		"evidence_records",
+		"controls",
 	)
 }
 
@@ -241,17 +244,39 @@ func TestImportAnswerExportRoundTrip(t *testing.T) {
 	}
 }
 
-// ===== #2432: the cite picker's citations save and read back =====
+// ===== #2432 / #2653: citations save, read back, and are checked =====
 
-// TestAnswerCitationsRoundTrip pins the envelope the web cite picker
-// writes (one {id, type, title} per pick, a control and an evidence
-// record) through PATCH and back out of GET, unchanged and in order.
-func TestAnswerCitationsRoundTrip(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
+// seedCitable inserts one control and one evidence record for tenant and
+// returns their ids. The evidence was observed on 2026-11-01 (UTC).
+func seedCitable(t *testing.T, admin *pgxpool.Pool, tenant, controlTitle string) (controlID, evidenceID string) {
+	t.Helper()
+	ctrl := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO controls (
+			id, tenant_id, title, control_family, implementation_type,
+			bundle_id, evidence_queries, applicability_expr, freshness_class
+		)
+		VALUES ($1, $2, $3, 'IAC', 'automated', $4, '[]'::jsonb, 'true', 'quarterly')
+	`, ctrl, tenant, controlTitle, "test-bundle-2653-"+ctrl.String()); err != nil {
+		t.Fatalf("seed control: %v", err)
+	}
+	ev := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO evidence_records (
+			id, tenant_id, control_id, control_ref, observed_at, ingested_at,
+			provenance, result, payload, hash, evidence_kind
+		)
+		VALUES ($1, $2, $3, $4, '2026-11-01T12:00:00Z', now(), $5, 'pass', '{}'::jsonb, $6, 'okta.workforce_policy')
+	`, ev, tenant, ctrl, ctrl.String(), `{"connector_id":"test-connector"}`, "hash-2653-"+ev.String()[:8]); err != nil {
+		t.Fatalf("seed evidence: %v", err)
+	}
+	return ctrl.String(), ev.String()
+}
 
+// importOneQuestion creates a questionnaire with one question and returns
+// (questionnaire id, question id).
+func importOneQuestion(t *testing.T, env testEnv) (string, string) {
+	t.Helper()
 	_, body := doJSON(t, env, http.MethodPost, "/v1/questionnaires",
 		map[string]any{"name": "cite round trip"})
 	id := body["id"].(string)
@@ -264,31 +289,109 @@ func TestAnswerCitationsRoundTrip(t *testing.T) {
 	}
 	_, getBody := doJSON(t, env, http.MethodGet, "/v1/questionnaires/"+id, nil)
 	qid := getBody["questions"].([]any)[0].(map[string]any)["id"].(string)
+	return id, qid
+}
 
-	citations := []any{
-		map[string]any{"id": uuid.NewString(), "type": "controls", "title": "Multi-factor authentication"},
-		map[string]any{"id": uuid.NewString(), "type": "evidence", "title": "okta.workforce_policy · 2026-11-01"},
+// readCitations returns the saved answer's citations as JSON, or "" when
+// the question has no answer.
+func readCitations(t *testing.T, env testEnv, id string) string {
+	t.Helper()
+	resp, getBody := doJSON(t, env, http.MethodGet, "/v1/questionnaires/"+id, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET = %d", resp.StatusCode)
 	}
+	answer, _ := getBody["questions"].([]any)[0].(map[string]any)["answer"].(map[string]any)
+	if answer == nil {
+		return ""
+	}
+	got, _ := json.Marshal(answer["citations"])
+	return string(got)
+}
+
+// TestAnswerCitationsRoundTrip pins the envelope the web cite picker
+// writes (one {id, type, title} per pick, a control and an evidence
+// record) through PATCH and back out of GET, in order, with each title
+// the server's own: a spoofed client title is overwritten (#2653).
+func TestAnswerCitationsRoundTrip(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+	controlID, evidenceID := seedCitable(t, admin, tenant, "Multi-factor authentication")
+	id, qid := importOneQuestion(t, env)
+
 	resp, ansBody := doJSON(t, env, http.MethodPatch,
 		"/v1/questionnaires/"+id+"/answers/"+qid,
-		map[string]any{"answer_value": "yes", "narrative": "MFA via Okta.", "citations": citations})
+		map[string]any{"answer_value": "yes", "narrative": "MFA via Okta.", "citations": []any{
+			map[string]any{"id": strings.ToUpper(controlID), "type": "controls", "title": "Spoofed: SOC 2 fully passed"},
+			map[string]any{"id": evidenceID, "type": "evidence", "title": "made up"},
+		}})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PATCH answer = %d; body=%v", resp.StatusCode, ansBody)
 	}
 
-	resp, getBody = doJSON(t, env, http.MethodGet, "/v1/questionnaires/"+id, nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET = %d", resp.StatusCode)
+	want, _ := json.Marshal([]any{
+		map[string]any{"id": controlID, "type": "controls", "title": "Multi-factor authentication"},
+		map[string]any{"id": evidenceID, "type": "evidence", "title": "okta.workforce_policy · 2026-11-01"},
+	})
+	if got, _ := json.Marshal(ansBody["citations"]); string(got) != string(want) {
+		t.Errorf("PATCH response citations = %s, want %s", got, want)
 	}
-	q := getBody["questions"].([]any)[0].(map[string]any)
-	answer, _ := q["answer"].(map[string]any)
-	if answer == nil {
-		t.Fatalf("question has no answer after PATCH: %v", q)
-	}
-	want, _ := json.Marshal(citations)
-	got, _ := json.Marshal(answer["citations"])
-	if string(got) != string(want) {
+	if got := readCitations(t, env, id); got != string(want) {
 		t.Errorf("citations read back = %s, want %s", got, want)
+	}
+}
+
+// TestAnswerCitationsRefused pins #2653: a citation naming a record the
+// caller's tenant does not hold (another tenant's, or none at all) is
+// refused with the one citation 400, the same body whichever it is, and
+// nothing is written. The unreadable case (a viewer citing evidence) is
+// handlers_citations_test.go.
+func TestAnswerCitationsRefused(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	other := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+	ownControl, _ := seedCitable(t, admin, tenant, "Own control")
+	foreignControl, foreignEvidence := seedCitable(t, admin, other, "Tenant B control")
+	id, qid := importOneQuestion(t, env)
+
+	cases := map[string]map[string]any{
+		"foreign control":        {"id": foreignControl, "type": "controls", "title": "x"},
+		"foreign evidence":       {"id": foreignEvidence, "type": "evidence", "title": "x"},
+		"nonexistent control":    {"id": uuid.NewString(), "type": "controls", "title": "x"},
+		"nonexistent evidence":   {"id": uuid.NewString(), "type": "evidence", "title": "x"},
+		"control id as evidence": {"id": ownControl, "type": "evidence", "title": "x"},
+		"malformed id":           {"id": "ev-01", "type": "evidence", "title": "x"},
+	}
+	var firstBody string
+	for name, bad := range cases {
+		req, _ := json.Marshal(map[string]any{"answer_value": "yes", "citations": []any{
+			map[string]any{"id": ownControl, "type": "controls", "title": "Own control"},
+			bad,
+		}})
+		httpReq, _ := http.NewRequest(http.MethodPatch, env.server.URL+"/v1/questionnaires/"+id+"/answers/"+qid, bytes.NewReader(req))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+env.bearer)
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			t.Fatalf("%s: Do: %v", name, err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: PATCH = %d, want 400; body=%s", name, resp.StatusCode, raw)
+			continue
+		}
+		if firstBody == "" {
+			firstBody = string(raw)
+		} else if string(raw) != firstBody {
+			t.Errorf("%s: body %s differs from %s; the refusal must not tell the cases apart", name, raw, firstBody)
+		}
+	}
+	if got := readCitations(t, env, id); got != "" {
+		t.Errorf("a refused PATCH wrote an answer: citations %s", got)
 	}
 }
 
