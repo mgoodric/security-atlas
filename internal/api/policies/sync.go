@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
@@ -64,13 +65,20 @@ type syncResultWire struct {
 	Reason   string `json:"reason,omitempty"`
 	PolicyID string `json:"policy_id,omitempty"`
 	Version  string `json:"version,omitempty"`
+	// PredecessorID is the superseded policy a new_version result chains
+	// to (#2851).
+	PredecessorID string `json:"predecessor_id,omitempty"`
+	// DriftDetectedAt is when drift on a drift result was first seen.
+	DriftDetectedAt *time.Time `json:"drift_detected_at,omitempty"`
 }
 
 type syncRespWire struct {
-	Created   int              `json:"created"`
-	Unchanged int              `json:"unchanged"`
-	Skipped   int              `json:"skipped"`
-	Results   []syncResultWire `json:"results"`
+	Created    int              `json:"created"`
+	NewVersion int              `json:"new_version"`
+	Unchanged  int              `json:"unchanged"`
+	Drift      int              `json:"drift"`
+	Skipped    int              `json:"skipped"`
+	Results    []syncResultWire `json:"results"`
 }
 
 // SyncPolicies handles POST /v1/policies:sync (#2850): a full-set push of
@@ -79,7 +87,8 @@ type syncRespWire struct {
 // Only a policy-sync API key reaches this handler: the policy-sync gate
 // in internal/api authenticates the key for this path and refuses every
 // other caller, and the handler checks the purpose again. Each new page
-// becomes a published, synced policy; see policy.Store.Sync.
+// becomes a published, synced policy, a version bump the next version
+// and a body change without one drift; see policy.Store.Sync.
 //
 // Response: 200 with the per-page report. 400 when the request itself is
 // malformed (no source, too many pages); a bad page is reported, not
@@ -205,12 +214,22 @@ func wireFromSyncReport(r policy.SyncReport) syncRespWire {
 		if res.Policy != nil {
 			rw.PolicyID = res.Policy.ID.String()
 			rw.Version = res.Policy.Version
+			if res.Status == policy.SyncStatusNewVersion && res.Policy.PredecessorID != nil {
+				rw.PredecessorID = res.Policy.PredecessorID.String()
+			}
+			if res.Status == policy.SyncStatusDrift {
+				rw.DriftDetectedAt = res.Policy.SyncDriftDetectedAt
+			}
 		}
 		switch res.Status {
 		case policy.SyncStatusCreated:
 			out.Created++
+		case policy.SyncStatusNewVersion:
+			out.NewVersion++
 		case policy.SyncStatusUnchanged:
 			out.Unchanged++
+		case policy.SyncStatusDrift:
+			out.Drift++
 		case policy.SyncStatusSkipped:
 			out.Skipped++
 		}

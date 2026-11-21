@@ -147,6 +147,7 @@ SELECT
     p.superseded_at, p.next_review_at,
     p.historical_approver_name, p.historical_approved_at, p.source_url,
     p.imported_by, p.imported_at, p.self_approved,
+    p.sync_drift_detected_at, p.sync_drift_body_sha256,
     ac.ack_denominator,
     ac.ack_numerator
 FROM policies p
@@ -386,7 +387,11 @@ WHERE tenant_id = sqlc.arg('tenant_id')
   AND sync_page_id = sqlc.arg('sync_page_id');
 
 -- name: InsertSyncedPolicy :one
--- #2850 — insert a page's first sync directly as 'published'. As with
+-- #2850 — insert a page's synced version directly as 'published'. A
+-- page's first sync has no predecessor; a later version (#2851) names the
+-- synced row it supersedes, which SupersedeSyncedPolicy has just marked
+-- 'superseded' in the same transaction, and carries that row's control
+-- links forward (links are kept in security-atlas, not synced). As with
 -- ImportPublishedPolicy, the in-tool submit/approve/publish transitions do
 -- not apply: the source's approval, kept in historical_approver_name and
 -- historical_approved_at, is the approval. approved_by stays NULL.
@@ -403,10 +408,10 @@ INSERT INTO policies (
     synced_by, synced_at
 )
 VALUES (
-    sqlc.arg('id'), sqlc.arg('tenant_id'), NULL,
+    sqlc.arg('id'), sqlc.arg('tenant_id'), sqlc.narg('predecessor_id'),
     sqlc.arg('title'), sqlc.arg('version'), sqlc.arg('body_md'),
     sqlc.arg('owner_role'), sqlc.arg('approver_role'),
-    '{}', sqlc.arg('acknowledgment_required_roles'),
+    sqlc.arg('linked_control_ids'), sqlc.arg('acknowledgment_required_roles'),
     'published', sqlc.arg('effective_date'), sqlc.narg('next_review_at'), 'synced',
     sqlc.arg('synced_by'), now(), sqlc.arg('synced_by'),
     sqlc.arg('historical_approver_name'), sqlc.arg('historical_approved_at'), sqlc.arg('source_url'),
@@ -424,3 +429,71 @@ SELECT pg_advisory_xact_lock(
     13,
     hashtext(sqlc.arg(tenant_id)::text || '|' || sqlc.arg(sync_site)::text || '|' || sqlc.arg(sync_space)::text)
 );
+
+-- name: SupersedeSyncedPolicy :one
+-- #2851 — a page arrived with a new declared version: its published
+-- synced row is superseded, in the same transaction as InsertSyncedPolicy
+-- writes the next version. Any drift recorded on it is cleared, since the
+-- new version is what the page holds now. next_review_at is left as it
+-- was, as SupersedePolicyAtPublish leaves it (#2009).
+UPDATE policies
+SET status = 'superseded',
+    superseded_at = now(),
+    sync_drift_detected_at = NULL,
+    sync_drift_body_sha256 = NULL,
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+RETURNING *;
+
+-- name: SetSyncedPolicyDrift :one
+-- #2851 — the page's body changed without a version bump. Records the
+-- body hash the source holds now; sync_drift_detected_at keeps the time
+-- drift was first seen, so a page edited twice without a bump still shows
+-- how long it has been out of step.
+--
+-- A run that sees the same drifted body again writes nothing: the
+-- IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+-- query returns no row, which the caller reads as "already recorded".
+UPDATE policies
+SET sync_drift_detected_at = COALESCE(sync_drift_detected_at, now()),
+    sync_drift_body_sha256 = sqlc.arg('sync_drift_body_sha256'),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_drift_body_sha256 IS DISTINCT FROM sqlc.arg('sync_drift_body_sha256')
+RETURNING *;
+
+-- name: ClearSyncedPolicyDrift :one
+-- #2851 — the page's body matches the synced version again: the drift
+-- recorded on the row is cleared.
+UPDATE policies
+SET sync_drift_detected_at = NULL,
+    sync_drift_body_sha256 = NULL,
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+RETURNING *;
+
+-- name: LockSyncedPolicyForSuccessor :one
+-- #2851 — before a sync run supersedes a page's synced row, lock it and
+-- report whether another row already names it as predecessor. FOR UPDATE
+-- conflicts with the KEY SHARE lock a concurrent in-tool create takes
+-- through the predecessor FK, so the answer cannot change before the run
+-- commits. A successor (an in-tool draft of the next version) would make
+-- the run's insert violate policies_predecessor_unique_when_set.
+SELECT p.id,
+       s.id AS successor_id,
+       s.status AS successor_status
+FROM policies p
+LEFT JOIN policies s
+  ON s.tenant_id = p.tenant_id AND s.predecessor_id = p.id
+WHERE p.tenant_id = sqlc.arg('tenant_id')
+  AND p.id = sqlc.arg('id')
+FOR UPDATE OF p;

@@ -3063,6 +3063,8 @@ type Policy struct {
 	SyncedBodySha256            *string            `json:"synced_body_sha256"`
 	SyncedBy                    *string            `json:"synced_by"`
 	SyncedAt                    pgtype.Timestamptz `json:"synced_at"`
+	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
+	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
 }
 
 type PolicyAcknowledgment struct {
