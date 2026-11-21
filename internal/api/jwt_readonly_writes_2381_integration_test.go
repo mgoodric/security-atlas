@@ -4,7 +4,9 @@
 // copied into OwnerRoles by jwtmw) is refused by the authz middleware on the
 // evidence, artifact and walkthrough write routes. Before the fix BuildInput
 // derived control_owner from the role claim and OPA let the request through
-// to the handler. A control_owner session still passes the authz gate.
+// to the handler. A control_owner session still passes the authz gate on
+// evidence and artifacts. On walkthroughs authz refuses it too: since #2708
+// OPA admits only admin and grc_engineer there, as the handler always did.
 //
 // The walkthrough handler has its own admin/grc_engineer check that also
 // answers 403, so the test tells the two apart by the body: the authz
@@ -115,7 +117,14 @@ func TestJWTReadOnlyRoles2381_WritesRefused(t *testing.T) {
 				t.Errorf("JWT %s POST %s: %d, not refused by authz; want 403 forbidden", name, path, got)
 			}
 		}
-		if got, byAuthz := post(owner, path); byAuthz || got == http.StatusNotFound {
+		got, byAuthz := post(owner, path)
+		if path == "/v1/walkthroughs" {
+			if !byAuthz {
+				t.Errorf("JWT control_owner POST %s: %d, not refused by authz; want 403 forbidden (#2708)", path, got)
+			}
+			continue
+		}
+		if byAuthz || got == http.StatusNotFound {
 			t.Errorf("JWT control_owner POST %s: %d; want past the authz gate", path, got)
 		}
 	}
