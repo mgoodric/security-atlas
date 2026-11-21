@@ -27,6 +27,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/demoprov"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -83,6 +84,7 @@ func (s *Store) EvidenceForControl(ctx context.Context, controlID uuid.UUID, p e
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var qerr error
 		rows, qerr = q.ListEvidenceForControlPaged(ctx, dbx.ListEvidenceForControlPagedParams{
+			UnboundKinds: unbound.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -108,6 +110,7 @@ func (s *Store) CountEvidenceForControl(ctx context.Context, controlID uuid.UUID
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var qerr error
 		total, qerr = q.CountEvidenceForControlWindow(ctx, dbx.CountEvidenceForControlWindowParams{
+			UnboundKinds: unbound.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),

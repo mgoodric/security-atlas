@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -133,10 +134,11 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 		// The resolver ranks all matched controls, returns the exact matched count
 		// via a window column, and caps to MaxControlsPerSummary for the corpus.
 		rows, err := q.ListActiveControlsForPortfolio(ctx, dbx.ListActiveControlsForPortfolioParams{
-			TenantID:  pgUUID(tenantID),
-			Limit:     int32(MaxControlsPerSummary),
-			Family:    family,
-			AnchorIds: anchorIDs,
+			UnboundKinds: unbound.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			Limit:        int32(MaxControlsPerSummary),
+			Family:       family,
+			AnchorIds:    anchorIDs,
 		})
 		if err != nil {
 			return fmt.Errorf("evidencesummary: list portfolio controls: %w", err)
@@ -156,9 +158,10 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 			}
 
 			total, err := q.CountEvidenceRecordsByControl(ctx, dbx.CountEvidenceRecordsByControlParams{
-				TenantID:   pgUUID(tenantID),
-				ControlID:  pgUUID(ctrlID),
-				ControlRef: ctrlID.String(),
+				UnboundKinds: unbound.Kinds(),
+				TenantID:     pgUUID(tenantID),
+				ControlID:    pgUUID(ctrlID),
+				ControlRef:   ctrlID.String(),
 			})
 			if err != nil {
 				return fmt.Errorf("evidencesummary: count portfolio evidence: %w", err)
@@ -166,11 +169,12 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 			ce.TotalCount = int(total)
 
 			recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
-				TenantID:   pgUUID(tenantID),
-				ControlID:  pgUUID(ctrlID),
-				ControlRef: ctrlID.String(),
-				Limit:      MaxRecordsPerControl,
-				Offset:     0,
+				UnboundKinds: unbound.Kinds(),
+				TenantID:     pgUUID(tenantID),
+				ControlID:    pgUUID(ctrlID),
+				ControlRef:   ctrlID.String(),
+				Limit:        MaxRecordsPerControl,
+				Offset:       0,
 			})
 			if err != nil {
 				return fmt.Errorf("evidencesummary: list portfolio evidence: %w", err)

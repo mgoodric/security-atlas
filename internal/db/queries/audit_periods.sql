@@ -144,10 +144,20 @@ ORDER BY id;
 -- COALESCE-to-infinity short-circuits to live state). Ordered by
 -- observed_at DESC so the caller can pick the most-recent record as the
 -- pass/fail-driving observation.
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
+-- The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
+-- cannot change it.
 SELECT id, observed_at, result, hash
 FROM evidence_records
-WHERE tenant_id  = $1
-  AND control_id = $2
+WHERE evidence_records.tenant_id  = $1
+  AND (control_id = $2
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                               'infinity'::timestamptz)
 ORDER BY observed_at DESC, id ASC;
