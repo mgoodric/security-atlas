@@ -67,7 +67,8 @@ func TestPolicyControlsUpdatedMigration(t *testing.T) {
 
 	for _, q := range []string{
 		`ALTER TABLE policy_audit_log DISABLE TRIGGER policy_audit_log_no_update_trg`,
-		`DELETE FROM policy_audit_log WHERE action = 'controls_updated'
+		// sync_takeover (#2854) postdates this down migration's CHECK.
+		`DELETE FROM policy_audit_log WHERE action IN ('controls_updated', 'sync_takeover')
 			OR previous_linked_control_ids IS NOT NULL OR new_linked_control_ids IS NOT NULL`,
 		`ALTER TABLE policy_audit_log ENABLE TRIGGER policy_audit_log_no_update_trg`,
 	} {
