@@ -11,8 +11,9 @@
 //  1. NARROW WRITER (safety bound). The Engine holds a *dbx.Queries, but it
 //     only ever calls a deliberately small set of write methods —
 //     CreateAggregateRisk, UpdateMetaRiskInherentScore, LinkRiskAggregation,
-//     UnlinkRiskAggregation (only for links its own rule made), and
-//     WriteAggregationRuleEvaluation. It NEVER calls CreateRisk,
+//     UnlinkRiskAggregation (only for links its own rule made),
+//     WriteAggregationRuleEvaluation, and InsertRiskAuditLog (the `created`
+//     row of a meta-risk it creates, #2835). It NEVER calls CreateRisk,
 //     DeleteRisk, or any control / policy / evidence writer. The set of
 //     methods the engine touches is the safety bound, enforced by the
 //     metaRiskWriter interface below — the engine is constructed with that
@@ -64,7 +65,7 @@ import (
 // metaRiskWriter is the NARROW write surface the engine is allowed to touch.
 // It is the safety bound: the engine cannot write `risks` arbitrarily,
 // cannot touch `controls`, `policies`, or `evidence_records` — the only
-// mutations it can perform are the five methods declared here. *dbx.Queries
+// mutations it can perform are the six methods declared here. *dbx.Queries
 // satisfies this interface; the engine is constructed against the interface,
 // not the concrete struct, so the bound holds by construction.
 type metaRiskWriter interface {
@@ -80,12 +81,14 @@ type metaRiskWriter interface {
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
 	// the tenant's risk categories, for the meta-risk category (#1813)
 	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]dbx.OrgRiskCategory, error)
-	// the five — and only five — writes
+	// the six — and only six — writes
 	CreateAggregateRisk(ctx context.Context, arg dbx.CreateAggregateRiskParams) (dbx.Risk, error)
 	UpdateMetaRiskInherentScore(ctx context.Context, arg dbx.UpdateMetaRiskInherentScoreParams) (dbx.Risk, error)
 	LinkRiskAggregation(ctx context.Context, arg dbx.LinkRiskAggregationParams) error
 	UnlinkRiskAggregation(ctx context.Context, arg dbx.UnlinkRiskAggregationParams) error
 	WriteAggregationRuleEvaluation(ctx context.Context, arg dbx.WriteAggregationRuleEvaluationParams) (dbx.AggregationRuleEvaluation, error)
+	// the `created` audit row of a new meta-risk (#2835)
+	InsertRiskAuditLog(ctx context.Context, arg dbx.InsertRiskAuditLogParams) error
 }
 
 // Compile-time proof that *dbx.Queries satisfies the narrow writer.
@@ -448,6 +451,12 @@ func (e *Engine) refreshMetaRisk(ctx context.Context, tenantID uuid.UUID, existi
 	return e.linkChildren(ctx, tenantID, metaRiskID, ruleID, childIDs)
 }
 
+// RuleActor is the actor a rule-generated meta-risk's `created` audit row
+// names: the aggregation rule that made it.
+func RuleActor(ruleID uuid.UUID) string {
+	return "system:aggregation-rule:" + ruleID.String()
+}
+
 // createMetaRisk creates this activation's meta-risk and links its
 // children. qualitative_5x5 + treatment=untreated mirrors slice 053's
 // manual-aggregation parent: a generated meta-risk carries no treatment
@@ -464,7 +473,7 @@ func (e *Engine) createMetaRisk(
 	childIDs []uuid.UUID,
 ) (uuid.UUID, error) {
 	metaRiskID := uuid.New()
-	if _, err := e.w.CreateAggregateRisk(ctx, dbx.CreateAggregateRiskParams{
+	row, err := e.w.CreateAggregateRisk(ctx, dbx.CreateAggregateRiskParams{
 		ID:                  pgUUID(metaRiskID),
 		TenantID:            pgUUID(tenantID),
 		Title:               rule.Title(),
@@ -480,8 +489,18 @@ func (e *Engine) createMetaRisk(
 		Level:               dbx.RiskLevel(rule.ParentLevel),
 		OrgUnitID:           pgtype.UUID{}, // meta-risks span teams; no single org unit
 		Column15:            themes,
-	}); err != nil {
+	})
+	if err != nil {
 		return uuid.Nil, fmt.Errorf("aggrule: create meta-risk for rule %s: %w", ruleID, err)
+	}
+	// No person makes a rule-generated meta-risk; its rule does, and the
+	// created row names it (#2835).
+	if err := risk.RecordCreatedTx(ctx, e.w, tenantID, metaRiskID, RuleActor(ruleID), risk.CreatedState{
+		Title:      row.Title,
+		CategoryID: uuid.UUID(row.CategoryID.Bytes),
+		Treatment:  row.Treatment,
+	}); err != nil {
+		return uuid.Nil, fmt.Errorf("aggrule: audit meta-risk for rule %s: %w", ruleID, err)
 	}
 	if err := e.linkChildren(ctx, tenantID, metaRiskID, ruleID, childIDs); err != nil {
 		return uuid.Nil, err

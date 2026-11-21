@@ -404,6 +404,11 @@ func tenantContext(r *http.Request) (context.Context, bool) {
 }
 
 func hasCalendarScope(c credstore.Credential) bool {
+	// #2849: a policy-sync key fetches nothing but policy sync, whatever
+	// kinds it carries.
+	if c.PolicySyncOnly() {
+		return false
+	}
 	for _, k := range c.Kinds {
 		if k == calendarScopeKind {
 			return true

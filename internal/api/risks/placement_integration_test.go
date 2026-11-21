@@ -194,9 +194,10 @@ func TestPlacement_PatchMovesRiskAndAudits(t *testing.T) {
 		t.Fatalf("PATCH changed another field: %v", body)
 	}
 
+	// Newest first: the move, then the risk's created row.
 	entries := placementAudit(t, app, tenant, id)
-	if len(entries) != 1 {
-		t.Fatalf("audit rows = %d, want 1", len(entries))
+	if len(entries) != 2 || entries[1].ActionType != "created" {
+		t.Fatalf("audit rows = %+v, want the move and the created row", entries)
 	}
 	e := entries[0]
 	if e.ActionType != "placement_changed" || e.Actor == "" {
@@ -235,8 +236,8 @@ func TestPlacement_PatchMovesRiskAndAudits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("no-op status %d", resp.StatusCode)
 	}
-	if n := len(placementAudit(t, app, tenant, id)); n != 3 {
-		t.Fatalf("audit rows = %d, want 3 (move, unbind, level)", n)
+	if n := len(placementAudit(t, app, tenant, id)); n != 4 {
+		t.Fatalf("audit rows = %d, want 4 (created, move, unbind, level)", n)
 	}
 
 	// The trail is append-only, even for the owner role.
@@ -275,8 +276,8 @@ func TestPlacement_PatchRejects(t *testing.T) {
 			t.Fatalf("%s: status %d, want 400: %v", name, resp.StatusCode, body)
 		}
 	}
-	if n := len(placementAudit(t, app, tenant, id)); n != 0 {
-		t.Fatalf("a refused PATCH wrote %d audit rows", n)
+	if n := len(placementAudit(t, app, tenant, id)); n != 1 {
+		t.Fatalf("a refused PATCH wrote %d audit rows beside the created row", n-1)
 	}
 
 	resp, _ := patch(t, env, "/v1/risks/"+uuid.NewString(), `{"level":"org"}`)

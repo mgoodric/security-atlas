@@ -69,6 +69,30 @@ type IssueRequest struct {
 	// id: <Person> reads "API key '<label>' (owner: <user>)". Trimmed;
 	// empty or all-space means no label.
 	Label string `json:"label,omitempty"`
+	// Purpose is empty for an ordinary key, or "policy-sync" (#2849) for
+	// a key that may only sync policies: every other route refuses it. A
+	// policy-sync key carries no other grant (checkPurpose). Any other
+	// value is refused; reset-bootstrap alone mints bootstrap-recovery.
+	Purpose string `json:"purpose,omitempty"`
+}
+
+// checkPurpose reports why a key with this purpose and these grants is
+// refused, or "" when it is accepted. A policy-sync key holds nothing
+// else: an admin, approver, role or kind grant would be dead weight on a
+// key every route but policy sync refuses, and would read in the key
+// list as access it does not have.
+func checkPurpose(req IssueRequest) string {
+	switch req.Purpose {
+	case "":
+		return ""
+	case credstore.PurposePolicySync:
+		if req.IsAdmin || req.IsApprover || len(req.OwnerRoles) > 0 || len(req.AllowedKinds) > 0 {
+			return "a policy-sync key cannot also carry is_admin, is_approver, owner_roles or allowed_kinds"
+		}
+		return ""
+	default:
+		return "purpose must be empty or policy-sync"
+	}
 }
 
 // maxLabelLen is the longest label, in characters (api_keys_label_chk).
@@ -111,6 +135,8 @@ type IssueResponse struct {
 	IssuedAt    time.Time `json:"issued_at"`
 	ExpiresAt   string    `json:"expires_at,omitempty"`
 	Label       string    `json:"label,omitempty"`
+	// Purpose is the key's purpose (#2849); absent on an ordinary key.
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // Issue handles POST /v1/admin/credentials.
@@ -152,6 +178,10 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
+	if msg := checkPurpose(req); msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
 	// requireAdmin returning true guarantees the credential is in context.
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	if msg := mintWithinCaller(cred, req.IsAdmin, req.IsApprover, req.OwnerRoles); msg != "" {
@@ -171,6 +201,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		IsApprover:     req.IsApprover,
 		OwnerRoles:     req.OwnerRoles,
 		Label:          label,
+		Purpose:        req.Purpose,
 	}
 	// The minting admin is attribution only (#1947): the key is a machine
 	// key, not the admin's, and keeps working after the admin is disabled.
@@ -189,6 +220,7 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		Last4:       issued.Last4,
 		IssuedAt:    issued.IssuedAt,
 		Label:       issued.Label,
+		Purpose:     issued.Purpose,
 	}
 	if !issued.IssuedAt.IsZero() && issued.TTL > 0 {
 		resp.ExpiresAt = issued.IssuedAt.Add(issued.TTL).Format(time.RFC3339)
@@ -219,6 +251,9 @@ type ListItem struct {
 	// Label is the admin-chosen name for the key (#2384). Absent when the
 	// key has none.
 	Label string `json:"label,omitempty"`
+	// Purpose is why the key exists when it is not an ordinary key
+	// (#2849): "policy-sync" or "bootstrap-recovery". Absent otherwise.
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // ListResponse is the GET /v1/admin/credentials shape.
@@ -278,6 +313,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			RotatedFrom:    c.RotatedFrom,
 			MintedBy:       c.MintedBy,
 			Label:          c.Label,
+			Purpose:        c.Purpose,
 		}
 		if !c.LastUsedAt.IsZero() {
 			lu := c.LastUsedAt

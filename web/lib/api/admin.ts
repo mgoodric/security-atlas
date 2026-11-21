@@ -39,6 +39,9 @@ export type AdminCredential = {
   minted_by?: string | null;
   // The admin-chosen name for the key (#2384); absent when it has none.
   label?: string | null;
+  // Why the key exists when it is not an ordinary key (#2849):
+  // "policy-sync" (may only sync policies) or "bootstrap-recovery".
+  purpose?: string | null;
 };
 
 export type AdminCredentialListResponse = { items: AdminCredential[] };

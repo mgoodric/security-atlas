@@ -149,6 +149,7 @@ func TestAggregate_CrossTenantChildDenial_AC10(t *testing.T) {
 	// As tenant A, try to aggregate including tenant B's child.
 	ctx := slice053CtxFor(t, tenantA)
 	_, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Cross-tenant attempt",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionMax,
@@ -160,6 +161,7 @@ func TestAggregate_CrossTenantChildDenial_AC10(t *testing.T) {
 
 	// Sanity: aggregating with only the local child succeeds.
 	res, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Local only",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionMax,
@@ -185,7 +187,7 @@ func TestAssignThemes_DefaultVocab_AC1(t *testing.T) {
 	ctx := slice053CtxFor(t, tenant)
 
 	riskID := seedAggregableRisk(t, admin, tenant, "needs themes", 3, 3, nil)
-	updated, err := store.AssignThemes(ctx, riskID, []string{"ownership", "access-control"})
+	updated, err := store.AssignThemes(ctx, riskID, []string{"ownership", "access-control"}, "test-actor")
 	if err != nil {
 		t.Fatalf("AssignThemes: %v", err)
 	}
@@ -206,7 +208,7 @@ func TestAssignThemes_RejectUnknown_AC1_AC25(t *testing.T) {
 	ctx := slice053CtxFor(t, tenant)
 
 	riskID := seedAggregableRisk(t, admin, tenant, "rejects unknown", 2, 2, nil)
-	_, err := store.AssignThemes(ctx, riskID, []string{"ownership", "made-up-theme"})
+	_, err := store.AssignThemes(ctx, riskID, []string{"ownership", "made-up-theme"}, "test-actor")
 	if !errors.Is(err, risk.ErrUnknownTheme) {
 		t.Fatalf("expected ErrUnknownTheme, got %v", err)
 	}
@@ -221,7 +223,7 @@ func TestAssignThemes_TenantPrivateAccepted_AC1(t *testing.T) {
 
 	seedTenantTheme(t, admin, tenant, "org-private:fintech", "tenant-private theme")
 	riskID := seedAggregableRisk(t, admin, tenant, "tenant-private theme", 2, 2, nil)
-	updated, err := store.AssignThemes(ctx, riskID, []string{"org-private:fintech"})
+	updated, err := store.AssignThemes(ctx, riskID, []string{"org-private:fintech"}, "test-actor")
 	if err != nil {
 		t.Fatalf("AssignThemes tenant-private: %v", err)
 	}
@@ -286,7 +288,7 @@ func TestRemoveTheme_Idempotent_AC2(t *testing.T) {
 		t.Fatalf("seed themes: got %d, want 2", len(current))
 	}
 	// Remove "ownership" by re-assigning with the rest.
-	updated, err := store.AssignThemes(ctx, riskID, []string{"tech-debt"})
+	updated, err := store.AssignThemes(ctx, riskID, []string{"tech-debt"}, "test-actor")
 	if err != nil {
 		t.Fatalf("AssignThemes after remove: %v", err)
 	}
@@ -294,7 +296,7 @@ func TestRemoveTheme_Idempotent_AC2(t *testing.T) {
 		t.Fatalf("after remove: %v", updated.Themes)
 	}
 	// Remove again — no error (idempotent).
-	updated2, err := store.AssignThemes(ctx, riskID, []string{"tech-debt"})
+	updated2, err := store.AssignThemes(ctx, riskID, []string{"tech-debt"}, "test-actor")
 	if err != nil {
 		t.Fatalf("idempotent re-remove: %v", err)
 	}
@@ -447,6 +449,7 @@ func TestAggregate_EndToEnd_AC5_AC6_AC8_AC22(t *testing.T) {
 	// Aggregate via max — expect severity = 15, grid (4, 4) since ceil(sqrt(15))=4.
 	parentOrgUnit := parentUnit.ID
 	res, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Cross-team ownership pattern",
 		ParentLevel:      dbx.RiskLevelOrg,
 		ParentOrgUnitID:  &parentOrgUnit,
@@ -513,6 +516,7 @@ func TestAggregate_WeightedMax(t *testing.T) {
 	r3 := seedAggregableRisk(t, admin, tenant, "WM 3", 3, 3, nil) // 9
 
 	res, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Weighted max test",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionWeightedMax,
@@ -538,6 +542,7 @@ func TestAggregate_Sum_Capped(t *testing.T) {
 	r2 := seedAggregableRisk(t, admin, tenant, "Sum 2", 3, 3, nil) // 9
 
 	res, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Sum capped",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionSum,
@@ -566,6 +571,7 @@ func TestAggregate_Idempotent_AC7(t *testing.T) {
 	r2 := seedAggregableRisk(t, admin, tenant, "Idemp 2", 3, 3, nil)
 
 	first, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Idempotent",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionMax,
@@ -576,6 +582,7 @@ func TestAggregate_Idempotent_AC7(t *testing.T) {
 	}
 	// Re-request with reversed child order — must return the SAME parent id.
 	second, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Idempotent",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionMax,
@@ -621,6 +628,7 @@ func TestAggregate_MixedMethodology_Rejected(t *testing.T) {
 	}
 
 	_, err := store.Aggregate(ctx, risk.AggregateInput{
+		Actor:            "test-actor",
 		ParentTitle:      "Mixed",
 		ParentLevel:      dbx.RiskLevelOrg,
 		SeverityFunction: risk.SeverityFunctionMax,

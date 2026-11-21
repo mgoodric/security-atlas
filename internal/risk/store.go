@@ -260,6 +260,9 @@ type CreateInput struct {
 	// (ValidateProposal, #2391). A zero ProposedUntil is absent.
 	Justification string
 	ProposedUntil time.Time
+	// Actor is the creating person or credential (credstore.PrincipalOf),
+	// named on the risk's `created` audit row (#2835). Required.
+	Actor string
 }
 
 // Create inserts a new risk row plus its control links. Methodology defaults
@@ -268,6 +271,9 @@ type CreateInput struct {
 // a placement validation error (IsPlacementValidation) for a bad level or
 // org unit.
 func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
+	if in.Actor == "" {
+		return Risk{}, fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
 	if in.Methodology == "" {
 		in.Methodology = DefaultMethodology
 	}
@@ -365,6 +371,9 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		out = riskFromRow(row)
 		out.CategorySlug, out.CategoryName = category.Slug, category.Name
 		out.LinkedControlIDs = append([]uuid.UUID(nil), in.LinkedControlIDs...)
+		if err := RecordCreatedTx(ctx, q, tenantID, out.ID, in.Actor, createdStateOf(out)); err != nil {
+			return err
+		}
 		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
 	})
 	return out, err

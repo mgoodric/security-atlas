@@ -89,8 +89,8 @@ func TestIfMatch_ConcurrentEditorsOneWins(t *testing.T) {
 	if codes[0] != http.StatusOK || codes[1] != http.StatusPreconditionFailed {
 		t.Fatalf("statuses %v, want one 200 and one 412", codes)
 	}
-	if n := len(auditEntries(t, env, id)); n != 1 {
-		t.Fatalf("audit rows = %d, want 1 (the loser writes none)", n)
+	if n := len(auditEntries(t, env, id)); n != 2 {
+		t.Fatalf("audit rows = %d, want 2: created and the winner's edit (the loser writes none)", n)
 	}
 }
 
@@ -155,9 +155,10 @@ func TestAuditLimit_CapsAndFlagsTruncation(t *testing.T) {
 		t.Fatalf("newest row first: got %v", after)
 	}
 
-	_, body = get(t, env, "/v1/risks/"+id+"/audit-log?limit=3")
-	if body["truncated"] != false || body["count"] != float64(3) {
-		t.Fatalf("limit=3: truncated=%v count=%v", body["truncated"], body["count"])
+	// Four rows: the risk's created row and the three seeded.
+	_, body = get(t, env, "/v1/risks/"+id+"/audit-log?limit=4")
+	if body["truncated"] != false || body["count"] != float64(4) {
+		t.Fatalf("limit=4: truncated=%v count=%v", body["truncated"], body["count"])
 	}
 	_, body = get(t, env, "/v1/risks/"+id+"/audit-log")
 	if body["limit"] != float64(200) || body["truncated"] != false {

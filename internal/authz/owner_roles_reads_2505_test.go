@@ -33,6 +33,7 @@ var ownerRolesReads2505 = map[string]string{
 	"internal/api/admincreds/http.go Handler.Issue":           "the issue request body's owner_roles, written to the new key",
 	"internal/api/admincreds/http.go Handler.List":            "lists each key's stored label; display only",
 	"internal/api/admincreds/http.go Handler.callerMayHandle": "the target key's stored label, checked against the caller's live roles (#2503); not the caller's claim",
+	"internal/api/admincreds/http.go checkPurpose":            "the issue request body's owner_roles: a policy-sync key may carry none (#2849); not the caller's claim",
 
 	"internal/api/credstore/credstore.go Store.rotateLocked": "a rotated key's successor inherits its label",
 

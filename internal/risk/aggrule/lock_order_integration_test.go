@@ -188,7 +188,7 @@ func TestAssignThemes_ReadsBeforeThemesUnderRowLock_1867(t *testing.T) {
 
 	assigned := make(chan error, 1)
 	go func() {
-		_, err := risks.AssignThemes(ctx, r, []string{"monitoring"})
+		_, err := risks.AssignThemes(ctx, r, []string{"monitoring"}, "test-actor")
 		assigned <- err
 	}()
 	waitBlockedBy(t, admin, pidA)
@@ -330,7 +330,7 @@ func TestRiskWrite_RetriesWhenThemesChangeBeforeRowLock_1880(t *testing.T) {
 	t.Run("AssignThemes", func(t *testing.T) {
 		r := seedRisk(t, admin, tenant, "assign", 2, 2, nil, &team1, now)
 		h := &themeRacingHook{race: addMonitoring(r)}
-		if _, err := wired(h).AssignThemes(ctx, r, []string{"ownership"}); err != nil {
+		if _, err := wired(h).AssignThemes(ctx, r, []string{"ownership"}, "test-actor"); err != nil {
 			t.Fatalf("AssignThemes: %v", err)
 		}
 		if len(h.calls) != 2 || !contains(h.calls[1], "monitoring") {
@@ -352,7 +352,7 @@ func TestRiskWrite_RetriesWhenThemesChangeBeforeRowLock_1880(t *testing.T) {
 	t.Run("NoRaceNoRetry", func(t *testing.T) {
 		r := seedRisk(t, admin, tenant, "steady", 2, 2, []string{"ownership"}, &team1, now)
 		h := &themeRacingHook{race: func() {}}
-		if _, err := wired(h).AssignThemes(ctx, r, []string{"monitoring"}); err != nil {
+		if _, err := wired(h).AssignThemes(ctx, r, []string{"monitoring"}, "test-actor"); err != nil {
 			t.Fatalf("AssignThemes: %v", err)
 		}
 		if len(h.calls) != 1 {

@@ -123,7 +123,7 @@ func TestThemeRename_WaitsForInFlightAssignment_1811(t *testing.T) {
 	assigner, paused, release := pausedAssigner(t, app)
 	assigned := make(chan error, 1)
 	go func() {
-		_, err := assigner.AssignThemes(ctx, r, []string{contendedTheme})
+		_, err := assigner.AssignThemes(ctx, r, []string{contendedTheme}, "test-actor")
 		assigned <- err
 	}()
 	<-paused
@@ -169,7 +169,7 @@ func TestThemeDelete_WaitsForInFlightAssignment_1811(t *testing.T) {
 	assigner, paused, release := pausedAssigner(t, app)
 	assigned := make(chan error, 1)
 	go func() {
-		_, err := assigner.AssignThemes(ctx, r, []string{contendedTheme})
+		_, err := assigner.AssignThemes(ctx, r, []string{contendedTheme}, "test-actor")
 		assigned <- err
 	}()
 	<-paused

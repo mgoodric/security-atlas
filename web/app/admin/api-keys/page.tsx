@@ -247,6 +247,17 @@ export default function APIKeysPage() {
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
+                      {/* #2849: a purpose key is not an ordinary key; a
+                          policy-sync key may only sync policies. */}
+                      {c.purpose ? (
+                        <Badge
+                          variant="outline"
+                          className="ml-2"
+                          data-testid={`cred-purpose-${c.id}`}
+                        >
+                          {c.purpose}
+                        </Badge>
+                      ) : null}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {c.id.slice(0, 12)}…

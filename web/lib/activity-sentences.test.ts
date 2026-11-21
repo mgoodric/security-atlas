@@ -116,6 +116,10 @@ describe("describeEvent", () => {
     expect(describeEvent(row("risk", "control_unlinked")).phrase).toBe(
       "unlinked a control from",
     );
+    expect(describeEvent(row("risk", "created")).phrase).toBe("created");
+    expect(describeEvent(row("risk", "themes_changed")).phrase).toBe(
+      "changed the themes of",
+    );
     expect(describeEvent(row("risk", "something_new")).phrase).toBe("changed");
     expect(
       describeEvent(row("feature_flag", "feature_flag.disable")).phrase,
