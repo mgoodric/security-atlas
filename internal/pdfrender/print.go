@@ -18,8 +18,9 @@ import (
 
 // ErrChromeUnavailable is returned when chromedp could not launch a browser.
 // Every renderer's own ErrChromeUnavailable is this sentinel, so a handler's
-// errors.Is check maps it to 503 and operators can run the platform without
-// Chrome (PDF endpoints disabled) until they install it.
+// errors.Is check maps it to 409 feature_not_enabled and operators can run
+// the platform without Chrome (PDF endpoints disabled) until they install it
+// (#2786).
 var ErrChromeUnavailable = errors.New("pdfrender: chrome browser unavailable")
 
 // allocatorOptions are the flags for a locally launched headless Chrome.
@@ -169,7 +170,7 @@ func blockNonDataRequests(browserCtx context.Context) error {
 }
 
 // renderError wraps a chromedp error, mapping a missing browser to
-// ErrChromeUnavailable so handlers 503.
+// ErrChromeUnavailable so handlers answer 409 feature_not_enabled.
 func renderError(err error) error {
 	if isChromeUnavailable(err) {
 		return fmt.Errorf("%w: %v", ErrChromeUnavailable, err)

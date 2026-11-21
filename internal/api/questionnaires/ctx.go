@@ -4,30 +4,42 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
+	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 )
 
-// pdfDegradation classifies a questionnaire PDF-render error into the graceful
-// 503 path (slice 475). The three modes — chrome absent, render deadline
-// exceeded, render queue saturated — ALL map to 503 so a slow/contended/
-// missing chrome never produces a 500 or a hung request (AC-1). ok=false for a
-// genuine bug so the caller falls through to a 500.
-func pdfDegradation(err error) (status int, msg string, ok bool) {
+// chromeAbsentMsg is the refusal for a deployment with no chrome installed.
+const chromeAbsentMsg = "PDF export is not enabled on this deployment: chrome is not installed"
+
+// writePDFDegradation answers a questionnaire PDF-render error that is one of
+// the three documented degradation modes (slice 475) and reports true; a
+// genuine bug returns false so the caller falls through to a 500.
+//
+//   - chrome absent: 409 feature_not_enabled. Retrying cannot install chrome,
+//     so this is a refusal about the deployment, not a server failure (#2786).
+//   - render deadline exceeded, render queue saturated: 503 with Retry-After.
+//     Both clear on their own once the renders ahead finish.
+func writePDFDegradation(w http.ResponseWriter, r *http.Request, err error) bool {
+	var msg string
 	switch {
 	case errors.Is(err, questionnaire.ErrChromeUnavailable):
-		return http.StatusServiceUnavailable,
-			"PDF export disabled: chrome not available in this deployment", true
+		logPDFDegradation(r, err)
+		httpresp.WriteFeatureNotEnabled(w, chromeAbsentMsg)
+		return true
 	case errors.Is(err, pdfrender.ErrRenderDeadline):
-		return http.StatusServiceUnavailable,
-			"PDF export unavailable: render deadline exceeded, retry shortly", true
+		msg = "PDF export unavailable: render deadline exceeded, retry shortly"
 	case errors.Is(err, pdfrender.ErrQueueSaturated):
-		return http.StatusServiceUnavailable,
-			"PDF export busy: too many concurrent renders, retry shortly", true
+		msg = "PDF export busy: too many concurrent renders, retry shortly"
 	default:
-		return 0, "", false
+		return false
 	}
+	logPDFDegradation(r, err)
+	w.Header().Set("Retry-After", strconv.Itoa(pdfrender.RetryAfterSeconds))
+	httpresp.WriteError(w, http.StatusServiceUnavailable, msg)
+	return true
 }
 
 // logPDFDegradation emits a WARN distinguishing the degradation mode (AC-5).

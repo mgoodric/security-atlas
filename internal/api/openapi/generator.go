@@ -493,6 +493,10 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 		_, err := io.WriteString(w, soaExportOperationDetails)
 		return err
 	}
+	if details, ok := pdfExportOperationDetails(r); ok {
+		_, err := io.WriteString(w, details)
+		return err
+	}
 	// Responses — single `default` ref to the Ack envelope. v1 spec
 	// does not commit to per-operation response schemas; follow-on
 	// slice will refine. Operations that genuinely return bodies (most
@@ -674,6 +678,79 @@ const soaExportOperationDetails = `      parameters:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Unknown framework version or revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+// pdfExportOperationDetails documents the PDF export routes' refusals
+// (#2786): 409 feature_not_enabled when the deployment has no Chrome, and,
+// for the routes behind the shared render limiter, a retryable 503 with
+// Retry-After when the render times out or the queue is full. The policy PDF
+// does not go through the limiter, so it has no 503.
+func pdfExportOperationDetails(r RouteSpec) (string, bool) {
+	switch {
+	case r.Method == "GET" && r.Path == "/v1/policies/{id}/pdf":
+		return pdfOKResponse + pdfChromeAbsentResponse + pdfDefaultResponse, true
+	case r.Method == "GET" && r.Path == "/v1/board-briefs/{id}/pdf",
+		r.Method == "GET" && r.Path == "/v1/board-packs/{id}/pdf",
+		r.Method == "POST" && r.Path == "/v1/questionnaires/{id}/export-pdf":
+		return pdfOKResponse + pdfChromeAbsentResponse + pdfRenderBusyResponse + pdfDefaultResponse, true
+	case r.Method == "GET" && r.Path == "/v1/walkthroughs/{id}/export":
+		return walkthroughExportOKResponse + pdfChromeAbsentResponse + pdfRenderBusyResponse + pdfDefaultResponse, true
+	}
+	return "", false
+}
+
+const pdfOKResponse = `      responses:
+        "200":
+          description: The rendered PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+`
+
+const walkthroughExportOKResponse = `      responses:
+        "200":
+          description: The walkthrough as a PDF for format=pdf, or as JSON for format=json.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: object
+`
+
+const pdfChromeAbsentResponse = `        "409":
+          description: >-
+            PDF export is not enabled on this deployment because Chrome is not installed.
+            code is feature_not_enabled. Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+const pdfDefaultResponse = `        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+const pdfRenderBusyResponse = `        "503":
+          description: The render timed out or the render queue is full. Retryable.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
           content:
             application/json:
               schema:
