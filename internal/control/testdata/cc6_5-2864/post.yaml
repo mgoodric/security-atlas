@@ -1,0 +1,85 @@
+bundle_schema_version: "1"
+bundle_id: soc2_cc6_5_asset_disposal
+title: "Decommissioned media and devices are securely wiped"
+description: |
+  Devices and media are wiped or destroyed before they leave the
+  organisation's protection (TSC CC6.5). The owner uploads quarterly
+  evidence of device disposal — laptops returned by terminated employees
+  and wiped, storage media physically destroyed, EBS volumes deleted —
+  including serial numbers, dates, and disposal method. For cloud-native
+  orgs the bulk of this evidence is the storage-deletion log from the
+  cloud provider.
+
+scf_anchor_id: AST-22
+control_family: AST
+implementation_type: semi_automated
+owner_role: it-operations
+lifecycle_state: active
+freshness_class: quarterly
+
+evidence_queries:
+  - id: disposal_log_uploaded_within_quarter
+    language: rego
+    evidence_kind: manual.upload.v1
+    description: "A disposal-log upload exists within the last 120 days (quarterly plus 30-day grace)"
+    expression: |
+      package evidence.query
+
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
+
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
+
+manual_evidence_schema:
+  type: object
+  required: [period_start, period_end, disposals]
+  properties:
+    period_start: { type: string, format: date }
+    period_end: { type: string, format: date }
+    disposals:
+      type: array
+      items:
+        type: object
+        required: [asset_id, asset_type, disposal_method, disposed_at]
+        properties:
+          asset_id:
+            {
+              type: string,
+              description: "Serial / instance id / EBS volume id",
+            }
+          asset_type:
+            {
+              type: string,
+              enum: [laptop, mobile, server, removable_media, cloud_volume],
+            }
+          disposal_method:
+            {
+              type: string,
+              enum:
+                [
+                  crypto_erase,
+                  physical_destruction,
+                  cloud_delete,
+                  secure_wipe_nist_888,
+                ],
+            }
+          disposed_at: { type: string, format: date }
+          witness:
+            {
+              type: string,
+              description: "Email of witness (for physical destruction)",
+            }
