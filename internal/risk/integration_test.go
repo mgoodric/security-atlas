@@ -75,6 +75,7 @@ func TestCreate_DefaultsMethodologyToNist80030(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Unauthorized PHI access",
 		CategoryRef:   "confidentiality",
 		Methodology:   "", // omitted on purpose
@@ -99,6 +100,7 @@ func TestCreate_RejectsInvalidNistScore(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Bad score",
 		CategoryRef:   "integrity",
 		Methodology:   dbx.RiskMethodologyNist80030,
@@ -118,6 +120,7 @@ func TestCreate_RejectsFairMissingLM(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "FAIR-style risk",
 		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
@@ -137,6 +140,7 @@ func TestCreate_FairPersistsCanonicalDollarExposure(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "FAIR-style risk",
 		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
@@ -170,6 +174,7 @@ func TestCreate_FairAcceptsLegacyAliasesAndNormalizes(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "FAIR aliases",
 		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
@@ -209,6 +214,7 @@ func TestCreate_MitigateRequiresLinkedControl(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Needs mitigation",
 		CategoryRef:   "operational",
 		Methodology:   dbx.RiskMethodologyNist80030,
@@ -229,6 +235,7 @@ func TestCreate_MitigateWithLinkedControlSucceeds(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:            "test-actor",
 		Title:            "Mitigated",
 		CategoryRef:      "operational",
 		Methodology:      dbx.RiskMethodologyNist80030,
@@ -281,6 +288,7 @@ func TestCreate_RefusesApprovedAcceptance(t *testing.T) {
 		},
 	} {
 		in.Title = "Accepted"
+		in.Actor = "test-actor"
 		in.CategoryRef = "regulatory"
 		in.Methodology = dbx.RiskMethodologyNist80030
 		in.InherentScore = []byte(`{"likelihood":1,"impact":2}`)
@@ -301,6 +309,7 @@ func TestCreate_OmittedTreatmentStoresUntreated(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Intake risk",
 		CategoryRef:   "operational",
 		InherentScore: []byte(`{"likelihood":2,"impact":2}`),
@@ -325,6 +334,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 
 	until := time.Now().UTC().AddDate(0, 3, 0)
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:            "test-actor",
 		Title:            "Pending acceptance",
 		CategoryRef:      "operational",
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
@@ -366,6 +376,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 		"past expiry":      {Proposer: "creator", Justification: "j", ProposedUntil: time.Now().UTC().AddDate(0, 0, -1)},
 	} {
 		in.Title = "Pending, " + name
+		in.Actor = "test-actor"
 		in.CategoryRef = "operational"
 		in.InherentScore = []byte(`{"likelihood":2,"impact":2}`)
 		in.Treatment = dbx.RiskTreatmentAccept
@@ -377,6 +388,7 @@ func TestCreate_ProposedAcceptNeedsNoAccepterOrExpiry(t *testing.T) {
 
 	// Approved without accepter / expiry: the domain layer rejects it.
 	_, err = store.Create(ctx, risk.CreateInput{
+		Actor:            "test-actor",
 		Title:            "Approved, unsigned",
 		CategoryRef:      "operational",
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
@@ -454,6 +466,7 @@ func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
 	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "Insured",
 		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyNist80030,
@@ -465,6 +478,7 @@ func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
 	}
 
 	created, err := store.Create(ctx, risk.CreateInput{
+		Actor:               "test-actor",
 		Title:               "Insured",
 		CategoryRef:         "financial",
 		Methodology:         dbx.RiskMethodologyNist80030,
@@ -491,6 +505,7 @@ func TestList_Filters(t *testing.T) {
 
 	// One nist_800_30 + accept
 	if _, err := store.Create(ctx, risk.CreateInput{
+		Actor: "test-actor",
 		Title: "A", CategoryRef: "privacy",
 		Methodology:      dbx.RiskMethodologyNist80030,
 		InherentScore:    []byte(`{"likelihood":2,"impact":2}`),
@@ -504,6 +519,7 @@ func TestList_Filters(t *testing.T) {
 	}
 	// One fair + avoid
 	if _, err := store.Create(ctx, risk.CreateInput{
+		Actor: "test-actor",
 		Title: "B", CategoryRef: "financial",
 		Methodology:   dbx.RiskMethodologyFair,
 		InherentScore: []byte(`{"lef":1.0,"lm":50000}`),
@@ -513,6 +529,7 @@ func TestList_Filters(t *testing.T) {
 	}
 	// One qualitative_5x5 + avoid
 	if _, err := store.Create(ctx, risk.CreateInput{
+		Actor: "test-actor",
 		Title: "C", CategoryRef: "availability",
 		Methodology:   dbx.RiskMethodologyQualitative5x5,
 		InherentScore: []byte(`{"likelihood":5,"impact":5}`),
@@ -558,6 +575,7 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	// Two nist_800_30 risks in the same bucket (3,4).
 	for i := 0; i < 2; i++ {
 		if _, err := store.Create(ctx, risk.CreateInput{
+			Actor:         "test-actor",
 			Title:         "n",
 			CategoryRef:   "confidentiality",
 			Methodology:   dbx.RiskMethodologyNist80030,
@@ -569,6 +587,7 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	}
 	// One qualitative_5x5 in bucket (5,5).
 	if _, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "q",
 		CategoryRef:   "availability",
 		Methodology:   dbx.RiskMethodologyQualitative5x5,
@@ -579,6 +598,7 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 	}
 	// One FAIR — must NOT appear in heatmap.
 	if _, err := store.Create(ctx, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "f",
 		CategoryRef:   "financial",
 		Methodology:   dbx.RiskMethodologyFair,
@@ -621,6 +641,7 @@ func TestCrossTenant_RisksAreIsolated(t *testing.T) {
 	ctxB := dbtest.WithTenantCtx(t, tenantB)
 
 	created, err := store.Create(ctxA, risk.CreateInput{
+		Actor:         "test-actor",
 		Title:         "A's risk",
 		CategoryRef:   "regulatory",
 		Methodology:   dbx.RiskMethodologyNist80030,

@@ -187,6 +187,18 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)
 	}
+	// The hand-written insert bypasses risk.Store.Create, so it writes the
+	// same `created` row the store writes, naming the confirming person
+	// (#2835).
+	if err := risk.RecordCreatedTx(ctx, dbx.New(tx), p.TenantID, id, p.Confirmer.Actor(), risk.CreatedState{
+		Title:          in.Title,
+		CategoryID:     category.ID,
+		Treatment:      treatment,
+		OwnerUserID:    owner,
+		TreatmentOwner: treatmentOwner,
+	}); err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
+	}
 	return id.String(), nil
 }
 

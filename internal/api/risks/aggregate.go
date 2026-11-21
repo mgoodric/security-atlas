@@ -17,6 +17,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -56,6 +58,12 @@ func (h *Handler) Aggregate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	// The aggregator is named on the parent's created audit row (#2835).
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
+		return
+	}
 	var req aggregateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
@@ -89,6 +97,7 @@ func (h *Handler) Aggregate(w http.ResponseWriter, r *http.Request) {
 		ParentOrgUnitID:  orgUnitID,
 		SeverityFunction: risk.SeverityFunction(req.Parent.SeverityFunction),
 		ChildRiskIDs:     childIDs,
+		Actor:            credstore.PrincipalOf(cred),
 	}
 	res, err := h.store.Aggregate(ctx, in)
 	if err != nil {

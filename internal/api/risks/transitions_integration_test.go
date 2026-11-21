@@ -171,6 +171,10 @@ func (env transitionEnv) newRisk(t *testing.T) string {
 }
 
 // auditRows reads the risk's audit trail oldest first.
+// auditRows returns the risk's audit rows oldest first, after its created
+// row. Every risk these tests make is created over POST /v1/risks, so the
+// oldest row must be its created row (#2835); the tests then read what
+// happened to the risk since.
 func (env transitionEnv) auditRows(t *testing.T, id string) []map[string]any {
 	t.Helper()
 	code, body := env.do(t, http.MethodGet, "/v1/risks/"+id+"/audit-log", env.ownerJWT, nil)
@@ -182,7 +186,10 @@ func (env transitionEnv) auditRows(t *testing.T, id string) []map[string]any {
 	for i, e := range raw {
 		out[len(raw)-1-i] = e.(map[string]any)
 	}
-	return out
+	if len(out) == 0 || out[0]["action"] != "created" || out[0]["actor"] == "" {
+		t.Fatalf("oldest audit row is not the risk's created row: %v", out)
+	}
+	return out[1:]
 }
 
 func actionsOf(rows []map[string]any) []string {
