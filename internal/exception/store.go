@@ -279,6 +279,13 @@ type CreateInput struct {
 	// ErrIdempotencyKeyReused.
 	IdempotencyKey string
 	RequestHash    string
+	// LegacyRequestHash is the same request hashed the #2618 way, before
+	// #2714 made the hash canonical. A key recorded before the upgrade
+	// replays when it matches.
+	// TODO(remove after next release, #2803): drop with legacyRequestHash in
+	// internal/api/exceptions once no key from before #2714 can be inside
+	// IdempotencyWindow.
+	LegacyRequestHash string
 }
 
 // IdempotencyWindow is how long an Idempotency-Key on POST /v1/exceptions
@@ -394,6 +401,16 @@ func (s *Store) CreateIdempotent(ctx context.Context, in CreateInput) (Exception
 	return out, replayed, err
 }
 
+// requestHashMatches reports whether a recorded key's hash is this
+// request's, under the current canonical hash or, for a key recorded
+// before #2714, the legacy one.
+func requestHashMatches(recorded string, in CreateInput) bool {
+	if recorded == in.RequestHash {
+		return true
+	}
+	return in.LegacyRequestHash != "" && recorded == in.LegacyRequestHash
+}
+
 // replayIdempotent takes the key's lock and returns the exception an
 // earlier request with in.IdempotencyKey created, if one did inside
 // IdempotencyWindow. The lock is held until the transaction ends, so a
@@ -418,7 +435,7 @@ func replayIdempotent(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, i
 	if err != nil {
 		return Exception{}, false, fmt.Errorf("read idempotency key: %w", err)
 	}
-	if key.RequestHash != in.RequestHash {
+	if !requestHashMatches(key.RequestHash, in) {
 		return Exception{}, false, ErrIdempotencyKeyReused
 	}
 	row, err := q.GetExceptionByID(ctx, dbx.GetExceptionByIDParams{

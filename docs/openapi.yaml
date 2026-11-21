@@ -3592,7 +3592,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618)
+      summary: POST /v1/exceptions — request an exception; an Idempotency-Key header replays the same request within 24h instead of filing a duplicate (#2618); a replay (header Idempotent-Replayed set to true) returns the exception as it is now, not as first filed, so it may already be approved, denied or active (#2714)
       tags: [exceptions]
       operationId: post-v1-exceptions
       security:

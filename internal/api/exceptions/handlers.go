@@ -171,6 +171,7 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 		}
 		in.IdempotencyKey = key
 		in.RequestHash = requestHash(controlID, req)
+		in.LegacyRequestHash = legacyRequestHash(controlID, req)
 	}
 	created, replayed, err := h.store.CreateIdempotent(ctx, in)
 	if err != nil {
@@ -206,10 +207,42 @@ func validIdempotencyKey(key string) bool {
 }
 
 // requestHash identifies a create request's content, so one key sent with
-// a different body is refused rather than replayed. The predicate is
-// compacted and the expiry normalised to UTC, so formatting differences
-// between two sends of one request do not count as a change.
+// a different body is refused rather than replayed. Equivalent spellings
+// of one request hash the same (#2714): the predicate is re-encoded with
+// its object keys sorted, an omitted predicate counts as {} (its stored
+// spelling), compensating_controls omitted, null and [] are one value, and
+// the expiry is normalised to UTC. The order of compensating_controls
+// still counts.
 func requestHash(controlID uuid.UUID, req createReq) string {
+	compensating := req.CompensatingControls
+	if compensating == nil {
+		compensating = []string{}
+	}
+	canonical, _ := json.Marshal(struct {
+		ControlID            string   `json:"control_id"`
+		ScopeCellPredicate   string   `json:"scope_cell_predicate"`
+		Justification        string   `json:"justification"`
+		CompensatingControls []string `json:"compensating_controls"`
+		ExpiresAt            string   `json:"expires_at"`
+	}{
+		ControlID:            controlID.String(),
+		ScopeCellPredicate:   canonicalPredicate(req.ScopeCellPredicate),
+		Justification:        req.Justification,
+		CompensatingControls: compensating,
+		ExpiresAt:            req.ExpiresAt.UTC().Format(time.RFC3339Nano),
+	})
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:])
+}
+
+// legacyRequestHash is requestHash as #2618 shipped it: the predicate only
+// compacted (an omitted one hashes as ""), and compensating_controls kept
+// as sent (omitted or null hash as null). A key recorded by that build
+// replays when it matches, so a retry across the upgrade is not refused.
+//
+// TODO(remove after next release, #2803): once every key recorded before #2714
+// is past IdempotencyWindow, delete this and CreateInput.LegacyRequestHash.
+func legacyRequestHash(controlID uuid.UUID, req createReq) string {
 	var predicate bytes.Buffer
 	if err := json.Compact(&predicate, req.ScopeCellPredicate); err != nil {
 		predicate.Reset()
@@ -230,6 +263,26 @@ func requestHash(controlID uuid.UUID, req createReq) string {
 	})
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])
+}
+
+// canonicalPredicate re-encodes a predicate with sorted object keys
+// (encoding/json sorts map keys) and numbers kept as their literal text.
+// Input that does not decode is hashed as sent.
+func canonicalPredicate(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return "{}"
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return string(raw)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return string(raw)
+	}
+	return string(out)
 }
 
 // ListExceptions handles GET /v1/exceptions, filterable by ?status= and

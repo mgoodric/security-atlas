@@ -1287,6 +1287,24 @@ func main() {
 		}
 	}
 
+	// #2714: exception Idempotency-Key sweeper. Deletes keys past the 24h
+	// window, once at start and hourly. The migrator pool only lists tenant
+	// IDs; each tenant's delete runs on the app pool under tenancy.WithTenant.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		ictx, icancel := context.WithTimeout(context.Background(), 10*time.Second)
+		idemPool, err := atlasotel.NewTracedPool(ictx, migratorURL)
+		icancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: exception idempotency sweeper pool: %v\n", err)
+		} else {
+			idemSweeper := exception.NewIdempotencySweeper(idemPool, pool, logger)
+			run.nonFatal("exception idempotency sweeper", func() error {
+				defer idemPool.Close()
+				return idemSweeper.Run(ctx, exception.DefaultIdempotencySweepInterval)
+			})
+		}
+	}
+
 	// Slice 582: notification-channel digest scheduler. An in-process
 	// tick-loop (mirroring the metrics + backup schedulers — no external
 	// cron, single-VM self-host target, D1) that, once per UTC day,

@@ -1,6 +1,8 @@
 package exceptions
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -66,5 +68,112 @@ func TestRequestHash(t *testing.T) {
 	changed.ExpiresAt = &later
 	if requestHash(ctrl, changed) == h {
 		t.Error("a different expiry hashed the same")
+	}
+}
+
+// #2714: equivalent spellings of one request hash the same: the
+// predicate's key order, compensating_controls omitted / null / [], and
+// an omitted predicate against {} (its stored spelling).
+func TestRequestHashCanonical(t *testing.T) {
+	t.Parallel()
+	ctrl := uuid.New()
+	exp := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	base := createReq{
+		ScopeCellPredicate: json.RawMessage(`{"op":"eq","dim":"env","value":"prod"}`),
+		Justification:      "vendor blocker",
+		ExpiresAt:          &exp,
+	}
+	h := requestHash(ctrl, base)
+
+	reordered := base
+	reordered.ScopeCellPredicate = json.RawMessage(`{"value":"prod","op":"eq","dim":"env"}`)
+	if got := requestHash(ctrl, reordered); got != h {
+		t.Errorf("predicate key order changed the hash: %s vs %s", got, h)
+	}
+
+	emptyList := base
+	emptyList.CompensatingControls = []string{}
+	if got := requestHash(ctrl, emptyList); got != h {
+		t.Errorf("compensating_controls [] hashed differently from omitted: %s vs %s", got, h)
+	}
+
+	var decoded createReq
+	body := `{"control_id":"` + ctrl.String() + `","justification":"vendor blocker",` +
+		`"compensating_controls":null,"expires_at":"2027-01-02T03:04:05Z",` +
+		`"scope_cell_predicate":{"dim":"env","value":"prod","op":"eq"}}`
+	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := requestHash(ctrl, decoded); got != h {
+		t.Errorf("a decoded body with null controls and reordered keys hashed differently: %s vs %s", got, h)
+	}
+
+	omitted := base
+	omitted.ScopeCellPredicate = nil
+	whole := base
+	whole.ScopeCellPredicate = json.RawMessage(`{}`)
+	if requestHash(ctrl, omitted) != requestHash(ctrl, whole) {
+		t.Error("an omitted predicate hashed differently from {}")
+	}
+
+	// The order of compensating controls and the predicate's values still
+	// count.
+	two := base
+	two.CompensatingControls = []string{"a", "b"}
+	swapped := base
+	swapped.CompensatingControls = []string{"b", "a"}
+	if requestHash(ctrl, two) == requestHash(ctrl, swapped) {
+		t.Error("compensating controls in another order hashed the same")
+	}
+	otherValue := base
+	otherValue.ScopeCellPredicate = json.RawMessage(`{"op":"eq","dim":"env","value":"dev"}`)
+	if requestHash(ctrl, otherValue) == h {
+		t.Error("a different predicate value hashed the same")
+	}
+
+	// Numbers keep their full precision.
+	big1 := base
+	big1.ScopeCellPredicate = json.RawMessage(`{"n":12345678901234567890}`)
+	big2 := base
+	big2.ScopeCellPredicate = json.RawMessage(`{"n":12345678901234567891}`)
+	if requestHash(ctrl, big1) == requestHash(ctrl, big2) {
+		t.Error("two large numbers that differ in the last digit hashed the same")
+	}
+}
+
+// #2714: legacyRequestHash is byte-for-byte the #2618 hash, so a key
+// recorded before the upgrade still replays. The expected value hashes
+// the exact JSON the #2618 build produced for a body without a predicate
+// or compensating controls (the request form's usual shape): the
+// predicate as "" and the controls as null. The canonical hash differs.
+func TestLegacyRequestHashMatchesTheShippedHash(t *testing.T) {
+	t.Parallel()
+	ctrl := uuid.MustParse("6f1c2e1a-0000-4000-8000-000000000001")
+	exp := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	req := createReq{Justification: "vendor blocker", ExpiresAt: &exp}
+
+	shipped := `{"control_id":"6f1c2e1a-0000-4000-8000-000000000001",` +
+		`"scope_cell_predicate":"","justification":"vendor blocker",` +
+		`"compensating_controls":null,"expires_at":"2027-01-02T03:04:05Z"}`
+	sum := sha256.Sum256([]byte(shipped))
+	want := hex.EncodeToString(sum[:])
+
+	if got := legacyRequestHash(ctrl, req); got != want {
+		t.Fatalf("legacyRequestHash = %s, want the #2618 hash %s", got, want)
+	}
+	if requestHash(ctrl, req) == want {
+		t.Fatal("the canonical hash equals the legacy one for this body; the fallback would be untested")
+	}
+
+	// A predicate with keys out of order hashed compacted, not sorted.
+	req.ScopeCellPredicate = json.RawMessage(`{ "value":"prod", "op":"eq", "dim":"env" }`)
+	req.CompensatingControls = []string{"manual review"}
+	shipped = `{"control_id":"6f1c2e1a-0000-4000-8000-000000000001",` +
+		`"scope_cell_predicate":"{\"value\":\"prod\",\"op\":\"eq\",\"dim\":\"env\"}",` +
+		`"justification":"vendor blocker","compensating_controls":["manual review"],` +
+		`"expires_at":"2027-01-02T03:04:05Z"}`
+	sum = sha256.Sum256([]byte(shipped))
+	if got := legacyRequestHash(ctrl, req); got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("legacyRequestHash with a predicate = %s, want %s", got, hex.EncodeToString(sum[:]))
 	}
 }
