@@ -48,6 +48,13 @@ func TestExternalRef_SetOnCreateChangedAndClearedByPatch(t *testing.T) {
 	if _, got := get(t, env, "/v1/risks/"+id); riskField(t, got, "external_ref") != "R-014" {
 		t.Fatalf("GET reads back external_ref %v, want R-014", riskField(t, got, "external_ref"))
 	}
+	// The created audit row carries the ID set at creation.
+	created := auditEntries(t, env, id)
+	if first := created[len(created)-1]; first["action"] != "created" {
+		t.Fatalf("oldest audit row = %v, want created", first)
+	} else if after, _ := first["after"].(map[string]any); after["external_ref"] != "R-014" {
+		t.Fatalf("created after_state = %v, want external_ref R-014", after)
+	}
 
 	// A risk created without one reads null.
 	resp, body = createPlaced(t, env, nil)
@@ -128,6 +135,23 @@ func TestExternalRef_UniqueWithinTheTenant(t *testing.T) {
 	}
 	if _, got := get(t, env, "/v1/risks/"+second); riskField(t, got, "external_ref") != "R-002" {
 		t.Fatalf("refused patch changed external_ref to %v", riskField(t, got, "external_ref"))
+	}
+
+	// Uniqueness ignores case: r-001 collides with R-001, on create and on
+	// PATCH.
+	resp, body = createPlaced(t, env, map[string]any{"external_ref": "r-001"})
+	if resp.StatusCode != http.StatusConflict || body["code"] != "external_ref_taken" {
+		t.Fatalf("case-variant create: status %d, body %v", resp.StatusCode, body)
+	}
+	resp, body = patch(t, env, "/v1/risks/"+second, `{"external_ref":"r-001"}`)
+	if resp.StatusCode != http.StatusConflict || body["code"] != "external_ref_taken" {
+		t.Fatalf("case-variant patch: status %d, body %v", resp.StatusCode, body)
+	}
+
+	// The typed case is kept: a risk may change only the case of its own ID.
+	resp, body = patch(t, env, "/v1/risks/"+second, `{"external_ref":"r-002"}`)
+	if resp.StatusCode != http.StatusOK || riskField(t, body, "external_ref") != "r-002" {
+		t.Fatalf("own case change: status %d, body %v", resp.StatusCode, body)
 	}
 
 	// Any number of risks may carry none.

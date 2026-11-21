@@ -1,8 +1,9 @@
 // The organisation's own risk ID (#2838): "R-014", kept on the risk so a
 // security leader finds risks by the IDs their team already uses, and so
 // the risk register import (#2812) has a duplicate key and a parent-link
-// key. It is optional and unique within the tenant when set (migration
-// 20261278000000, index risks_tenant_external_ref_key).
+// key. It is optional and unique within the tenant when set, ignoring case;
+// the typed case is stored (migration 20261278000000, index
+// risks_tenant_external_ref_key on lower(external_ref)).
 
 package risk
 
