@@ -67,15 +67,80 @@ WHERE tenant_id = $1
 
 -- ===== user_roles origin-aware reconciliation =====
 
--- name: ListGroupDerivedRoles :many
--- The user's CURRENT group-derived roles (origin='group-derived') in the
--- tenant. The resolver diffs this against the freshly-resolved target set to
--- compute grants + revokes. Manual roles (origin='manual') are intentionally
--- excluded — they are never touched by re-derivation (AC-4).
+-- name: ListGroupDerivedRolesForSource :many
+-- The user's CURRENT group-derived roles from ONE source (#2760): the roles
+-- user_role_group_sources attributes to this idp_config_id (NULL = SCIM).
+-- The resolver diffs this against that source's freshly-resolved target
+-- set, so a reconcile through one source never revokes a role another
+-- source derived. Manual roles have no source row and are never touched
+-- by re-derivation (AC-4).
 SELECT role
-FROM user_roles
-WHERE tenant_id = $1 AND user_id = $2 AND origin = 'group-derived'
+FROM user_role_group_sources
+WHERE tenant_id = $1 AND user_id = $2
+  AND idp_config_id IS NOT DISTINCT FROM sqlc.narg('idp_config_id')::uuid
 ORDER BY role ASC;
+
+-- name: InsertGroupRoleSource :exec
+-- Records that a source derived the user's role (#2760). The user_roles row
+-- must exist first (FK). Idempotent on the per-source unique index.
+INSERT INTO user_role_group_sources (tenant_id, user_id, role, idp_config_id)
+VALUES ($1, $2, $3, sqlc.narg('idp_config_id')::uuid)
+ON CONFLICT DO NOTHING;
+
+-- name: DeleteGroupRoleSource :execrows
+-- Removes one source's derivation of the user's role (#2760).
+DELETE FROM user_role_group_sources
+WHERE tenant_id = $1 AND user_id = $2 AND role = $3
+  AND idp_config_id IS NOT DISTINCT FROM sqlc.narg('idp_config_id')::uuid;
+
+-- name: GroupRoleHasSource :one
+-- Reports whether any source still derives the user's role (#2760). The
+-- group-derived user_roles row is removed only when none does.
+SELECT EXISTS (
+    SELECT 1 FROM user_role_group_sources
+    WHERE tenant_id = $1 AND user_id = $2 AND role = $3
+) AS has_source;
+
+-- name: GroupRoleHasOtherSource :one
+-- Reports whether a source other than idp_config_id derives the user's role
+-- (#2760). The last-admin guard reads it: a user another source keeps admin
+-- for is not stranded by this source's revoke.
+SELECT EXISTS (
+    SELECT 1 FROM user_role_group_sources
+    WHERE tenant_id = $1 AND user_id = $2 AND role = $3
+      AND idp_config_id IS DISTINCT FROM sqlc.narg('idp_config_id')::uuid
+) AS has_other_source;
+
+-- name: ListGroupRoleSourcesForConfig :many
+-- Every (user, role) one OIDC config derived, for the config delete (#2760).
+-- FOR UPDATE so a concurrent reconcile cannot drop a row mid-delete.
+SELECT user_id, role
+FROM user_role_group_sources
+WHERE tenant_id = $1 AND idp_config_id = $2
+ORDER BY user_id ASC, role ASC
+FOR UPDATE;
+
+-- name: CountGroupRoleMappingsForConfig :one
+-- The mappings scoped to one OIDC config: the rows deleting it removes.
+SELECT count(*)::bigint AS mapping_count
+FROM oidc_idp_group_mappings
+WHERE tenant_id = $1 AND idp_config_id = $2;
+
+-- name: CountSoleSourceGroupRolesForConfig :one
+-- The group-derived roles deleting one OIDC config would revoke (#2760):
+-- the config's source rows on a group-derived user_roles row that no other
+-- source derives. A role the user also holds manually is not counted.
+SELECT count(*)::bigint AS role_count
+FROM user_role_group_sources s
+JOIN user_roles ur
+  ON ur.tenant_id = s.tenant_id AND ur.user_id = s.user_id AND ur.role = s.role
+WHERE s.tenant_id = $1 AND s.idp_config_id = $2
+  AND ur.origin = 'group-derived'
+  AND NOT EXISTS (
+      SELECT 1 FROM user_role_group_sources o
+      WHERE o.tenant_id = s.tenant_id AND o.user_id = s.user_id AND o.role = s.role
+        AND o.idp_config_id IS DISTINCT FROM s.idp_config_id
+  );
 
 -- name: HasManualRole :one
 -- Reports whether the user holds a SPECIFIC role via a manual assignment. Used

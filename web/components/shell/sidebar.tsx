@@ -17,8 +17,8 @@ import { VersionFooter } from "@/components/version-footer";
 // each entry's label is the title of the page it opens. The groups, the
 // order and the gates are pure data in `lib/nav.ts`; the labels come from
 // `lib/page-titles.ts`, the same map the pages read their titles from.
-// Before #2081 Exceptions, Framework scopes, the Implementation checklist
-// and Risk hierarchy were reachable only by URL, and labels such as
+// Before #2081 Exceptions, Framework scopes and the Implementation
+// checklist were reachable only by URL, and labels such as
 // "Personnel" and "Catalog · SCF" did not match their pages' titles.
 //
 // The gates are unchanged:

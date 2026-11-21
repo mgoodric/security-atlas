@@ -1246,6 +1246,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
   /v1/admin/sso:
+    delete:
+      summary: DELETE /v1/admin/sso — delete the IdP config, its group-role mappings and the group-derived roles only it derived; 409 if it would revoke the last admin (#2760)
+      tags: [admin-sso]
+      operationId: delete-v1-admin-sso
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
     get:
       summary: GET /v1/admin/sso
       tags: [admin-sso]

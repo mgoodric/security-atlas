@@ -11,6 +11,54 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countGroupRoleMappingsForConfig = `-- name: CountGroupRoleMappingsForConfig :one
+SELECT count(*)::bigint AS mapping_count
+FROM oidc_idp_group_mappings
+WHERE tenant_id = $1 AND idp_config_id = $2
+`
+
+type CountGroupRoleMappingsForConfigParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	IdpConfigID pgtype.UUID `json:"idp_config_id"`
+}
+
+// The mappings scoped to one OIDC config: the rows deleting it removes.
+func (q *Queries) CountGroupRoleMappingsForConfig(ctx context.Context, arg CountGroupRoleMappingsForConfigParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countGroupRoleMappingsForConfig, arg.TenantID, arg.IdpConfigID)
+	var mapping_count int64
+	err := row.Scan(&mapping_count)
+	return mapping_count, err
+}
+
+const countSoleSourceGroupRolesForConfig = `-- name: CountSoleSourceGroupRolesForConfig :one
+SELECT count(*)::bigint AS role_count
+FROM user_role_group_sources s
+JOIN user_roles ur
+  ON ur.tenant_id = s.tenant_id AND ur.user_id = s.user_id AND ur.role = s.role
+WHERE s.tenant_id = $1 AND s.idp_config_id = $2
+  AND ur.origin = 'group-derived'
+  AND NOT EXISTS (
+      SELECT 1 FROM user_role_group_sources o
+      WHERE o.tenant_id = s.tenant_id AND o.user_id = s.user_id AND o.role = s.role
+        AND o.idp_config_id IS DISTINCT FROM s.idp_config_id
+  )
+`
+
+type CountSoleSourceGroupRolesForConfigParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	IdpConfigID pgtype.UUID `json:"idp_config_id"`
+}
+
+// The group-derived roles deleting one OIDC config would revoke (#2760):
+// the config's source rows on a group-derived user_roles row that no other
+// source derives. A role the user also holds manually is not counted.
+func (q *Queries) CountSoleSourceGroupRolesForConfig(ctx context.Context, arg CountSoleSourceGroupRolesForConfigParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSoleSourceGroupRolesForConfig, arg.TenantID, arg.IdpConfigID)
+	var role_count int64
+	err := row.Scan(&role_count)
+	return role_count, err
+}
+
 const deleteGroupDerivedRole = `-- name: DeleteGroupDerivedRole :execrows
 DELETE FROM user_roles
 WHERE tenant_id = $1 AND user_id = $2 AND role = $3 AND origin = 'group-derived'
@@ -53,6 +101,33 @@ func (q *Queries) DeleteGroupRoleMapping(ctx context.Context, arg DeleteGroupRol
 	return result.RowsAffected(), nil
 }
 
+const deleteGroupRoleSource = `-- name: DeleteGroupRoleSource :execrows
+DELETE FROM user_role_group_sources
+WHERE tenant_id = $1 AND user_id = $2 AND role = $3
+  AND idp_config_id IS NOT DISTINCT FROM $4::uuid
+`
+
+type DeleteGroupRoleSourceParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	UserID      string      `json:"user_id"`
+	Role        string      `json:"role"`
+	IdpConfigID pgtype.UUID `json:"idp_config_id"`
+}
+
+// Removes one source's derivation of the user's role (#2760).
+func (q *Queries) DeleteGroupRoleSource(ctx context.Context, arg DeleteGroupRoleSourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteGroupRoleSource,
+		arg.TenantID,
+		arg.UserID,
+		arg.Role,
+		arg.IdpConfigID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getGroupRoleMapping = `-- name: GetGroupRoleMapping :one
 SELECT id, tenant_id, idp_config_id, group_ref, role, created_at, created_by
 FROM oidc_idp_group_mappings
@@ -78,6 +153,58 @@ func (q *Queries) GetGroupRoleMapping(ctx context.Context, arg GetGroupRoleMappi
 		&i.CreatedBy,
 	)
 	return i, err
+}
+
+const groupRoleHasOtherSource = `-- name: GroupRoleHasOtherSource :one
+SELECT EXISTS (
+    SELECT 1 FROM user_role_group_sources
+    WHERE tenant_id = $1 AND user_id = $2 AND role = $3
+      AND idp_config_id IS DISTINCT FROM $4::uuid
+) AS has_other_source
+`
+
+type GroupRoleHasOtherSourceParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	UserID      string      `json:"user_id"`
+	Role        string      `json:"role"`
+	IdpConfigID pgtype.UUID `json:"idp_config_id"`
+}
+
+// Reports whether a source other than idp_config_id derives the user's role
+// (#2760). The last-admin guard reads it: a user another source keeps admin
+// for is not stranded by this source's revoke.
+func (q *Queries) GroupRoleHasOtherSource(ctx context.Context, arg GroupRoleHasOtherSourceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, groupRoleHasOtherSource,
+		arg.TenantID,
+		arg.UserID,
+		arg.Role,
+		arg.IdpConfigID,
+	)
+	var has_other_source bool
+	err := row.Scan(&has_other_source)
+	return has_other_source, err
+}
+
+const groupRoleHasSource = `-- name: GroupRoleHasSource :one
+SELECT EXISTS (
+    SELECT 1 FROM user_role_group_sources
+    WHERE tenant_id = $1 AND user_id = $2 AND role = $3
+) AS has_source
+`
+
+type GroupRoleHasSourceParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   string      `json:"user_id"`
+	Role     string      `json:"role"`
+}
+
+// Reports whether any source still derives the user's role (#2760). The
+// group-derived user_roles row is removed only when none does.
+func (q *Queries) GroupRoleHasSource(ctx context.Context, arg GroupRoleHasSourceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, groupRoleHasSource, arg.TenantID, arg.UserID, arg.Role)
+	var has_source bool
+	err := row.Scan(&has_source)
+	return has_source, err
 }
 
 const groupRoleMappingIdpConfigExists = `-- name: GroupRoleMappingIdpConfigExists :one
@@ -241,26 +368,55 @@ func (q *Queries) InsertGroupRoleMapping(ctx context.Context, arg InsertGroupRol
 	return i, err
 }
 
-const listGroupDerivedRoles = `-- name: ListGroupDerivedRoles :many
+const insertGroupRoleSource = `-- name: InsertGroupRoleSource :exec
+INSERT INTO user_role_group_sources (tenant_id, user_id, role, idp_config_id)
+VALUES ($1, $2, $3, $4::uuid)
+ON CONFLICT DO NOTHING
+`
+
+type InsertGroupRoleSourceParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	UserID      string      `json:"user_id"`
+	Role        string      `json:"role"`
+	IdpConfigID pgtype.UUID `json:"idp_config_id"`
+}
+
+// Records that a source derived the user's role (#2760). The user_roles row
+// must exist first (FK). Idempotent on the per-source unique index.
+func (q *Queries) InsertGroupRoleSource(ctx context.Context, arg InsertGroupRoleSourceParams) error {
+	_, err := q.db.Exec(ctx, insertGroupRoleSource,
+		arg.TenantID,
+		arg.UserID,
+		arg.Role,
+		arg.IdpConfigID,
+	)
+	return err
+}
+
+const listGroupDerivedRolesForSource = `-- name: ListGroupDerivedRolesForSource :many
 
 SELECT role
-FROM user_roles
-WHERE tenant_id = $1 AND user_id = $2 AND origin = 'group-derived'
+FROM user_role_group_sources
+WHERE tenant_id = $1 AND user_id = $2
+  AND idp_config_id IS NOT DISTINCT FROM $3::uuid
 ORDER BY role ASC
 `
 
-type ListGroupDerivedRolesParams struct {
-	TenantID pgtype.UUID `json:"tenant_id"`
-	UserID   string      `json:"user_id"`
+type ListGroupDerivedRolesForSourceParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	UserID      string      `json:"user_id"`
+	IdpConfigID pgtype.UUID `json:"idp_config_id"`
 }
 
 // ===== user_roles origin-aware reconciliation =====
-// The user's CURRENT group-derived roles (origin='group-derived') in the
-// tenant. The resolver diffs this against the freshly-resolved target set to
-// compute grants + revokes. Manual roles (origin='manual') are intentionally
-// excluded — they are never touched by re-derivation (AC-4).
-func (q *Queries) ListGroupDerivedRoles(ctx context.Context, arg ListGroupDerivedRolesParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listGroupDerivedRoles, arg.TenantID, arg.UserID)
+// The user's CURRENT group-derived roles from ONE source (#2760): the roles
+// user_role_group_sources attributes to this idp_config_id (NULL = SCIM).
+// The resolver diffs this against that source's freshly-resolved target
+// set, so a reconcile through one source never revokes a role another
+// source derived. Manual roles have no source row and are never touched
+// by re-derivation (AC-4).
+func (q *Queries) ListGroupDerivedRolesForSource(ctx context.Context, arg ListGroupDerivedRolesForSourceParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listGroupDerivedRolesForSource, arg.TenantID, arg.UserID, arg.IdpConfigID)
 	if err != nil {
 		return nil, err
 	}
@@ -350,6 +506,46 @@ func (q *Queries) ListGroupRoleMappings(ctx context.Context, tenantID pgtype.UUI
 			&i.CreatedAt,
 			&i.CreatedBy,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupRoleSourcesForConfig = `-- name: ListGroupRoleSourcesForConfig :many
+SELECT user_id, role
+FROM user_role_group_sources
+WHERE tenant_id = $1 AND idp_config_id = $2
+ORDER BY user_id ASC, role ASC
+FOR UPDATE
+`
+
+type ListGroupRoleSourcesForConfigParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	IdpConfigID pgtype.UUID `json:"idp_config_id"`
+}
+
+type ListGroupRoleSourcesForConfigRow struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// Every (user, role) one OIDC config derived, for the config delete (#2760).
+// FOR UPDATE so a concurrent reconcile cannot drop a row mid-delete.
+func (q *Queries) ListGroupRoleSourcesForConfig(ctx context.Context, arg ListGroupRoleSourcesForConfigParams) ([]ListGroupRoleSourcesForConfigRow, error) {
+	rows, err := q.db.Query(ctx, listGroupRoleSourcesForConfig, arg.TenantID, arg.IdpConfigID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGroupRoleSourcesForConfigRow
+	for rows.Next() {
+		var i ListGroupRoleSourcesForConfigRow
+		if err := rows.Scan(&i.UserID, &i.Role); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

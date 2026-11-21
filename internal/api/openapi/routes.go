@@ -28,6 +28,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "DELETE", Path: "/v1/admin/group-role-mappings/{id}", Tag: "admin-group-role-mappings", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/group-role-mappings/{id}"},
 	{Method: "DELETE", Path: "/v1/admin/llm-routing", Tag: "admin-llm-routing", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/llm-routing — clear cloud-LLM routing, revert to local-ollama (slice 499)"},
 	{Method: "DELETE", Path: "/v1/admin/scim-credentials/{id}", Tag: "admin-scim-credentials", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/scim-credentials/{id}"},
+	{Method: "DELETE", Path: "/v1/admin/sso", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/sso — delete the IdP config, its group-role mappings and the group-derived roles only it derived; 409 if it would revoke the last admin (#2760)"},
 	{Method: "DELETE", Path: "/v1/admin/super-admins/{user_id}", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/super-admins/{user_id}"},
 	{Method: "DELETE", Path: "/v1/audit-periods/{id}/auditors/{userID}", Tag: "audit-periods", Tier: "bearer", Internal: false, Summary: "DELETE /v1/audit-periods/{id}/auditors/{userID} — remove an auditor from the period (admin; #2118)"},
 	{Method: "DELETE", Path: "/v1/csf/profiles/{kind}/selections/{requirement_id}", Tag: "csf", Tier: "bearer", Internal: false, Summary: "DELETE /v1/csf/profiles/{kind}/selections/{requirement_id}"},

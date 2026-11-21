@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteAdminSSO = `-- name: DeleteAdminSSO :execrows
+DELETE FROM oidc_idp_configs
+WHERE tenant_id = $1 AND id = $2
+`
+
+type DeleteAdminSSOParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #2760: removes the tenant's IdP config by id. The FK cascades remove the
+// group-role mappings and the role-source rows scoped to it; DELETE
+// /v1/admin/sso revokes the roles only it derived first.
+func (q *Queries) DeleteAdminSSO(ctx context.Context, arg DeleteAdminSSOParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAdminSSO, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getAdminSSO = `-- name: GetAdminSSO :one
 
 SELECT id,

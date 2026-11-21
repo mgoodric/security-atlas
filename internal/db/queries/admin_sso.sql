@@ -97,3 +97,10 @@ SELECT id,
 FROM oidc_idp_configs
 WHERE tenant_id = $1 AND name = $2
 FOR UPDATE;
+
+-- name: DeleteAdminSSO :execrows
+-- #2760: removes the tenant's IdP config by id. The FK cascades remove the
+-- group-role mappings and the role-source rows scoped to it; DELETE
+-- /v1/admin/sso revokes the roles only it derived first.
+DELETE FROM oidc_idp_configs
+WHERE tenant_id = $1 AND id = $2;

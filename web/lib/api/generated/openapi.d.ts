@@ -1045,7 +1045,8 @@ export interface paths {
         get: operations["get-v1-admin-sso"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** DELETE /v1/admin/sso — delete the IdP config, its group-role mappings and the group-derived roles only it derived; 409 if it would revoke the last admin (#2760) */
+        delete: operations["delete-v1-admin-sso"];
         options?: never;
         head?: never;
         /** PATCH /v1/admin/sso — upsert the primary IdP config, incl. trust_unverified_email_for_link (strict default false; */
@@ -7518,6 +7519,26 @@ export interface operations {
         };
     };
     "get-v1-admin-sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "delete-v1-admin-sso": {
         parameters: {
             query?: never;
             header?: never;

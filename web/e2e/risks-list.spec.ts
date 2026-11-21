@@ -131,19 +131,22 @@ test.describe("/risks list view", () => {
     await expect(page.getByTestId("list-page")).toBeVisible();
   });
 
-  // The sidebar lists /risks/hierarchy again: lib/nav.ts NAV_GROUPS puts
-  // it in the "Risks" group beside /risks, reversing slice 100's audit
-  // F-3 removal. Not a product bug on its face; the intent needs a call: #2774.
-  test.fixme(
-    "AC-8: sidebar no longer exposes /risks/hierarchy as a top-level entry",
-    async ({ page }) => {
-      await page.goto("/dashboard");
-      await expect(page.getByRole("link", { name: "Risks" })).toBeVisible();
-      await expect(
-        page.getByRole("link", { name: "Risk hierarchy" }),
-      ).toHaveCount(0);
-    },
-  );
+  // Slice 100's audit F-3: the hierarchy opens from the /risks page
+  // header (AC-6), not the sidebar. #2081 re-listed it; #2774 decided
+  // that was a regression and took it back out.
+  test("AC-8: sidebar no longer exposes /risks/hierarchy as a top-level entry", async ({
+    page,
+  }) => {
+    await page.goto("/dashboard");
+    const sidebar = page.getByTestId("sidebar-desktop");
+    await expect(sidebar.locator('a[href="/risks"]')).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(sidebar.locator('a[href^="/risks/hierarchy"]')).toHaveCount(0);
+    await expect(
+      sidebar.getByText("Risk hierarchy", { exact: true }),
+    ).toHaveCount(0);
+  });
 
   // Slice 185 (AC-4) made rows non-clickable, with a per-row "View in
   // hierarchy" link and a future-slice banner, because no per-risk detail
