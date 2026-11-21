@@ -207,8 +207,10 @@ func AckRoleLabels(cred credstore.Credential) []string {
 }
 
 // HasOwnerRole reports whether cred may act as the owner of a control whose
-// free-text owner_role is role: the slice-011 attestation gate, and the CSF
-// assessment edit gate (#2523). The admin flag is a wildcard. An empty role
+// free-text owner_role is role: the slice-011 attestation gate (#2523).
+// The CSF assessment edit gate moved to IsTenantApprover in #2540. It is a
+// per-resource ownership check, outside the #2447 tenant-role inventory
+// (#2706). The admin flag is a wildcard. An empty role
 // admits only the admin flag, so a control bundle that declared no
 // owner_role cannot be attested by anyone else.
 //
