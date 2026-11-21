@@ -1,22 +1,31 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc6_6_boundary_protection
-title: "Production endpoints have host-firewall enabled"
+title: "Endpoints reporting posture have the host firewall enabled"
 description: |
   Systems are shielded from threats that originate outside the system
-  boundary (TSC CC6.6). The intended endpoint-level test is that every
-  production-developer endpoint has a host firewall enabled (pf on macOS,
-  ufw on Linux, Windows Defender Firewall on Windows).
+  boundary (TSC CC6.6). The test is that every endpoint has a host
+  firewall enabled (pf / the application firewall on macOS, ufw on Linux,
+  Windows Defender Firewall on Windows).
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are osquery's
-  `osquery.host_posture.v1`, whose verdict is disk encryption plus screen
-  lock on each host, not the firewall: a host passes when both are on,
-  fails when either is off, and is inconclusive when its posture could not
-  be read.
+  What runs today: a SQL query over the payloads of osquery's
+  `osquery.host_posture.v1` records, one per host per connector run. It
+  takes each host's latest in-window record (by `host_uuid`) and passes the
+  control when every one of them has `firewall_enabled` true. One host
+  whose latest record has `firewall_enabled` false, or missing, fails the
+  control. No in-window record leaves it inconclusive. The connector's
+  per-record verdict, which is disk encryption plus screen lock, is not
+  used.
 
-  Pending: every host-posture record having the host firewall enabled, in
-  SQL over the record's existing firewall field (#2822).
+  A host whose posture the connector could not read (its Fleet host-detail
+  call failed) is still pushed, with `firewall_enabled` false and an
+  inconclusive verdict. This query counts it as firewall off, so one such
+  host fails the control until the connector stops reporting unread fields
+  as false.
+
+  Not checked: which firewall is on, or its rules; that the host is a
+  production or managed endpoint (every reporting host counts). Only the
+  records the control receives are checked: a managed endpoint that never
+  reported is not seen, which waits on an endpoint inventory (#2834).
 
 scf_anchor_id: NET-03
 control_family: NET
@@ -26,28 +35,16 @@ lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: host_firewall_enabled_on_managed_endpoints
-    language: rego
+  - id: every_reporting_host_firewall_enabled
+    language: sql
     evidence_kind: osquery.host_posture.v1
-    description: "Every managed endpoint reports host firewall = enabled"
+    description: "Every host's latest posture record reports the host firewall enabled"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT coalesce(bool_and(
+               coalesce(payload->'firewall_enabled' = 'true'::jsonb, false)
+             ), false)
+      FROM (
+        SELECT DISTINCT ON (payload->>'host_uuid') payload
+        FROM evidence
+        ORDER BY payload->>'host_uuid', observed_at DESC
+      ) AS latest
