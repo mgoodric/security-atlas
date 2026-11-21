@@ -141,6 +141,7 @@ func TestImport_TenPlatformSchemas(t *testing.T) {
 		"manual.attestation.v1",
 		"aws.s3.bucket_encryption_state.v1",
 		"github.repo_protection.v1",
+		"github.repo_protection.v2",
 		"okta.mfa_policy.v1",
 		"okta.mfa_policy.v2",
 		"1password.org_policy.v1",

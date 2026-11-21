@@ -9,20 +9,27 @@ description: |
   status checks, no force-push and protection enforced on admins.
 
   What runs today: a SQL query over the payloads of the GitHub connector's
-  `github.repo_protection.v1` records, one per repository's default branch
-  per connector run. It takes each repository's latest in-window record
-  (by `repo_full_name`) and passes the control when every one of them has
-  `required_reviews` of at least 1 and `enforce_admins` true. One
-  repository whose latest record requires no approving review, does not
-  enforce protection on admins, or lacks either field fails the control.
-  No in-window record leaves it inconclusive. The connector's per-record
-  verdict is not used.
+  `github.repo_protection.v2` records, one per repository's default branch
+  per connector run. The connector merges classic branch protection with
+  every active repository and organization ruleset, so a branch protected
+  only by a ruleset counts. The query takes each repository's latest
+  in-window record, keyed by its stable `repo_id`, so a rename does not
+  split one repository in two. It passes the control when every one of
+  them has `required_reviews` of at least 1 and `enforce_admins` true.
+  One repository whose latest record requires no approving review, or
+  does not enforce the review on admins, fails it. So does a record with
+  no usable `repo_id` or a mistyped field. A repository whose latest
+  record omits either field, because the connector could not read it,
+  leaves the control inconclusive unless another repository fails it. No
+  in-window v2 record leaves it inconclusive, including when only
+  `github.repo_protection.v1` records arrived (a GitHub connector older
+  than #2925): v1 records are not read. The connector's per-record verdict
+  is not used.
 
-  A repository with no branch protection is pushed with
-  `required_reviews` 0, so it fails. A repository whose protection the
-  connector could not read (any error other than 404) is also pushed with
-  `required_reviews` 0 and `enforce_admins` false, so it fails too, until
-  the connector stops reporting unread fields as off.
+  The connector reports `enforce_admins` true when a source requiring a
+  review binds admins: classic `enforce_admins`, or a ruleset that only an
+  app or a deploy key may bypass. A role, team or user bypass actor may be
+  an admin, so it counts as admin bypass.
 
   Pending, because the connector does not emit the fields yet (#2827):
   required status checks (the protection's required status checks
@@ -43,21 +50,30 @@ freshness_class: daily
 evidence_queries:
   - id: every_repo_requires_review_enforced_on_admins
     language: sql
-    evidence_kind: github.repo_protection.v1
-    description: "Every repository's latest protection record requires an approving review and enforces protection on admins"
+    evidence_kind: github.repo_protection.v2
+    description: "Every repository's latest protection record requires an approving review and enforces it on admins"
     expression: |
-      SELECT coalesce(bool_and(ok), false)
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 1 THEN 'inconclusive'
+               ELSE 'pass'
+             END
       FROM (
-        SELECT DISTINCT ON (payload->>'repo_full_name') ok
+        SELECT DISTINCT ON (payload->'repo_id') verdict
         FROM (
           SELECT payload, observed_at,
-                 coalesce(payload->>'repo_full_name' <> '', false)
-                 AND CASE WHEN jsonb_typeof(payload->'required_reviews') = 'number'
-                          THEN (payload->'required_reviews')::numeric >= 1
-                          ELSE false
-                     END
-                 AND coalesce(payload->'enforce_admins' = 'true'::jsonb, false) AS ok
+                 CASE
+                   WHEN coalesce(jsonb_typeof(payload->'repo_id'), '') <> 'number' THEN 0
+                   WHEN (payload->'repo_id')::numeric < 1 THEN 0
+                   WHEN payload->'required_reviews' IS NULL THEN 1
+                   WHEN jsonb_typeof(payload->'required_reviews') <> 'number' THEN 0
+                   WHEN (payload->'required_reviews')::numeric < 1 THEN 0
+                   WHEN payload->'enforce_admins' IS NULL THEN 1
+                   WHEN payload->'enforce_admins' <> 'true'::jsonb THEN 0
+                   ELSE 2
+                 END AS verdict
           FROM evidence
         ) AS checked
-        ORDER BY payload->>'repo_full_name', observed_at DESC, ok
+        ORDER BY payload->'repo_id', observed_at DESC, verdict
       ) AS latest

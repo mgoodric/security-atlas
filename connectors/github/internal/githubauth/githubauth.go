@@ -131,7 +131,7 @@ func DocumentedScopes() []Scope {
 		{
 			Name:      "Repository: Administration",
 			Access:    "Read",
-			Gates:     "github.repo_protection.v1 (branch protection rules)",
+			Gates:     "github.repo_protection.v2 (branch protection rules and rulesets)",
 			TokenKind: "Fine-grained PAT",
 		},
 		{

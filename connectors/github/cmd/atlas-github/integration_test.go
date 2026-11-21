@@ -113,8 +113,11 @@ func TestRun_PushesRepoProtectionAndSCIM(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/orgs/example/repos", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode([]githubrepo.Repo{
-			{FullName: "example/web", DefaultBranch: "main"},
+			{ID: 1296269, FullName: "example/web", DefaultBranch: "main"},
 		})
+	})
+	mux.HandleFunc("/repos/example/web/rules/branches/main", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
 	})
 	mux.HandleFunc("/repos/example/web/branches/main/protection", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
@@ -195,9 +198,10 @@ func TestRun_RepoProtectionDedupes(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
 	state := githubrepo.ProtectionState{
+		RepoID:          1296269,
 		RepoFullName:    "example/web",
 		DefaultBranch:   "main",
-		RequiredReviews: 1,
+		RequiredReviews: intp(1),
 		Result:          githubrepo.ResultPass,
 		ObservedAt:      time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
