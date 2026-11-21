@@ -30,6 +30,13 @@ type ApproveInput struct {
 	Approver string
 }
 
+// ApproveRowInput approves one staged row.
+type ApproveRowInput struct {
+	BatchID  string
+	RowID    string
+	Approver string
+}
+
 // RejectRowInput rejects one staged row with a reason.
 type RejectRowInput struct {
 	BatchID  string
@@ -106,13 +113,7 @@ func (s *Store) ApprovePending(ctx context.Context, in ApproveInput) (ApproveRes
 	}
 	res := ApproveResult{BatchID: in.BatchID, Approved: []RowDecision{}, Duplicates: []RowDecision{}, Skipped: []ApproveSkip{}}
 	for _, p := range pending {
-		d, err := s.approveRow(ctx, in, p.ID)
-		if errors.Is(err, risk.ErrExternalRefTaken) {
-			// A risk with this ID was created after the duplicate check
-			// read the risks: the retry finds it and marks the row
-			// duplicate.
-			d, err = s.approveRow(ctx, in, p.ID)
-		}
+		d, err := s.approveRowRetrying(ctx, in, p.ID)
 		if reason, skip := skipReason(err); skip {
 			res.Skipped = append(res.Skipped, ApproveSkip{RowID: p.ID, RowNumber: p.RowNumber, ExternalRef: p.ExternalRef, Reason: reason})
 			continue
@@ -130,6 +131,28 @@ func (s *Store) ApprovePending(ctx context.Context, in ApproveInput) (ApproveRes
 	return res, nil
 }
 
+// ApproveRow approves one pending row: it becomes a risk, or is marked
+// duplicate, exactly as ApprovePending decides each of its rows. A row that
+// is not pending is ErrRowDecided; a value the risk store refuses is
+// returned as the store's error and the row stays pending.
+func (s *Store) ApproveRow(ctx context.Context, in ApproveRowInput) (RowDecision, error) {
+	if strings.TrimSpace(in.Approver) == "" {
+		return RowDecision{}, ErrApproverRequired
+	}
+	return s.approveRowRetrying(ctx, ApproveInput{BatchID: in.BatchID, Approver: in.Approver}, in.RowID)
+}
+
+// approveRowRetrying approves one row, retrying once when a risk with the
+// row's ID was created after the duplicate check read the risks: the retry
+// finds it and marks the row duplicate.
+func (s *Store) approveRowRetrying(ctx context.Context, in ApproveInput, rowID string) (RowDecision, error) {
+	d, err := s.approveRow(ctx, in, rowID)
+	if errors.Is(err, risk.ErrExternalRefTaken) {
+		d, err = s.approveRow(ctx, in, rowID)
+	}
+	return d, err
+}
+
 // skipReason reports whether err is a row's own failure, and its text.
 func skipReason(err error) (string, bool) {
 	switch {
@@ -144,6 +167,14 @@ func skipReason(err error) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// IsRowRefusal reports whether err is a refusal of the row's own values by
+// the risk store (an archived category, a value it rejects, an ID taken
+// meanwhile): the row stays pending and the caller can fix and retry.
+func IsRowRefusal(err error) bool {
+	_, skip := skipReason(err)
+	return skip && !errors.Is(err, ErrRowDecided)
 }
 
 func (s *Store) pendingRows(ctx context.Context, batchID string) ([]pendingRow, error) {

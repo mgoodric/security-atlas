@@ -9,6 +9,8 @@
 //	POST /v1/risks/imports/{id}/approve
 //	                                approve every pending row; each becomes a
 //	                                risk through the risk store
+//	POST /v1/risks/imports/{id}/rows/{row}/approve
+//	                                approve one staged row (#2847)
 //	POST /v1/risks/imports/{id}/rows/{row}/reject
 //	                                reject one staged row with a reason
 //
@@ -65,6 +67,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/risks/imports", h.Create)
 	r.Get("/v1/risks/imports/{id}", h.Get)
 	r.Post("/v1/risks/imports/{id}/approve", h.Approve)
+	r.Post("/v1/risks/imports/{id}/rows/{row}/approve", h.ApproveRow)
 	r.Post("/v1/risks/imports/{id}/rows/{row}/reject", h.Reject)
 }
 
@@ -165,6 +168,27 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, res)
 }
 
+// ApproveRow approves one staged row (#2847). It takes no body and is gated
+// by decidingPerson, the same gate as Approve and Reject. A row the risk
+// store refuses (a category archived since upload, a value it rejects)
+// is a 422 and stays pending.
+func (h *Handler) ApproveRow(w http.ResponseWriter, r *http.Request) {
+	approver, ok := decidingPerson(w, r)
+	if !ok {
+		return
+	}
+	d, err := h.store.ApproveRow(r.Context(), riskimport.ApproveRowInput{
+		BatchID:  chi.URLParam(r, "id"),
+		RowID:    chi.URLParam(r, "row"),
+		Approver: approver,
+	})
+	if err != nil {
+		writeDecisionError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, d)
+}
+
 type rejectBody struct {
 	Reason string `json:"reason"`
 }
@@ -259,6 +283,8 @@ func writeDecisionError(w http.ResponseWriter, r *http.Request, err error) {
 		httpresp.WriteError(w, http.StatusForbidden, msg)
 	case errors.Is(err, riskimport.ErrReasonRequired), errors.Is(err, riskimport.ErrInvalidDecision):
 		httpresp.WriteError(w, http.StatusBadRequest, msg)
+	case riskimport.IsRowRefusal(err):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, strings.TrimPrefix(msg, "risk: "))
 	default:
 		httperr.WriteInternal(w, r, "riskimports", err)
 	}

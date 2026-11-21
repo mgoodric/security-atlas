@@ -36,6 +36,15 @@ const (
 	RowStatusDuplicate = "duplicate"
 )
 
+// Review flags on a staged row: why an approver should look at it before
+// deciding. The vocabulary is fixed (risk_import_rows_flags_chk); #2843,
+// #2842 and #2846 set them.
+const (
+	FlagOwnerUnlinked       = "owner_unlinked"
+	FlagTreatmentDowngraded = "treatment_downgraded"
+	FlagParentLinkFailed    = "parent_link_failed"
+)
+
 // maxRejectReason caps a rejection reason, in characters.
 const maxRejectReason = 2000
 
@@ -57,8 +66,10 @@ type BatchRow struct {
 	InherentScore json.RawMessage   `json:"inherent_score,omitempty"`
 	ResidualScore json.RawMessage   `json:"residual_score,omitempty"`
 	Unmapped      map[string]string `json:"unmapped"`
-	Status        string            `json:"status"`
-	DecidedBy     string            `json:"decided_by,omitempty"`
+	// Flags are the row's review flags (Flag*), empty when none.
+	Flags     []string `json:"flags"`
+	Status    string   `json:"status"`
+	DecidedBy string   `json:"decided_by,omitempty"`
 	// RiskID is the risk approval created, or for a duplicate the existing
 	// risk carrying the row's organisation risk ID.
 	RiskID          string `json:"risk_id,omitempty"`

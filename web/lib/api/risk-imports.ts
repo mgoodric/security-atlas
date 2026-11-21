@@ -1,0 +1,229 @@
+// #2847 — wire types and pure view helpers for the risk import review
+// page. The types mirror internal/risk/riskimport (Batch, BatchRow,
+// RejectedRow, RowDecision, ApproveResult); the helpers are node-testable
+// so the page stays a renderer.
+
+export type RowStatus = "pending" | "approved" | "rejected" | "duplicate";
+
+export const ROW_STATUSES: readonly RowStatus[] = [
+  "pending",
+  "approved",
+  "rejected",
+  "duplicate",
+];
+
+export const ROW_STATUS_LABELS: Record<RowStatus, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  rejected: "Rejected",
+  duplicate: "Duplicate",
+};
+
+// The review flags a staged row can carry (risk_import_rows_flags_chk).
+export type RowFlag =
+  | "owner_unlinked"
+  | "treatment_downgraded"
+  | "parent_link_failed";
+
+export const FLAG_LABELS: Record<RowFlag, string> = {
+  owner_unlinked: "Owner not linked to a user",
+  treatment_downgraded: "Treatment downgraded to untreated",
+  parent_link_failed: "Parent link failed",
+};
+
+/** flagLabel names a flag; one this client does not know shows as sent. */
+export function flagLabel(flag: string): string {
+  return FLAG_LABELS[flag as RowFlag] ?? flag;
+}
+
+// The reasons the upload refuses a row (riskimport.Reject*).
+export const REJECT_REASON_LABELS: Record<string, string> = {
+  missing_required_field: "Missing required field",
+  duplicate_external_ref: "Risk ID repeated in the file",
+  invalid_external_ref: "Invalid risk ID",
+  unknown_category: "Unknown category",
+  invalid_review_due: "Invalid review date",
+};
+
+export function rejectReasonLabel(reason: string): string {
+  return REJECT_REASON_LABELS[reason] ?? reason;
+}
+
+export type BatchRow = {
+  id: string;
+  row_number: number;
+  external_ref?: string;
+  title: string;
+  description: string;
+  category: string;
+  review_due?: string;
+  unmapped: Record<string, string> | null;
+  flags: string[] | null;
+  status: RowStatus | string;
+  decided_by?: string;
+  risk_id?: string;
+  rejection_reason?: string;
+};
+
+export type RejectedRow = {
+  row_number: number;
+  external_ref?: string;
+  reason: string;
+  detail: string;
+};
+
+export type RiskImportBatch = {
+  id: string;
+  source_filename: string;
+  source_format: string;
+  uploaded_by: string;
+  status: string;
+  total_rows: number;
+  staged_count: number;
+  rejected_count: number;
+  unmapped_columns: string[] | null;
+  created_at: string;
+  staged: BatchRow[] | null;
+  rejected: RejectedRow[] | null;
+};
+
+export type RowDecision = {
+  batch_id: string;
+  row_id: string;
+  row_number: number;
+  external_ref?: string;
+  status: RowStatus | string;
+  decided_by: string;
+  risk_id?: string;
+  rejection_reason?: string;
+};
+
+export type ApproveResult = {
+  batch_id: string;
+  approved_count: number;
+  approved: RowDecision[] | null;
+  duplicates: RowDecision[] | null;
+  skipped:
+    | {
+        row_id: string;
+        row_number: number;
+        external_ref?: string;
+        reason: string;
+      }[]
+    | null;
+};
+
+export type BatchProgress = {
+  staged: number;
+  approved: number;
+  rejected: number;
+  duplicate: number;
+  pending: number;
+  flagged: number;
+  /** Rows the upload itself refused (missing title, unknown category, ...). */
+  notStaged: number;
+};
+
+export function isFlagged(row: BatchRow): boolean {
+  return (row.flags ?? []).length > 0;
+}
+
+/** batchProgress tallies a batch's staged rows by decision and flags. */
+export function batchProgress(batch: RiskImportBatch): BatchProgress {
+  const p: BatchProgress = {
+    staged: batch.staged_count,
+    approved: 0,
+    rejected: 0,
+    duplicate: 0,
+    pending: 0,
+    flagged: 0,
+    notStaged: batch.rejected_count,
+  };
+  for (const row of batch.staged ?? []) {
+    if (row.status === "approved") p.approved++;
+    else if (row.status === "rejected") p.rejected++;
+    else if (row.status === "duplicate") p.duplicate++;
+    else p.pending++;
+    if (isFlagged(row)) p.flagged++;
+  }
+  return p;
+}
+
+export type RowFilter = { status: RowStatus | ""; flaggedOnly: boolean };
+
+export const NO_FILTER: RowFilter = { status: "", flaggedOnly: false };
+
+/** filterRows keeps the staged rows matching the filter, in row order. */
+export function filterRows(
+  rows: readonly BatchRow[] | null,
+  f: RowFilter,
+): BatchRow[] {
+  return (rows ?? []).filter(
+    (r) =>
+      (!f.status || r.status === f.status) && (!f.flaggedOnly || isFlagged(r)),
+  );
+}
+
+/** unmappedEntries lists a row's unmapped values by header, blanks left
+ *  out: an empty cell says nothing the reviewer needs. */
+export function unmappedEntries(row: BatchRow): [string, string][] {
+  return Object.entries(row.unmapped ?? {})
+    .filter(([, v]) => v.trim() !== "")
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+/** A row's mapped fields, labelled, in the order the page shows them.
+ *  An unset optional field is left out. */
+export function mappedFields(row: BatchRow): [string, string][] {
+  const out: [string, string][] = [];
+  if (row.external_ref) out.push(["Risk ID", row.external_ref]);
+  out.push(["Title", row.title]);
+  out.push(["Category", row.category]);
+  if (row.review_due) out.push(["Review due", row.review_due]);
+  if (row.description) out.push(["Description", row.description]);
+  return out;
+}
+
+export type ReviewMode = "decide" | "read-only";
+
+/** reviewMode is what the page lets the caller do. Only an approver
+ *  decides (`/v1/me` is_approver); everyone else reads. The platform's
+ *  gate is the authority either way: the mode only hides buttons it would
+ *  refuse. */
+export function reviewMode(
+  me: { is_approver: boolean } | undefined,
+): ReviewMode {
+  return me?.is_approver ? "decide" : "read-only";
+}
+
+/** emptyRowsMessage explains an empty row list: no staged rows at all, or
+ *  none matching the filter. */
+export function emptyRowsMessage(batch: RiskImportBatch, f: RowFilter): string {
+  if ((batch.staged ?? []).length === 0) {
+    return "No rows were staged from this file.";
+  }
+  if (f.flaggedOnly && !f.status) return "No staged row is flagged for review.";
+  return "No staged rows match these filters.";
+}
+
+/** approveAllMessage summarises an approve-all for a toast. */
+export function approveAllMessage(r: ApproveResult): string {
+  const dup = r.duplicates?.length ?? 0;
+  const skipped = r.skipped?.length ?? 0;
+  const parts = [
+    `Approved ${r.approved_count} ${r.approved_count === 1 ? "row" : "rows"}`,
+  ];
+  if (dup > 0) parts.push(`${dup} marked duplicate`);
+  if (skipped > 0) parts.push(`${skipped} skipped`);
+  return parts.join("; ");
+}
+
+export function batchPath(id: string): string {
+  return `/api/risks/imports/${encodeURIComponent(id)}`;
+}
+
+export function rowPath(batchID: string, rowID: string, verb: string): string {
+  return `${batchPath(batchID)}/rows/${encodeURIComponent(rowID)}/${verb}`;
+}
+
+export { bffPostJSON as postJSON } from "./_shared";
