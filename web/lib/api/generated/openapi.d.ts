@@ -5069,6 +5069,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/risks/imports/{id}/rows/{row}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/risks/imports/{id}/rows/{row}/approve — approve one staged row, creating it as a risk through the risk store or marking it duplicate; no body; a tenant approver who is a person must approve (403 otherwise); 409 when already decided, 422 when the risk store refuses the row's values; audit-logged (#2847) */
+        post: operations["post-v1-risks-imports-id-rows-row-approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/risks/imports/{id}/rows/{row}/reject": {
         parameters: {
             query?: never;
@@ -13618,6 +13635,29 @@ export interface operations {
             header?: never;
             path: {
                 id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-risks-imports-id-rows-row-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                row: string;
             };
             cookie?: never;
         };
