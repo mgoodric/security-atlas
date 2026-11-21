@@ -3,9 +3,20 @@ bundle_id: soc2_pi1_3_processing_validity
 title: "Authorization checks asserted by SAST in processing-path code"
 description: |
   Processing logic is controlled so it produces the intended results (TSC
-  PI1.3). The SAST rule set covering authorization / IDOR /
-  privilege-escalation patterns surfaces zero unsuppressed findings on the
-  most recent scan of every in-scope repo.
+  PI1.3). The intended test is that the most recent SAST scan of every
+  in-scope repo has zero unsuppressed findings in the rule set covering
+  authorisation, IDOR and privilege-escalation patterns.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are
+  `sast.scan_result.v1`. No bundled connector emits that kind; the verdict
+  is whatever the pusher (for example `atlas-cli evidence push --result`)
+  states. Findings and rule sets are not checked.
+
+  Pending: findings with severity, rule id and suppression in a new
+  `sast.scan_result` schema version, to select the authorisation rules
+  (#2831).
 
 scf_anchor_id: TDA-05
 control_family: TDA

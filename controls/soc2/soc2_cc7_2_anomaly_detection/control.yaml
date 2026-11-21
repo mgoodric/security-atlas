@@ -3,10 +3,19 @@ bundle_id: soc2_cc7_2_anomaly_detection
 title: "Anomalous behavior detection is operational on production endpoints"
 description: |
   Systems are watched for abnormal behaviour, whether it comes from an
-  attack, a mistake or an outside event (TSC CC7.2). The osquery posture
-  stream surfaces the EDR / behavioral-detection engine state on each
-  endpoint; the query asserts every managed endpoint has the engine
-  running and reporting healthy.
+  attack, a mistake or an outside event (TSC CC7.2). The intended test is
+  that every managed endpoint has its EDR or behavioural detection engine
+  installed, running and reporting healthy.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are osquery's
+  `osquery.host_posture.v1`, whose verdict is disk encryption plus screen
+  lock on each host, not EDR: a host passes when both are on, fails when
+  either is off, and is inconclusive when its posture could not be read.
+
+  Pending: whether EDR is installed, running and healthy, which osquery
+  does not emit yet (#2826).
 
 scf_anchor_id: MON-16
 control_family: MON

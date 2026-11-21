@@ -3,11 +3,24 @@ bundle_id: soc2_cc7_4_incident_response
 title: "Incident response plan exists and incidents are logged"
 description: |
   Confirmed incidents are handled by following a written response plan
-  (TSC CC7.4). The control owner uploads quarterly evidence of: (a) the
-  current IR plan version on file, (b) a list of incidents declared in the
-  period (zero is a valid count, but the listing itself is required
-  evidence), and (c) for each declared incident, a link to the
-  post-incident report or ticket showing the IR playbook was followed.
+  (TSC CC7.4). The control owner keeps on file (a) the current IR plan
+  version, (b) a list of incidents declared in the period (zero is a valid
+  count, but the listing itself is required evidence), and (c) for each
+  declared incident, a link to the post-incident report or ticket showing
+  the IR playbook was followed. The intended automated test is that
+  everyone on call has acknowledged the IR plan.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the tenant's
+  `policy.acknowledgment.v1` acknowledgements (#2869), and each one is
+  recorded as pass. The control therefore passes on any acknowledgement of
+  any policy in the quarterly window of 120 days. Which policy was
+  acknowledged, and by whom, is not checked, and the incident listing is
+  not evaluated.
+
+  Pending: an acknowledgement of the IR plan (#2832); and every on-call
+  person having acknowledged it, which needs an on-call inventory (#2834).
 
 scf_anchor_id: IRO-08
 control_family: IRO

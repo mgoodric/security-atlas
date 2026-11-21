@@ -3,13 +3,22 @@ bundle_id: soc2_cc6_1_logical_access_baseline
 title: "Identity provider enforces MFA on all org-managed applications"
 description: |
   Access to protected systems and data goes through managed logical access
-  controls (TSC CC6.1). The canonical operationalisation is: the corporate
-  identity provider (Okta / Google Workspace / Azure AD) is the chokepoint
-  for application access and enforces MFA on every assigned application.
-  The query reads the Okta MFA policy snapshot and asserts the policy is
-  enabled, applies to the everyone group, and requires a
-  phishing-resistant factor (WebAuthn, push-with-number-matching) for at
+  controls (TSC CC6.1). The intended test is that the identity provider's
+  MFA policy is enabled, applies to the everyone group, and allows a
+  phishing-resistant factor (WebAuthn, push with number matching) for at
   least admin roles.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the Okta
+  connector's `okta.mfa_policy.v1` snapshots, whose verdict is that the
+  policy requires MFA with at least one factor: it passes when MFA is
+  required and a factor is configured, fails when MFA is not required, and
+  is inconclusive when MFA is required with no factor. Which groups the
+  policy covers and which factors it allows are not checked.
+
+  Pending: the everyone-group and phishing-resistant-factor check, in SQL
+  over the snapshot's existing fields (#2821).
 
 scf_anchor_id: IAC-01
 control_family: IAC

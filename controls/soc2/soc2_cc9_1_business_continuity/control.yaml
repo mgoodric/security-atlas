@@ -3,10 +3,21 @@ bundle_id: soc2_cc9_1_business_continuity
 title: "Business continuity plan reviewed annually"
 description: |
   Plans exist to limit the damage a business disruption can do (TSC
-  CC9.1). The control owner uploads the current business continuity /
-  disaster recovery plan annually, alongside a confirmation that the
-  document was reviewed and is current — including stated RTO / RPO
-  targets, leadership succession plan, and communication tree.
+  CC9.1). The control owner uploads the current business continuity and
+  disaster recovery plan annually, with a confirmation that it was
+  reviewed and is current, including stated RTO and RPO targets,
+  leadership succession plan and communication tree.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are
+  `manual.upload.v1` files from the manual connector, which records every
+  upload as inconclusive for a person to judge. This control is therefore
+  inconclusive whether or not a plan is uploaded, and the content of the
+  upload is not checked.
+
+  Pending: a continuity plan uploaded within 365 days, in SQL over the
+  record's existing fields (#2824).
 
 scf_anchor_id: BCD-04
 control_family: BCD
