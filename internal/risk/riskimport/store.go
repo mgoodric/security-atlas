@@ -56,6 +56,63 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.
 	return nil
 }
 
+// resolveControls maps each linked-controls ref to the tenant's active
+// control it names: a uuid by control id, anything else by bundle id. A
+// superseded version is not linked, as the risk would point at a control
+// the tenant no longer runs. A ref that names no control is absent from the
+// result. Another tenant's controls are invisible under RLS.
+func (s *Store) resolveControls(ctx context.Context, refs []string) (map[string]uuid.UUID, error) {
+	out := map[string]uuid.UUID{}
+	if len(refs) == 0 {
+		return out, nil
+	}
+	var ids []uuid.UUID
+	var bundles []string
+	for _, ref := range refs {
+		if id, err := uuid.Parse(ref); err == nil {
+			ids = append(ids, id)
+		} else {
+			bundles = append(bundles, ref)
+		}
+	}
+	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id, bundle_id FROM controls
+			WHERE tenant_id = $1 AND superseded_by IS NULL
+			  AND (id = ANY($2::uuid[]) OR bundle_id = ANY($3::text[]))
+		`, tenantID, ids, bundles)
+		if err != nil {
+			return fmt.Errorf("riskimport: resolve linked controls: %w", err)
+		}
+		defer rows.Close()
+		byID := map[uuid.UUID]bool{}
+		byBundle := map[string]uuid.UUID{}
+		for rows.Next() {
+			var id uuid.UUID
+			var bundle string
+			if err := rows.Scan(&id, &bundle); err != nil {
+				return fmt.Errorf("riskimport: scan linked control: %w", err)
+			}
+			byID[id] = true
+			byBundle[bundle] = id
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, ref := range refs {
+			if id, err := uuid.Parse(ref); err == nil {
+				if byID[id] {
+					out[ref] = id
+				}
+			} else if id, ok := byBundle[ref]; ok {
+				out[ref] = id
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
 // createBatch writes the batch, its staged rows and its rejected rows in
 // one transaction.
 func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
@@ -84,12 +141,17 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO risk_import_rows (
 					tenant_id, batch_id, row_number, external_ref, title, description,
-					category_slug, review_due, inherent_score, residual_score, unmapped, flags, status)
-				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::date, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13)
+					category_slug, review_due, inherent_score, residual_score, unmapped, flags, status,
+					treatment, requested_treatment, acceptance_justification, proposed_until,
+					historical_accepter, instrument_reference, linked_control_ids, unresolved_controls)
+				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::date, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13,
+					$14, $15, $16, $17::date, $18, $19, $20::uuid[], $21)
 				RETURNING id::text
 			`, tenantID, b.ID, r.RowNumber, nullable(r.ExternalRef), r.Title, r.Description,
 				r.Category, nullable(r.ReviewDue), nullable(string(r.InherentScore)), nullable(string(r.ResidualScore)),
 				string(vals), nonNil(r.Flags), r.Status,
+				r.Treatment, nullable(r.RequestedTreatment), r.Justification, nullable(r.ProposedUntil),
+				r.HistoricalAccepter, r.InstrumentReference, nonNil(r.LinkedControlIDs), nonNil(r.UnresolvedControls),
 			).Scan(&r.ID); err != nil {
 				return fmt.Errorf("riskimport: insert staged row %d: %w", r.RowNumber, err)
 			}
@@ -111,6 +173,8 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 	for i := range b.Staged {
 		b.Staged[i].Unmapped = nonNilMap(b.Staged[i].Unmapped)
 		b.Staged[i].Flags = nonNil(b.Staged[i].Flags)
+		b.Staged[i].LinkedControlIDs = nonNil(b.Staged[i].LinkedControlIDs)
+		b.Staged[i].UnresolvedControls = nonNil(b.Staged[i].UnresolvedControls)
 	}
 	b.UnmappedColumns = nonNil(b.UnmappedColumns)
 	return b, nil
@@ -164,7 +228,10 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, row_number, COALESCE(external_ref, ''), title, description, category_slug,
 		       COALESCE(to_char(review_due, 'YYYY-MM-DD'), ''), inherent_score::text, residual_score::text, unmapped, flags, status,
-		       COALESCE(decided_by, ''), COALESCE(risk_id::text, ''), COALESCE(rejection_reason, '')
+		       COALESCE(decided_by, ''), COALESCE(risk_id::text, ''), COALESCE(rejection_reason, ''),
+		       treatment, COALESCE(requested_treatment, ''), acceptance_justification,
+		       COALESCE(to_char(proposed_until, 'YYYY-MM-DD'), ''), historical_accepter, instrument_reference,
+		       linked_control_ids::text[], unresolved_controls
 		FROM risk_import_rows
 		WHERE batch_id = $1::uuid
 		ORDER BY row_number
@@ -179,7 +246,9 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 		var vals []byte
 		var inherent, residual *string
 		if err := rows.Scan(&r.ID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description, &r.Category,
-			&r.ReviewDue, &inherent, &residual, &vals, &r.Flags, &r.Status, &r.DecidedBy, &r.RiskID, &r.RejectionReason); err != nil {
+			&r.ReviewDue, &inherent, &residual, &vals, &r.Flags, &r.Status, &r.DecidedBy, &r.RiskID, &r.RejectionReason,
+			&r.Treatment, &r.RequestedTreatment, &r.Justification, &r.ProposedUntil, &r.HistoricalAccepter,
+			&r.InstrumentReference, &r.LinkedControlIDs, &r.UnresolvedControls); err != nil {
 			return nil, fmt.Errorf("riskimport: scan staged row: %w", err)
 		}
 		r.InherentScore, r.ResidualScore = rawJSON(inherent), rawJSON(residual)
@@ -188,6 +257,8 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 		}
 		r.Unmapped = nonNilMap(r.Unmapped)
 		r.Flags = nonNil(r.Flags)
+		r.LinkedControlIDs = nonNil(r.LinkedControlIDs)
+		r.UnresolvedControls = nonNil(r.UnresolvedControls)
 		out = append(out, r)
 	}
 	return out, rows.Err()

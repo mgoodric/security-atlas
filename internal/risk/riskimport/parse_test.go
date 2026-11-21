@@ -89,9 +89,9 @@ func TestParseCSV(t *testing.T) {
 			csv: "id,title,description,category,treatment,review_due_at,category_name,external_ref\n" +
 				"6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c2839,Outage,Vendor down,operational,untreated,2027-02-01T00:00:00Z,Operational,R-1\n",
 			wantRisks: []rowSummary{{Row: 2, Ref: "R-1", Title: "Outage", Desc: "Vendor down", Cat: "operational", Due: "2027-02-01",
-				Unmapped: map[string]string{"id": "6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c2839", "treatment": "untreated", "category_name": "Operational"}}},
+				Unmapped: map[string]string{"id": "6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c2839", "category_name": "Operational"}}},
 			wantRejected: map[int]string{},
-			wantUnmapped: []string{"id", "treatment", "category_name"},
+			wantUnmapped: []string{"id", "category_name"},
 		},
 		{
 			name:      "a column map overrides alias detection",
@@ -383,9 +383,9 @@ func TestMatchCategory(t *testing.T) {
 func TestFieldNames(t *testing.T) {
 	t.Parallel()
 	got := fmt.Sprint(FieldNames())
-	want := "[category description external_ref inherent_impact inherent_likelihood " +
-		"inherent_loss_event_frequency inherent_loss_magnitude residual_impact residual_likelihood " +
-		"residual_loss_event_frequency residual_loss_magnitude review_due title]"
+	want := "[accepted_until accepter category description external_ref inherent_impact inherent_likelihood " +
+		"inherent_loss_event_frequency inherent_loss_magnitude instrument_reference justification linked_controls " +
+		"residual_impact residual_likelihood residual_loss_event_frequency residual_loss_magnitude review_due title treatment]"
 	if got != want {
 		t.Errorf("FieldNames = %s", got)
 	}
