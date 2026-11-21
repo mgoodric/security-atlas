@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/aws.s3.bucket_encryption_state/1.1.0.json",
+  "x-evidence-kind": "aws.s3.bucket_encryption_state.v1",
+  "x-semver": "1.1.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CRY-07"],
+  "title": "AWS S3 bucket encryption state",
+  "description": "Per-bucket default-encryption configuration captured by the AWS connector. v1.1 adds kms_key_id (the KMS key as configured on the bucket, which AWS accepts as a key ID, alias or ARN) and reason (why the connector could not decide). The record's result is the verdict; encryption_enabled is true only when default encryption was observed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bucket_name", "encryption_enabled"],
+  "properties": {
+    "bucket_name": { "type": "string", "minLength": 1 },
+    "encryption_enabled": {
+      "type": "boolean",
+      "description": "True when a default server-side encryption rule was observed. False both when the bucket has none and when the connector could not read it; result and reason tell those apart."
+    },
+    "sse_algorithm": { "type": "string" },
+    "kms_key_arn": { "type": "string" },
+    "kms_key_id": {
+      "type": "string",
+      "description": "KMSMasterKeyID exactly as configured: a key ID, alias or ARN."
+    },
+    "bucket_key_enabled": { "type": "boolean" },
+    "account_id": { "type": "string" },
+    "region": { "type": "string" },
+    "reason": {
+      "type": "string",
+      "description": "Why the result is inconclusive, e.g. the AWS error from the region or encryption lookup."
+    }
+  }
+}
