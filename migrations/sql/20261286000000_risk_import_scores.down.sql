@@ -1,4 +1,4 @@
--- Reverses 20261285000000_risk_import_scores.sql. Rejected rows carrying
+-- Reverses 20261286000000_risk_import_scores.sql. Rejected rows carrying
 -- the invalid_score reason are deleted so the prior reason CHECK holds.
 DELETE FROM risk_import_rejected_rows WHERE reason = 'invalid_score';
 ALTER TABLE risk_import_rejected_rows
