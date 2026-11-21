@@ -5010,7 +5010,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header) as a staged import batch; every row is staged or rejected with a reason; capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839) */
+        /** POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header, methodology nist_800_30 (default) | qualitative_5x5 | fair, else 400) as a staged import batch; every row is staged or rejected with a reason; inherent and residual scores are read from columns in the methodology's shape (likelihood and impact 1..5, or FAIR loss event frequency and loss magnitude), a row with none imports unscored and a row with an invalid score is rejected (invalid_score); capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839) */
         post: operations["post-v1-risks-imports"];
         delete?: never;
         options?: never;
@@ -5025,7 +5025,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/risks/imports/{id} — a risk import batch with its counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839) */
+        /** GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839) */
         get: operations["get-v1-risks-imports-id"];
         put?: never;
         post?: never;

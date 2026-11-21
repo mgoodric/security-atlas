@@ -35,15 +35,18 @@ func newRisksCmd() *cobra.Command {
 // Nothing becomes a risk until a person approves the batch.
 func newRisksImportCmd() *cobra.Command {
 	var (
-		columnMap []string
-		jsonOut   bool
+		columnMap   []string
+		methodology string
+		jsonOut     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "import <file>",
 		Short: "upload a CSV/XLSX risk register and stage it as an import batch",
 		Long: "Upload your risk register (CSV or XLSX) for import. Every row is either staged for " +
 			"review or reported as rejected with a reason (missing title or category, a repeated " +
-			"risk ID, an unknown category, a bad review date). Columns no risk field takes are kept " +
+			"risk ID, an unknown category, a bad review date, an invalid score). Scores are read in " +
+			"the shape of --methodology: likelihood and impact (1-5) for nist_800_30 and " +
+			"qualitative_5x5, loss event frequency and loss magnitude for fair. Columns no risk field takes are kept " +
 			"on the staged rows. --column-map field=Header overrides header detection (fields: " +
 			strings.Join(riskimport.FieldNames(), ", ") + ").",
 		Args: cobra.ExactArgs(1),
@@ -54,7 +57,7 @@ func newRisksImportCmd() *cobra.Command {
 			return resolveCommon()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			batch, raw, err := uploadRiskImport(args[0], columnMap)
+			batch, raw, err := uploadRiskImport(args[0], methodology, columnMap)
 			if err != nil {
 				return err
 			}
@@ -72,13 +75,14 @@ func newRisksImportCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVar(&columnMap, "column-map", nil, "field=Header override of header detection; repeatable")
+	cmd.Flags().StringVar(&methodology, "methodology", "", "the batch's scoring methodology: nist_800_30 (server default), qualitative_5x5 or fair")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the API response as JSON")
 	return cmd
 }
 
 // uploadRiskImport posts the register and returns the decoded batch plus
 // the raw response body.
-func uploadRiskImport(path string, columnMap []string) (riskimport.Batch, []byte, error) {
+func uploadRiskImport(path, methodology string, columnMap []string) (riskimport.Batch, []byte, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return riskimport.Batch{}, nil, fmt.Errorf("read %s: %w", path, err)
@@ -94,6 +98,11 @@ func uploadRiskImport(path string, columnMap []string) (riskimport.Batch, []byte
 	}
 	for _, m := range columnMap {
 		if err := mp.WriteField("column_map", m); err != nil {
+			return riskimport.Batch{}, nil, fmt.Errorf("multipart write: %w", err)
+		}
+	}
+	if methodology != "" {
+		if err := mp.WriteField("methodology", methodology); err != nil {
 			return riskimport.Batch{}, nil, fmt.Errorf("multipart write: %w", err)
 		}
 	}
@@ -143,6 +152,7 @@ func uploadRiskImport(path string, columnMap []string) (riskimport.Batch, []byte
 // printable, so a cell can't carry terminal escape sequences.
 func renderRiskImportSummary(out io.Writer, b riskimport.Batch) {
 	_, _ = fmt.Fprintf(out, "risk import batch %s (%s)\n", printable(b.ID), printable(b.SourceFilename))
+	_, _ = fmt.Fprintf(out, "  methodology: %s\n", printable(b.Methodology))
 	_, _ = fmt.Fprintf(out, "  rows:     %d\n", b.TotalRows)
 	_, _ = fmt.Fprintf(out, "  staged:   %d\n", b.StagedCount)
 	_, _ = fmt.Fprintf(out, "  rejected: %d\n", b.RejectedCount)

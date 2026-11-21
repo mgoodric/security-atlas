@@ -383,7 +383,10 @@ func TestMatchCategory(t *testing.T) {
 func TestFieldNames(t *testing.T) {
 	t.Parallel()
 	got := fmt.Sprint(FieldNames())
-	if got != "[category description external_ref review_due title]" {
+	want := "[category description external_ref inherent_impact inherent_likelihood " +
+		"inherent_loss_event_frequency inherent_loss_magnitude residual_impact residual_likelihood " +
+		"residual_loss_event_frequency residual_loss_magnitude review_due title]"
+	if got != want {
 		t.Errorf("FieldNames = %s", got)
 	}
 }
