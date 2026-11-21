@@ -2,8 +2,8 @@
 //
 // Seeded by fixtures/evidence-list.sql: a tenant of the spec's own with
 // one control carrying six evidence records (one per result value plus
-// two older passes, four inside the last 7 days) and one control with
-// none. The spec signs in to that tenant through /v1/test/issue-jwt
+// two older passes, four inside the last 7 days), a second anchored
+// control with one 45-day-old record, and one control with none. The spec signs in to that tenant through /v1/test/issue-jwt
 // (web/e2e/tenant-session.ts). #2755 restored the assertions slice 099
 // and its follow-ons left commented out behind the slice-082 quarantine.
 //
@@ -35,7 +35,13 @@ const CONTROL_NO_ROWS = "00000000-0000-0000-0000-2755c000a002";
 const NEWEST_ID = "00000000-0000-0000-0000-2755c1000001";
 // The fixture's hash is sha256 over the record id's text.
 const NEWEST_HASH = createHash("sha256").update(NEWEST_ID).digest("hex");
-const SEEDED_ROWS = 6;
+const SEEDED_ROWS = 7;
+// Records under CONTROL_WITH_ROWS; the seventh belongs to the second
+// anchored control and is 45 days old (#2794).
+const ROWS_FOR_CONTROL = 6;
+// The default Since window is the last 30 days (#2794), which leaves
+// out the 45-day-old record.
+const ROWS_IN_DEFAULT_WINDOW = 6;
 const ROWS_IN_LAST_7_DAYS = 4;
 // Records pushed in the seeded cell (prod · us-east-1), and records
 // pushed by test-connector-a.
@@ -73,19 +79,30 @@ test.describe("/evidence list view", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("list-page")).toBeVisible();
     // Slice 106: the tenant-wide ledger renders immediately (no
-    // pick-a-control gate), every seeded record in it.
+    // pick-a-control gate). #2794: the default Since window is the last
+    // 30 days, so the 45-day-old record is not in it; "All time" adds it.
     await expect(table(page)).toBeVisible();
-    await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-      SEEDED_ROWS,
-    );
+    const rows = table(page).getByTestId("list-table-row");
+    await expect(rows).toHaveCount(ROWS_IN_DEFAULT_WINDOW);
+    await expect(
+      page.getByTestId("list-filter-pills").getByLabel("Since"),
+    ).toHaveValue("30d");
+    await page
+      .getByTestId("list-filter-pills")
+      .getByLabel("Since")
+      .selectOption({ label: "All time" });
+    await expect(page).toHaveURL(/[?&]since_preset=all/);
+    await expect(rows).toHaveCount(SEEDED_ROWS);
   });
 
   // #2771: the Control pill's option value is the tenant control behind
-  // the anchor, the id GET /v1/evidence?control_id= matches.
+  // the anchor, the id GET /v1/evidence?control_id= matches. #2794: the
+  // second anchored control's record drops out, so the count proves the
+  // pill narrows.
   test("AC-3: selecting a control narrows the ledger (slice 106 — filter, not gate)", async ({
     page,
   }) => {
-    await page.goto("/evidence");
+    await page.goto("/evidence?since_preset=all");
     await expect(table(page).getByTestId("list-table-row")).toHaveCount(
       SEEDED_ROWS,
       { timeout: 30_000 },
@@ -93,12 +110,12 @@ test.describe("/evidence list view", () => {
     await page
       .getByTestId("list-filter-pills")
       .getByLabel("Control")
-      .selectOption({ index: 1 });
+      .selectOption(CONTROL_WITH_ROWS);
     await expect(page).toHaveURL(
       new RegExp(`[?&]control_id=${CONTROL_WITH_ROWS}`),
     );
     await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-      SEEDED_ROWS,
+      ROWS_FOR_CONTROL,
     );
   });
 
@@ -107,7 +124,9 @@ test.describe("/evidence list view", () => {
   }) => {
     await page.goto("/evidence");
     const cells = table(page).getByTestId("evidence-row-result");
-    await expect(cells).toHaveCount(SEEDED_ROWS, { timeout: 30_000 });
+    await expect(cells).toHaveCount(ROWS_IN_DEFAULT_WINDOW, {
+      timeout: 30_000,
+    });
     // Newest first; the four newest rows carry one result value each.
     await expect(cells.nth(0)).toHaveText("Pass");
     await expect(cells.nth(1)).toHaveText("Fail");
@@ -230,7 +249,7 @@ test.describe("/evidence list view", () => {
   }) => {
     await page.goto("/evidence");
     const rows = table(page).getByTestId("list-table-row");
-    await expect(rows).toHaveCount(SEEDED_ROWS, { timeout: 30_000 });
+    await expect(rows).toHaveCount(ROWS_IN_DEFAULT_WINDOW, { timeout: 30_000 });
     await page
       .getByTestId("list-filter-pills")
       .getByLabel("Since")
@@ -251,7 +270,7 @@ test.describe("/evidence list view", () => {
   }) => {
     await page.goto("/evidence");
     await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-      SEEDED_ROWS,
+      ROWS_IN_DEFAULT_WINDOW,
       { timeout: 30_000 },
     );
     await expect(page.getByTestId("evidence-scope-hint")).toHaveCount(0);
@@ -300,7 +319,7 @@ test.describe("/evidence list view", () => {
     await page.getByTestId("evidence-empty-clear").click();
     await expect(page).toHaveURL(/\/evidence$/);
     await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-      SEEDED_ROWS,
+      ROWS_IN_DEFAULT_WINDOW,
     );
     expect(page.url()).not.toContain("since_preset=");
     expect(page.url()).not.toContain("scope_cell_id=");
