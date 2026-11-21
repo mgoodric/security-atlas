@@ -100,7 +100,7 @@ func seedStockBundleControl(t *testing.T, admin *pgxpool.Pool, tenant, bundle st
 
 func seedMFAPolicy(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl uuid.UUID, observedAt time.Time, connectorResult string, payload map[string]any) {
 	t.Helper()
-	seedStockEvidence(t, admin, tenant, ctrl, "okta.mfa_policy.v1", observedAt, connectorResult, payload)
+	seedStockEvidence(t, admin, tenant, ctrl, "okta.mfa_policy.v2", observedAt, connectorResult, payload)
 }
 
 // seedStockEvidence inserts one ledger record of the given kind, carrying the
@@ -129,27 +129,36 @@ func TestCC61_EngineEvaluatesMFAPolicyPayload(t *testing.T) {
 	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
 	observed := time.Now().UTC().Add(-2 * time.Hour)
 
-	policy := func(required bool, factors, groups []string) map[string]any {
+	// An okta.mfa_policy.v2 payload as the connector builds it (#2901).
+	policy := func(status string, required bool, factors []string, everyone bool) map[string]any {
+		groups := []string{"00g1engineering"}
+		if everyone {
+			groups = []string{"00g1everyone"}
+		}
 		return map[string]any{
-			"policy_id":         "00p1",
-			"policy_name":       "Default MFA enrollment",
-			"mfa_required":      required,
-			"factors_allowed":   factors,
-			"applies_to_groups": groups,
+			"policy_id":           "00p1",
+			"policy_name":         "Default Policy",
+			"status":              status,
+			"mfa_required":        required,
+			"factors_allowed":     factors,
+			"applies_to_groups":   groups,
+			"applies_to_everyone": everyone,
 		}
 	}
 	// connectorResult is what the Okta connector emits for each payload:
-	// pass whenever MFA is required with a factor. The query must ignore it.
+	// pass whenever an active policy requires MFA with a factor, na when it
+	// is inactive. The query must ignore it.
 	cases := []struct {
 		name            string
 		connectorResult string
 		payload         map[string]any
 		want            string
 	}{
-		{"webauthn on everyone", "pass", policy(true, []string{"okta_verify", "webauthn"}, []string{"everyone"}), eval.ResultPass},
-		{"only sms and push", "pass", policy(true, []string{"okta_sms", "okta_push"}, []string{"everyone"}), eval.ResultFail},
-		{"mfa not required", "fail", policy(false, []string{"webauthn"}, []string{"everyone"}), eval.ResultFail},
-		{"not applied to everyone", "pass", policy(true, []string{"webauthn"}, []string{"engineering"}), eval.ResultFail},
+		{"webauthn on everyone", "pass", policy("ACTIVE", true, []string{"okta_verify", "webauthn"}, true), eval.ResultPass},
+		{"only sms and push", "pass", policy("ACTIVE", true, []string{"okta_push", "okta_sms"}, true), eval.ResultFail},
+		{"mfa not required", "fail", policy("ACTIVE", false, []string{"webauthn"}, true), eval.ResultFail},
+		{"not applied to everyone", "pass", policy("ACTIVE", true, []string{"webauthn"}, false), eval.ResultFail},
+		{"inactive", "na", policy("INACTIVE", true, []string{"webauthn"}, true), eval.ResultFail},
 		{"no snapshot", "", nil, eval.ResultInconclusive},
 	}
 	for _, tc := range cases {

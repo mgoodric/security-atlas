@@ -7,4 +7,10 @@
 
 Both use the same embedded OPA Go library — same engine evaluates control queries and authz decisions, so the security model is auditable in the same substrate as the controls.
 
-Empty in slice 001.
+## Where the Rego lives
+
+- **Authorization policies** are in `internal/authz/rego_bundle/`, compiled
+  into the binary with `//go:embed` (`internal/authz/decision.go`). That
+  directory is the only copy. Edit it there; there is no mirror to sync
+  (#2677 removed the `policies/authz/` copy).
+- **`stock/`** holds the stock policy documents (Markdown), not Rego.

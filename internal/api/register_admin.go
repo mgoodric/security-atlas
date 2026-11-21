@@ -213,7 +213,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// catalog edge left on an older release's anchor is queued; approving one
 	// copies the edge onto the successor anchor. Global catalog rows, so every
 	// route (the list included) is super_admin-gated in the handler and in
-	// policies/authz (a tenant admin is 403, #1757).
+	// internal/authz/rego_bundle (a tenant admin is 403, #1757).
 	admincrosswalkremap.New(crosswalkremap.NewStore(s.dbPool)).RegisterRoutes(root)
 
 	// Slice 484: framework-versioning capability (ADR 0019). The write routes
@@ -235,7 +235,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA
-	// policy in policies/authz/super_admin.rego is the second leg.
+	// policy in internal/authz/rego_bundle/super_admin.rego is the second leg.
 	// #2385: the BYPASSRLS authPool names super admins whose users row
 	// is in another tenant (PK-bounded read). Nil in the test harness.
 	superAdminsH := adminsuperadmins.New(s.dbPool).SetAuthPool(s.authPool)
@@ -244,7 +244,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Delete("/v1/admin/super-admins/{user_id}", superAdminsH.Demote)
 
 	// Slice 378: authz bundle hot-reload. super_admin-gated; reloads
-	// the embedded policies/authz/*.rego bundle without a process
+	// the embedded internal/authz/rego_bundle/*.rego bundle without a process
 	// restart. The atomic.Pointer-backed Engine swap (slice 378 AC-1
 	// + AC-2) means in-flight Decide calls during a reload see
 	// either the old query or the new one — never a partial state.

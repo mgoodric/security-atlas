@@ -11,7 +11,7 @@
 //
 // The slice-035 OPA middleware is the PRIMARY authz gate in production
 // (the "personnel-security" resource is enrolled in
-// policies/authz/grc_engineer.rego's writable set). This guard is its
+// internal/authz/rego_bundle/grc_engineer.rego's writable set). This guard is its
 // defense-in-depth twin — the same belt-and-suspenders posture slices
 // 059/062/064/066/067 adopted — and the testable enforcement point,
 // because integration test servers leave the OPA engine nil.

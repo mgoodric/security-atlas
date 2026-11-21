@@ -9,9 +9,9 @@ import (
 
 // Slice 027 — walkthrough authz rules. Validates the rego changes in
 //
-//	policies/authz/auditor.rego          (mirrored to internal/authz/rego_bundle/)
-//	policies/authz/control_owner.rego
-//	policies/authz/grc_engineer.rego
+//	internal/authz/rego_bundle/auditor.rego
+//	internal/authz/rego_bundle/control_owner.rego
+//	internal/authz/rego_bundle/grc_engineer.rego
 //
 // AC-4 spans these tests: "auditor and the control's owner can read"
 // the walkthrough; the auditor's testing notes are private (those tests

@@ -51,7 +51,7 @@ export function humanizeAction(action: string): string {
 
 // Controls are the only record type every role (viewer, control_owner,
 // auditor, grc_engineer, admin) is admitted to read
-// (policies/authz/*.rego). Any other target renders as plain text.
+// (internal/authz/rego_bundle/*.rego). Any other target renders as plain text.
 export function targetHref(
   targetType: string,
   targetId: string,

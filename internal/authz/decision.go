@@ -61,7 +61,7 @@ type Engine struct {
 	attrsResolver AttrsResolver
 }
 
-// NewEngine constructs an Engine from the embedded policies/authz/*.rego
+// NewEngine constructs an Engine from the embedded internal/authz/rego_bundle/*.rego
 // bundle. resolver is the optional DB-backed role lookup; pass
 // NoopRolesResolver{} when DB lookup is not required.
 //
@@ -201,7 +201,7 @@ func (e *Engine) Reload(ctx context.Context, modules map[string]*ast.Module, sou
 }
 
 // ReloadFromEmbedded reloads the engine from the embedded
-// policies/authz/*.rego bundle. Convenience wrapper around Reload for
+// internal/authz/rego_bundle/*.rego bundle. Convenience wrapper around Reload for
 // the HTTP `POST /v1/admin/authz-bundle/reload` endpoint, which v1
 // scopes to the embedded bundle (slice 378 P0-4 — user-authored
 // bundles are v3+ work).
@@ -405,11 +405,10 @@ var embeddedRegoFS embed.FS
 // source map feeds the SHA-256 fingerprint computation that the
 // slice-378 reload-audit path records.
 //
-// The bundle is populated by `just authz-sync` (or at build time by a
-// code-generation step); the source of truth lives at
-// policies/authz/*. We use an embedded FS so the binary is
-// self-contained and operators don't need to ship the policies
-// directory alongside the binary.
+// internal/authz/rego_bundle/ is the source of truth; there is no
+// other copy (#2677 removed the policies/authz/ mirror). We use an
+// embedded FS so the binary is self-contained and operators don't need
+// to ship the policies directory alongside the binary.
 func embeddedPoliciesWithSources() (map[string]*ast.Module, map[string][]byte, error) {
 	modules := map[string]*ast.Module{}
 	sources := map[string][]byte{}
