@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/policy/seed"
 )
 
@@ -63,6 +64,11 @@ func TestLoadFromFS_RealStockBundle(t *testing.T) {
 		// against, never whatever release is current at seed time.
 		if fm.SCFRelease != "2026.3" {
 			t.Errorf("%s: scf_release = %q; want 2026.3", p.SourcePath, fm.SCFRelease)
+		}
+		// #2588: every stock template is aimed at everyone; an admin narrows
+		// it afterwards. A team name ("engineer") matches no session.
+		if got := fm.AcknowledgmentRequiredRoles; len(got) != 1 || got[0] != policy.AudienceEveryone {
+			t.Errorf("%s: acknowledgment_required_roles = %v; want [%s]", p.SourcePath, got, policy.AudienceEveryone)
 		}
 	}
 }
