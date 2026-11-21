@@ -72,7 +72,12 @@ snapshot's `factors_allowed` is the list of factor keys from the policy's
 out. So only `webauthn` counts, and the description says Okta Verify with
 number matching is not seen. Making it count needs the connector to emit
 the number-matching setting, under a new schema version (ADR 0028
-decision 8). That is a tier-2 change, not filed here.
+decision 8). That is a tier-2 change.
+
+**Follow-up:** the connector doesn't emit `webauthn` on real tenants.
+[#2901](https://github.com/mgoodric/security-atlas/issues/2901) fixes the
+connector side: `fido_webauthn` and authenticators. Until it lands, the
+description says the control fails on real Okta tenants.
 
 **Unverified:** that Okta returns WebAuthn under the key `webauthn` in an
 `MFA_ENROLL` policy's `settings.factors`. I took it from the connector's
@@ -90,6 +95,11 @@ API may put group IDs (`00g...`) in `include`, not names. If it does, a
 real tenant's Everyone group never matches and this control fails for
 everyone. The fix would be in the connector (resolve the Everyone group's
 ID, or emit a flag), not in this query.
+
+**Follow-up:** the review confirmed the connector reports group ids.
+[#2901](https://github.com/mgoodric/security-atlas/issues/2901) fixes that
+in the connector, along with policy status, so inactive policies stop
+counting. Matt chose to merge this PR first.
 
 ## D5 — Supersedes the stock bundle `soc2_cc6_1_logical_access_baseline`
 

@@ -17,11 +17,16 @@ description: |
   snapshot leaves it inconclusive. The connector's per-record verdict is
   not used.
 
+  Until #2901 lands, this fails on real Okta tenants: the connector reports
+  group ids, not `everyone`, and doesn't emit `webauthn`.
+
   Not checked: Okta Verify with number matching also resists phishing, but
   the snapshot records only the factor key (`okta_verify`), not whether
-  number matching is on, so `okta_verify` does not count. Only the records
-  the control receives are checked; a policy the connector did not report
-  is not seen.
+  number matching is on, so `okta_verify` does not count. An inactive
+  policy counts the same as an active one. A higher-priority policy scoped
+  to a subset of users can override the Everyone policy for them, and that
+  is not seen. Only the records the control receives are checked; a policy
+  the connector did not report is not seen.
 
 scf_anchor_id: IAC-01
 control_family: IAC
