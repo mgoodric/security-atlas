@@ -5990,7 +5990,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived; inherent_score is optional, and omitting it (or sending null or an empty object) creates an unscored risk, stored with empty inherent and residual scores and read as Unscored; a residual_score without an inherent_score is refused (400); a non-FAIR score field (score, severity, likelihood, impact) that is not a JSON number in range is refused (422), and a non-empty residual_score must carry one; treatment=accept with acceptance_status=proposed needs justification and proposed_until (YYYY-MM-DD, after today), as /acceptance/propose does, else 400
+      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived; inherent_score is optional, and omitting it (or sending null or an empty object) creates an unscored risk, stored with empty inherent and residual scores and read as Unscored; a residual_score without an inherent_score is refused (400); a non-FAIR score field (score, severity, likelihood, impact) that is not a JSON number in range is refused (422), and a non-empty residual_score must carry one; treatment=accept with acceptance_status=proposed needs justification and proposed_until (YYYY-MM-DD, after today), as /acceptance/propose does, else 400, and a person, as /acceptance/propose does, else 403
       tags: [risks]
       operationId: post-v1-risks
       security:
@@ -6278,7 +6278,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/acceptance/propose:
     patch:
-      summary: PATCH /v1/risks/{id}/acceptance/propose — propose accepting a risk; body {justification, proposed_until (YYYY-MM-DD, after today)}; refused when an acceptance is already proposed or approved (409); audit-logged
+      summary: PATCH /v1/risks/{id}/acceptance/propose — propose accepting a risk; body {justification, proposed_until (YYYY-MM-DD, after today)}; refused when an acceptance is already proposed or approved (409); only a person proposes (an unbound API key, OAuth client or bootstrap credential gets 403; a key bound to a user counts as that user); audit-logged
       tags: [risks]
       operationId: patch-v1-risks-id-acceptance-propose
       security:

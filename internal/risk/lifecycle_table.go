@@ -92,10 +92,11 @@ func treatmentTransitions() []lifecycle.Transition {
 	for _, from := range treatmentTargets {
 		out = append(out, lifecycle.Transition{
 			From: from.state, To: TreatmentStateAcceptProposed, Action: "propose_acceptance",
-			Actor:  lifecycle.ActorPerson,
-			Routes: []string{"PATCH /v1/risks/{id}/acceptance/propose"},
-			Roles:  riskWriteRoles,
-			Note:   "Needs a justification and a proposed expiry after today.",
+			Actor:      lifecycle.ActorPerson,
+			Routes:     []string{"PATCH /v1/risks/{id}/acceptance/propose"},
+			Roles:      riskWriteRoles,
+			PeopleOnly: true,
+			Note:       "Needs a justification and a proposed expiry after today. A machine credential never proposes (#2623).",
 		})
 	}
 	return append(out,
