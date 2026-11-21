@@ -4124,10 +4124,12 @@ type Querier interface {
 	UpdateBoardPackContent(ctx context.Context, arg UpdateBoardPackContentParams) (BoardPack, error)
 	// Issues #1908, #1958, #2023: a re-upload whose manifest differs from the
 	// active row's only in `description`, `external_refs` and/or
-	// `anchor_fit_note` updates that row in
-	// place instead of versioning, so every control-keyed row (owners,
-	// evidence, exceptions, links) stays attached. The hash moves with the
-	// YAML so a repeat upload is a no-op.
+	// `anchor_fit_note`, plus evidence_queries[].description (#2891), updates
+	// that row in place instead of versioning, so every control-keyed row
+	// (owners, evidence, exceptions, links) stays attached. evidence_queries
+	// is rewritten so the stored copy carries the new query descriptions; the
+	// caller has already checked nothing else in it changed. The hash moves
+	// with the YAML so a repeat upload is a no-op.
 	UpdateControlMetadataInPlace(ctx context.Context, arg UpdateControlMetadataInPlaceParams) (int64, error)
 	UpdateDecision(ctx context.Context, arg UpdateDecisionParams) (Decision, error)
 	// #2116 — edit a draft in place. Only a row still in 'draft' matches, so a
