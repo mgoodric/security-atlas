@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
@@ -160,34 +161,24 @@ func derivedRolesFor(cred credstore.Credential) []Role {
 		// user_roles to fall back on. Every other subject shape, known or
 		// not, derives nothing.
 		return nil
-	case jwtSession(cred) && readOnlyRoleClaim(cred.OwnerRoles):
-		// #2381: a machine token whose claim names only viewer and/or
-		// auditor must not derive control_owner below.
-		return nil
-	case boundKeyCeiling(cred) != nil:
+	case boundKey(cred):
 		// #2431: a key bound to a user derives nothing from its label. Its
 		// roles are its owner's live user_roles rows, capped by the label
-		// (boundKeyCeiling), which Decide applies after the resolver.
+		// (boundKeyCeiling), which Decide applies after the resolver. An
+		// unlabelled bound key has no cap and does not take the grc_engineer
+		// default below (Matt, 2026-11-18). The flags were handled above.
 		return nil
-	case apiKey(cred) && readOnlyRoleClaim(cred.OwnerRoles):
-		// #2402: an API key whose owner_roles names only viewer and/or
-		// auditor used to derive control_owner below, so a "viewer" key
-		// could write evidence, artifacts and walkthroughs. A key bound to
-		// a user (issued_by set, UserID the owner's uuid) derives nothing:
-		// like a JWT session (#2381) its roles are the owner's live
-		// user_roles rows. An unbound machine key has no user_roles to fall
-		// back on, so it derives exactly the roles its label names.
-		if cred.UserID != cred.ID {
-			return nil
-		}
-		return readOnlyRoles(cred.OwnerRoles)
 	case len(cred.OwnerRoles) > 0:
-		return []Role{RoleControlOwner}
-	case boundKey(cred):
-		// #2431 (Matt, 2026-11-18): an unlabelled key bound to a user holds
-		// exactly its owner's live user_roles rows, not the grc_engineer
-		// default below. The flags were handled above.
-		return nil
+		// #2596 (Matt, 2026-11-17): what is left is a credential whose label
+		// is its grant (roleLabelIsGrant): an unbound API key, a
+		// client_credentials machine token, a legacy credstore credential. It
+		// derives exactly the canonical roles its label names, as the handler
+		// gates count them (TenantRoleLabels, IsTenantAdmin, ...). A free-text
+		// label derives nothing, and does not fall through to the grc_engineer
+		// default below. Before #2596 any label that was not viewer/auditor
+		// only derived control_owner, and a viewer/auditor-only label on a
+		// machine token derived nothing (#2381, #2402).
+		return labelRoles(cred.OwnerRoles)
 	case cred.TenantID == "":
 		// No credential in context -- exempt path. Return empty so
 		// authz.Decide hits default-deny.
@@ -265,34 +256,16 @@ func apiKey(cred credstore.Credential) bool {
 	return strings.HasPrefix(cred.ID, "key_")
 }
 
-// readOnlyRoles maps a label that readOnlyRoleClaim accepts to its roles,
-// viewer before auditor, each once.
-func readOnlyRoles(labels []string) []Role {
+// labelRoles is the canonical roles a label names, in label order, each
+// once, or nil when it names none. Free-text entries are dropped (#2596).
+func labelRoles(labels []string) []Role {
 	var out []Role
-	for _, want := range []Role{RoleViewer, RoleAuditor} {
-		for _, l := range labels {
-			if Role(l) == want {
-				out = append(out, want)
-				break
-			}
+	for _, l := range labels {
+		if r := Role(l); IsCanonical(r) && !slices.Contains(out, r) {
+			out = append(out, r)
 		}
 	}
 	return out
-}
-
-// readOnlyRoleClaim reports whether a non-empty role claim names only
-// viewer and auditor. Any other entry (control_owner, grc_engineer, admin,
-// or a slice-011 owner-role label) keeps the control_owner derivation.
-func readOnlyRoleClaim(roles []string) bool {
-	if len(roles) == 0 {
-		return false
-	}
-	for _, r := range roles {
-		if Role(r) != RoleViewer && Role(r) != RoleAuditor {
-			return false
-		}
-	}
-	return true
 }
 
 // actionFromMethodAndPath derives the canonical action name. GET is

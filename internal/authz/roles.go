@@ -49,7 +49,7 @@ func IsTenantAdmin(cred credstore.Credential) bool {
 	if cred.IsAdmin || hasLabel(cred.TenantRoles, RoleAdmin) {
 		return true
 	}
-	return ownerLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleAdmin)
+	return roleLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleAdmin)
 }
 
 // IsTenantApprover reports whether cred may approve: a tenant admin, the
@@ -62,7 +62,7 @@ func IsTenantApprover(cred credstore.Credential) bool {
 	if IsTenantAdmin(cred) || cred.IsApprover || hasLabel(cred.TenantRoles, RoleGRCEngineer) {
 		return true
 	}
-	return ownerLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
+	return roleLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
 }
 
 // IsTenantAuditReader reports whether cred may read what OPA admits an
@@ -126,7 +126,7 @@ func IsTenantControlOwner(cred credstore.Credential) bool {
 	if hasLabel(cred.TenantRoles, RoleControlOwner) {
 		return true
 	}
-	return ownerLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleControlOwner)
+	return roleLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleControlOwner)
 }
 
 // HasTenantRole reports whether the caller holds any role in its current
@@ -230,26 +230,26 @@ func HasOwnerRole(cred credstore.Credential, role string) bool {
 }
 
 // roleLabelIsGrant reports whether cred's OwnerRoles is its own grant rather
-// than a copy of a user's roles: true unless cred is a user's JWT session or
-// an API key bound to a user (issued_by set, so UserID is the owner, not the
-// key id).
+// than a copy of a user's roles: true unless cred is a user's JWT session,
+// whose role claim outlives a revoke (#2381), or an API key bound to a user
+// (issued_by set, so UserID is the owner, not the key id), whose label is a
+// copy of the owner's roles (#2541). A key naming no user at all (empty
+// UserID) is unbound, as boundKey and is_machine_actor treat it.
+//
+// Every reader of the label uses it (#2596): the tenant gates (IsTenantAdmin,
+// IsTenantApprover, IsTenantControlOwner), TenantRoleLabels, and, through
+// derivedRolesFor, OPA. Before #2596 the tenant gates had their own rule,
+// which refused a client_credentials machine token's label, and
+// TenantRoleLabels refused the label of a key naming no user.
 func roleLabelIsGrant(cred credstore.Credential) bool {
 	switch {
 	case jwtSession(cred):
 		return machineJWT(cred)
 	case apiKey(cred):
-		return cred.UserID == cred.ID
+		return !boundKey(cred)
 	default:
 		return true
 	}
-}
-
-// ownerLabelIsGrant reports whether the tenant gates (IsTenantAdmin,
-// IsTenantApprover, IsTenantControlOwner) count cred's OwnerRoles: never for a
-// JWT, whose role claim outlives a revoke (#2381), and never for a key bound
-// to a user, whose label is a copy of the owner's roles (#2541).
-func ownerLabelIsGrant(cred credstore.Credential) bool {
-	return !jwtSession(cred) && !boundKey(cred)
 }
 
 // boundKey reports whether cred is an API key bound to a user: issued_by is
