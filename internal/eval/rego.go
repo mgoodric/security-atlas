@@ -5,9 +5,10 @@
 // expression over the evidence ledger. When the engine evaluates such a
 // control it runs the query here. The sandbox contract:
 //
-//   - The ONLY input is {records: [{result, observed_at, hash}, ...]} — the
-//     in-window evidence records for that (control, scope_cell). No DB
-//     handle, no other-tenant data, nothing else reaches the policy.
+//   - The ONLY input is {records: [{result, observed_at}, ...]} — the
+//     in-window evidence records for that (control, scope_cell), with
+//     observed_at as an RFC 3339 timestamp. No payload, no DB handle, no
+//     other-tenant data, nothing else reaches the policy (ADR 0028).
 //   - No rego.Store, no rego.Function.
 //   - The capability set is restricted via evalSandboxCapabilities() so the
 //     network / runtime / introspection builtins (http.send, net.*,
@@ -73,8 +74,10 @@ func evalSandboxCapabilities() *ast.Capabilities {
 }
 
 // regoInputRecord is one in-window evidence record as the Rego policy sees
-// it. Deliberately minimal — the policy gets the result enum and nothing
-// that could identify another tenant's data.
+// it. Deliberately minimal — the policy gets the result enum and the
+// observation time, and nothing that could identify another tenant's data.
+// Payload checks belong in SQL (ADR 0028 decision 2), so no payload field is
+// copied here.
 type regoInputRecord struct {
 	Result     string    `json:"result"`
 	ObservedAt time.Time `json:"observed_at"`
@@ -121,7 +124,7 @@ func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord)
 
 	inRecs := make([]regoInputRecord, len(records))
 	for i, r := range records {
-		inRecs[i] = regoInputRecord{Result: r.result}
+		inRecs[i] = regoInputRecord{Result: r.result, ObservedAt: r.observedAt}
 	}
 	input := map[string]interface{}{"records": inRecs}
 
