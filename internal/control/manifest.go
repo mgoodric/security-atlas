@@ -23,6 +23,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/eval"
 )
 
 // BundleSchemaVersion is the only accepted manifest schema version in slice
@@ -139,14 +141,26 @@ var allowedLifecycleStates = map[string]struct{}{
 	"retired":    {},
 }
 
-var allowedFreshnessClasses = map[string]struct{}{
-	"realtime":  {},
-	"hourly":    {},
-	"daily":     {},
-	"weekly":    {},
-	"monthly":   {},
-	"quarterly": {},
-	"annual":    {},
+// unmappedFreshnessClasses are the classes a bundle may declare although the
+// evaluation engine has no window for them, so they fall back to the 90-day
+// default. Every other allowed class comes from eval's freshness table, the
+// single source: a class the engine cannot map is refused at parse and
+// upload instead of silently widening to 90 days (#2896).
+//
+// `hourly`: unmapped; removed with a1_1's supersede in #2826. Do not add to
+// this set.
+var unmappedFreshnessClasses = map[string]struct{}{
+	"hourly": {},
+}
+
+// isAllowedFreshnessClass reports whether a bundle may declare class: eval's
+// freshness table maps it, or it is a named unmapped exception.
+func isAllowedFreshnessClass(class string) bool {
+	if _, known := eval.FreshnessMaxAge(class); known {
+		return true
+	}
+	_, ok := unmappedFreshnessClasses[class]
+	return ok
 }
 
 var allowedQueryLanguages = map[string]struct{}{
@@ -238,8 +252,8 @@ func (m *Manifest) ValidateStructural() error {
 	}
 
 	if m.FreshnessClass != "" {
-		if _, ok := allowedFreshnessClasses[m.FreshnessClass]; !ok {
-			return fmt.Errorf("control bundle: freshness_class %q is not a known class", m.FreshnessClass)
+		if !isAllowedFreshnessClass(m.FreshnessClass) {
+			return fmt.Errorf("control bundle: freshness_class %q is not one of %s", m.FreshnessClass, strings.Join(eval.FreshnessClasses(), "|"))
 		}
 	}
 
