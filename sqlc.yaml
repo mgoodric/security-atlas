@@ -184,7 +184,7 @@ sql:
       # #2852: control-link changes on synced policies, audited.
       - "migrations/sql/20261284000000_policy_controls_updated.sql"
       # #2853: missing pages on synced policies.
-      - "migrations/sql/20261286000000_policy_sync_missing.sql"
+      - "migrations/sql/20261287000000_policy_sync_missing.sql"
     queries: "internal/db/queries"
     gen:
       go:

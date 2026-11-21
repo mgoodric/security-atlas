@@ -264,7 +264,7 @@ func TestSync_MissingIsPerTenant(t *testing.T) {
 }
 
 // sync_missing_since is rejected on a row that is not synced
-// (20261286000000_policy_sync_missing).
+// (20261287000000_policy_sync_missing).
 func TestSync_MissingOnlyOnSyncedRows(t *testing.T) {
 	s := newSyncSetup(t)
 	authored := createDraftPolicy(t, s.setupResult, "Authored-2853", "1.0", nil)

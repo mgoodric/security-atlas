@@ -17,7 +17,7 @@
 -- Constitutional invariant #6: policies keeps its RLS policies; this
 -- migration adds no table.
 --
--- Reversible via 20261286000000_policy_sync_missing.down.sql.
+-- Reversible via 20261287000000_policy_sync_missing.down.sql.
 
 ALTER TABLE policies
     ADD COLUMN sync_missing_since TIMESTAMPTZ NULL;

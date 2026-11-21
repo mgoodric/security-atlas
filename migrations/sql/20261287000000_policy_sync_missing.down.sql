@@ -1,4 +1,4 @@
--- security-atlas -- reverse 20261286000000_policy_sync_missing.sql.
+-- security-atlas -- reverse 20261287000000_policy_sync_missing.sql.
 --
 -- The missing state is derived: the next sync run records it again from
 -- the pages it carries. Dropping it loses nothing a run cannot rebuild.
