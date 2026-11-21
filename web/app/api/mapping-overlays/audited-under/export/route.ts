@@ -10,6 +10,7 @@ import { NextResponse } from "next/server";
 
 import { isFrameworkSlug } from "@/lib/api/audited-under";
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 const PASSTHROUGH_HEADERS = [
@@ -42,14 +43,17 @@ export async function GET(req: Request): Promise<Response> {
     { headers: { Authorization: `Bearer ${bearer}` }, cache: "no-store" },
   );
   if (!upstream.ok) {
-    return new NextResponse(await upstream.text(), {
-      status: upstream.status,
-      headers: {
-        "Content-Type":
-          upstream.headers.get("Content-Type") ?? "application/json",
-        "Cache-Control": "no-store",
+    return new NextResponse(
+      upstreamBody(upstream.status, await upstream.text()),
+      {
+        status: upstream.status,
+        headers: {
+          "Content-Type":
+            upstream.headers.get("Content-Type") ?? "application/json",
+          "Cache-Control": "no-store",
+        },
       },
-    });
+    );
   }
   const headers: Record<string, string> = { "Cache-Control": "no-store" };
   for (const name of PASSTHROUGH_HEADERS) {

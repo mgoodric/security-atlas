@@ -163,7 +163,7 @@ describe("GET /api/exceptions", () => {
     expect(calledURL).not.toContain("debug");
   });
 
-  test("upstream error status passes through", async () => {
+  test("upstream 5xx status passes through, its body is masked (#2757)", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-177" });
 
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -176,7 +176,7 @@ describe("GET /api/exceptions", () => {
     const res = await GET(makeRequest("http://localhost/api/exceptions"));
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe("upstream boom");
+    expect(body.error).toBe("platform error");
   });
 
   test("cross-tenant isolation: BFF does not consult or echo caller tenant_id", async () => {

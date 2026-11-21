@@ -484,16 +484,29 @@ LIMIT sqlc.arg('limit_n')::integer;
 -- The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
 -- what the visibility rules read: the same window, the slice 270
 -- non-privileged predicate and the slice 669 read-telemetry predicate.
--- One row per (actor, kind, target_type, request_path), so the handler
--- applies the #2173 module filter exactly as it does to the feed, and an
--- actor seen only in rows the caller may not see is not listed.
 -- `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
 -- to one query and not the other.
+--
+-- The #2173 module filter runs here as well, before the cap (#2718), so
+-- rows from a hidden module neither use up the cap nor mark the list
+-- truncated, and an actor seen only in rows the caller may not see is not
+-- listed. The handler passes the filter as arguments (moduleRouteFilter):
+-- `hidden_kinds`, the kinds owned by a module the caller may not see, and
+-- the featureflag route registry as three parallel arrays, each pattern
+-- with its owner and whether the caller sees that owner. `resolved`
+-- places a path the way featureflag.Resolve does: a `*` segment matches
+-- one non-empty segment, the last literal also matches `<literal>:<verb>`,
+-- and the most specific match wins (most segments, then most literals).
+-- A path no pattern matches is shown; a tie between two owners is
+-- hidden, as ModuleSet.Sees hides it. A decision is placed by its request
+-- path when that resolves, else by `/v1/<target_type>`, as decisionRoute
+-- does. `TestActivityActors_ModuleFilterMatchesGo` checks this against
+-- entrySeen for every registry route.
 --
 -- RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
 -- atlas_app and takes no tenant parameter.
 --
--- LIMIT 1001 is the handler's 1000-tuple cap plus one (#2627): a 1001st
+-- LIMIT 1001 is the handler's 1000-actor cap plus one (#2627): a 1001st
 -- row is how the handler knows the window held more and sets `truncated`,
 -- rather than dropping actors silently.
 WITH unified AS (
@@ -548,29 +561,91 @@ WITH unified AS (
     UNION ALL
     SELECT created_at, actor, 'vendor', action_type, '', ''
     FROM vendor_audit_log
-)
-SELECT DISTINCT
-    unified.actor_id::text     AS actor_id,
-    unified.kind::text         AS kind,
-    unified.target_type::text  AS target_type,
-    unified.request_path::text AS request_path
-FROM unified
-WHERE unified.occurred_at >= sqlc.arg('from_ts')::timestamptz
-  AND unified.occurred_at <  sqlc.arg('to_ts')::timestamptz
-  AND (unified.actor_id = 'system'
-       OR starts_with(unified.actor_id, 'system:')
-       OR starts_with(unified.actor_id, 'oauth_client:'))
-  AND (
-      sqlc.arg('caller_is_privileged')::boolean = true
-      OR (
-          unified.kind <> 'feature_flag'
-          AND unified.kind <> 'module_access'
-          AND unified.kind <> 'me'
+),
+tuples AS (
+    SELECT DISTINCT
+        unified.actor_id::text     AS actor_id,
+        unified.kind::text         AS kind,
+        unified.target_type::text  AS target_type,
+        unified.request_path::text AS request_path
+    FROM unified
+    WHERE unified.occurred_at >= sqlc.arg('from_ts')::timestamptz
+      AND unified.occurred_at <  sqlc.arg('to_ts')::timestamptz
+      AND (unified.actor_id = 'system'
+           OR starts_with(unified.actor_id, 'system:')
+           OR starts_with(unified.actor_id, 'oauth_client:'))
+      AND (
+          sqlc.arg('caller_is_privileged')::boolean = true
+          OR (
+              unified.kind <> 'feature_flag'
+              AND unified.kind <> 'module_access'
+              AND unified.kind <> 'me'
+          )
       )
-  )
-  AND (
-      sqlc.arg('exclude_read_telemetry')::boolean = false
-      OR NOT (unified.kind = 'decision' AND unified.action = 'read')
-  )
-ORDER BY 1, 2, 3, 4
+      AND (
+          sqlc.arg('exclude_read_telemetry')::boolean = false
+          OR NOT (unified.kind = 'decision' AND unified.action = 'read')
+      )
+      AND NOT (unified.kind = ANY(sqlc.arg('hidden_kinds')::text[]))
+),
+patterns AS (
+    SELECT string_to_array((sqlc.arg('route_patterns')::text[])[n], '/') AS segs,
+           (sqlc.arg('route_owners')::text[])[n]                         AS owner,
+           (sqlc.arg('route_visible')::boolean[])[n]                     AS visible
+    FROM generate_subscripts(sqlc.arg('route_patterns')::text[], 1) AS n
+),
+paths AS (
+    SELECT tuples.request_path AS path
+    FROM tuples
+    WHERE tuples.kind = 'decision' AND tuples.request_path <> ''
+    UNION
+    SELECT '/v1/' || tuples.target_type
+    FROM tuples
+    WHERE tuples.kind = 'decision' AND tuples.target_type <> ''
+),
+matches AS (
+    SELECT paths.path, patterns.owner, patterns.visible,
+           cardinality(patterns.segs) * 1000
+             + cardinality(array_remove(patterns.segs, '*')) AS score
+    FROM paths
+    CROSS JOIN LATERAL string_to_array(paths.path, '/') AS s
+    CROSS JOIN patterns
+    WHERE cardinality(s) >= cardinality(patterns.segs)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM generate_subscripts(patterns.segs, 1) AS i
+          WHERE NOT CASE
+              WHEN patterns.segs[i] = '*' THEN s[i] <> ''
+              ELSE s[i] = patterns.segs[i]
+                   OR (i = cardinality(patterns.segs)
+                       AND starts_with(s[i], patterns.segs[i] || ':'))
+          END
+      )
+),
+resolved AS (
+    SELECT best.path,
+           CASE WHEN count(DISTINCT best.owner) > 1 THEN 'ambiguous'
+                WHEN bool_and(best.visible) THEN 'visible'
+                ELSE 'hidden'
+           END AS status
+    FROM (
+        SELECT matches.*, max(matches.score) OVER (PARTITION BY matches.path) AS top
+        FROM matches
+    ) AS best
+    WHERE best.score = best.top
+    GROUP BY best.path
+)
+SELECT DISTINCT tuples.actor_id::text AS actor_id
+FROM tuples
+LEFT JOIN resolved AS by_path
+       ON tuples.kind = 'decision' AND by_path.path = tuples.request_path
+LEFT JOIN resolved AS by_type
+       ON tuples.kind = 'decision' AND tuples.target_type <> ''
+      AND by_type.path = '/v1/' || tuples.target_type
+WHERE tuples.kind <> 'decision'
+   OR CASE
+          WHEN by_path.status IN ('visible', 'hidden') THEN by_path.status = 'visible'
+          ELSE coalesce(by_type.status, 'visible') = 'visible'
+      END
+ORDER BY 1
 LIMIT 1001;

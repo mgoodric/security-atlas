@@ -9,9 +9,7 @@ linked_control_ids:
   - IRO-01
   - IRO-02
 acknowledgment_required_roles:
-  - on_call
-  - security_lead
-  - engineering_lead
+  - everyone
 source_attribution: community_draft
 ---
 

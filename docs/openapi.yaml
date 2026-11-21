@@ -530,12 +530,18 @@ paths:
       security:
         - bearer: []
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: OK.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/ActivityActorsResponse"
+        default:
+          description: Error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/activity/unified:
     get:
       summary: GET /v1/activity/unified
@@ -7389,6 +7395,19 @@ components:
           minimum: 0
           maximum: 1
           description: Lexical token-overlap relevance score. Higher sorts first.
+    ActivityActorsResponse:
+      type: object
+      required:
+        - actors
+        - truncated
+      additionalProperties: false
+      properties:
+        actors:
+          type: array
+          items:
+            type: string
+        truncated:
+          type: boolean
     EdgeRemapProposal:
       type: object
       required:

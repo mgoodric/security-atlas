@@ -147,18 +147,20 @@ func ensureSCFAnchorsSeed(t *testing.T) (anchorID uuid.UUID, requirementID uuid.
 		`, soc2FwID); err != nil {
 			t.Fatalf("insert slice174-soc framework: %v", err)
 		}
+		// Delete the global slice174-soc framework this call inserted when
+		// the test ends (its version, requirement and edges cascade). Left
+		// behind, it shows up in every later package's framework listings
+		// on a shared database, as it did for internal/board (#2627). By
+		// id, and only when inserted here, so a row another test seeded is
+		// left to its owner (#2718). The admin pool's own close was
+		// registered first, so it runs after this.
+		t.Cleanup(func() {
+			if _, err := admin.Exec(context.Background(),
+				`DELETE FROM frameworks WHERE id = $1`, soc2FwID); err != nil {
+				t.Errorf("cleanup slice174-soc framework: %v", err)
+			}
+		})
 	}
-	// Delete the global slice174-soc framework when the test ends (its
-	// version, requirement and edges cascade). Left behind, it shows up in
-	// every later package's framework listings on a shared database, as
-	// it did for internal/board (#2627). The admin pool's own close was
-	// registered first, so it runs after this.
-	t.Cleanup(func() {
-		if _, err := admin.Exec(context.Background(),
-			`DELETE FROM frameworks WHERE slug = 'slice174-soc' AND tenant_id IS NULL`); err != nil {
-			t.Errorf("cleanup slice174-soc framework: %v", err)
-		}
-	})
 	var soc2VerID uuid.UUID
 	err = admin.QueryRow(ctx, `
 		SELECT id FROM framework_versions

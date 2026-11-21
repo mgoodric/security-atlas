@@ -120,11 +120,11 @@ describe("mapping overlay BFF routes", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  test("an export error passes through as JSON", async () => {
+  test("an export 5xx keeps its status, its body is masked (#2757)", async () => {
     upstream(500, JSON.stringify({ error: "boom" }));
     const res = await exportReport(new Request("http://t/"));
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: "boom" });
+    expect(await res.json()).toEqual({ error: "platform error" });
   });
 
   test("the overlay POST forwards only the overlay fields", async () => {

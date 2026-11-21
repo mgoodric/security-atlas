@@ -2465,10 +2465,19 @@ type Querier interface {
 	// {actor_type, actor_id, session_id} shape there).
 	//
 	// Slice 234: a fifth optional filter `scope_cell_id` narrows to one
-	// scope cell. Pattern mirrors slice 224's `scope_cell_id` filter on the
-	// anchors rollup query (`scf_anchors.sql`). Out-of-tenant cell ids return
-	// zero rows naturally because the row's `scope_id` is itself tenant-
-	// scoped — no 404 leak.
+	// scope cell. #2771: a record is in the cell when the scope it was pushed
+	// with (`scope_canonical`, [{key, values[]}]) covers every one of the
+	// cell's dimensions: for each (k, v) in scope_cells.dimensions, the
+	// record has key k with v among its values. That is the cartesian-cell
+	// reading scope.MatchRecordScope applies to credentials. jsonb `@>` does
+	// the per-element subset test against a pattern built once from the
+	// cell (an uncorrelated subquery, so Postgres runs it as an InitPlan).
+	// `scope_id` (FK to `scopes`) is NULL on every pushed record and is not
+	// consulted. Rows with no scope_canonical (pushed before slice 474)
+	// never match. The subquery requires the cell in the caller's tenant: an
+	// out-of-tenant or unknown cell id yields NULL, and `@> NULL` matches
+	// nothing, never the whole ledger. Cost notes in
+	// docs/audit-log/2771-evidence-filter-pills-decisions.md.
 	//
 	// Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
 	// decomposed (observed_at, id) predicate, same +1 probe-row idiom.
@@ -3437,19 +3446,32 @@ type Querier interface {
 	// The branches mirror ListUnifiedAuditLog's seventeen sources, projected to
 	// what the visibility rules read: the same window, the slice 270
 	// non-privileged predicate and the slice 669 read-telemetry predicate.
-	// One row per (actor, kind, target_type, request_path), so the handler
-	// applies the #2173 module filter exactly as it does to the feed, and an
-	// actor seen only in rows the caller may not see is not listed.
 	// `TestMachineActorsQueryMirrorsUnifiedLog` fails when a source is added
 	// to one query and not the other.
+	//
+	// The #2173 module filter runs here as well, before the cap (#2718), so
+	// rows from a hidden module neither use up the cap nor mark the list
+	// truncated, and an actor seen only in rows the caller may not see is not
+	// listed. The handler passes the filter as arguments (moduleRouteFilter):
+	// `hidden_kinds`, the kinds owned by a module the caller may not see, and
+	// the featureflag route registry as three parallel arrays, each pattern
+	// with its owner and whether the caller sees that owner. `resolved`
+	// places a path the way featureflag.Resolve does: a `*` segment matches
+	// one non-empty segment, the last literal also matches `<literal>:<verb>`,
+	// and the most specific match wins (most segments, then most literals).
+	// A path no pattern matches is shown; a tie between two owners is
+	// hidden, as ModuleSet.Sees hides it. A decision is placed by its request
+	// path when that resolves, else by `/v1/<target_type>`, as decisionRoute
+	// does. `TestActivityActors_ModuleFilterMatchesGo` checks this against
+	// entrySeen for every registry route.
 	//
 	// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
 	// atlas_app and takes no tenant parameter.
 	//
-	// LIMIT 1001 is the handler's 1000-tuple cap plus one (#2627): a 1001st
+	// LIMIT 1001 is the handler's 1000-actor cap plus one (#2627): a 1001st
 	// row is how the handler knows the window held more and sets `truncated`,
 	// rather than dropping actors silently.
-	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]ListUnifiedAuditMachineActorsRow, error)
+	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]string, error)
 	// The tested-under references ListAuditedUnderGaps cannot resolve (#2324):
 	// the system names no global framework with a current version, or the id
 	// names no requirement in that version. Typos and withdrawn codes land

@@ -23,9 +23,30 @@
 //      a mutation that started before a switch, but cannot reach a
 //      callback passed to mutate(); a cache write there would land in
 //      the new tenant's view.
+//   5. No setQueryData() after an await or a .then() in the same function
+//      unless currentTenantEpoch() is read after the last wait (#2768). A
+//      handler that awaits a plain fetch is not a mutation, so the guard
+//      in 4 never sees it; the epoch compare is what drops its late write.
+//      Files whose QueryClient is per-request on the server are named in
+//      SERVER_QUERY_CLIENTS.
 //
 // The scan reads code, not comments, the same way
-// lib/no-origin-self-fetch.test.ts does.
+// lib/no-origin-self-fetch.test.ts does. It is a text scan, not a type
+// check, and these get past it:
+//
+//   - an aliased import (`import { switchTenant as go }`): rule 2 counts
+//     the name switchTenant, so a call through the alias is not counted;
+//   - a computed route string (`"/api/auth/" + "switch-tenant"`) slips
+//     rule 1, which matches the literal path;
+//   - rule 2 counts per file, so a reset in one function covers a switch
+//     in another function of the same file;
+//   - a raw `Set-Cookie: atlas_jwt=` header escapes rule 3, which matches
+//     cookies.set() and the "atlas_jwt" literal used as a set() argument;
+//   - web/proxy.ts sits outside SCANNED_DIRS, so no rule reads it;
+//   - rule 5 finds the enclosing function by braces, so a write in an
+//     expression-bodied callback is judged by the braced function around
+//     it, and an epoch read anywhere after the last wait counts, even if
+//     it is not compared.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -131,6 +152,99 @@ function writesFromMutateCallback(src: string): boolean {
   return mutateCalls(stripComments(src)).some(
     (call) => /\bonSuccess\b/.test(call) && /\bsetQueryData\b/.test(call),
   );
+}
+
+// Files that call setQueryData on a server-side QueryClient built per
+// request, which no tenant switch can reach mid-flight.
+const SERVER_QUERY_CLIENTS: Record<string, string> = {
+  "app/(authed)/dashboard/dashboard-prefetch.ts":
+    "seeds a per-request server QueryClient for hydration",
+};
+
+// Keywords whose `(...) {` opens a block, not a function body.
+const BLOCK_KEYWORDS = new Set(["if", "for", "while", "switch", "catch"]);
+
+function matchingClose(src: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) return i;
+  }
+  return src.length;
+}
+
+/** Whether the `{` at src[open] opens a function body. */
+function opensFunction(src: string, open: number): boolean {
+  let before = src.slice(0, open).trimEnd();
+  if (before.endsWith("=>")) return true;
+  // A return type annotation: `): Promise<void> {`.
+  const annotated = /\)\s*:[^(){};=]*$/.exec(before);
+  if (annotated) before = before.slice(0, annotated.index + 1);
+  if (!before.endsWith(")")) return false;
+  let depth = 0;
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (before[i] === ")") depth++;
+    else if (before[i] === "(" && --depth === 0) {
+      const word = /(\w+)\s*$/.exec(before.slice(0, i))?.[1] ?? "";
+      return !BLOCK_KEYWORDS.has(word);
+    }
+  }
+  return false;
+}
+
+/** The `{` of the innermost function body around src[at], or -1. */
+function enclosingFunction(src: string, at: number): number {
+  let depth = 0;
+  for (let i = at - 1; i >= 0; i--) {
+    if (src[i] === "}") depth++;
+    else if (src[i] === "{") {
+      if (depth > 0) depth--;
+      else if (opensFunction(src, i)) return i;
+    }
+  }
+  return -1;
+}
+
+/** src[from, to) with the bodies of nested functions cut out. */
+function ownCode(src: string, from: number, to: number): string {
+  let out = "";
+  for (let i = from; i < to; i++) {
+    if (src[i] === "{" && i > from && opensFunction(src, i)) {
+      const close = matchingClose(src, i);
+      if (close < to) {
+        i = close;
+        continue;
+      }
+    }
+    out += src[i];
+  }
+  return out;
+}
+
+const WAIT = /\bawait\b|\.then\(/g;
+const THEN_CALLBACK =
+  /\.then\(\s*(?:async\s*)?(?:\([^()]*\)|\w+)(?:\s*:[^=]*)?\s*=>\s*$/;
+
+/**
+ * Each setQueryData() in src that runs after its function has waited on
+ * something (an await, or being a .then() callback) without reading
+ * currentTenantEpoch() after the last wait: how many there are.
+ */
+function unguardedLateWrites(src: string): number {
+  const code = stripComments(src);
+  let found = 0;
+  for (const m of code.matchAll(/\bsetQueryData\b/g)) {
+    const open = enclosingFunction(code, m.index);
+    const own = ownCode(code, open + 1, m.index);
+    const waits = [...own.matchAll(WAIT)];
+    const isThen = open >= 0 && THEN_CALLBACK.test(code.slice(0, open));
+    if (waits.length === 0 && !isThen) continue;
+    const lastWait = waits.at(-1);
+    const afterWait = lastWait ? own.slice(lastWait.index) : own;
+    if (/\bcurrentTenantEpoch\(/.test(afterWait)) continue;
+    found++;
+  }
+  return found;
 }
 
 describe("#2715: every tenant-cookie path resets the browser query cache", () => {
@@ -248,6 +362,117 @@ describe("#2715: every tenant-cookie path resets the browser query cache", () =>
       "save.mutate(days);",
     ].join("\n");
     expect(writesFromMutateCallback(guarded)).toBe(false);
+  });
+
+  test("no setQueryData() after a wait skips the tenant-epoch check", () => {
+    const offenders = [...code]
+      .filter(([p]) => !(p in SERVER_QUERY_CLIENTS))
+      .filter(([, src]) => unguardedLateWrites(src) > 0)
+      .map(([p]) => p);
+    expect(
+      offenders,
+      "These files call setQueryData after an await or in a .then() " +
+        "without comparing currentTenantEpoch() after the wait. A tenant " +
+        "switch during the request would write the old tenant's response " +
+        "into the new tenant's cache. See lib/tenant-cache.ts (#2768).",
+    ).toEqual([]);
+    // The handlers #2768 fixed are still found and still guarded.
+    for (const p of [
+      "app/(authed)/exceptions/[id]/[action]/page.tsx",
+      "app/(authed)/questionnaires/[id]/page.tsx",
+      "app/(authed)/controls/checklist/page.tsx",
+    ]) {
+      const src = code.get(p);
+      expect(src, p).toMatch(/\bcurrentTenantEpoch\(/);
+      expect(
+        unguardedLateWrites(src!.replace(/\bcurrentTenantEpoch\(/g, "x(")),
+        p,
+      ).toBeGreaterThan(0);
+    }
+    for (const p of Object.keys(SERVER_QUERY_CLIENTS)) {
+      expect(code.get(p), p).toMatch(/\bsetQueryData\b/);
+    }
+  });
+
+  test("the late-write detector sees an unchecked write and nothing else", () => {
+    const awaited = [
+      "async function submit() {",
+      "  const resp = await fetch(url);",
+      '  qc.setQueryData(["exceptions", id], resp);',
+      "}",
+    ].join("\n");
+    expect(unguardedLateWrites(awaited)).toBe(1);
+
+    const inTry = [
+      "async function draftAll(): Promise<void> {",
+      "  try {",
+      "    const res = await fetch(url, { method: 'POST' });",
+      "    if (!res.ok) { return; }",
+      "    queryClient.setQueryData(k, await res.json());",
+      "  } finally {}",
+      "}",
+    ].join("\n");
+    expect(unguardedLateWrites(inTry)).toBe(1);
+
+    const inThen = [
+      "onSuccess: () => {",
+      "  void fetch(url).then((r) => r.json()).then((data: T | null) => {",
+      "    if (data) { qc.setQueryData(k, data); }",
+      "  });",
+      "},",
+    ].join("\n");
+    expect(unguardedLateWrites(inThen)).toBe(1);
+
+    const checked = [
+      "async function submit() {",
+      "  const epoch = currentTenantEpoch(qc);",
+      "  const resp = await fetch(url);",
+      "  if (currentTenantEpoch(qc) !== epoch) return;",
+      "  qc.setQueryData(k, resp);",
+      "}",
+    ].join("\n");
+    expect(unguardedLateWrites(checked)).toBe(0);
+
+    // Read only before the wait: the switch can land after it.
+    const checkedTooEarly = [
+      "async function submit() {",
+      "  const epoch = currentTenantEpoch(qc);",
+      "  const resp = await fetch(url);",
+      "  qc.setQueryData(k, resp);",
+      "}",
+    ].join("\n");
+    expect(unguardedLateWrites(checkedTooEarly)).toBe(1);
+
+    // useMutation's onSuccess, and a write before any await: guarded by
+    // tenantGuardedMutationCache() or not late at all.
+    const mutation = [
+      "const m = useMutation({",
+      "  mutationFn: () => save(),",
+      "  onSuccess: async (next) => {",
+      "    qc.setQueryData(k, next);",
+      "    await qc.invalidateQueries({ queryKey: k });",
+      "  },",
+      "});",
+    ].join("\n");
+    expect(unguardedLateWrites(mutation)).toBe(0);
+
+    // An await in a sibling function does not count against this one.
+    const sibling = [
+      "function Page() {",
+      "  async function load() { await fetch(url); }",
+      "  const m = useMutation({ onSuccess: (d) => qc.setQueryData(k, d) });",
+      "}",
+    ].join("\n");
+    expect(unguardedLateWrites(sibling)).toBe(0);
+
+    // An await inside an if block of the same function still counts.
+    const nestedAwait = [
+      "async function f() {",
+      "  if (x) { await fetch(url); }",
+      "  qc.setQueryData(k, v);",
+      "}",
+    ].join("\n");
+    expect(unguardedLateWrites(nestedAwait)).toBe(1);
   });
 
   test("the detector counts a switch with no reset (guards against a dead regex)", () => {

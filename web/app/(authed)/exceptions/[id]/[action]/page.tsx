@@ -23,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 import { invalidateApprovals } from "@/lib/api/approvals";
 import { APIError } from "@/lib/api/base";
 import { fetchException, transitionException } from "@/lib/api/exceptions";
+import { currentTenantEpoch } from "@/lib/tenant-cache";
 
 import {
   ACTION_COPY,
@@ -81,8 +82,15 @@ function ActionForm({ id, action }: { id: string; action: FormAction }) {
     }
     setFieldErr(null);
     setSubmitting(true);
+    const epoch = currentTenantEpoch(qc);
     try {
       const resp = await transitionException(id, action, r.body);
+      // The tenant switched mid-request: resp is the old tenant's
+      // exception, and `back` points at it (#2768).
+      if (currentTenantEpoch(qc) !== epoch) {
+        setSubmitting(false);
+        return;
+      }
       qc.setQueryData(["exceptions", id], resp);
       await qc.invalidateQueries({ queryKey: ["exceptions"] });
       void invalidateApprovals(qc);

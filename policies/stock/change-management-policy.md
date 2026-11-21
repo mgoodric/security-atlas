@@ -9,9 +9,7 @@ linked_control_ids:
   - CFG-04
   - CHG-04
 acknowledgment_required_roles:
-  - engineer
-  - engineering_lead
-  - sre
+  - everyone
 source_attribution: community_draft
 ---
 

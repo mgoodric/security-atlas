@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // seedActorRow inserts one decision_audit_log row (or, for kind
@@ -164,7 +166,7 @@ func TestActivityActors_ModuleFilter(t *testing.T) {
 	}
 }
 
-// #2627: past the 1000-tuple cap the response says it is truncated rather
+// #2627: past the 1000-actor cap the response says it is truncated rather
 // than dropping actors silently; at or under the cap it does not.
 func TestActivityActors_TruncatedPastCap(t *testing.T) {
 	under, over := uuid.New(), uuid.New()
@@ -178,6 +180,156 @@ func TestActivityActors_TruncatedPastCap(t *testing.T) {
 	}
 	if resp := getActors(t, adminauditlog.New(appPool), over, true, false); !resp.Truncated || len(resp.Actors) != 1000 {
 		t.Fatalf("1001 actors: truncated = %v, %d actors; want true, 1000", resp.Truncated, len(resp.Actors))
+	}
+}
+
+// #2718: the module filter runs before the cap. A window with 1000 actors
+// the caller may see and more seen only in a switched-off module's rows
+// lists the 1000 and is not truncated.
+func TestActivityActors_HiddenRowsDoNotUseTheCap(t *testing.T) {
+	tenant := uuid.New()
+	cleanupUnifiedTables(t, tenant)
+	seedMachineActors(t, tenant, 1000)
+	for _, actor := range []string{"system:hidden-a", "system:hidden-b", "system:hidden-c"} {
+		seedSystemExceptionRow(t, tenant, actor)
+	}
+	// A decision on a switched-off module's route, by an actor that sorts
+	// before every visible one.
+	inTenantTx(t, tenant, `INSERT INTO decision_audit_log
+		   (decision_id, tenant_id, user_id, action, resource_type, resource_id, result, request_path)
+		 VALUES (gen_random_uuid(), $1, 'system:a-hidden', 'write', 'exceptions', 'r-2718', 'allow', '/v1/exceptions/r-2718')`,
+		tenant)
+	switchExceptions(t, tenant, false)
+	views := moduleaccess.NewViews(moduleaccess.NewStore(appPool), featureflag.NewStore(appPool))
+
+	resp := getActors(t, adminauditlog.New(appPool).WithModules(views), tenant, true, false)
+	if resp.Truncated || len(resp.Actors) != 1000 {
+		t.Fatalf("truncated = %v, %d actors; want false, 1000", resp.Truncated, len(resp.Actors))
+	}
+	for _, a := range resp.Actors {
+		if strings.Contains(a, "hidden") {
+			t.Fatalf("actor %q is seen only in Exceptions rows, which are switched off", a)
+		}
+	}
+}
+
+// decisionCase is one authorization decision placed by request path and
+// target type.
+type decisionCase struct{ path, targetType string }
+
+// registryDecisionCases builds decisions on every route the module
+// registry lists: the route itself, a path below it, a `:verb` on it, and
+// the route's last segment as a bare target type, plus paths and types no
+// module owns. decision_audit_log requires a target type, so a case
+// placed by its path alone carries one no module owns.
+func registryDecisionCases() []decisionCase {
+	seen := map[decisionCase]bool{}
+	var out []decisionCase
+	add := func(c decisionCase) {
+		if !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	routes := []string{}
+	for _, m := range featureflag.Modules {
+		routes = append(routes, m.Routes...)
+		for _, f := range m.Features {
+			routes = append(routes, f.Routes...)
+		}
+	}
+	for _, r := range routes {
+		concrete := strings.ReplaceAll(r, "*", "x2718")
+		segs := strings.Split(r, "/")
+		last := segs[len(segs)-1]
+		add(decisionCase{concrete, "unowned-2718"})
+		add(decisionCase{concrete + "/r-2718", "unowned-2718"})
+		add(decisionCase{concrete + ":bulk", "unowned-2718"})
+		add(decisionCase{"", last})
+		add(decisionCase{"/v1/unowned-2718", last})
+	}
+	add(decisionCase{"/v1/unowned-2718", "unowned-2718"})
+	add(decisionCase{"", "unowned-2718"})
+	return out
+}
+
+// #2718: the query's module filter places every decision as entrySeen
+// does, for every route in the registry, with every module and feature
+// on, with them all off, and with a mix.
+func TestActivityActors_ModuleFilterMatchesGo(t *testing.T) {
+	cases := registryDecisionCases()
+	views := moduleaccess.NewViews(moduleaccess.NewStore(appPool), featureflag.NewStore(appPool))
+	h := adminauditlog.New(appPool).WithModules(views)
+
+	scenarios := []struct {
+		name string
+		off  func(i int) bool // i-th switch in registry order
+	}{
+		{"all on", func(int) bool { return false }},
+		{"all off", func(int) bool { return true }},
+		{"odd off", func(i int) bool { return i%2 == 1 }},
+		{"even off", func(i int) bool { return i%2 == 0 }},
+	}
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			tenant := uuid.New()
+			cleanupUnifiedTables(t, tenant)
+			ctx, err := tenancy.WithTenant(context.Background(), tenant.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			flags := featureflag.NewStore(appPool)
+			i := 0
+			for _, m := range featureflag.Modules {
+				keys := []string{}
+				if !m.Core {
+					keys = append(keys, m.FlagKey)
+				}
+				for _, f := range m.Features {
+					keys = append(keys, f.FlagKey)
+				}
+				for _, k := range keys {
+					if _, err := flags.Set(ctx, k, !sc.off(i), "test-2718", "test"); err != nil {
+						t.Fatalf("set %s: %v", k, err)
+					}
+					i++
+				}
+			}
+			for n, c := range cases {
+				inTenantTx(t, tenant, `INSERT INTO decision_audit_log
+					   (decision_id, tenant_id, user_id, action, resource_type, resource_id, result, request_path)
+					 VALUES (gen_random_uuid(), $1, $2, 'write', $3, 'r-2718', 'allow', $4)`,
+					tenant, fmt.Sprintf("system:c%04d", n), c.targetType, c.path)
+			}
+
+			set, err := views.Switches(httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx))
+			if err != nil {
+				t.Fatalf("switches: %v", err)
+			}
+			want := []string{}
+			hidden := 0
+			for n, c := range cases {
+				if adminauditlog.DecisionSeen(set, c.path, c.targetType) {
+					want = append(want, fmt.Sprintf("system:c%04d", n))
+				} else {
+					hidden++
+				}
+			}
+			if sc.name != "all on" && hidden == 0 {
+				t.Fatal("no case is hidden: the scenario does not exercise the filter")
+			}
+			got := getActors(t, h, tenant, true, false).Actors
+			if !slices.Equal(got, want) {
+				for n, c := range cases {
+					a := fmt.Sprintf("system:c%04d", n)
+					if slices.Contains(got, a) != slices.Contains(want, a) {
+						t.Errorf("path %q target %q: listed = %v, entrySeen = %v",
+							c.path, c.targetType, slices.Contains(got, a), slices.Contains(want, a))
+					}
+				}
+				t.Fatalf("SQL module filter disagrees with entrySeen (%d listed, %d want)", len(got), len(want))
+			}
+		})
 	}
 }
 

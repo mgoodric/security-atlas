@@ -3091,6 +3091,8 @@ type PolicyAuditLog struct {
 	NewState               *string            `json:"new_state"`
 	BodySha256             *string            `json:"body_sha256"`
 	Editors                []string           `json:"editors"`
+	PreviousAudience       []string           `json:"previous_audience"`
+	NewAudience            []string           `json:"new_audience"`
 }
 
 type Population struct {
