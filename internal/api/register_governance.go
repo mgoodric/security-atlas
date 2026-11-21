@@ -113,6 +113,9 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	root.Patch("/v1/policies/{id}/approve", policiesH.Approve)
 	root.Post("/v1/policies/{id}/publish", policiesH.Publish)
 	root.Patch("/v1/policies/{id}/review-date", policiesH.SetReviewDate)
+	// #2852: a synced policy's control links, the one in-tool change it
+	// accepts.
+	root.Patch("/v1/policies/{id}/controls", policiesH.SetControls)
 	root.Get("/v1/policies/{id}/pdf", policiesH.PDF)
 	root.Get("/v1/policies/{id}", policiesH.GetPolicy)
 	root.Delete("/v1/policies/{id}", policiesH.DiscardDraft)

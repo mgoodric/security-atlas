@@ -296,7 +296,8 @@ INSERT INTO policy_audit_log (
     previous_next_review_at, new_next_review_at,
     policy_title, policy_version,
     previous_state, new_state,
-    body_sha256, editors
+    body_sha256, editors,
+    previous_linked_control_ids, new_linked_control_ids
 )
 VALUES (
     sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
@@ -304,7 +305,8 @@ VALUES (
     sqlc.narg('previous_next_review_at'), sqlc.narg('new_next_review_at'),
     sqlc.narg('policy_title'), sqlc.narg('policy_version'),
     sqlc.narg('previous_state'), sqlc.narg('new_state'),
-    sqlc.narg('body_sha256'), sqlc.narg('editors')
+    sqlc.narg('body_sha256'), sqlc.narg('editors'),
+    sqlc.narg('previous_linked_control_ids'), sqlc.narg('new_linked_control_ids')
 )
 RETURNING *;
 
@@ -314,6 +316,20 @@ SELECT *
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC;
+
+-- name: UpdateSyncedPolicyLinks :one
+-- #2852 — replace a published synced policy's control links in place. It
+-- is not a new version: the links are kept in security-atlas, not synced.
+-- The caller writes the policy_audit_log row in the same transaction.
+-- Other rows do not match.
+UPDATE policies
+SET linked_control_ids = sqlc.arg('linked_control_ids'),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+RETURNING *;
 
 -- name: UpdatePolicyNextReviewAt :one
 -- #1806 — change the review date of a published policy in place. It is not

@@ -79,6 +79,8 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/framework-scopes/" + id2428 + "/applicability:carry-over", tenantApproverGate},
 	{http.MethodPost, "/v1/policies", tenantApproverGate},
 	{http.MethodPatch, "/v1/policies/" + id2428 + "/submit", tenantApproverGate},
+	// #2852: a synced policy's control links.
+	{http.MethodPatch, "/v1/policies/" + id2428 + "/controls", tenantApproverGate},
 	{http.MethodPost, "/v1/exceptions", tenantApproverGate},
 	{http.MethodPatch, "/v1/risks/" + id2428 + "/acceptance/approve", tenantApproverGate},
 	{http.MethodPatch, "/v1/risks/" + id2428 + "/acceptance/reject", tenantApproverGate},

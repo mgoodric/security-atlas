@@ -24,8 +24,12 @@ export type PolicyAction =
   | { kind: "new-version"; label: "Create new version"; href: string };
 
 export function primaryAction(
-  p: Pick<Policy, "id" | "status">,
+  p: Pick<Policy, "id" | "status"> &
+    Partial<Pick<Policy, "source_attribution">>,
 ): PolicyAction | null {
+  // #2852 — a synced policy is edited at its source page; the platform
+  // refuses every in-tool lifecycle step on it.
+  if (isSynced(p)) return null;
   const base = `/policies/${encodeURIComponent(p.id)}`;
   switch (p.status) {
     case "draft":
@@ -50,6 +54,57 @@ export function primaryAction(
  *  changes through a new version. */
 export function isDraft(p: Pick<Policy, "status">): boolean {
   return p.status === "draft";
+}
+
+/** #2852 — a policy synced from Confluence. Its text, version and review
+ *  date come from its page and are read-only here; only its control links
+ *  and acknowledgments change in the tool. */
+export function isSynced(
+  p: Partial<Pick<Policy, "source_attribution">>,
+): boolean {
+  return p.source_attribution === "synced";
+}
+
+/** #2852 — what the synced-policy panel shows. The approver is the name
+ *  and date the page records, not an approval made in this app, so the
+ *  line says where it was approved. Null for a policy that is not synced. */
+export type SyncedPolicyView = {
+  sourceHref: string | null;
+  approval: string | null;
+  drift: { detectedAt: string } | null;
+};
+
+export function syncedPolicyView(
+  p: Pick<
+    Policy,
+    | "source_attribution"
+    | "source_url"
+    | "historical_approver_name"
+    | "historical_approved_at"
+    | "sync_drift"
+  >,
+): SyncedPolicyView | null {
+  if (!isSynced(p)) return null;
+  const name = p.historical_approver_name?.trim();
+  const on = p.historical_approved_at ? ` on ${p.historical_approved_at}` : "";
+  return {
+    sourceHref: safeHttpUrl(p.source_url),
+    approval: name ? `Approved in Confluence by ${name}${on}` : null,
+    drift: p.sync_drift ? { detectedAt: p.sync_drift.detected_at } : null,
+  };
+}
+
+/** #1747 — the import and the sync validate source_url as an absolute
+ *  http(s) URL; re-check before rendering it as a link so no other scheme
+ *  can reach an href. */
+export function safeHttpUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The publish block the platform enforces, said before the operator
