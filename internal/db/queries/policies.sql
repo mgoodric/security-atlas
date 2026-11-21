@@ -575,21 +575,23 @@ WHERE tenant_id = sqlc.arg('tenant_id')
   AND sync_missing_since IS NOT NULL
 ORDER BY sync_missing_since, id;
 
--- name: GetImportedPolicyForTakeover :one
--- #2854 — on a page's first sync, the published imported policy in the
--- tenant with the page's title, which the page takes over. The import
--- does not chain versions, so a title can have several published imported
--- rows: the one with the page's version wins, then the latest published.
--- FOR UPDATE holds it against a concurrent run for another source, which
--- then re-reads it as no longer imported.
+-- name: ListImportedPoliciesForTakeover :many
+-- #2854 — on a page's first sync, every published imported policy in the
+-- tenant with the page's title. The page takes over the policy only when
+-- there is exactly one; the import does not chain versions, so a title
+-- can carry several, and then the sync refuses to choose. FOR UPDATE locks
+-- the rows until the run commits. A concurrent run for another source
+-- that reads the same title waits on the lock; under READ COMMITTED its
+-- read then re-checks the committed row, which is no longer a published
+-- imported one, and leaves it out. There is no LIMIT, so the waiting run
+-- sees every remaining candidate, not an empty result.
 SELECT *
 FROM policies
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND source_attribution = 'imported'
   AND status = 'published'
   AND title = sqlc.arg('title')
-ORDER BY (version = sqlc.arg('version')::text) DESC, published_at DESC NULLS LAST, id
-LIMIT 1
+ORDER BY published_at DESC NULLS LAST, id
 FOR UPDATE;
 
 -- name: GetAuthoredPolicyByTitle :one

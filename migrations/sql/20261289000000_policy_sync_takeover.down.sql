@@ -1,4 +1,4 @@
--- security-atlas -- reverse 20261288000000_policy_sync_takeover.sql.
+-- security-atlas -- reverse 20261289000000_policy_sync_takeover.sql.
 --
 -- policy_audit_log is append-only audit evidence, so this reversal refuses
 -- to run while any 'sync_takeover' row exists, or any row names a previous
@@ -13,7 +13,7 @@ BEGIN
        OR previous_source_attribution IS NOT NULL;
     IF n > 0 THEN
         RAISE EXCEPTION 'policy_audit_log holds % sync_takeover row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261288000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261289000000.';
     END IF;
 END
 $$;

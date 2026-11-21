@@ -6,10 +6,13 @@ drift), #2852 (the lock) and #2853 (missing pages).
 
 ## Detection-tier classification
 
-- **detection_tier_actual:** integration. Adding the `sync_takeover` action
+- **detection_tier_actual:** integration, then manual_review. Adding the `sync_takeover` action
   broke two older down-migration tests (`TestPolicySyncMigration`,
   `TestPolicyControlsUpdatedMigration`) whose cleanup listed only the
   actions they knew; caught by the local integration run, fixed in this PR.
+  Review then caught that the first version silently picked one of several
+  same-titled imported policies (D2), and that the migration timestamp
+  collided with open #2906 (renumbered to `20261289000000`).
 - **detection_tier_target:** integration.
 
 ## Decisions
@@ -23,13 +26,25 @@ taking over the wrong policy, which is worse than a duplicate the security
 leader can see in the list. It runs only when the page has no published
 synced row in its source, i.e. on its first sync.
 
-### D2 — several imported rows with one title: same version first
+### D2 — an ambiguous title is refused, not resolved
 
 The import does not chain versions, so a tenant can hold "X 1.0" and
-"X 2.0" both published and imported. The query prefers the row with the
-page's version, then the most recently published, then id, so the choice
-is deterministic. Only that one row is taken over; any other stays as it
-is.
+"X 2.0" both published and imported. A first version of this PR picked one
+(same version first, then the latest published). Review (#2908) rejected
+that: an audit tool should refuse rather than choose. The sync now skips
+the page with an `ambiguous title` reason in two cases:
+
+- more than one published imported policy carries the page's title; the
+  reason names every candidate with its version;
+- the title matches one imported policy, but more than one page in the
+  push carries it; each of those pages is skipped, and the reason names
+  them all.
+
+A skipped page writes nothing, so it is still a first sync on the next
+run, and it takes the policy over once the title is unambiguous. The
+candidate query has no `LIMIT`. Its `FOR UPDATE` makes a concurrent run for
+another source wait; under READ COMMITTED that run re-checks the committed
+row and no longer sees it as a published imported policy.
 
 ### D3 — same version is in place; the imported fields are cleared
 

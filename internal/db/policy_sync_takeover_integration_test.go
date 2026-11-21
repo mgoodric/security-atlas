@@ -1,6 +1,6 @@
 //go:build integration
 
-// #2854 — 20261288000000_policy_sync_takeover. policy_audit_log accepts
+// #2854 — 20261289000000_policy_sync_takeover. policy_audit_log accepts
 // 'sync_takeover' with the policy's previous attribution. The down
 // migration refuses while such a row exists, and once applied refuses
 // 'sync_takeover' again; the up migration re-applies.
@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	policySyncTakeoverUp   = "../../migrations/sql/20261288000000_policy_sync_takeover.sql"
-	policySyncTakeoverDown = "../../migrations/sql/20261288000000_policy_sync_takeover.down.sql"
+	policySyncTakeoverUp   = "../../migrations/sql/20261289000000_policy_sync_takeover.sql"
+	policySyncTakeoverDown = "../../migrations/sql/20261289000000_policy_sync_takeover.down.sql"
 )
 
 func TestPolicySyncTakeoverMigration(t *testing.T) {

@@ -1064,13 +1064,6 @@ type Querier interface {
 	// caller's tenant; a cross-tenant or non-component-definition id returns
 	// ErrNoRows.
 	GetImportedComponentDefinitionByID(ctx context.Context, arg GetImportedComponentDefinitionByIDParams) (ImportedCatalog, error)
-	// #2854 — on a page's first sync, the published imported policy in the
-	// tenant with the page's title, which the page takes over. The import
-	// does not chain versions, so a title can have several published imported
-	// rows: the one with the page's version wins, then the latest published.
-	// FOR UPDATE holds it against a concurrent run for another source, which
-	// then re-reads it as no longer imported.
-	GetImportedPolicyForTakeover(ctx context.Context, arg GetImportedPolicyForTakeoverParams) (Policy, error)
 	GetIncidentByID(ctx context.Context, arg GetIncidentByIDParams) (Incident, error)
 	// The engine's "when did this rule last fire, and into which window"
 	// lookup. Used to decide whether the current write falls inside an
@@ -2761,6 +2754,16 @@ type Querier interface {
 	// Every defined-component for one imported component-definition, ordered for
 	// stable rendering.
 	ListImportedComponentsForDefinition(ctx context.Context, arg ListImportedComponentsForDefinitionParams) ([]ImportedComponent, error)
+	// #2854 — on a page's first sync, every published imported policy in the
+	// tenant with the page's title. The page takes over the policy only when
+	// there is exactly one; the import does not chain versions, so a title
+	// can carry several, and then the sync refuses to choose. FOR UPDATE locks
+	// the rows until the run commits. A concurrent run for another source
+	// that reads the same title waits on the lock; under READ COMMITTED its
+	// read then re-checks the committed row, which is no longer a published
+	// imported one, and leaves it out. There is no LIMIT, so the waiting run
+	// sees every remaining candidate, not an empty result.
+	ListImportedPoliciesForTakeover(ctx context.Context, arg ListImportedPoliciesForTakeoverParams) ([]Policy, error)
 	// Enumerate every resolved profile baseline for the tenant, most recent
 	// first (index-served by idx_imported_catalogs_tenant_profiles).
 	ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)

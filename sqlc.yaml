@@ -186,7 +186,7 @@ sql:
       # #2853: missing pages on synced policies.
       - "migrations/sql/20261287000000_policy_sync_missing.sql"
       # #2854: sync takes over imported policies.
-      - "migrations/sql/20261288000000_policy_sync_takeover.sql"
+      - "migrations/sql/20261289000000_policy_sync_takeover.sql"
     queries: "internal/db/queries"
     gen:
       go:

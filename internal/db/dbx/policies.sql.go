@@ -421,78 +421,6 @@ func (q *Queries) GetAuthoredPolicyByTitle(ctx context.Context, arg GetAuthoredP
 	return i, err
 }
 
-const getImportedPolicyForTakeover = `-- name: GetImportedPolicyForTakeover :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
-FROM policies
-WHERE tenant_id = $1
-  AND source_attribution = 'imported'
-  AND status = 'published'
-  AND title = $2
-ORDER BY (version = $3::text) DESC, published_at DESC NULLS LAST, id
-LIMIT 1
-FOR UPDATE
-`
-
-type GetImportedPolicyForTakeoverParams struct {
-	TenantID pgtype.UUID `json:"tenant_id"`
-	Title    string      `json:"title"`
-	Version  string      `json:"version"`
-}
-
-// #2854 — on a page's first sync, the published imported policy in the
-// tenant with the page's title, which the page takes over. The import
-// does not chain versions, so a title can have several published imported
-// rows: the one with the page's version wins, then the latest published.
-// FOR UPDATE holds it against a concurrent run for another source, which
-// then re-reads it as no longer imported.
-func (q *Queries) GetImportedPolicyForTakeover(ctx context.Context, arg GetImportedPolicyForTakeoverParams) (Policy, error) {
-	row := q.db.QueryRow(ctx, getImportedPolicyForTakeover, arg.TenantID, arg.Title, arg.Version)
-	var i Policy
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Title,
-		&i.Version,
-		&i.EffectiveDate,
-		&i.BodyMd,
-		&i.AcknowledgmentRequiredRoles,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PredecessorID,
-		&i.OwnerRole,
-		&i.ApproverRole,
-		&i.LinkedControlIds,
-		&i.SourceAttribution,
-		&i.CreatedBy,
-		&i.SubmittedAt,
-		&i.SubmittedBy,
-		&i.ApprovedAt,
-		&i.ApprovedBy,
-		&i.PublishedAt,
-		&i.PublishedBy,
-		&i.SupersededAt,
-		&i.NextReviewAt,
-		&i.HistoricalApproverName,
-		&i.HistoricalApprovedAt,
-		&i.SourceUrl,
-		&i.ImportedBy,
-		&i.ImportedAt,
-		&i.SelfApproved,
-		&i.DraftEditors,
-		&i.SyncSite,
-		&i.SyncSpace,
-		&i.SyncPageID,
-		&i.SyncedBodySha256,
-		&i.SyncedBy,
-		&i.SyncedAt,
-		&i.SyncDriftDetectedAt,
-		&i.SyncDriftBodySha256,
-		&i.SyncMissingSince,
-	)
-	return i, err
-}
-
 const getPolicyByID = `-- name: GetPolicyByID :one
 SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
 FROM policies
@@ -960,6 +888,92 @@ func (q *Queries) InsertSyncedPolicy(ctx context.Context, arg InsertSyncedPolicy
 		&i.SyncMissingSince,
 	)
 	return i, err
+}
+
+const listImportedPoliciesForTakeover = `-- name: ListImportedPoliciesForTakeover :many
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'imported'
+  AND status = 'published'
+  AND title = $2
+ORDER BY published_at DESC NULLS LAST, id
+FOR UPDATE
+`
+
+type ListImportedPoliciesForTakeoverParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Title    string      `json:"title"`
+}
+
+// #2854 — on a page's first sync, every published imported policy in the
+// tenant with the page's title. The page takes over the policy only when
+// there is exactly one; the import does not chain versions, so a title
+// can carry several, and then the sync refuses to choose. FOR UPDATE locks
+// the rows until the run commits. A concurrent run for another source
+// that reads the same title waits on the lock; under READ COMMITTED its
+// read then re-checks the committed row, which is no longer a published
+// imported one, and leaves it out. There is no LIMIT, so the waiting run
+// sees every remaining candidate, not an empty result.
+func (q *Queries) ListImportedPoliciesForTakeover(ctx context.Context, arg ListImportedPoliciesForTakeoverParams) ([]Policy, error) {
+	rows, err := q.db.Query(ctx, listImportedPoliciesForTakeover, arg.TenantID, arg.Title)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Policy
+	for rows.Next() {
+		var i Policy
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Title,
+			&i.Version,
+			&i.EffectiveDate,
+			&i.BodyMd,
+			&i.AcknowledgmentRequiredRoles,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PredecessorID,
+			&i.OwnerRole,
+			&i.ApproverRole,
+			&i.LinkedControlIds,
+			&i.SourceAttribution,
+			&i.CreatedBy,
+			&i.SubmittedAt,
+			&i.SubmittedBy,
+			&i.ApprovedAt,
+			&i.ApprovedBy,
+			&i.PublishedAt,
+			&i.PublishedBy,
+			&i.SupersededAt,
+			&i.NextReviewAt,
+			&i.HistoricalApproverName,
+			&i.HistoricalApprovedAt,
+			&i.SourceUrl,
+			&i.ImportedBy,
+			&i.ImportedAt,
+			&i.SelfApproved,
+			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
+			&i.SyncDriftDetectedAt,
+			&i.SyncDriftBodySha256,
+			&i.SyncMissingSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMissingSyncedPolicies = `-- name: ListMissingSyncedPolicies :many

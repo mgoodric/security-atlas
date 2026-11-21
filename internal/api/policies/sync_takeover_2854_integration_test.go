@@ -142,6 +142,17 @@ func TestSync2854_TakeOverSameVersionInPlace(t *testing.T) {
 		t.Errorf("synced audit rows = %+v; an in-place takeover writes none", rows)
 	}
 
+	// The taken-over policy is managed in Confluence now (#2852): in-tool
+	// edits are refused, and acknowledgements were shown to survive above.
+	wantManaged(t, s.setupResult, http.MethodPatch, "/v1/policies/"+imported+"/review-date",
+		[]byte(`{"next_review_at":"2027-01-01"}`), s.adminBear)
+	wantManaged(t, s.setupResult, http.MethodPost, "/v1/policies",
+		draftJSON(t, s.ctrlID, map[string]any{"predecessor_id": imported}), s.adminBear)
+	wantManaged(t, s.setupResult, http.MethodPatch, "/v1/policies/"+imported, draftJSON(t, s.ctrlID, nil), s.adminBear)
+	if after := getPolicyVersion(t, s.setupResult, imported); after.Status != "published" || after.Version != "1.0" || after.BodyMd != body {
+		t.Errorf("taken-over policy after refused edits = %+v; want unchanged", after)
+	}
+
 	again := postSync(t, s.setupResult, key, http.StatusOK, page)
 	if again.Unchanged != 1 || again.TakenOver != 0 || again.Results[0].PolicyID != imported {
 		t.Errorf("re-push = %+v; want unchanged %s", again, imported)
@@ -226,6 +237,73 @@ func TestSync2854_TakeOverDifferentVersionChains(t *testing.T) {
 	again := postSync(t, s.setupResult, key, http.StatusOK, syncPage("5201", "Incident Response Policy", "2.0", "Revised.", props))
 	if again.Unchanged != 1 || again.Results[0].PolicyID != res.PolicyID {
 		t.Errorf("re-push = %+v; want unchanged", again)
+	}
+}
+
+// More than one published imported policy with the page's title: the sync
+// refuses to choose. The page is skipped with an ambiguous-title reason
+// naming every candidate, and nothing is written.
+func TestSync2854_AmbiguousImportedTitleSkips(t *testing.T) {
+	s := newSyncSetup(t)
+	_, key := s.issueKey(t, s.tenant, apikeystore.IssueInput{Purpose: credstore.PurposePolicySync})
+	first, _ := importPolicy(t, s, "Backup Policy", "1.0")
+	second, _ := importPolicy(t, s, "Backup Policy", "2.0")
+	before := countPolicies(t, s.setupResult, s.tenant)
+
+	resp := postSync(t, s.setupResult, key, http.StatusOK, syncPage("6001", "Backup Policy", "2.0", "Body.", nil))
+	res := resp.Results[0]
+	if resp.Skipped != 1 || resp.TakenOver != 0 || resp.Created != 0 || res.Status != "skipped" {
+		t.Fatalf("sync = %+v; want the page skipped", resp)
+	}
+	if !strings.Contains(res.Reason, "ambiguous title") || !strings.Contains(res.Reason, first) || !strings.Contains(res.Reason, second) {
+		t.Errorf("reason = %q; want ambiguous title naming %s and %s", res.Reason, first, second)
+	}
+	for _, id := range []string{first, second} {
+		if got := getSyncedPolicy(t, s.setupResult, id); got.SourceAttribution != "imported" || got.Status != "published" {
+			t.Errorf("imported policy %s = %+v; want untouched", id, got)
+		}
+	}
+	if n := countPolicies(t, s.setupResult, s.tenant); n != before {
+		t.Errorf("policies = %d, want %d", n, before)
+	}
+	if n := len(takeoverAuditRows(t, s.setupResult)); n != 0 {
+		t.Errorf("takeover audit rows = %d, want 0", n)
+	}
+}
+
+// Two pages in one push share a title that matches an imported policy:
+// neither takes it over. Both are skipped with a reason naming both pages.
+func TestSync2854_AmbiguousPagesInRunSkip(t *testing.T) {
+	s := newSyncSetup(t)
+	_, key := s.issueKey(t, s.tenant, apikeystore.IssueInput{Purpose: credstore.PurposePolicySync})
+	imported, _ := importPolicy(t, s, "Logging Policy", "1.0")
+	before := countPolicies(t, s.setupResult, s.tenant)
+
+	resp := postSync(t, s.setupResult, key, http.StatusOK,
+		syncPage("6101", "Logging Policy", "1.0", "Body A.", nil),
+		syncPage("6102", "Logging Policy", "1.0", "Body B.", nil))
+	if resp.Skipped != 2 || resp.TakenOver != 0 || resp.Created != 0 || len(resp.Results) != 2 {
+		t.Fatalf("sync = %+v; want both pages skipped", resp)
+	}
+	for _, res := range resp.Results {
+		if res.Status != "skipped" || !strings.Contains(res.Reason, "ambiguous title") ||
+			!strings.Contains(res.Reason, "6101") || !strings.Contains(res.Reason, "6102") || !strings.Contains(res.Reason, imported) {
+			t.Errorf("result = %+v; want skipped, ambiguous title naming both pages and %s", res, imported)
+		}
+	}
+	if got := getSyncedPolicy(t, s.setupResult, imported); got.SourceAttribution != "imported" || got.Status != "published" {
+		t.Errorf("imported policy = %+v; want untouched", got)
+	}
+	if n := countPolicies(t, s.setupResult, s.tenant); n != before {
+		t.Errorf("policies = %d, want %d", n, before)
+	}
+
+	// Once one page is retitled, the other takes the policy over.
+	again := postSync(t, s.setupResult, key, http.StatusOK,
+		syncPage("6101", "Logging Policy", "1.0", "Body A.", nil),
+		syncPage("6102", "Audit Logging Policy", "1.0", "Body B.", nil))
+	if again.TakenOver != 1 || again.Created != 1 || again.Skipped != 0 {
+		t.Errorf("retitled sync = %+v; want one taken_over and one created", again)
 	}
 }
 

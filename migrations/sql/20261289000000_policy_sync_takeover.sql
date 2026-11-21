@@ -23,7 +23,7 @@
 -- Constitutional invariant #6: policy_audit_log keeps its RLS policies;
 -- this migration adds no table.
 --
--- Reversible via 20261288000000_policy_sync_takeover.down.sql.
+-- Reversible via 20261289000000_policy_sync_takeover.down.sql.
 
 ALTER TABLE policy_audit_log
     DROP CONSTRAINT IF EXISTS policy_audit_log_action_check;

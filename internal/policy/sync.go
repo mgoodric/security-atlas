@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -148,6 +150,14 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 		}
 		results := append([]SyncResult{}, invalid...)
 		seen := map[string]bool{}
+		// The page ids of the run by title: a takeover needs the title to
+		// name one page (#2854).
+		byTitle := map[string][]string{}
+		for _, p := range pages {
+			if !slices.Contains(byTitle[p.In.Title], p.PageID) {
+				byTitle[p.In.Title] = append(byTitle[p.In.Title], p.PageID)
+			}
+		}
 		for _, p := range pages {
 			res := SyncResult{PageID: p.PageID, Title: p.In.Title}
 			if err := validateSyncPage(p); err != nil {
@@ -170,7 +180,7 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			})
 			switch {
 			case errors.Is(err, pgx.ErrNoRows):
-				if res, err = syncFirst(ctx, q, tenantID, src, p, hash, keyID); err != nil {
+				if res, err = syncFirst(ctx, q, tenantID, src, p, hash, keyID, byTitle[p.In.Title]); err != nil {
 					return err
 				}
 			case err != nil:
@@ -276,17 +286,43 @@ func syncMarkMissing(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, sr
 
 // syncFirst handles a page with no synced policy in its source: it takes
 // over the tenant's published imported policy with the page's title, if
-// there is one, or else publishes the page as a new policy (#2854).
-func syncFirst(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string) (SyncResult, error) {
+// there is exactly one, or else publishes the page as a new policy
+// (#2854). A title that matches several imported policies, or that another
+// page in the run shares while it matches one, skips the page instead.
+//
+// sameTitle is every page id in the run with p's title, p's own included.
+func syncFirst(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string, sameTitle []string) (SyncResult, error) {
 	res := SyncResult{PageID: p.PageID, Title: p.In.Title}
-	imported, err := q.GetImportedPolicyForTakeover(ctx, dbx.GetImportedPolicyForTakeoverParams{
-		TenantID: pgUUID(tenantID), Title: p.In.Title, Version: p.In.Version,
+	candidates, err := q.ListImportedPoliciesForTakeover(ctx, dbx.ListImportedPoliciesForTakeoverParams{
+		TenantID: pgUUID(tenantID), Title: p.In.Title,
 	})
+	if err != nil {
+		return res, fmt.Errorf("sync: look up imported policies for page %q: %w", p.PageID, err)
+	}
+	// An audit tool refuses rather than chooses: with more than one
+	// candidate policy, or more than one page that would claim the one,
+	// the page is skipped and written nowhere. A later run takes it over
+	// once the title is unambiguous.
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-	case err != nil:
-		return res, fmt.Errorf("sync: look up imported policy for page %q: %w", p.PageID, err)
-	case imported.Version == p.In.Version:
+	case len(candidates) > 1:
+		ids := make([]string, 0, len(candidates))
+		for _, c := range candidates {
+			ids = append(ids, fmt.Sprintf("%s (version %q)", uuid.UUID(c.ID.Bytes), c.Version))
+		}
+		res.Status = SyncStatusSkipped
+		res.Reason = fmt.Sprintf("ambiguous title: %d published imported policies are titled %q: %s. Retitle all but one, or retitle this page, before it can sync",
+			len(candidates), p.In.Title, strings.Join(ids, ", "))
+		return res, nil
+	case len(candidates) == 1 && len(sameTitle) > 1:
+		res.Status = SyncStatusSkipped
+		res.Reason = fmt.Sprintf("ambiguous title: pages %s in this push are all titled %q, which matches imported policy %s. Give each page a distinct title before one can take it over",
+			strings.Join(sameTitle, ", "), p.In.Title, uuid.UUID(candidates[0].ID.Bytes))
+		return res, nil
+	}
+	switch {
+	case len(candidates) == 0:
+	case candidates[0].Version == p.In.Version:
+		imported := candidates[0]
 		taken, err := syncTakeOverInPlace(ctx, q, tenantID, src, p, imported, hash, keyID)
 		if err != nil {
 			return res, err
@@ -298,6 +334,7 @@ func syncFirst(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src Sync
 		}
 		return res, nil
 	default:
+		imported := candidates[0]
 		// The chain is linear, as for a synced version bump: an in-tool
 		// draft of the next version already holding the imported row's
 		// successor slot skips this page.
