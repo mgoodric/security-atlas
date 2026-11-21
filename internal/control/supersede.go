@@ -127,7 +127,7 @@ func queryDiffFields(prior, next any) []string {
 }
 
 func unionKeys(a, b map[string]any) []string {
-	seen := make(map[string]struct{}, len(a)+len(b))
+	seen := map[string]struct{}{}
 	var out []string
 	for _, m := range []map[string]any{a, b} {
 		for k := range m {
