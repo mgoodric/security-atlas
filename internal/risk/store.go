@@ -277,8 +277,42 @@ type CreateInput struct {
 // a placement validation error (IsPlacementValidation) for a bad level or
 // org unit.
 func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
+	prepared, err := prepareCreate(in)
+	if err != nil {
+		return Risk{}, err
+	}
+	var out Risk
+	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		out, err = s.insertPrepared(ctx, q, tenantID, prepared)
+		return err
+	})
+	return out, err
+}
+
+// CreateTx is Create inside the caller's tenant-scoped transaction: the
+// same validation, the same `created` audit row and the same after-write
+// hook. The risk register import (#2839) uses it, so an approved row's
+// risk, its row decision and its import audit row commit together.
+func (s *Store) CreateTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, in CreateInput) (Risk, error) {
+	prepared, err := prepareCreate(in)
+	if err != nil {
+		return Risk{}, err
+	}
+	return s.insertPrepared(ctx, q, tenantID, prepared)
+}
+
+// preparedCreate is a CreateInput that passed every check that needs no
+// database read, with its defaults applied.
+type preparedCreate struct {
+	in          CreateInput
+	proposal    Acceptance
+	externalRef *string
+}
+
+// prepareCreate applies Create's defaults and its checks that read nothing.
+func prepareCreate(in CreateInput) (preparedCreate, error) {
 	if in.Actor == "" {
-		return Risk{}, fmt.Errorf("%w: actor is required", ErrTransitionInput)
+		return preparedCreate{}, fmt.Errorf("%w: actor is required", ErrTransitionInput)
 	}
 	if in.Methodology == "" {
 		in.Methodology = DefaultMethodology
@@ -288,11 +322,11 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	}
 	inherent, residual, err := PrepareCreateScores(in.Methodology, in.InherentScore, in.ResidualScore)
 	if err != nil {
-		return Risk{}, err
+		return preparedCreate{}, err
 	}
 	in.InherentScore, in.ResidualScore = inherent, residual
 	if err := ValidateCreateAcceptance(in.AcceptanceStatus, in.Accepter, in.AcceptedUntil != nil); err != nil {
-		return Risk{}, err
+		return preparedCreate{}, err
 	}
 	if err := ValidateTreatment(TreatmentInput{
 		Treatment:            in.Treatment,
@@ -302,7 +336,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		InstrumentReference:  in.InstrumentReference,
 		LinkedControlCount:   len(in.LinkedControlIDs),
 	}); err != nil {
-		return Risk{}, err
+		return preparedCreate{}, err
 	}
 	proposal, err := CreateProposal(in.AcceptanceStatus, ProposeAcceptanceInput{
 		Justification:    in.Justification,
@@ -311,7 +345,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		ProposerIsPerson: in.ProposerIsPerson,
 	}, time.Now().UTC())
 	if err != nil {
-		return Risk{}, err
+		return preparedCreate{}, err
 	}
 
 	if in.OwnerUserID != nil {
@@ -319,11 +353,17 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	}
 	externalRef, err := NormalizeExternalRef(in.ExternalRef)
 	if err != nil {
-		return Risk{}, err
+		return preparedCreate{}, err
 	}
 
+	return preparedCreate{in: in, proposal: proposal, externalRef: externalRef}, nil
+}
+
+// insertPrepared writes a prepared create in the caller's transaction.
+func (s *Store) insertPrepared(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, p preparedCreate) (Risk, error) {
+	in, proposal, externalRef := p.in, p.proposal, p.externalRef
 	var out Risk
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := func() error {
 		if err := CheckOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
 			return err
 		}
@@ -386,7 +426,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			return err
 		}
 		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
-	})
+	}()
 	return out, err
 }
 
