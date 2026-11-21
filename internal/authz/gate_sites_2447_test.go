@@ -7,7 +7,8 @@ package authz_test
 //
 // This test parses every non-test Go file under internal/api and records,
 // per function, the authz.IsTenantAdmin / IsTenantApprover /
-// IsTenantRiskReader (#2556) / HasAnyTenantRole (#2507) calls in
+// IsTenantRiskReader (#2556) / HasAnyTenantRole (#2507) /
+// IsTenantControlOwner (#2706) calls in
 // it. That inventory must equal gateSites2447 exactly: each site names the
 // gate it calls and the routes2428 rows it guards, or why it guards no
 // route. A changed, added or removed call fails here until the site table
@@ -52,6 +53,7 @@ const (
 	riskReader2447  = "IsTenantRiskReader"
 	auditReader2447 = "IsTenantAuditReader"
 	anyRole2447     = "HasAnyTenantRole"
+	ctlOwner2447    = "IsTenantControlOwner"
 )
 
 // gateSites2447 is keyed by "<dir under internal/api>/<file> <func>", with
@@ -182,7 +184,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"checklist/handler.go Handler.Generate":          site(apr, r2447(post, "/v1/controls/checklist:generate")),
 		"checklist/handler.go Handler.ExportMarkdown":    site(anyr, r2447(get, "/v1/controls/checklist/"+id+"/export.md")),
 		"checklist/handler.go Handler.LoadGeneration":    site(anyr, r2447(get, "/v1/controls/checklist/"+id)),
-		"controldetail/authz.go readsUnscopedEvidence": notRoute(apr,
+		"controldetail/authz.go readsUnscopedEvidence": notRoute([]string{approver2447, ctlOwner2447},
 			"per-control evidence list (#2470): narrows a period-scoped caller to control_id resolution; never a refusal"),
 		"controlimports/settings.go requireTenantAdmin":     notRoute(adm, preRoute+" (control import LLM settings)"),
 		"controls/handlers.go Handler.UploadBundle":         site(adm, r2447(post, "/v1/controls:upload-bundle")),
@@ -304,7 +306,7 @@ const authzImport2447 = "github.com/mgoodric/security-atlas/internal/authz"
 // isHelper2447 reports whether name is one of the inventoried helpers.
 func isHelper2447(name string) bool {
 	switch name {
-	case admin2447, approver2447, riskReader2447, auditReader2447, anyRole2447:
+	case admin2447, approver2447, riskReader2447, auditReader2447, anyRole2447, ctlOwner2447:
 		return true
 	}
 	return false
