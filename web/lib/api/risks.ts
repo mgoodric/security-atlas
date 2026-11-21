@@ -521,6 +521,8 @@ export type RiskAuditEntry = {
     | "reopened"
     | "control_linked"
     | "control_unlinked"
+    | "created"
+    | "themes_changed"
     | string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;

@@ -18,6 +18,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -75,6 +77,10 @@ func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
+		return
+	}
 	riskID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
@@ -100,7 +106,7 @@ func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	merged := mergeThemes(current, req.Themes)
-	updated, err := h.store.AssignThemes(r.Context(), riskID, merged)
+	updated, err := h.store.AssignThemes(r.Context(), riskID, merged, actor)
 	if err != nil {
 		switch {
 		case errors.Is(err, risk.ErrUnknownTheme):
@@ -120,6 +126,10 @@ func (h *Handler) AssignThemes(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RemoveTheme(w http.ResponseWriter, r *http.Request) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	actor, ok := actorFrom(w, r)
+	if !ok {
 		return
 	}
 	riskID, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -145,7 +155,7 @@ func (h *Handler) RemoveTheme(w http.ResponseWriter, r *http.Request) {
 	// Even if the theme wasn't present, the replace is a no-op write.
 	// Calling AssignThemes still validates the remaining set against the
 	// vocabulary — defaults to a no-op when remaining is unchanged.
-	if _, err := h.store.AssignThemes(r.Context(), riskID, remaining); err != nil {
+	if _, err := h.store.AssignThemes(r.Context(), riskID, remaining, actor); err != nil {
 		switch {
 		case errors.Is(err, risk.ErrUnknownTheme):
 			// Should not happen — `remaining` is a subset of `current`,
@@ -162,6 +172,19 @@ func (h *Handler) RemoveTheme(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----- helpers -----
+
+// actorFrom names the caller on the risk's themes_changed audit row
+// (#2835), as the risk routes name it (credstore.PrincipalOf). With no
+// credential in context it writes a 401 and returns false, so a theme
+// change is never recorded without an actor.
+func actorFrom(w http.ResponseWriter, r *http.Request) (string, bool) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
+		return "", false
+	}
+	return credstore.PrincipalOf(cred), true
+}
 
 func mergeThemes(existing, additions []string) []string {
 	seen := make(map[string]struct{}, len(existing)+len(additions))

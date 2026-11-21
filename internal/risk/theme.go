@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -91,7 +92,10 @@ func (s *Store) ListVisibleThemes(ctx context.Context) ([]Theme, error) {
 // The HTTP handler exposes both add (POST) and remove (DELETE) semantics by
 // reading the current themes, merging in the operation, and calling
 // AssignThemes with the resulting set.
-func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []string) (Risk, error) {
+func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []string, actor string) (Risk, error) {
+	if actor == "" {
+		return Risk{}, fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
 	// Normalise: trim + lowercase + dedupe + sorted-for-stability.
 	normalised := normaliseThemes(themes)
 	var out Risk
@@ -150,6 +154,15 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 			return fmt.Errorf("update risk themes: %w", err)
 		}
 		out = riskFromRow(row)
+		// A changed set writes one themes_changed row (#2835); the same set
+		// writes none, as AC-2's no-op promises.
+		if !slices.Equal(normaliseThemes(before.Themes), normaliseThemes(out.Themes)) {
+			if err := insertRiskAudit(ctx, q, tenantID, riskID, actor, ActionThemesChanged,
+				map[string]any{"themes": themesValue(before.Themes)},
+				map[string]any{"themes": themesValue(out.Themes)}); err != nil {
+				return err
+			}
+		}
 		// LinkedControlIDs requires a separate query (slice 019) — read it
 		// so the wire response keeps the same shape.
 		links, err := q.ListRiskControlLinks(ctx, dbx.ListRiskControlLinksParams{

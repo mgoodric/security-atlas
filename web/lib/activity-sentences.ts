@@ -153,6 +153,8 @@ const RISK_PHRASES: Record<string, string> = {
   deleted: "deleted",
   control_linked: "linked a control to",
   control_unlinked: "unlinked a control from",
+  created: "created",
+  themes_changed: "changed the themes of",
 };
 
 const FLAG_PHRASES: Record<string, string> = {

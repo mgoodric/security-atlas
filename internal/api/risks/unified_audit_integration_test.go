@@ -101,11 +101,16 @@ func TestUnifiedAuditLog_ShowsRiskRows_1954(t *testing.T) {
 			if changed != "[title]" {
 				t.Errorf("fields_changed changed_fields = %s, want [title]", changed)
 			}
+		case "created":
+			// #2835: the risk's creation, naming its initial fields only.
+			if changed != "[category_id owner_user_id title treatment treatment_owner]" {
+				t.Errorf("created changed_fields = %s", changed)
+			}
 		}
 		actions[e["action"].(string)] = true
 	}
-	if len(entries) != 2 || !actions["placement_changed"] || !actions["fields_changed"] {
-		t.Fatalf("unified entries = %v, want placement_changed and fields_changed", entries)
+	if len(entries) != 3 || !actions["created"] || !actions["placement_changed"] || !actions["fields_changed"] {
+		t.Fatalf("unified entries = %v, want created, placement_changed and fields_changed", entries)
 	}
 
 	if resp, unifiedB := get(t, envB, "/v1/admin/audit-log/unified?"+q.Encode()); resp.StatusCode != http.StatusOK ||
@@ -155,13 +160,13 @@ func TestUnifiedAuditLog_DeletedRiskKeepsRows_1954(t *testing.T) {
 	if r.StatusCode != http.StatusOK {
 		t.Fatalf("unified audit log: status %d (%v)", r.StatusCode, unified)
 	}
-	// Newest first: the deleted row the delete writes (#2107), then the
-	// placement row from before it.
+	// Newest first: the deleted row the delete writes (#2107), the
+	// placement row from before it, and the created row (#2835).
 	entries, _ := unified["entries"].([]any)
-	if len(entries) != 2 {
-		t.Fatalf("entries = %v, want the deleted risk's deleted and placement rows", entries)
+	if len(entries) != 3 {
+		t.Fatalf("entries = %v, want the deleted risk's deleted, placement and created rows", entries)
 	}
-	for i, want := range []string{"deleted", "placement_changed"} {
+	for i, want := range []string{"deleted", "placement_changed", "created"} {
 		e := entries[i].(map[string]any)
 		if e["target_id"] != id || e["action"] != want || e["actor_id"] == "" {
 			t.Fatalf("entry %d = %v, want %s", i, e, want)
@@ -314,8 +319,8 @@ func TestPatchRisk_NoCredentialWritesNoRow_1954(t *testing.T) {
 		t.Fatalf("status %d, want 401: %s", rec.Code, rec.Body.String())
 	}
 
-	if n := len(placementAudit(t, app, tenant, id)); n != 0 {
-		t.Fatalf("audit rows = %d, want 0", n)
+	if n := len(placementAudit(t, app, tenant, id)); n != 1 {
+		t.Fatalf("audit rows = %d, want only the created row", n)
 	}
 	_, got := get(t, env, "/v1/risks/"+id)
 	if riskField(t, got, "level") != "team" {
