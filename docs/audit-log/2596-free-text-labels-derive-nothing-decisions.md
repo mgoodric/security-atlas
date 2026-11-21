@@ -130,8 +130,12 @@ since #2428 ("An API key's owner_roles label keeps counting"). The
 alternative was to narrow both layers and stop counting those labels
 anywhere. Matt chose agreement with the handler.
 
-Routes `TestDecide2402_APIKeyRoleMatrix` (real Postgres) sees flip from deny
-to allow at OPA for an unbound key:
+The invariant: **a label is the role.** An unbound key or machine token
+labelled `admin` is admin at OPA on every route, and one labelled
+`grc_engineer` is grc_engineer on every route, exactly as a user holding
+that live role would be. The list below is not that set. It is only the
+routes in the `TestDecide2402_APIKeyRoleMatrix` matrix (`routes2381`, real
+Postgres) that flip from deny to allow at OPA for an unbound key:
 
 - label `admin`: `POST /v1/admin/users`, `GET /v1/admin/audit-log/unified`,
   `POST /v1/risks`, `POST /v1/controls`, `POST /v1/policies/{id}/approve`,
@@ -145,8 +149,8 @@ platform over gRPC alone, which calls no gate (#2541 D5); and no
 client_credentials token carries a role claim (D3). The change matters the
 day an HTTP key path or a role-carrying machine token lands.
 
-Routes that flip from allow to deny (the free-text narrowing), for an
-unbound key whose label is free text only: `GET /v1/controls`,
+Routes in the same matrix that flip from allow to deny (the free-text
+narrowing), for an unbound key whose label is free text only: `GET /v1/controls`,
 `GET /v1/policies`, `GET /v1/framework-scopes`, `GET /v1/evidence`,
 `GET /v1/evidence/{id}`, `GET /v1/evidence/freshness`,
 `GET /v1/artifacts/{id}`, `GET /v1/walkthroughs`, `GET /v1/calendar`,

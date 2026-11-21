@@ -43,6 +43,12 @@ func legacy2596(labels ...string) credstore.Credential {
 	return credstore.Credential{ID: "cred_2596", TenantID: tenant2596, OwnerRoles: labels}
 }
 
+// userlessKey2596 is an API key naming no user (empty UserID). credstore
+// never mints one; it is unbound, as boundKey and is_machine_actor read it.
+func userlessKey2596(labels ...string) credstore.Credential {
+	return credstore.Credential{ID: "key_2596e", TenantID: tenant2596, OwnerRoles: labels}
+}
+
 func boundKey2596(labels ...string) credstore.Credential {
 	return credstore.Credential{ID: "key_2596b", UserID: user2596, TenantID: tenant2596, OwnerRoles: labels}
 }
@@ -127,6 +133,7 @@ func shapes2596() []shape2596 {
 		{"unbound key", unboundKey2596},
 		{"machine token", machine2596},
 		{"legacy credential", legacy2596},
+		{"key without user", userlessKey2596},
 	} {
 		out = append(out,
 			shape2596{mk.kind + ", free text", mk.fn("employee"), nil, ""},
