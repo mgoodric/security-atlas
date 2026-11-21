@@ -241,6 +241,11 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
 		return
 	}
+	// Defense in depth: OPA admits only admin and grc_engineer here (#2664).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
