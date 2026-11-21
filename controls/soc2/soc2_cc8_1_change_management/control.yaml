@@ -3,11 +3,24 @@ bundle_id: soc2_cc8_1_change_management
 title: "Production-deploying repositories enforce branch protection"
 description: |
   Changes to infrastructure, data, software and procedures reach
-  production only by a controlled, approved path (TSC CC8.1). For a SaaS
-  codebase the testable manifestation is: every repository that deploys to
-  production has GitHub branch protection enabled on the production branch
-  — required pull-request reviews, status checks, no force-push, no direct
-  push by non-admins.
+  production only by a controlled, approved path (TSC CC8.1). The intended
+  test is that every repository that deploys to production has branch
+  protection on its production branch: required pull-request reviews,
+  status checks, no force-push and protection enforced on admins.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the GitHub
+  connector's `github.repo_protection.v1`, one per repository's default
+  branch, whose verdict is that at least one approving review is required:
+  a branch requiring one passes, and a branch requiring none or having no
+  protection fails. Status checks, force-push, admin enforcement and which
+  repos deploy to production are not checked.
+
+  Pending: protection enforced on admins, in SQL over the record's
+  existing fields (#2823); and required status checks, the force-push
+  setting and the deploys-to-production topic, which the connector does
+  not emit yet (#2827).
 
 scf_anchor_id: CHG-02
 control_family: CHG

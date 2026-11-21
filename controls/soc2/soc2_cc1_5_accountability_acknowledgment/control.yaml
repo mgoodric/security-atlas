@@ -3,11 +3,22 @@ bundle_id: soc2_cc1_5_accountability_acknowledgment
 title: "All personnel acknowledge core security policies"
 description: |
   Each person answers for the control duties assigned to them (TSC CC1.5,
-  COSO Principle 5). Operationally, every active user must have on file an
-  acknowledgment of each policy in the v1 policy library (Information
-  Security, Access Control, Vendor Management, Incident Response, Change
-  Management). The evidence query reads the `policy.acknowledgment` ledger
-  and asserts coverage across active users.
+  COSO Principle 5). The intended test is that every active user has
+  acknowledged the current version of each of the five core policies:
+  Information Security, Access Control, Vendor Management, Incident
+  Response and Change Management.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the tenant's
+  `policy.acknowledgment.v1` acknowledgements (#2869), and each one is
+  recorded as pass. The control therefore passes on any acknowledgement of
+  any policy in the weekly window of 30 days. Which policies, which
+  versions and which users are not checked.
+
+  Pending: acknowledgements covering all five core policies in their
+  current version (#2832); and every active user having acknowledged them,
+  which needs a user inventory (#2834).
 
 scf_anchor_id: HRS-02
 control_family: HRS
