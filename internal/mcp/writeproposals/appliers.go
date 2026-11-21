@@ -166,7 +166,7 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	// id the AI-assisted proposal was filed under (a per-session "jwt:" id
 	// for a browser caller), which names no person to compare with, and the
 	// confirmer is the person who decides to make the proposal.
-	proposal, err := createRiskProposal(in, status, p.Confirmer.Actor())
+	proposal, err := createRiskProposal(in, status, p.Confirmer.Actor(), p.Confirmer.UserID != "")
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
@@ -205,8 +205,9 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 // createRiskProposal is the acceptance a create_risk proposal records,
 // under the rule POST /v1/risks applies (risk.CreateProposal, #2391).
 // proposer is the confirming person; when the proposal is filed there is
-// none yet, and validateToolInput passes a placeholder.
-func createRiskProposal(in CreateRiskInput, status dbx.RiskAcceptanceStatus, proposer string) (risk.Acceptance, error) {
+// none yet, and validateToolInput passes a placeholder person. isPerson is
+// whether the confirmer is a user: a machine confirmer is refused (#2623).
+func createRiskProposal(in CreateRiskInput, status dbx.RiskAcceptanceStatus, proposer string, isPerson bool) (risk.Acceptance, error) {
 	var until time.Time
 	if in.ProposedUntil != "" {
 		var err error
@@ -215,9 +216,10 @@ func createRiskProposal(in CreateRiskInput, status dbx.RiskAcceptanceStatus, pro
 		}
 	}
 	return risk.CreateProposal(status, risk.ProposeAcceptanceInput{
-		Justification: in.Justification,
-		ProposedUntil: until,
-		Proposer:      proposer,
+		Justification:    in.Justification,
+		ProposedUntil:    until,
+		Proposer:         proposer,
+		ProposerIsPerson: isPerson,
 	}, time.Now().UTC())
 }
 
@@ -274,7 +276,7 @@ func validateToolInput(tool string, input json.RawMessage) error {
 	if in.Treatment != string(dbx.RiskTreatmentAccept) {
 		return nil
 	}
-	if _, err := createRiskProposal(in, dbx.RiskAcceptanceStatus(in.AcceptanceStatus), "pending-confirmer"); err != nil {
+	if _, err := createRiskProposal(in, dbx.RiskAcceptanceStatus(in.AcceptanceStatus), "pending-confirmer", true); err != nil {
 		return fmt.Errorf("%w: create_risk tool_input: %v", ErrInvalidInput, err)
 	}
 	return nil
@@ -563,9 +565,10 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 		})
 	case status == dbx.RiskAcceptanceStatusProposed:
 		_, err = risk.ProposeAcceptanceTx(ctx, q, p.TenantID, riskID, risk.ProposeAcceptanceInput{
-			Justification: in.Justification,
-			ProposedUntil: until,
-			Proposer:      actor,
+			Justification:    in.Justification,
+			ProposedUntil:    until,
+			Proposer:         actor,
+			ProposerIsPerson: p.Confirmer.UserID != "",
 		}, now)
 	case status == dbx.RiskAcceptanceStatusApproved:
 		_, err = risk.ApproveAcceptanceTx(ctx, q, p.TenantID, riskID, risk.ApproveAcceptanceInput{

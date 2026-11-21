@@ -303,7 +303,9 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		OrgUnitID:           orgUnitID,
 		OwnerUserID:         ownerUserID,
 	}
+	// Only a person proposes (#2623).
 	in.Proposer = credstore.PrincipalOf(cred)
+	in.ProposerIsPerson = credstore.MinterUserID(cred) != ""
 	in.Actor = in.Proposer
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
@@ -317,6 +319,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			})
 		case errors.Is(err, risk.ErrScoreNotNumeric):
 			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		case risk.IsApprovalRefusal(err):
+			httpresp.WriteError(w, http.StatusForbidden, err.Error())
 		case risk.IsTransitionInput(err),
 			errors.Is(err, risk.ErrInvalidMethodology),
 			errors.Is(err, risk.ErrInherentScoreInvalid),

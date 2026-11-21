@@ -252,6 +252,9 @@ type CreateInput struct {
 	// acceptance, so the approval rule can refuse them as approver (#2371).
 	// Required with acceptance_status=proposed.
 	Proposer string
+	// ProposerIsPerson is whether the creator is a user (#2623); a create
+	// proposing an acceptance from a machine credential is refused.
+	ProposerIsPerson bool
 	// Justification and ProposedUntil are the proposal's, required with
 	// acceptance_status=proposed as the propose transition requires them
 	// (ValidateProposal, #2391). A zero ProposedUntil is absent.
@@ -296,9 +299,10 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		return Risk{}, err
 	}
 	proposal, err := CreateProposal(in.AcceptanceStatus, ProposeAcceptanceInput{
-		Justification: in.Justification,
-		ProposedUntil: in.ProposedUntil,
-		Proposer:      in.Proposer,
+		Justification:    in.Justification,
+		ProposedUntil:    in.ProposedUntil,
+		Proposer:         in.Proposer,
+		ProposerIsPerson: in.ProposerIsPerson,
 	}, time.Now().UTC())
 	if err != nil {
 		return Risk{}, err

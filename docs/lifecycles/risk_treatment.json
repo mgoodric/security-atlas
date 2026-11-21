@@ -294,10 +294,10 @@
         "grc_engineer"
       ],
       "requires_approver": false,
-      "people_only": false,
+      "people_only": true,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "Needs a justification and a proposed expiry after today."
+      "note": "Needs a justification and a proposed expiry after today. A machine credential never proposes (#2623)."
     },
     {
       "from": "mitigate",
@@ -312,10 +312,10 @@
         "grc_engineer"
       ],
       "requires_approver": false,
-      "people_only": false,
+      "people_only": true,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "Needs a justification and a proposed expiry after today."
+      "note": "Needs a justification and a proposed expiry after today. A machine credential never proposes (#2623)."
     },
     {
       "from": "transfer",
@@ -330,10 +330,10 @@
         "grc_engineer"
       ],
       "requires_approver": false,
-      "people_only": false,
+      "people_only": true,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "Needs a justification and a proposed expiry after today."
+      "note": "Needs a justification and a proposed expiry after today. A machine credential never proposes (#2623)."
     },
     {
       "from": "avoid",
@@ -348,10 +348,10 @@
         "grc_engineer"
       ],
       "requires_approver": false,
-      "people_only": false,
+      "people_only": true,
       "second_person": false,
       "self_approval_opt_in": false,
-      "note": "Needs a justification and a proposed expiry after today."
+      "note": "Needs a justification and a proposed expiry after today. A machine credential never proposes (#2623)."
     },
     {
       "from": "accept_proposed",

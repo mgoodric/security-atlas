@@ -70,7 +70,7 @@ func TestTreatmentLifecycle_EveryPair(t *testing.T) {
 	}
 	propose := func(t *testing.T, id string) error {
 		_, err := store.ProposeAcceptance(ctx, uuid.MustParse(id), risk.ProposeAcceptanceInput{
-			Justification: "within appetite", ProposedUntil: until, Proposer: lifecycleProposer,
+			Justification: "within appetite", ProposedUntil: until, Proposer: lifecycleProposer, ProposerIsPerson: true,
 		})
 		return err
 	}
@@ -189,7 +189,7 @@ func TestTreatmentLifecycle_ClosedRiskTakesNoMove(t *testing.T) {
 		t.Fatal("change treatment on a closed risk succeeded")
 	}
 	if _, err := store.ProposeAcceptance(ctx, id, risk.ProposeAcceptanceInput{
-		Justification: "x", ProposedUntil: time.Now().UTC().AddDate(0, 1, 0), Proposer: lifecycleProposer,
+		Justification: "x", ProposedUntil: time.Now().UTC().AddDate(0, 1, 0), Proposer: lifecycleProposer, ProposerIsPerson: true,
 	}); err == nil {
 		t.Fatal("propose acceptance on a closed risk succeeded")
 	}
