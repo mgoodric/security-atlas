@@ -17,14 +17,25 @@
 # named). A prefix passes if every migration on it is grandfathered, so a
 # new migration on a grandfathered prefix still fails.
 #
+# With MIGRATIONS_BASE_REF set to a git revision (CI passes main's tip,
+# fetched when the job runs), it also fails when a migration in the
+# directory that the base revision lacks carries a timestamp less than or
+# equal to the base's latest (#2883). A PR's pull_request run checks the
+# tree as it stood when the run started; once another PR lands the same
+# "next timestamp" on main, that run stays green over a collision. Comparing
+# against main at check time catches the PR that is behind; it still only
+# runs when the PR's checks run.
+#
 # Exit codes:
-#   0 — no prefix carries two migrations, outside the grandfathered set
-#   1 — at least one prefix does
-#   2 — the migrations directory is not readable
+#   0 — no prefix carries two migrations, outside the grandfathered set,
+#       and no new migration is at or below the base's latest
+#   1 — at least one of those holds
+#   2 — the migrations directory is not readable, or the base ref is not
 #
 # Usage:
 #   bash scripts/check-migration-timestamps.sh
 #   MIGRATIONS_DIR=/path/to/sql bash scripts/check-migration-timestamps.sh
+#   MIGRATIONS_BASE_REF=FETCH_HEAD bash scripts/check-migration-timestamps.sh
 #
 # Self-test:
 #   bash scripts/check-migration-timestamps_test.sh
@@ -88,6 +99,32 @@ for prefix in $dup_prefixes; do
     status=1
   fi
 done
+
+if [[ -n "${MIGRATIONS_BASE_REF:-}" ]]; then
+  # ls-tree prints paths relative to the -C directory, so this lists the
+  # base revision's copy of the same directory by bare filename.
+  if ! base_files="$(git -C "$DIR" ls-tree --name-only "$MIGRATIONS_BASE_REF" -- . 2>/dev/null)"; then
+    echo "check-migration-timestamps: base ref not readable: $MIGRATIONS_BASE_REF" >&2
+    exit 2
+  fi
+  base_bases="$(printf '%s\n' "$base_files" | grep -E '\.sql$' | sed -E 's/(\.down)?\.sql$//' | sort -u || true)"
+  base_max="$(printf '%s\n' "$base_bases" | awk -F_ 'NF { print $1 }' | sort | tail -n 1)"
+  if [[ -n "$base_max" ]]; then
+    while read -r prefix base; do
+      [[ -n "$base" ]] || continue
+      # A here-string, not a pipe: grep -q closing early would SIGPIPE
+      # printf, and pipefail would read a match as a miss.
+      if grep -qxF "$base" <<<"$base_bases"; then
+        continue
+      fi
+      if [[ ! "$prefix" > "$base_max" ]]; then
+        echo "check-migration-timestamps: new migration $base is not after the base's latest timestamp $base_max ($MIGRATIONS_BASE_REF)." >&2
+        echo "  merge main and renumber it to a timestamp after $base_max." >&2
+        status=1
+      fi
+    done <<<"$pairs"
+  fi
+fi
 
 if [[ $status -eq 0 ]]; then
   echo "check-migration-timestamps: OK"
