@@ -25,6 +25,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/eval"
+	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -192,6 +193,25 @@ func TestAcknowledge2817_ReachesStockAckControls(t *testing.T) {
 		ids, total := evidenceList(t, s, ctrl)
 		if got := slices.Contains(ids, ackID.String()); got != want(name) || (total == 1) != want(name) {
 			t.Errorf("%s: GET /v1/evidence lists ack=%v total=%d, want ack=%v", name, got, total, want(name))
+		}
+	}
+
+	// The freshness read model counts it too.
+	t.Cleanup(func() {
+		_, _ = s.admin.Exec(context.Background(), `DELETE FROM evidence_freshness WHERE tenant_id = $1`, s.tenant)
+	})
+	if _, err := freshness.NewStore(s.app).Refresh(ctx); err != nil {
+		t.Fatalf("refresh freshness: %v", err)
+	}
+	for name, ctrl := range withAck {
+		var n int
+		if err := s.admin.QueryRow(context.Background(), `
+			SELECT evidence_count FROM evidence_freshness WHERE tenant_id = $1 AND control_id = $2
+		`, s.tenant, ctrl).Scan(&n); err != nil {
+			t.Fatalf("%s: read freshness: %v", name, err)
+		}
+		if (n == 1) != want(name) {
+			t.Errorf("%s: freshness evidence_count = %d, want ack counted=%v", name, n, want(name))
 		}
 	}
 
