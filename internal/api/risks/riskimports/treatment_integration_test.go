@@ -203,3 +203,110 @@ func TestRiskImport_TreatmentAndAcceptance(t *testing.T) {
 		t.Errorf("approved acceptance = %+v", out.Risk)
 	}
 }
+
+// supersedeControl replaces prior with a new active version of the same
+// bundle, in the order controls_one_active_version_per_bundle allows: the
+// prior row is flipped first, under the deferred self-FK.
+func supersedeControl(t *testing.T, admin *pgxpool.Pool, tenant string, prior uuid.UUID, bundleID string) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	next := uuid.New()
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `UPDATE controls SET superseded_by = $2 WHERE id = $1`, prior, next); err != nil {
+		t.Fatalf("supersede %s: %v", bundleID, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO controls (id, tenant_id, title, control_family, implementation_type, bundle_id, version)
+		VALUES ($1, $2, $3, 'AC', 'manual_attested', $3, 2)`, next, tenant, bundleID); err != nil {
+		t.Fatalf("insert successor %s: %v", bundleID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit supersede: %v", err)
+	}
+	return next
+}
+
+// TestRiskImport_LinkedControlsActiveOnly: only an active control version
+// is linked, at upload and again at approval, and a bundle id names at most
+// one active control, so a bundle ref is never ambiguous.
+func TestRiskImport_LinkedControlsActiveOnly(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	e := newEnvFor(t, admin, app, dbtest.SeedTenant(t, admin, append(cleanupTables(), "controls")...))
+	bundleA, bundleB := "SUP-A-"+e.tenant[:8], "SUP-B-"+e.tenant[:8]
+	ctlA := seedImportControl(t, admin, e.tenant, bundleA)
+	ctlB := seedImportControl(t, admin, e.tenant, bundleB)
+
+	// The active-version index the bundle resolver relies on: a second
+	// active control with a bundle id already in use is refused.
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO controls (id, tenant_id, title, control_family, implementation_type, bundle_id)
+		VALUES ($1, $2, 'dup', 'AC', 'manual_attested', $3)`, uuid.New(), e.tenant, bundleB); err == nil {
+		t.Fatal("a second active control with the same bundle id was accepted; bundle refs could be ambiguous")
+	}
+
+	csv := fmt.Sprintf("Risk ID,Title,Category,Treatment,Linked Controls\n"+
+		"R-ONLY-A,Mitigated by A only,operational,mitigate,%[1]s\n"+
+		"R-A-AND-B,Mitigated by A and B,operational,mitigate,\"%[1]s; %[2]s\"\n", ctlA, bundleB)
+	status, raw := upload(t, e, e.grcJWT, "register.csv", []byte(csv))
+	if status != http.StatusCreated {
+		t.Fatalf("upload = %d %s", status, raw)
+	}
+	b := decode[riskimport.Batch](t, raw)
+	onlyA, aAndB := stagedByRef(t, b, "R-ONLY-A"), stagedByRef(t, b, "R-A-AND-B")
+	if onlyA.Treatment != "mitigate" || !slices.Equal(onlyA.LinkedControlIDs, []string{ctlA.String()}) {
+		t.Fatalf("R-ONLY-A staged as %+v", onlyA)
+	}
+
+	// A is superseded after upload.
+	successor := supersedeControl(t, admin, e.tenant, ctlA, bundleA)
+
+	// The row whose only link is now superseded is refused by the create
+	// path and stays pending; nothing is linked to the old version.
+	status, raw = approveRow(t, e, e.apprJWT, b.ID, onlyA.ID)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("approve row linked only to a superseded control = %d %s, want 422", status, raw)
+	}
+	var rowStatus string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT status FROM risk_import_rows WHERE id = $1`, onlyA.ID).Scan(&rowStatus); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if rowStatus != riskimport.RowStatusPending {
+		t.Errorf("refused row status = %s, want pending", rowStatus)
+	}
+
+	// The row with an active link as well keeps mitigate, linked to B only.
+	status, raw = approveRow(t, e, e.apprJWT, b.ID, aAndB.ID)
+	if status != http.StatusOK {
+		t.Fatalf("approve row = %d %s", status, raw)
+	}
+	got := readImportedRisk(t, e, decode[riskimport.RowDecision](t, raw).RiskID)
+	if got.Treatment != "mitigate" || !slices.Equal(got.Controls, []string{ctlB.String()}) {
+		t.Errorf("R-A-AND-B created as %+v, want mitigate linked to %s only", got, ctlB)
+	}
+
+	// At upload, the superseded version's id no longer resolves, and the
+	// bundle id resolves to the successor.
+	csv = fmt.Sprintf("Risk ID,Title,Category,Treatment,Linked Controls\n"+
+		"R-OLD,Old version,operational,mitigate,%s\n"+
+		"R-NEW,By bundle,operational,mitigate,%s\n", ctlA, bundleA)
+	status, raw = upload(t, e, e.grcJWT, "register.csv", []byte(csv))
+	if status != http.StatusCreated {
+		t.Fatalf("second upload = %d %s", status, raw)
+	}
+	b = decode[riskimport.Batch](t, raw)
+	if r := stagedByRef(t, b, "R-OLD"); r.Treatment != "untreated" ||
+		!slices.Contains(r.Flags, riskimport.FlagTreatmentDowngraded) ||
+		!slices.Equal(r.UnresolvedControls, []string{ctlA.String()}) {
+		t.Errorf("R-OLD staged as %+v", r)
+	}
+	if r := stagedByRef(t, b, "R-NEW"); r.Treatment != "mitigate" ||
+		!slices.Equal(r.LinkedControlIDs, []string{successor.String()}) {
+		t.Errorf("R-NEW staged as %+v", r)
+	}
+}

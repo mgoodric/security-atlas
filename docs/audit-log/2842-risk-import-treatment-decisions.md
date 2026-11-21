@@ -61,8 +61,16 @@ case-sensitive natural keys, so matching ignores no case. A partly-resolved
 cell keeps its resolved links and the treatment, because the risk does have a
 mitigation the tool can see.
 
-At approval the staged links are re-read and only controls that still exist
-are linked, so a control deleted since upload cannot fail the insert. If that
+A bundle id can't be ambiguous: `controls_one_active_version_per_bundle`
+holds `(tenant_id, bundle_id)` unique among active versions, and
+`TestRiskImport_LinkedControlsActiveOnly` pins that a second active control
+with a bundle id already in use is refused. So the resolver needs no
+ambiguity branch.
+
+At approval the staged links are re-read and only controls that are still
+an active version are linked, the same rule upload applied. A control
+deleted or superseded since upload is not linked, and cannot fail the
+insert. If that
 leaves a mitigate row with no link, the create path refuses it
 (treatment validation) and the row stays pending with the reason, which is
 now a row refusal rather than a stopping error.

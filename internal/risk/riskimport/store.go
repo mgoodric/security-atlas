@@ -59,8 +59,12 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.
 // resolveControls maps each linked-controls ref to the tenant's active
 // control it names: a uuid by control id, anything else by bundle id. A
 // superseded version is not linked, as the risk would point at a control
-// the tenant no longer runs. A ref that names no control is absent from the
-// result. Another tenant's controls are invisible under RLS.
+// the tenant no longer runs. A bundle id names at most one active control:
+// controls_one_active_version_per_bundle holds (tenant_id, bundle_id)
+// unique WHERE superseded_by IS NULL, so a bundle ref is never ambiguous
+// (TestRiskImport_LinkedControlsActiveOnly pins it). A ref that names no
+// control is absent from the result. Another tenant's controls are
+// invisible under RLS.
 func (s *Store) resolveControls(ctx context.Context, refs []string) (map[string]uuid.UUID, error) {
 	out := map[string]uuid.UUID{}
 	if len(refs) == 0 {

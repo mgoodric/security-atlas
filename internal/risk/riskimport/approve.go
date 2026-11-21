@@ -368,16 +368,19 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 	return r, nil
 }
 
-// existingControls keeps the staged control links whose control still
-// exists in the tenant. A control deleted since upload is dropped; when that
-// leaves a mitigate row with no link, the create path refuses it and the row
-// stays pending with the reason.
+// existingControls keeps the staged control links whose control is still
+// an active version in the tenant, as resolveControls required at upload. A
+// control deleted or superseded since upload is dropped; when that leaves a
+// mitigate row with no link, the create path refuses it and the row stays
+// pending with the reason.
 func existingControls(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id FROM controls WHERE tenant_id = $1 AND id = ANY($2::uuid[]) ORDER BY id
+		SELECT id FROM controls
+		WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND superseded_by IS NULL
+		ORDER BY id
 	`, tenantID, ids)
 	if err != nil {
 		return nil, fmt.Errorf("riskimport: read linked controls: %w", err)
