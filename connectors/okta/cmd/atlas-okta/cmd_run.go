@@ -65,9 +65,10 @@ func newRunCmd() *cobra.Command {
 transform to evidence records, and push to the platform.
 
 Okta scopes required (least-privilege, Read-only Administrator):
-  - okta.policies.read  (gates okta.mfa_policy.v1)
+  - okta.policies.read  (gates okta.mfa_policy.v2)
   - okta.apps.read      (gates okta.app_assignment.v1)
-  - okta.groups.read    (gates okta.app_assignment.v1)
+  - okta.groups.read    (gates okta.app_assignment.v1, and the Everyone
+                         group lookup for okta.mfa_policy.v2)
   - okta.users.read     (gates okta.user_lifecycle.v1)
 
 Auth: set OKTA_API_TOKEN in the process environment. The --token flag
@@ -98,10 +99,10 @@ appears in shell history.`,
 	// documented preferred path so the secret never reaches shell history.
 	cmd.Flags().StringVar(&f.token, "token-env-only-do-not-pass-on-cli", "", "")
 	_ = cmd.Flags().MarkHidden("token-env-only-do-not-pass-on-cli")
-	cmd.Flags().StringVar(&f.mfaPolicyControl, "mfa-policy-control", "scf:IAC-37", "control_id to attach to okta.mfa_policy.v1 records")
+	cmd.Flags().StringVar(&f.mfaPolicyControl, "mfa-policy-control", "scf:IAC-37", "control_id to attach to okta.mfa_policy.v2 records")
 	cmd.Flags().StringVar(&f.appAssignControl, "app-assignment-control", "scf:IAC-10", "control_id to attach to okta.app_assignment.v1 records")
 	cmd.Flags().StringVar(&f.userLifeControl, "user-lifecycle-control", "scf:IAC-22", "control_id to attach to okta.user_lifecycle.v1 records")
-	cmd.Flags().BoolVar(&f.skipMFAPolicy, "skip-mfa-policy", false, "skip okta.mfa_policy.v1 pull")
+	cmd.Flags().BoolVar(&f.skipMFAPolicy, "skip-mfa-policy", false, "skip okta.mfa_policy.v2 pull")
 	cmd.Flags().BoolVar(&f.skipAppAssign, "skip-app-assignment", false, "skip okta.app_assignment.v1 pull")
 	cmd.Flags().BoolVar(&f.skipUserLife, "skip-user-lifecycle", false, "skip okta.user_lifecycle.v1 pull")
 	return cmd
@@ -191,16 +192,18 @@ func doRun(ctx context.Context, f runFlags) error {
 
 func buildMFAPolicyRecord(s oktapolicy.PolicyState, org, env, controlID string) (*evidencev1.EvidenceRecord, error) {
 	now := s.ObservedAt.UTC().Truncate(time.Hour)
+	// v2 requires both lists; structpb turns an empty one into [].
 	pm := map[string]any{
-		"policy_id":    s.PolicyID,
-		"policy_name":  s.PolicyName,
-		"mfa_required": s.MFARequired,
+		"policy_id":           s.PolicyID,
+		"policy_name":         s.PolicyName,
+		"status":              s.Status,
+		"mfa_required":        s.MFARequired,
+		"factors_allowed":     asAny(s.FactorsAllowed),
+		"applies_to_groups":   asAny(s.AppliesToGroups),
+		"applies_to_everyone": s.AppliesToEveryone,
 	}
-	if len(s.FactorsAllowed) > 0 {
-		pm["factors_allowed"] = asAny(s.FactorsAllowed)
-	}
-	if len(s.AppliesToGroups) > 0 {
-		pm["applies_to_groups"] = asAny(s.AppliesToGroups)
+	if s.Priority > 0 {
+		pm["priority"] = float64(s.Priority)
 	}
 	payload, err := structpb.NewStruct(pm)
 	if err != nil {
@@ -208,8 +211,8 @@ func buildMFAPolicyRecord(s oktapolicy.PolicyState, org, env, controlID string) 
 	}
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.MFAPolicyKey(s.PolicyID, now),
-		EvidenceKind:   "okta.mfa_policy.v1",
-		SchemaVersion:  "1.0.0",
+		EvidenceKind:   "okta.mfa_policy.v2",
+		SchemaVersion:  "2.0.0",
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{org}},
@@ -314,6 +317,8 @@ func mapPolicyResult(r oktapolicy.Result) evidencev1.Result {
 		return evidencev1.Result_RESULT_FAIL
 	case oktapolicy.ResultInconclusive:
 		return evidencev1.Result_RESULT_INCONCLUSIVE
+	case oktapolicy.ResultNA:
+		return evidencev1.Result_RESULT_NA
 	default:
 		return evidencev1.Result_RESULT_UNSPECIFIED
 	}

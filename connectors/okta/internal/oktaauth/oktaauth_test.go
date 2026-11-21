@@ -110,7 +110,7 @@ func TestDocumentedScopes_NoWriteOrDeleteOrAdminAccess(t *testing.T) {
 func TestDocumentedScopes_CoversAllThreeKinds(t *testing.T) {
 	scopes := oktaauth.DocumentedScopes()
 	want := map[string]bool{
-		"okta.mfa_policy.v1":     false,
+		"okta.mfa_policy.v2":     false,
 		"okta.app_assignment.v1": false,
 		"okta.user_lifecycle.v1": false,
 	}
