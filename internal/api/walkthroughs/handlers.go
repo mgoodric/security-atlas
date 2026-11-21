@@ -408,9 +408,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		// queue saturated) map to a deterministic 503 instead of a 500/hang.
 		buf, err := walkthrough.RenderPDF(r.Context(), wt)
 		if err != nil {
-			if status, msg, ok := pdfDegradation(err); ok {
-				logPDFDegradation(r, err)
-				httpresp.WriteError(w, status, msg)
+			if writePDFDegradation(w, r, err) {
 				return
 			}
 			httperr.WriteInternal(w, r, "render PDF", err)

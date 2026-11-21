@@ -234,9 +234,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	// in a second WithTimeout here — the limiter owns the bounded deadline.
 	pdfBytes, err := board.RenderPDF(ctx, stored)
 	if err != nil {
-		if status, msg, ok := pdfDegradation(err); ok {
-			logPDFDegradation(r, "board-brief", err)
-			httpresp.WriteError(w, status, msg)
+		if writePDFDegradation(w, r, "board-brief", err) {
 			return
 		}
 		httperr.WriteInternal(w, r, "board", err)

@@ -528,11 +528,9 @@ func assertRealPDF(t *testing.T, resp *http.Response, raw []byte) {
 }
 
 // assertPDFOrServiceUnavailable enforces the slice-475 contract: the PDF
-// endpoint returns EITHER a real 200 %PDF- body OR a 503 graceful degradation
-// — and NEVER a 500 / hang / any other status. The 503 path is no longer
-// merely "acceptable when chrome is absent": it is the documented, exhaustive
-// non-200 outcome (chrome absent OR render deadline exceeded OR queue
-// saturated), so a third status here is a hard failure.
+// endpoint returns a real 200 %PDF- body, a 503 graceful degradation (render
+// deadline exceeded OR queue saturated), or a 409 feature_not_enabled when
+// chrome is absent (#2786) — and NEVER a 500 / hang / any other status.
 func assertPDFOrServiceUnavailable(t *testing.T, resp *http.Response, raw []byte) {
 	t.Helper()
 	switch resp.StatusCode {
@@ -546,8 +544,13 @@ func assertPDFOrServiceUnavailable(t *testing.T, resp *http.Response, raw []byte
 	case http.StatusServiceUnavailable:
 		// Graceful degradation — the handler 503s rather than 500ing or
 		// hanging (slice 475 AC-1).
+	case http.StatusConflict:
+		// Chrome absent: a refusal about the deployment (#2786).
+		if !bytes.Contains(raw, []byte(`"code":"feature_not_enabled"`)) {
+			t.Errorf("409 body lacks code feature_not_enabled; body=%q", raw)
+		}
 	default:
-		t.Fatalf("AC-1: GET /pdf = %d, want exactly 200 or 503; body=%q", resp.StatusCode, raw)
+		t.Fatalf("AC-1: GET /pdf = %d, want exactly 200, 409 or 503; body=%q", resp.StatusCode, raw)
 	}
 }
 
@@ -576,6 +579,9 @@ func TestPDF_RenderDeadlineDegradesTo503(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("AC-1: render-deadline path = %d, want 503 (never 500/hang); body=%q",
 			resp.StatusCode, raw)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("render-deadline 503 carries no Retry-After (#2786)")
 	}
 }
 
@@ -613,10 +619,7 @@ func TestPDF_QueueSaturationDegradesTo503(t *testing.T) {
 			defer wg.Done()
 			resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
 			statuses[idx] = resp.StatusCode
-			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
-				t.Errorf("AC-3: concurrent render %d = %d, want 200 or 503; body=%q",
-					idx, resp.StatusCode, raw)
-			}
+			assertPDFOrServiceUnavailable(t, resp, raw)
 		}(i)
 	}
 	wg.Wait()
