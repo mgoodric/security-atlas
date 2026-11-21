@@ -133,6 +133,10 @@ type FixtureRecord struct {
 	// the SQL + JSON-path query evaluators read. Decoded from YAML and
 	// re-marshalled to JSON bytes for the engine.
 	Payload map[string]any `yaml:"payload,omitempty" json:"payload,omitempty"`
+	// EvidenceKind is the record's evidence_kind. Optional: a query that
+	// declares a kind sees only records of it (#2818), and a record that
+	// omits it counts as whatever kind each query reads.
+	EvidenceKind string `yaml:"evidence_kind,omitempty" json:"evidence_kind,omitempty"`
 }
 
 // LoadTestCases reads every tests/*.yaml file beside a bundle's control.yaml
