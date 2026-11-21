@@ -3625,6 +3625,13 @@ type Querier interface {
 	// lock (LockAggregationKey) so the two locks are always acquired in the
 	// same order. Namespace 6 is advisorylock.RiskHierarchy (#2273).
 	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
+	// #2851 — before a sync run supersedes a page's synced row, lock it and
+	// report whether another row already names it as predecessor. FOR UPDATE
+	// conflicts with the KEY SHARE lock a concurrent in-tool create takes
+	// through the predecessor FK, so the answer cannot change before the run
+	// commits. A successor (an in-tool draft of the next version) would make
+	// the run's insert violate policies_predecessor_unique_when_set.
+	LockSyncedPolicyForSuccessor(ctx context.Context, arg LockSyncedPolicyForSuccessorParams) (LockSyncedPolicyForSuccessorRow, error)
 	// #2261: serialises every change that can remove a tenant's admin. It takes
 	// the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
 	// the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
@@ -3952,6 +3959,10 @@ type Querier interface {
 	// body hash the source holds now; sync_drift_detected_at keeps the time
 	// drift was first seen, so a page edited twice without a bump still shows
 	// how long it has been out of step.
+	//
+	// A run that sees the same drifted body again writes nothing: the
+	// IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+	// query returns no row, which the caller reads as "already recorded".
 	SetSyncedPolicyDrift(ctx context.Context, arg SetSyncedPolicyDriftParams) (Policy, error)
 	// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
 	// ledger (AC-2, decisions log D2). Called after recording a review when the

@@ -1354,6 +1354,42 @@ func (q *Queries) LockPolicySyncSource(ctx context.Context, arg LockPolicySyncSo
 	return err
 }
 
+const lockSyncedPolicyForSuccessor = `-- name: LockSyncedPolicyForSuccessor :one
+SELECT p.id,
+       s.id AS successor_id,
+       s.status AS successor_status
+FROM policies p
+LEFT JOIN policies s
+  ON s.tenant_id = p.tenant_id AND s.predecessor_id = p.id
+WHERE p.tenant_id = $1
+  AND p.id = $2
+FOR UPDATE OF p
+`
+
+type LockSyncedPolicyForSuccessorParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+type LockSyncedPolicyForSuccessorRow struct {
+	ID              pgtype.UUID `json:"id"`
+	SuccessorID     pgtype.UUID `json:"successor_id"`
+	SuccessorStatus *string     `json:"successor_status"`
+}
+
+// #2851 — before a sync run supersedes a page's synced row, lock it and
+// report whether another row already names it as predecessor. FOR UPDATE
+// conflicts with the KEY SHARE lock a concurrent in-tool create takes
+// through the predecessor FK, so the answer cannot change before the run
+// commits. A successor (an in-tool draft of the next version) would make
+// the run's insert violate policies_predecessor_unique_when_set.
+func (q *Queries) LockSyncedPolicyForSuccessor(ctx context.Context, arg LockSyncedPolicyForSuccessorParams) (LockSyncedPolicyForSuccessorRow, error) {
+	row := q.db.QueryRow(ctx, lockSyncedPolicyForSuccessor, arg.TenantID, arg.ID)
+	var i LockSyncedPolicyForSuccessorRow
+	err := row.Scan(&i.ID, &i.SuccessorID, &i.SuccessorStatus)
+	return i, err
+}
+
 const policyTitleVersionExists = `-- name: PolicyTitleVersionExists :one
 SELECT EXISTS (
     SELECT 1 FROM policies
@@ -1466,6 +1502,7 @@ WHERE tenant_id = $2
   AND id = $3
   AND source_attribution = 'synced'
   AND status = 'published'
+  AND sync_drift_body_sha256 IS DISTINCT FROM $1
 RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
 `
 
@@ -1479,6 +1516,10 @@ type SetSyncedPolicyDriftParams struct {
 // body hash the source holds now; sync_drift_detected_at keeps the time
 // drift was first seen, so a page edited twice without a bump still shows
 // how long it has been out of step.
+//
+// A run that sees the same drifted body again writes nothing: the
+// IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+// query returns no row, which the caller reads as "already recorded".
 func (q *Queries) SetSyncedPolicyDrift(ctx context.Context, arg SetSyncedPolicyDriftParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, setSyncedPolicyDrift, arg.SyncDriftBodySha256, arg.TenantID, arg.ID)
 	var i Policy

@@ -26,6 +26,12 @@ version, whether or not the body changed. The spec makes the version the
 signal. A bump with an identical body is a deliberate re-issue, for example
 to collect fresh acknowledgements.
 
+"Changed" means different, not greater. Versions are free text, so they are
+not ordered. A page moved back from 1.1 to 1.0 publishes a new version 1.0,
+chained to 1.1 and superseding it, and staff acknowledge again. The text in
+force changed, so the acknowledgements must follow it.
+`TestSync_VersionRevertIsANewVersion` pins this.
+
 ### D3 — the new version keeps the previous version's control links
 
 Control links belong to security-atlas, not to the page (spec: "Acknowledgements
@@ -76,6 +82,27 @@ Drift clears in two cases:
   `drift` result `drift_detected_at` and a reason telling the owner to bump or
   revert.
 
+### D9 — a bump is skipped while an in-tool draft holds the successor slot
+
+A row has at most one successor (`policies_predecessor_unique_when_set`).
+Until #2852 locks synced policies, an in-tool draft can be created as the
+next version of a synced row. A bump of that page would then violate the
+index, and because the violation aborts the transaction, the whole run would
+roll back with a 500. Instead, the run locks the synced row
+(`LockSyncedPolicyForSuccessor`, `SELECT … FOR UPDATE`) and checks for a
+successor before superseding it. `FOR UPDATE` conflicts with the `KEY SHARE`
+lock that a concurrent in-tool create takes through the predecessor FK, so
+the answer holds until the run commits. A page with a successor is reported
+`skipped`. The reason names the draft, and the run's other pages still sync.
+Once the draft is discarded, the next run publishes the bump.
+
+### D10 — a repeated drift writes nothing
+
+`SetSyncedPolicyDrift` updates only when `sync_drift_body_sha256 IS DISTINCT
+FROM` the new hash. A daily run against a page that stays drifted therefore
+does not touch the row or its `updated_at`. The page is still reported
+`drift` with its first detection time.
+
 ## Finding (not built here)
 
 Only the version and the body are compared. A page whose properties changed
@@ -83,4 +110,4 @@ without a bump (next review date, owner role, audience) while its body stayed
 the same is reported `unchanged`, and the synced row keeps the old values.
 Spec user story 16 ("a synced policy's review date follows the page's
 next-review property") therefore holds only when the version is bumped. No
-ticket under #2813 owns updating properties in place, so it needs a decision.
+ticket under #2813 owned updating properties in place; it is now #2877.

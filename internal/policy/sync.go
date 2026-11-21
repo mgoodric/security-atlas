@@ -129,6 +129,26 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			case err != nil:
 				return fmt.Errorf("sync: look up page %q: %w", p.PageID, err)
 			case cur.Version != p.In.Version:
+				// The chain is linear: a row has at most one successor. An
+				// in-tool draft of the next version already holding that
+				// slot skips this page instead of failing the run.
+				lock, err := q.LockSyncedPolicyForSuccessor(ctx, dbx.LockSyncedPolicyForSuccessorParams{
+					TenantID: pgUUID(tenantID), ID: cur.ID,
+				})
+				if err != nil {
+					return fmt.Errorf("sync: lock page %q: %w", p.PageID, err)
+				}
+				if lock.SuccessorID.Valid {
+					existing := policyFromRow(cur)
+					status := ""
+					if lock.SuccessorStatus != nil {
+						status = *lock.SuccessorStatus
+					}
+					res.Status, res.Policy = SyncStatusSkipped, &existing
+					res.Reason = fmt.Sprintf("version %q already has a next version in security-atlas (policy %s, %s); discard it before version %q can sync",
+						cur.Version, uuid.UUID(lock.SuccessorID.Bytes), status, p.In.Version)
+					break
+				}
 				written, err := syncNewVersion(ctx, q, tenantID, src, p, cur, hash, keyID)
 				if err != nil {
 					return err
@@ -148,10 +168,14 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 				// The body changed and the version did not: what staff
 				// acknowledged is not rewritten under them. The drift is
 				// recorded on the policy and nothing else is written.
+				// No row back means this drift is already recorded.
 				drifted, err := q.SetSyncedPolicyDrift(ctx, dbx.SetSyncedPolicyDriftParams{
 					TenantID: pgUUID(tenantID), ID: cur.ID, SyncDriftBodySha256: &hash,
 				})
-				if err != nil {
+				switch {
+				case errors.Is(err, pgx.ErrNoRows):
+					drifted = cur
+				case err != nil:
 					return fmt.Errorf("sync: record drift on page %q: %w", p.PageID, err)
 				}
 				existing := policyFromRow(drifted)
