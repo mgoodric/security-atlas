@@ -136,8 +136,14 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.ControlID = controlID
 		out.ControlTitle = ctrl.Title
 
+		// A period frozen before the routing cutover reads no control-free
+		// routed record (#2924).
+		kinds, err := routed.KindsForPeriod(ctx, q, period.FrozenAt)
+		if err != nil {
+			return err
+		}
 		total, err := q.CountEvidenceRecordsByControlBeforeHorizon(ctx, dbx.CountEvidenceRecordsByControlBeforeHorizonParams{
-			UnboundKinds: routed.ControlFreeKinds(),
+			UnboundKinds: kinds,
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -149,7 +155,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.TotalCount = int(total)
 
 		recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-			UnboundKinds: routed.ControlFreeKinds(),
+			UnboundKinds: kinds,
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -223,11 +229,15 @@ func (s *PeriodStore) ResolveBeforeHorizon(ctx context.Context, id, controlID uu
 		// in-population id beyond the excerpt bound still resolves — the grounding
 		// gate already capped what the model could see, this gate only confirms
 		// tenant + frozen-population membership.
+		kinds, err := routed.KindsForPeriod(ctx, q, horizon)
+		if err != nil {
+			return err
+		}
 		const pageSize = 500
 		offset := int32(0)
 		for {
 			recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-				UnboundKinds: routed.ControlFreeKinds(),
+				UnboundKinds: kinds,
 				TenantID:     pgUUID(tenantID),
 				ControlID:    pgUUID(controlID),
 				ControlRef:   controlID.String(),

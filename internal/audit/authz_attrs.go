@@ -93,8 +93,14 @@ func (s *Store) EvidencePeriods(ctx context.Context, id uuid.UUID) (out Evidence
 		if err != nil {
 			return err
 		}
+		// A control-free routed record is in no population drawn before the
+		// routing cutover (#2924), so those populations' periods don't hold it.
+		var routedKind string
+		if !rec.ControlID.Valid && rec.EvidenceKind != nil && routed.Kind(*rec.EvidenceKind) {
+			routedKind = *rec.EvidenceKind
+		}
 		for _, c := range controls {
-			periods, err := periodsCovering(ctx, q, tenantID, c, &at, &at, out.ScopeCellID)
+			periods, err := periodsCovering(ctx, q, tenantID, c, &at, &at, out.ScopeCellID, routedKind)
 			if err != nil {
 				return err
 			}
@@ -143,7 +149,7 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 	var out []uuid.UUID
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var err error
-		out, err = periodsCovering(ctx, q, tenantID, controlID, &since, &until, nil)
+		out, err = periodsCovering(ctx, q, tenantID, controlID, &since, &until, nil, "")
 		return err
 	})
 	return out, err
@@ -153,15 +159,24 @@ func (s *Store) ControlPeriods(ctx context.Context, controlID uuid.UUID, since, 
 // controlID that cover ([since, until], cellID): both bounds inside the
 // population's window and freeze horizon. A record passes its observed_at
 // as both. A nil cellID is covered only by a match-every-cell predicate.
+// routedKind is the kind of a control-free routed record, or "": a
+// population pinned before the routing cutover never draws such a record,
+// so it covers nothing for it (#2924).
 func periodsCovering(
 	ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID,
-	since, until *time.Time, cellID *uuid.UUID,
+	since, until *time.Time, cellID *uuid.UUID, routedKind string,
 ) ([]uuid.UUID, error) {
 	pops, err := q.ListPeriodPopulationsForControl(ctx, dbx.ListPeriodPopulationsForControlParams{
 		TenantID: pgUUID(tenantID), ControlID: pgUUID(controlID),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list period populations: %w", err)
+	}
+	var cutover time.Time
+	if routedKind != "" && len(pops) > 0 {
+		if cutover, err = routed.Cutover(ctx, q); err != nil {
+			return nil, err
+		}
 	}
 	var universe []scope.Cell
 	loaded := false
@@ -170,6 +185,9 @@ func periodsCovering(
 	for _, pop := range pops {
 		period, ok := uuidFromPG(pop.AuditPeriodID)
 		if !ok || seen[period] || !populationWindowCovers(pop, since) || !populationWindowCovers(pop, until) {
+			continue
+		}
+		if routedKind != "" && !slices.Contains(routed.PopulationKindsAt(cutover, pop), routedKind) {
 			continue
 		}
 		if !isTrivialPredicate(pop.ScopePredicate) {

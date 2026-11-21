@@ -77,16 +77,70 @@ routed AND kind = the query's kind`) is the #2817 rule exactly. Reusing it
   reader.
 - **Chosen:** (A), by Matt through the dispatcher on 2026-11-21. It needs no
   code: those rows match the rule.
-- **Consequence:** results that are recomputed, replayed or read as-of over
-  those rows' dates, and populations drawn from now on over those dates, can
-  change from inconclusive to pass or fail (cc8_1, cc6_1, cc6_6, cc4_1 on
-  default connector flags). A population still draws only `observed_at <=
-frozen_at`. Persisted results don't change: stored `control_evaluations`
-  rows and drawn samples (`sample_evidence`) are snapshots.
+- **Consequence:** live results that are recomputed, replayed or read as-of
+  over those rows' dates can change from inconclusive to pass or fail (cc8_1,
+  cc6_1, cc6_6, cc4_1 on default connector flags). So can draws from
+  populations created after the routing cutover, and reads of periods frozen
+  after it. Persisted results don't change: stored `control_evaluations` rows
+  and drawn samples (`sample_evidence`) are snapshots. Periods frozen and
+  populations created before the cutover are pinned (D6).
 - **Rationale:** the rows are genuine tenant connector evidence. They passed
   the scope and credential checks at push and are read under RLS. Only the
   routing was wrong. (B) adds a predicate to about 12 reader queries to hide
   real evidence.
+
+## D6 — Periods frozen and populations created before the cutover are pinned (Matt, 2026-11-21, review of PR #2927)
+
+- **Requirement:** an audit period frozen before this change keeps its state,
+  and a population created before it re-draws the same `row_count` and the
+  same same-seed sample (invariant 10).
+- **Cutover:** migration `20261290000000` records its apply time in a
+  one-row global table, `evidence_routing_cutover.cut_at` (`now()` of the
+  migration transaction). Reads compare against that recorded instant, never
+  against the wall clock at read time. A missing row is an error, so a pinned
+  read never silently widens.
+- **Anchors:**
+  - A period anchors on its `frozen_at`. The only freeze path
+    (`internal/api/auditperiods`) stamps `frozen_at = now()`, so this is the
+    freeze instant. An open period is unanchored and reads live.
+  - A population anchors on the earlier of its `created_at` and its
+    `frozen_at`. The second case is a population created after the cutover
+    and attached to a period frozen before it: it stays consistent with that
+    period.
+- **Mechanism:** a pinned read binds only the owned kinds
+  (`unbound.Kinds()`) as `unbound_kinds` instead of owned plus routed
+  (`routed.KindsAsOf`). That is exactly the parameter every reader had before
+  this change, so a pinned read is the pre-change read. Records bound to the
+  control by UUID or bundle id are unaffected, because they match on
+  `control_id`.
+- **Readers pinned:**
+  - the period's `ControlState`;
+  - the period evidence set: its count and list, and the frozen-horizon
+    citation resolver;
+  - population re-draws (`DrawSample`);
+  - the auditor attribute lookup (`EvidencePeriods`), which no longer
+    places a control-free routed record in a pinned population's period.
+  - A population created now (`CreatePopulation`) is after the cutover by
+    definition, so it reads routed records.
+- **Evidence:** `TestRouted2924_PeriodsAndPopulationsPinnedBeforeCutover`.
+  With the pin disabled (`KindsAsOf` always returning owned plus routed) it
+  fails on every pinned read:
+
+  ```
+  old period state = [a8de4e1a-… d02894d7-…], want unchanged [a8de4e1a-…]
+  old period evidence-set total = 2, want 1
+  old period resolves routed row as citable: ok=true err=<nil>, want false
+  old population re-draw = [a8de4e1a-… d02894d7-…], want the original [a8de4e1a-…]
+  old population re-draw size = 2, want row_count 1
+  routed row's periods = [2c51dee7-… b8bd7710-…], want only [2c51dee7-…] (not the pinned b8bd7710-…)
+  ```
+
+  With the pin it passes, and the period frozen and population created after
+  the cutover see the routed row (row_count 2, state of both records).
+
+- **Constraint lock:** the relaxed CHECK is added `NOT VALID` and then
+  validated, so the scan runs under SHARE UPDATE EXCLUSIVE, not ACCESS
+  EXCLUSIVE.
 
 ## Not changed
 

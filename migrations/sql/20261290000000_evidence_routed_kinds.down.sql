@@ -19,4 +19,9 @@ $$;
 ALTER TABLE evidence_records
     DROP CONSTRAINT evidence_records_control_ref_nonempty,
     ADD CONSTRAINT evidence_records_control_ref_nonempty
-        CHECK (length(control_ref) > 0);
+        CHECK (length(control_ref) > 0) NOT VALID;
+
+ALTER TABLE evidence_records
+    VALIDATE CONSTRAINT evidence_records_control_ref_nonempty;
+
+DROP TABLE IF EXISTS evidence_routing_cutover;

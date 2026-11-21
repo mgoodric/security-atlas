@@ -952,6 +952,10 @@ type Querier interface {
 	// (tenant_id, idempotency_key)?". Returns at most one row because the
 	// partial UNIQUE index `evidence_records_tenant_idem_uniq` enforces it.
 	GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvidenceRecordByIdempotencyParams) (EvidenceRecord, error)
+	// #2924: the instant migration 20261290000000 applied. An audit period frozen,
+	// or a population created or frozen, before it reads no control-free record
+	// of a routed kind (internal/evidence/routed.KindsAsOf).
+	GetEvidenceRoutingCutover(ctx context.Context) (pgtype.Timestamptz, error)
 	GetExceptionByID(ctx context.Context, arg GetExceptionByIDParams) (Exception, error)
 	// #2618: the exception a key created, while the key is inside its window.
 	GetExceptionIdempotencyKey(ctx context.Context, arg GetExceptionIdempotencyKeyParams) (GetExceptionIdempotencyKeyRow, error)

@@ -5,9 +5,12 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"gopkg.in/yaml.v3"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 )
 
@@ -64,6 +67,46 @@ func TestKindsReturnsACopy(t *testing.T) {
 	c[0] = "widened"
 	if slices.Contains(ControlFreeKinds(), "widened") {
 		t.Fatal("mutating the result of ControlFreeKinds() changed the list")
+	}
+}
+
+func TestKindsAsOfPinsReadsAnchoredBeforeCutover(t *testing.T) {
+	t.Parallel()
+	cut := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		anchor time.Time
+		want   []string
+	}{
+		{"unanchored (open period, live read)", time.Time{}, ControlFreeKinds()},
+		{"before the cutover", cut.Add(-time.Nanosecond), unbound.Kinds()},
+		{"at the cutover", cut, ControlFreeKinds()},
+		{"after the cutover", cut.Add(time.Hour), ControlFreeKinds()},
+	} {
+		if got := KindsAsOf(cut, tc.anchor); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: KindsAsOf = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPopulationKindsAtAnchorsOnTheEarlierOfCreatedAndFrozen(t *testing.T) {
+	t.Parallel()
+	cut := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
+	for _, tc := range []struct {
+		name string
+		pop  dbx.Population
+		want []string
+	}{
+		{"created before, never frozen", dbx.Population{CreatedAt: ts(cut.Add(-time.Hour))}, unbound.Kinds()},
+		{"created after, never frozen", dbx.Population{CreatedAt: ts(cut.Add(time.Hour))}, ControlFreeKinds()},
+		{"created after, frozen before (attached to an old period)",
+			dbx.Population{CreatedAt: ts(cut.Add(time.Hour)), FrozenAt: ts(cut.Add(-time.Hour))}, unbound.Kinds()},
+		{"created after, frozen after", dbx.Population{CreatedAt: ts(cut.Add(time.Hour)), FrozenAt: ts(cut.Add(2 * time.Hour))}, ControlFreeKinds()},
+	} {
+		if got := PopulationKindsAt(cut, tc.pop); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: PopulationKindsAt = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

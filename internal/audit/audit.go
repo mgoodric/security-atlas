@@ -500,8 +500,14 @@ func resolvePopulationEvidenceIDs(
 func resolvePopulationEvidenceIDsFromRow(
 	ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, pop dbx.Population,
 ) ([]uuid.UUID, error) {
+	// A population created or frozen before the routing cutover draws from
+	// exactly the records it drew from before (#2924).
+	kinds, err := routed.KindsForPopulation(ctx, q, pop)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := q.ListPopulationEvidenceIDs(ctx, dbx.ListPopulationEvidenceIDsParams{
-		UnboundKinds: routed.ControlFreeKinds(),
+		UnboundKinds: kinds,
 		TenantID:     pop.TenantID,
 		ControlID:    pop.ControlID,
 		ObservedAt:   pop.TimeWindowStart,
