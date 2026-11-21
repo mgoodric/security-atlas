@@ -1967,7 +1967,13 @@ jobs:
           done
       - name: Run Playwright tests
         working-directory: web
-        run: npx playwright test
+        # TEMPORARY (#2793 proof, reverted before merge).
+        run: |
+          set -x
+          npx playwright test e2e/risk-hierarchy.spec.ts -g "responsive" --repeat-each=50 --retries=0 --reporter=list
+          npx playwright test e2e/activity-midnight-repro.spec.ts --retries=0 --reporter=list
+          node -r ./e2e/_proof-runner-clock.cjs -e 'console.log("runner clock:", new Date().toISOString())'
+          NODE_OPTIONS="--require $PWD/e2e/_proof-runner-clock.cjs" npx playwright test e2e/activity.spec.ts --retries=0 --reporter=list
       # #2080 — the route sweep's axe findings (serious + critical) are
       # REPORTED, not enforced: one JSON per route, uploaded on every run
       # whether or not the suite passed.
