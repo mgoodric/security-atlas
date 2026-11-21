@@ -39,18 +39,23 @@ RETURNING *;
 -- back in one fixed order (#2111: the latest attestation wins, and equal
 -- timestamps must not make that choice depend on the plan).
 -- unbound_kinds (#2817) adds the tenant's records of those kinds that are
--- bound to no control: a policy acknowledgement names a policy, never a
--- control, and is evidence for every control whose queries read its kind.
--- A record of such a kind that IS bound reaches only its own control.
+-- bound to no control, when the control's evidence_queries declare the kind:
+-- a policy acknowledgement names a policy, never a control. A record of such
+-- a kind that IS bound reaches only its own control. internal/evidence/unbound
+-- owns the list; every ledger reader below applies the same rule.
 -- This is a pure SELECT — the engine never mutates the ledger.
 SELECT id, tenant_id, control_id, control_ref, scope_id,
        observed_at, result, freshness_class, hash, payload,
        evidence_kind, ingested_at
 FROM evidence_records
-WHERE tenant_id = sqlc.arg(tenant_id)
+WHERE evidence_records.tenant_id = sqlc.arg(tenant_id)
   AND (control_id = sqlc.arg(control_id) OR control_ref = sqlc.arg(control_ref)
        OR (control_id IS NULL
-           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])))
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = sqlc.arg(control_id)
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= sqlc.arg(observed_at)
 ORDER BY observed_at DESC, ingested_at DESC, id DESC;
 

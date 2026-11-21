@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -102,14 +103,14 @@ func (s *Store) loadControl(ctx context.Context, q *dbx.Queries, tenantID, contr
 // point-in-time horizon `asOf`. Pure SELECT — the engine never mutates the
 // ledger. `controlRef` is the free-form string form (slice 013 control_ref)
 // so a control whose evidence was pushed under an SCF anchor string is also
-// found. unboundKinds adds the tenant's records of those kinds that are
-// bound to no control (#2817, UnboundEvidenceKinds).
-func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID, controlRef string, unboundKinds []string, asOf time.Time) ([]allRecord, error) {
+// found, and so are the tenant's unbound records of the kinds the control's
+// queries declare (#2817, internal/evidence/unbound).
+func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID, controlRef string, asOf time.Time) ([]allRecord, error) {
 	rows, err := q.ListEvidenceForControlAsOf(ctx, dbx.ListEvidenceForControlAsOfParams{
 		TenantID:     pgUUID(tenantID),
 		ControlID:    pgUUID(controlID),
 		ControlRef:   controlRef,
-		UnboundKinds: unboundKinds,
+		UnboundKinds: unbound.Kinds(),
 		ObservedAt:   pgTimestamptz(asOf),
 	})
 	if err != nil {

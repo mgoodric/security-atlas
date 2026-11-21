@@ -14,14 +14,21 @@ import (
 const countEvidenceRecordsByControl = `-- name: CountEvidenceRecordsByControl :one
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($4::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
 `
 
 type CountEvidenceRecordsByControlParams struct {
-	TenantID   pgtype.UUID `json:"tenant_id"`
-	ControlID  pgtype.UUID `json:"control_id"`
-	ControlRef string      `json:"control_ref"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ControlID    pgtype.UUID `json:"control_id"`
+	ControlRef   string      `json:"control_ref"`
+	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
 // Slice 502: total CURRENT LIVE evidence count for one control, used by the
@@ -29,7 +36,12 @@ type CountEvidenceRecordsByControlParams struct {
 // over the bounded top-N, never the full history — P0-502-8). Resolution
 // mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
 func (q *Queries) CountEvidenceRecordsByControl(ctx context.Context, arg CountEvidenceRecordsByControlParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countEvidenceRecordsByControl, arg.TenantID, arg.ControlID, arg.ControlRef)
+	row := q.db.QueryRow(ctx, countEvidenceRecordsByControl,
+		arg.TenantID,
+		arg.ControlID,
+		arg.ControlRef,
+		arg.UnboundKinds,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -38,17 +50,24 @@ func (q *Queries) CountEvidenceRecordsByControl(ctx context.Context, arg CountEv
 const countEvidenceRecordsByControlBeforeHorizon = `-- name: CountEvidenceRecordsByControlBeforeHorizon :one
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= COALESCE($4::timestamptz,
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($4::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND observed_at <= COALESCE($5::timestamptz,
                               'infinity'::timestamptz)
 `
 
 type CountEvidenceRecordsByControlBeforeHorizonParams struct {
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	ControlID  pgtype.UUID        `json:"control_id"`
-	ControlRef string             `json:"control_ref"`
-	FrozenAt   pgtype.Timestamptz `json:"frozen_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	UnboundKinds []string           `json:"unbound_kinds"`
+	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
 }
 
 // Slice 749: total FROZEN-population evidence count for one control bounded by
@@ -61,6 +80,7 @@ func (q *Queries) CountEvidenceRecordsByControlBeforeHorizon(ctx context.Context
 		arg.TenantID,
 		arg.ControlID,
 		arg.ControlRef,
+		arg.UnboundKinds,
 		arg.FrozenAt,
 	)
 	var count int64
@@ -485,20 +505,30 @@ func (q *Queries) ListEvidenceAuditEntriesByCredential(ctx context.Context, arg 
 const listEvidenceRecordsByControl = `-- name: ListEvidenceRecordsByControl :many
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($6::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5
 `
 
 type ListEvidenceRecordsByControlParams struct {
-	TenantID   pgtype.UUID `json:"tenant_id"`
-	ControlID  pgtype.UUID `json:"control_id"`
-	ControlRef string      `json:"control_ref"`
-	Limit      int32       `json:"limit"`
-	Offset     int32       `json:"offset"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ControlID    pgtype.UUID `json:"control_id"`
+	ControlRef   string      `json:"control_ref"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
+// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+// the control's evidence_queries declare (internal/evidence/unbound).
+// The same leg is on the three by-control readers below.
 // Replay-friendly read for evaluation (slice 012+). Append-only ordering
 // on observed_at lets the evaluator stream historical state without
 // worrying about UPDATEs since slice 002.
@@ -509,6 +539,7 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 		arg.ControlRef,
 		arg.Limit,
 		arg.Offset,
+		arg.UnboundKinds,
 	)
 	if err != nil {
 		return nil, err
@@ -556,21 +587,28 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 const listEvidenceRecordsByControlBeforeHorizon = `-- name: ListEvidenceRecordsByControlBeforeHorizon :many
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
-  AND observed_at <= COALESCE($6::timestamptz,
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY($6::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
+  AND observed_at <= COALESCE($7::timestamptz,
                               'infinity'::timestamptz)
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5
 `
 
 type ListEvidenceRecordsByControlBeforeHorizonParams struct {
-	TenantID   pgtype.UUID        `json:"tenant_id"`
-	ControlID  pgtype.UUID        `json:"control_id"`
-	ControlRef string             `json:"control_ref"`
-	Limit      int32              `json:"limit"`
-	Offset     int32              `json:"offset"`
-	FrozenAt   pgtype.Timestamptz `json:"frozen_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	ControlRef   string             `json:"control_ref"`
+	Limit        int32              `json:"limit"`
+	Offset       int32              `json:"offset"`
+	UnboundKinds []string           `json:"unbound_kinds"`
+	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
 }
 
 // Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
@@ -592,6 +630,7 @@ func (q *Queries) ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context,
 		arg.ControlRef,
 		arg.Limit,
 		arg.Offset,
+		arg.UnboundKinds,
 		arg.FrozenAt,
 	)
 	if err != nil {
