@@ -90,6 +90,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"evidence/export.go evidenceHasProgramRead":       site(apr, r2447(get, "/v1/admin/evidence/export")),
 		"exceptions/export.go exceptionsHasProgramRead":   site(apr, r2447(get, "/v1/admin/exceptions/export")),
 		"policies/export.go policiesHasProgramRead":       site(apr, r2447(get, "/v1/admin/policies/export")),
+		"policies/import.go Handler.ImportPolicies":       site(adm, r2447(post, "/v1/admin/policies/import")),
 		"oscalcomponents/handler.go hasOscalRead": site(apr,
 			r2447(get, "/v1/oscal/component-definitions"),
 			r2447(get, "/v1/oscal/component-definitions/"+id)),
