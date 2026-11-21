@@ -31,15 +31,17 @@ type AuditWriter interface {
 }
 
 // CreatedState is a new risk's initial record as its `created` row holds
-// it: title, category, treatment and owner, keyed by wire name. An unset
-// owner is null, and treatment_owner is the free-text owner a risk without
-// an owner_user_id may carry.
+// it: title, category, treatment, owner and organisation risk ID, keyed by
+// wire name. An unset owner or ID is null, and treatment_owner is the
+// free-text owner a risk without an owner_user_id may carry.
 type CreatedState struct {
 	Title          string
 	CategoryID     uuid.UUID
 	Treatment      dbx.RiskTreatment
 	OwnerUserID    *uuid.UUID
 	TreatmentOwner string
+	// ExternalRef is the organisation risk ID set at creation (#2838).
+	ExternalRef *string
 }
 
 func (c CreatedState) after() map[string]any {
@@ -49,6 +51,7 @@ func (c CreatedState) after() map[string]any {
 		"treatment":       c.Treatment,
 		"owner_user_id":   userIDValue(c.OwnerUserID),
 		"treatment_owner": c.TreatmentOwner,
+		"external_ref":    refValue(c.ExternalRef),
 	}
 }
 
@@ -67,6 +70,7 @@ func createdStateOf(r Risk) CreatedState {
 		Treatment:      r.Treatment,
 		OwnerUserID:    r.OwnerUserID,
 		TreatmentOwner: r.TreatmentOwner,
+		ExternalRef:    r.ExternalRef,
 	}
 }
 

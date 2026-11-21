@@ -42,6 +42,7 @@ const FIELD_LABELS: Record<string, string> = {
   owner_user_id: "Owner",
   review_due_at: "Review due",
   instrument_reference: "Instrument reference",
+  external_ref: "Risk ID",
   category: "Category",
   level: "Level",
   org_unit_id: "Org unit",
