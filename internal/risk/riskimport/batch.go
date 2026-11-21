@@ -2,6 +2,7 @@ package riskimport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -58,8 +59,13 @@ type BatchRow struct {
 	// Category is the slug of the tenant category the row's value matched.
 	Category string `json:"category"`
 	// ReviewDue is a YYYY-MM-DD date, empty when unset.
-	ReviewDue string            `json:"review_due,omitempty"`
-	Unmapped  map[string]string `json:"unmapped"`
+	ReviewDue string `json:"review_due,omitempty"`
+	// InherentScore and ResidualScore are in the batch methodology's
+	// shape; absent is unscored, and an absent residual takes the create
+	// path's default.
+	InherentScore json.RawMessage   `json:"inherent_score,omitempty"`
+	ResidualScore json.RawMessage   `json:"residual_score,omitempty"`
+	Unmapped      map[string]string `json:"unmapped"`
 	// Flags are the row's review flags (Flag*), empty when none.
 	Flags     []string `json:"flags"`
 	Status    string   `json:"status"`
@@ -73,9 +79,12 @@ type BatchRow struct {
 // Batch is one upload. Every non-blank data row of the file is in exactly
 // one of Staged or Rejected, so TotalRows == StagedCount + RejectedCount.
 type Batch struct {
-	ID              string        `json:"id"`
-	SourceFilename  string        `json:"source_filename"`
-	SourceFormat    string        `json:"source_format"`
+	ID             string `json:"id"`
+	SourceFilename string `json:"source_filename"`
+	SourceFormat   string `json:"source_format"`
+	// Methodology is the one scoring methodology every risk of the batch
+	// is created with (#2841).
+	Methodology     string        `json:"methodology"`
 	UploadedBy      string        `json:"uploaded_by"`
 	Status          string        `json:"status"`
 	TotalRows       int           `json:"total_rows"`
@@ -89,10 +98,12 @@ type Batch struct {
 
 // StageInput is one upload to stage.
 type StageInput struct {
-	Filename   string
-	Raw        []byte
-	ColumnMap  map[string]string
-	UploadedBy string
+	Filename  string
+	Raw       []byte
+	ColumnMap map[string]string
+	// Methodology is the batch's; empty is the platform default.
+	Methodology string
+	UploadedBy  string
 }
 
 // Stage parses the upload, matches each row's category to one of the
@@ -105,7 +116,11 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if len(in.Raw) > MaxUploadBytes {
 		return Batch{}, ErrUploadTooLarge
 	}
-	parsed, err := Parse(in.Filename, in.Raw, ParseOptions{ColumnMap: in.ColumnMap})
+	methodology, err := ResolveMethodology(in.Methodology)
+	if err != nil {
+		return Batch{}, err
+	}
+	parsed, err := Parse(in.Filename, in.Raw, ParseOptions{ColumnMap: in.ColumnMap, Methodology: methodology})
 	if err != nil {
 		return Batch{}, err
 	}
@@ -116,6 +131,7 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	b := Batch{
 		SourceFilename:  in.Filename,
 		SourceFormat:    FormatOf(in.Filename),
+		Methodology:     string(parsed.Methodology),
 		UploadedBy:      in.UploadedBy,
 		Status:          BatchStatusStaged,
 		UnmappedColumns: parsed.UnmappedColumns,
@@ -133,13 +149,15 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 			continue
 		}
 		row := BatchRow{
-			RowNumber:   r.RowNumber,
-			ExternalRef: r.ExternalRef,
-			Title:       r.Title,
-			Description: r.Description,
-			Category:    slug,
-			Unmapped:    r.Unmapped,
-			Status:      RowStatusPending,
+			RowNumber:     r.RowNumber,
+			ExternalRef:   r.ExternalRef,
+			Title:         r.Title,
+			Description:   r.Description,
+			Category:      slug,
+			InherentScore: r.InherentScore,
+			ResidualScore: r.ResidualScore,
+			Unmapped:      r.Unmapped,
+			Status:        RowStatusPending,
 		}
 		if r.ReviewDue != nil {
 			row.ReviewDue = r.ReviewDue.Format(time.DateOnly)

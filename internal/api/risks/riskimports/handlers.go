@@ -16,8 +16,10 @@
 //
 // The upload's multipart fields:
 //
-//	file        the CSV or XLSX risk register (required)
-//	column_map  optional, repeatable "field=Header" overrides of header detection
+//	file         the CSV or XLSX risk register (required)
+//	methodology  optional, the batch's one scoring methodology: nist_800_30
+//	             (the default), qualitative_5x5 or fair (#2841)
+//	column_map   optional, repeatable "field=Header" overrides of header detection
 //
 // Upload is a write on risks at the authz layer, which admin and
 // grc_engineer hold. Approve and reject also require a tenant approver who
@@ -109,11 +111,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	methodology := r.MultipartForm.Value["methodology"]
+	if len(methodology) > 1 {
+		httpresp.WriteError(w, http.StatusBadRequest, "methodology is given more than once; a batch has one methodology")
+		return
+	}
 	batch, err := h.store.Stage(ctx, riskimport.StageInput{
-		Filename:   header.Filename,
-		Raw:        raw,
-		ColumnMap:  columnMap,
-		UploadedBy: credstore.PrincipalOf(cred),
+		Filename:    header.Filename,
+		Raw:         raw,
+		ColumnMap:   columnMap,
+		Methodology: strings.Join(methodology, ""),
+		UploadedBy:  credstore.PrincipalOf(cred),
 	})
 	if err != nil {
 		writeStageError(w, r, err)
@@ -254,6 +262,7 @@ func writeStageError(w http.ResponseWriter, r *http.Request, err error) {
 		errors.Is(err, riskimport.ErrEmptyFile),
 		errors.Is(err, riskimport.ErrNoHeaderRow),
 		errors.Is(err, riskimport.ErrInvalidColumnMap),
+		errors.Is(err, riskimport.ErrInvalidMethodology),
 		errors.Is(err, riskimport.ErrMappedColumnAbsent):
 		httpresp.WriteError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "riskimport: "))
 	default:
