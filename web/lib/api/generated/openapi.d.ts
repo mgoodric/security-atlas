@@ -4504,6 +4504,23 @@ export interface paths {
         patch: operations["patch-v1-policies-id-submit"];
         trace?: never;
     };
+    "/v1/policies:sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, with a per-page report (created, unchanged, skipped with reason) (#2850) */
+        post: operations["post-v1-policies_sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/populations": {
         parameters: {
             query?: never;
@@ -12687,6 +12704,26 @@ export interface operations {
             path: {
                 id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-policies_sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

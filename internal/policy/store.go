@@ -72,6 +72,10 @@ const (
 	// SourceImported marks a policy brought in by Import with its
 	// historical lifecycle (#1747). Never accepted on Create.
 	SourceImported = "imported"
+	// SourceSynced marks a policy written by a policy sync run (#2850): the
+	// published copy of a page in an external system of record. Never
+	// accepted on Create.
+	SourceSynced = "synced"
 )
 
 // WarningOrphanPolicy is the literal warning code surfaced in API responses

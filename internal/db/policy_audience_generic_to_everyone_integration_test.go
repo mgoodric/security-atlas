@@ -39,6 +39,22 @@ func TestPolicyAudienceGenericToEveryoneMigration(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Re-applying this migration narrows the policy_audit_log action CHECK
+	// to the actions it lists, so rows other tests wrote with a later action
+	// ('synced', #2850) would block it (the #2865 pattern). Clear them inside
+	// this rolled-back transaction; the log is append-only, so its trigger
+	// is lifted for the delete.
+	for _, q := range []string{
+		`ALTER TABLE policy_audit_log DISABLE TRIGGER policy_audit_log_no_update_trg`,
+		`DELETE FROM policy_audit_log WHERE action NOT IN ('imported', 'review_date_updated', 'draft_discarded',
+			'self_approved', 'submitted', 'resubmitted', 'approved', 'draft_edited', 'audience_mapped')`,
+		`ALTER TABLE policy_audit_log ENABLE TRIGGER policy_audit_log_no_update_trg`,
+	} {
+		if _, err := tx.Exec(ctx, q); err != nil {
+			t.Fatalf("clear rows the migration's CHECK refuses: %s: %v", q, err)
+		}
+	}
+
 	tenant := uuid.New()
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, $2, false)`,

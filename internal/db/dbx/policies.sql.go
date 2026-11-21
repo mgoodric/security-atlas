@@ -21,7 +21,7 @@ SET status = 'approved',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'under_review'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type ApprovePolicyParams struct {
@@ -74,6 +74,12 @@ func (q *Queries) ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (P
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -119,7 +125,7 @@ VALUES (
     $9, $10,
     'draft', $11, $12, COALESCE($13::text[], '{}')
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type CreatePolicyParams struct {
@@ -202,6 +208,12 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Pol
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -211,7 +223,7 @@ DELETE FROM policies
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type DeleteDraftPolicyParams struct {
@@ -259,12 +271,18 @@ func (q *Queries) DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyPa
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
 
 const getPolicyByID = `-- name: GetPolicyByID :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 FROM policies
 WHERE tenant_id = $1 AND id = $2
 `
@@ -309,6 +327,82 @@ func (q *Queries) GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (P
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+	)
+	return i, err
+}
+
+const getSyncedPolicyByPage = `-- name: GetSyncedPolicyByPage :one
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND sync_page_id = $4
+`
+
+type GetSyncedPolicyByPageParams struct {
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	SyncSite   *string     `json:"sync_site"`
+	SyncSpace  *string     `json:"sync_space"`
+	SyncPageID *string     `json:"sync_page_id"`
+}
+
+// #2850 — the published synced row for one page of one sync source, if
+// any. idx_policies_synced_page makes it unique.
+func (q *Queries) GetSyncedPolicyByPage(ctx context.Context, arg GetSyncedPolicyByPageParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, getSyncedPolicyByPage,
+		arg.TenantID,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.SyncPageID,
+	)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -334,7 +428,7 @@ VALUES (
     $13, $14, $15,
     $12, now()
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type ImportPublishedPolicyParams struct {
@@ -411,6 +505,12 @@ func (q *Queries) ImportPublishedPolicy(ctx context.Context, arg ImportPublished
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -501,8 +601,124 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 	return i, err
 }
 
+const insertSyncedPolicy = `-- name: InsertSyncedPolicy :one
+INSERT INTO policies (
+    id, tenant_id, predecessor_id,
+    title, version, body_md,
+    owner_role, approver_role,
+    linked_control_ids, acknowledgment_required_roles,
+    status, effective_date, next_review_at, source_attribution,
+    created_by, published_at, published_by,
+    historical_approver_name, historical_approved_at, source_url,
+    sync_site, sync_space, sync_page_id, synced_body_sha256,
+    synced_by, synced_at
+)
+VALUES (
+    $1, $2, NULL,
+    $3, $4, $5,
+    $6, $7,
+    '{}', $8,
+    'published', $9, $10, 'synced',
+    $11, now(), $11,
+    $12, $13, $14,
+    $15, $16, $17, $18,
+    $11, now()
+)
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
+`
+
+type InsertSyncedPolicyParams struct {
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Title                       string             `json:"title"`
+	Version                     string             `json:"version"`
+	BodyMd                      string             `json:"body_md"`
+	OwnerRole                   string             `json:"owner_role"`
+	ApproverRole                string             `json:"approver_role"`
+	AcknowledgmentRequiredRoles []string           `json:"acknowledgment_required_roles"`
+	EffectiveDate               pgtype.Date        `json:"effective_date"`
+	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	SyncedBy                    string             `json:"synced_by"`
+	HistoricalApproverName      *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt        pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                   *string            `json:"source_url"`
+	SyncSite                    *string            `json:"sync_site"`
+	SyncSpace                   *string            `json:"sync_space"`
+	SyncPageID                  *string            `json:"sync_page_id"`
+	SyncedBodySha256            *string            `json:"synced_body_sha256"`
+}
+
+// #2850 — insert a page's first sync directly as 'published'. As with
+// ImportPublishedPolicy, the in-tool submit/approve/publish transitions do
+// not apply: the source's approval, kept in historical_approver_name and
+// historical_approved_at, is the approval. approved_by stays NULL.
+// created_by, published_by and synced_by are the policy-sync key's id.
+func (q *Queries) InsertSyncedPolicy(ctx context.Context, arg InsertSyncedPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, insertSyncedPolicy,
+		arg.ID,
+		arg.TenantID,
+		arg.Title,
+		arg.Version,
+		arg.BodyMd,
+		arg.OwnerRole,
+		arg.ApproverRole,
+		arg.AcknowledgmentRequiredRoles,
+		arg.EffectiveDate,
+		arg.NextReviewAt,
+		arg.SyncedBy,
+		arg.HistoricalApproverName,
+		arg.HistoricalApprovedAt,
+		arg.SourceUrl,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.SyncPageID,
+		arg.SyncedBodySha256,
+	)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+	)
+	return i, err
+}
+
 const listPolicies = `-- name: ListPolicies :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 FROM policies
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -551,6 +767,12 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 			&i.ImportedAt,
 			&i.SelfApproved,
 			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -563,7 +785,7 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 }
 
 const listPoliciesUnderReview = `-- name: ListPoliciesUnderReview :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 FROM policies
 WHERE tenant_id = $1
   AND status = 'under_review'
@@ -613,6 +835,12 @@ func (q *Queries) ListPoliciesUnderReview(ctx context.Context, tenantID pgtype.U
 			&i.ImportedAt,
 			&i.SelfApproved,
 			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -880,18 +1108,18 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 const listPolicyVersionChain = `-- name: ListPolicyVersionChain :many
 WITH RECURSIVE chain AS (
     -- Anchor: the policy itself.
-    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
     FROM policies p0
     WHERE p0.tenant_id = $1 AND p0.id = $2
 
     UNION ALL
 
     -- Walk forward: any row whose predecessor_id is the current chain tip.
-    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at, p.historical_approver_name, p.historical_approved_at, p.source_url, p.imported_by, p.imported_at, p.self_approved, p.draft_editors
+    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at, p.historical_approver_name, p.historical_approved_at, p.source_url, p.imported_by, p.imported_at, p.self_approved, p.draft_editors, p.sync_site, p.sync_space, p.sync_page_id, p.synced_body_sha256, p.synced_by, p.synced_at
     FROM policies p
     INNER JOIN chain c ON p.predecessor_id = c.id AND p.tenant_id = c.tenant_id
 )
-SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at, chain.historical_approver_name, chain.historical_approved_at, chain.source_url, chain.imported_by, chain.imported_at, chain.self_approved, chain.draft_editors
+SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at, chain.historical_approver_name, chain.historical_approved_at, chain.source_url, chain.imported_by, chain.imported_at, chain.self_approved, chain.draft_editors, chain.sync_site, chain.sync_space, chain.sync_page_id, chain.synced_body_sha256, chain.synced_by, chain.synced_at
 FROM chain
 ORDER BY chain.created_at ASC, chain.id ASC
 `
@@ -933,6 +1161,12 @@ type ListPolicyVersionChainRow struct {
 	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
 	SelfApproved                bool               `json:"self_approved"`
 	DraftEditors                []string           `json:"draft_editors"`
+	SyncSite                    *string            `json:"sync_site"`
+	SyncSpace                   *string            `json:"sync_space"`
+	SyncPageID                  *string            `json:"sync_page_id"`
+	SyncedBodySha256            *string            `json:"synced_body_sha256"`
+	SyncedBy                    *string            `json:"synced_by"`
+	SyncedAt                    pgtype.Timestamptz `json:"synced_at"`
 }
 
 // Returns the version chain for a policy id by walking predecessor_id.
@@ -980,6 +1214,12 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 			&i.ImportedAt,
 			&i.SelfApproved,
 			&i.DraftEditors,
+			&i.SyncSite,
+			&i.SyncSpace,
+			&i.SyncPageID,
+			&i.SyncedBodySha256,
+			&i.SyncedBy,
+			&i.SyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -989,6 +1229,28 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockPolicySyncSource = `-- name: LockPolicySyncSource :exec
+SELECT pg_advisory_xact_lock(
+    13,
+    hashtext($1::text || '|' || $2::text || '|' || $3::text)
+)
+`
+
+type LockPolicySyncSourceParams struct {
+	TenantID  string `json:"tenant_id"`
+	SyncSite  string `json:"sync_site"`
+	SyncSpace string `json:"sync_space"`
+}
+
+// #2850: serialises sync runs for one source in one tenant, so an
+// overlapping run waits for the first to commit and then finds its pages
+// unchanged instead of creating them twice. Released at the end of the
+// transaction. Namespace 13 is advisorylock.PolicySyncSource.
+func (q *Queries) LockPolicySyncSource(ctx context.Context, arg LockPolicySyncSourceParams) error {
+	_, err := q.db.Exec(ctx, lockPolicySyncSource, arg.TenantID, arg.SyncSite, arg.SyncSpace)
+	return err
 }
 
 const policyTitleVersionExists = `-- name: PolicyTitleVersionExists :one
@@ -1024,7 +1286,7 @@ SET status = 'published',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'approved'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type PublishApprovedPolicyParams struct {
@@ -1082,6 +1344,12 @@ func (q *Queries) PublishApprovedPolicy(ctx context.Context, arg PublishApproved
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -1097,7 +1365,7 @@ WHERE tenant_id = $1
   AND (status = 'draft'
        OR (status = 'under_review'
            AND (submitted_by LIKE 'jwt:%' OR submitted_by LIKE 'key\_%')))
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type SubmitPolicyForReviewParams struct {
@@ -1146,6 +1414,12 @@ func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyFor
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -1158,7 +1432,7 @@ SET status = 'superseded',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type SupersedePolicyAtPublishParams struct {
@@ -1214,6 +1488,12 @@ func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePol
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -1234,7 +1514,7 @@ SET title = $1,
 WHERE tenant_id = $8
   AND id = $9
   AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type UpdateDraftPolicyParams struct {
@@ -1298,6 +1578,12 @@ func (q *Queries) UpdateDraftPolicy(ctx context.Context, arg UpdateDraftPolicyPa
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -1309,7 +1595,7 @@ SET next_review_at = $1,
 WHERE tenant_id = $2
   AND id = $3
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at
 `
 
 type UpdatePolicyNextReviewAtParams struct {
@@ -1357,6 +1643,12 @@ func (q *Queries) UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicy
 		&i.ImportedAt,
 		&i.SelfApproved,
 		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
 	)
 	return i, err
 }

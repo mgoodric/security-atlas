@@ -372,3 +372,55 @@ FROM controls
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = ANY(sqlc.arg('ids')::uuid[])
   AND lifecycle_state <> 'retired';
+
+-- name: GetSyncedPolicyByPage :one
+-- #2850 — the published synced row for one page of one sync source, if
+-- any. idx_policies_synced_page makes it unique.
+SELECT *
+FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = sqlc.arg('sync_site')
+  AND sync_space = sqlc.arg('sync_space')
+  AND sync_page_id = sqlc.arg('sync_page_id');
+
+-- name: InsertSyncedPolicy :one
+-- #2850 — insert a page's first sync directly as 'published'. As with
+-- ImportPublishedPolicy, the in-tool submit/approve/publish transitions do
+-- not apply: the source's approval, kept in historical_approver_name and
+-- historical_approved_at, is the approval. approved_by stays NULL.
+-- created_by, published_by and synced_by are the policy-sync key's id.
+INSERT INTO policies (
+    id, tenant_id, predecessor_id,
+    title, version, body_md,
+    owner_role, approver_role,
+    linked_control_ids, acknowledgment_required_roles,
+    status, effective_date, next_review_at, source_attribution,
+    created_by, published_at, published_by,
+    historical_approver_name, historical_approved_at, source_url,
+    sync_site, sync_space, sync_page_id, synced_body_sha256,
+    synced_by, synced_at
+)
+VALUES (
+    sqlc.arg('id'), sqlc.arg('tenant_id'), NULL,
+    sqlc.arg('title'), sqlc.arg('version'), sqlc.arg('body_md'),
+    sqlc.arg('owner_role'), sqlc.arg('approver_role'),
+    '{}', sqlc.arg('acknowledgment_required_roles'),
+    'published', sqlc.arg('effective_date'), sqlc.narg('next_review_at'), 'synced',
+    sqlc.arg('synced_by'), now(), sqlc.arg('synced_by'),
+    sqlc.arg('historical_approver_name'), sqlc.arg('historical_approved_at'), sqlc.arg('source_url'),
+    sqlc.arg('sync_site'), sqlc.arg('sync_space'), sqlc.arg('sync_page_id'), sqlc.arg('synced_body_sha256'),
+    sqlc.arg('synced_by'), now()
+)
+RETURNING *;
+
+-- name: LockPolicySyncSource :exec
+-- #2850: serialises sync runs for one source in one tenant, so an
+-- overlapping run waits for the first to commit and then finds its pages
+-- unchanged instead of creating them twice. Released at the end of the
+-- transaction. Namespace 13 is advisorylock.PolicySyncSource.
+SELECT pg_advisory_xact_lock(
+    13,
+    hashtext(sqlc.arg(tenant_id)::text || '|' || sqlc.arg(sync_site)::text || '|' || sqlc.arg(sync_space)::text)
+);

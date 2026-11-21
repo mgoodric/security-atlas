@@ -161,7 +161,12 @@ func (s *Server) buildRouter() *chi.Mux {
 		}), "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/",
+			// #2850: refusePolicySyncKeys authenticates this path's
+			// policy-sync key; a session cookie must not replace it.
+			// requireCredential still runs, so without the gate (no
+			// apikeyStore) the path answers 401.
+			policySyncPath))
 		// Slice 197: fail-closed credential requirement. The slice 190
 		// JWT middleware passes through requests with NO JWT shape
 		// (e.g. malformed bearers or no Authorization header); without
