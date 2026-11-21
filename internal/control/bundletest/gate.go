@@ -73,7 +73,7 @@ func RunFromFiles(ctx context.Context, bundleID, freshnessClass string, queries 
 func QueriesFromManifest(qs []ManifestQuery) []eval.FixtureQuery {
 	out := make([]eval.FixtureQuery, 0, len(qs))
 	for _, q := range qs {
-		out = append(out, eval.FixtureQuery{Language: q.Language, Expression: q.Expression})
+		out = append(out, eval.FixtureQuery{Language: q.Language, Expression: q.Expression, EvidenceKind: q.EvidenceKind})
 	}
 	return out
 }
@@ -83,8 +83,9 @@ func QueriesFromManifest(qs []ManifestQuery) []eval.FixtureQuery {
 // queries without bundletest importing internal/control (which would create an
 // import cycle, since control would then import bundletest for the gate).
 type ManifestQuery struct {
-	Language   string
-	Expression string
+	Language     string
+	Expression   string
+	EvidenceKind string // "" = every kind (#2818)
 }
 
 // loadTestCasesFromBytes is the in-memory counterpart of LoadTestCases: it
