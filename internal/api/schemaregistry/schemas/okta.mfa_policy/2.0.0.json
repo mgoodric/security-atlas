@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/okta.mfa_policy/2.0.0.json",
+  "x-evidence-kind": "okta.mfa_policy.v2",
+  "x-semver": "2.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-37"],
+  "title": "Okta MFA enrollment policy state",
+  "description": "One Okta MFA_ENROLL (authenticator enrollment) policy. Supersedes okta.mfa_policy.v1, which reported raw group ids as if they were names, never reported WebAuthn from Identity Engine policies, and dropped the policy status.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policy_id",
+    "policy_name",
+    "status",
+    "mfa_required",
+    "factors_allowed",
+    "applies_to_groups",
+    "applies_to_everyone"
+  ],
+  "properties": {
+    "policy_id": { "type": "string", "minLength": 1 },
+    "policy_name": { "type": "string", "minLength": 1 },
+    "status": {
+      "description": "Okta's policy status. Okta applies only ACTIVE policies.",
+      "type": "string",
+      "enum": ["ACTIVE", "INACTIVE"]
+    },
+    "priority": {
+      "description": "Okta's evaluation order; 1 is evaluated first. Omitted when Okta reports none.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "mfa_required": {
+      "description": "At least one factor other than the password is REQUIRED.",
+      "type": "boolean"
+    },
+    "factors_allowed": {
+      "description": "Canonical keys of the factors set to REQUIRED or OPTIONAL, sorted, password excluded. Every FIDO key (Classic fido_webauthn and fido_u2f, Identity Engine webauthn) is reported as webauthn; other keys are Okta's, lower-cased.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "applies_to_groups": {
+      "description": "Okta group ids from conditions.people.groups.include, as Okta returned them.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "applies_to_everyone": {
+      "description": "applies_to_groups contains the id of the org's Everyone group.",
+      "type": "boolean"
+    }
+  }
+}

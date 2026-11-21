@@ -1,36 +1,43 @@
-# okta.mfa_policy.v1 snapshots, shaped as the Okta connector emits them
-# (connectors/okta/internal/oktapolicy). `result` is the connector's own
-# verdict, which passes any policy that requires MFA with a factor. The
-# query decides on the payload, so the SMS/push and okta_verify cases
-# fail even though their records say pass.
+# okta.mfa_policy.v2 snapshots, shaped as the Okta connector emits them
+# (connectors/okta/internal/oktapolicy, #2901): group ids in
+# applies_to_groups, with applies_to_everyone saying whether one is the
+# org's Everyone group, and FIDO factors reported as webauthn. `result` is
+# the connector's own verdict, which passes any active policy that requires
+# MFA with a factor. The query decides on the payload, so the SMS/push and
+# okta_verify cases fail even though their records say pass.
 cases:
   - name: webauthn-on-everyone-passes
     expected_state: pass
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p1
-          policy_name: Default MFA enrollment
+          policy_name: Default Policy
+          status: ACTIVE
+          priority: 1
           mfa_required: true
           factors_allowed: [okta_verify, webauthn]
-          applies_to_groups: [everyone]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
 
   - name: only-sms-and-push-fails
     expected_state: fail
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p1
-          policy_name: Default MFA enrollment
+          policy_name: Default Policy
+          status: ACTIVE
           mfa_required: true
-          factors_allowed: [okta_sms, okta_push]
-          applies_to_groups: [everyone]
+          factors_allowed: [okta_push, okta_sms]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
 
   - name: okta-verify-without-webauthn-fails
     description: number matching is not in the snapshot, so okta_verify alone does not count
@@ -38,77 +45,111 @@ cases:
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p1
-          policy_name: Default MFA enrollment
+          policy_name: Default Policy
+          status: ACTIVE
           mfa_required: true
           factors_allowed: [okta_verify]
-          applies_to_groups: [everyone]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
 
   - name: mfa-not-required-fails
     expected_state: fail
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: fail
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p1
-          policy_name: Default MFA enrollment
+          policy_name: Default Policy
+          status: ACTIVE
           mfa_required: false
           factors_allowed: [webauthn]
-          applies_to_groups: [everyone]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
 
   - name: policy-not-on-everyone-fails
     expected_state: fail
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p2
           policy_name: Engineering MFA
+          status: ACTIVE
           mfa_required: true
           factors_allowed: [webauthn]
-          applies_to_groups: [engineering]
+          applies_to_groups: [00g1engineering]
+          applies_to_everyone: false
 
-  - name: no-groups-listed-fails
+  - name: group-named-everyone-is-not-the-everyone-group
+    description: the query reads applies_to_everyone, not group names; v1's name match is gone
     expected_state: fail
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p2
-          policy_name: Unscoped MFA
+          policy_name: Lookalike
+          status: ACTIVE
           mfa_required: true
           factors_allowed: [webauthn]
+          applies_to_groups: [everyone]
+          applies_to_everyone: false
+
+  - name: inactive-policy-fails
+    description: Okta does not apply an INACTIVE policy, so it does not satisfy the control
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: na
+        evidence_kind: okta.mfa_policy.v2
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          policy_id: 00p1
+          policy_name: Default Policy
+          status: INACTIVE
+          mfa_required: true
+          factors_allowed: [webauthn]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
 
   - name: one-qualifying-policy-among-others-passes
     expected_state: pass
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p1
-          policy_name: Default MFA enrollment
+          policy_name: Default Policy
+          status: ACTIVE
+          priority: 2
           mfa_required: true
           factors_allowed: [webauthn]
-          applies_to_groups: [Everyone]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
       - result: fail
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p3
           policy_name: Contractors
+          status: ACTIVE
+          priority: 1
           mfa_required: false
-          applies_to_groups: [contractors]
+          factors_allowed: []
+          applies_to_groups: [00g1contractors]
+          applies_to_everyone: false
 
   - name: latest-snapshot-decides
     description: webauthn was removed between two in-window snapshots of the same policy
@@ -116,22 +157,41 @@ cases:
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass
-        evidence_kind: okta.mfa_policy.v1
+        evidence_kind: okta.mfa_policy.v2
         observed_at: 2026-11-21T01:00:00Z
+        payload:
+          policy_id: 00p1
+          policy_name: Default Policy
+          status: ACTIVE
+          mfa_required: true
+          factors_allowed: [webauthn]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
+      - result: pass
+        evidence_kind: okta.mfa_policy.v2
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          policy_id: 00p1
+          policy_name: Default Policy
+          status: ACTIVE
+          mfa_required: true
+          factors_allowed: [okta_sms]
+          applies_to_groups: [00g1everyone]
+          applies_to_everyone: true
+
+  - name: v1-snapshot-is-not-read
+    description: the query declares okta.mfa_policy.v2, so a v1 record (even one v1's query passed) is filtered out
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: okta.mfa_policy.v1
+        observed_at: 2026-11-21T06:00:00Z
         payload:
           policy_id: 00p1
           policy_name: Default MFA enrollment
           mfa_required: true
           factors_allowed: [webauthn]
-          applies_to_groups: [everyone]
-      - result: pass
-        evidence_kind: okta.mfa_policy.v1
-        observed_at: 2026-11-21T09:00:00Z
-        payload:
-          policy_id: 00p1
-          policy_name: Default MFA enrollment
-          mfa_required: true
-          factors_allowed: [okta_sms]
           applies_to_groups: [everyone]
 
   - name: no-snapshot-is-inconclusive

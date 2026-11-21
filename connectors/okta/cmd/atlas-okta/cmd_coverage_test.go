@@ -97,6 +97,7 @@ func TestMapPolicyResult(t *testing.T) {
 		{"pass", oktapolicy.ResultPass, evidencev1.Result_RESULT_PASS},
 		{"fail", oktapolicy.ResultFail, evidencev1.Result_RESULT_FAIL},
 		{"inconclusive", oktapolicy.ResultInconclusive, evidencev1.Result_RESULT_INCONCLUSIVE},
+		{"na", oktapolicy.ResultNA, evidencev1.Result_RESULT_NA},
 		{"unspecified-default", oktapolicy.Result("unknown-sentinel"), evidencev1.Result_RESULT_UNSPECIFIED},
 	}
 	for _, tc := range cases {

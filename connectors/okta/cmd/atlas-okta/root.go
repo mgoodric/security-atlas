@@ -20,11 +20,11 @@ import (
 const ConnectorName = "okta-connector"
 
 // SupportedKinds is the canonical list of evidence kinds slice 045 emits.
-//   - okta.mfa_policy.v1     (schema shipped slice 014)
+//   - okta.mfa_policy.v2     (v1 shipped slice 014; v2 #2901)
 //   - okta.app_assignment.v1 (schema added this slice)
 //   - okta.user_lifecycle.v1 (schema added this slice)
 var SupportedKinds = []string{
-	"okta.mfa_policy.v1",
+	"okta.mfa_policy.v2",
 	"okta.app_assignment.v1",
 	"okta.user_lifecycle.v1",
 }
@@ -114,7 +114,7 @@ func sdkOpts() []sdk.Option {
 const longDescription = `security-atlas Okta connector
 
 Emits three evidence kinds:
-  - okta.mfa_policy.v1     (run subcommand, pull)
+  - okta.mfa_policy.v2     (run subcommand, pull)
   - okta.app_assignment.v1 (run subcommand, pull)
   - okta.user_lifecycle.v1 (run subcommand, pull)
 

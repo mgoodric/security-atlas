@@ -108,7 +108,7 @@ func DocumentedScopes() []Scope {
 		{
 			Name:      "okta.groups.read",
 			Access:    "Read",
-			Gates:     "okta.app_assignment.v1 (GET /api/v1/apps/{id}/groups)",
+			Gates:     "okta.app_assignment.v1 (GET /api/v1/apps/{id}/groups) + okta.mfa_policy.v2 (GET /api/v1/groups, Everyone group id)",
 			TokenKind: "API token (Read-only Admin role)",
 		},
 		{
@@ -120,7 +120,7 @@ func DocumentedScopes() []Scope {
 		{
 			Name:      "okta.policies.read",
 			Access:    "Read",
-			Gates:     "okta.mfa_policy.v1 (GET /api/v1/policies?type=MFA_ENROLL)",
+			Gates:     "okta.mfa_policy.v2 (GET /api/v1/policies?type=MFA_ENROLL)",
 			TokenKind: "API token (Read-only Admin role)",
 		},
 	}

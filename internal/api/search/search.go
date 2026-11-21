@@ -709,7 +709,7 @@ func (h *Handler) queryInTenantTx(ctx context.Context, stmt string, args ...any)
 // applying a tenant GUC would be meaningless. Every authenticated
 // caller reads the same anchor rows (the OPA `anchors` catalog-read
 // admit already gates the endpoint-level access; see
-// policies/authz/defaults.rego catalog_resources).
+// internal/authz/rego_bundle/defaults.rego catalog_resources).
 //
 // CRITICAL invariant-#6 boundary: this helper is used ONLY by
 // searchAnchors. The controls/risks/evidence branches MUST continue to

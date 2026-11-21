@@ -13,7 +13,7 @@
 // per-tenant admin API key, which sets cred.IsAdmin) must not change them:
 // that would be a cross-tenant write (#1757). The list is gated too: it is
 // the review surface for those writes, and tenants read the resulting edges
-// through coverage. policies/authz/super_admin.rego enforces the same rule
+// through coverage. internal/authz/rego_bundle/super_admin.rego enforces the same rule
 // in OPA; this handler is the second leg. On a single-tenant install the
 // bootstrap admin holds super_admin (#1759).
 //
