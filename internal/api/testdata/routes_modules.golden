@@ -246,6 +246,7 @@ PATCH /v1/org_units/{id} risk
 PATCH /v1/oscal/component-claims/{id}/scf-anchor third_party_risk/vendor_claims
 PATCH /v1/policies/{id} policies
 PATCH /v1/policies/{id}/approve policies
+PATCH /v1/policies/{id}/controls policies
 PATCH /v1/policies/{id}/review-date policies
 PATCH /v1/policies/{id}/submit policies
 PATCH /v1/questionnaires/{id}/answers/{qid} questionnaires

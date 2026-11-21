@@ -4436,6 +4436,23 @@ export interface paths {
         patch: operations["patch-v1-policies-id-approve"];
         trace?: never;
     };
+    "/v1/policies/{id}/controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** PATCH /v1/policies/{id}/controls — replace a published synced policy's control links in place, audit-logged with the links before and after; any other policy answers 409 (#2852) */
+        patch: operations["patch-v1-policies-id-controls"];
+        trace?: never;
+    };
     "/v1/policies/{id}/pdf": {
         parameters: {
             query?: never;
@@ -12677,6 +12694,28 @@ export interface operations {
         };
     };
     "patch-v1-policies-id-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "patch-v1-policies-id-controls": {
         parameters: {
             query?: never;
             header?: never;

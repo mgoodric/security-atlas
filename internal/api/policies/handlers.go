@@ -10,6 +10,7 @@
 //	POST   /v1/policies/{id}/publish               approved -> published (AC-1 versioned row + AC-7 orphan block)
 //	PATCH  /v1/policies/{id}/review-date           change a published policy's next_review_at (#1806)
 //	DELETE /v1/policies/{id}                       discard a draft, audit-logged (#1987)
+//	PATCH  /v1/policies/{id}/controls              replace a synced policy's control links, audit-logged (#2852)
 //	GET    /v1/policies/{id}/pdf                   PDF render via chromedp (AC-5)
 //	POST   /v1/admin/policies/import               import a policy library with its history (#1747, import.go)
 //
@@ -209,6 +210,11 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	// Defense in depth: OPA admits only admin and grc_engineer here (#2664).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
 		return
 	}
 	var req createReq
@@ -559,6 +565,11 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
+	// Defense in depth: OPA admits only admin and grc_engineer here (#2664).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
@@ -709,6 +720,9 @@ func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := h.store.SetNextReviewAt(ctx, id, next, actorOf(cred))
 	if err != nil {
+		if writeManagedBySync(w, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, policy.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
@@ -741,6 +755,9 @@ func (h *Handler) DiscardDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.store.DiscardDraft(ctx, id, actorOf(cred)); err != nil {
+		if writeManagedBySync(w, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, policy.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
@@ -802,6 +819,10 @@ func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "load policy draft", err)
 		return
 	}
+	if current.SourceAttribution == policy.SourceSynced {
+		httpresp.WriteError(w, http.StatusConflict, managedInConfluenceMsg)
+		return
+	}
 	if err := validateAudience(req.AcknowledgmentRequiredRoles, current.AcknowledgmentRequiredRoles); err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -816,6 +837,9 @@ func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
 		Editor:                      actorOf(cred),
 	})
 	if err != nil {
+		if writeManagedBySync(w, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, policy.ErrUnknownLinkedControl):
 			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
@@ -831,6 +855,66 @@ func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusConflict, "only a draft policy can be edited; create a new version of a published policy")
 		default:
 			httperr.WriteInternal(w, r, "update policy draft", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
+}
+
+// setControlsReq is the PATCH /v1/policies/{id}/controls body: the whole
+// link set, replaced.
+type setControlsReq struct {
+	LinkedControlIDs []string `json:"linked_control_ids"`
+}
+
+// SetControls handles PATCH /v1/policies/{id}/controls (#2852). It
+// replaces a published synced policy's control links in place: the page
+// carries the text, version and review date, and the links are kept in
+// security-atlas. It is the one in-tool change a synced policy accepts.
+// Any other policy answers 409 and changes its links in a draft or a new
+// version. The role is the draft-edit one (`write` on `policies`). A
+// change is audit-logged with the links before and after; the same set
+// again writes nothing.
+func (h *Handler) SetControls(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	// Defense in depth: OPA admits only admin and grc_engineer here (#2664).
+	if !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req setControlsReq
+	if !decodePolicyBody(w, r, &req) {
+		return
+	}
+	if req.LinkedControlIDs == nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids is required ([] removes every link)")
+		return
+	}
+	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids contains invalid UUID: "+err.Error())
+		return
+	}
+	updated, err := h.store.SetSyncedLinks(ctx, id, linkedIDs, actorOf(cred))
+	if err != nil {
+		switch {
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrNotSyncedPolicy):
+			httpresp.WriteError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, policy.ErrUnknownLinkedControl):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		default:
+			httperr.WriteInternal(w, r, "set policy controls", err)
 		}
 		return
 	}
@@ -898,7 +982,24 @@ func writePDFRenderErr(w http.ResponseWriter, r *http.Request, err error) {
 	httperr.WriteInternal(w, r, "render pdf", err)
 }
 
+// managedInConfluenceMsg answers an in-tool edit of a synced policy
+// (#2852). Its page is the authority, so the edit is made there.
+const managedInConfluenceMsg = "managed in Confluence: this policy is synced from its source page; edit it there"
+
+// writeManagedBySync answers 409 when err is policy.ErrManagedBySync and
+// reports whether it did.
+func writeManagedBySync(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, policy.ErrManagedBySync) {
+		return false
+	}
+	httpresp.WriteError(w, http.StatusConflict, managedInConfluenceMsg)
+	return true
+}
+
 func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
+	if writeManagedBySync(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, policy.ErrTitleRequired),
 		errors.Is(err, policy.ErrVersionRequired),
@@ -954,6 +1055,9 @@ func actorOf(cred credstore.Credential) string {
 }
 
 func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
+	if writeManagedBySync(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
@@ -974,6 +1078,9 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 }
 
 func (h *Handler) writePublishErr(w http.ResponseWriter, r *http.Request, err error) {
+	if writeManagedBySync(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, policy.ErrOrphanPublish):
 		httpresp.WriteError(w, http.StatusConflict, err.Error())

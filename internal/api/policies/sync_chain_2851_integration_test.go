@@ -37,7 +37,6 @@ func TestSync_BumpSkippedWhileInToolSuccessorExists(t *testing.T) {
 		"approver_role":      "security_lead",
 		"linked_control_ids": []string{s.ctrlID.String()},
 		"source_attribution": "tenant_authored",
-		"predecessor_id":     v1,
 	})
 	var created struct {
 		Policy struct {
@@ -48,6 +47,13 @@ func TestSync_BumpSkippedWhileInToolSuccessorExists(t *testing.T) {
 		t.Fatalf("decode draft: %v", err)
 	}
 	draft := created.Policy.ID
+	// Since #2852 the API refuses a next version of a synced policy, so
+	// the draft is chained to v1 directly: a next version started in the
+	// tool before its chain was synced.
+	if _, err := s.admin.Exec(context.Background(),
+		`UPDATE policies SET predecessor_id = $1 WHERE id = $2`, v1, draft); err != nil {
+		t.Fatalf("chain draft to v1: %v", err)
+	}
 
 	bumped := syncPage("7001", "Incident Policy", "1.1", "Body, revised.", nil)
 	resp := postSync(t, s.setupResult, key, http.StatusOK, bumped, syncPage("7002", "Other Policy", "1.0", "Other.", nil))

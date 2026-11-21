@@ -5418,6 +5418,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/policies/{id}/controls:
+    patch:
+      summary: PATCH /v1/policies/{id}/controls — replace a published synced policy's control links in place, audit-logged with the links before and after; any other policy answers 409 (#2852)
+      tags: [policies]
+      operationId: patch-v1-policies-id-controls
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/pdf:
     get:
       summary: GET /v1/policies/{id}/pdf
