@@ -1,6 +1,7 @@
 package riskimport
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
 	"fmt"
@@ -65,6 +66,23 @@ func TestParseCSV(t *testing.T) {
 				Unmapped: map[string]string{}}},
 			wantRejected: map[int]string{},
 			wantUnmapped: []string{},
+		},
+		{
+			name: "a notes row holding alias words is not taken for the header",
+			csv:  "Risk,Reference,\n,,\nTitle,Category,Ref\nOutage,operational,R-1\n",
+			wantRisks: []rowSummary{{Row: 4, Ref: "R-1", Title: "Outage", Cat: "operational",
+				Unmapped: map[string]string{}}},
+			wantRejected: map[int]string{},
+			wantUnmapped: []string{},
+		},
+		{
+			name:      "a column-mapped header is found below a title row",
+			csv:       "Q3 register,,\nHeadline,Bucket,Notes\nOutage,operational,kept\n",
+			columnMap: map[string]string{FieldTitle: "Headline", FieldCategory: "Bucket"},
+			wantRisks: []rowSummary{{Row: 3, Title: "Outage", Cat: "operational",
+				Unmapped: map[string]string{"Notes": "kept"}}},
+			wantRejected: map[int]string{},
+			wantUnmapped: []string{"Notes"},
 		},
 		{
 			name: "the risk export's own headers re-import without a map",
@@ -159,9 +177,11 @@ func TestParseCSVErrors(t *testing.T) {
 		{"too many columns", []byte(wide), nil, ErrTooManyColumns},
 		{"no title column", []byte("Risk ID,Category\nR-1,operational\n"), nil, ErrNoHeaderRow},
 		{"no category column", []byte("Risk ID,Title\nR-1,Outage\n"), nil, ErrNoHeaderRow},
+		{"header below the search window", []byte(strings.Repeat("note\n", headerSearchRows) + "Title,Category\nA,operational\n"), nil, ErrNoHeaderRow},
 		{"unknown column map field", []byte("Title,Category\n"), map[string]string{"owner": "Owner"}, ErrInvalidColumnMap},
 		{"one header mapped twice", []byte("Title,Category\n"), map[string]string{FieldTitle: "X", FieldDescription: "x"}, ErrInvalidColumnMap},
 		{"mapped header absent", []byte("Title,Category\nA,operational\n"), map[string]string{FieldDescription: "Notes"}, ErrMappedColumnAbsent},
+		{"required field mapped to an absent header", []byte("Title,Category\nA,operational\n"), map[string]string{FieldTitle: "Headline"}, ErrMappedColumnAbsent},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,15 +203,17 @@ func TestParseCSVErrors(t *testing.T) {
 	}
 }
 
-func TestParseXLSX(t *testing.T) {
-	t.Parallel()
+// xlsxOf writes rows to the first sheet of a new workbook, each row at
+// the sheet row its index names (row 0 is sheet row 1); a nil row is left
+// empty.
+func xlsxOf(t *testing.T, rows [][]any) []byte {
+	t.Helper()
 	f := excelize.NewFile()
-	rows := [][]any{
-		{"Risk ID", "Title", "Category", "Owner"},
-		{"R-1", "Outage", "operational", "alice@corp.test"},
-		{"r-1", "Repeat", "operational", ""},
-	}
+	defer func() { _ = f.Close() }()
 	for i, r := range rows {
+		if r == nil {
+			continue
+		}
 		cell, _ := excelize.CoordinatesToCellName(1, i+1)
 		if err := f.SetSheetRow("Sheet1", cell, &r); err != nil {
 			t.Fatalf("SetSheetRow: %v", err)
@@ -201,19 +223,132 @@ func TestParseXLSX(t *testing.T) {
 	if err := f.Write(&buf); err != nil {
 		t.Fatalf("write xlsx: %v", err)
 	}
-	got, err := Parse("register.xlsx", buf.Bytes(), ParseOptions{})
-	if err != nil {
-		t.Fatalf("Parse xlsx: %v", err)
+	return buf.Bytes()
+}
+
+func TestParseXLSX(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		rows         [][]any
+		wantRisks    []rowSummary
+		wantRejected map[int]string
+	}{
+		{
+			name: "header on the first row",
+			rows: [][]any{
+				{"Risk ID", "Title", "Category", "Owner"},
+				{"R-1", "Outage", "operational", "alice@corp.test"},
+				{"r-1", "Repeat", "operational", ""},
+			},
+			wantRisks:    []rowSummary{{Row: 2, Ref: "R-1", Title: "Outage", Cat: "operational", Unmapped: map[string]string{"Owner": "alice@corp.test"}}},
+			wantRejected: map[int]string{3: RejectDuplicateExternal},
+		},
+		{
+			// Row numbers are the sheet's own, so a rejected row can be
+			// found in the workbook the user uploaded.
+			name: "a title, a blank row and notes above the header",
+			rows: [][]any{
+				{"Acme risk register"},
+				nil,
+				{"Exported for the Q3 review", "Risk"},
+				{"Risk ID", "Title", "Category", "Review Due"},
+				{"R-1", "Outage", "operational", "2027-02-01"},
+				nil,
+				{"R-2", "Bad date", "operational", "soon"},
+			},
+			wantRisks:    []rowSummary{{Row: 5, Ref: "R-1", Title: "Outage", Cat: "operational", Due: "2027-02-01", Unmapped: map[string]string{}}},
+			wantRejected: map[int]string{7: RejectInvalidReviewDue},
+		},
 	}
-	want := []rowSummary{{Row: 2, Ref: "R-1", Title: "Outage", Cat: "operational", Unmapped: map[string]string{"Owner": "alice@corp.test"}}}
-	if s := summarize(got.Risks); !reflect.DeepEqual(s, want) {
-		t.Errorf("risks = %+v, want %+v", s, want)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Parse("register.xlsx", xlsxOf(t, tc.rows), ParseOptions{})
+			if err != nil {
+				t.Fatalf("Parse xlsx: %v", err)
+			}
+			if s := summarize(got.Risks); !reflect.DeepEqual(s, tc.wantRisks) {
+				t.Errorf("risks =\n%+v\nwant\n%+v", s, tc.wantRisks)
+			}
+			if r := rejections(got.Rejected); !reflect.DeepEqual(r, tc.wantRejected) {
+				t.Errorf("rejected = %v, want %v", r, tc.wantRejected)
+			}
+		})
 	}
-	if r := rejections(got.Rejected); !reflect.DeepEqual(r, map[int]string{3: RejectDuplicateExternal}) {
-		t.Errorf("rejected = %v", r)
-	}
-	if _, err := Parse("register.txt", buf.Bytes(), ParseOptions{}); !errors.Is(err, ErrUnsupportedFormat) {
+	if _, err := Parse("register.txt", xlsxOf(t, cases[0].rows), ParseOptions{}); !errors.Is(err, ErrUnsupportedFormat) {
 		t.Errorf("txt: %v", err)
+	}
+}
+
+// TestParseXLSXBounds: an XLSX upload is held to the CSV caps, through the
+// bounded reader, and the caps are inclusive.
+func TestParseXLSXBounds(t *testing.T) {
+	t.Parallel()
+	rowsOf := func(n int) [][]any {
+		rows := [][]any{{"Title", "Category"}}
+		for len(rows) < n {
+			rows = append(rows, []any{"Risk", "operational"})
+		}
+		return rows
+	}
+	wideOf := func(n int) [][]any {
+		header := []any{"Title", "Category"}
+		for len(header) < n {
+			header = append(header, fmt.Sprintf("Extra %d", len(header)))
+		}
+		return [][]any{header, {"Risk", "operational"}}
+	}
+	// A sheet whose inline XML inflates past MaxUnzipBytes while the
+	// upload itself stays under MaxUploadBytes.
+	bomb := func() []byte {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		w, err := zw.Create("xl/worksheets/sheet1.xml")
+		if err != nil {
+			t.Fatalf("zip create: %v", err)
+		}
+		chunk := bytes.Repeat([]byte{' '}, 1<<20)
+		for i := 0; i <= MaxUnzipBytes>>20; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				t.Fatalf("zip write: %v", err)
+			}
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatalf("zip close: %v", err)
+		}
+		if buf.Len() > MaxUploadBytes {
+			t.Fatalf("bomb is %d bytes, over the upload cap", buf.Len())
+		}
+		return buf.Bytes()
+	}
+
+	for _, tc := range []struct {
+		name string
+		raw  func() []byte
+		want error
+	}{
+		{"empty", func() []byte { return nil }, ErrEmptyFile},
+		{"over the upload cap", func() []byte { return bytes.Repeat([]byte("a"), MaxUploadBytes+1) }, ErrUploadTooLarge},
+		{"inflates past the uncompressed cap", bomb, ErrWorkbookTooLarge},
+		{"one row over the row cap", func() []byte { return xlsxOf(t, rowsOf(MaxRows+1)) }, ErrTooManyRows},
+		{"one column over the column cap", func() []byte { return xlsxOf(t, wideOf(MaxColumns+1)) }, ErrTooManyColumns},
+		{"no header row", func() []byte { return xlsxOf(t, [][]any{{"Risk ID", "Owner"}, {"R-1", "a"}}) }, ErrNoHeaderRow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := Parse("register.xlsx", tc.raw(), ParseOptions{}); !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+
+	got, err := Parse("register.xlsx", xlsxOf(t, rowsOf(MaxRows)), ParseOptions{})
+	if err != nil || len(got.Risks) != MaxRows-1 {
+		t.Errorf("%d rows: err=%v staged=%d", MaxRows, err, len(got.Risks))
+	}
+	if _, err := Parse("register.xlsx", xlsxOf(t, wideOf(MaxColumns)), ParseOptions{}); err != nil {
+		t.Errorf("%d columns: %v", MaxColumns, err)
 	}
 }
 
