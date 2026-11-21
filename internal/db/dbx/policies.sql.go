@@ -600,7 +600,8 @@ INSERT INTO policy_audit_log (
     previous_next_review_at, new_next_review_at,
     policy_title, policy_version,
     previous_state, new_state,
-    body_sha256, editors
+    body_sha256, editors,
+    previous_linked_control_ids, new_linked_control_ids
 )
 VALUES (
     $1, $2, $3, $4, $5,
@@ -608,28 +609,31 @@ VALUES (
     $9, $10,
     $11, $12,
     $13, $14,
-    $15, $16
+    $15, $16,
+    $17, $18
 )
-RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience
+RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids
 `
 
 type InsertPolicyAuditLogParams struct {
-	TenantID               pgtype.UUID        `json:"tenant_id"`
-	PolicyID               pgtype.UUID        `json:"policy_id"`
-	Action                 string             `json:"action"`
-	Actor                  string             `json:"actor"`
-	SourceFile             string             `json:"source_file"`
-	HistoricalApproverName *string            `json:"historical_approver_name"`
-	HistoricalApprovedAt   pgtype.Date        `json:"historical_approved_at"`
-	SourceUrl              *string            `json:"source_url"`
-	PreviousNextReviewAt   pgtype.Timestamptz `json:"previous_next_review_at"`
-	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
-	PolicyTitle            *string            `json:"policy_title"`
-	PolicyVersion          *string            `json:"policy_version"`
-	PreviousState          *string            `json:"previous_state"`
-	NewState               *string            `json:"new_state"`
-	BodySha256             *string            `json:"body_sha256"`
-	Editors                []string           `json:"editors"`
+	TenantID                 pgtype.UUID        `json:"tenant_id"`
+	PolicyID                 pgtype.UUID        `json:"policy_id"`
+	Action                   string             `json:"action"`
+	Actor                    string             `json:"actor"`
+	SourceFile               string             `json:"source_file"`
+	HistoricalApproverName   *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt     pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                *string            `json:"source_url"`
+	PreviousNextReviewAt     pgtype.Timestamptz `json:"previous_next_review_at"`
+	NewNextReviewAt          pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle              *string            `json:"policy_title"`
+	PolicyVersion            *string            `json:"policy_version"`
+	PreviousState            *string            `json:"previous_state"`
+	NewState                 *string            `json:"new_state"`
+	BodySha256               *string            `json:"body_sha256"`
+	Editors                  []string           `json:"editors"`
+	PreviousLinkedControlIds []pgtype.UUID      `json:"previous_linked_control_ids"`
+	NewLinkedControlIds      []pgtype.UUID      `json:"new_linked_control_ids"`
 }
 
 // #1747 — append one row to the policy audit log.
@@ -651,6 +655,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		arg.NewState,
 		arg.BodySha256,
 		arg.Editors,
+		arg.PreviousLinkedControlIds,
+		arg.NewLinkedControlIds,
 	)
 	var i PolicyAuditLog
 	err := row.Scan(
@@ -675,6 +681,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		&i.Editors,
 		&i.PreviousAudience,
 		&i.NewAudience,
+		&i.PreviousLinkedControlIds,
+		&i.NewLinkedControlIds,
 	)
 	return i, err
 }
@@ -1148,7 +1156,7 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 }
 
 const listPolicyAuditLog = `-- name: ListPolicyAuditLog :many
-SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience
+SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC
@@ -1191,6 +1199,8 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 			&i.Editors,
 			&i.PreviousAudience,
 			&i.NewAudience,
+			&i.PreviousLinkedControlIds,
+			&i.NewLinkedControlIds,
 		); err != nil {
 			return nil, err
 		}
@@ -1900,6 +1910,74 @@ type UpdatePolicyNextReviewAtParams struct {
 // published chain tip has a review due, so other states do not match.
 func (q *Queries) UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicyNextReviewAtParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, updatePolicyNextReviewAt, arg.NextReviewAt, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+	)
+	return i, err
+}
+
+const updateSyncedPolicyLinks = `-- name: UpdateSyncedPolicyLinks :one
+UPDATE policies
+SET linked_control_ids = $1,
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND source_attribution = 'synced'
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256
+`
+
+type UpdateSyncedPolicyLinksParams struct {
+	LinkedControlIds []pgtype.UUID `json:"linked_control_ids"`
+	TenantID         pgtype.UUID   `json:"tenant_id"`
+	ID               pgtype.UUID   `json:"id"`
+}
+
+// #2852 — replace a published synced policy's control links in place. It
+// is not a new version: the links are kept in security-atlas, not synced.
+// The caller writes the policy_audit_log row in the same transaction.
+// Other rows do not match.
+func (q *Queries) UpdateSyncedPolicyLinks(ctx context.Context, arg UpdateSyncedPolicyLinksParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, updateSyncedPolicyLinks, arg.LinkedControlIds, arg.TenantID, arg.ID)
 	var i Policy
 	err := row.Scan(
 		&i.ID,

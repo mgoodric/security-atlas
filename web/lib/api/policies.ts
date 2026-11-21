@@ -82,6 +82,15 @@ export type Policy = {
   source_url?: string | null;
   imported_by?: string | null;
   imported_at?: string | null;
+  /**
+   * #2851 — set on a synced policy (`source_attribution: "synced"`) whose
+   * source page body changed without a version bump: when a sync run
+   * first saw it, and the sha256 of the body the source holds now.
+   */
+  sync_drift?: {
+    detected_at: string;
+    source_body_sha256: string;
+  } | null;
   created_at: string;
   updated_at: string;
   warnings?: string[];
@@ -282,6 +291,20 @@ export async function transitionPolicy(
     await fetch(
       `/api/policies/${encodeURIComponent(id)}/${action}`,
       jsonInit("POST", body),
+    ),
+  );
+}
+
+/** #2852 — replace a synced policy's control links in place. The
+ *  platform refuses it (409) for any policy that is not synced. */
+export async function setPolicyControls(
+  id: string,
+  linkedControlIds: string[],
+): Promise<Policy> {
+  return parsePolicy(
+    await fetch(
+      `/api/policies/${encodeURIComponent(id)}/controls`,
+      jsonInit("POST", { linked_control_ids: linkedControlIds }),
     ),
   );
 }
