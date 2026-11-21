@@ -29,7 +29,7 @@
 //     - `since`: preset window key (`24h` / `7d` / `30d` / `audit`),
 //       mapped to an RFC3339 cutoff client-side via `sinceCutoff`.
 
-import type { Anchor } from "@/lib/api/anchors";
+import type { AnchorWithState } from "@/lib/api/anchors";
 import type { ScopeCell } from "@/lib/api/controls-list";
 import type { EvidenceResultEnum } from "@/lib/api/evidence";
 import { enumLabel } from "@/lib/labels/enum-labels";
@@ -44,7 +44,7 @@ export const ALL = "all" as const;
 export const NONE = "" as const;
 
 export type EvidenceFilters = {
-  /** Selected control anchor id (UUID), or `NONE` for "no control filter"
+  /** Selected tenant control id (UUID), or `NONE` for "no control filter"
    *  (tenant-wide list). Post-slice-106 the page is happy to render a
    *  tenant-wide list when `NONE`. */
   controlId: string;
@@ -59,9 +59,9 @@ export type EvidenceFilters = {
   /**
    * Slice 234 — scope cell UUID narrowing, or `ALL` for no narrowing.
    * Server-side intersection via the new `scope_cell_id` query param;
-   * the BFF forwards to upstream and the SQL predicate runs on
-   * `evidence_records.scope_id`. Out-of-tenant cell ids return zero
-   * rows naturally under RLS (no 404 leak).
+   * the BFF forwards to upstream and the SQL predicate matches the
+   * record's pushed scope (`scope_canonical`) against the cell's
+   * dimensions (#2771). Out-of-tenant cell ids return zero rows.
    */
   scopeCellId: string;
   /**
@@ -133,15 +133,22 @@ export function clearFilters(): EvidenceFilters {
  * Slice 106: the first option is "All controls" (NONE — meaning the
  * tenant-wide path), rather than the slice-099 "Select a control…"
  * gate. The rest are anchors sorted by scf_id for stable ordering.
+ *
+ * #2771: the option value is the tenant control behind the anchor
+ * (`control_id`), because `GET /v1/evidence?control_id=` matches the
+ * tenant control id, not the SCF anchor id. An anchor with no tenant
+ * control has no evidence to narrow to and is left out.
  */
 export function buildControlOptions(
-  anchors: Anchor[],
+  anchors: AnchorWithState[],
 ): { value: string; label: string }[] {
-  const sorted = [...anchors].sort((a, b) => a.scf_id.localeCompare(b.scf_id));
+  const sorted = anchors
+    .filter((a) => typeof a.control_id === "string" && a.control_id !== "")
+    .sort((a, b) => a.scf_id.localeCompare(b.scf_id));
   return [
     { value: NONE, label: "All controls" },
     ...sorted.map((a) => ({
-      value: a.id,
+      value: a.control_id as string,
       label: `${a.scf_id} · ${a.name}`,
     })),
   ];
@@ -264,6 +271,15 @@ export function scopeCellLabel(cell: ScopeCell): string {
  * A typeahead replacement is deferred per the slice 224 decision log.
  */
 export const SCOPE_CELL_CAP = 50;
+
+/**
+ * #2771 — shown while the Scope pill narrows. A record is in a cell when
+ * the scope it was pushed with covers every one of the cell's
+ * dimensions; records pushed before scope capture carry no scope and are
+ * never matched, so the operator is told rather than left to wonder.
+ */
+export const SCOPE_FILTER_HINT =
+  "Scope matches the scope each record was pushed with. Records pushed before scope capture have none, so no Scope filter matches them.";
 
 /**
  * Build the Scope pill option list from the tenant's scope cells.

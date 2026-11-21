@@ -134,9 +134,13 @@ type evidenceWire struct {
 	EvidenceKind *string         `json:"evidence_kind"`
 	ObservedAt   string          `json:"observed_at"`
 	Source       json.RawMessage `json:"source"`
-	ContentHash  string          `json:"content_hash"`
-	ScopeCell    *string         `json:"scope_cell"`
-	Result       string          `json:"result"`
+	// SourceAttribution is the pusher's actor claim ({actor_type,
+	// actor_id, session_id}), the column the source_actor_* filters
+	// match (#2771). `source` stays the server-observed provenance.
+	SourceAttribution json.RawMessage `json:"source_attribution"`
+	ContentHash       string          `json:"content_hash"`
+	ScopeCell         *string         `json:"scope_cell"`
+	Result            string          `json:"result"`
 	// Demo is true when the in-place demo seed added this record to the
 	// organisation (#2043). Omitted otherwise.
 	Demo bool `json:"demo,omitempty"`
@@ -527,19 +531,21 @@ func splitHistoryPage(rows []dbx.ListControlEvaluationHistoryPagedRow, pageRows 
 
 // evidenceWireFrom maps a sqlc per-control evidence row to the AC-1 wire
 // shape. The `source` field carries the provenance JSONB verbatim (canvas
-// §2.3: connector id, source system id, query hash, runner id);
+// §2.3: connector id, source system id, query hash, runner id) and
+// `source_attribution` the pusher's actor claim (#2771);
 // `scope_cell` carries the nullable scope_id. Slice 106 surfaces
 // `result` from the evidence_records.result column (always present in
 // the DB; the slice-064 shape omitted it).
 func evidenceWireFrom(rec dbx.ListEvidenceForControlPagedRow) evidenceWire {
 	return evidenceWire{
-		EvidenceID:   uuidString(rec.ID),
-		EvidenceKind: rec.EvidenceKind,
-		ObservedAt:   tsString(rec.ObservedAt),
-		Source:       jsonOrNull(rec.Provenance),
-		ContentHash:  rec.Hash,
-		ScopeCell:    uuidPtr(rec.ScopeID),
-		Result:       string(rec.Result),
+		EvidenceID:        uuidString(rec.ID),
+		EvidenceKind:      rec.EvidenceKind,
+		ObservedAt:        tsString(rec.ObservedAt),
+		Source:            jsonOrNull(rec.Provenance),
+		SourceAttribution: jsonOrNull(rec.SourceAttribution),
+		ContentHash:       rec.Hash,
+		ScopeCell:         uuidPtr(rec.ScopeID),
+		Result:            string(rec.Result),
 	}
 }
 
@@ -549,13 +555,14 @@ func evidenceWireFrom(rec dbx.ListEvidenceForControlPagedRow) evidenceWire {
 // distinct named queries.
 func evidenceWireFromListRow(rec dbx.ListEvidencePagedRow) evidenceWire {
 	return evidenceWire{
-		EvidenceID:   uuidString(rec.ID),
-		EvidenceKind: rec.EvidenceKind,
-		ObservedAt:   tsString(rec.ObservedAt),
-		Source:       jsonOrNull(rec.Provenance),
-		ContentHash:  rec.Hash,
-		ScopeCell:    uuidPtr(rec.ScopeID),
-		Result:       string(rec.Result),
+		EvidenceID:        uuidString(rec.ID),
+		EvidenceKind:      rec.EvidenceKind,
+		ObservedAt:        tsString(rec.ObservedAt),
+		Source:            jsonOrNull(rec.Provenance),
+		SourceAttribution: jsonOrNull(rec.SourceAttribution),
+		ContentHash:       rec.Hash,
+		ScopeCell:         uuidPtr(rec.ScopeID),
+		Result:            string(rec.Result),
 	}
 }
 

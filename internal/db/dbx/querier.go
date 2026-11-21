@@ -2443,10 +2443,19 @@ type Querier interface {
 	// {actor_type, actor_id, session_id} shape there).
 	//
 	// Slice 234: a fifth optional filter `scope_cell_id` narrows to one
-	// scope cell. Pattern mirrors slice 224's `scope_cell_id` filter on the
-	// anchors rollup query (`scf_anchors.sql`). Out-of-tenant cell ids return
-	// zero rows naturally because the row's `scope_id` is itself tenant-
-	// scoped — no 404 leak.
+	// scope cell. #2771: a record is in the cell when the scope it was pushed
+	// with (`scope_canonical`, [{key, values[]}]) covers every one of the
+	// cell's dimensions: for each (k, v) in scope_cells.dimensions, the
+	// record has key k with v among its values. That is the cartesian-cell
+	// reading scope.MatchRecordScope applies to credentials. jsonb `@>` does
+	// the per-element subset test against a pattern built once from the
+	// cell (an uncorrelated subquery, so Postgres runs it as an InitPlan).
+	// `scope_id` (FK to `scopes`) is NULL on every pushed record and is not
+	// consulted. Rows with no scope_canonical (pushed before slice 474)
+	// never match. The subquery requires the cell in the caller's tenant: an
+	// out-of-tenant or unknown cell id yields NULL, and `@> NULL` matches
+	// nothing, never the whole ledger. Cost notes in
+	// docs/audit-log/2771-evidence-filter-pills-decisions.md.
 	//
 	// Keyset pagination mirrors ListEvidenceForControlPaged exactly: same
 	// decomposed (observed_at, id) predicate, same +1 probe-row idiom.
