@@ -23,6 +23,10 @@ const ConnectorName = "aws-connector"
 // kinds (ec2.security_group_state.v1, etc.) come with later AWS slices.
 const SupportedKind = "aws.s3.bucket_encryption_state.v1"
 
+// SchemaVersion is the registered schema every record's payload follows.
+// 1.1.0 adds kms_key_id and reason to 1.0.0 (#2815).
+const SchemaVersion = "1.1.0"
+
 // commonFlags is the persistent set every subcommand needs.
 var common struct {
 	endpoint string

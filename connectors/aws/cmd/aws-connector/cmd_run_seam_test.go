@@ -28,6 +28,7 @@ package main
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -335,7 +336,21 @@ func TestBuildRecord_StablePayloadShape(t *testing.T) {
 	if rec.Result != evidencev1.Result_RESULT_PASS {
 		t.Errorf("Result = %v; want RESULT_PASS", rec.Result)
 	}
-	if rec.Payload == nil || rec.Payload.Fields["bucket_arn"] == nil {
-		t.Error("Payload missing bucket_arn field")
+	if rec.SchemaVersion != SchemaVersion {
+		t.Errorf("SchemaVersion = %q; want %q", rec.SchemaVersion, SchemaVersion)
+	}
+	// #2815: the registered schema's keys, and only those. reason is
+	// omitted because it is empty.
+	want := map[string]any{
+		"bucket_name":        "bucket-x",
+		"encryption_enabled": true,
+		"sse_algorithm":      "aws:kms",
+		"kms_key_id":         "alias/test-key",
+		"bucket_key_enabled": true,
+		"account_id":         "111122223333",
+		"region":             "us-east-1",
+	}
+	if got := rec.GetPayload().AsMap(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Payload = %v; want %v", got, want)
 	}
 }
