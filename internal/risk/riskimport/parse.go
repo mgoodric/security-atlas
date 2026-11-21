@@ -111,7 +111,11 @@ type ParseOptions struct {
 // risk export's own headers are among them (external_ref, title,
 // description, category, review_due_at), so an export re-imports with no
 // column map. The export's "id" is the risk's uuid and is deliberately not
-// an alias of external_ref.
+// an alias of external_ref. Every other export column (computed severity,
+// timestamps, ids, and fields later slices map) lands in unmapped; no
+// export header is an alias of a second field, so none errors.
+// TestRiskImport_ExportRoundTrip pins this against the export's real
+// header in CSV and XLSX.
 var fieldAliases = map[string][]string{
 	FieldExternalRef: {
 		"external_ref", "external ref", "risk id", "risk_id", "riskid", "risk ref", "risk reference",
@@ -296,6 +300,11 @@ func parseRows(rows [][]string, opts ParseOptions) (*ParseResult, error) {
 	}
 	headerIdx, headers := findHeaderRow(rows, match)
 	if headerIdx < 0 {
+		// A mapped header that is nowhere in the search window is the
+		// likelier mistake, and the one the user can act on.
+		if err := absentMappedHeader(rows, opts); err != nil {
+			return nil, err
+		}
 		return nil, ErrNoHeaderRow
 	}
 	data := rows[headerIdx+1:]
@@ -305,10 +314,6 @@ func parseRows(rows [][]string, opts ParseOptions) (*ParseResult, error) {
 			return nil, fmt.Errorf("%w: %s=%q", ErrMappedColumnAbsent, field, header)
 		}
 	}
-	if !hasField(cols, FieldTitle) || !hasField(cols, FieldCategory) {
-		return nil, ErrNoHeaderRow
-	}
-
 	out := &ParseResult{
 		Risks:           make([]StagedRisk, 0, len(data)),
 		Rejected:        make([]RejectedRow, 0),
@@ -454,23 +459,49 @@ func missingFields(s StagedRisk) []string {
 	return missing
 }
 
+// headerSearchRows is how far down the sheet the header row is looked for,
+// so a title, an export note or a blank line above it is skipped.
+const headerSearchRows = 5
+
+// findHeaderRow returns the first of the first headerSearchRows rows in
+// which both required fields (title and category) resolve, through an alias
+// or the column map. A title or notes row above the header that happens to
+// hold alias words ("Risk", "Reference") is passed over, because it does not
+// name both required columns.
 func findHeaderRow(rows [][]string, match headerMatcher) (int, []string) {
-	limit := 5
-	if len(rows) < limit {
-		limit = len(rows)
-	}
+	limit := min(headerSearchRows, len(rows))
 	for i := 0; i < limit; i++ {
-		matches := 0
+		var title, category bool
 		for _, cell := range rows[i] {
-			if match(cell) != "" {
-				matches++
+			switch match(cell) {
+			case FieldTitle:
+				title = true
+			case FieldCategory:
+				category = true
 			}
 		}
-		if matches >= 2 {
+		if title && category {
 			return i, rows[i]
 		}
 	}
 	return -1, nil
+}
+
+// absentMappedHeader reports the first column-map entry, in field order,
+// whose header appears in none of the first headerSearchRows rows.
+func absentMappedHeader(rows [][]string, opts ParseOptions) error {
+	seen := map[string]bool{}
+	for _, row := range rows[:min(headerSearchRows, len(rows))] {
+		for _, cell := range row {
+			seen[normalizeHeader(cell)] = true
+		}
+	}
+	for _, field := range FieldNames() {
+		if header, ok := opts.ColumnMap[field]; ok && !seen[normalizeHeader(header)] {
+			return fmt.Errorf("%w: %s=%q", ErrMappedColumnAbsent, field, header)
+		}
+	}
+	return nil
 }
 
 // matchAlias resolves an already-normalized header to a canonical field.
