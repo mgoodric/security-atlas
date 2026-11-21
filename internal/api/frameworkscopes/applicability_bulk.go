@@ -66,9 +66,8 @@ func writeDecisionError(w http.ResponseWriter, r *http.Request, what string, err
 // listed requirement. All or nothing: an invalid decision is a 400 and an
 // unknown requirement a 404, and either writes nothing.
 func (h *Handler) BulkSetApplicability(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -135,9 +134,8 @@ func (h *Handler) BulkSetApplicability(w http.ResponseWriter, r *http.Request) {
 // reason: 200 when at least one row applied, 422 (nothing written) when
 // none did.
 func (h *Handler) ImportApplicability(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
