@@ -384,6 +384,7 @@ POST /v1/risks/categories/{ref}/set-default 11
 POST /v1/risks/categories/{ref}/unarchive 11
 POST /v1/risks/imports 11
 POST /v1/risks/imports/{id}/approve 11
+POST /v1/risks/imports/{id}/rows/{row}/approve 11
 POST /v1/risks/imports/{id}/rows/{row}/reject 11
 POST /v1/risks/{id}/children 11
 POST /v1/risks/{id}/controls 11
