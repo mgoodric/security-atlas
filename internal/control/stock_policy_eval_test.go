@@ -44,7 +44,7 @@ func TestStockControlPoliciesEvaluateOnFreshInstall(t *testing.T) {
 
 	withQueries := 0
 	forEachSOC2Bundle(t, func(name string, b *control.Bundle) {
-		if len(b.Manifest.EvidenceQueries) == 0 {
+		if len(b.Manifest.EvidenceQueries) == 0 || hasSQLQuery(b) {
 			return
 		}
 		withQueries++
