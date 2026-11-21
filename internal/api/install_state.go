@@ -54,8 +54,9 @@ func (s *Server) AttachBootstrapTokenPath(path string) {
 
 // AttachLogger wires the platform logger onto the server for handlers
 // that log non-request-bound events (slice-073 bootstrap-token deletion
-// is the first such surface). Unit servers leave it nil and the
-// handlers use slog.Default().
+// is the first such surface; the needs-attention large-read warning,
+// #2783, is another). Unit servers leave it nil and the handlers use
+// slog.Default(). Attach it before the router is built (RunHTTP).
 func (s *Server) AttachLogger(l *slog.Logger) {
 	s.logger = l
 }
