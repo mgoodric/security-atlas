@@ -147,8 +147,8 @@ func TestHeldBack2358_ReviewedStockControlListedAndEditsKept(t *testing.T) {
 		t.Fatalf("read approved manifest: %v", err)
 	}
 	edited := strings.Replace(approvedYAML,
-		`title: "Production-deploying repositories enforce branch protection"`,
-		`title: "Production-deploying repositories enforce branch protection (tenant edit)"`, 1)
+		`title: "Repositories require an approving review, enforced on admins"`,
+		`title: "Repositories require an approving review, enforced on admins (tenant edit)"`, 1)
 	if edited == approvedYAML {
 		t.Fatalf("approved manifest has no title line to edit:\n%s", approvedYAML)
 	}

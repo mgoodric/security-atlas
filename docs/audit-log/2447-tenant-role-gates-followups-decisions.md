@@ -76,3 +76,36 @@ The three pre-#2428 tenant-admin gates were not added to `routes2428`. Their
 GET routes would need handler-narrower entries for reader roles, and
 pinning their OPA agreement is beyond this ticket. They are inventoried, so
 a change to their helper still fails the guard.
+
+### D5 — every tenant-role helper in roles.go is decided (#2706)
+
+`internal/authz/roles.go` exported three tenant-role helpers the D3
+inventory did not cover. Each is now decided, and
+`TestRoleHelpers2706_EveryHelperDecided` parses `roles.go` and fails on any
+exported `IsTenant*` or `Has*Role` function that is in neither
+`isHelper2447` nor `nonGate2447` (which carries a reason per name).
+
+- **`IsTenantControlOwner` is inventoried.** It is in `isHelper2447`, and
+  the `controldetail/authz.go readsUnscopedEvidence` site lists it after
+  `IsTenantApprover`. It has no OPA-agreement row: its one caller filters
+  the per-control evidence list (it drops the `control_ref` leg for a
+  period-scoped caller) and never refuses a request, like the
+  `buildProfile` not-a-route entry.
+- **`HasTenantRole` is a non-gate.** Its three call sites in
+  `internal/api/me/profile.go` only set `has_tenant_role` on `/v1/me`; it
+  never allows or denies a request. The gate for that route is the Rego
+  roleless self-read allow in `internal/authz/rego_bundle/defaults.rego`
+  (`roleless_self_read_paths`, #2494).
+- **`HasOwnerRole` is a per-resource ownership check, outside the
+  tenant-role inventory.** It does deny: `internal/api/controls/attest.go`
+  returns 403 when the caller does not hold the control's `owner_role`. But
+  it checks ownership of one control against `AckRoleLabels`, not a tenant
+  role, and Rego hands that check to the handler by design: the #2523
+  attest rule in `internal/authz/rego_bundle/control_owner.rego` admits the
+  `control_owner` role at `POST /v1/controls/{id}/attestations` and leaves
+  ownership to `authz.HasOwnerRole`. The 403 is covered by
+  `TestAttest_Rejects_WhenCallerLacksOwnerRole` and the "owner_role differs"
+  leg of `TestAttest2523_RoleMatrix`
+  (`internal/api/controls/attest_integration_test.go`), and the role layer
+  by `TestHasOwnerRole2523`. Its doc comment no longer claims the CSF
+  assessment edit gate, which moved to `IsTenantApprover` in #2540.

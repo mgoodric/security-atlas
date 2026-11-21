@@ -114,8 +114,10 @@ type FixtureResult struct {
 //     identically to the live path.
 //   - queries are the control's declared evidence queries (zero queries falls
 //     back to the per-record evidence rollup, exactly as the live engine does).
-//   - now is the evaluation instant the freshness window is measured against;
-//     the runner passes a deterministic now so a test case is reproducible.
+//   - now is the evaluation instant the freshness window is measured against,
+//     and the instant the queries see: SQL's evaluated_at column and Rego's
+//     time.now_ns() (#2911). The runner passes a deterministic now so a test
+//     case is reproducible.
 //   - tx is OPTIONAL: required only when a query's language is sql. Pass nil
 //     for Rego/JSON-path-only bundles (the common case) and the call needs no
 //     database at all (AC-9). A SQL query with a nil tx returns
@@ -144,7 +146,7 @@ func EvaluateFixture(ctx context.Context, freshnessClass string, queries []Fixtu
 	inWindow := inWindowRecords(all, freshnessClass, now)
 	freshness := computeFreshness(all, freshnessClass, now)
 
-	result, err := evalFixtureQueries(ctx, queries, latestAttestationWins(inWindow), tx)
+	result, err := evalFixtureQueries(ctx, queries, latestAttestationWins(inWindow), now, tx)
 	if err != nil {
 		return FixtureResult{}, err
 	}
@@ -170,7 +172,7 @@ func EvaluateFixture(ctx context.Context, freshnessClass string, queries []Fixtu
 // engine always holds, and a fixture record with no evidence_kind matches a
 // query of any kind (#2818), where a live record with no kind reaches only a
 // query that declares none.
-func evalFixtureQueries(ctx context.Context, queries []FixtureQuery, inWindow []inWindowRecord, tx pgx.Tx) (string, error) {
+func evalFixtureQueries(ctx context.Context, queries []FixtureQuery, inWindow []inWindowRecord, now time.Time, tx pgx.Tx) (string, error) {
 	if len(queries) == 0 {
 		// No declared query: the per-record evidence rollup IS the result —
 		// identical to the live engine's no-query fallback.
@@ -195,12 +197,12 @@ func evalFixtureQueries(ctx context.Context, queries []FixtureQuery, inWindow []
 		)
 		switch q.Language {
 		case "rego":
-			res, err = evalRegoQuery(ctx, q.Expression, records)
+			res, err = evalRegoQuery(ctx, q.Expression, records, now)
 		case "sql":
 			if tx == nil {
 				return "", ErrFixtureSQLNeedsDB
 			}
-			res, err = evalSQLQuery(ctx, tx, q.Expression, records)
+			res, err = evalSQLQuery(ctx, tx, q.Expression, records, now)
 		case "jsonpath":
 			res, err = evalJSONPathQuery(ctx, q.Expression, records)
 		}

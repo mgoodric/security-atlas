@@ -69,7 +69,7 @@ func TestEvalQueries_TwoQueriesTwoKinds(t *testing.T) {
 		{Language: "jsonpath", Expression: queryMFA, EvidenceKind: kindMFA},
 		{Language: "jsonpath", Expression: queryPosture, EvidenceKind: kindPosture},
 	}}
-	got, err := (&Engine{}).evalQueries(context.Background(), nil, meta, mixedKindRecords(now))
+	got, err := (&Engine{}).evalQueries(context.Background(), nil, meta, mixedKindRecords(now), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestEvalQueries_TwoQueriesTwoKinds(t *testing.T) {
 
 	// A failing record of one kind fails only through its own query.
 	recs := append(mixedKindRecords(now), inWindowRecord{result: ResultPass, observedAt: now, kind: kindPosture, payload: []byte(`{"firewall_enabled": false}`)})
-	got, err = (&Engine{}).evalQueries(context.Background(), nil, meta, recs)
+	got, err = (&Engine{}).evalQueries(context.Background(), nil, meta, recs, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestEvalQueries_NoDeclaredKindSeesEveryRecord(t *testing.T) {
 	meta := controlMeta{id: uuid.New(), queries: []evidenceQueryManifest{
 		{Language: "jsonpath", Expression: queryMFA},
 	}}
-	got, err := (&Engine{}).evalQueries(context.Background(), nil, meta, mixedKindRecords(now))
+	got, err := (&Engine{}).evalQueries(context.Background(), nil, meta, mixedKindRecords(now), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestEvalQueries_DeclaredKindWithNoRecords(t *testing.T) {
 	meta := controlMeta{id: uuid.New(), queries: []evidenceQueryManifest{
 		{Language: "jsonpath", Expression: queryMFA, EvidenceKind: "jira.ticket_evidence.v1"},
 	}}
-	got, err := (&Engine{}).evalQueries(context.Background(), nil, meta, mixedKindRecords(now))
+	got, err := (&Engine{}).evalQueries(context.Background(), nil, meta, mixedKindRecords(now), now)
 	if err != nil {
 		t.Fatal(err)
 	}

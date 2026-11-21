@@ -210,8 +210,30 @@ evidence_queries:
 A Rego evidence query lives in `package evidence.query` and assigns `result`
 (`pass | fail | na | inconclusive`). Its only input is
 `{records: [{result, observed_at}]}`: the per-record verdicts the connector
-already decided, each with its RFC 3339 observation time. It never sees the
+already decided, each with its RFC 3339 observation time in UTC. It never sees the
 payload; use the SQL or JSON-path languages to read payload fields.
+
+#### The evaluation instant
+
+A query that checks a time window compares against the **evaluation instant**,
+never the wall clock (#2911, ADR 0028 d1 amendment):
+
+| Language | Where the instant is                                                         | Example                                                                            |
+| -------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| SQL      | the `evaluated_at` column of `evidence`, the same `timestamptz` on every row | `SELECT bool_and(observed_at >= evaluated_at - interval '24 hours') FROM evidence` |
+| Rego     | `time.now_ns()` (#2890)                                                      | `time.now_ns() - time.parse_rfc3339_ns(r.observed_at) < 24 * 60 * 60 * 1000000000` |
+
+The instant is the engine's evaluation time, or the as-of horizon when a
+replay or an as-of evaluation passes an earlier one. In a bundle test it is
+the case's `evaluated_at`. So a replay judges the window as of its horizon,
+and a test case whose dates are pinned keeps passing however old they get.
+
+In SQL, use `evaluated_at` and never `now()`, `current_timestamp`,
+`clock_timestamp()`, `statement_timestamp()`, `transaction_timestamp()`,
+`current_date`, `localtimestamp` or a `'now'` / `'today'` literal: those read
+the wall clock. A test refuses them in the stock bundles under `controls/`
+(`eval.SQLUsesWallClock`). A tenant's own query is not refused, but it gives a
+replay the wrong answer.
 
 A minimal **manual** control:
 
@@ -314,7 +336,7 @@ cases:
   - name: all-users-have-mfa # required, unique
     description: "optional human context"
     expected_state: pass # required: pass | fail | na | inconclusive
-    evaluated_at: 2026-06-01T12:00:00Z # optional: pins the freshness "now"
+    evaluated_at: 2026-06-01T12:00:00Z # optional: pins the evaluation instant (freshness, SQL evaluated_at, Rego time.now_ns())
     records: # fixture evidence records
       - result: pass # required: pass | fail | na | inconclusive
         observed_at: 2026-06-01T00:00:00Z # optional, defaults to evaluated_at

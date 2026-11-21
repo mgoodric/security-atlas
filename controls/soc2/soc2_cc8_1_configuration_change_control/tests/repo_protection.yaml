@@ -1,0 +1,258 @@
+# github.repo_protection.v1 records, shaped as the GitHub connector emits
+# them (connectors/github/cmd/atlas-github/cmd_run.go
+# buildRepoProtectionRecord): all seven fields are always present, and
+# required_reviews is a JSON number. `result` is the connector's own
+# verdict, required_reviews >= 1. A repo with no protection (404) is
+# pushed as fail with every field zero or false; a repo whose protection
+# could not be read is pushed as inconclusive with the same zeros.
+cases:
+  - name: every-repo-requires-review-passes
+    description: admin enforcement is not part of this check
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/infra
+          default_branch: main
+          required_reviews: 2
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: no-approving-review-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+      - result: fail
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/infra
+          default_branch: main
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: no-branch-protection-fails
+    description: a 404 from the protection endpoint
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+
+  - name: unread-repo-fails
+    description: a failed protection fetch is pushed inconclusive with every field zero
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+      - result: inconclusive
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/infra
+          default_branch: main
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: false
+
+  - name: connector-pass-with-no-review-fails
+    description: the query reads required_reviews, not the verdict
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: missing-required-reviews-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: non-numeric-required-reviews-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: "1"
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: missing-repo-name-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: latest-record-per-repo-decides-on
+    description: reviews became required after an earlier in-window record had none
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: latest-record-per-repo-decides-off
+    description: the review requirement was removed after an earlier in-window record had it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+      - result: fail
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: tie-at-one-instant-fails-closed
+    description: two records for one repo at the same observed_at disagree; the failing one decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 1
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+      - result: fail
+        evidence_kind: github.repo_protection.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          repo_full_name: acme/api
+          default_branch: main
+          required_reviews: 0
+          require_code_owner_reviews: false
+          require_signed_commits: false
+          require_linear_history: false
+          enforce_admins: true
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
