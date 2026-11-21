@@ -22,7 +22,11 @@ It takes the control import sweeper's two-pool shape: the migrator pool
 lists tenant IDs only, and each tenant's DELETE runs on `atlas_app` under
 `tenancy.WithTenant`, so the write is RLS-bound (invariant #6). Migration
 `20261274000000_exception_idempotency_keys_sweep.sql` adds the
-`tenant_delete` policy and `GRANT DELETE`. A single cross-tenant DELETE on
+`tenant_delete` policy and `GRANT DELETE`. The policy also requires
+`created_at <= now() - interval '24 hours'`, so even within its own tenant
+the app role can only delete a key that can no longer replay
+(`TestIdempotencySweeper_PolicyKeepsKeysInsideTheWindow`, observed failing
+against an unbounded policy). A single cross-tenant DELETE on
 the migrator role was simpler but would be the one write to this table that
 RLS does not bind.
 
@@ -39,10 +43,25 @@ an omitted predicate as `{}` (the stored spelling), and treats
 `compensating_controls` omitted, `null` and `[]` as one value. The order of
 `compensating_controls` still counts: the stored array is ordered.
 
-One-time effect at upgrade: a key recorded by the previous build whose
-predicate keys were not already sorted hashes differently now, so a retry
-of it inside the first 24h after the upgrade gets 422 instead of a replay.
-Accepted: the window is short and the client can resend without the key.
+**Keys recorded before the upgrade still replay.** The #2618 hash differs
+from the canonical one for nearly every request, not only for unsorted
+predicates. It encoded an omitted predicate as `""` and omitted or null
+`compensating_controls` as `null`, and the request form sends neither. On a
+mismatch the store also compares the request's legacy hash
+(`legacyRequestHash`, the #2618 function kept byte for byte) and replays
+when that matches. `TestLegacyRequestHashMatchesTheShippedHash` pins it
+against the literal JSON the #2618 build hashed.
+`TestHTTP_ExceptionCreate_LegacyHashedKeyReplays` checks the replay end to
+end, and it was observed failing with the fallback disabled.
+
+The fallback is temporary. It is marked `TODO(remove after next release)`:
+once every key recorded before #2714 is past the 24h window, a follow-up
+deletes `legacyRequestHash` and `CreateInput.LegacyRequestHash`. The
+removal ticket is filed by the dispatcher.
+
+The first draft of this PR documented only the unsorted-predicate case and
+accepted a 422 for it. Review found the effect covered nearly every
+retry across the upgrade, which is why the fallback was added.
 
 ### D3 — revoked-jti TTL: confirmed, pinned
 

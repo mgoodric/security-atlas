@@ -171,6 +171,7 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 		}
 		in.IdempotencyKey = key
 		in.RequestHash = requestHash(controlID, req)
+		in.LegacyRequestHash = legacyRequestHash(controlID, req)
 	}
 	created, replayed, err := h.store.CreateIdempotent(ctx, in)
 	if err != nil {
@@ -228,6 +229,36 @@ func requestHash(controlID uuid.UUID, req createReq) string {
 		ScopeCellPredicate:   canonicalPredicate(req.ScopeCellPredicate),
 		Justification:        req.Justification,
 		CompensatingControls: compensating,
+		ExpiresAt:            req.ExpiresAt.UTC().Format(time.RFC3339Nano),
+	})
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:])
+}
+
+// legacyRequestHash is requestHash as #2618 shipped it: the predicate only
+// compacted (an omitted one hashes as ""), and compensating_controls kept
+// as sent (omitted or null hash as null). A key recorded by that build
+// replays when it matches, so a retry across the upgrade is not refused.
+//
+// TODO(remove after next release): once every key recorded before #2714
+// is past IdempotencyWindow, delete this and CreateInput.LegacyRequestHash.
+func legacyRequestHash(controlID uuid.UUID, req createReq) string {
+	var predicate bytes.Buffer
+	if err := json.Compact(&predicate, req.ScopeCellPredicate); err != nil {
+		predicate.Reset()
+		predicate.Write(req.ScopeCellPredicate)
+	}
+	canonical, _ := json.Marshal(struct {
+		ControlID            string   `json:"control_id"`
+		ScopeCellPredicate   string   `json:"scope_cell_predicate"`
+		Justification        string   `json:"justification"`
+		CompensatingControls []string `json:"compensating_controls"`
+		ExpiresAt            string   `json:"expires_at"`
+	}{
+		ControlID:            controlID.String(),
+		ScopeCellPredicate:   predicate.String(),
+		Justification:        req.Justification,
+		CompensatingControls: req.CompensatingControls,
 		ExpiresAt:            req.ExpiresAt.UTC().Format(time.RFC3339Nano),
 	})
 	sum := sha256.Sum256(canonical)

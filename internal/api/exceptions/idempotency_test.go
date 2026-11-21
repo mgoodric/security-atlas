@@ -1,6 +1,8 @@
 package exceptions
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -136,5 +138,42 @@ func TestRequestHashCanonical(t *testing.T) {
 	big2.ScopeCellPredicate = json.RawMessage(`{"n":12345678901234567891}`)
 	if requestHash(ctrl, big1) == requestHash(ctrl, big2) {
 		t.Error("two large numbers that differ in the last digit hashed the same")
+	}
+}
+
+// #2714: legacyRequestHash is byte-for-byte the #2618 hash, so a key
+// recorded before the upgrade still replays. The expected value hashes
+// the exact JSON the #2618 build produced for a body without a predicate
+// or compensating controls (the request form's usual shape): the
+// predicate as "" and the controls as null. The canonical hash differs.
+func TestLegacyRequestHashMatchesTheShippedHash(t *testing.T) {
+	t.Parallel()
+	ctrl := uuid.MustParse("6f1c2e1a-0000-4000-8000-000000000001")
+	exp := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	req := createReq{Justification: "vendor blocker", ExpiresAt: &exp}
+
+	shipped := `{"control_id":"6f1c2e1a-0000-4000-8000-000000000001",` +
+		`"scope_cell_predicate":"","justification":"vendor blocker",` +
+		`"compensating_controls":null,"expires_at":"2027-01-02T03:04:05Z"}`
+	sum := sha256.Sum256([]byte(shipped))
+	want := hex.EncodeToString(sum[:])
+
+	if got := legacyRequestHash(ctrl, req); got != want {
+		t.Fatalf("legacyRequestHash = %s, want the #2618 hash %s", got, want)
+	}
+	if requestHash(ctrl, req) == want {
+		t.Fatal("the canonical hash equals the legacy one for this body; the fallback would be untested")
+	}
+
+	// A predicate with keys out of order hashed compacted, not sorted.
+	req.ScopeCellPredicate = json.RawMessage(`{ "value":"prod", "op":"eq", "dim":"env" }`)
+	req.CompensatingControls = []string{"manual review"}
+	shipped = `{"control_id":"6f1c2e1a-0000-4000-8000-000000000001",` +
+		`"scope_cell_predicate":"{\"value\":\"prod\",\"op\":\"eq\",\"dim\":\"env\"}",` +
+		`"justification":"vendor blocker","compensating_controls":["manual review"],` +
+		`"expires_at":"2027-01-02T03:04:05Z"}`
+	sum = sha256.Sum256([]byte(shipped))
+	if got := legacyRequestHash(ctrl, req); got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("legacyRequestHash with a predicate = %s, want %s", got, hex.EncodeToString(sum[:]))
 	}
 }
