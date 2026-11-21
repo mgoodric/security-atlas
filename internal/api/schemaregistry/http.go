@@ -12,6 +12,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
 // HTTPHandler exposes the slice-014 routes:
@@ -118,15 +119,19 @@ type registerRequest struct {
 	DefaultSCFAnchors []string        `json:"default_scf_anchors"`
 }
 
-// RegisterHTTP — AC-4 + AC-5: admin-only, tenant-scoped registration with
-// semver enforcement.
+// RegisterHTTP — AC-4 + AC-5: tenant-admin-only, tenant-scoped registration
+// with semver enforcement. The gate is authz.IsTenantAdmin (#2674): the admin
+// flag or the live tenant admin role, as OPA admits only admin on a schemas
+// write. It read the cred.IsAdmin flag alone until then, which refused a
+// tenant admin signed in by browser.
 func (h *HTTPHandler) RegisterHTTP(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
 		httpresp.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
-	if !cred.IsAdmin {
+	isTenantAdmin := authz.IsTenantAdmin(cred)
+	if !isTenantAdmin {
 		httpresp.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "admin credential required"})
 		return
 	}
@@ -147,7 +152,7 @@ func (h *HTTPHandler) RegisterHTTP(w http.ResponseWriter, r *http.Request) {
 		Semver:            body.Semver,
 		SchemaJSON:        body.Schema,
 		Owner:             body.Owner,
-		IsAdmin:           cred.IsAdmin,
+		IsAdmin:           isTenantAdmin,
 		HasCredential:     true,
 		CreatedBy:         cred.ID,
 		DefaultSCFAnchors: body.DefaultSCFAnchors,
