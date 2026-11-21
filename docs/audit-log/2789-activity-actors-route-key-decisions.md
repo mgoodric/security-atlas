@@ -11,7 +11,7 @@ Harness: a throwaway `//go:build explain2789` test in `internal/api/adminauditlo
 
 Dataset: 100,000 `decision_audit_log` rows spread uniformly over 90 days. 40% are by 20 machine actors (`system`, three `system:<process>`, 16 `oauth_client:<uuid>`) and 60% by person UUIDs. 60% are `read`. Each path is a random registry pattern with every `*` replaced by a fresh UUID. A quarter of them gain a trailing `/<uuid>` and a quarter a `:bulk` suffix. Postgres 16.15 on a local scratch cluster (`scripts/scratch-pg.sh`), warm cache.
 
-In the 90-day window with reads included, the `resolved` CTE took 3,313 ms of a 3,570 ms run. Its nested loop is 12,424 paths × 77 patterns with a subquery per pair. That is far over the ticket's 100 ms bar.
+In the 90-day window with reads included, the `resolved` CTE finished at 3,415 ms of a 3,570 ms run. Its nested loop is 12,424 paths × 77 patterns with a subquery per pair. That is far over the ticket's 100 ms bar.
 
 ## D2 — Normalise each path to a route key, then match only distinct keys
 
