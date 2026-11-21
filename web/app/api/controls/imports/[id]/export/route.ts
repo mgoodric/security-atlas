@@ -9,7 +9,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { rejectNonUUID } from "@/lib/api/bff";
+import { rejectNonUUID, upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 const PASSTHROUGH_HEADERS = [
@@ -36,13 +36,16 @@ export async function GET(
     { headers: { Authorization: `Bearer ${bearer}` }, cache: "no-store" },
   );
   if (!upstream.ok) {
-    return new NextResponse(await upstream.text(), {
-      status: upstream.status,
-      headers: {
-        "Content-Type":
-          upstream.headers.get("Content-Type") ?? "application/json",
+    return new NextResponse(
+      upstreamBody(upstream.status, await upstream.text()),
+      {
+        status: upstream.status,
+        headers: {
+          "Content-Type":
+            upstream.headers.get("Content-Type") ?? "application/json",
+        },
       },
-    });
+    );
   }
   const headers: Record<string, string> = {};
   for (const name of PASSTHROUGH_HEADERS) {

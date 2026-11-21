@@ -9,6 +9,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/app/oauth/callback/route";
 
 export async function GET(): Promise<Response> {
@@ -23,11 +24,14 @@ export async function GET(): Promise<Response> {
   });
   const text = await upstream.text();
   try {
-    return NextResponse.json(text ? JSON.parse(text) : null, {
-      status: upstream.status,
-    });
+    return NextResponse.json(
+      text ? JSON.parse(upstreamBody(upstream.status, text)) : null,
+      {
+        status: upstream.status,
+      },
+    );
   } catch {
-    return new NextResponse(text, {
+    return new NextResponse(upstreamBody(upstream.status, text), {
       status: upstream.status,
       headers: { "Content-Type": "text/plain" },
     });

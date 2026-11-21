@@ -77,5 +77,23 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
       paramsFor("00000000-0000-0000-0000-000025580001"),
     );
     expect(res.status).toBe(503);
+    // #2757: the 5xx body is masked on the wire.
+    expect(await res.json()).toEqual({ error: "platform error" });
+  });
+
+  test("passes an upstream 4xx body through", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "questionnaire not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const res = await POST(
+      {} as never,
+      paramsFor("00000000-0000-0000-0000-000025580001"),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "questionnaire not found" });
   });
 });

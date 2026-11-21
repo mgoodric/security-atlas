@@ -9,8 +9,7 @@ linked_control_ids:
   - TPM-04
   - TPM-10
 acknowledgment_required_roles:
-  - procurement_owner
-  - security_lead
+  - everyone
 source_attribution: community_draft
 ---
 

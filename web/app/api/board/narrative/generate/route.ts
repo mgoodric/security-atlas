@@ -21,6 +21,7 @@ import { cookies } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { upstreamBody } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     cache: "no-store",
   });
   const text = await upstream.text();
-  return new NextResponse(text, {
+  return new NextResponse(upstreamBody(upstream.status, text), {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
   });
