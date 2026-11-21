@@ -4173,6 +4173,11 @@ type Querier interface {
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
+	// #2852 — replace a published synced policy's control links in place. It
+	// is not a new version: the links are kept in security-atlas, not synced.
+	// The caller writes the policy_audit_log row in the same transaction.
+	// Other rows do not match.
+	UpdateSyncedPolicyLinks(ctx context.Context, arg UpdateSyncedPolicyLinksParams) (Policy, error)
 	// #2101: turn the caller-tenant's Allow self-approval on or off. RLS gates
 	// this to the caller's own row; the handler gates it to admins and writes
 	// the me_audit_log row in the same transaction.

@@ -152,6 +152,15 @@ var (
 	// source_attribution outside the accepted set, or 'imported' (which
 	// only Import sets). HTTP 400.
 	ErrInvalidSourceAttribution = errors.New("policy: invalid source_attribution")
+	// ErrManagedBySync is returned when an in-tool edit targets a synced
+	// policy (#2852): creating its next version, changing its review date,
+	// or any draft path on it or on a draft of its chain. Its page is the
+	// authority, so the edit is made there. HTTP 409.
+	ErrManagedBySync = errors.New("policy: managed in Confluence; edit it at its source page")
+	// ErrNotSyncedPolicy is returned when SetSyncedLinks targets a policy
+	// that is not a published synced row (#2852). Any other policy changes
+	// its links in a draft or a new version. HTTP 409.
+	ErrNotSyncedPolicy = errors.New("policy: control links change in place only on a published synced policy; change any other policy's links in a draft or a new version")
 )
 
 // pgErrForeignKeyViolation is the SQLSTATE Postgres returns when a
@@ -373,8 +382,48 @@ func checkPredecessor(ctx context.Context, q *dbx.Queries, tenantID, pred uuid.U
 		}
 		return fmt.Errorf("get predecessor: %w", err)
 	}
+	if row.SourceAttribution == SourceSynced {
+		return ErrManagedBySync
+	}
 	if row.Status != StatePublished {
 		return ErrPredecessorNotPublished
+	}
+	return nil
+}
+
+// checkNotSynced refuses an in-tool edit of a synced policy (#2852): the
+// row itself is synced, or, when chain is set, it is a draft whose
+// predecessor is (a next version started before its chain was synced). A
+// missing id passes, so the caller reports it as not found.
+func checkNotSynced(ctx context.Context, q *dbx.Queries, tenantID, id uuid.UUID, chain bool) error {
+	row, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+		TenantID: pgUUID(tenantID),
+		ID:       pgUUID(id),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check synced: %w", err)
+	}
+	if row.SourceAttribution == SourceSynced {
+		return ErrManagedBySync
+	}
+	if !chain || !row.PredecessorID.Valid {
+		return nil
+	}
+	pred, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+		TenantID: pgUUID(tenantID),
+		ID:       row.PredecessorID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check synced predecessor: %w", err)
+	}
+	if pred.SourceAttribution == SourceSynced {
+		return ErrManagedBySync
 	}
 	return nil
 }
@@ -714,6 +763,9 @@ func (s *Store) Publish(ctx context.Context, approvedID uuid.UUID, in PublishInp
 	}
 	var out Policy
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		if err := checkNotSynced(ctx, q, tenantID, approvedID, true); err != nil {
+			return err
+		}
 		// Fetch the approved row to determine first-publish vs
 		// subsequent-publish, and to check orphan-block.
 		approved, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
@@ -830,6 +882,10 @@ func (s *Store) SetNextReviewAt(ctx context.Context, id uuid.UUID, next *time.Ti
 			}
 			return fmt.Errorf("get policy: %w", err)
 		}
+		// A synced policy's review date follows its page (#2852).
+		if prior.SourceAttribution == SourceSynced {
+			return ErrManagedBySync
+		}
 		if prior.Status != StatePublished {
 			return ErrWrongState
 		}
@@ -877,6 +933,13 @@ func (s *Store) DiscardDraft(ctx context.Context, id uuid.UUID, actor string) (P
 	}
 	var out Policy
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		// A synced row is refused as managed in Confluence (#2852). A
+		// draft of a synced chain may still be discarded: it holds the
+		// successor slot the page's next version needs, so discarding it
+		// is how the sync is unblocked.
+		if err := checkNotSynced(ctx, q, tenantID, id, false); err != nil {
+			return err
+		}
 		row, err := q.DeleteDraftPolicy(ctx, dbx.DeleteDraftPolicyParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
@@ -1049,6 +1112,11 @@ type transitionParams struct {
 func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams) (Policy, error) {
 	var out Policy
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		// Every transition (submit, approve, draft edit) is a draft path a
+		// synced policy refuses (#2852).
+		if err := checkNotSynced(ctx, q, tenantID, id, true); err != nil {
+			return err
+		}
 		row, err := p.run(q, tenantID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
