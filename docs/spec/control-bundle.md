@@ -94,13 +94,13 @@ and why they were kept rather than narrowed to the cadence, is recorded in
 
 Each entry has:
 
-| Field           | Type   | Notes                                                                                                                              |
-| --------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `id`            | string | Unique within the bundle. Pattern `^[a-z][a-z0-9_-]{2,63}$`.                                                                       |
-| `language`      | enum   | `rego` \| `sql` \| `jsonpath`. The slice-009 parser stores the language verbatim; the slice-012 evaluator dispatches on it.        |
-| `expression`    | string | The query body. **Not executed in slice 009** — only stored.                                                                       |
-| `evidence_kind` | string | Optional. When set, must match an `evidence_kind` registered in the schema registry (slice 014). Unregistered kinds reject upload. |
-| `description`   | string | Author-facing comment.                                                                                                             |
+| Field           | Type   | Notes                                                                                                                                                                                                                                                                                                                                                     |
+| --------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`            | string | Unique within the bundle. Pattern `^[a-z][a-z0-9_-]{2,63}$`.                                                                                                                                                                                                                                                                                              |
+| `language`      | enum   | `rego` \| `sql` \| `jsonpath`. The slice-009 parser stores the language verbatim; the slice-012 evaluator dispatches on it.                                                                                                                                                                                                                               |
+| `expression`    | string | The query body. **Not executed in slice 009** — only stored.                                                                                                                                                                                                                                                                                              |
+| `evidence_kind` | string | Optional. When set, must match an `evidence_kind` registered in the schema registry (slice 014). Unregistered kinds reject upload. The query then evaluates only the control's records of this kind (#2818, ADR 0028). A query without one evaluates every record the control receives, of any kind; upload and `atlas-cli controls validate` warn on it. |
+| `description`   | string | Author-facing comment.                                                                                                                                                                                                                                                                                                                                    |
 
 ### 2.4 applicability_expr shape (mirror of slice 017)
 
@@ -308,6 +308,7 @@ cases:
     records: # fixture evidence records
       - result: pass # required: pass | fail | na | inconclusive
         observed_at: 2026-06-01T00:00:00Z # optional, defaults to evaluated_at
+        evidence_kind: aws.iam_user.access_state # optional; omitted = whatever kind each query reads
         payload: # optional; read by SQL + JSON-path queries
           iam_users:
             - { mfa_enabled: true }
@@ -315,6 +316,7 @@ cases:
 
 - **`expected_state`** is the control state you assert the query produces. An **expected-fail is a passing test**: a case that declares `expected_state: fail` passes when the query correctly returns `fail`.
 - **`observed_at`** defaults to the case's evaluation instant, so a record is in-window by default — you only set it when you are testing freshness/staleness behaviour.
+- **`evidence_kind`** routes the record to the queries that declare that kind, as the engine does live (#2818). Omit it in a single-kind bundle: a record with no kind counts as whatever kind each query reads. Set it when a control has queries over two kinds, to test that each query sees only its own records.
 - **`payload`** is the evidence record's JSON body; the Rego path ignores it (it sees only `result`), while the SQL and JSON-path query languages read it.
 
 ### Worked example — the MFA control

@@ -79,6 +79,23 @@ func (b *Bundle) ValidateEvidenceKinds(_ context.Context, reg SchemaRegistry) er
 	return nil
 }
 
+// UnkindedQueryWarnings returns one warning for each evidence query that
+// declares no evidence_kind (#2818, ADR 0028 decision 5). Such a query is
+// still accepted and evaluates over every record its control receives, as
+// all queries did before #2818; a query that reads payload fields can then
+// misread a record of another kind. Upload returns these as warnings and
+// `atlas-cli controls validate` prints them; neither fails.
+func (m *Manifest) UnkindedQueryWarnings() []string {
+	var out []string
+	for i, q := range m.EvidenceQueries {
+		if q.EvidenceKind != "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("evidence_queries[%d] (%s) declares no evidence_kind, so it evaluates every record the control receives, of any kind; declare the kind it reads", i, q.ID))
+	}
+	return out
+}
+
 // registryKnowsKind probes the slice-014 cache for any registered semver of
 // the kind. The bundle author hasn't pinned one, so we accept the kind iff
 // at least one semver is registered. We try the v1 canonical "1.0.0" first
