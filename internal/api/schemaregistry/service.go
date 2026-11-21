@@ -353,9 +353,10 @@ type RegisterRequest struct {
 	Semver     string
 	SchemaJSON []byte
 	Owner      string
-	// IsAdmin is true when the calling credential is marked admin. The
-	// handler (api/schemaregistry HTTP) extracts this from the credential
-	// in context; Service.Register treats !IsAdmin as ErrUnauthorized.
+	// IsAdmin is true when the calling credential administers its tenant.
+	// The handler (api/schemaregistry HTTP) sets it from
+	// authz.IsTenantAdmin on the credential in context (#2674);
+	// Service.Register treats !IsAdmin as ErrUnauthorized.
 	IsAdmin       bool
 	HasCredential bool
 	CreatedBy     string

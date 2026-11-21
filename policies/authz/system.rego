@@ -13,10 +13,10 @@
 # kinds — this Rego rule is the second leg of defense in depth, so a
 # bug in the platform layer doesn't open a "push any kind" hole.
 #
-# Schema admin (POST /v1/schemas) is a separate machine path gated by
-# the slice-034 IsAdmin flag. The legacy-flag bridge maps IsAdmin to
-# the admin role, so admin.rego covers it without this file needing a
-# dedicated rule.
+# Schema admin (POST /v1/schemas) is gated on the tenant admin: the
+# slice-034 IsAdmin flag, which the legacy-flag bridge maps to the admin
+# role, or the live admin role (#2674). admin.rego covers it without
+# this file needing a dedicated rule.
 
 package authz
 
