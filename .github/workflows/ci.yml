@@ -3793,6 +3793,59 @@ jobs:
           bash scripts/changelog.sh require <"$RUNNER_TEMP/files.txt"
 
   # ====================================================================
+  # #2891 — stock bundles must not supersede silently (HARD FAIL).
+  #
+  # Every start of an existing deployment re-uploads the stock bundles
+  # (deploy/docker/bootstrap/bootstrap.sh). A superseding change mints a
+  # new control id and leaves owners, evidence, exceptions and links on
+  # the old row (docs/audit-log/1908). The check compares each controls/**
+  # control.yaml with the PR base using control.SupersedingFields, the
+  # function Store.Upload uses, and fails on a supersede unless the PR
+  # carries the `supersedes-stock` label AND a changed docs/audit-log/*.md
+  # names the bundle. After adding the label, re-run the failed job.
+  # Unconditional (the PR step no-ops without a controls change), so
+  # merge-gate needs it.
+  #
+  # Local repro: `go run ./cmd/scripts/stock-supersede-check --base origin/main`
+  #   self-test: `go test ./cmd/scripts/stock-supersede-check`
+  # ====================================================================
+  stock-supersede-check:
+    name: stock-supersede-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: Self-test
+        run: go test ./cmd/scripts/stock-supersede-check
+
+      - name: Compare stock bundles with the PR base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
+          go run ./cmd/scripts/stock-supersede-check --base "$BASE_SHA" --labels "$PR_LABELS"
+
+  # ====================================================================
   # #1887 — merge-gate needs-completeness (HARD FAIL).
   #
   # Refuses a job that runs on every PR (no job-level `if:`) but is not in
@@ -4184,6 +4237,7 @@ jobs:
       - merge-gate-needs-check # merge-gate-needs-check (unconditional, #1887)
       - stub-twin-check # stub-twin-check (unconditional, #2099)
       - changelog-fragment # changelog-fragment (unconditional, #2357)
+      - stock-supersede-check # stock-supersede-check (unconditional, #2891)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
