@@ -10,8 +10,8 @@ package authz_test
 //     the matrix pins the result of both layers;
 //   - that no routes2428 gate admits a session holding a role in its claim
 //     alone (a revoked user's token, #2381);
-//   - the HasAnyTenantRole helper itself, and the recorded split where OPA
-//     admits a free-text label the handler refuses.
+//   - the HasAnyTenantRole helper itself, and that OPA, like the handler,
+//     refuses a free-text label (#2596).
 
 import (
 	"context"
@@ -119,20 +119,19 @@ func TestReadGates2507_HasAnyTenantRole(t *testing.T) {
 	}
 }
 
-// TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses pins a recorded
-// split between the layers (Matt, 2026-11-17: keep the stricter handler).
-// derivedRolesFor turns a free-text owner_roles label into control_owner,
-// so OPA admits these credentials to the control, evidence and activity
-// reads: an unbound API key, a client_credentials machine token and a
-// legacy credential, whose label is their grant. HasAnyTenantRole counts
-// canonical roles only, so the handler refuses all three: a free-text label
-// grants nothing at the handler. The policy layer catching up is #2596; when
-// it does, this test flips to agreement.
+// TestReadGates2507_FreeTextLabelBothRefuse: a free-text owner_roles label
+// grants nothing (Matt, 2026-11-17). HasAnyTenantRole counts canonical roles
+// only, and since #2596 derivedRolesFor derives none from free text, so OPA
+// refuses the control, evidence and activity reads too: to an unbound API
+// key, a client_credentials machine token and a legacy credential, whose
+// label is their grant. Until #2596 OPA admitted them as control_owner while
+// the handler refused (the recorded split, #2507 D2).
 //
 // A key bound to a user left the split with #2431: its free-text label is a
 // control_owner ceiling on its owner's live roles, so with an owner holding
 // no role both layers refuse it, and with a control_owner owner both admit.
-func TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses(t *testing.T) {
+// The full matrix is in free_text_label_2596_test.go.
+func TestReadGates2507_FreeTextLabelBothRefuse(t *testing.T) {
 	t.Parallel()
 	e := engine(t)
 	shapes := []struct {
@@ -160,8 +159,8 @@ func TestReadGates2507_FreeTextLabelOPAAdmitsHandlerRefuses(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s GET %s: Decide: %v", sh.name, path, err)
 			}
-			if !d.Allow {
-				t.Errorf("%s GET %s: OPA refuses; the recorded split is gone, update this test and D2", sh.name, path)
+			if d.Allow {
+				t.Errorf("%s GET %s: OPA admits a free-text label (%v), the handler refuses it", sh.name, path, d.Reason)
 			}
 		}
 	}

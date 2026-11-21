@@ -1954,6 +1954,9 @@ jobs:
           keystore-path: /tmp/atlas-ci/keys
           data-dir: /tmp/atlas-ci
           atlas-health-url: http://localhost:8080/health
+          # A fresh throwaway key per run, so the SSO save flow can be
+          # tested (#2773).
+          generate-oidc-secret-key: "true"
       - name: Start web server
         working-directory: web
         run: |
@@ -2197,6 +2200,9 @@ jobs:
           keystore-path: /tmp/atlas-ci/keys
           data-dir: /tmp/atlas-ci
           atlas-health-url: http://localhost:8080/health
+          # A fresh throwaway key per run, so the SSO save flow can be
+          # tested (#2773).
+          generate-oidc-secret-key: "true"
       - name: Start web server (production-build standalone)
         # Slice 387 — boot the standalone Node server, NOT `npm start`.
         # The standalone entrypoint is `.next/standalone/web/server.js`
@@ -2395,6 +2401,9 @@ jobs:
           keystore-path: /tmp/atlas-ci/keys
           data-dir: /tmp/atlas-ci
           atlas-health-url: http://localhost:8080/health
+          # A fresh throwaway key per run, so the SSO save flow can be
+          # tested (#2773).
+          generate-oidc-secret-key: "true"
       - name: Start web server
         working-directory: web
         run: |

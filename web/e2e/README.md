@@ -105,6 +105,7 @@ A spec's preconditions (the test user, tenant rows, seeded controls/evidence/pol
    - The atlas server is reachable on `http://localhost:8080`; the web app on `http://localhost:3000`.
    - `atlas-bootstrap` has run; `evidence_kind_schemas` (and the other phase-2 tables) exist.
    - A long-lived test JWT is minted at runtime via `POST /v1/test/issue-jwt` (gated by `ATLAS_TEST_MODE=1`) and written into `process.env.TEST_BEARER` by Playwright `globalSetup`. The auth fixture (`e2e/fixtures.ts`) injects it as a `sa_session_token` cookie.
+   - The atlas server has an `ATLAS_OIDC_SECRET_KEY` (CI generates a throwaway one per run with `openssl rand -base64 32`), so the SSO page can save a client secret. A local atlas server needs one too, or `admin-bootstrap.spec.ts`'s SSO save test gets a 503 (#2773).
 
 3. **What the harness does NOT do.**
 
