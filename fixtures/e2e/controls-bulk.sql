@@ -5,12 +5,18 @@
 -- in parallel over the demo tenant's three fixture controls. It holds:
 --   - an admin (the signed-in approver) and a second member, the owner
 --     the bulk assign hands the controls to;
---   - three active controls;
---   - one action plan the bulk link targets.
--- Owner assignments and the plan's control links are reset each run, so
--- a rerun on the shared Postgres starts from the same state. No
--- feature_flags rows: every module reads its seed default (Risk and
+--   - three active controls.
+-- No feature_flags rows: every module reads its seed default (Risk and
 -- Exceptions on).
+--
+-- #2780: this file only inserts. It used to hold the plan the bulk link
+-- targets and to reset that plan's links and the owner assignments on
+-- every apply. The spec applies it from both halves' beforeAll hooks, and
+-- under fullyParallel those run in whatever worker picks the test up, so
+-- one apply's DELETE emptied the plan's links between the link test's
+-- write and its read (CI run 44819493563). The link test now creates a
+-- plan of its own each run. Bulk assign is an upsert to the same owner
+-- every time, so it needs no reset.
 --
 -- Tenant UUID matches TENANT in the spec; the `2141` suffix carries the
 -- ticket. Every id and string is neutral (P0-A9 / GitGuardian).
@@ -54,24 +60,5 @@ VALUES
      'Bulk e2e control three', 'IAC', 'automated', 'security-engineering', 'active',
      'bundle-e2e-2141-3', 'monthly', '[]'::jsonb, 'true')
 ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO action_plans (id, tenant_id, title, owner_id, due_date, status)
-VALUES (
-    'acacacac-acac-acac-acac-acacacac2141',
-    '00000000-0000-0000-0000-000000002141',
-    'Bulk e2e remediation plan',
-    '44444444-4444-4444-4444-444444442141',
-    (now() + INTERVAL '30 days')::date,
-    'in_progress'
-)
-ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status;
-
--- Determinism reset: NOT on-conflict; scoped to this tenant's rows.
-DELETE FROM action_plan_controls
- WHERE tenant_id = '00000000-0000-0000-0000-000000002141'
-   AND action_plan_id = 'acacacac-acac-acac-acac-acacacac2141';
-
-DELETE FROM control_owner_assignments
- WHERE tenant_id = '00000000-0000-0000-0000-000000002141';
 
 COMMIT;

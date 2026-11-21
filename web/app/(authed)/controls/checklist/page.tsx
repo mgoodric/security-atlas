@@ -44,6 +44,7 @@ import {
 import { pageTitle } from "@/lib/page-titles";
 import { Term } from "@/components/help/term";
 import { upstreamErrorMessage } from "@/lib/api/_shared";
+import { currentTenantEpoch } from "@/lib/tenant-cache";
 
 async function postJSON(path: string): Promise<ChecklistResponse> {
   const res = await fetch(path, { method: "POST" });
@@ -86,12 +87,16 @@ export default function ChecklistPage() {
     onSuccess: () => {
       // Re-load the generation to reflect the now-approved section.
       if (generationId) {
+        // The mutation guard covers this onSuccess starting, not the
+        // re-read it starts: a switch during it would write the old
+        // tenant's checklist (#2768).
+        const epoch = currentTenantEpoch(qc);
         void fetch(
           `/api/controls/checklist/${encodeURIComponent(generationId)}`,
         )
           .then((r) => (r.ok ? r.json() : null))
           .then((data: ChecklistResponse | null) => {
-            if (data) {
+            if (data && currentTenantEpoch(qc) === epoch) {
               qc.setQueryData(["checklist", generationId], data);
               generate.reset();
               setGenerationId(data.generation_id);
