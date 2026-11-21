@@ -360,9 +360,7 @@ func (h *PackHandler) PDF(w http.ResponseWriter, r *http.Request) {
 	// (slice 475); board.RenderPackPDF routes through it.
 	pdfBytes, err := board.RenderPackPDF(ctx, stored)
 	if err != nil {
-		if status, msg, ok := pdfDegradation(err); ok {
-			logPDFDegradation(r, "board-pack", err)
-			httpresp.WriteError(w, status, msg)
+		if writePDFDegradation(w, r, "board-pack", err) {
 			return
 		}
 		httperr.WriteInternal(w, r, "board", err)

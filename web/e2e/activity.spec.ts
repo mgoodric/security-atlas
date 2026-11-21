@@ -22,12 +22,16 @@ const ACTOR = "00000000-0000-4000-8000-000000002093";
 const TENANT = "00000000-0000-4000-8000-000000000001";
 const OLD = "2025-01-15T09:30:00Z";
 
+// #2793 — the page groups rows by the browser's own "now", so the spec pins
+// the browser clock to noon UTC (the browser runs in UTC, playwright.config)
+// and anchors the recent rows to that instant. Nothing reads the runner's
+// clock: a run at 00:01 UTC renders exactly what a run at noon does.
+const NOW = new Date("2026-03-10T12:00:00Z");
+
 function hoursAgo(h: number): string {
-  return new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
+  return new Date(NOW.getTime() - h * 60 * 60 * 1000).toISOString();
 }
 
-// The recent rows sit a few minutes back so they stay on the runner's
-// local "today" unless the spec runs in the first minutes after midnight.
 function entries() {
   return [
     {
@@ -72,6 +76,7 @@ function entries() {
 
 async function mockActivity(page: Page): Promise<Request[]> {
   const seen: Request[] = [];
+  await page.clock.setFixedTime(NOW);
   await page.route(/\/api\/activity(\?.*)?$/, async (route) => {
     seen.push(route.request());
     await route.fulfill({
