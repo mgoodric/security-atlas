@@ -69,26 +69,24 @@ routed AND kind = the query's kind`) is the #2817 rule exactly. Reusing it
   repeat the routed list, so SQL and Go can't drift. Ingest enforces which
   kinds may omit a control.
 
-## D5 — Existing control-free rows of a routed kind become readable (PROVISIONAL, awaiting Matt)
+## D5 — Existing control-free rows of a routed kind become readable (Matt, 2026-11-21)
 
 - **Options considered:** (A) rows already stored with `control_id` NULL and a
   `scf:` `control_ref` become readable under the new rule; (B) they stay
   unreadable, which needs a marker column set at ingest and checked by every
   reader.
-- **Built:** (A). It needs no code: those rows match the rule.
-- **Effect:** any re-evaluation, replay or as-of read covering their
-  `observed_at` now sees them, so cc8_1 / cc6_1 / cc6_6 / cc4_1 can move from
-  inconclusive to pass or fail for past instants. Populations drawn from now
-  on can include them, under `observed_at <= frozen_at` as before. Stored
-  `control_evaluations` rows and drawn samples (`sample_evidence`) are
-  snapshots and do not change.
-- **Rationale for recommending (A):** the rows are genuine tenant connector
-  evidence. They passed the scope and credential checks at push and are read
-  under RLS. Only the routing was wrong. (B) adds a predicate to about 12
-  reader queries to hide real evidence.
-- **Status:** asked through the dispatcher on 2026-11-21 because it changes
-  re-computed verdicts. If Matt picks (B), this entry is rewritten and the
-  marker lands in this PR.
+- **Chosen:** (A), by Matt through the dispatcher on 2026-11-21. It needs no
+  code: those rows match the rule.
+- **Consequence:** results that are recomputed, replayed or read as-of over
+  those rows' dates, and populations drawn from now on over those dates, can
+  change from inconclusive to pass or fail (cc8_1, cc6_1, cc6_6, cc4_1 on
+  default connector flags). A population still draws only `observed_at <=
+frozen_at`. Persisted results don't change: stored `control_evaluations`
+  rows and drawn samples (`sample_evidence`) are snapshots.
+- **Rationale:** the rows are genuine tenant connector evidence. They passed
+  the scope and credential checks at push and are read under RLS. Only the
+  routing was wrong. (B) adds a predicate to about 12 reader queries to hide
+  real evidence.
 
 ## Not changed
 
