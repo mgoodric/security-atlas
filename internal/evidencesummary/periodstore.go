@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
-	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -137,7 +137,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.ControlTitle = ctrl.Title
 
 		total, err := q.CountEvidenceRecordsByControlBeforeHorizon(ctx, dbx.CountEvidenceRecordsByControlBeforeHorizonParams{
-			UnboundKinds: unbound.Kinds(),
+			UnboundKinds: routed.ControlFreeKinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -149,7 +149,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		out.TotalCount = int(total)
 
 		recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-			UnboundKinds: unbound.Kinds(),
+			UnboundKinds: routed.ControlFreeKinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -227,7 +227,7 @@ func (s *PeriodStore) ResolveBeforeHorizon(ctx context.Context, id, controlID uu
 		offset := int32(0)
 		for {
 			recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
-				UnboundKinds: unbound.Kinds(),
+				UnboundKinds: routed.ControlFreeKinds(),
 				TenantID:     pgUUID(tenantID),
 				ControlID:    pgUUID(controlID),
 				ControlRef:   controlID.String(),

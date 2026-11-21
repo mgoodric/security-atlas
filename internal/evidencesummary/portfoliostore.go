@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
-	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -134,7 +134,7 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 		// The resolver ranks all matched controls, returns the exact matched count
 		// via a window column, and caps to MaxControlsPerSummary for the corpus.
 		rows, err := q.ListActiveControlsForPortfolio(ctx, dbx.ListActiveControlsForPortfolioParams{
-			UnboundKinds: unbound.Kinds(),
+			UnboundKinds: routed.ControlFreeKinds(),
 			TenantID:     pgUUID(tenantID),
 			Limit:        int32(MaxControlsPerSummary),
 			Family:       family,
@@ -158,7 +158,7 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 			}
 
 			total, err := q.CountEvidenceRecordsByControl(ctx, dbx.CountEvidenceRecordsByControlParams{
-				UnboundKinds: unbound.Kinds(),
+				UnboundKinds: routed.ControlFreeKinds(),
 				TenantID:     pgUUID(tenantID),
 				ControlID:    pgUUID(ctrlID),
 				ControlRef:   ctrlID.String(),
@@ -169,7 +169,7 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 			ce.TotalCount = int(total)
 
 			recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
-				UnboundKinds: unbound.Kinds(),
+				UnboundKinds: routed.ControlFreeKinds(),
 				TenantID:     pgUUID(tenantID),
 				ControlID:    pgUUID(ctrlID),
 				ControlRef:   ctrlID.String(),

@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
-	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
@@ -117,7 +117,7 @@ func recordControls(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, rec
 	if c, ok := uuidFromPG(rec.ControlID); ok {
 		return []uuid.UUID{c}, nil
 	}
-	if rec.EvidenceKind == nil || !slices.Contains(unbound.Kinds(), *rec.EvidenceKind) {
+	if rec.EvidenceKind == nil || !slices.Contains(routed.ControlFreeKinds(), *rec.EvidenceKind) {
 		return nil, nil
 	}
 	ids, err := q.ListControlIDsDeclaringEvidenceKind(ctx, dbx.ListControlIDsDeclaringEvidenceKindParams{

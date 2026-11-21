@@ -103,7 +103,7 @@ wires the JWT signer. Use a PAT for now.`,
 	cmd.Flags().BoolVar(&f.useApp, "use-app", false, "use GitHub App auth instead of PAT (slice 045)")
 	cmd.Flags().StringVar(&f.appID, "app-id", "", "GitHub App id (env: GITHUB_APP_ID)")
 	cmd.Flags().StringVar(&f.appPrivateKey, "app-private-key", "", "GitHub App PEM private key (env: GITHUB_APP_PRIVATE_KEY)")
-	cmd.Flags().StringVar(&f.repoProtControl, "repo-protection-control", "scf:TDA-06", "control_id to attach to github.repo_protection.v1 records")
+	cmd.Flags().StringVar(&f.repoProtControl, "repo-protection-control", "", "control_id to attach to github.repo_protection.v1 records; empty (the default) routes each record to every control that queries github.repo_protection.v1 (#2924)")
 	cmd.Flags().StringVar(&f.scimUserControl, "scim-user-control", "scf:IAC-22", "control_id to attach to github.scim_user.v1 records")
 	cmd.Flags().BoolVar(&f.skipRepoProt, "skip-repo-protection", false, "skip github.repo_protection.v1 pull")
 	cmd.Flags().BoolVar(&f.skipSCIM, "skip-scim", false, "skip github.scim_user.v1 pull")

@@ -47,7 +47,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
-	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -481,7 +481,7 @@ func resolvePopulationEvidenceIDs(
 	in CreatePopulationInput, predicate []byte,
 ) ([]uuid.UUID, error) {
 	rows, err := q.ListPopulationEvidenceIDs(ctx, dbx.ListPopulationEvidenceIDsParams{
-		UnboundKinds: unbound.Kinds(),
+		UnboundKinds: routed.ControlFreeKinds(),
 		TenantID:     pgUUID(tenantID),
 		ControlID:    pgUUID(in.ControlID),
 		ObservedAt:   pgTimestamptz(in.TimeWindowStart),
@@ -501,7 +501,7 @@ func resolvePopulationEvidenceIDsFromRow(
 	ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, pop dbx.Population,
 ) ([]uuid.UUID, error) {
 	rows, err := q.ListPopulationEvidenceIDs(ctx, dbx.ListPopulationEvidenceIDsParams{
-		UnboundKinds: unbound.Kinds(),
+		UnboundKinds: routed.ControlFreeKinds(),
 		TenantID:     pop.TenantID,
 		ControlID:    pop.ControlID,
 		ObservedAt:   pop.TimeWindowStart,

@@ -27,6 +27,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 )
 
 // Service is the gRPC handler. It is parameterized over either the
@@ -157,7 +158,8 @@ func missingField(r *evidencev1.EvidenceRecord) string {
 		return "evidence_kind is required"
 	case r.GetSchemaVersion() == "":
 		return "schema_version is required"
-	case r.GetControlId() == "":
+	case r.GetControlId() == "" && !routed.Kind(r.GetEvidenceKind()):
+		// #2924: a routed kind is bound to no control, so it may omit one.
 		return "control_id is required"
 	case len(r.GetScope()) == 0:
 		return "scope is required (at least one dimension)"
