@@ -37,8 +37,11 @@ const NEWEST_ID = "00000000-0000-0000-0000-2755c1000001";
 const NEWEST_HASH = createHash("sha256").update(NEWEST_ID).digest("hex");
 const SEEDED_ROWS = 7;
 // Records under CONTROL_WITH_ROWS; the seventh belongs to the second
-// anchored control (#2794).
+// anchored control and is 45 days old (#2794).
 const ROWS_FOR_CONTROL = 6;
+// The default Since window is the last 30 days (#2794), which leaves
+// out the 45-day-old record.
+const ROWS_IN_DEFAULT_WINDOW = 6;
 const ROWS_IN_LAST_7_DAYS = 4;
 // Records pushed in the seeded cell (prod · us-east-1), and records
 // pushed by test-connector-a.
@@ -76,13 +79,20 @@ test.describe("/evidence list view", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("list-page")).toBeVisible();
     // Slice 106: the tenant-wide ledger renders immediately (no
-    // pick-a-control gate), every seeded record in it. #2794: "All time"
-    // (the default) includes the record older than the 30-day default
-    // window.
+    // pick-a-control gate). #2794: the default Since window is the last
+    // 30 days, so the 45-day-old record is not in it; "All time" adds it.
     await expect(table(page)).toBeVisible();
-    await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-      SEEDED_ROWS,
-    );
+    const rows = table(page).getByTestId("list-table-row");
+    await expect(rows).toHaveCount(ROWS_IN_DEFAULT_WINDOW);
+    await expect(
+      page.getByTestId("list-filter-pills").getByLabel("Since"),
+    ).toHaveValue("30d");
+    await page
+      .getByTestId("list-filter-pills")
+      .getByLabel("Since")
+      .selectOption({ label: "All time" });
+    await expect(page).toHaveURL(/[?&]since_preset=all/);
+    await expect(rows).toHaveCount(SEEDED_ROWS);
   });
 
   // #2771: the Control pill's option value is the tenant control behind
@@ -92,7 +102,7 @@ test.describe("/evidence list view", () => {
   test("AC-3: selecting a control narrows the ledger (slice 106 — filter, not gate)", async ({
     page,
   }) => {
-    await page.goto("/evidence");
+    await page.goto("/evidence?since_preset=all");
     await expect(table(page).getByTestId("list-table-row")).toHaveCount(
       SEEDED_ROWS,
       { timeout: 30_000 },
@@ -114,7 +124,9 @@ test.describe("/evidence list view", () => {
   }) => {
     await page.goto("/evidence");
     const cells = table(page).getByTestId("evidence-row-result");
-    await expect(cells).toHaveCount(SEEDED_ROWS, { timeout: 30_000 });
+    await expect(cells).toHaveCount(ROWS_IN_DEFAULT_WINDOW, {
+      timeout: 30_000,
+    });
     // Newest first; the four newest rows carry one result value each.
     await expect(cells.nth(0)).toHaveText("Pass");
     await expect(cells.nth(1)).toHaveText("Fail");
@@ -237,7 +249,7 @@ test.describe("/evidence list view", () => {
   }) => {
     await page.goto("/evidence");
     const rows = table(page).getByTestId("list-table-row");
-    await expect(rows).toHaveCount(SEEDED_ROWS, { timeout: 30_000 });
+    await expect(rows).toHaveCount(ROWS_IN_DEFAULT_WINDOW, { timeout: 30_000 });
     await page
       .getByTestId("list-filter-pills")
       .getByLabel("Since")
@@ -258,7 +270,7 @@ test.describe("/evidence list view", () => {
   }) => {
     await page.goto("/evidence");
     await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-      SEEDED_ROWS,
+      ROWS_IN_DEFAULT_WINDOW,
       { timeout: 30_000 },
     );
     await expect(page.getByTestId("evidence-scope-hint")).toHaveCount(0);
@@ -307,7 +319,7 @@ test.describe("/evidence list view", () => {
     await page.getByTestId("evidence-empty-clear").click();
     await expect(page).toHaveURL(/\/evidence$/);
     await expect(table(page).getByTestId("list-table-row")).toHaveCount(
-      SEEDED_ROWS,
+      ROWS_IN_DEFAULT_WINDOW,
     );
     expect(page.url()).not.toContain("since_preset=");
     expect(page.url()).not.toContain("scope_cell_id=");

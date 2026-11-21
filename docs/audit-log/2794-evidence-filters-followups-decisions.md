@@ -39,14 +39,16 @@ The index that changes the picture is a btree on `(tenant_id, observed_at DESC, 
 
 It turns the default read and common cells into a 51-row index walk. A selective or empty cell walks the whole window in index order instead, and gets slower. A complete fix is the ordering btree for the unfiltered path, plus a Scope query written without the `IS NULL OR` (its own statement, or a dynamic predicate) so a GIN index can serve selective cells.
 
-This PR adds neither index. Each is a write-locking build on the append-only ledger: Atlas migrations run in a transaction, so no `CONCURRENTLY`. And the GIN half needs a query change before it does anything. That is a follow-up, recommended in the PR. Building the GIN index out of band now, as the ticket proposed, would cost write amplification on every push for no read benefit.
+This PR adds neither index. Each is a write-locking build on the append-only ledger: Atlas migrations run in a transaction, so no `CONCURRENTLY`. And the GIN half needs a query change before it does anything. That follow-up is #2811. Building the GIN index out of band now, as the ticket proposed, would cost write amplification on every push for no read benefit.
 
 ## D3 — OpenAPI: no change
 
 `GET /v1/evidence` in `docs/openapi.yaml` documents only the generic `Ack` response envelope, with no row schema. The ticket's condition ("if it has a response schema") does not hold, so there is nothing to extend with `source_attribution`.
 
-## D4 — "All time" sends an explicit lower bound
+## D4 — "All time" sends an explicit lower bound; "Last 30 days" is the default
 
-`toFetchOptions` sends `since=1970-01-01T00:00:00Z` (`ALL_TIME_SINCE` in `web/app/(authed)/evidence/filters.ts`) when the Since pill is "All time", the default. Before, it sent no `since`, so the handler's 30-day `defaultWindow` applied. The fix is in the page, not the handler: the handler's 30-day default also serves the per-control evidence tab and other callers, and changing it would widen their reads too.
+`toFetchOptions` sends `since=1970-01-01T00:00:00Z` (`ALL_TIME_SINCE` in `web/app/(authed)/evidence/filters.ts`) when the Since pill is "All time". Before, it sent no `since`, so the handler's 30-day `defaultWindow` applied under an "All time" label. The fix is in the page, not the handler: the handler's 30-day default also serves the per-control evidence tab and other callers, and changing it would widen their reads too.
 
-Cost: per D2, the default `/evidence` read now covers the tenant's whole ledger instead of 30 days. At 2M rows that moves p95 from about 1.6 s to about 2.7 s, until the ordering btree lands. At fixture and early-adopter volumes the difference is not measurable. Confidence: MEDIUM. This is one laptop, one tenant, synthetic data.
+The pill's default is now "Last 30 days" (`DEFAULT_FILTERS.since = "30d"`), and "All time" is an explicit choice, kept in the URL as `since_preset=all`. Leaving "All time" as the default would have moved every ordinary `/evidence` load from a 30-day read to a whole-ledger read: per D2, p95 about 1.6 s to about 2.7 s at 2M rows. The 30-day default reads the same window the page always loaded, under a label that says so. Chosen by the dispatcher on review of PR #2808. The page's URL writer now omits a filter when it equals `DEFAULT_FILTERS[key]` rather than a per-key sentinel, so "Last 30 days" leaves the URL clean and "All time" is written out. The e2e AC-1 checks 6 rows on the default load and 7 after picking "All time".
+
+An explicit "All time" read still covers the whole ledger and pays that cost until the ordering index lands. That index, and the Scope query change from D2, are #2811 (on hold: a write-locking build on the ledger, so Matt decides when it runs). Confidence: MEDIUM. This is one laptop, one tenant, synthetic data.

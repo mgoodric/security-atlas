@@ -83,7 +83,10 @@ export const DEFAULT_FILTERS: EvidenceFilters = {
   sourceActorType: ALL,
   sourceActorId: ALL,
   scopeCellId: ALL,
-  since: ALL,
+  // #2794: the default is the last 30 days, the window the default load
+  // always read. "All time" (ALL) is an explicit choice, so an ordinary
+  // page load never reads the tenant's whole ledger.
+  since: "30d",
 };
 
 /**
@@ -107,7 +110,7 @@ export function isDefault(filters: EvidenceFilters): boolean {
     filters.sourceActorType === ALL &&
     filters.sourceActorId === ALL &&
     filters.scopeCellId === ALL &&
-    filters.since === ALL
+    filters.since === DEFAULT_FILTERS.since
   );
 }
 
@@ -123,7 +126,8 @@ export function setFilter(
 }
 
 /**
- * Clear all filters back to the default (no narrowing on any axis).
+ * Clear all filters back to the default (no narrowing on any axis
+ * except the default Since window, the last 30 days).
  */
 export function clearFilters(): EvidenceFilters {
   return { ...DEFAULT_FILTERS };
@@ -317,7 +321,8 @@ export const ALL_TIME_SINCE = "1970-01-01T00:00:00Z";
 
 /**
  * Build the Since pill option list. First option is ALL ("All time",
- * sent as `ALL_TIME_SINCE`). The "audit" option label adjusts to
+ * sent as `ALL_TIME_SINCE`); the default selection is "30d"
+ * (`DEFAULT_FILTERS.since`). The "audit" option label adjusts to
  * include the active audit period name when one is supplied.
  */
 export function buildSinceOptions(

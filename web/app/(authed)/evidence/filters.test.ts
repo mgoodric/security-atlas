@@ -42,7 +42,8 @@ describe("evidence filters", () => {
     expect(DEFAULT_FILTERS.sourceActorId).toBe(ALL);
     // Slice 234 — three new axes also default to ALL (no narrowing).
     expect(DEFAULT_FILTERS.scopeCellId).toBe(ALL);
-    expect(DEFAULT_FILTERS.since).toBe(ALL);
+    // #2794: Since defaults to the last 30 days; "All time" is explicit.
+    expect(DEFAULT_FILTERS.since).toBe("30d");
     expect(isNoneSelected(DEFAULT_FILTERS)).toBe(true);
     expect(isDefault(DEFAULT_FILTERS)).toBe(true);
   });
@@ -86,8 +87,10 @@ describe("evidence filters", () => {
     expect(cleared.sourceActorType).toBe(ALL);
     expect(cleared.sourceActorId).toBe(ALL);
     expect(cleared.scopeCellId).toBe(ALL);
-    expect(cleared.since).toBe(ALL);
+    expect(cleared.since).toBe("30d");
     expect(isDefault(cleared)).toBe(true);
+    // Picking "All time" is a non-default choice.
+    expect(isDefault({ ...cleared, since: ALL })).toBe(false);
   });
 
   test("ALL sentinel is distinct from NONE sentinel", () => {
@@ -188,16 +191,21 @@ describe("evidence filters", () => {
     ]);
   });
 
-  test("toFetchOptions drops sentinel values; All time sends the epoch", () => {
-    const out = toFetchOptions(DEFAULT_FILTERS);
-    expect(out).toEqual({ since: ALL_TIME_SINCE });
+  test("toFetchOptions drops sentinel values; the default sends the 30-day cutoff", () => {
+    expect(toFetchOptions(DEFAULT_FILTERS)).toEqual({});
+    expect(toFetchOptions(DEFAULT_FILTERS, "2026-04-23T10:00:00.000Z")).toEqual(
+      { since: "2026-04-23T10:00:00.000Z" },
+    );
   });
 
   // #2794: with no `since` the handler applies its 30-day default
   // window, so "All time" has to send an explicit lower bound.
   test("toFetchOptions sends ALL_TIME_SINCE for All time, ignoring resolvedSince", () => {
     expect(ALL_TIME_SINCE).toBe("1970-01-01T00:00:00Z");
-    const out = toFetchOptions(DEFAULT_FILTERS, "2026-05-16T10:00:00.000Z");
+    const out = toFetchOptions(
+      { ...DEFAULT_FILTERS, since: ALL },
+      "2026-05-16T10:00:00.000Z",
+    );
     expect(out.since).toBe(ALL_TIME_SINCE);
   });
 
