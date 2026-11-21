@@ -234,6 +234,12 @@ func (m ModuleSet) Sees(path string) bool {
 	if err != nil {
 		return false
 	}
+	return m.SeesOwner(o)
+}
+
+// SeesOwner reports whether an item the registry places under o may be
+// shown: Sees once Resolve has placed the path.
+func (m ModuleSet) SeesOwner(o featureflag.Owner) bool {
 	if !o.Module.Core && m.hidden[o.Module.Key] {
 		return false
 	}

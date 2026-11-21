@@ -3,6 +3,7 @@ package openapi
 import (
 	"reflect"
 
+	"github.com/mgoodric/security-atlas/internal/api/adminauditlog"
 	"github.com/mgoodric/security-atlas/internal/api/admincrosswalkremap"
 	"github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
@@ -26,6 +27,7 @@ var ResponseSchemas = []ResponseSchema{
 	{Method: "POST", Path: "/v1/controls/remap-proposals/{id}/reject", Type: reflect.TypeOf(control.RemapDecision{})},
 	{Method: "POST", Path: "/v1/controls/remap-proposals/{id}/keep-legacy", Type: reflect.TypeOf(control.RemapDecision{})},
 	{Method: "GET", Path: "/v1/admin/crosswalk-edge-remap-proposals", Type: reflect.TypeOf(admincrosswalkremap.ListResponse{})},
+	{Method: "GET", Path: "/v1/activity/actors", Type: reflect.TypeOf(adminauditlog.ActivityActorsResponse{})},
 }
 
 // schemaNames renames a Go type whose own name is too generic for the

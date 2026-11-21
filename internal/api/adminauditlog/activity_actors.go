@@ -2,9 +2,7 @@ package adminauditlog
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"sort"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -12,9 +10,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/moduleaccess"
 )
 
@@ -24,17 +22,17 @@ type ActivityActorsResponse struct {
 	// `oauth_client:<id>`), sorted. Never a person or API key: those
 	// are listed from /v1/people.
 	Actors []string `json:"actors"`
-	// Truncated is true when the window held more than machineActorRowCap
-	// distinct (actor, kind, target_type, request_path) tuples (#2627).
-	// Actors is then built from the first machineActorRowCap of them and
-	// may be missing some; a narrower window lists them all.
+	// Truncated is true when the window held more than machineActorCap
+	// actors the caller may see (#2627). Actors then holds the first
+	// machineActorCap of them in sort order; a narrower window lists
+	// them all.
 	Truncated bool `json:"truncated"`
 }
 
-// machineActorRowCap bounds the tuples one actors request reads.
+// machineActorCap bounds the actors one request lists.
 // ListUnifiedAuditMachineActors returns one row more than this, so a
 // 1001st row marks the response truncated.
-const machineActorRowCap = 1000
+const machineActorCap = 1000
 
 // ActivityActors handles GET /v1/activity/actors (#2414): the machine and
 // system actors in the caller's activity for a `from`/`to` window, so the
@@ -43,8 +41,9 @@ const machineActorRowCap = 1000
 // It reads what GET /v1/activity/unified would show the same caller: the
 // same window bounds, the slice 270 privilege predicate, the slice 669
 // read-telemetry default (`?include_reads=true` opts back in) and the
-// #2173 module filter. RLS scopes every source to the caller's tenant.
-// It lists identifiers, not rows, so it writes no meta-audit row.
+// #2173 module filter, which the query applies before the cap (#2718).
+// RLS scopes every source to the caller's tenant. It lists identifiers,
+// not rows, so it writes no meta-audit row.
 func (h *Handler) ActivityActors(w http.ResponseWriter, r *http.Request) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
@@ -76,54 +75,62 @@ func (h *Handler) ActivityActors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var rows []dbx.ListUnifiedAuditMachineActorsRow
+	arg := dbx.ListUnifiedAuditMachineActorsParams{
+		FromTs:               pgtype.Timestamptz{Time: params.queryParams.From, Valid: true},
+		ToTs:                 pgtype.Timestamptz{Time: params.queryParams.To, Valid: true},
+		CallerIsPrivileged:   privileged,
+		ExcludeReadTelemetry: !params.includeReads,
+	}
+	moduleRouteFilter(&arg, modules)
+	var actors []string
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
 		var qErr error
-		rows, qErr = q.ListUnifiedAuditMachineActors(ctx, dbx.ListUnifiedAuditMachineActorsParams{
-			FromTs:               pgtype.Timestamptz{Time: params.queryParams.From, Valid: true},
-			ToTs:                 pgtype.Timestamptz{Time: params.queryParams.To, Valid: true},
-			CallerIsPrivileged:   privileged,
-			ExcludeReadTelemetry: !params.includeReads,
-		})
+		actors, qErr = q.ListUnifiedAuditMachineActors(ctx, arg)
 		return qErr
 	})
 	if err != nil {
 		httperr.WriteInternal(w, r, "activity actors", err)
 		return
 	}
-	truncated := len(rows) > machineActorRowCap
+	truncated := len(actors) > machineActorCap
 	if truncated {
-		rows = rows[:machineActorRowCap]
+		actors = actors[:machineActorCap]
+	}
+	if actors == nil {
+		actors = []string{}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, ActivityActorsResponse{
-		Actors:    visibleActors(rows, modules),
+		Actors:    actors,
 		Truncated: truncated,
 	})
 }
 
-// visibleActors keeps each actor seen in at least one row the module
-// filter lets through, deduplicated and sorted.
-func visibleActors(rows []dbx.ListUnifiedAuditMachineActorsRow, modules moduleaccess.ModuleSet) []string {
-	entries := make([]unifiedlog.Entry, 0, len(rows))
-	for _, row := range rows {
-		e := unifiedlog.Entry{
-			ActorID:    row.ActorID,
-			Kind:       unifiedlog.Kind(row.Kind),
-			TargetType: row.TargetType,
-		}
-		if row.RequestPath != "" {
-			e.PayloadJSON, _ = json.Marshal(map[string]string{"request_path": row.RequestPath})
-		}
-		entries = append(entries, e)
-	}
-	seen := map[string]bool{}
-	actors := []string{}
-	for _, e := range visibleEntries(entries, modules) {
-		if !seen[e.ActorID] {
-			seen[e.ActorID] = true
-			actors = append(actors, e.ActorID)
+// moduleRouteFilter sets the arguments that carry the #2173 module filter
+// (entrySeen) into ListUnifiedAuditMachineActors: the kinds whose module
+// set hides, and every registry route with its owner and whether set
+// shows that owner, so the query can place a decision's route as
+// featureflag.Resolve does. The slices are never nil: a NULL array would
+// make `kind = ANY(...)` NULL and drop every row.
+func moduleRouteFilter(arg *dbx.ListUnifiedAuditMachineActorsParams, set moduleaccess.ModuleSet) {
+	arg.HiddenKinds = []string{}
+	for kind, route := range kindModuleRoute {
+		if !set.Sees(route) {
+			arg.HiddenKinds = append(arg.HiddenKinds, string(kind))
 		}
 	}
-	sort.Strings(actors)
-	return actors
+	arg.RoutePatterns, arg.RouteOwners, arg.RouteVisible = []string{}, []string{}, []bool{}
+	add := func(o featureflag.Owner, owner string, patterns []string) {
+		for _, p := range patterns {
+			arg.RoutePatterns = append(arg.RoutePatterns, p)
+			arg.RouteOwners = append(arg.RouteOwners, owner)
+			arg.RouteVisible = append(arg.RouteVisible, set.SeesOwner(o))
+		}
+	}
+	for _, m := range featureflag.Modules {
+		add(featureflag.Owner{Module: m}, m.Key, m.Routes)
+		for j := range m.Features {
+			f := &m.Features[j]
+			add(featureflag.Owner{Module: m, Feature: f}, m.Key+"/"+f.Key, f.Routes)
+		}
+	}
 }
