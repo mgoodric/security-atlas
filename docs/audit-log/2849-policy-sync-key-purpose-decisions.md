@@ -66,3 +66,21 @@ list shows a key's purpose as a badge, since a policy-sync key with no
 kinds would otherwise read as "any kind". The issue form gains no purpose
 control. That belongs with the connector setup flow, once #2850 gives the
 key something to do.
+
+### D7 — the gate fails closed on a lookup error (review)
+
+When `Identify` fails with anything but `ErrUnknownKey`, such as an
+unreachable database or a failed owner-status read, the gate answers 503
+and stops. Passing the request on would let a later bearer path (the
+legacy `httpAuthMiddlewareWithExemptions` fallback to
+`apikeys.Authenticate`) admit a policy-sync key the gate could not check.
+An unknown, revoked or expired key still passes through to the 401.
+
+### D8 — no streaming RPCs; a test keeps it so (review)
+
+`authInterceptor` is unary only, and there is no stream interceptor. No
+service registers a streaming method: every generated `ServiceDesc` has an
+empty `Streams`. A streaming RPC would skip every bearer check, not just
+this one. `TestGRPCServices_HaveNoStreamingMethods` walks the real
+server's services and fails when one appears, so the stream interceptor
+has to land with it.
