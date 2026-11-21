@@ -89,6 +89,28 @@ Services in the bundle (`docker compose ps` / `just self-host-ps`):
 `self-host-logs`, `self-host-ps`, `self-host-build`, `self-host-config`
 (validates the compose file without starting anything).
 
+### When a subsystem fails, `atlas` exits
+
+The `atlas` process runs several subsystems side by side. If one that serves
+requests or keeps control state current fails, the process stops and exits 1
+with every collected error on stderr, so a supervisor restarts it. Those
+subsystems are the gRPC and HTTP servers, the NATS evidence consumer, the
+event subscribers (evaluation, freshness/drift, risk residual, personnel
+security) and the evaluation, freshness/drift, metrics and staleness
+schedulers. A port that will not bind is the usual cause. Before #2781 the
+process kept running without the failed subsystem, and `/health` still
+answered.
+
+The notification and housekeeping loops do not stop the process: the
+exception expirer, the decision and personnel overdue notifiers, the
+security-awareness roster sync, the control-import sweeper and the digest
+scheduler. Each logs a failed sweep and tries again on its next tick.
+
+Run `atlas` under something that restarts it. The compose bundles set
+`restart: unless-stopped` on the `atlas` service. A bare-binary deploy needs
+the equivalent, such as systemd `Restart=on-failure`. Decisions:
+[`docs/audit-log/2781-fatal-subsystems-decisions.md`](audit-log/2781-fatal-subsystems-decisions.md).
+
 ### Manual smoke test
 
 CI validates that `docker-compose.yml` parses (`just self-host-config`);
