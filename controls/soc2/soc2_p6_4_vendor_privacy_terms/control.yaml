@@ -20,7 +20,7 @@ evidence_queries:
   - id: dpa_register_uploaded_within_quarter
     language: rego
     evidence_kind: manual.upload.v1
-    description: "A data-processing-agreement register upload exists within the last 90 days"
+    description: "A data-processing-agreement register upload exists within the last 120 days (quarterly plus 30-day grace)"
     expression: |
       package evidence.query
 

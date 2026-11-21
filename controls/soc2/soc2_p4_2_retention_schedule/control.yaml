@@ -45,7 +45,7 @@ evidence_queries:
   - id: retention_schedule_review_within_quarter
     language: rego
     evidence_kind: manual.upload.v1
-    description: "A retention-schedule review upload exists within the last 90 days"
+    description: "A retention-schedule review upload exists within the last 120 days (quarterly plus 30-day grace)"
     expression: |
       package evidence.query
 
