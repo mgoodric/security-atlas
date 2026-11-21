@@ -2,12 +2,21 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc6_6_mfa_external_threats
 title: "MFA enforced on all internet-facing administrative interfaces"
 description: |
-  The canonical "external-threat authentication" control under TSC CC6.6
-  is MFA on every internet-facing administrative interface. The query
-  reads the Okta MFA policy snapshot AND the Okta app-assignment data,
-  and asserts every app tagged "admin" or "infrastructure" has MFA
-  enforced at sign-in. This is a deliberately narrower test than
-  CC6.1's "MFA everywhere" — auditors sample admin paths first.
+  The canonical external-threat authentication control under TSC CC6.6 is
+  MFA on every internet-facing administrative interface. The intended
+  test, deliberately narrower than CC6.1's MFA everywhere because auditors
+  sample admin paths first, is that every Okta app classified admin or
+  infrastructure enforces MFA at sign-in.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the Okta
+  connector's `okta.app_assignment.v1`, which it emits as inconclusive by
+  design, leaving the decision to the platform. This control is therefore
+  inconclusive whatever the assignments contain.
+
+  Pending: the app's classification and whether its sign-on policy
+  requires MFA, which the connector does not emit yet (#2828).
 
 scf_anchor_id: IAC-37
 control_family: IAC

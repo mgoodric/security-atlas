@@ -4,11 +4,22 @@ title: "Decommissioned media and devices are securely wiped"
 description: |
   Devices and media are wiped or destroyed before they leave the
   organisation's protection (TSC CC6.5). The owner uploads quarterly
-  evidence of device disposal — laptops returned by terminated employees
-  and wiped, storage media physically destroyed, EBS volumes deleted —
-  including serial numbers, dates, and disposal method. For cloud-native
+  evidence of device disposal (laptops returned by terminated employees
+  and wiped, storage media physically destroyed, EBS volumes deleted)
+  including serial numbers, dates and disposal method. For cloud-native
   orgs the bulk of this evidence is the storage-deletion log from the
   cloud provider.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are
+  `manual.upload.v1` files from the manual connector, which records every
+  upload as inconclusive for a person to judge. This control is therefore
+  inconclusive whether or not a disposal log is uploaded, and the content
+  of the upload is not checked.
+
+  Pending: a disposal log uploaded within 90 days, in SQL over the
+  record's existing fields (#2824).
 
 scf_anchor_id: AST-22
 control_family: AST

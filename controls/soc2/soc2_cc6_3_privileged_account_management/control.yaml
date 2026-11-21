@@ -3,11 +3,23 @@ bundle_id: soc2_cc6_3_privileged_account_management
 title: "Privileged credentials vaulted with break-glass workflow"
 description: |
   Privileged accounts are a tested subset of CC6.3 (granting, changing and
-  revoking access). The query reads the 1Password org-policy snapshot and
-  asserts that the vault containing privileged credentials (root keys,
-  shared admin passwords, break-glass accounts) has: a documented list of
-  vault members, sharing-disabled-by-default, and an audit-event stream
-  enabled. Personal-vault sharing of company secrets is disallowed.
+  revoking access). The intended test is that the vault holding privileged
+  credentials (root keys, shared admin passwords, break-glass accounts)
+  has a documented member list, sharing disabled by default and an
+  audit-event stream enabled, and that company secrets are not shared from
+  personal vaults.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the 1Password
+  connector's `1password.org_policy.v1` snapshots, whose verdict is the
+  account's sign-in policy: it passes when two-factor sign-in is required
+  and the minimum password length is at least 12, and fails otherwise.
+  Vault membership, sharing and audit events are not checked.
+
+  Pending: the privileged-vault sharing default, audit events and member
+  count, which the connector does not emit yet (#2830); and bounding the
+  member count by the privileged role, which needs an inventory (#2834).
 
 scf_anchor_id: IAC-10
 control_family: IAC

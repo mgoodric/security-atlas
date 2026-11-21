@@ -3,10 +3,22 @@ bundle_id: soc2_cc6_3_access_modification_revocation
 title: "Terminated users revoked from IdP within 24 hours of termination"
 description: |
   Access is granted, changed and taken away on approval and on time (TSC
-  CC6.3). The query joins the HRIS termination stream against the Okta
-  user lifecycle and asserts that every termination event was followed by
-  an Okta user-deactivate or user-delete event within 24 hours. This is
-  the auditor's most-sampled CC6.3 manifestation.
+  CC6.3). The intended test, the auditor's most-sampled CC6.3 check, is
+  that every HRIS termination was followed by an Okta deactivation or
+  deletion within 24 hours.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the Okta
+  connector's `okta.user_lifecycle.v1`, whose verdict is the user's status
+  and MFA enrolment: an active user with MFA passes, an active user
+  without MFA or a deprovisioned, suspended, locked-out or
+  password-expired user fails, and a transitional status is inconclusive.
+  Any deprovisioned user in the window therefore fails the control, and
+  the timing of revocation is not checked.
+
+  Pending: timing each deactivation against its termination record. There
+  is no HRIS source yet; it needs a design (#2833).
 
 scf_anchor_id: IAC-04
 control_family: IAC
