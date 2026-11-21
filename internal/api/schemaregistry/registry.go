@@ -109,6 +109,9 @@ func DefaultSeed() []KindVersion {
 		// #2912: the osquery connector pushes 1.1.0 (adds last_seen_at +
 		// reason; unread posture booleans omitted, not false).
 		{Kind: "osquery.host_posture.v1", Version: "1.1.0"},
+		// #2921: 1.2.0 adds firewall_source + screen_lock_source, read from
+		// operator-named Fleet policies.
+		{Kind: "osquery.host_posture.v1", Version: "1.2.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
 		{Kind: "change.approval.v1", Version: "1.0.0"},
 		{Kind: "change.verification.v1", Version: "1.0.0"},
