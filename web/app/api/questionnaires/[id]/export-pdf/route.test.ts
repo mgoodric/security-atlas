@@ -85,12 +85,12 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
     expect(await res.json()).toEqual(refusal);
   });
 
-  test("propagates upstream 503 render busy", async () => {
+  test("propagates upstream 503 render busy with its Retry-After", async () => {
     mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "PDF export busy" }), {
         status: 503,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Retry-After": "15" },
       }),
     );
     const res = await POST(
@@ -98,6 +98,7 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
       paramsFor("00000000-0000-0000-0000-000025580001"),
     );
     expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("15");
     // #2757: the 5xx body is masked on the wire.
     expect(await res.json()).toEqual({ error: "platform error" });
   });
