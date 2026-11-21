@@ -3443,8 +3443,8 @@ type Querier interface {
 	// that equals no registry literal, and is no `<literal>:<verb>`, becomes
 	// `*`. That segment matches a pattern's `*` and none of its literals, and
 	// so does `*` itself (no literal is `*`), so a path and its key resolve
-	// alike; only the distinct keys go through `matches`. 100k decisions over
-	// 90 days took the query from 3.7 s to see docs/audit-log/2789-*.md.
+	// alike; only the distinct keys go through `matches`. Measurements:
+	// docs/audit-log/2789-activity-actors-route-key-decisions.md.
 	//
 	// RLS-aware, as ListUnifiedAuditLog: runs under tenancy.ApplyTenant as
 	// atlas_app and takes no tenant parameter.
