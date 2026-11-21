@@ -65,6 +65,16 @@ Three further facts shape the answer:
 
 8. **A schema change is a new schema version.** Every tier-2 ticket below adds fields to a kind whose schema sets `additionalProperties: false`. Older records stay valid under their own version, and a query that reads a new field reads only records of the version that carries it.
 
+9. **Connector evidence is routed to controls by evidence type** ([#2924](https://github.com/mgoodric/security-atlas/issues/2924), Matt, 2026-11-21). A connector observes a system, not a control: one `github.repo_protection.v1` record answers both cc8_1 bundles, and one `osquery.host_posture.v1` record answers cc6_6 and cc4_1. Before this, a connector bound each record to one control through a `--*-control` flag. That flag defaulted to an SCF anchor (`scf:TDA-06`, `scf:END-03`), which no control resolves, so on default flags every stock SQL check got no records and stayed inconclusive. Each evidence kind is now in one of three categories:
+
+   | Category       | Kinds                                                        | Stored as                                                                         | Reached by                                                 | Who may write it                                     |
+   | -------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+   | Bound          | every other kind (`manual.upload.v1`, `sast.scan_result.v1`) | `control_id` of the named control                                                 | that control only                                          | any push credential scoped to the kind               |
+   | Routed by type | `internal/evidence/routed`                                   | `control_id` NULL; any wire `control_id` kept in `control_ref` as provenance only | every control in the tenant whose queries declare the kind | any push credential scoped to the kind               |
+   | Owned          | `internal/evidence/unbound` (`policy.acknowledgment.v1`)     | `control_id` NULL                                                                 | every control in the tenant whose queries declare the kind | its platform handler only; a push is refused (#2873) |
+
+   Every ledger reader applies one control-free rule, `control_id IS NULL AND evidence_kind = ANY(<owned ∪ routed>) AND <the control's evidence_queries declare the kind>`, inside the tenant's RLS context and with `tenant_id` in the query too. Decision 5's per-query kind filter and the freshness window apply unchanged. A routed kind may be pushed with an empty `control_id`, and the connector flags for routed kinds default to empty. `TestStockBundleKindsAreCategorized` fails when a stock bundle reads a kind that is in no category. Decisions: `docs/audit-log/2924-evidence-routed-kinds-decisions.md`.
+
 ## The 27 checks, by tier
 
 The 27 Rego queries reduced to a roll-up in #1858 are in 26 bundles; cc1_4 has two. The old expressions are at `bf99aaa5`. #2820's decisions log lists each one with its permalink.
