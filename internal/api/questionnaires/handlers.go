@@ -52,6 +52,16 @@ type Handler struct {
 	suggest        *qaisuggest.Service
 	mappingSuggest *qmapsuggest.Service
 	answerRuns     *questionnaire.AnswerRunService
+	// engine is the OPA engine the answer PATCH asks whether the caller
+	// may read each cited record (#2653). Nil on unit-test servers, which
+	// skip that check as they skip the authz middleware.
+	engine *authz.Engine
+}
+
+// WithAuthz wires the OPA engine for the citation read check and returns h.
+func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
+	h.engine = engine
+	return h
 }
 
 // New constructs a Handler without the AI-suggestion surface (slice 155 only).
@@ -291,21 +301,59 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
 		return
 	}
+	citations, err := questionnaire.ParseCitations(req.Citations)
+	if err != nil || !h.citationsReadable(r, citations) {
+		httpresp.WriteError(w, http.StatusBadRequest, invalidCitationMsg)
+		return
+	}
 	a, err := h.store.UpsertAnswer(ctx, questionnaire.AnswerParams{
 		QuestionID:      qid,
 		AnswerValue:     req.AnswerValue,
 		Narrative:       req.Narrative,
-		Citations:       req.Citations,
+		Citations:       citations,
 		AuthoredBy:      req.AuthoredBy,
 		SaveToLibrary:   req.SaveToLibrary,
 		SCFAnchorIDHint: req.SCFAnchorID,
 		SourceLabel:     req.SourceLabel,
 	})
+	if errors.Is(err, questionnaire.ErrInvalidCitation) {
+		httpresp.WriteError(w, http.StatusBadRequest, invalidCitationMsg)
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, a)
+}
+
+// invalidCitationMsg is the one refusal for a malformed, absent, foreign or
+// unreadable citation (#2653), so the PATCH cannot be used to learn whether
+// an id exists.
+const invalidCitationMsg = "each citation must be a control or evidence record you can read in this tenant"
+
+// citationsReadable asks OPA whether the caller may read each cited record,
+// as GET /v1/<type>/<id> would. Without an engine (unit-test servers) every
+// citation passes, as every request passes the absent authz middleware.
+// The middleware's resource-attribute hydration does not run here, so a
+// rule that needs it (the auditor's assigned-period evidence) denies.
+func (h *Handler) citationsReadable(r *http.Request, cites []questionnaire.Citation) bool {
+	if h.engine == nil {
+		return true
+	}
+	for _, c := range cites {
+		in := authz.BuildInput(r, nil)
+		in.Action = "read"
+		in.Resource.Type = c.Type
+		in.Resource.ID = c.ID
+		in.Request.Method = http.MethodGet
+		in.Request.Path = "/v1/" + c.Type + "/" + c.ID
+		d, err := h.engine.Decide(r.Context(), in)
+		if err != nil || !d.Allow {
+			return false
+		}
+	}
+	return true
 }
 
 // ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-37&limit=10 =====
