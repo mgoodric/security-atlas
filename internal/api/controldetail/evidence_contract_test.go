@@ -130,16 +130,17 @@ func TestContract_ControlEvidence(t *testing.T) {
 		total: 7,
 		rows: []dbx.ListEvidenceForControlPagedRow{
 			{
-				ID:           pgID(contractEvidenceID),
-				TenantID:     pgID(contractTenantID),
-				ControlID:    pgID(contractControlID),
-				ControlRef:   contractControlID,
-				ScopeID:      pgID(contractScopeID),
-				ObservedAt:   pgTS(observed),
-				EvidenceKind: strptr("manual.attestation.v1"),
-				Provenance:   []byte(`{"connector":"manual","runner":"operator-console"}`),
-				Hash:         "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-				Result:       dbx.EvidenceResult("pass"),
+				ID:                pgID(contractEvidenceID),
+				TenantID:          pgID(contractTenantID),
+				ControlID:         pgID(contractControlID),
+				ControlRef:        contractControlID,
+				ScopeID:           pgID(contractScopeID),
+				ObservedAt:        pgTS(observed),
+				EvidenceKind:      strptr("manual.attestation.v1"),
+				Provenance:        []byte(`{"connector":"manual","runner":"operator-console"}`),
+				Hash:              "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+				Result:            dbx.EvidenceResult("pass"),
+				SourceAttribution: []byte(`{"actor_type":"connector","actor_id":"manual"}`),
 			},
 			{
 				ID:           pgID(contractPolicyID),
@@ -167,7 +168,7 @@ func TestContract_ControlEvidence(t *testing.T) {
 	}
 	assertContractGolden(t,
 		filepath.Clean("../../../web/lib/contracts/control-evidence.golden.json"),
-		"Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the count of the request's control and [since, until] window, not the page length and not the tenant ledger (#2470). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
+		"Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent), source_attribution (the pusher's actor claim, null when absent; #2771); evidence is ALWAYS an array; total is the count of the request's control and [since, until] window, not the page length and not the tenant ledger (#2470). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
 		"GET /v1/evidence?control_id={id}",
 		recorded,
 	)
@@ -190,7 +191,22 @@ func listRow(id string, observed time.Time, kind *string, prov []byte, hash stri
 		Provenance:   prov,
 		Hash:         hash,
 		Result:       dbx.EvidenceResult(result),
+		// #2771: a row with provenance also carries the pusher's actor
+		// claim, named after the provenance connector.
+		SourceAttribution: attributionFor(prov),
 	}
+}
+
+// attributionFor derives a fixture source_attribution from a provenance
+// fixture's connector, or nil when the row has no provenance.
+func attributionFor(prov []byte) []byte {
+	var p struct {
+		Connector string `json:"connector"`
+	}
+	if len(prov) == 0 || json.Unmarshal(prov, &p) != nil || p.Connector == "" {
+		return nil
+	}
+	return []byte(`{"actor_type":"connector","actor_id":"` + p.Connector + `"}`)
 }
 
 // TestContract_TenantWideEvidence records the PROVIDER half of the tenant-wide
@@ -266,7 +282,7 @@ func TestContract_TenantWideEvidence(t *testing.T) {
 	}
 	assertContractGolden(t,
 		filepath.Clean("../../../web/lib/contracts/evidence-tenant-window.golden.json"),
-		"Slice 704 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence TENANT-WIDE branch — GET /v1/evidence with no control_id, the slice-106 + slice-234 filter-matrix window — real handler over an injected fixed-row evidenceWindowReader stub via EvidencePaged; Option A seam extended to the tenant-wide method, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_TenantWideEvidence -update`. CONSUMER: web/lib/contracts/evidence-tenant-window.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; on this branch control_id is the EMPTY STRING. Each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the tenant-wide ledger count (NOT the page length). The `filtered` variant is recorded through a non-empty filter predicate (kind/result/scope_cell_id/window) to pin the filter-matrix request surface; the `empty` variant pins count 0 / total > 0 (slice 236). Closes slice 692 D3.",
+		"Slice 704 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence TENANT-WIDE branch — GET /v1/evidence with no control_id, the slice-106 + slice-234 filter-matrix window — real handler over an injected fixed-row evidenceWindowReader stub via EvidencePaged; Option A seam extended to the tenant-wide method, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_TenantWideEvidence -update`. CONSUMER: web/lib/contracts/evidence-tenant-window.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; on this branch control_id is the EMPTY STRING. Each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent), source_attribution (the pusher's actor claim, null when absent; #2771); evidence is ALWAYS an array; total is the tenant-wide ledger count (NOT the page length). The `filtered` variant is recorded through a non-empty filter predicate (kind/result/scope_cell_id/window) to pin the filter-matrix request surface; the `empty` variant pins count 0 / total > 0 (slice 236). Closes slice 692 D3.",
 		"GET /v1/evidence",
 		recorded,
 	)

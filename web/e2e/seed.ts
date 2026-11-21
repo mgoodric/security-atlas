@@ -182,8 +182,9 @@ export type FixtureName =
   // #2503 — a tenant with a tenant admin and a viewer member whose roles
   // are reset each run, for tenant-admin-users.spec.ts.
   | "tenant-admin-users"
-  // #2141 — a tenant with three controls, a second member and an action
-  // plan, for controls-bulk-2141.spec.ts's bulk writes.
+  // #2141 — a tenant with three controls and a second member, for
+  // controls-bulk-2141.spec.ts's bulk writes. #2780: inserts only, no
+  // reset, so an apply from another worker never undoes a test's write.
   | "controls-bulk"
   // #2531 — the shared e2e user and its live roles, so the owner pickers
   // in risks-create.spec.ts and create-toasts.spec.ts list a user when the

@@ -1,5 +1,5 @@
 {
-  "_comment": "Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the count of the request's control and [since, until] window, not the page length and not the tenant ledger (#2470). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
+  "_comment": "Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent), source_attribution (the pusher's actor claim, null when absent; #2771); evidence is ALWAYS an array; total is the count of the request's control and [since, until] window, not the page length and not the tenant ledger (#2470). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
   "endpoint": "GET /v1/evidence?control_id={id}",
   "variants": {
     "empty": {
@@ -23,6 +23,10 @@
           "source": {
             "connector": "manual",
             "runner": "operator-console"
+          },
+          "source_attribution": {
+            "actor_id": "manual",
+            "actor_type": "connector"
           }
         },
         {
@@ -32,7 +36,8 @@
           "observed_at": "2026-05-13T20:00:00Z",
           "result": "fail",
           "scope_cell": null,
-          "source": null
+          "source": null,
+          "source_attribution": null
         }
       ],
       "next_cursor": "",

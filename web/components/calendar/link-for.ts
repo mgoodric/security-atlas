@@ -16,36 +16,28 @@
 //   { kind: "static"; reason: string }
 //
 // Consumers render a `<Link>` for `link` and a `<span title={...}>`
-// for `static`. The exception / policy branches return the static
-// shape (no link, tooltip explains the placeholder). The audit /
-// control branches return the link shape. The default branch takes a
-// `never` argument for exhaustiveness, so adding an event type to the
-// union without a case is a compile error rather than a silent dead
-// anchor. At runtime an unrecognised type returns the static shape
-// (#2215: it used to throw, which crashed the page).
+// for `static`. Every known event type returns the link shape; the
+// static shape is the runtime fallback for a type the frontend does
+// not recognise. The default branch takes a `never` argument for
+// exhaustiveness, so adding an event type to the union without a case
+// is a compile error rather than a silent dead anchor. At runtime an
+// unrecognised type returns the static shape (#2215: it used to throw,
+// which crashed the page).
 //
 // AC mapping:
 //   AC-1 — default branch never returns "#"; an unrecognised runtime
 //          type renders as plain text.
-//   AC-2 — exception events return { kind: "static", reason: <copy> }.
-//   AC-3 — policy events return { kind: "static", reason: <copy> }.
 //   AC-6 — covered by `link-for.test.ts` (pure logic, node-env vitest).
 //
-// Anti-criterion P0-183-1: this slice does NOT introduce
-// `/admin/exceptions/:id` or `/policies/:id` detail pages. Future
-// slices that ship those pages flip the static branch back to a link
-// branch HERE (one place to edit, both views update).
+// Slice 183 rendered exception and policy events unlinked because
+// their detail pages did not exist yet. #2772: `/exceptions/[id]` and
+// `/policies/[id]` both ship now, so those branches link.
 
 import type { CalendarEvent } from "@/lib/api/calendar";
 
 export type LinkForResult =
   | { kind: "link"; href: string }
   | { kind: "static"; reason: string };
-
-const EXCEPTION_REASON =
-  "A per-exception detail page is not available yet — view the exception register at /exceptions.";
-const POLICY_REASON =
-  "A per-policy detail page is not available yet — view the policy register at /policies.";
 
 const UNKNOWN_REASON =
   "has no page in this version of the app, so it is shown without a link.";
@@ -68,11 +60,15 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
     case "audit":
       return { kind: "link", href: `/audits/${ev.related_entity_id}` };
     case "exception":
-      return { kind: "static", reason: EXCEPTION_REASON };
+      // #2772: links to web/app/(authed)/exceptions/[id]/page.tsx.
+      return { kind: "link", href: `/exceptions/${ev.related_entity_id}` };
     case "policy":
     case "policy_ack":
-      // #2130: an acknowledgement expiry has no page of its own either.
-      return { kind: "static", reason: POLICY_REASON };
+      // #2772: links to web/app/(authed)/policies/[id]/page.tsx. A
+      // policy_ack event's related_entity_id is the acknowledged
+      // policy_version_id, which is a `policies` row id (each publish
+      // writes a fresh row), so it resolves on the same page.
+      return { kind: "link", href: `/policies/${ev.related_entity_id}` };
     case "vendor":
       // Slice 675: vendor review events link to the real per-vendor
       // detail page (web/app/(authed)/vendors/[id]/page.tsx).

@@ -55,6 +55,7 @@ import {
   type AuditPeriodsListResponse,
 } from "@/lib/api/audit-periods";
 import {
+  ANCHORS_PAGE_LIMIT,
   fetchControlsList,
   fetchScopeCells,
   type ControlsListResponse,
@@ -70,6 +71,7 @@ import {
   ALL,
   NONE,
   SCOPE_CELL_CAP,
+  SCOPE_FILTER_HINT,
   SOURCE_DELIM,
   buildControlOptions,
   buildKindOptions,
@@ -259,9 +261,11 @@ function EvidencePageInner() {
 
   // Anchor catalog — drives the Control pill option list. The fetch
   // reuses the slice 098 endpoint so we don't duplicate the wire.
+  // #2771: only anchors with a tenant control behind them, since the
+  // ledger filters on the tenant control id; one page at the platform cap.
   const anchorsQ = useQuery<ControlsListResponse>({
-    queryKey: ["controls", "list"],
-    queryFn: () => fetchControlsList(),
+    queryKey: ["controls", "list", "has_control", ANCHORS_PAGE_LIMIT],
+    queryFn: () => fetchControlsList(undefined, true, ANCHORS_PAGE_LIMIT),
   });
   const anchors = useMemo(() => anchorsQ.data?.anchors ?? [], [anchorsQ.data]);
   const controlOptions = useMemo(() => buildControlOptions(anchors), [anchors]);
@@ -383,7 +387,8 @@ function EvidencePageInner() {
   );
   // Slice 234 — Source pill options derived from the observed
   // (actor_type, actor_id) tuples on the current page of evidence
-  // rows. Same provenance shape as the table cell renderer; no
+  // rows: `source_attribution`, the column the filter matches (#2771),
+  // same as the table cell renderer; no
   // invented values (P0 — "Options come from observed values only").
   // #2385: a person or API key is labelled by name, never by ID.
   const people = usePeopleDirectory();
@@ -392,12 +397,12 @@ function EvidencePageInner() {
       buildSourceOptions(
         records.map((r) => ({
           actor_type:
-            typeof r.source?.actor_type === "string"
-              ? r.source.actor_type
+            typeof r.source_attribution?.actor_type === "string"
+              ? r.source_attribution.actor_type
               : undefined,
           actor_id:
-            typeof r.source?.actor_id === "string"
-              ? r.source.actor_id
+            typeof r.source_attribution?.actor_id === "string"
+              ? r.source_attribution.actor_id
               : undefined,
         })),
         (id) => actorText(id, people.data),
@@ -561,7 +566,7 @@ function EvidencePageInner() {
       header: "Source",
       cell: (row) => (
         <span className="text-xs" data-testid="evidence-row-source">
-          <SourceAttribution source={row.source} />
+          <SourceAttribution source={row.source_attribution} />
         </span>
       ),
     },
@@ -814,6 +819,17 @@ function EvidencePageInner() {
             224 banner above the controls table). The banner fires when
             the tenant has more cells than `SCOPE_CELL_CAP`; the
             dropdown still works for the first 50 cells. */}
+        {/* #2771 — the Scope filter matches the scope a record was
+            pushed with; older records carry none and drop out, so say
+            so while the filter is narrowing. */}
+        {filters.scopeCellId !== ALL ? (
+          <p
+            className="mb-3 text-xs text-muted-foreground"
+            data-testid="evidence-scope-hint"
+          >
+            {SCOPE_FILTER_HINT}
+          </p>
+        ) : null}
         {scopeCellsCapped ? (
           <Alert data-testid="evidence-scope-cells-capped" className="mb-3">
             <AlertTitle>
