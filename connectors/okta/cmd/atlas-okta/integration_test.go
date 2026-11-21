@@ -67,9 +67,12 @@ func fakeOktaServer(t *testing.T) *httptest.Server {
 				"status": "ACTIVE",
 				"type": "MFA_ENROLL",
 				"settings": {"factors": {"okta_verify": {"enroll": {"self": "REQUIRED"}}}},
-				"conditions": {"people": {"groups": {"include": ["everyone"]}}}
+				"conditions": {"people": {"groups": {"include": ["00g1everyone00000001"]}}}
 			}
 		]`))
+	})
+	mux.HandleFunc("/api/v1/groups", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"id": "00g1everyone00000001", "type": "BUILT_IN", "profile": {"name": "Everyone"}}]`))
 	})
 	mux.HandleFunc("/api/v1/apps", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"id": "app1", "label": "Slack", "status": "ACTIVE", "signOnMode": "SAML_2_0"}]`))
