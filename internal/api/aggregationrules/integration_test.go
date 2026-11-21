@@ -72,8 +72,10 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
 
-	// Slice 197: JWT bearer via slice 190 path (owner roles).
-	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"owner"}))
+	// Slice 197: JWT bearer via slice 190 path. An admin, because the
+	// evaluate tests write risks and POST /v1/risks refuses a caller
+	// whose role is only a JWT claim (#2664).
+	bearer := srv.IssueTestJWT(t, testjwt.AdminFor(uuid.MustParse(tenant)))
 
 	h := srv.HTTPHandlerForTests()
 	if h == nil {

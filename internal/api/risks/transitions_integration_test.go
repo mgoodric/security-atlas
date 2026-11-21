@@ -398,7 +398,9 @@ func TestTransition_CreateProposalTerms(t *testing.T) {
 // MinterUserID for a bound key.
 func TestTransition_BoundKeyProposerIsItsUser(t *testing.T) {
 	env := newTransitionEnv(t)
-	cred := credstore.Credential{ID: "key_" + uuid.NewString(), TenantID: env.tenant, UserID: env.owner.String()}
+	// TenantRoles stands in for the owner's live role, which authzmw would
+	// resolve onto a bound key before the handler's guard (#2664).
+	cred := credstore.Credential{ID: "key_" + uuid.NewString(), TenantID: env.tenant, UserID: env.owner.String(), TenantRoles: []string{"grc_engineer"}}
 	ctx, err := tenancy.WithTenant(authctx.WithCredential(context.Background(), cred), env.tenant)
 	if err != nil {
 		t.Fatal(err)

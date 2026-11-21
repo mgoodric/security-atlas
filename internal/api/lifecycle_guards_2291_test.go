@@ -41,23 +41,6 @@ import (
 // the table, each with the issue that closes the gap. A listed route that
 // starts agreeing fails the test until it is removed from the list.
 var knownDivergent = map[string]string{
-	// No handler role guard; OPA alone admits admin|grc_engineer (#2664).
-	"POST /v1/risks":                                               "#2664",
-	"PATCH /v1/risks/{id}/close":                                   "#2664",
-	"PATCH /v1/risks/{id}/reopen":                                  "#2664",
-	"PATCH /v1/risks/{id}/treatment":                               "#2664",
-	"PATCH /v1/risks/{id}/acceptance/propose":                      "#2664",
-	"POST /v1/framework-scopes":                                    "#2664",
-	"PATCH /v1/framework-scopes/{id}":                              "#2664",
-	"PATCH /v1/framework-scopes/{id}/submit":                       "#2664",
-	"PATCH /v1/framework-scopes/{id}/activate":                     "#2664",
-	"PUT /v1/framework-scopes/{id}/applicability/{requirement_id}": "#2664",
-	"POST /v1/framework-scopes/{id}/applicability/bulk":            "#2664",
-	"POST /v1/framework-scopes/{id}/applicability/import":          "#2664",
-	"POST /v1/framework-scopes/{id}/applicability:carry-over":      "#2664",
-	"POST /v1/policies":                                            "#2664",
-	"PATCH /v1/policies/{id}/submit":                               "#2664",
-	"POST /v1/exceptions":                                          "#2664",
 	// The handler checks the cred.IsAdmin flag; OPA admits a live-role
 	// admin too, so the handler is stricter (#2665, decide).
 	"POST /v1/admin/policies/import": "#2665",
