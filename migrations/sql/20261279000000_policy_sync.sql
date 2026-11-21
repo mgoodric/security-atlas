@@ -28,7 +28,7 @@
 -- Constitutional invariant #6: policies and policy_audit_log keep their
 -- RLS policies; this migration adds no table.
 --
--- Reversible via 20261278000000_policy_sync.down.sql.
+-- Reversible via 20261279000000_policy_sync.down.sql.
 
 ALTER TABLE policies
     ADD COLUMN sync_site    TEXT        NULL,

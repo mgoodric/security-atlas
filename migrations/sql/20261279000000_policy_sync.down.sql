@@ -1,4 +1,4 @@
--- security-atlas -- reverse 20261278000000_policy_sync.sql.
+-- security-atlas -- reverse 20261279000000_policy_sync.sql.
 --
 -- A synced policy is a published, audit-binding row, and its 'synced'
 -- policy_audit_log row is append-only audit evidence. This reversal
@@ -13,12 +13,12 @@ BEGIN
     SELECT count(*) INTO n FROM policies WHERE source_attribution = 'synced';
     IF n > 0 THEN
         RAISE EXCEPTION 'policies holds % synced row(s); refusing to delete published policies', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261278000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261279000000.';
     END IF;
     SELECT count(*) INTO n FROM policy_audit_log WHERE action = 'synced';
     IF n > 0 THEN
         RAISE EXCEPTION 'policy_audit_log holds % synced row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261278000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261279000000.';
     END IF;
 END
 $$;

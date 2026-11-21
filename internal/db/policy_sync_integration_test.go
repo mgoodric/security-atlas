@@ -1,6 +1,6 @@
 //go:build integration
 
-// #2850 — 20261278000000_policy_sync. A 'synced' policy row must carry its
+// #2850 — 20261279000000_policy_sync. A 'synced' policy row must carry its
 // source, page id, body hash, sync key and time, plus the historical
 // approver, approval date and source URL; no other row may carry the sync
 // columns. One published synced row per page of a source. The audit log
@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	policySyncUp   = "../../migrations/sql/20261278000000_policy_sync.sql"
-	policySyncDown = "../../migrations/sql/20261278000000_policy_sync.down.sql"
+	policySyncUp   = "../../migrations/sql/20261279000000_policy_sync.sql"
+	policySyncDown = "../../migrations/sql/20261279000000_policy_sync.down.sql"
 )
 
 // syncedRow is a full synced policy row; a case blanks one column.
