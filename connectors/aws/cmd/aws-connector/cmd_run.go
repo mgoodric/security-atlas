@@ -139,22 +139,32 @@ func buildRecord(state awss3.BucketState, identity awsauth.Identity, controlID s
 	// hour (see idem.Key); without this truncation, ObservedAt drift in
 	// sub-second precision would force hash mismatch on dedup.
 	now := time.Now().UTC().Truncate(time.Hour)
-	payload, err := structpb.NewStruct(map[string]any{
-		"bucket_arn":         state.BucketARN,
+	// Keys follow the registered schema (#2815); ingest rejects any other
+	// key. Empty strings are omitted rather than sent as "".
+	fields := map[string]any{
 		"bucket_name":        state.BucketName,
-		"bucket_region":      state.BucketRegion,
-		"algorithm":          state.Algorithm,
-		"kms_key_id":         state.KMSKeyID,
+		"encryption_enabled": state.Result == awss3.ResultPass,
 		"bucket_key_enabled": state.BucketKeyEnabled,
-		"reason":             state.Reason,
-	})
+		"account_id":         identity.AccountID,
+	}
+	for key, value := range map[string]string{
+		"region":        state.BucketRegion,
+		"sse_algorithm": state.Algorithm,
+		"kms_key_id":    state.KMSKeyID,
+		"reason":        state.Reason,
+	} {
+		if value != "" {
+			fields[key] = value
+		}
+	}
+	payload, err := structpb.NewStruct(fields)
 	if err != nil {
 		return nil, err
 	}
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.Key(state.BucketARN, now),
 		EvidenceKind:   SupportedKind,
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  SchemaVersion,
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "cloud_account", Values: []string{"aws:" + identity.AccountID}},
