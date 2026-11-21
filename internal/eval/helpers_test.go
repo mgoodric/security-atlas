@@ -25,6 +25,7 @@ package eval
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -123,6 +124,20 @@ func TestFreshnessMaxAge_KnownClasses(t *testing.T) {
 				t.Fatalf("FreshnessMaxAge(%q) duration=%s; want positive", class, d)
 			}
 		})
+	}
+}
+
+func TestFreshnessClasses_MatchesTableShortestFirst(t *testing.T) {
+	t.Parallel()
+	got := FreshnessClasses()
+	want := []string{"realtime", "daily", "weekly", "monthly", "quarterly", "annual"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("FreshnessClasses() = %v; want %v", got, want)
+	}
+	for _, c := range got {
+		if _, known := FreshnessMaxAge(c); !known {
+			t.Errorf("FreshnessClasses() lists %q but FreshnessMaxAge reports it unknown", c)
+		}
 	}
 }
 

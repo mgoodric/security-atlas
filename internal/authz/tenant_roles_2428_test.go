@@ -175,6 +175,11 @@ var routes2428 = []route2428{
 	// #2358: stock controls the boot seed holds back behind a reviewed
 	// re-anchor.
 	{http.MethodGet, "/v1/admin/controls/held-back", tenantAdminGate},
+	// #2665: policy import, which read the cred.IsAdmin flag until then.
+	{http.MethodPost, "/v1/admin/policies/import", tenantAdminGate},
+	// #2674: a tenant's evidence_kind schemas, which read the cred.IsAdmin
+	// flag until then.
+	{http.MethodPost, "/v1/schemas", tenantAdminGate},
 	// #2110: Evaluate now. The role gate is tenant admin; the handler also
 	// admits the control's assigned owner (owner_user_id), whatever their
 	// role, which this role-only table cannot express.

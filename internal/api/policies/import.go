@@ -10,6 +10,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/policy/importfile"
 )
@@ -51,7 +52,9 @@ type importRespWire struct {
 
 // ImportPolicies handles POST /v1/admin/policies/import (#1747). Admin
 // only: the import writes published, audit-binding policies without the
-// in-tool approval workflow, so the admin gate stands in for it.
+// in-tool approval workflow, so the admin gate stands in for it. The gate
+// is authz.IsTenantAdmin, so a live-role tenant admin is admitted as OPA
+// admits it, not only the credential flag admin (#2665).
 //
 // Response: 200 with the per-file report when the import committed (some
 // files may be skipped, or failed under partial); 422 with the same
@@ -63,7 +66,7 @@ func (h *Handler) ImportPolicies(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	if !cred.IsAdmin {
+	if !authz.IsTenantAdmin(cred) {
 		httpresp.WriteError(w, http.StatusForbidden, "admin role required for policy import")
 		return
 	}

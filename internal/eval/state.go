@@ -24,6 +24,7 @@ package eval
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/control/attestation"
@@ -82,8 +83,9 @@ func freshnessMaxAge(class string) (time.Duration, bool) {
 // FreshnessMaxAge is the exported accessor for the canvas §2.3 freshness
 // model — the class -> max-acceptable-evidence-age mapping. It exists so
 // sibling packages (slice 016's freshness read model) reuse the SAME mapping
-// rather than redefining it: the table lives in exactly one place,
-// freshnessMaxAgeTable above. An unknown or empty class falls back to the
+// rather than redefining it. The one other copy is the CASE blocks in
+// internal/db/queries/calendar.sql, pinned to this table by
+// calendar_freshness_sync_test.go (#2868). An unknown or empty class falls back to the
 // `monthly` (90d) default; the returned bool reports whether the class was a
 // known member of the table. Callers may surface that in logging but never
 // need to special-case it — the returned duration is always usable.
@@ -91,6 +93,20 @@ func FreshnessMaxAge(class string) (time.Duration, bool) {
 	_, known := freshnessMaxAgeTable[class]
 	d, _ := freshnessMaxAge(class)
 	return d, known
+}
+
+// FreshnessClasses returns every class freshnessMaxAgeTable maps, shortest
+// window first. The control-bundle parser derives its allowed set from it, so
+// a bundle cannot declare a class the engine has no window for (#2896).
+func FreshnessClasses() []string {
+	classes := make([]string, 0, len(freshnessMaxAgeTable))
+	for c := range freshnessMaxAgeTable {
+		classes = append(classes, c)
+	}
+	sort.Slice(classes, func(i, j int) bool {
+		return freshnessMaxAgeTable[classes[i]] < freshnessMaxAgeTable[classes[j]]
+	})
+	return classes
 }
 
 // inWindowRecord is one evidence record that fell INSIDE the freshness window.

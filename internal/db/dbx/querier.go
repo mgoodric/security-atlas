@@ -199,6 +199,10 @@ type Querier interface {
 	// #2851 — the page's body matches the synced version again: the drift
 	// recorded on the row is cleared.
 	ClearSyncedPolicyDrift(ctx context.Context, arg ClearSyncedPolicyDriftParams) (Policy, error)
+	// #2853 — the pages of this run are present: any missing state recorded
+	// on their published synced rows by an earlier run is cleared. Rows not
+	// marked missing are left alone, so updated_at moves only on a change.
+	ClearSyncedPolicyMissing(ctx context.Context, arg ClearSyncedPolicyMissingParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CloseIncident(ctx context.Context, arg CloseIncidentParams) (Incident, error)
@@ -2170,7 +2174,9 @@ type Querier interface {
 	//     interval. The mapping is the same one `internal/eval/state.go`
 	//     `FreshnessMaxAge` exposes (realtime 24h, daily 7d, weekly 30d,
 	//     monthly 90d, quarterly 120d, annual 400d). We replicate the mapping
-	//     here as a CASE expression so the SQL is self-contained.
+	//     here as a CASE expression so the SQL is self-contained. Every
+	//     `CASE c.freshness_class` block below is pinned to the Go table by
+	//     internal/eval/calendar_freshness_sync_test.go (#2868): change both.
 	//   - next_due_at = last_evaluated_at + cadence, OR now() when the
 	//     control has never been evaluated (LEFT JOIN -> NULL).
 	//   - status: 'overdue' when next_due_at < now(); 'due-soon' when
@@ -2803,6 +2809,9 @@ type Querier interface {
 	// empty string ('') for "no filter" -- the WHERE clause shortcut
 	// avoids null-typed parameter inference issues with sqlc v1.31.x.
 	ListMetricsCatalog(ctx context.Context, arg ListMetricsCatalogParams) ([]MetricsCatalog, error)
+	// #2853 — the published synced policies whose page a sync run found
+	// absent, for GET /v1/needs-attention.
+	ListMissingSyncedPolicies(ctx context.Context, tenantID pgtype.UUID) ([]ListMissingSyncedPoliciesRow, error)
 	// Recipient-scoped list. Unread first (NULLS FIRST on read_at), then
 	// newest first within each read-status bucket. The index
 	// idx_notifications_recipient_unread_first directly serves this order.
@@ -3324,6 +3333,10 @@ type Querier interface {
 	// the stock manifest the approval replaced; the shipped manifest is an
 	// update the tenant has not received when the two hashes differ.
 	ListStockControlHoldbacks(ctx context.Context, tenantID pgtype.UUID) ([]ListStockControlHoldbacksRow, error)
+	// #2853 — the published synced rows of one source whose page a run found
+	// absent, for that run's report. Read after MarkSyncedPoliciesMissing in
+	// the same transaction.
+	ListSyncedPoliciesMissingFromSource(ctx context.Context, arg ListSyncedPoliciesMissingFromSourceParams) ([]Policy, error)
 	// Tenant-private themes only. Caller composes with ListDefaultThemes when a
 	// full visible vocabulary is needed.
 	ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([]OrgTheme, error)
@@ -3715,6 +3728,12 @@ type Querier interface {
 	// earliest timestamp).
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
 	MarkPersonnelChecklistCompleted(ctx context.Context, arg MarkPersonnelChecklistCompletedParams) (PersonnelSecurityChecklist, error)
+	// #2853 — every published synced row of this source whose page is absent
+	// from the run, not yet marked, gets sync_missing_since = now(). A row
+	// already marked keeps the time it was first found missing and is not
+	// rewritten. The policy itself is untouched: still published, and
+	// acknowledgements continue.
+	MarkSyncedPoliciesMissing(ctx context.Context, arg MarkSyncedPoliciesMissingParams) error
 	// Slice 135 AC-12: the earliest `frozen_at` across all FROZEN
 	// audit_periods whose [period_start, period_end] intersects the
 	// supplied [from_ts, to_ts] export window. Used by the audit-log

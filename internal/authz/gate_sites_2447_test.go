@@ -90,6 +90,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"evidence/export.go evidenceHasProgramRead":       site(apr, r2447(get, "/v1/admin/evidence/export")),
 		"exceptions/export.go exceptionsHasProgramRead":   site(apr, r2447(get, "/v1/admin/exceptions/export")),
 		"policies/export.go policiesHasProgramRead":       site(apr, r2447(get, "/v1/admin/policies/export")),
+		"policies/import.go Handler.ImportPolicies":       site(adm, r2447(post, "/v1/admin/policies/import")),
 		"oscalcomponents/handler.go hasOscalRead": site(apr,
 			r2447(get, "/v1/oscal/component-definitions"),
 			r2447(get, "/v1/oscal/component-definitions/"+id)),
@@ -249,6 +250,8 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			r2447(post, "/v1/questionnaires/"+id+"/questions/q1/scf-mapping/ai-suggest")),
 		"questionnaires/handlers.go Handler.StartAnswerRun": site(adm,
 			r2447(post, "/v1/questionnaires/"+id+"/answer-runs")),
+		// #2674: tenant-private evidence_kind schema registration.
+		"schemaregistry/http.go HTTPHandler.RegisterHTTP": site(adm, r2447(post, "/v1/schemas")),
 		"risks/authz.go requireTaxonomyAdmin": site(apr,
 			r2447(post, "/v1/risks/categories"),
 			r2447(patch, "/v1/risks/categories/c1"),
