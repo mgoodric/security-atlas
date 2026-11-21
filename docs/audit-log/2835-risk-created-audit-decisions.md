@@ -2,7 +2,7 @@
 
 Before this change, a risk's later edits were in `risk_audit_log` but its
 creation was not, and neither were theme changes. Migration
-`20261275000000_risk_audit_created.sql` adds two actions, `created` and
+`20261277000000_risk_audit_created.sql` adds two actions, `created` and
 `themes_changed`. This log does not block merge.
 
 - detection_tier_actual: none
