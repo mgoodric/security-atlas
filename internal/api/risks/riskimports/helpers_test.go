@@ -1,0 +1,158 @@
+package riskimports
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/risk/riskimport"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
+)
+
+// Pure-Go tier (slice-353 Q-2): input parsing, error mapping and the
+// deciding-person gate, no Postgres. The integration suite covers the
+// stored paths.
+
+func TestParseColumnMap(t *testing.T) {
+	t.Parallel()
+	got, err := parseColumnMap([]string{"external_ref = Ref No.", "title=Risk = Name"})
+	if err != nil {
+		t.Fatalf("parseColumnMap: %v", err)
+	}
+	if got["external_ref"] != "Ref No." || got["title"] != "Risk = Name" {
+		t.Errorf("map = %v", got)
+	}
+	if m, err := parseColumnMap(nil); err != nil || m != nil {
+		t.Errorf("empty = %v, %v", m, err)
+	}
+	for _, bad := range [][]string{{"title"}, {"=Header"}, {"title="}, {"title=A", "title=B"}} {
+		if _, err := parseColumnMap(bad); err == nil {
+			t.Errorf("parseColumnMap(%q) succeeded, want error", bad)
+		}
+	}
+}
+
+func TestWriteStageErrorStatuses(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err      error
+		status   int
+		contains string
+	}{
+		{riskimport.ErrUploadTooLarge, http.StatusRequestEntityTooLarge, "5 MiB size cap"},
+		{riskimport.ErrWorkbookTooLarge, http.StatusRequestEntityTooLarge, "64 MiB uncompressed cap"},
+		{riskimport.ErrTooManyRows, http.StatusBadRequest, "5000-row cap"},
+		{riskimport.ErrTooManyColumns, http.StatusBadRequest, "past column 200"},
+		{riskimport.ErrUnsupportedFormat, http.StatusBadRequest, ".csv or .xlsx"},
+		{riskimport.ErrEmptyFile, http.StatusBadRequest, "empty"},
+		{riskimport.ErrNoHeaderRow, http.StatusBadRequest, "title and a category"},
+		{riskimport.ErrInvalidColumnMap, http.StatusBadRequest, "column map"},
+		{riskimport.ErrMappedColumnAbsent, http.StatusBadRequest, "not in the file"},
+		{errors.New("db down"), http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		writeStageError(rec, httptest.NewRequest(http.MethodPost, "/v1/risks/imports", nil), tc.err)
+		assertError(t, rec, tc.err, tc.status, tc.contains)
+	}
+}
+
+func TestWriteDecisionErrorStatuses(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err      error
+		status   int
+		contains string
+	}{
+		{riskimport.ErrBatchNotFound, http.StatusNotFound, "import batch not found"},
+		{riskimport.ErrRowNotFound, http.StatusNotFound, "staged row not found"},
+		{riskimport.ErrRowDecided, http.StatusConflict, "already decided"},
+		{riskimport.ErrApproverRequired, http.StatusForbidden, "deciding person"},
+		{riskimport.ErrReasonRequired, http.StatusBadRequest, "reason"},
+		{riskimport.ErrInvalidDecision, http.StatusBadRequest, "invalid decision"},
+		{errors.New("db down"), http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		writeDecisionError(rec, httptest.NewRequest(http.MethodPost, "/v1/risks/imports/x/approve", nil), tc.err)
+		assertError(t, rec, tc.err, tc.status, tc.contains)
+	}
+}
+
+func assertError(t *testing.T, rec *httptest.ResponseRecorder, err error, status int, contains string) {
+	t.Helper()
+	if rec.Code != status {
+		t.Errorf("%v: status = %d, want %d", err, rec.Code, status)
+	}
+	var body map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if !strings.Contains(body["error"], contains) {
+		t.Errorf("%v: error = %q, want it to contain %q", err, body["error"], contains)
+	}
+	if strings.Contains(body["error"], "riskimport:") || strings.Contains(body["error"], "db down") {
+		t.Errorf("%v: error leaks internals: %q", err, body["error"])
+	}
+}
+
+// TestDecidingPerson: only a tenant approver who is a person decides. A
+// machine credential with the approver flag is refused, as is a person
+// without approver rights.
+func TestDecidingPerson(t *testing.T) {
+	t.Parallel()
+	tenant := uuid.NewString()
+	user := uuid.New()
+	cases := []struct {
+		name   string
+		cred   credstore.Credential
+		status int
+		want   string
+	}{
+		{"person approver", credstore.Credential{ID: "jwt:1", TenantID: tenant, UserID: "user:" + user.String(), IsApprover: true}, http.StatusOK, user.String()},
+		{"key bound to a person", credstore.Credential{ID: "key_bound", TenantID: tenant, UserID: user.String(), IsApprover: true}, http.StatusOK, user.String()},
+		{"machine token", credstore.Credential{ID: "jwt:2", TenantID: tenant, UserID: "oauth_client:ci", IsApprover: true}, http.StatusForbidden, "a person must approve"},
+		{"unbound key", credstore.Credential{ID: "key_unbound", TenantID: tenant, UserID: "key_unbound", IsApprover: true}, http.StatusForbidden, "a person must approve"},
+		{"person without approver rights", credstore.Credential{ID: "jwt:3", TenantID: tenant, UserID: "user:" + user.String()}, http.StatusForbidden, "approver role required"},
+	}
+	for _, tc := range cases {
+		ctx, err := tenancy.WithTenant(context.Background(), tenant)
+		if err != nil {
+			t.Fatalf("WithTenant: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/risks/imports/x/approve", nil).
+			WithContext(authctx.WithCredential(ctx, tc.cred))
+		rec := httptest.NewRecorder()
+		got, ok := decidingPerson(rec, req)
+		if tc.status == http.StatusOK {
+			if !ok || got != tc.want {
+				t.Errorf("%s: decidingPerson = %q, %v; want %q", tc.name, got, ok, tc.want)
+			}
+			continue
+		}
+		if ok || rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: ok=%v status=%d body=%s; want %d containing %q", tc.name, ok, rec.Code, rec.Body.String(), tc.status, tc.want)
+		}
+	}
+}
+
+func TestHandlersRequireTenant(t *testing.T) {
+	t.Parallel()
+	h := New(nil) // never reached: the tenant guard refuses first
+	for _, tc := range []struct {
+		name string
+		fn   http.HandlerFunc
+	}{{"create", h.Create}, {"get", h.Get}, {"approve", h.Approve}, {"reject", h.Reject}} {
+		rec := httptest.NewRecorder()
+		tc.fn(rec, httptest.NewRequest(http.MethodPost, "/v1/risks/imports", nil).WithContext(context.Background()))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without tenant = %d, want 401", tc.name, rec.Code)
+		}
+	}
+}

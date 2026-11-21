@@ -195,6 +195,7 @@ GET /v1/risks
 GET /v1/risks/categories
 GET /v1/risks/export
 GET /v1/risks/heatmap
+GET /v1/risks/imports/{id}
 GET /v1/risks/review-cadence
 GET /v1/risks/theme-heatmap
 GET /v1/risks/{id}
@@ -381,6 +382,9 @@ POST /v1/risks/categories
 POST /v1/risks/categories/{ref}/archive
 POST /v1/risks/categories/{ref}/set-default
 POST /v1/risks/categories/{ref}/unarchive
+POST /v1/risks/imports
+POST /v1/risks/imports/{id}/approve
+POST /v1/risks/imports/{id}/rows/{row}/reject
 POST /v1/risks/{id}/children
 POST /v1/risks/{id}/controls
 POST /v1/risks/{id}/themes

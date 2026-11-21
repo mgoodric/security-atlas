@@ -5018,6 +5018,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/risks/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header) as a staged import batch; every row is staged or rejected with a reason; capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839) */
+        post: operations["post-v1-risks-imports"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/risks/imports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /v1/risks/imports/{id} — a risk import batch with its counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839) */
+        get: operations["get-v1-risks-imports-id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/risks/imports/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a tenant approver who is a person must approve (403 otherwise); each decision is audit-logged (#2839) */
+        post: operations["post-v1-risks-imports-id-approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/risks/imports/{id}/rows/{row}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/risks/imports/{id}/rows/{row}/reject — reject a staged row; body {reason} (required); a tenant approver who is a person must reject; audit-logged (#2839) */
+        post: operations["post-v1-risks-imports-id-rows-row-reject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/risks/review-cadence": {
         parameters: {
             query?: never;
@@ -13487,6 +13555,93 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-risks-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "get-v1-risks-imports-id": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-risks-imports-id-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-risks-imports-id-rows-row-reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                row: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
