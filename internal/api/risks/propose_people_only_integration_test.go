@@ -164,7 +164,9 @@ func TestTransition_ProposeIsPeopleOnly(t *testing.T) {
 		name string
 		call caller
 	}{
-		{"bound key", viaHandler(credstore.Credential{ID: "key_" + uuid.NewString(), TenantID: env.tenant, UserID: env.owner.String()})},
+		// TenantRoles stands in for the owner's live role, which authzmw
+		// would resolve onto a bound key before the handler's guard (#2664).
+		{"bound key", viaHandler(credstore.Credential{ID: "key_" + uuid.NewString(), TenantID: env.tenant, UserID: env.owner.String(), TenantRoles: []string{"grc_engineer"}})},
 		{"JWT session", viaRouter(env.ownerJWT)},
 	}
 	for _, p := range people {
