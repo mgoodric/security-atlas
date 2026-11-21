@@ -7,7 +7,9 @@
 //   1. Every listed page is reachable by clicking its sidebar entry, and
 //      the page it opens carries an H1 equal to the entry's label. That
 //      includes the pages that used to be URL-only: Exceptions,
-//      Framework scopes, the Implementation checklist, Risk hierarchy.
+//      Framework scopes, the Implementation checklist. Risk hierarchy
+//      is not listed: it opens from the /risks page header (slice 100
+//      F-3, #2774).
 //   2. With the board-reporting flag off, Board packs is not listed;
 //      with no NIST CSF framework in the catalog (the CI database loads
 //      none), CSF assessment is not listed. global-setup turns the gated
@@ -49,7 +51,6 @@ const DEMO_TENANT_LABELS = [
   "Exceptions",
   "Implementation checklist",
   "Risk register",
-  "Risk hierarchy",
   "Risk taxonomy",
   "Action plans",
   "Audit periods",
@@ -152,6 +153,8 @@ test.describe("#2081 — sidebar lists every page, labels match titles", () => {
     for (const want of DEMO_TENANT_LABELS) {
       expect(labels, `sidebar lists ${want}`).toContain(want);
     }
+    // Slice 100 F-3 / #2774: reached from the /risks page header only.
+    expect(labels).not.toContain("Risk hierarchy");
     for (const label of labels) {
       await openFromSidebar(page, label);
     }
