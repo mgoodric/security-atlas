@@ -268,7 +268,7 @@ func TestSync_DriftClearsOnBump(t *testing.T) {
 }
 
 // The drift columns are rejected on a row that is not synced, and must
-// come together (20261280000000_policy_sync_drift).
+// come together (20261281000000_policy_sync_drift).
 func TestSync_DriftOnlyOnSyncedRows(t *testing.T) {
 	s := newSyncSetup(t)
 	_, key := s.issueKey(t, s.tenant, apikeystore.IssueInput{Purpose: credstore.PurposePolicySync})

@@ -1,4 +1,4 @@
--- security-atlas -- reverse 20261280000000_policy_sync_drift.sql.
+-- security-atlas -- reverse 20261281000000_policy_sync_drift.sql.
 --
 -- Drift is derived state: the next sync run records it again from the
 -- page. Dropping it loses nothing a run cannot rebuild.

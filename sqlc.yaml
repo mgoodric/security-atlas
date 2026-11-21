@@ -180,7 +180,7 @@ sql:
       - "migrations/sql/20261278000000_risks_external_ref.sql"
       - "migrations/sql/20261279000000_policy_sync.sql"
       # #2851: drift on synced policies.
-      - "migrations/sql/20261280000000_policy_sync_drift.sql"
+      - "migrations/sql/20261281000000_policy_sync_drift.sql"
     queries: "internal/db/queries"
     gen:
       go:
