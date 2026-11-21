@@ -10,6 +10,10 @@
 //     observed_at as an RFC 3339 timestamp. No payload, no DB handle, no
 //     other-tenant data, nothing else reaches the policy (ADR 0028).
 //   - No rego.Store, no rego.Function.
+//   - time.now_ns() is the engine's evaluation instant, passed with
+//     rego.EvalTime (the as-of instant for a replay, the case's pinned
+//     instant for a bundle test), never the wall clock (#2890, #2911).
+//     observed_at is normalised to UTC.
 //   - The capability set is restricted via evalSandboxCapabilities() so the
 //     network / runtime / introspection builtins (http.send, net.*,
 //     opa.runtime, ...) are not even compilable. A query referencing one
@@ -112,7 +116,7 @@ var defaultRegoCache = regocache.New()
 // (policy, capabilities) pair compiles via PrepareForEval; subsequent
 // calls re-use the cached *rego.PreparedEvalQuery. Closes slice 332
 // audit F-OPA-1.
-func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord) (string, error) {
+func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord, evaluatedAt time.Time) (string, error) {
 	if policy == "" {
 		return "", fmt.Errorf("%w: policy is empty", ErrRegoQuery)
 	}
@@ -124,11 +128,11 @@ func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord)
 
 	inRecs := make([]regoInputRecord, len(records))
 	for i, r := range records {
-		inRecs[i] = regoInputRecord{Result: r.result, ObservedAt: r.observedAt}
+		inRecs[i] = regoInputRecord{Result: r.result, ObservedAt: r.observedAt.UTC()}
 	}
 	input := map[string]interface{}{"records": inRecs}
 
-	rs, err := q.Eval(ctx, rego.EvalInput(input))
+	rs, err := q.Eval(ctx, rego.EvalInput(input), rego.EvalTime(evaluatedAt))
 	if err != nil {
 		return "", fmt.Errorf("%w: eval: %v", ErrRegoQuery, err)
 	}

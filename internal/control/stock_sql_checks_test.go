@@ -56,3 +56,16 @@ func TestStockSQLChecksShipBundleTests(t *testing.T) {
 		t.Fatal("no stock bundle declares a SQL query; soc2_cc6_1_logical_access_baseline should (#2821)")
 	}
 }
+
+// #2911: a stock SQL check compares against the `evidence.evaluated_at`
+// column, never the wall clock, so a replay, an audit-period re-evaluation
+// and a bundle test with pinned dates all give the verdict they gave first.
+func TestStockSQLChecksNeverReadTheWallClock(t *testing.T) {
+	forEachSOC2Bundle(t, func(name string, b *control.Bundle) {
+		for _, q := range b.Manifest.EvidenceQueries {
+			if q.Language == "sql" && eval.SQLUsesWallClock(q.Expression) {
+				t.Errorf("%s / %s: SQL query reads the wall clock (now(), current_timestamp, clock_timestamp() or similar); compare against evaluated_at instead", name, q.ID)
+			}
+		}
+	})
+}

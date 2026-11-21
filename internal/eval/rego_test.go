@@ -41,7 +41,7 @@ func TestEvalRegoQuery_ObservedAtFreshRecordsPass(t *testing.T) {
 		{result: "pass", observedAt: now.Add(-1 * time.Hour)},
 		{result: "pass", observedAt: now.Add(-23 * time.Hour)},
 	}
-	got, err := evalRegoQuery(context.Background(), freshnessPolicy, records)
+	got, err := evalRegoQuery(context.Background(), freshnessPolicy, records, time.Now())
 	if err != nil {
 		t.Fatalf("evalRegoQuery: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestEvalRegoQuery_ObservedAtStaleRecordFails(t *testing.T) {
 		{result: "pass", observedAt: now.Add(-1 * time.Hour)},
 		{result: "pass", observedAt: now.Add(-48 * time.Hour)},
 	}
-	got, err := evalRegoQuery(context.Background(), freshnessPolicy, records)
+	got, err := evalRegoQuery(context.Background(), freshnessPolicy, records, time.Now())
 	if err != nil {
 		t.Fatalf("evalRegoQuery: %v", err)
 	}
@@ -91,7 +91,7 @@ result := "pass" if {
 		ingestedAt: time.Now(),
 		id:         "00000000-0000-0000-0000-000000000001",
 	}}
-	got, err := evalRegoQuery(context.Background(), policy, records)
+	got, err := evalRegoQuery(context.Background(), policy, records, time.Now())
 	if err != nil {
 		t.Fatalf("evalRegoQuery: %v", err)
 	}
@@ -115,7 +115,7 @@ result := "pass" if {
 }
 `
 	records := []inWindowRecord{{result: "pass"}, {result: "pass"}}
-	got, err := evalRegoQuery(context.Background(), policy, records)
+	got, err := evalRegoQuery(context.Background(), policy, records, time.Now())
 	if err != nil {
 		t.Fatalf("evalRegoQuery: %v", err)
 	}
@@ -136,7 +136,7 @@ result := "pass" if {
 }
 `
 	records := []inWindowRecord{{result: "pass"}, {result: "fail"}}
-	got, err := evalRegoQuery(context.Background(), policy, records)
+	got, err := evalRegoQuery(context.Background(), policy, records, time.Now())
 	if err != nil {
 		t.Fatalf("evalRegoQuery: %v", err)
 	}
@@ -159,7 +159,7 @@ result := "pass" if {
 	every r in input.records { r.result == "pass" }
 }
 `
-	got, err := evalRegoQuery(context.Background(), policy, nil)
+	got, err := evalRegoQuery(context.Background(), policy, nil, time.Now())
 	if err != nil {
 		t.Fatalf("evalRegoQuery(empty records): %v", err)
 	}
@@ -170,7 +170,7 @@ result := "pass" if {
 
 func TestEvalRegoQuery_EmptyPolicyErrors(t *testing.T) {
 	t.Parallel()
-	if _, err := evalRegoQuery(context.Background(), "", nil); err == nil {
+	if _, err := evalRegoQuery(context.Background(), "", nil, time.Now()); err == nil {
 		t.Fatalf("evalRegoQuery(empty policy) should error")
 	}
 }
@@ -191,7 +191,7 @@ result := "pass" if {
 	http.send({"method": "GET", "url": "http://169.254.169.254/"})
 }
 `
-	_, err := evalRegoQuery(context.Background(), hostile, []inWindowRecord{{result: "pass"}})
+	_, err := evalRegoQuery(context.Background(), hostile, []inWindowRecord{{result: "pass"}}, time.Now())
 	if err == nil {
 		t.Fatalf("expected http.send query to be rejected, got nil error")
 	}
@@ -210,7 +210,7 @@ result := "pass" if {
 	rt.env.PATH != ""
 }
 `
-	_, err := evalRegoQuery(context.Background(), hostile, []inWindowRecord{{result: "pass"}})
+	_, err := evalRegoQuery(context.Background(), hostile, []inWindowRecord{{result: "pass"}}, time.Now())
 	if err == nil {
 		t.Fatalf("expected opa.runtime query to be rejected, got nil error")
 	}
@@ -259,13 +259,13 @@ func BenchmarkEvalRegoQueryRepeatedCompile(b *testing.B) {
 	records := []inWindowRecord{{result: "pass"}, {result: "pass"}, {result: "pass"}}
 
 	// Warm the cache so the steady-state hit cost dominates.
-	if _, err := evalRegoQuery(ctx, benchPolicy, records); err != nil {
+	if _, err := evalRegoQuery(ctx, benchPolicy, records, time.Now()); err != nil {
 		b.Fatalf("warm: %v", err)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := evalRegoQuery(ctx, benchPolicy, records); err != nil {
+		if _, err := evalRegoQuery(ctx, benchPolicy, records, time.Now()); err != nil {
 			b.Fatalf("eval: %v", err)
 		}
 	}
