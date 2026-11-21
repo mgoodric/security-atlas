@@ -13,6 +13,7 @@ import type { AnchorWithState } from "@/lib/api/anchors";
 
 import {
   ALL,
+  ALL_TIME_SINCE,
   NONE,
   SCOPE_CELL_CAP,
   SOURCE_DELIM,
@@ -187,9 +188,17 @@ describe("evidence filters", () => {
     ]);
   });
 
-  test("toFetchOptions drops sentinel values", () => {
+  test("toFetchOptions drops sentinel values; All time sends the epoch", () => {
     const out = toFetchOptions(DEFAULT_FILTERS);
-    expect(out).toEqual({});
+    expect(out).toEqual({ since: ALL_TIME_SINCE });
+  });
+
+  // #2794: with no `since` the handler applies its 30-day default
+  // window, so "All time" has to send an explicit lower bound.
+  test("toFetchOptions sends ALL_TIME_SINCE for All time, ignoring resolvedSince", () => {
+    expect(ALL_TIME_SINCE).toBe("1970-01-01T00:00:00Z");
+    const out = toFetchOptions(DEFAULT_FILTERS, "2026-05-16T10:00:00.000Z");
+    expect(out.since).toBe(ALL_TIME_SINCE);
   });
 
   test("toFetchOptions passes narrowing values through", () => {
@@ -209,6 +218,7 @@ describe("evidence filters", () => {
       result: "fail",
       sourceActorType: "connector",
       sourceActorID: "aws-connector",
+      since: ALL_TIME_SINCE,
     });
   });
 

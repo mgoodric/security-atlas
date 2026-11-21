@@ -67,7 +67,8 @@ export type EvidenceFilters = {
   /**
    * Slice 234 — Since preset key. One of `SINCE_PRESET_KEYS` or `ALL`.
    * The page maps the key to an RFC3339 `since` cutoff via
-   * `sinceCutoff` and forwards it on the wire. The "audit" preset
+   * `sinceCutoff` and forwards it on the wire; `ALL` sends
+   * `ALL_TIME_SINCE` (#2794). The "audit" preset
    * resolves to the active audit period's `period_start`; when no
    * active period exists the option still renders but the page reuses
    * the upstream default window (last 30 days).
@@ -307,12 +308,17 @@ export const SINCE_PRESET_KEYS = ["24h", "7d", "30d", "audit"] as const;
 export type SincePresetKey = (typeof SINCE_PRESET_KEYS)[number];
 
 /**
- * Build the Since pill option list. First option is ALL ("All time"
- * — really the upstream default window, last 30 days; the label is
- * "All time" because honestly conveying "default window" in a single
- * dropdown label would be more confusing than the operator-friendly
- * "All time"). The "audit" option label adjusts to include the active
- * audit period name when one is supplied.
+ * The `since` the page sends for "All time". Without it the handler
+ * applies its 30-day default window (`defaultWindow` in
+ * internal/api/controldetail/pagination.go), so "All time" would hide
+ * older records (#2794).
+ */
+export const ALL_TIME_SINCE = "1970-01-01T00:00:00Z";
+
+/**
+ * Build the Since pill option list. First option is ALL ("All time",
+ * sent as `ALL_TIME_SINCE`). The "audit" option label adjusts to
+ * include the active audit period name when one is supplied.
  */
 export function buildSinceOptions(
   activeAuditPeriodName?: string,
@@ -405,7 +411,9 @@ export function toFetchOptions(
   if (filters.scopeCellId !== ALL) {
     out.scopeCellID = filters.scopeCellId;
   }
-  if (filters.since !== ALL && resolvedSince) {
+  if (filters.since === ALL) {
+    out.since = ALL_TIME_SINCE;
+  } else if (resolvedSince) {
     out.since = resolvedSince;
   }
   return out;
