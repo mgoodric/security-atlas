@@ -103,6 +103,9 @@ func DefaultSeed() []KindVersion {
 		{Kind: "okta.user_lifecycle.v1", Version: "1.0.0"},
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
+		// #2912: the osquery connector pushes 1.1.0 (adds last_seen_at +
+		// reason; unread posture booleans omitted, not false).
+		{Kind: "osquery.host_posture.v1", Version: "1.1.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
 		{Kind: "change.approval.v1", Version: "1.0.0"},
 		{Kind: "change.verification.v1", Version: "1.0.0"},
