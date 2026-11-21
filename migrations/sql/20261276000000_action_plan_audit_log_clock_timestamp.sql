@@ -13,7 +13,7 @@
 -- on any row whose before- or after-status is completed or verified, so it
 -- does not depend on order alone.
 --
--- Reversible via 20261275000000_action_plan_audit_log_clock_timestamp.down.sql.
+-- Reversible via 20261276000000_action_plan_audit_log_clock_timestamp.down.sql.
 
 ALTER TABLE action_plan_audit_log
     ALTER COLUMN created_at SET DEFAULT clock_timestamp();
