@@ -42,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/redact"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -167,6 +168,10 @@ var (
 	ErrScopeViolation      = errors.New("ingest: credential not authorized for this push")
 	ErrObservedAtSkew      = errors.New("ingest: observed_at outside permitted skew window")
 	ErrOversized           = errors.New("ingest: payload exceeds inline size limit; use payload_uri")
+	// ErrOwnedKind refuses an owner-only kind (OwnedKind) on a Service
+	// not built for it with WithOwnedKind (#2873). It wraps
+	// ErrScopeViolation, so both transports answer 403 / PermissionDenied.
+	ErrOwnedKind = fmt.Errorf("%w: evidence kind is written only by its platform handler", ErrScopeViolation)
 	// ErrUnavailable is returned by ProcessInTx on a nil *Service: the
 	// domain store was built without an ingest service (#1830).
 	ErrUnavailable = errors.New("ingest: no ingest service wired")
@@ -185,6 +190,16 @@ func ForDomainWriter(svc *Service) *Service {
 		return nil
 	}
 	return svc.WithPath(DomainWriterPath)
+}
+
+// OwnedKind reports whether kind may be written only by its platform
+// handler, never by a generic push (#2873). The owner-only kinds are the
+// unbound kinds (internal/evidence/unbound): an unbound record counts for
+// every control that queries its kind, tenant-wide, so a push credential
+// that could send one would forge that evidence for all of them. Today that
+// is policy.acknowledgment.v1, written by internal/api/policyacks.
+func OwnedKind(kind string) bool {
+	return contains(unbound.Kinds(), kind)
 }
 
 // SystemCredential is the credential a domain writer ingests under: a
@@ -258,6 +273,9 @@ type Service struct {
 	// to "push" — connector / webhook callers can construct a Service
 	// with a different path tag via WithPath.
 	path string
+	// ownedKind is the one owner-only kind (OwnedKind) this copy may
+	// write; "" on every Service except the owning handler's (#2873).
+	ownedKind string
 	// marshalLedger is the protojson-marshal seam for the bytes that
 	// LAND in the ledger (and feed the canonjson hash). Slice 379
 	// (F-ING-1 closure) split the protojson marshal sites into two
@@ -370,6 +388,43 @@ func (s *Service) WithPath(path string) *Service {
 	copy := *s
 	copy.path = path
 	return &copy
+}
+
+// WithOwnedKind returns a copy of s that may write the owner-only kind
+// (OwnedKind). Only that kind's platform handler builds one; every other
+// Service refuses the kind with ErrOwnedKind (#2873). It panics on a kind
+// that is not owner-only: granting an ordinary kind is a wiring mistake,
+// and a typo would otherwise leave the owner unable to write its kind.
+func (s *Service) WithOwnedKind(kind string) *Service {
+	if !OwnedKind(kind) {
+		panic(fmt.Sprintf("ingest: WithOwnedKind(%q): not an owner-only kind", kind))
+	}
+	copy := *s
+	copy.ownedKind = kind
+	return &copy
+}
+
+// RefuseOwnedKind refuses rec when its kind is owner-only and s was not
+// built for it, writing the rejected_scope_violation audit row (credential,
+// kind, idempotency key) the way Process does. It returns nil otherwise. A
+// push transport that answers before Process runs (the JetStream publisher)
+// calls it so the pusher is refused synchronously and the attempt is still
+// audited (#2873).
+func (s *Service) RefuseOwnedKind(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) error {
+	return s.refuseOwnedKind(ctx, rec, cred, pgtype.UUID{})
+}
+
+func (s *Service) refuseOwnedKind(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) error {
+	kind := rec.GetEvidenceKind()
+	if !OwnedKind(kind) || (s != nil && kind == s.ownedKind) {
+		return nil
+	}
+	// A nil Service still refuses; it has no pool to audit with.
+	if s != nil {
+		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), kind, DecisionRejectedScopeViolation,
+			fmt.Sprintf("kind %s is written only by its platform handler", kind), recordID)
+	}
+	return fmt.Errorf("%w: %s", ErrOwnedKind, kind)
 }
 
 // Process runs the ingestion stage for one EvidenceRecord:
@@ -548,6 +603,11 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	if msg := missingField(rec); msg != "" {
 		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, msg, recordID)
 		return nil, DecisionRejectedValidation, fmt.Errorf("%w: %s", ErrMissingField, msg)
+	}
+
+	// #2873: an owner-only kind comes only from its platform handler.
+	if err := s.refuseOwnedKind(ctx, rec, cred, recordID); err != nil {
+		return nil, DecisionRejectedScopeViolation, err
 	}
 
 	// AC-8: observed_at skew check (replay protection).
