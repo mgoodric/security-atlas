@@ -36,6 +36,7 @@ import {
   pendingDrafts,
 } from "@/lib/questionnaire/review-queue";
 import { upstreamErrorMessage } from "@/lib/api/_shared";
+import { currentTenantEpoch } from "@/lib/tenant-cache";
 
 async function fetchDetail(id: string): Promise<QuestionnaireDetail> {
   const res = await fetch(`/api/questionnaires/${id}`, {
@@ -116,6 +117,7 @@ export default function QuestionnaireDetailPage(props: {
   async function draftAll(): Promise<void> {
     setDrafting(true);
     setDraftError(null);
+    const epoch = currentTenantEpoch(queryClient);
     try {
       const res = await fetch(`/api/questionnaires/${id}/answer-runs`, {
         method: "POST",
@@ -127,6 +129,9 @@ export default function QuestionnaireDetailPage(props: {
       }
       const detail = (await res.json()) as AnswerRunDetail;
       await queryClient.invalidateQueries({ queryKey: ["questionnaire", id] });
+      // The tenant switched during the run: detail is the old tenant's,
+      // so neither cache it nor navigate to it (#2768).
+      if (currentTenantEpoch(queryClient) !== epoch) return;
       queryClient.setQueryData(
         ["questionnaire-run", id, detail.run.id],
         detail,

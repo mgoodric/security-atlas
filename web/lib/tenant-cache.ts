@@ -24,6 +24,11 @@
 // it; query-core calls options.onSuccess whether or not the mutation is
 // still cached. tenantGuardedMutationCache() drops that onSuccess instead.
 // See docs/audit-log/2715-tenant-switch-mutation-guard-decisions.md.
+//
+// #2768 — a handler that writes the cache after a plain awaited request
+// is not a mutation, so the guard above never sees it. It reads
+// currentTenantEpoch() before the request and skips the write (and any
+// navigation to the result) if the epoch moved while it waited.
 
 import {
   MutationCache,
@@ -41,6 +46,17 @@ export function forgetTenantCaches(qc: QueryClient): void {
   const mc = qc.getMutationCache();
   epochs.set(mc, (epochs.get(mc) ?? 0) + 1);
   void qc.resetQueries();
+}
+
+/**
+ * The tenant epoch of qc, which forgetTenantCaches() bumps. Read it before
+ * an awaited request and compare after: if it changed, the tenant switched
+ * while the request was in flight, the response is the old tenant's, and
+ * it must not be written into the cache. A QueryClient whose cache is not
+ * tenantGuardedMutationCache() still counts its resets.
+ */
+export function currentTenantEpoch(qc: QueryClient): number {
+  return epochs.get(qc.getMutationCache()) ?? 0;
 }
 
 /**

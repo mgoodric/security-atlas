@@ -12,7 +12,9 @@
 //     (fixtures/e2e/controls-bulk.sql), so its writes never race the
 //     controls-list spec over the demo tenant's controls: the Export menu,
 //     and bulk assign owner to another member, evaluate now and link to a
-//     plan, each on three selected controls.
+//     plan, each on three selected controls. #2780: the fixture only
+//     inserts and the link test makes a plan of its own, because both
+//     halves apply the fixture from workers that run side by side.
 //   - Route-mocked over the same sign-in (the slice 594 convention) for
 //     what the seed cannot cheaply hold: more controls than the cap, a
 //     viewer, and a batch the platform partly refuses.
@@ -29,7 +31,6 @@ import { seedFromFixture } from "./seed";
 
 const TENANT = "00000000-0000-0000-0000-000000002141";
 const ADMIN = "44444444-4444-4444-4444-444444442141";
-const PLAN = "acacacac-acac-acac-acac-acacacac2141";
 const CONTROL_TITLES = [
   "Bulk e2e control one",
   "Bulk e2e control two",
@@ -189,18 +190,33 @@ test.describe("#2141 — Export menu and bulk actions (real platform)", () => {
     await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
-  test("bulk link to an action plan links three controls", async ({ page }) => {
+  test("bulk link to an action plan links three controls", async ({
+    page,
+  }, testInfo) => {
+    // #2780 — a plan of this run's own, so no other run's writes or
+    // fixture apply can change its links between the link and the read.
+    const title = `Bulk e2e plan ${testInfo.repeatEachIndex}-${
+      testInfo.retry
+    }-${Date.now()}`;
+    const created = await page.request.post("/api/action-plans", {
+      data: { title, owner_id: ADMIN, due_date: null },
+    });
+    expect(created.ok(), await created.text()).toBe(true);
+    const plan = ((await created.json()) as { action_plan: { id: string } })
+      .action_plan.id;
+
     await selectThree(page);
     await page.getByTestId("controls-bulk-link-plan").click();
+    await page.getByTestId("controls-bulk-plan-search").fill(title);
     const select = page.getByTestId("controls-bulk-plan-select");
-    await expect(select.locator(`option[value="${PLAN}"]`)).toHaveCount(1);
-    await select.selectOption(PLAN);
+    await expect(select.locator(`option[value="${plan}"]`)).toHaveCount(1);
+    await select.selectOption(plan);
     await page.getByTestId("controls-bulk-link-confirm").click();
     await expect(page.getByTestId("controls-bulk-result-summary")).toHaveText(
       "3 controls linked to the plan.",
     );
 
-    const res = await page.request.get(`/api/action-plans/${PLAN}`);
+    const res = await page.request.get(`/api/action-plans/${plan}`);
     expect(res.ok()).toBe(true);
     const body = (await res.json()) as {
       linkage: { controls: { target_id: string }[] };
