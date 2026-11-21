@@ -50,7 +50,7 @@ import {
   type Exception,
 } from "@/lib/api/exceptions";
 
-import { nextAction, statusPillClass } from "../lifecycle";
+import { isWholeControl, nextAction, statusPillClass } from "../lifecycle";
 
 function noRetryOn(statuses: number[]) {
   return (count: number, err: unknown) =>
@@ -338,12 +338,18 @@ function ScopeCard({ ex }: { ex: Exception }) {
         <CardTitle>Scope</CardTitle>
       </CardHeader>
       <CardContent>
-        {/* key remounts the read-only picker if the record reloads. */}
-        <ScopePicker
-          key={JSON.stringify(ex.scope_cell_predicate)}
-          value={ex.scope_cell_predicate}
-          readOnly
-        />
+        {isWholeControl(ex.scope_cell_predicate) ? (
+          <p className="text-sm" data-testid="exception-scope-whole-control">
+            Whole control: every scope cell this control applies to.
+          </p>
+        ) : (
+          /* key remounts the read-only picker if the record reloads. */
+          <ScopePicker
+            key={JSON.stringify(ex.scope_cell_predicate)}
+            value={ex.scope_cell_predicate}
+            readOnly
+          />
+        )}
       </CardContent>
     </Card>
   );
