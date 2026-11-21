@@ -136,9 +136,8 @@ func toWire(s frameworkscope.FrameworkScope) scopeWire {
 
 // Create — AC-5. POST /v1/framework-scopes.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	var req createReq
@@ -198,9 +197,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 // to `draft`; we surface this as `approval_invalidated: true`. An activated
 // or superseded row is immutable (#1965): 409, create a new revision.
 func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -242,9 +240,8 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 
 // Submit — AC-6. PATCH /v1/framework-scopes/{id}/submit.
 func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -346,9 +343,8 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 
 // Activate — AC-8. PATCH /v1/framework-scopes/{id}/activate.
 func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
@@ -563,6 +559,24 @@ func (h *Handler) tenantContext(r *http.Request) (context.Context, bool) {
 		return nil, false
 	}
 	return r.Context(), true
+}
+
+// writerContext is tenantContext for the framework_scope writes (create,
+// edit, submit, activate and the applicability decisions): the caller must
+// also be a tenant approver, admin or grc_engineer by its live roles
+// (authz.IsTenantApprover), as OPA admits it (#2664). It writes the 401 or
+// 403 itself.
+func (h *Handler) writerContext(w http.ResponseWriter, r *http.Request) (context.Context, bool) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return nil, false
+	}
+	if cred, _ := authctx.CredentialFromContext(ctx); !authz.IsTenantApprover(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "admin or grc_engineer role required")
+		return nil, false
+	}
+	return ctx, true
 }
 
 func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {

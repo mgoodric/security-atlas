@@ -57,9 +57,8 @@ func uuidString(u *uuid.UUID) *string {
 // single prior version leads into its framework version. Re-running writes
 // nothing new.
 func (h *Handler) CarryOverApplicability(w http.ResponseWriter, r *http.Request) {
-	ctx, ok := h.tenantContext(r)
+	ctx, ok := h.writerContext(w, r)
 	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 	id, ok := parseID(w, r)
