@@ -120,6 +120,8 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		// The free-form control_ref used by slice-013 pushes is the control
 		// UUID string by default; evidence pushed under that string is found
 		// by ListEvidenceForControlAsOf's (control_id = $2 OR control_ref = $3).
+		// The unbound records of the kinds the control's queries declare are
+		// found alongside them (#2817, internal/evidence/unbound).
 		controlRef := controlID.String()
 		records, err := e.store.loadEvidence(ctx, q, tenantID, controlID, controlRef, asOf)
 		if err != nil {

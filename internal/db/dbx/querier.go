@@ -285,6 +285,8 @@ type Querier interface {
 	// evaluates the JSON-AST against scope cells in memory and intersects with
 	// evidence_records.scope_id. v1 keeps the SQL simple; future slices can
 	// push the predicate down into a JSONB index.
+	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+	// the control's evidence_queries declare (internal/evidence/unbound).
 	CountPopulationEvidence(ctx context.Context, arg CountPopulationEvidenceParams) (int64, error)
 	// Rate denominator (#2586): the distinct active users holding a live
 	// user_roles row the policy's audience names, or any live role when the
@@ -1816,6 +1818,8 @@ type Querier interface {
 	// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
 	// the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the
 	// GUC so the read is tenant-scoped (invariant #6).
+	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+	// the control's evidence_queries declare (internal/evidence/unbound).
 	ListActiveControlsForPortfolio(ctx context.Context, arg ListActiveControlsForPortfolioParams) ([]ListActiveControlsForPortfolioRow, error)
 	// Slice 493 — SSP control-implementation-narrative projection.
 	//
@@ -2238,6 +2242,10 @@ type Querier interface {
 	// does not have to infer the type of a bare placeholder. The handler /
 	// effectiveness.go aggregates these into the rolling pass rate.
 	ListControlEvaluationsForEffectiveness(ctx context.Context, arg ListControlEvaluationsForEffectivenessParams) ([]ListControlEvaluationsForEffectivenessRow, error)
+	// #2817: the controls whose evidence_queries declare evidence_kind. An
+	// unbound record of a kind in internal/evidence/unbound belongs to each of
+	// them, so the authz hydrator looks for its periods on all of them.
+	ListControlIDsDeclaringEvidenceKind(ctx context.Context, arg ListControlIDsDeclaringEvidenceKindParams) ([]pgtype.UUID, error)
 	// Hash-input ingredient #2 (ADR 0003): the sorted UUIDs of controls in the
 	// tenant's catalog. v1 takes the full tenant catalog; a future slice may
 	// narrow to controls satisfied by the period's framework_version_id once
@@ -2336,7 +2344,9 @@ type Querier interface {
 	// row (latest_observed_at NULL, evidence_count 0). The evidence join matches
 	// BOTH the UUID control_id path and the free-form control_ref path (slice
 	// 013), so evidence pushed under an SCF-anchor string is still counted.
-	ListControlsWithLatestEvidence(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsWithLatestEvidenceRow, error)
+	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+	// the control's evidence_queries declare (internal/evidence/unbound).
+	ListControlsWithLatestEvidence(ctx context.Context, arg ListControlsWithLatestEvidenceParams) ([]ListControlsWithLatestEvidenceRow, error)
 	// Newest first. Exposed for the audit trail + integration assertions.
 	ListCsfAssessmentAudit(ctx context.Context, arg ListCsfAssessmentAuditParams) ([]CsfAssessmentAudit, error)
 	// The gap-view row source for ONE profile: every selection joined to its
@@ -2393,6 +2403,11 @@ type Querier interface {
 	// then ingested_at DESC and id DESC so records sharing an observed_at come
 	// back in one fixed order (#2111: the latest attestation wins, and equal
 	// timestamps must not make that choice depend on the plan).
+	// unbound_kinds (#2817) adds the tenant's records of those kinds that are
+	// bound to no control, when the control's evidence_queries declare the kind:
+	// a policy acknowledgement names a policy, never a control. A record of such
+	// a kind that IS bound reaches only its own control. internal/evidence/unbound
+	// owns the list; every ledger reader below applies the same rule.
 	// This is a pure SELECT — the engine never mutates the ledger.
 	ListEvidenceForControlAsOf(ctx context.Context, arg ListEvidenceForControlAsOfParams) ([]ListEvidenceForControlAsOfRow, error)
 	// Slice 064 — control-detail backend read endpoints.
@@ -2435,6 +2450,8 @@ type Querier interface {
 	// control_id = $2 set the auditor hydrator (audit.Store.ControlPeriods) and
 	// the population draw resolve. The handler sets it for a period-scoped
 	// caller; every other caller keeps the slice-012 OR resolution.
+	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+	// the control's evidence_queries declare (internal/evidence/unbound).
 	ListEvidenceForControlPaged(ctx context.Context, arg ListEvidenceForControlPagedParams) ([]ListEvidenceForControlPagedRow, error)
 	// AC-3: control-state read for a period. Returns evidence records for one
 	// control bounded by the period's frozen_at horizon (or live when the
@@ -2442,6 +2459,10 @@ type Querier interface {
 	// COALESCE-to-infinity short-circuits to live state). Ordered by
 	// observed_at DESC so the caller can pick the most-recent record as the
 	// pass/fail-driving observation.
+	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+	// the control's evidence_queries declare (internal/evidence/unbound).
+	// The freeze hash (ADR 0003) is tenant-wide, not per control, so this leg
+	// cannot change it.
 	ListEvidenceForPeriodControl(ctx context.Context, arg ListEvidenceForPeriodControlParams) ([]ListEvidenceForPeriodControlRow, error)
 	// AC-1 / AC-2 read: every freshness row for the tenant. The handler buckets
 	// by freshness_class and counts is_stale in Go — a flat list keeps the query
@@ -2500,6 +2521,9 @@ type Querier interface {
 	// Window default (last 30 days) is still applied by the handler, not the
 	// query — the handler passes the resolved cutoff timestamps verbatim.
 	ListEvidencePaged(ctx context.Context, arg ListEvidencePagedParams) ([]ListEvidencePagedRow, error)
+	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+	// the control's evidence_queries declare (internal/evidence/unbound).
+	// The same leg is on the three by-control readers below.
 	// Replay-friendly read for evaluation (slice 012+). Append-only ordering
 	// on observed_at lets the evaluator stream historical state without
 	// worrying about UPDATEs since slice 002.
@@ -2940,6 +2964,8 @@ type Querier interface {
 	//
 	// Returns just the evidence_record_id (and observed_at for scope intersection)
 	// to keep the round-trip small; the handler hydrates after the shuffle.
+	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+	// the control's evidence_queries declare (internal/evidence/unbound).
 	ListPopulationEvidenceIDs(ctx context.Context, arg ListPopulationEvidenceIDsParams) ([]ListPopulationEvidenceIDsRow, error)
 	ListPopulationsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]Population, error)
 	// Slice 030 — OSCAL SSP + POA&M export aggregation queries.

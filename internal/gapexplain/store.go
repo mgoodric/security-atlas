@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -123,11 +124,12 @@ func (s *Store) Rollup(ctx context.Context, controlID uuid.UUID) (Rollup, error)
 		}
 
 		recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
-			TenantID:   pgUUID(tenantID),
-			ControlID:  pgUUID(controlID),
-			ControlRef: controlID.String(),
-			Limit:      maxCitedExcerpts,
-			Offset:     0,
+			UnboundKinds: unbound.Kinds(),
+			TenantID:     pgUUID(tenantID),
+			ControlID:    pgUUID(controlID),
+			ControlRef:   controlID.String(),
+			Limit:        maxCitedExcerpts,
+			Offset:       0,
 		})
 		if err != nil {
 			return fmt.Errorf("gapexplain: list evidence: %w", err)

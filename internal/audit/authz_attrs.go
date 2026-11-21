@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
@@ -88,10 +89,51 @@ func (s *Store) EvidencePeriods(ctx context.Context, id uuid.UUID) (out Evidence
 			return nil
 		}
 		at := rec.ObservedAt.Time
-		out.Periods, err = periodsCovering(ctx, q, tenantID, uuid.UUID(rec.ControlID.Bytes), &at, &at, out.ScopeCellID)
-		return err
+		controls, err := recordControls(ctx, q, tenantID, rec)
+		if err != nil {
+			return err
+		}
+		for _, c := range controls {
+			periods, err := periodsCovering(ctx, q, tenantID, c, &at, &at, out.ScopeCellID)
+			if err != nil {
+				return err
+			}
+			out.Periods = append(out.Periods, periods...)
+		}
+		slices.SortFunc(out.Periods, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+		out.Periods = slices.Compact(out.Periods)
+		return nil
 	})
 	return out, ok, err
+}
+
+// recordControls are the controls whose populations a record can belong to:
+// its own control, or, for an unbound record of a kind in
+// internal/evidence/unbound, every control whose evidence_queries declare
+// that kind (#2817). The population draw resolves the same set, so an
+// auditor can open each record a period's population holds. Any other
+// unbound record belongs to no control, and so to no period.
+func recordControls(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, rec dbx.EvidenceRecord) ([]uuid.UUID, error) {
+	if c, ok := uuidFromPG(rec.ControlID); ok {
+		return []uuid.UUID{c}, nil
+	}
+	if rec.EvidenceKind == nil || !slices.Contains(unbound.Kinds(), *rec.EvidenceKind) {
+		return nil, nil
+	}
+	ids, err := q.ListControlIDsDeclaringEvidenceKind(ctx, dbx.ListControlIDsDeclaringEvidenceKindParams{
+		TenantID:     pgUUID(tenantID),
+		EvidenceKind: *rec.EvidenceKind,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("evidence periods: controls declaring %s: %w", *rec.EvidenceKind, err)
+	}
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if c, ok := uuidFromPG(id); ok {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 // ControlPeriods returns the audit periods with an attached population that

@@ -51,13 +51,22 @@ WHERE id = $1
   AND tenant_id = $2;
 
 -- name: ListEvidenceRecordsByControl :many
+-- #2817: plus the tenant's unbound records of a kind in unbound_kinds that
+-- the control's evidence_queries declare (internal/evidence/unbound).
+-- The same leg is on the three by-control readers below.
 -- Replay-friendly read for evaluation (slice 012+). Append-only ordering
 -- on observed_at lets the evaluator stream historical state without
 -- worrying about UPDATEs since slice 002.
 SELECT *
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5;
 
@@ -71,8 +80,14 @@ SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
 -- mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3);
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))));
 
 -- name: ListEvidenceRecordsByControlBeforeHorizon :many
 -- Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
@@ -89,8 +104,14 @@ WHERE tenant_id = $1
 -- summarizes FROZEN periods, so in practice the horizon is always set.
 SELECT *
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                               'infinity'::timestamptz)
 ORDER BY observed_at DESC
@@ -104,8 +125,14 @@ LIMIT $4 OFFSET $5;
 -- count and the bounded list agree on the frozen population (P0-749-1).
 SELECT count(*)
 FROM evidence_records
-WHERE tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3)
+WHERE evidence_records.tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3
+       OR (control_id IS NULL
+           AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
+           AND EXISTS (SELECT 1 FROM controls uc
+                       WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
+                         AND uc.evidence_queries @> jsonb_build_array(
+                               jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
   AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
                               'infinity'::timestamptz);
 
