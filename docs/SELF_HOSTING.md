@@ -111,6 +111,13 @@ Run `atlas` under something that restarts it. The compose bundles set
 the equivalent, such as systemd `Restart=on-failure`. Decisions:
 [`docs/audit-log/2781-fatal-subsystems-decisions.md`](audit-log/2781-fatal-subsystems-decisions.md).
 
+On SIGTERM, or when a subsystem fails, the gRPC and HTTP servers each get
+5 seconds to drain in-flight requests and streams. Past that, gRPC closes
+the connections that are still open and HTTP returns with its handlers
+still running, so a stuck stream cannot keep the process from exiting
+(#2805). A supervisor's stop timeout should allow at least that long;
+Docker's default of 10 seconds does.
+
 ### Manual smoke test
 
 CI validates that `docker-compose.yml` parses (`just self-host-config`);

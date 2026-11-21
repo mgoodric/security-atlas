@@ -463,19 +463,45 @@ func (s *Server) AttachAuthHandler(h *authapi.Handler) {
 	s.authHandler = h
 }
 
+// ShutdownTimeout bounds how long the gRPC and HTTP servers drain in-flight
+// work once their context is canceled. Past it, gRPC hard-stops and HTTP
+// returns with handlers still running, so a stuck stream or request cannot
+// keep the process from exiting for its supervisor to restart (#2805).
+const ShutdownTimeout = 5 * time.Second
+
 // Run starts the gRPC server on addr (e.g., ":50051") and blocks until ctx
-// is canceled, at which point it gracefully stops.
+// is canceled, at which point it gracefully stops, hard-stopping after
+// ShutdownTimeout.
 func (s *Server) Run(ctx context.Context, addr string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("api: listen %s: %w", addr, err)
 	}
+	return s.serveGRPC(ctx, lis, ShutdownTimeout)
+}
+
+// serveGRPC serves on lis until ctx is canceled, then drains for at most
+// timeout. GracefulStop waits for every open stream to finish, so a
+// long-lived or stuck one would block it forever; Stop closes them.
+func (s *Server) serveGRPC(ctx context.Context, lis net.Listener, timeout time.Duration) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.GRPC.Serve(lis) }()
 
 	select {
 	case <-ctx.Done():
-		s.GRPC.GracefulStop()
+		stopped := make(chan struct{})
+		go func() {
+			s.GRPC.GracefulStop()
+			close(stopped)
+		}()
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case <-stopped:
+		case <-timer.C:
+			s.GRPC.Stop()
+			<-stopped
+		}
 		return nil
 	case err := <-errCh:
 		return err

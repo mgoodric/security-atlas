@@ -391,7 +391,7 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	go func() { errCh <- srv.ListenAndServe() }()
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 		defer cancel()
 		err := srv.Shutdown(shutdownCtx)
 		// A Shutdown that hit its deadline leaves handlers running. wait
