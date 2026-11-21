@@ -9,7 +9,7 @@ INSERT INTO risks (
     review_due_at, accepted_until, accepter, instrument_reference,
     acceptance_status, level, org_unit_id,
     acceptance_proposed_by, acceptance_proposed_at, owner_user_id,
-    acceptance_justification, acceptance_proposed_until
+    acceptance_justification, acceptance_proposed_until, external_ref
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
@@ -17,7 +17,7 @@ VALUES (
     $11, $12, $13, $14,
     $15, $16, $17,
     $18, $19, $20,
-    $21, $22
+    $21, $22, $23
 )
 RETURNING *;
 
@@ -76,6 +76,7 @@ SET title = $3,
     instrument_reference = $13,
     acceptance_status = $14,
     owner_user_id = $15,
+    external_ref = $16,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;

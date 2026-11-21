@@ -219,6 +219,7 @@ func TestSlice136_RiskExportReturnsExpectedColumns(t *testing.T) {
 		"closure_reason",    // #2107, appended
 		"owner_user_id",     // #2450, appended
 		"owner_name",        // #2450, appended
+		"external_ref",      // #2838, appended
 	}
 	if len(header) != len(expectedCols) {
 		t.Errorf("header column count = %d; want %d; header=%v", len(header), len(expectedCols), header)
@@ -275,6 +276,7 @@ func TestSlice136_RiskExportColumnSetMatchesCanonical(t *testing.T) {
 		"closure_reason",    // #2107, appended
 		"owner_user_id",     // #2450, appended
 		"owner_name",        // #2450, appended
+		"external_ref",      // #2838, appended
 	}
 
 	t.Run("csv", func(t *testing.T) {

@@ -32,8 +32,8 @@ func TestCreatePathsRequireAnActor(t *testing.T) {
 	}
 }
 
-// TestCreatedStateAfter pins the created row's after state: the five
-// initial fields by wire name, an unset owner as null.
+// TestCreatedStateAfter pins the created row's after state: the six
+// initial fields by wire name, an unset owner or risk ID as null (#2838).
 func TestCreatedStateAfter(t *testing.T) {
 	t.Parallel()
 	cat, owner := uuid.New(), uuid.New()
@@ -44,6 +44,7 @@ func TestCreatedStateAfter(t *testing.T) {
 		"treatment":       dbx.RiskTreatmentUntreated,
 		"owner_user_id":   nil,
 		"treatment_owner": "ops",
+		"external_ref":    nil,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("after = %v, want %v", got, want)
@@ -55,5 +56,9 @@ func TestCreatedStateAfter(t *testing.T) {
 	}
 	if a := (CreatedState{OwnerUserID: &owner}).after(); a["owner_user_id"] != owner.String() {
 		t.Errorf("owner_user_id = %v, want %s", a["owner_user_id"], owner)
+	}
+	ref := "R-014"
+	if a := (CreatedState{ExternalRef: &ref}).after(); a["external_ref"] != "R-014" {
+		t.Errorf("external_ref = %v, want R-014", a["external_ref"])
 	}
 }
