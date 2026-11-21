@@ -215,8 +215,12 @@ type Policy struct {
 	// and the hex sha256 of the body the source holds now.
 	SyncDriftDetectedAt *time.Time
 	SyncDriftBodySHA256 *string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// SyncMissingSince is set on a published synced row whose page a sync
+	// run found absent (#2853): when a run first found it missing. The
+	// policy stays in force.
+	SyncMissingSince *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // IsImported reports whether p was brought in by Import (#1747).
@@ -1309,6 +1313,10 @@ func policyFromRow(r dbx.Policy) Policy {
 	if r.SyncDriftBodySha256 != nil {
 		v := *r.SyncDriftBodySha256
 		out.SyncDriftBodySHA256 = &v
+	}
+	if r.SyncMissingSince.Valid {
+		t := r.SyncMissingSince.Time
+		out.SyncMissingSince = &t
 	}
 	if r.CreatedAt.Valid {
 		out.CreatedAt = r.CreatedAt.Time
