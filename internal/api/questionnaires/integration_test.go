@@ -416,8 +416,9 @@ func exportPDF(t *testing.T, env testEnv, id string) (*http.Response, []byte) {
 }
 
 // assertQuestionnairePDFOrServiceUnavailable enforces the slice-475 contract:
-// the export-pdf endpoint returns EITHER a real 200 %PDF- body OR a 503
-// graceful degradation — NEVER a 500 / hang / other status. The old test
+// the export-pdf endpoint returns a real 200 %PDF- body, a 503 graceful
+// degradation, or a 409 feature_not_enabled when chrome is absent (#2786) —
+// NEVER a 500 / hang / other status. The old test
 // t.Skip'd on 503; the contract now asserts it deterministically.
 func assertQuestionnairePDFOrServiceUnavailable(t *testing.T, resp *http.Response, buf []byte) {
 	t.Helper()
@@ -431,8 +432,13 @@ func assertQuestionnairePDFOrServiceUnavailable(t *testing.T, resp *http.Respons
 		}
 	case http.StatusServiceUnavailable:
 		// Graceful degradation — never a 500 / hang (slice 475 AC-1).
+	case http.StatusConflict:
+		// Chrome absent: a refusal about the deployment (#2786).
+		if !bytes.Contains(buf, []byte(`"code":"feature_not_enabled"`)) {
+			t.Errorf("409 body lacks code feature_not_enabled; body=%q", buf)
+		}
 	default:
-		t.Fatalf("AC-1: export-pdf = %d, want exactly 200 or 503; body=%q",
+		t.Fatalf("AC-1: export-pdf = %d, want exactly 200, 409 or 503; body=%q",
 			resp.StatusCode, string(buf[:min(64, len(buf))]))
 	}
 }
@@ -458,6 +464,9 @@ func TestExportPDF_RenderDeadlineDegradesTo503(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("AC-1: render-deadline path = %d, want 503 (never 500/hang); body=%q",
 			resp.StatusCode, string(buf[:min(64, len(buf))]))
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("render-deadline 503 carries no Retry-After (#2786)")
 	}
 }
 

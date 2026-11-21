@@ -856,11 +856,7 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	pdfBytes, err := h.renderPDF(renderCtx, doc)
 	if err != nil {
-		if errors.Is(err, policypdf.ErrChromeUnavailable) {
-			httpresp.WriteError(w, http.StatusServiceUnavailable, "pdf renderer unavailable: chrome not installed")
-			return
-		}
-		httperr.WriteInternal(w, r, "render pdf", err)
+		writePDFRenderErr(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/pdf")
@@ -870,6 +866,18 @@ func (h *Handler) PDF(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----- helpers -----
+
+// writePDFRenderErr answers a failed policy PDF render. A deployment with no
+// chrome installed gets 409 feature_not_enabled: retrying cannot install
+// chrome, so it is a refusal about the deployment, not a server failure
+// (#2786). Anything else is a 500.
+func writePDFRenderErr(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, policypdf.ErrChromeUnavailable) {
+		httpresp.WriteFeatureNotEnabled(w, "PDF export is not enabled on this deployment: chrome is not installed")
+		return
+	}
+	httperr.WriteInternal(w, r, "render pdf", err)
+}
 
 func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {

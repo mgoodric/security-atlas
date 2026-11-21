@@ -2069,12 +2069,38 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: The rendered PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "409":
+          description: >-
+            PDF export is not enabled on this deployment because Chrome is not installed.
+            code is feature_not_enabled. Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: The render timed out or the render queue is full. Retryable.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Default response envelope.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/Error"
   /v1/board-packs:
     get:
       summary: GET /v1/board-packs
@@ -2156,12 +2182,38 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: The rendered PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "409":
+          description: >-
+            PDF export is not enabled on this deployment because Chrome is not installed.
+            code is feature_not_enabled. Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: The render timed out or the render queue is full. Retryable.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Default response envelope.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/Error"
   /v1/board-packs/{id}/publish:
     post:
       summary: POST /v1/board-packs/{id}/publish
@@ -5380,12 +5432,27 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: The rendered PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "409":
+          description: >-
+            PDF export is not enabled on this deployment because Chrome is not installed.
+            code is feature_not_enabled. Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Default response envelope.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/Error"
   /v1/policies/{id}/publish:
     post:
       summary: POST /v1/policies/{id}/publish
@@ -5711,12 +5778,38 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: The rendered PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "409":
+          description: >-
+            PDF export is not enabled on this deployment because Chrome is not installed.
+            code is feature_not_enabled. Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: The render timed out or the render queue is full. Retryable.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Default response envelope.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/Error"
   /v1/questionnaires/{id}/import-excel:
     post:
       summary: POST /v1/questionnaires/{id}/import-excel
@@ -7182,12 +7275,41 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: The walkthrough as a PDF for format=pdf, or as JSON for format=json.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: object
+        "409":
+          description: >-
+            PDF export is not enabled on this deployment because Chrome is not installed.
+            code is feature_not_enabled. Not retryable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: The render timed out or the render queue is full. Retryable.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           description: Default response envelope.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/Error"
   /v1/walkthroughs/{id}:finalize:
     post:
       summary: POST /v1/walkthroughs/{id}:finalize

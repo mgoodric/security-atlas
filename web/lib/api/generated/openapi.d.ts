@@ -8536,13 +8536,42 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The rendered PDF. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description PDF export is not enabled on this deployment because Chrome is not installed. code is feature_not_enabled. Not retryable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The render timed out or the render queue is full. Retryable. */
+            503: {
+                headers: {
+                    /** @description Suggested retry delay in seconds. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Default response envelope. */
             default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ack"];
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -8642,13 +8671,42 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The rendered PDF. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description PDF export is not enabled on this deployment because Chrome is not installed. code is feature_not_enabled. Not retryable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The render timed out or the render queue is full. Retryable. */
+            503: {
+                headers: {
+                    /** @description Suggested retry delay in seconds. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Default response envelope. */
             default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ack"];
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -12549,13 +12607,31 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The rendered PDF. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description PDF export is not enabled on this deployment because Chrome is not installed. code is feature_not_enabled. Not retryable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Default response envelope. */
             default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ack"];
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -12901,13 +12977,42 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The rendered PDF. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description PDF export is not enabled on this deployment because Chrome is not installed. code is feature_not_enabled. Not retryable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The render timed out or the render queue is full. Retryable. */
+            503: {
+                headers: {
+                    /** @description Suggested retry delay in seconds. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Default response envelope. */
             default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ack"];
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -14615,13 +14720,43 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The walkthrough as a PDF for format=pdf, or as JSON for format=json. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description PDF export is not enabled on this deployment because Chrome is not installed. code is feature_not_enabled. Not retryable. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The render timed out or the render queue is full. Retryable. */
+            503: {
+                headers: {
+                    /** @description Suggested retry delay in seconds. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Default response envelope. */
             default: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Ack"];
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
