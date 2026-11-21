@@ -3,11 +3,22 @@ bundle_id: soc2_cc8_1_configuration_change_control
 title: "Infrastructure changes go through reviewed pull requests"
 description: |
   The configuration-change-control half of TSC CC8.1: infrastructure
-  changes (Terraform, Kubernetes manifests, IAM policy JSON) are
-  modified only via reviewed pull requests on the IaC repository. The
-  query asserts that the dedicated IaC repos have branch protection
-  with required reviews AND that the repo is tagged
-  `iac: true` so future automation can target it deterministically.
+  changes (Terraform, Kubernetes manifests, IAM policy JSON) are made only
+  through reviewed pull requests on the IaC repositories. The intended
+  test is that every repo tagged `iac` has branch protection with required
+  reviews.
+
+  What runs today: the query rolls up the connector's per-record verdicts:
+  any fail fails the control, otherwise any pass passes it, and no
+  in-window record leaves it inconclusive. The records are the GitHub
+  connector's `github.repo_protection.v1`, one per repository's default
+  branch, whose verdict is that at least one approving review is required:
+  a branch requiring one passes, and a branch requiring none or having no
+  protection fails. Every repository the connector reads counts, not only
+  IaC ones.
+
+  Pending: the approving-review check in SQL (#2823); and scoping to repos
+  with the `iac` topic, which the connector does not emit yet (#2827).
 
 scf_anchor_id: CHG-03
 control_family: CHG
