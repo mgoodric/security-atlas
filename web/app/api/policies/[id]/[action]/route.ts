@@ -13,6 +13,10 @@
 // whose role is in the policy's audience, and an ack is always for the
 // caller. The body's optional `policy_version_id` pins the version the
 // caller was shown; a mismatch is the platform's 409 (#2668).
+//
+// #2852 — controls (PATCH upstream) replaces a synced policy's control
+// links in place, the one change a synced policy accepts. The platform
+// refuses it with 409 for any other policy.
 
 import { NextResponse } from "next/server";
 
@@ -23,6 +27,7 @@ const UPSTREAM_METHOD: Record<string, "PATCH" | "POST"> = {
   approve: "PATCH",
   publish: "POST",
   acknowledge: "POST",
+  controls: "PATCH",
 };
 
 export async function POST(

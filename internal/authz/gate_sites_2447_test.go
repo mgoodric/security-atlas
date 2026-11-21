@@ -230,6 +230,7 @@ var gateSites2447 = func() map[string]gateSite2447 {
 		"policies/handlers.go Handler.Approve":       site(apr, r2447(patch, "/v1/policies/"+id+"/approve")),
 		"policies/handlers.go Handler.Publish":       site(apr, r2447(post, "/v1/policies/"+id+"/publish")),
 		"policies/handlers.go Handler.SetReviewDate": site(apr, r2447(patch, "/v1/policies/"+id+"/review-date")),
+		"policies/handlers.go Handler.SetControls":   site(apr, r2447(patch, "/v1/policies/"+id+"/controls")),
 		"posturetargets/handler.go Handler.Set": site(apr,
 			r2447(put, "/v1/framework-scopes/posture-targets/"+id)),
 		"questionnaires/handlers.go Handler.AIApprove": site(adm,

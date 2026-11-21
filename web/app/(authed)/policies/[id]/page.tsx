@@ -34,6 +34,11 @@
 // year) shows a "Your acknowledgment" card with an Acknowledge button. The
 // card states what the click attests, so it records on one click. The
 // platform admits the ack and records it for the caller only.
+//
+// #2852 — a synced policy (source_attribution "synced") is edited at its
+// Confluence page. It shows a "Managed in Confluence" badge, the page link,
+// the approval the page records and any drift, and offers no lifecycle or
+// edit action. Its control links are kept here, so it has a link editor.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -47,6 +52,7 @@ import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EntityMultiPicker } from "@/components/ui/entity-picker";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Timestamp } from "@/components/ui/timestamp";
@@ -59,20 +65,32 @@ import {
   fetchMyAcknowledgments,
   MY_ACKS_QUERY_KEY,
   fetchPolicyDetail,
+  setPolicyControls,
   transitionPolicy,
 } from "@/lib/api/policies";
+import type { Policy } from "@/lib/api/policies";
+import type { EntityKind } from "@/lib/entity-picker";
 import { Markdown } from "@/components/markdown";
 
 import {
   acknowledgedToast,
   audienceLabel,
   isDraft,
+  isSynced,
   myAckState,
   needsControlsWarning,
   NO_CONTROLS_WARNING,
   primaryAction,
+  safeHttpUrl,
+  syncedPolicyView,
   unrecognisedAudiences,
 } from "../lifecycle";
+import {
+  ManagedInConfluenceBadge,
+  SyncedPolicyPanel,
+} from "../synced-policy-panel";
+
+const CONTROL_KINDS: readonly EntityKind[] = ["control"];
 
 function statusPillVariant(
   status: string,
@@ -84,19 +102,6 @@ function statusPillVariant(
       return "outline";
     default:
       return "secondary";
-  }
-}
-
-// #1747 — the import validates source_url as an absolute http(s) URL;
-// re-check before rendering it as a link so no other scheme can reach an
-// href.
-function safeHttpUrl(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  try {
-    const u = new URL(raw);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
-  } catch {
-    return null;
   }
 }
 
@@ -230,7 +235,9 @@ export default function PolicyDetailPage({
   const { policy, ack_rate } = data;
   const sourceHref = safeHttpUrl(policy.source_url);
   const primary = primaryAction(policy);
-  const draft = isDraft(policy);
+  const synced = isSynced(policy);
+  const syncView = syncedPolicyView(policy);
+  const draft = isDraft(policy) && !synced;
   const busy = confirming !== null || transition.isPending || discard.isPending;
   const base = `/policies/${encodeURIComponent(id)}`;
   const ackState = myAckState(
@@ -306,6 +313,7 @@ export default function PolicyDetailPage({
               Imported
             </Badge>
           ) : null}
+          {synced ? <ManagedInConfluenceBadge /> : null}
           <SelfApprovedBadge
             selfApproved={policy.self_approved}
             testId="policy-detail-self-approved"
@@ -428,6 +436,7 @@ export default function PolicyDetailPage({
               ) : null}
             </dl>
           ) : null}
+          {syncView ? <SyncedPolicyPanel view={syncView} /> : null}
         </div>
       }
     >
@@ -484,6 +493,10 @@ export default function PolicyDetailPage({
               </span>
             ))}
       </p>
+
+      {synced && policy.status === "published" ? (
+        <SyncedControlsEditor policy={policy} />
+      ) : null}
 
       {ackState ? (
         <Card size="sm" data-testid="policy-detail-my-ack">
@@ -585,6 +598,52 @@ export default function PolicyDetailPage({
         </Link>
       </div>
     </DetailHeader>
+  );
+}
+
+// #2852 — a synced policy's control links, the one thing about it edited
+// here. Save replaces the whole set; the platform audit-logs the change.
+function SyncedControlsEditor({ policy }: { policy: Policy }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [ids, setIds] = useState<string[]>(() => [
+    ...policy.linked_control_ids,
+  ]);
+  const save = useMutation({
+    mutationFn: () => setPolicyControls(policy.id, ids),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["policy", policy.id] });
+      void qc.invalidateQueries({ queryKey: ["policies"] });
+      toast("Linked controls saved");
+    },
+    onError: (err) => {
+      toast(`Could not save linked controls: ${(err as Error).message}`);
+    },
+  });
+  const changed =
+    ids.length !== policy.linked_control_ids.length ||
+    ids.some((cid) => !policy.linked_control_ids.includes(cid));
+  return (
+    <Card size="sm" data-testid="policy-detail-synced-controls">
+      <CardContent className="space-y-3">
+        <EntityMultiPicker
+          kinds={CONTROL_KINDS}
+          legend="Linked controls"
+          searchPlaceholder="Search controls…"
+          testId="policy-synced-controls"
+          value={ids}
+          onChange={setIds}
+          emptyHint="No controls in this tenant yet — upload a control bundle first."
+        />
+        <Button
+          onClick={() => save.mutate()}
+          disabled={!changed || save.isPending}
+          data-testid="policy-action-save-controls"
+        >
+          Save linked controls
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

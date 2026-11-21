@@ -209,6 +209,7 @@ func TestWriteCreateErr(t *testing.T) {
 		{"owner role required", policy.ErrOwnerRoleRequired, http.StatusBadRequest},
 		{"approver role required", policy.ErrApproverRoleRequired, http.StatusBadRequest},
 		{"created_by required", policy.ErrCreatedByRequired, http.StatusBadRequest},
+		{"synced predecessor → 409 (#2852)", policy.ErrManagedBySync, http.StatusConflict},
 		{"unknown → 500", errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
@@ -237,6 +238,7 @@ func TestWriteTransitionErr(t *testing.T) {
 		{fmt.Errorf("transition: %w", policy.ErrApproverNotPerson), http.StatusForbidden},
 		{fmt.Errorf("transition: %w", policy.ErrSubmitterUnknown), http.StatusConflict},
 		{fmt.Errorf("transition: %w", policy.ErrUnknownLinkedControl), http.StatusUnprocessableEntity},
+		{fmt.Errorf("transition: %w", policy.ErrManagedBySync), http.StatusConflict},
 		{errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
