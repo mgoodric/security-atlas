@@ -18,7 +18,7 @@
 //
 // The edges are global catalog rows shared by every tenant, so the store
 // sets no tenant context. The super-admin gate is the caller's
-// (internal/api/admincrosswalkremap and policies/authz). In the database the
+// (internal/api/admincrosswalkremap and internal/authz/rego_bundle). In the database the
 // app role can only read the queue and call scf_edge_remap_decide, which
 // validates each decision and appends it to scf_edge_remap_decisions in the
 // same statement.

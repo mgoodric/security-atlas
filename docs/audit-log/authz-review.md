@@ -14,7 +14,7 @@
 **Reviewer:** Matt Goodrich
 **Review date:** 2026-05-13
 **Canonical role enum file:** `migrations/sql/20260511000018_rbac_authz.sql` (CHECK constraint on `user_roles.role`)
-**Rego policy directory:** `policies/authz/`
+**Rego policy directory:** `internal/authz/rego_bundle/` (reviewed at `policies/authz/`; that mirror was removed in #2677, and the embedded bundle was always what the binary loads)
 **Source attribution:** `community_draft` (agent-authored, slice 035)
 **Total Rego files:** 10
 
@@ -69,18 +69,18 @@ cells reviewed | approved? | reviewer notes.)
 
 (Reviewer: append one row per file reviewed.)
 
-| file                                | reviewed? | reviewer notes |
-| ----------------------------------- | --------- | -------------- |
-| `policies/authz/defaults.rego`      |           |                |
-| `policies/authz/helpers.rego`       |           |                |
-| `policies/authz/admin.rego`         |           |                |
-| `policies/authz/grc_engineer.rego`  |           |                |
-| `policies/authz/control_owner.rego` |           |                |
-| `policies/authz/auditor.rego`       |           |                |
-| `policies/authz/viewer.rego`        |           |                |
-| `policies/authz/audit_periods.rego` |           |                |
-| `policies/authz/scope_cells.rego`   |           |                |
-| `policies/authz/system.rego`        |           |                |
+| file                                            | reviewed? | reviewer notes |
+| ----------------------------------------------- | --------- | -------------- |
+| `internal/authz/rego_bundle/defaults.rego`      |           |                |
+| `internal/authz/rego_bundle/helpers.rego`       |           |                |
+| `internal/authz/rego_bundle/admin.rego`         |           |                |
+| `internal/authz/rego_bundle/grc_engineer.rego`  |           |                |
+| `internal/authz/rego_bundle/control_owner.rego` |           |                |
+| `internal/authz/rego_bundle/auditor.rego`       |           |                |
+| `internal/authz/rego_bundle/viewer.rego`        |           |                |
+| `internal/authz/rego_bundle/audit_periods.rego` |           |                |
+| `internal/authz/rego_bundle/scope_cells.rego`   |           |                |
+| `internal/authz/rego_bundle/system.rego`        |           |                |
 
 ## HITL decisions (2026-05-13)
 

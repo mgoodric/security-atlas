@@ -9,7 +9,7 @@
 //   - BuildInput(...)                       construct the canonical Input
 //   - NewAuditWriter(pool) -> AuditWriter   write Decisions to the DB
 //
-// Policies live under policies/authz/*.rego and are loaded once at
+// Policies live under internal/authz/rego_bundle/*.rego and are loaded once at
 // startup via NewEngine. Reloading at runtime is intentionally not
 // supported in v1 -- the slice's HITL gate (docs/audit-log/authz-review.md)
 // is the change-management surface.
@@ -285,7 +285,7 @@ func hasLabel(labels []string, role Role) bool {
 
 // Role is the canonical role enum from canvas §9.5. The CHECK
 // constraint on user_roles.role mirrors this set; updates to one MUST
-// update the other and add a .rego file under policies/authz/.
+// update the other and add a .rego file under internal/authz/rego_bundle/.
 type Role string
 
 const (
