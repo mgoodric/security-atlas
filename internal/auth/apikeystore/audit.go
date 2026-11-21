@@ -49,6 +49,9 @@ type keyAudit struct {
 	RetiresAt      *time.Time      `json:"retires_at,omitempty"`
 	// Label is the admin-chosen name (#2384), so a row names the key.
 	Label string `json:"label,omitempty"`
+	// Purpose is the key's api_keys.purpose (#2849); absent on an
+	// ordinary key.
+	Purpose string `json:"purpose,omitempty"`
 }
 
 func keyAuditOf(c credstore.Credential) keyAudit {
@@ -62,6 +65,7 @@ func keyAuditOf(c credstore.Credential) keyAudit {
 		TTLSeconds:   int64(c.TTL / time.Second),
 		RotatedFrom:  c.RotatedFrom,
 		Label:        c.Label,
+		Purpose:      c.Purpose,
 	}
 	if json.Valid([]byte(c.ScopePredicate)) {
 		a.ScopePredicate = json.RawMessage(c.ScopePredicate)

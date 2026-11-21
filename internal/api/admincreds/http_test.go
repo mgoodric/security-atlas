@@ -196,3 +196,41 @@ func TestIssue_KeyCallerCannotMintWiderKey(t *testing.T) {
 		}
 	}
 }
+
+// #2849: purpose is empty or policy-sync, and a policy-sync key carries no
+// other grant. Each case is refused with 400 before the (nil) store.
+func TestIssue_RefusesBadPurpose(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]IssueRequest{
+		"unknown purpose":           {Purpose: "everything"},
+		"bootstrap-recovery":        {Purpose: credstore.PurposeBootstrapRecovery},
+		"other casing":              {Purpose: "Policy-Sync"},
+		"padded":                    {Purpose: " policy-sync"},
+		"policy-sync with admin":    {Purpose: credstore.PurposePolicySync, IsAdmin: true},
+		"policy-sync with approver": {Purpose: credstore.PurposePolicySync, IsApprover: true},
+		"policy-sync with roles":    {Purpose: credstore.PurposePolicySync, OwnerRoles: []string{"security_lead"}},
+		"policy-sync with kinds":    {Purpose: credstore.PurposePolicySync, AllowedKinds: []string{credstore.KindCalendarRead}},
+	} {
+		raw, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader(raw))
+		req = req.WithContext(authctx.WithCredential(req.Context(), credstore.Credential{IsAdmin: true}))
+		w := httptest.NewRecorder()
+		New(nil).Issue(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: want 400, got %d: %s", name, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestCheckPurpose_Accepts(t *testing.T) {
+	t.Parallel()
+	for _, in := range []IssueRequest{
+		{},
+		{IsAdmin: true, AllowedKinds: []string{"sast.scan_result"}},
+		{Purpose: credstore.PurposePolicySync, Label: "Confluence sync", TTLSeconds: 3600},
+	} {
+		if msg := checkPurpose(in); msg != "" {
+			t.Errorf("checkPurpose(%+v) = %q, want accepted", in, msg)
+		}
+	}
+}

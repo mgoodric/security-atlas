@@ -517,6 +517,10 @@ func (s *Server) serveGRPC(ctx context.Context, lis net.Listener, timeout time.D
 // Unauthenticated on every RPC (#2477): it may only fetch the feed, so it
 // is no bearer for ConnectorRegistry, evidence ingest or the admin
 // services, whatever an RPC's own kind check would say.
+//
+// A policy-sync key (credstore.Credential.PolicySyncOnly) is refused as
+// PermissionDenied on every RPC (#2849): it authenticates, but may only
+// sync policies, and no RPC does that.
 func authInterceptor(store *credstore.Store) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		token, err := extractBearer(ctx)
@@ -532,6 +536,9 @@ func authInterceptor(store *credstore.Store) grpc.UnaryServerInterceptor {
 		}
 		if cred.CalendarOnly() {
 			return nil, status.Error(codes.Unauthenticated, "calendar feed tokens cannot call the API")
+		}
+		if cred.PolicySyncOnly() {
+			return nil, status.Error(codes.PermissionDenied, "a policy-sync key may only sync policies")
 		}
 		ctx = authctx.WithCredential(ctx, cred)
 		return handler(ctx, req)

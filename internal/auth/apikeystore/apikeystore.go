@@ -118,6 +118,9 @@ type IssueInput struct {
 	// Label is the admin-chosen name for the key (api_keys.label, #2384),
 	// shown in place of its id. Empty is an unlabelled key.
 	Label string
+	// Purpose is api_keys.purpose (credstore.PurposePolicySync, #2849).
+	// Empty is an ordinary key. The column's CHECK refuses any other value.
+	Purpose string
 }
 
 // Issue creates a new api_keys row and returns the bearer plaintext exactly
@@ -192,9 +195,13 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 		IsApprover:     pred.IsApprover,
 		OwnerRoles:     pred.OwnerRoles,
 	}
-	// A successor keeps its predecessor's name (#2384).
+	// A successor keeps its predecessor's name (#2384) and purpose
+	// (#2849): rotating a policy-sync key must not mint a general one.
 	if pred.Label != nil {
 		in.Label = *pred.Label
+	}
+	if pred.Purpose != nil {
+		in.Purpose = *pred.Purpose
 	}
 	if pred.MintedBy.Valid {
 		if u, uerr := uuidFromPg(pred.MintedBy); uerr == nil {
@@ -316,6 +323,18 @@ func (s *Store) List(ctx context.Context, tenantID string) ([]credstore.Credenti
 // On success, last_used_at is bumped best-effort (failure logged, never
 // blocks the request).
 func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Credential, error) {
+	return s.authenticate(ctx, token, true)
+}
+
+// Identify resolves a plaintext bearer to its credential like Authenticate,
+// but does not bump last_used_at: it is for a caller that only needs to
+// know which key it was shown, such as the HTTP gate that refuses
+// policy-sync keys (#2849) before a request it will not serve.
+func (s *Store) Identify(ctx context.Context, token string) (credstore.Credential, error) {
+	return s.authenticate(ctx, token, false)
+}
+
+func (s *Store) authenticate(ctx context.Context, token string, touch bool) (credstore.Credential, error) {
 	if len(token) == 0 {
 		return credstore.Credential{}, ErrUnknownKey
 	}
@@ -347,6 +366,9 @@ func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Crede
 		if !ok {
 			return credstore.Credential{}, ErrUnknownKey
 		}
+	}
+	if !touch {
+		return credentialFromRow(row), nil
 	}
 	// Best-effort last_used_at bump; never blocks.
 	go func() {
@@ -495,6 +517,10 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 	if in.Label != "" {
 		label = &in.Label
 	}
+	var purpose *string
+	if in.Purpose != "" {
+		purpose = &in.Purpose
+	}
 	row, err := q.InsertAPIKey(ctx, dbx.InsertAPIKeyParams{
 		ID:             id,
 		TenantID:       tIDU,
@@ -511,6 +537,7 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 		TtlSeconds:     int64(in.TTL.Seconds()),
 		MintedBy:       mintedBy,
 		Label:          label,
+		Purpose:        purpose,
 	})
 	return row, err
 }

@@ -107,9 +107,10 @@ type Credential struct {
 	// through authz.IsTenantAdmin / authz.IsTenantApprover, never directly.
 	TenantRoles []string
 	// Purpose marks a key minted for a specific job rather than an
-	// ordinary issue. PurposeBootstrapRecovery is the only value: the admin
-	// key reset-bootstrap mints. Persisted in api_keys.purpose, so the
-	// marker survives a restart; a Rotate successor inherits it.
+	// ordinary issue: PurposeBootstrapRecovery (the admin key
+	// reset-bootstrap mints) or PurposePolicySync. Persisted in
+	// api_keys.purpose, so the marker survives a restart; a Rotate
+	// successor inherits it.
 	Purpose string
 	// MintedBy is the users(id) uuid of whoever minted the key, for
 	// attribution only (api_keys.minted_by). It is NOT the key's identity:
@@ -134,6 +135,17 @@ type Credential struct {
 // /v1/admin/install/reset-bootstrap mints (#1892). RevokePurpose finds
 // these by the marker and id, never by bearer.
 const PurposeBootstrapRecovery = "bootstrap-recovery"
+
+// PurposePolicySync marks a key that may only sync policies (#2849): the
+// Confluence policy connector's key. Every API surface refuses it
+// (PolicySyncOnly); only the policy sync endpoint will accept it.
+const PurposePolicySync = "policy-sync"
+
+// PolicySyncOnly reports whether c is a policy-sync key, which every route
+// but the policy sync endpoint refuses.
+func (c Credential) PolicySyncOnly() bool {
+	return c.Purpose == PurposePolicySync
+}
 
 // ExpiresAt is IssuedAt + TTL, or the zero time for a credential with no
 // TTL (it never expires).
