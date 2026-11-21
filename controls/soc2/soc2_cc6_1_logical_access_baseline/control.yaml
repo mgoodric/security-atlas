@@ -1,24 +1,32 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc6_1_logical_access_baseline
-title: "Identity provider enforces MFA on all org-managed applications"
+title: "Identity provider requires phishing-resistant MFA for everyone"
 description: |
   Access to protected systems and data goes through managed logical access
-  controls (TSC CC6.1). The intended test is that the identity provider's
-  MFA policy is enabled, applies to the everyone group, and allows a
-  phishing-resistant factor (WebAuthn, push with number matching) for at
-  least admin roles.
+  controls (TSC CC6.1). The test is that the identity provider has an MFA
+  policy that requires MFA, applies to the everyone group, and allows a
+  phishing-resistant factor.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the Okta
-  connector's `okta.mfa_policy.v1` snapshots, whose verdict is that the
-  policy requires MFA with at least one factor: it passes when MFA is
-  required and a factor is configured, fails when MFA is not required, and
-  is inconclusive when MFA is required with no factor. Which groups the
-  policy covers and which factors it allows are not checked.
+  What runs today: a SQL query over the payloads of the Okta connector's
+  `okta.mfa_policy.v1` snapshots, one per MFA enrollment policy. It takes
+  each policy's latest in-window snapshot and passes the control when at
+  least one of them has `mfa_required` true, lists `everyone` (in any
+  case) in `applies_to_groups`, and lists `webauthn` in `factors_allowed`.
+  Otherwise the control fails: MFA not required, a policy scoped to other
+  groups only, or only SMS, voice, email, OTP or push factors. No in-window
+  snapshot leaves it inconclusive. The connector's per-record verdict is
+  not used.
 
-  Pending: the everyone-group and phishing-resistant-factor check, in SQL
-  over the snapshot's existing fields (#2821).
+  Until #2901 lands, this fails on real Okta tenants: the connector reports
+  group ids, not `everyone`, and doesn't emit `webauthn`.
+
+  Not checked: Okta Verify with number matching also resists phishing, but
+  the snapshot records only the factor key (`okta_verify`), not whether
+  number matching is on, so `okta_verify` does not count. An inactive
+  policy counts the same as an active one. A higher-priority policy scoped
+  to a subset of users can override the Everyone policy for them, and that
+  is not seen. Only the records the control receives are checked; a policy
+  the connector did not report is not seen.
 
 scf_anchor_id: IAC-01
 control_family: IAC
@@ -28,28 +36,27 @@ lifecycle_state: active
 freshness_class: daily
 
 evidence_queries:
-  - id: idp_mfa_policy_enabled
-    language: rego
+  - id: mfa_policy_everyone_phishing_resistant
+    language: sql
     evidence_kind: okta.mfa_policy.v1
-    description: "Okta MFA policy is enabled, applies broadly, requires a phishing-resistant factor for admins"
+    description: "An Okta MFA policy requires MFA, applies to everyone, and allows WebAuthn"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT coalesce(bool_or(
+               payload->'mfa_required' = 'true'::jsonb
+               AND payload->'factors_allowed' ? 'webauthn'
+               AND EXISTS (
+                 SELECT 1
+                 FROM jsonb_array_elements_text(
+                   CASE WHEN jsonb_typeof(payload->'applies_to_groups') = 'array'
+                        THEN payload->'applies_to_groups'
+                        ELSE '[]'::jsonb
+                   END
+                 ) AS grp(group_name)
+                 WHERE lower(group_name) = 'everyone'
+               )
+             ), false)
+      FROM (
+        SELECT DISTINCT ON (payload->>'policy_id') payload
+        FROM evidence
+        ORDER BY payload->>'policy_id', observed_at DESC
+      ) AS latest
