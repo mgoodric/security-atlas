@@ -24,6 +24,7 @@ package eval
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/control/attestation"
@@ -91,6 +92,20 @@ func FreshnessMaxAge(class string) (time.Duration, bool) {
 	_, known := freshnessMaxAgeTable[class]
 	d, _ := freshnessMaxAge(class)
 	return d, known
+}
+
+// FreshnessClasses returns every class freshnessMaxAgeTable maps, shortest
+// window first. The control-bundle parser derives its allowed set from it, so
+// a bundle cannot declare a class the engine has no window for (#2896).
+func FreshnessClasses() []string {
+	classes := make([]string, 0, len(freshnessMaxAgeTable))
+	for c := range freshnessMaxAgeTable {
+		classes = append(classes, c)
+	}
+	sort.Slice(classes, func(i, j int) bool {
+		return freshnessMaxAgeTable[classes[i]] < freshnessMaxAgeTable[classes[j]]
+	})
+	return classes
 }
 
 // inWindowRecord is one evidence record that fell INSIDE the freshness window.

@@ -131,7 +131,7 @@ func TestFictionalUserEmail_Shape(t *testing.T) {
 // The happy-path cases are covered by the integration test's
 // evidence-kind iteration (writeEvidence walks every kind).
 func TestBuildEvidencePayload_Default(t *testing.T) {
-	payload := buildEvidencePayload("totally.unknown.kind", 0)
+	payload := buildEvidencePayload("totally.unknown.kind", 0, "pass")
 	if payload == nil {
 		t.Fatal("buildEvidencePayload default returned nil")
 	}
@@ -147,7 +147,7 @@ func TestBuildEvidencePayload_Default(t *testing.T) {
 // schema-level concerns covered by the integration test.
 func TestBuildEvidencePayload_KnownKindNonNil(t *testing.T) {
 	for _, kind := range evidenceKindsPool {
-		got := buildEvidencePayload(kind, 1)
+		got := buildEvidencePayload(kind, 1, "pass")
 		if got == nil {
 			t.Errorf("buildEvidencePayload(%q) returned nil; every known kind must produce a payload", kind)
 		}

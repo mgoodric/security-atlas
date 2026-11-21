@@ -84,9 +84,12 @@ effective window in this table, not the nominal cadence:
 | `annual`          | 365 d           | 400 d            | 35 d (about 13 months) |
 
 The table lives in one place, `freshnessMaxAgeTable` in
-`internal/eval/state.go`, and comes from canvas §2.3. A class the table does
-not know (including `hourly`, which this enum accepts but the engine does not
-map) falls back to the `monthly` 90-day window. Why the windows carry grace,
+`internal/eval/state.go`, and comes from canvas §2.3. It is also the source of
+the classes a bundle may declare: parse and upload refuse any class the table
+does not map, so a typo cannot silently widen a control's window (#2896). The
+one exception is `hourly`, which the engine does not map and which falls back
+to the `monthly` 90-day window. It is kept only for stock `soc2_a1_1` and is
+removed when #2826 supersedes that bundle; do not declare it in new bundles. Why the windows carry grace,
 and why they were kept rather than narrowed to the cadence, is recorded in
 `docs/audit-log/2816-freshness-window-grace-decisions.md`.
 

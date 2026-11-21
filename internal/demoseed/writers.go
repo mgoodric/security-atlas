@@ -443,15 +443,15 @@ func writeEvidence(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, []strin
 			 (id, tenant_id, control_id, control_ref, scope_id,
 			  observed_at, ingested_at,
 			  provenance, result, payload, hash, freshness_class,
-			  evidence_kind, ingestion_path)
+			  evidence_kind, schema_version, ingestion_path)
 			 VALUES ($1, $2, $3, $4, NULL,
 			         $5, now(),
 			         $6::jsonb, $7::evidence_result, $8::jsonb, $9, $10::evidence_freshness_class,
-			         $11, 'push')`,
+			         $11, $12, 'push')`,
 			e.ID, fs.tenant.ID, e.ControlID, e.ControlID.String(),
 			e.ObservedAt,
 			provBytes, e.Result, payloadBytes, e.HashHex, e.FreshnessCl,
-			e.EvidenceKind,
+			e.EvidenceKind, e.SchemaVer,
 		)
 		if err != nil {
 			return 0, nil, fmt.Errorf("demoseed: insert evidence record idx=%d: %w", i, err)

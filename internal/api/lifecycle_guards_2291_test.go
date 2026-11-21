@@ -40,11 +40,7 @@ import (
 // knownDivergent is the ratchet: routes whose handler does not yet match
 // the table, each with the issue that closes the gap. A listed route that
 // starts agreeing fails the test until it is removed from the list.
-var knownDivergent = map[string]string{
-	// The handler checks the cred.IsAdmin flag; OPA admits a live-role
-	// admin too, so the handler is stricter (#2665, decide).
-	"POST /v1/admin/policies/import": "#2665",
-}
+var knownDivergent = map[string]string{}
 
 func TestLifecycleGuards_MatchTableRoles(t *testing.T) {
 	handlers := map[string]http.Handler{}
