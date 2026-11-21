@@ -17,9 +17,18 @@ const (
 	// SyncStatusCreated: the page had no synced policy and one was
 	// published.
 	SyncStatusCreated = "created"
+	// SyncStatusNewVersion: the page's declared version changed. The
+	// next version was published, chained to the page's previous synced
+	// row and superseding it (#2851).
+	SyncStatusNewVersion = "new_version"
 	// SyncStatusUnchanged: the page's synced policy already has this
-	// version and body; nothing was written.
+	// version and body; nothing was written. Drift recorded by an earlier
+	// run is cleared.
 	SyncStatusUnchanged = "unchanged"
+	// SyncStatusDrift: the page's body changed without a version bump.
+	// No version was written; the drift is recorded on the policy
+	// (#2851).
+	SyncStatusDrift = "drift"
 	// SyncStatusSkipped: the page was not synced; Reason says why.
 	SyncStatusSkipped = "skipped"
 )
@@ -64,6 +73,11 @@ type SyncReport struct {
 // as its historical approver, the page URL as its source URL and the
 // body's sha256, plus one 'synced' policy_audit_log row naming the key.
 // A page whose synced policy has the same version and body is unchanged.
+// A page whose declared version changed becomes the next version of its
+// policy, superseding the previous synced row; a page whose body changed
+// without a version bump writes no version and records drift on the
+// policy instead (#2851). Drift clears when a later run's body matches
+// again or arrives with a new version.
 //
 // invalid are pages the caller refused (a missing or invalid property);
 // they are reported as skipped and written nowhere. Unlike Import, valid
@@ -114,16 +128,35 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 				res.Status, res.Policy = SyncStatusCreated, &written
 			case err != nil:
 				return fmt.Errorf("sync: look up page %q: %w", p.PageID, err)
-			case cur.Version == p.In.Version && cur.SyncedBodySha256 != nil && *cur.SyncedBodySha256 == hash:
+			case cur.Version != p.In.Version:
+				written, err := syncNewVersion(ctx, q, tenantID, src, p, cur, hash, keyID)
+				if err != nil {
+					return err
+				}
+				res.Status, res.Policy = SyncStatusNewVersion, &written
+			case cur.SyncedBodySha256 != nil && *cur.SyncedBodySha256 == hash:
+				if cur.SyncDriftDetectedAt.Valid {
+					if cur, err = q.ClearSyncedPolicyDrift(ctx, dbx.ClearSyncedPolicyDriftParams{
+						TenantID: pgUUID(tenantID), ID: cur.ID,
+					}); err != nil {
+						return fmt.Errorf("sync: clear drift on page %q: %w", p.PageID, err)
+					}
+				}
 				existing := policyFromRow(cur)
 				res.Status, res.Policy = SyncStatusUnchanged, &existing
 			default:
-				// #2851 turns a version change into the next version and a
-				// body change without one into drift. Until then the
-				// published copy is left as it is.
-				existing := policyFromRow(cur)
-				res.Status, res.Policy = SyncStatusSkipped, &existing
-				res.Reason = fmt.Sprintf("the page changed since it was synced at version %q; updating a synced policy is not supported yet, so the published copy is unchanged", cur.Version)
+				// The body changed and the version did not: what staff
+				// acknowledged is not rewritten under them. The drift is
+				// recorded on the policy and nothing else is written.
+				drifted, err := q.SetSyncedPolicyDrift(ctx, dbx.SetSyncedPolicyDriftParams{
+					TenantID: pgUUID(tenantID), ID: cur.ID, SyncDriftBodySha256: &hash,
+				})
+				if err != nil {
+					return fmt.Errorf("sync: record drift on page %q: %w", p.PageID, err)
+				}
+				existing := policyFromRow(drifted)
+				res.Status, res.Policy = SyncStatusDrift, &existing
+				res.Reason = fmt.Sprintf("the page body changed without a version bump; version %q is unchanged. Bump the page's version to publish the change, or revert the edit", cur.Version)
 			}
 			results = append(results, res)
 		}
@@ -137,6 +170,29 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 }
 
 func syncCreate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string) (Policy, error) {
+	return syncInsert(ctx, q, tenantID, src, p, hash, keyID, pgtype.UUID{}, []pgtype.UUID{})
+}
+
+// syncNewVersion publishes the page's new declared version as the next
+// row of its chain (#2851): cur, the page's published synced row, is
+// superseded first (one published synced row per page), then the new row
+// is inserted with cur as its predecessor and cur's control links.
+// Acknowledgements belong to a row, so staff are asked to acknowledge the
+// new version afresh.
+func syncNewVersion(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, cur dbx.Policy, hash, keyID string) (Policy, error) {
+	if _, err := q.SupersedeSyncedPolicy(ctx, dbx.SupersedeSyncedPolicyParams{
+		TenantID: pgUUID(tenantID), ID: cur.ID,
+	}); err != nil {
+		return Policy{}, fmt.Errorf("sync: supersede page %q: %w", p.PageID, err)
+	}
+	links := cur.LinkedControlIds
+	if links == nil {
+		links = []pgtype.UUID{}
+	}
+	return syncInsert(ctx, q, tenantID, src, p, hash, keyID, cur.ID, links)
+}
+
+func syncInsert(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string, predecessor pgtype.UUID, links []pgtype.UUID) (Policy, error) {
 	in := p.In
 	ackRoles := in.AcknowledgmentRequiredRoles
 	if ackRoles == nil {
@@ -149,6 +205,8 @@ func syncCreate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src Syn
 	row, err := q.InsertSyncedPolicy(ctx, dbx.InsertSyncedPolicyParams{
 		ID:                          pgUUID(uuid.New()),
 		TenantID:                    pgUUID(tenantID),
+		PredecessorID:               predecessor,
+		LinkedControlIds:            links,
 		Title:                       in.Title,
 		Version:                     in.Version,
 		BodyMd:                      in.BodyMd,

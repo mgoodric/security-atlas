@@ -181,9 +181,27 @@ type policyWire struct {
 	SourceURL              *string    `json:"source_url,omitempty"`
 	ImportedBy             *string    `json:"imported_by,omitempty"`
 	ImportedAt             *time.Time `json:"imported_at,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
-	Warnings               []string   `json:"warnings,omitempty"`
+	// SyncDrift is set on a synced policy whose page body changed without
+	// a version bump (#2851); absent when the policy is in step.
+	SyncDrift *policySyncDriftWire `json:"sync_drift,omitempty"`
+	CreatedAt time.Time            `json:"created_at"`
+	UpdatedAt time.Time            `json:"updated_at"`
+	Warnings  []string             `json:"warnings,omitempty"`
+}
+
+// policySyncDriftWire is a synced policy's drift (#2851): when a sync run
+// first saw the page body differ from the published version, and the hex
+// sha256 of the body the page holds now.
+type policySyncDriftWire struct {
+	DetectedAt       time.Time `json:"detected_at"`
+	SourceBodySHA256 string    `json:"source_body_sha256"`
+}
+
+func syncDriftWire(at *time.Time, hash *string) *policySyncDriftWire {
+	if at == nil || hash == nil {
+		return nil
+	}
+	return &policySyncDriftWire{DetectedAt: *at, SourceBodySHA256: *hash}
 }
 
 // CreatePolicy handles POST /v1/policies (AC-1 part A).
@@ -450,6 +468,7 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		SourceURL:                   r.SourceUrl,
 		ImportedBy:                  r.ImportedBy,
 		ImportedAt:                  timestamptzPtr(r.ImportedAt),
+		SyncDrift:                   syncDriftWire(timestamptzPtr(r.SyncDriftDetectedAt), r.SyncDriftBodySha256),
 		CreatedAt:                   r.CreatedAt.Time,
 		UpdatedAt:                   r.UpdatedAt.Time,
 	}
@@ -1010,6 +1029,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		SourceURL:                   p.SourceURL,
 		ImportedBy:                  p.ImportedBy,
 		ImportedAt:                  p.ImportedAt,
+		SyncDrift:                   syncDriftWire(p.SyncDriftDetectedAt, p.SyncDriftBodySHA256),
 		CreatedAt:                   p.CreatedAt,
 		UpdatedAt:                   p.UpdatedAt,
 	}

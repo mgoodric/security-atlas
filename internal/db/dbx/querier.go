@@ -196,6 +196,9 @@ type Querier interface {
 	// the shipped manifest, so nothing is held back any more. The row named an
 	// earlier shipped manifest; without this it would be listed for good.
 	ClearStockControlHoldback(ctx context.Context, arg ClearStockControlHoldbackParams) error
+	// #2851 — the page's body matches the synced version again: the drift
+	// recorded on the row is cleared.
+	ClearSyncedPolicyDrift(ctx context.Context, arg ClearSyncedPolicyDriftParams) (Policy, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CloseIncident(ctx context.Context, arg CloseIncidentParams) (Incident, error)
@@ -1614,7 +1617,11 @@ type Querier interface {
 	// a unique-violation the handler maps to 409. filters is the handler-
 	// validated criteria payload (threat-model T).
 	InsertSavedView(ctx context.Context, arg InsertSavedViewParams) (SavedView, error)
-	// #2850 — insert a page's first sync directly as 'published'. As with
+	// #2850 — insert a page's synced version directly as 'published'. A
+	// page's first sync has no predecessor; a later version (#2851) names the
+	// synced row it supersedes, which SupersedeSyncedPolicy has just marked
+	// 'superseded' in the same transaction, and carries that row's control
+	// links forward (links are kept in security-atlas, not synced). As with
 	// ImportPublishedPolicy, the in-tool submit/approve/publish transitions do
 	// not apply: the source's approval, kept in historical_approver_name and
 	// historical_approved_at, is the approval. approved_by stays NULL.
@@ -3941,6 +3948,11 @@ type Querier interface {
 	// SCIM Patch `active` flip (AC-4) — the deprovision/reprovision signal. Keeps
 	// status in lockstep with the boolean. Never touches roles.
 	SetSCIMUserActive(ctx context.Context, arg SetSCIMUserActiveParams) (User, error)
+	// #2851 — the page's body changed without a version bump. Records the
+	// body hash the source holds now; sync_drift_detected_at keeps the time
+	// drift was first seen, so a page edited twice without a bump still shows
+	// how long it has been out of step.
+	SetSyncedPolicyDrift(ctx context.Context, arg SetSyncedPolicyDriftParams) (Policy, error)
 	// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
 	// ledger (AC-2, decisions log D2). Called after recording a review when the
 	// new review's reviewed_at is the most-recent on file. updated_at is bumped so
@@ -4007,6 +4019,12 @@ type Querier interface {
 	// superseded_by at the new row, stamp superseded_at = now(). Skips the
 	// new row itself (id <> @new_id) so a re-running activation is idempotent.
 	SupersedePreviousActivated(ctx context.Context, arg SupersedePreviousActivatedParams) error
+	// #2851 — a page arrived with a new declared version: its published
+	// synced row is superseded, in the same transaction as InsertSyncedPolicy
+	// writes the next version. Any drift recorded on it is cleared, since the
+	// new version is what the page holds now. next_review_at is left as it
+	// was, as SupersedePolicyAtPublish leaves it (#2009).
+	SupersedeSyncedPolicy(ctx context.Context, arg SupersedeSyncedPolicyParams) (Policy, error)
 	// Names are unique across the built-ins and the tenant's own themes; the
 	// two partial unique indexes only cover each namespace on its own.
 	ThemeNameTaken(ctx context.Context, arg ThemeNameTakenParams) (bool, error)

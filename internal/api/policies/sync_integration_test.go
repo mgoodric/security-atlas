@@ -81,16 +81,20 @@ func syncPage(id, title, version, body string, props map[string]any) map[string]
 }
 
 type syncResp struct {
-	Created   int `json:"created"`
-	Unchanged int `json:"unchanged"`
-	Skipped   int `json:"skipped"`
-	Results   []struct {
-		PageID   string `json:"page_id"`
-		Title    string `json:"title"`
-		Status   string `json:"status"`
-		Reason   string `json:"reason"`
-		PolicyID string `json:"policy_id"`
-		Version  string `json:"version"`
+	Created    int `json:"created"`
+	NewVersion int `json:"new_version"`
+	Unchanged  int `json:"unchanged"`
+	Drift      int `json:"drift"`
+	Skipped    int `json:"skipped"`
+	Results    []struct {
+		PageID          string     `json:"page_id"`
+		Title           string     `json:"title"`
+		Status          string     `json:"status"`
+		Reason          string     `json:"reason"`
+		PolicyID        string     `json:"policy_id"`
+		Version         string     `json:"version"`
+		PredecessorID   string     `json:"predecessor_id"`
+		DriftDetectedAt *time.Time `json:"drift_detected_at"`
 	} `json:"results"`
 }
 
@@ -240,20 +244,6 @@ func TestSync_CreatesThenUnchanged(t *testing.T) {
 	}
 	if n := len(syncedAuditRows(t, s.setupResult, s.tenant)); n != 1 {
 		t.Errorf("synced audit rows after re-push = %d, want 1", n)
-	}
-
-	// A changed page (new version, or new body) is left for #2851: it is
-	// reported skipped and the published copy is not touched.
-	bumped := syncPage("1001", "Access Control Policy", "3.3", body+"\n\nNew rule.", nil)
-	changed := postSync(t, s.setupResult, key, http.StatusOK, bumped)
-	if changed.Skipped != 1 || changed.Results[0].Status != "skipped" || changed.Results[0].Reason == "" {
-		t.Fatalf("changed page = %+v", changed)
-	}
-	if n := countPolicies(t, s.setupResult, s.tenant); n != before {
-		t.Errorf("policies after a changed page = %d, want %d", n, before)
-	}
-	if n := len(syncedAuditRows(t, s.setupResult, s.tenant)); n != 1 {
-		t.Errorf("synced audit rows after a changed page = %d, want 1", n)
 	}
 }
 
