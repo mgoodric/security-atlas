@@ -10,17 +10,22 @@ description: |
   the IR playbook was followed. The intended automated test is that
   everyone on call has acknowledged the IR plan.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the tenant's
-  `policy.acknowledgment.v1` acknowledgements (#2869), and each one is
-  recorded as pass. The control therefore passes on any acknowledgement of
-  any policy in the quarterly window of 120 days. Which policy was
-  acknowledged, and by whom, is not checked, and the incident listing is
-  not evaluated.
+  What runs today: a SQL query over the tenant's `policy.acknowledgment.v1`
+  records in the quarterly window of 120 days, which only the
+  acknowledgement handler writes (#2869, #2873). The control passes when
+  at least one record acknowledges the policy titled "Incident Response
+  Plan", read from the payload's `policy_title` (snapshotted at
+  acknowledgement time, #2832), with `result` pass and an `observed_at`
+  no more than an hour after the evaluation instant. Otherwise it is
+  inconclusive. That includes no record at all, and records recorded
+  before #2832, which carry no title.
 
-  Pending: an acknowledgement of the IR plan (#2832); and every on-call
-  person having acknowledged it, which needs an on-call inventory (#2834).
+  The check never fails. Received acknowledgements can show that someone
+  acknowledged the plan, but not that someone who should have did not.
+  Every on-call person having acknowledged the plan needs an on-call
+  inventory (#2834). The title is matched exactly, so a renamed IR plan
+  is not seen. The incident listing and post-incident reports are not
+  evaluated.
 
 scf_anchor_id: IRO-08
 control_family: IRO
@@ -31,30 +36,20 @@ freshness_class: quarterly
 
 evidence_queries:
   - id: ir_plan_acknowledged_by_on_call
-    language: rego
+    language: sql
     evidence_kind: policy.acknowledgment.v1
-    description: "Every on-call rotation member has acknowledged the current IR plan version"
+    description: "At least one in-window acknowledgement is of the Incident Response Plan"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN bool_or(
+                      jsonb_typeof(payload->'policy_title') = 'string'
+                      AND payload->>'policy_title' = 'Incident Response Plan'
+                      AND result = 'pass'
+                      AND observed_at <= evaluated_at + interval '1 hour'
+                    ) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM evidence
 
 manual_evidence_schema:
   type: object

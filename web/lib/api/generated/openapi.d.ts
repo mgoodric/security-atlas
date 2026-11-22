@@ -5027,8 +5027,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header, methodology nist_800_30 (default) | qualitative_5x5 | fair, else 400) as a staged import batch; every row is staged or rejected with a reason; inherent and residual scores are read from columns in the methodology's shape (likelihood and impact 1..5, or FAIR loss event frequency and loss magnitude), a row with none imports unscored and a row with an invalid score is rejected (invalid_score); a treatment column maps to the treatment (an unknown value is rejected, invalid_treatment); an accepted row stages a proposed acceptance with its justification and until-date, never an approved one, and is rejected (invalid_acceptance) without both, the register accepter kept on the staged row as historical; a linked-controls column resolves to the tenant controls by control id or bundle id; mitigate with no resolved control, or transfer with no instrument reference, stages as untreated flagged treatment_downgraded (#2842); capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839) */
+        /** POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header, methodology nist_800_30 (default) | qualitative_5x5 | fair, else 400) as a staged import batch; every row is staged or rejected with a reason; inherent and residual scores are read from columns in the methodology's shape (likelihood and impact 1..5, or FAIR loss event frequency and loss magnitude), a row with none imports unscored and a row with an invalid score is rejected (invalid_score); a treatment column maps to the treatment (an unknown value is rejected, invalid_treatment); an accepted row stages a proposed acceptance with its justification and until-date, never an approved one, and is rejected (invalid_acceptance) without both, the register accepter kept on the staged row as historical; a linked-controls column resolves to the tenant controls by control id or bundle id; mitigate with no resolved control, or transfer with no instrument reference, stages as untreated flagged treatment_downgraded (#2842); capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839); repeatable ignore_column=Header keeps a column unmapped whatever its alias (#2848) */
         post: operations["post-v1-risks-imports"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/risks/imports/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/risks/imports/preview — read a CSV/XLSX risk register with the upload's fields (file, methodology, column_map, ignore_column) and return its header row, whether it was detected (a title and a category column) or offered as the fullest of the first rows, each column with the field it maps to and whether a column map can name it, the fields the methodology reads (title and category required), the first 5 data rows and the data row count; nothing is staged; the upload's caps and 400s; a write on risks (#2848) */
+        post: operations["post-v1-risks-imports-preview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13605,6 +13622,26 @@ export interface operations {
         };
     };
     "post-v1-risks-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-risks-imports-preview": {
         parameters: {
             query?: never;
             header?: never;

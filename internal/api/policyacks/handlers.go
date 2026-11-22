@@ -327,6 +327,14 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		"user_id":           ack.UserID.String(),
 		"acknowledged_at":   ack.AcknowledgedAt.UTC().Format(time.RFC3339Nano),
 	}
+	// #2832: the stock ack checks (cc1_5, cc5_3, cc7_4) key on the title
+	// and version, which schema 1.0.0 declares as optional snapshots.
+	if ack.PolicyTitle != "" {
+		payload["policy_title"] = ack.PolicyTitle
+	}
+	if ack.PolicyVersion != "" {
+		payload["policy_version"] = ack.PolicyVersion
+	}
 	payloadStruct, perr := structpb.NewStruct(payload)
 	if perr != nil {
 		// Domain row exists; surface the emission failure but keep
