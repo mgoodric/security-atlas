@@ -51,7 +51,18 @@ names REST, MCP and import only. The aggregate parent's `created` row
 on the link row, so both remain unaudited as link events; that is a
 follow-up if wanted, not part of this ticket.
 
-## D6 — History names the child by title
+## D6 — Import links: the deciding approver, and a note when settled
+
+The import (#2846) links through `settleLink`, which now takes the
+`HierarchyAudit`. The actor is the approver of the decision that makes the
+link: the child row's own approval, or, for a row waiting on a pending
+parent row, the approval of that parent row. Detail is `import_batch_id`
+and `import_row_id` (the child's row). A link settled by the parent row's
+decision also carries `settled_by_import_row_id` and a `note` naming that
+row's number. A link the hierarchy rules refuse rolls back its savepoint,
+audit row included.
+
+## D7 — History names the child by title
 
 `child_risk_id` is an id-valued field, so History resolves it (#2138: no id
 is shown) through a new `risk` ref kind, read from the register
