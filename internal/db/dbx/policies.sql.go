@@ -714,7 +714,7 @@ INSERT INTO policy_audit_log (
     previous_state, new_state,
     body_sha256, editors,
     previous_linked_control_ids, new_linked_control_ids,
-    previous_source_attribution
+    previous_source_attribution, sync_drift_body_sha256
 )
 VALUES (
     $1, $2, $3, $4, $5,
@@ -724,9 +724,9 @@ VALUES (
     $13, $14,
     $15, $16,
     $17, $18,
-    $19
+    $19, $20
 )
-RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution
+RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution, sync_drift_body_sha256
 `
 
 type InsertPolicyAuditLogParams struct {
@@ -749,6 +749,7 @@ type InsertPolicyAuditLogParams struct {
 	PreviousLinkedControlIds  []pgtype.UUID      `json:"previous_linked_control_ids"`
 	NewLinkedControlIds       []pgtype.UUID      `json:"new_linked_control_ids"`
 	PreviousSourceAttribution *string            `json:"previous_source_attribution"`
+	SyncDriftBodySha256       *string            `json:"sync_drift_body_sha256"`
 }
 
 // #1747 — append one row to the policy audit log.
@@ -773,6 +774,7 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		arg.PreviousLinkedControlIds,
 		arg.NewLinkedControlIds,
 		arg.PreviousSourceAttribution,
+		arg.SyncDriftBodySha256,
 	)
 	var i PolicyAuditLog
 	err := row.Scan(
@@ -800,6 +802,7 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		&i.PreviousLinkedControlIds,
 		&i.NewLinkedControlIds,
 		&i.PreviousSourceAttribution,
+		&i.SyncDriftBodySha256,
 	)
 	return i, err
 }
@@ -1422,7 +1425,7 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 }
 
 const listPolicyAuditLog = `-- name: ListPolicyAuditLog :many
-SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution
+SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state, body_sha256, editors, previous_audience, new_audience, previous_linked_control_ids, new_linked_control_ids, previous_source_attribution, sync_drift_body_sha256
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC
@@ -1468,6 +1471,7 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 			&i.PreviousLinkedControlIds,
 			&i.NewLinkedControlIds,
 			&i.PreviousSourceAttribution,
+			&i.SyncDriftBodySha256,
 		); err != nil {
 			return nil, err
 		}

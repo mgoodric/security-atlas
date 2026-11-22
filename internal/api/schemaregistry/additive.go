@@ -14,6 +14,9 @@ import (
 //     existing property's type changes).
 //  3. `additionalProperties` does not become more restrictive (false ->
 //     true is allowed; true -> false is rejected; absent stays absent).
+//  4. `x-assert-format` is not newly turned on. Enforcing `format`
+//     refuses values the predecessor accepted, so opting in needs a new
+//     major or a new kind (#2930).
 //
 // Anything more permissive — adding new optional properties, loosening
 // formats, adding enum values — is fine. The check is intentionally
@@ -84,6 +87,12 @@ func CheckAdditiveOver(prev, next []byte) error {
 				return fmt.Errorf("additive check failed: additionalProperties tightened (true -> false)")
 			}
 		}
+	}
+
+	// 4. x-assert-format turned on. Only a literal true counts as on,
+	// matching compileSchema; a non-boolean fails compilation separately.
+	if nSchema[assertFormatKey] == true && pSchema[assertFormatKey] != true {
+		return fmt.Errorf("additive check failed: %s turned on; enforcing format narrows acceptance, so opting in needs a new major version or a new kind", assertFormatKey)
 	}
 
 	return nil
