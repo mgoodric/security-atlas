@@ -91,6 +91,16 @@ export type Policy = {
     detected_at: string;
     source_body_sha256: string;
   } | null;
+  /**
+   * #2877 — set on a synced policy whose source page properties (review
+   * date, owner role, audience, ...) changed without a version bump: when
+   * a sync run first saw it, and the page property names that differ now.
+   * Independent of `sync_drift`.
+   */
+  sync_property_drift?: {
+    detected_at: string;
+    keys: string[];
+  } | null;
   created_at: string;
   updated_at: string;
   warnings?: string[];

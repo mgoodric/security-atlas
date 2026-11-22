@@ -30,6 +30,7 @@ type Synced = Pick<
   | "historical_approver_name"
   | "historical_approved_at"
   | "sync_drift"
+  | "sync_property_drift"
 >;
 
 function synced(over: Partial<Synced> = {}): Synced {
@@ -41,6 +42,7 @@ function synced(over: Partial<Synced> = {}): Synced {
     historical_approver_name: "Jane Doe",
     historical_approved_at: "2025-03-01",
     sync_drift: null,
+    sync_property_drift: null,
     ...over,
   };
 }
@@ -96,6 +98,22 @@ describe("synced policy", () => {
     );
     expect(html).toContain('data-testid="policy-detail-sync-drift"');
     expect(html).toContain("The source page has changed");
+  });
+
+  it("shows the property drift indicator, naming the keys", () => {
+    const html = render(
+      synced({
+        sync_property_drift: {
+          detected_at: "2026-11-21T08:00:00Z",
+          keys: ["next_review_at", "owner_role"],
+        },
+      }),
+    );
+    expect(html).toContain('data-testid="policy-detail-sync-property-drift"');
+    expect(html).toContain("next_review_at, owner_role");
+    // Body drift is separate: not shown for a property-only change.
+    expect(html).not.toContain('data-testid="policy-detail-sync-drift"');
+    expect(render(synced())).not.toContain("policy-detail-sync-property-drift");
   });
 
   it("hides the edit and lifecycle actions", () => {
