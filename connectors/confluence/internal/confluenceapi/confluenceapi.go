@@ -26,8 +26,9 @@ import (
 	"strings"
 )
 
-// Env vars for the Confluence credential. Env is preferred to flags so
-// the token never appears in shell history or a process listing.
+// Env vars for the Confluence credential. The token is read from the
+// environment only, so it never appears in shell history or a process
+// listing.
 const (
 	EnvEmail = "CONFLUENCE_EMAIL"
 	EnvToken = "CONFLUENCE_API_TOKEN"
@@ -53,7 +54,7 @@ func ResolveCredential(email, token string) (Credential, error) {
 		return Credential{}, fmt.Errorf("confluence email required (set %s or pass --confluence-email)", EnvEmail)
 	}
 	if token == "" {
-		return Credential{}, fmt.Errorf("confluence API token required (set %s or pass --confluence-token)", EnvToken)
+		return Credential{}, fmt.Errorf("confluence API token required (set %s)", EnvToken)
 	}
 	return Credential{secret: base64.StdEncoding.EncodeToString([]byte(email + ":" + token)), emailLen: len(email)}, nil
 }
@@ -79,6 +80,28 @@ func CheckBaseURL(flag, raw string) (*url.URL, error) {
 		return nil, fmt.Errorf("%s must be https, got scheme %q", flag, u.Scheme)
 	}
 	return u, nil
+}
+
+// ErrUnsafeRedirect is returned for a redirect that changes host or
+// leaves https.
+var ErrUnsafeRedirect = errors.New("refused redirect")
+
+// CheckRedirect is an http.Client CheckRedirect that refuses a redirect
+// to another host (scheme and port included) or from https to http, so a
+// request carrying a credential is only ever followed on its own origin.
+// It also stops after 10 redirects, as the default does.
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	orig := via[0].URL
+	if !strings.EqualFold(req.URL.Host, orig.Host) {
+		return fmt.Errorf("%w: from host %q to %q", ErrUnsafeRedirect, orig.Host, req.URL.Host)
+	}
+	if req.URL.Scheme != orig.Scheme {
+		return fmt.Errorf("%w: from %s to %s", ErrUnsafeRedirect, orig.Scheme, req.URL.Scheme)
+	}
+	return nil
 }
 
 func isLoopback(host string) bool {

@@ -357,7 +357,7 @@ func TestRun_Configuration(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error with no configuration")
 	}
-	for _, want := range []string{"--site", "--space", "--atlas-url", "--atlas-key"} {
+	for _, want := range []string{"--site", "--space", "--atlas-url", EnvAtlasKey} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %s", err, want)
 		}
@@ -372,17 +372,75 @@ func TestRun_Configuration(t *testing.T) {
 	}
 
 	ctx := context.Background()
+	t.Setenv("CONFLUENCE_API_TOKEN", "t")
 	for name, c := range map[string]config{
 		"http site":       {site: "http://acme.atlassian.net", space: "POL", atlasURL: "https://a.example", atlasKey: "k", timeout: time.Minute},
 		"http platform":   {site: "https://acme.atlassian.net", space: "POL", atlasURL: "http://a.example", atlasKey: "k", timeout: time.Minute},
-		"no credential":   {site: "https://acme.atlassian.net", space: "POL", atlasURL: "https://a.example", atlasKey: "k", timeout: time.Minute},
-		"quote in space":  {site: "https://acme.atlassian.net", space: `P"OL`, atlasURL: "https://a.example", atlasKey: "k", timeout: time.Minute, confluenceEmail: "e", confluenceToken: "t"},
+		"no email":        {site: "https://acme.atlassian.net", space: "POL", atlasURL: "https://a.example", atlasKey: "k", timeout: time.Minute},
+		"quote in space":  {site: "https://acme.atlassian.net", space: `P"OL`, atlasURL: "https://a.example", atlasKey: "k", timeout: time.Minute, confluenceEmail: "e"},
 		"relative site":   {site: "acme", space: "POL", atlasURL: "https://a.example", atlasKey: "k", timeout: time.Minute},
 		"site with query": {site: "https://acme.atlassian.net?x=1", space: "POL", atlasURL: "https://a.example", atlasKey: "k", timeout: time.Minute},
 	} {
 		if err := run(ctx, c, http.DefaultClient, io.Discard); err == nil {
 			t.Errorf("%s: want an error", name)
 		}
+	}
+}
+
+// The secrets have no flags, so they can never reach ps or shell history.
+func TestRun_NoSecretFlags(t *testing.T) {
+	for _, flag := range []string{"--confluence-token", "--atlas-key"} {
+		cmd := newRootCmd(io.Discard)
+		cmd.SetArgs([]string{"run", flag, "secret"})
+		if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "unknown flag") {
+			t.Errorf("%s: err = %v, want unknown flag", flag, err)
+		}
+	}
+}
+
+// A redirect off the configured origin is refused for both the
+// Confluence read and the platform push, and the other host never sees
+// a request.
+func TestRun_RefusesRedirectToAnotherHost(t *testing.T) {
+	var mu sync.Mutex
+	elsewhere := 0
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		elsewhere++
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer other.Close()
+	redirect := func(code int) *httptest.Server {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+r.URL.Path, code)
+		}))
+		t.Cleanup(s.Close)
+		return s
+	}
+
+	// Confluence redirects.
+	fp := newFakePlatform(t, 0)
+	fc := &fakeConfluence{srv: redirect(http.StatusFound)}
+	_, err := runAgainst(t, fc, fp)
+	if err == nil || !strings.Contains(err.Error(), "refused redirect") {
+		t.Fatalf("confluence redirect: err = %v, want refused", err)
+	}
+	if pushes, _ := fp.recorded(); len(pushes) != 0 {
+		t.Errorf("pushed after a refused read")
+	}
+
+	// The platform redirects, keeping the method and body (307).
+	fc = newFakeConfluence(t, []fakePage{{ID: "1", Title: "A", Storage: fullProps + "<p>a</p>"}}, -1)
+	fp = &fakePlatform{srv: redirect(http.StatusTemporaryRedirect)}
+	_, err = runAgainst(t, fc, fp)
+	if err == nil || !strings.Contains(err.Error(), "refused redirect") {
+		t.Fatalf("platform redirect: err = %v, want refused", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if elsewhere != 0 {
+		t.Errorf("the other host got %d requests, want 0", elsewhere)
 	}
 }
 

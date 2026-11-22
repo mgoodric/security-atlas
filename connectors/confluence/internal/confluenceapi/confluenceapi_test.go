@@ -228,6 +228,37 @@ func TestLabelledPages_LoopBound(t *testing.T) {
 	}
 }
 
+func TestCheckRedirect(t *testing.T) {
+	t.Parallel()
+	req := func(raw string) *http.Request {
+		u, _ := url.Parse(raw)
+		return &http.Request{URL: u}
+	}
+	orig := []*http.Request{req("https://acme.atlassian.net/wiki/rest/api/content/search")}
+	if err := CheckRedirect(req("https://acme.atlassian.net/wiki/other"), orig); err != nil {
+		t.Errorf("same origin: %v", err)
+	}
+	if err := CheckRedirect(req("https://ACME.atlassian.net/x"), orig); err != nil {
+		t.Errorf("host case: %v", err)
+	}
+	for _, bad := range []string{
+		"https://evil.example/wiki",
+		"http://acme.atlassian.net/wiki",
+		"https://acme.atlassian.net:8443/wiki",
+	} {
+		if err := CheckRedirect(req(bad), orig); !errors.Is(err, ErrUnsafeRedirect) {
+			t.Errorf("%s: err = %v, want ErrUnsafeRedirect", bad, err)
+		}
+	}
+	many := make([]*http.Request, 10)
+	for i := range many {
+		many[i] = orig[0]
+	}
+	if err := CheckRedirect(req("https://acme.atlassian.net/x"), many); err == nil {
+		t.Error("11th redirect: want an error")
+	}
+}
+
 func TestLabelledPages_BadInput(t *testing.T) {
 	t.Parallel()
 	if _, err := (&Client{}).LabelledPages(context.Background(), "POL", "policy"); err == nil {

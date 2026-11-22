@@ -34,14 +34,14 @@ space or label looks the same as an empty space.
 | Space                | `--space`            | `CONFLUENCE_SPACE`               | Space key, e.g. `POL`.                                    |
 | Label                | `--label`            | `CONFLUENCE_LABEL`               | Defaults to `policy`.                                     |
 | Confluence email     | `--confluence-email` | `CONFLUENCE_EMAIL`               | Atlassian account that minted the API token.              |
-| Confluence API token | `--confluence-token` | `CONFLUENCE_API_TOKEN`           | Use the environment, not the flag.                        |
+| Confluence API token | (none)               | `CONFLUENCE_API_TOKEN`           | Environment only.                                         |
 | security-atlas URL   | `--atlas-url`        | `SECURITY_ATLAS_URL`             | The platform's HTTP base URL. https, or http on loopback. |
-| Policy-sync key      | `--atlas-key`        | `SECURITY_ATLAS_POLICY_SYNC_KEY` | Use the environment, not the flag.                        |
+| Policy-sync key      | (none)               | `SECURITY_ATLAS_POLICY_SYNC_KEY` | Environment only.                                         |
 | Run timeout          | `--timeout`          |                                  | Defaults to `10m`.                                        |
 
-Secrets are best passed in the environment, so they don't appear in shell
-history or a process listing, resolved at run time. For example, with
-1Password:
+The two secrets have no flags. They are read from the environment only,
+so they never appear in shell history or a process listing. Resolve them at
+run time, for example with 1Password:
 
 ```bash
 export CONFLUENCE_API_TOKEN="$(op read 'op://<vault>/<item>/credential')"
@@ -59,7 +59,9 @@ Basic auth with an Atlassian account email and an
 The token carries that account's permissions, so mint it from an account
 that can only **view** the policy space. The connector issues GET requests
 only, and sends the credential only to the configured site. It ignores the
-host of any link in a Confluence response.
+host of any link in a Confluence response, and refuses any redirect that
+changes host or leaves https, for the Confluence read and the platform push
+alike.
 
 Pages are found with CQL content search,
 `GET /wiki/rest/api/content/search?cql=type = page AND space = "<space>" AND label = "<label>"&expand=body.storage`,

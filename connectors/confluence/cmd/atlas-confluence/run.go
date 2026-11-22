@@ -36,10 +36,12 @@ type config struct {
 	space           string
 	label           string
 	confluenceEmail string
-	confluenceToken string
 	atlasURL        string
-	atlasKey        string
-	timeout         time.Duration
+	// atlasKey is read from the environment only, as is the Confluence
+	// API token: neither has a flag, so neither reaches ps or shell
+	// history.
+	atlasKey string
+	timeout  time.Duration
 }
 
 // resolve fills unset values from the environment and checks them.
@@ -54,9 +56,13 @@ func (c *config) resolve() error {
 		{"--site", EnvSite, c.site},
 		{"--space", EnvSpace, c.space},
 		{"--atlas-url", EnvAtlasURL, c.atlasURL},
-		{"--atlas-key", EnvAtlasKey, c.atlasKey},
+		{"", EnvAtlasKey, c.atlasKey},
 	} {
 		if strings.TrimSpace(m.val) == "" {
+			if m.flag == "" {
+				missing = append(missing, "env "+m.env)
+				continue
+			}
 			missing = append(missing, m.flag+" (env "+m.env+")")
 		}
 	}
@@ -88,9 +94,10 @@ func newRunCmd(out io.Writer) *cobra.Command {
 		Long: `Read every page labelled --label in --space, and push the full set to
 POST /v1/policies:sync in one request. Prints one report line per page.
 
-Secrets come from the environment, so they never appear in shell history:
-  CONFLUENCE_EMAIL + CONFLUENCE_API_TOKEN   the Confluence credential
-  SECURITY_ATLAS_POLICY_SYNC_KEY            the policy-sync API key
+Secrets come only from the environment, never from flags, so they never
+appear in a process listing or shell history:
+  CONFLUENCE_API_TOKEN             the Confluence API token
+  SECURITY_ATLAS_POLICY_SYNC_KEY   the policy-sync API key
 
 A failure reading Confluence, or a refused push, exits non-zero. Nothing
 is pushed unless the whole labelled set was read.`,
@@ -110,15 +117,18 @@ is pushed unless the whole labelled set was read.`,
 	f.StringVar(&c.space, "space", "", "space key the policy pages live in (env "+EnvSpace+")")
 	f.StringVar(&c.label, "label", "", `label marking a page as a policy (env `+EnvLabel+`; default "`+defaultLabel+`")`)
 	f.StringVar(&c.confluenceEmail, "confluence-email", "", "Atlassian account email (env "+confluenceapi.EnvEmail+" preferred)")
-	f.StringVar(&c.confluenceToken, "confluence-token", "", "Atlassian API token (env "+confluenceapi.EnvToken+" preferred)")
 	f.StringVar(&c.atlasURL, "atlas-url", "", "security-atlas base URL, e.g. https://atlas.example.com (env "+EnvAtlasURL+")")
-	f.StringVar(&c.atlasKey, "atlas-key", "", "policy-sync API key (env "+EnvAtlasKey+" preferred)")
 	f.DurationVar(&c.timeout, "timeout", 10*time.Minute, "limit on the whole run")
 	return cmd
 }
 
 // run is one sync: read the full set, push it, write the report.
 func run(ctx context.Context, c config, hc *http.Client, out io.Writer) error {
+	// Both requests carry a secret, so a redirect may not move them to
+	// another host or down to http.
+	guarded := *hc
+	guarded.CheckRedirect = confluenceapi.CheckRedirect
+	hc = &guarded
 	site, err := confluenceapi.CheckBaseURL("--site", c.site)
 	if err != nil {
 		return err
@@ -127,7 +137,7 @@ func run(ctx context.Context, c config, hc *http.Client, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cred, err := confluenceapi.ResolveCredential(c.confluenceEmail, c.confluenceToken)
+	cred, err := confluenceapi.ResolveCredential(c.confluenceEmail, "")
 	if err != nil {
 		return err
 	}
