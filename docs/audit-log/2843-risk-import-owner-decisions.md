@@ -30,17 +30,32 @@ maps to the owner field, so it no longer lands in unmapped on a round-trip.
 owner is `owner_user_id` (a uuid of the source tenant) and `owner_name`; a
 uuid from another tenant cannot be matched by email, so both stay unmapped
 and a linked owner does not round-trip as linked. That gap is recorded here,
-not fixed: the export carries no owner email column.
+not fixed: the export carries no owner email column. It is tracked on #2898.
 
 ## D3 — An owner disabled after upload is created unlinked
 
 **Decision.** Approval re-reads the staged owner. If the user is no longer
-active, the risk is created with that user's email as the unlinked owner;
-the row is not refused.
+active, the risk is created with that user's display name (their email when
+they have none) as the unlinked owner; the row is not refused.
 
 **Why.** The create path refuses an inactive `owner_user_id`
 (`ErrOwnerNotActiveUser`), which is not a row refusal the approve-all run
 skips, so it would abort the batch. The spec's rule is that an owner matching
 no active user becomes the unlinked owner; applying it at approval keeps the
-name and lets the row through. A user deleted outright leaves the risk with
-no owner, as no text for them was staged.
+name and lets the row through. The display name, not the email, is what the
+risk pages show for an owner, and it does not copy an address into the
+risk's free text (review of #2938). A user deleted outright leaves the risk
+with no owner, as no text for them was staged.
+
+## D4 — A linked row carries the user id only; the linked/unlinked signal stays
+
+**Decision.** A staged row returns `owner_user_id` for a linked owner and
+nothing else about that user. The review page names them through `<Person>`
+(`/v1/people`), under the caller's own directory access.
+
+**Why.** Returning the matched user's email let anyone who can read a batch
+read users' addresses through it. That a row is linked or unlinked still
+tells the uploader whether an address belongs to an active user of their
+tenant. That residual signal is an accepted trade-off: it is scoped to the
+uploader's own tenant, never another's (D1), and every batch is a durable
+record naming its uploader, so probing addresses this way leaves a trail.

@@ -88,9 +88,7 @@ type BatchRow struct {
 	// OwnerUserID is the active user of the tenant the owner cell matched
 	// by email; OwnerUnlinked the cell when it matched none, which also
 	// flags the row owner_unlinked (#2843). At most one is set.
-	// OwnerEmail is the linked user's email, for review.
 	OwnerUserID   string            `json:"owner_user_id,omitempty"`
-	OwnerEmail    string            `json:"owner_email,omitempty"`
 	OwnerUnlinked string            `json:"owner_unlinked,omitempty"`
 	Unmapped      map[string]string `json:"unmapped"`
 	// Flags are the row's review flags (Flag*), empty when none.

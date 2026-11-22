@@ -238,9 +238,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 		       treatment, COALESCE(requested_treatment, ''), acceptance_justification,
 		       COALESCE(to_char(proposed_until, 'YYYY-MM-DD'), ''), historical_accepter, instrument_reference,
 		       linked_control_ids::text[], unresolved_controls,
-		       COALESCE(owner_user_id::text, ''), owner_unlinked,
-		       COALESCE((SELECT u.email FROM users u
-		                 WHERE u.tenant_id = risk_import_rows.tenant_id AND u.id = risk_import_rows.owner_user_id), '')
+		       COALESCE(owner_user_id::text, ''), owner_unlinked
 		FROM risk_import_rows
 		WHERE batch_id = $1::uuid
 		ORDER BY row_number
@@ -258,7 +256,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 			&r.ReviewDue, &inherent, &residual, &vals, &r.Flags, &r.Status, &r.DecidedBy, &r.RiskID, &r.RejectionReason,
 			&r.Treatment, &r.RequestedTreatment, &r.Justification, &r.ProposedUntil, &r.HistoricalAccepter,
 			&r.InstrumentReference, &r.LinkedControlIDs, &r.UnresolvedControls,
-			&r.OwnerUserID, &r.OwnerUnlinked, &r.OwnerEmail); err != nil {
+			&r.OwnerUserID, &r.OwnerUnlinked); err != nil {
 			return nil, fmt.Errorf("riskimport: scan staged row: %w", err)
 		}
 		r.InherentScore, r.ResidualScore = rawJSON(inherent), rawJSON(residual)

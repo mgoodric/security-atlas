@@ -213,14 +213,10 @@ describe("row fields", () => {
   });
 
   it("shows a matched owner by email and an unmatched one as unlinked (#2843)", () => {
-    expect(
-      mappedFields(
-        row({ owner_user_id: "u-1", owner_email: "alice@corp.test" }),
-      ),
-    ).toEqual([
+    expect(mappedFields(row({ owner_user_id: "u-1" }))).toEqual([
       ["Title", "Vendor outage"],
       ["Category", "operational"],
-      ["Owner", "alice@corp.test"],
+      ["Owner", "u-1"],
     ]);
     expect(mappedFields(row({ owner_unlinked: "Platform team" }))).toEqual([
       ["Title", "Vendor outage"],

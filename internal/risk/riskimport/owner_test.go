@@ -35,22 +35,22 @@ func TestParseCSV_OwnerHeaders(t *testing.T) {
 func TestApplyOwner(t *testing.T) {
 	t.Parallel()
 	alice := uuid.MustParse("6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c2843")
-	resolved := map[string]ownerMatch{"alice@corp.test": {ID: alice, Email: "Alice@corp.test"}}
+	resolved := map[string]uuid.UUID{"alice@corp.test": alice}
 	cases := []struct {
-		name, cell, wantUser, wantEmail, wantUnlinked string
-		wantFlags                                     []string
+		name, cell, wantUser, wantUnlinked string
+		wantFlags                          []string
 	}{
-		{"matched, ignoring case and space", " ALICE@corp.test ", alice.String(), "Alice@corp.test", "", nil},
-		{"unmatched email", "carol@corp.test", "", "", "carol@corp.test", []string{FlagOwnerUnlinked}},
-		{"a name", "Platform team", "", "", "Platform team", []string{FlagOwnerUnlinked}},
-		{"blank", "  ", "", "", "", nil},
+		{"matched, ignoring case and space", " ALICE@corp.test ", alice.String(), "", nil},
+		{"unmatched email", "carol@corp.test", "", "carol@corp.test", []string{FlagOwnerUnlinked}},
+		{"a name", "Platform team", "", "Platform team", []string{FlagOwnerUnlinked}},
+		{"blank", "  ", "", "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var row BatchRow
 			applyOwner(&row, tc.cell, resolved)
-			if row.OwnerUserID != tc.wantUser || row.OwnerEmail != tc.wantEmail || row.OwnerUnlinked != tc.wantUnlinked || !reflect.DeepEqual(row.Flags, tc.wantFlags) {
+			if row.OwnerUserID != tc.wantUser || row.OwnerUnlinked != tc.wantUnlinked || !reflect.DeepEqual(row.Flags, tc.wantFlags) {
 				t.Errorf("row = user %q unlinked %q flags %v", row.OwnerUserID, row.OwnerUnlinked, row.Flags)
 			}
 		})

@@ -19,13 +19,19 @@ import (
 	"github.com/mgoodric/security-atlas/internal/risk/riskimport"
 )
 
-// seedUserWithEmail inserts a user of tenant with the given email and status.
+// seedUserWithEmail inserts a user of tenant with the given email and
+// status, named by their email.
 func seedUserWithEmail(t *testing.T, admin *pgxpool.Pool, tenant, email, status string) uuid.UUID {
+	t.Helper()
+	return seedNamedUser(t, admin, tenant, email, email, status)
+}
+
+func seedNamedUser(t *testing.T, admin *pgxpool.Pool, tenant, email, name, status string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO users (id, tenant_id, email, display_name, status)
-		VALUES ($1, $2, $3, $3, $4)`, id, tenant, email, status); err != nil {
+		VALUES ($1, $2, $3, $4, $5)`, id, tenant, email, name, status); err != nil {
 		t.Fatalf("seed user %s: %v", email, err)
 	}
 	return id
@@ -49,7 +55,11 @@ func TestRiskImport_Owners(t *testing.T) {
 	sfx := e.tenant[:8]
 	alice := seedUserWithEmail(t, e.admin, e.tenant, "alice-"+sfx+"@2843.test", "active")
 	seedUserWithEmail(t, e.admin, e.tenant, "dave-"+sfx+"@2843.test", "disabled")
-	erin := seedUserWithEmail(t, e.admin, e.tenant, "erin-"+sfx+"@2843.test", "active")
+	erin := seedNamedUser(t, e.admin, e.tenant, "erin-"+sfx+"@2843.test", "Erin Example", "active")
+	// Two active accounts whose addresses differ only by case: the cell is
+	// ambiguous and links to neither.
+	seedUserWithEmail(t, e.admin, e.tenant, "Dup-"+sfx+"@2843.test", "active")
+	seedUserWithEmail(t, e.admin, e.tenant, "dup-"+sfx+"@2843.test", "active")
 	// The same address in both tenants matches this tenant's user only;
 	// an address only another tenant holds matches no one.
 	shared := seedUserWithEmail(t, e.admin, e.tenant, "shared-"+sfx+"@2843.test", "active")
@@ -64,6 +74,7 @@ func TestRiskImport_Owners(t *testing.T) {
 		"R-DISABLED,Disabled owner,operational,dave-%[1]s@2843.test\n"+
 		"R-NAME,Owner by name,operational,Platform team\n"+
 		"R-ERIN,Owner disabled after upload,operational,erin-%[1]s@2843.test\n"+
+		"R-DUP,Owner held by two accounts by case,operational,dup-%[1]s@2843.test\n"+
 		"R-NONE,No owner,operational,\n", sfx)
 
 	status, raw := upload(t, e, e.grcJWT, "register.csv", []byte(csv))
@@ -71,7 +82,7 @@ func TestRiskImport_Owners(t *testing.T) {
 		t.Fatalf("upload = %d %s", status, raw)
 	}
 	b := decode[riskimport.Batch](t, raw)
-	if b.StagedCount != 8 || b.RejectedCount != 0 || len(b.UnmappedColumns) != 0 {
+	if b.StagedCount != 9 || b.RejectedCount != 0 || len(b.UnmappedColumns) != 0 {
 		t.Fatalf("batch staged=%d rejected=%+v unmapped=%q", b.StagedCount, b.Rejected, b.UnmappedColumns)
 	}
 
@@ -87,6 +98,7 @@ func TestRiskImport_Owners(t *testing.T) {
 		"R-DISABLED": {unlinked: "dave-" + sfx + "@2843.test", flagged: true},
 		"R-NAME":     {unlinked: "Platform team", flagged: true},
 		"R-ERIN":     {user: erin.String()},
+		"R-DUP":      {unlinked: "dup-" + sfx + "@2843.test", flagged: true},
 		"R-NONE":     {},
 	}
 	// The upload response and a later read of the batch agree.
@@ -97,9 +109,6 @@ func TestRiskImport_Owners(t *testing.T) {
 	for _, got := range []riskimport.Batch{b, decode[riskimport.Batch](t, raw)} {
 		for ref, w := range staged {
 			r := stagedByRef(t, got, ref)
-			if (r.OwnerUserID == "") != (r.OwnerEmail == "") {
-				t.Errorf("%s owner user=%q but email=%q", ref, r.OwnerUserID, r.OwnerEmail)
-			}
 			if r.OwnerUserID != w.user || r.OwnerUnlinked != w.unlinked ||
 				slices.Contains(r.Flags, riskimport.FlagOwnerUnlinked) != w.flagged {
 				t.Errorf("%s staged owner user=%q unlinked=%q flags=%v; want %+v", ref, r.OwnerUserID, r.OwnerUnlinked, r.Flags, w)
@@ -111,7 +120,8 @@ func TestRiskImport_Owners(t *testing.T) {
 	}
 
 	// Erin is disabled between upload and approval: her risk is created
-	// with her email as the unlinked owner, not linked to a disabled user.
+	// with her display name as the unlinked owner, not linked to a
+	// disabled user.
 	if _, err := e.admin.Exec(context.Background(), `UPDATE users SET status = 'disabled' WHERE id = $1`, erin); err != nil {
 		t.Fatalf("disable erin: %v", err)
 	}
@@ -120,7 +130,7 @@ func TestRiskImport_Owners(t *testing.T) {
 		t.Fatalf("approve = %d %s", status, raw)
 	}
 	res := decode[riskimport.ApproveResult](t, raw)
-	if res.ApprovedCount != 8 || len(res.Skipped) != 0 {
+	if res.ApprovedCount != 9 || len(res.Skipped) != 0 {
 		t.Fatalf("approve result = %+v", res)
 	}
 	created := map[string]want{
@@ -130,7 +140,8 @@ func TestRiskImport_Owners(t *testing.T) {
 		"R-UNKNOWN":  {unlinked: "frank-" + sfx + "@2843.test"},
 		"R-DISABLED": {unlinked: "dave-" + sfx + "@2843.test"},
 		"R-NAME":     {unlinked: "Platform team"},
-		"R-ERIN":     {unlinked: "erin-" + sfx + "@2843.test"},
+		"R-ERIN":     {unlinked: "Erin Example"},
+		"R-DUP":      {unlinked: "dup-" + sfx + "@2843.test"},
 		"R-NONE":     {},
 	}
 	for _, d := range res.Approved {

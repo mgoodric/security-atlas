@@ -70,10 +70,10 @@ export type BatchRow = {
   instrument_reference?: string;
   linked_control_ids?: string[] | null;
   unresolved_controls?: string[] | null;
-  // #2843: the active user the owner cell matched by email (with that
-  // user's email), or the cell as the unlinked owner when none matched.
+  // #2843: the active user the owner cell matched by email, or the cell as
+  // the unlinked owner when none matched. The page names the user through
+  // <Person> (/v1/people); the row carries only the id.
   owner_user_id?: string;
-  owner_email?: string;
   owner_unlinked?: string;
   unmapped: Record<string, string> | null;
   flags: string[] | null;
@@ -200,7 +200,7 @@ export function mappedFields(row: BatchRow): [string, string][] {
   if (row.review_due) out.push(["Review due", row.review_due]);
   if (row.description) out.push(["Description", row.description]);
   if (row.owner_user_id) {
-    out.push(["Owner", row.owner_email || row.owner_user_id]);
+    out.push(["Owner", row.owner_user_id]);
   } else if (row.owner_unlinked) {
     out.push(["Owner (unlinked)", row.owner_unlinked]);
   }
