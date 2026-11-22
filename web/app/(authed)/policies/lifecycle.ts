@@ -72,6 +72,8 @@ export type SyncedPolicyView = {
   sourceHref: string | null;
   approval: string | null;
   drift: { detectedAt: string } | null;
+  /** #2877 — the page properties that changed without a version bump. */
+  propertyDrift: { detectedAt: string; keys: string[] } | null;
 };
 
 export function syncedPolicyView(
@@ -82,6 +84,7 @@ export function syncedPolicyView(
     | "historical_approver_name"
     | "historical_approved_at"
     | "sync_drift"
+    | "sync_property_drift"
   >,
 ): SyncedPolicyView | null {
   if (!isSynced(p)) return null;
@@ -91,6 +94,12 @@ export function syncedPolicyView(
     sourceHref: safeHttpUrl(p.source_url),
     approval: name ? `Approved in Confluence by ${name}${on}` : null,
     drift: p.sync_drift ? { detectedAt: p.sync_drift.detected_at } : null,
+    propertyDrift: p.sync_property_drift?.keys.length
+      ? {
+          detectedAt: p.sync_property_drift.detected_at,
+          keys: p.sync_property_drift.keys,
+        }
+      : null,
   };
 }
 
