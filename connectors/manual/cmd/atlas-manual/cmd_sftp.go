@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -128,7 +129,7 @@ func doSFTP(ctx context.Context, f sftpFlags) error {
 	defer func() { _ = client.Close() }()
 
 	now := time.Now().UTC().Truncate(time.Hour)
-	pushed := 0
+	pushed, already := 0, 0
 	for _, p := range matches {
 		stat, err := sftpClient.Stat(p)
 		if err != nil {
@@ -141,15 +142,18 @@ func doSFTP(ctx context.Context, f sftpFlags) error {
 		if err != nil {
 			return fmt.Errorf("build record %q: %w", p, err)
 		}
-		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err = client.Push(pctx, rec)
-		cancel()
+		held, err := pushRecord(ctx, client, rec)
 		if err != nil {
 			return fmt.Errorf("push %q: %w", p, err)
 		}
+		if held {
+			_, _ = fmt.Fprintf(os.Stderr, "already ingested %q: its key is in the ledger under an earlier push (AlreadyExists); not pushed again\n", p)
+			already++
+			continue
+		}
 		pushed++
 	}
-	fmt.Printf("pushed %d records (host=%s path=%s)\n", pushed, f.host, f.pathGlob)
+	fmt.Printf("pushed %d records, %d already ingested (host=%s path=%s)\n", pushed, already, f.host, f.pathGlob)
 	return nil
 }
 
@@ -168,9 +172,9 @@ func buildSFTPRecord(host, path string, size int64, mtime time.Time, controlID s
 		return nil, err
 	}
 	return &evidencev1.EvidenceRecord{
-		IdempotencyKey: idem.SFTPFileKey(host, path, mtime),
+		IdempotencyKey: idem.SFTPFileKey(host, path, mtime, size),
 		EvidenceKind:   "manual.upload.v1",
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  schemaVersion,
 		ControlId:      controlID,
 		Scope:          scope,
 		ObservedAt:     timestamppb.New(observedAt),
