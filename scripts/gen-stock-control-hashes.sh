@@ -10,6 +10,15 @@
 # commit stores that commit's bytes. A tenant cannot get a manifest of its own
 # onto this list.
 #
+# The list is append-only (#2963): the entries already in the generated
+# file are kept, and the history walk only adds to them. The walk sees only
+# commits reachable from HEAD, and a squash merge drops a PR branch's
+# intermediate commits, so a hash added from one of those (or from a
+# working-tree edit) vanishes on the next regeneration elsewhere. Three did:
+# cc4_1 (#2932 -> #2937), cc6_1 (#2897 -> #2913), cc6_7 (#2948 -> #2955).
+# scripts/check-stock-hashes-superset.sh is the CI guard against a drop that
+# arrives some other way, such as a merge-conflict resolution.
+#
 # Run after editing any controls/soc2/*/control.yaml and commit the result;
 # TestStockManifestHashes_CoverControlsDir fails until you do.
 #
@@ -39,11 +48,20 @@ trap 'rm -f "$tmp"' EXIT
 		printf '%s %s\n' "$(shasum -a 256 "$f" | cut -d' ' -f1)" \
 			"$(sed -n 's/^bundle_id:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}[[:space:]]*$/\1/p' "$f" | head -n1)"
 	done
+	# Keep every entry already on the list.
+	if [ -f "$out" ]; then
+		sed -n 's/^[[:space:]]*"\([0-9a-f]\{64\}\)":[[:space:]]*"\([^"]*\)",$/\1 \2/p' "$out"
+	fi
 } | sort -u >"$tmp"
 rm -f "$tmp.blob"
 
 if awk 'NF != 2 { bad = 1 } END { exit !bad }' "$tmp"; then
 	echo "gen-stock-control-hashes: a control.yaml revision has no bundle_id line" >&2
+	exit 1
+fi
+if [ -n "$(cut -d' ' -f1 "$tmp" | uniq -d)" ]; then
+	echo "gen-stock-control-hashes: a hash maps to two bundle_ids:" >&2
+	cut -d' ' -f1 "$tmp" | uniq -d >&2
 	exit 1
 fi
 
