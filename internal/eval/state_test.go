@@ -37,8 +37,9 @@ func TestFreshnessMaxAge_CanvasTable(t *testing.T) {
 
 func TestFreshnessMaxAge_UnknownClassFallsBackToMonthly(t *testing.T) {
 	t.Parallel()
-	// A control bundle may declare freshness_class = "hourly" (the bundle
-	// manifest allows it) which the canvas §2.3 evidence enum does not have.
+	// A row stored before the bundle parser refused it may carry
+	// freshness_class = "hourly", which the canvas §2.3 evidence enum does
+	// not have (soc2_a1_1 before #2826).
 	// An empty/absent class is also possible. Both fall back to the
 	// monthly default — the same default the evidence_records column uses.
 	got, ok := freshnessMaxAge("")

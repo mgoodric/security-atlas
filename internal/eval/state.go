@@ -69,8 +69,8 @@ var freshnessMaxAgeTable = map[string]time.Duration{
 }
 
 // freshnessMaxAge returns the max acceptable evidence age for a freshness
-// class. An unknown or empty class (e.g. a bundle that declares "hourly",
-// which the evidence enum lacks) falls back to the monthly default; `ok` is
+// class. An unknown or empty class (e.g. "hourly", which the evidence enum
+// lacks and the bundle parser refuses since #2826) falls back to the monthly default; `ok` is
 // always true so callers do not have to special-case the fallback, but the
 // distinction is available for logging.
 func freshnessMaxAge(class string) (time.Duration, bool) {

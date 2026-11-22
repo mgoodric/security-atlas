@@ -55,7 +55,10 @@ atlas-osquery run \
   --org example \
   --environment prod \
   --firewall-policy "Firewall enabled (macOS)" \
-  --screenlock-policy "Screen lock enabled (macOS)"
+  --screenlock-policy "Screen lock enabled (macOS)" \
+  --antimalware-policy "Anti-malware current" \
+  --edr-policy "EDR healthy" \
+  --production-label "Production"
 
 # Local osqueryd socket mode (configuration surface only in slice 047).
 atlas-osquery run \
@@ -72,8 +75,9 @@ atlas-osquery scopes
 
 ## Evidence shape
 
-One `osquery.host_posture.v1` record per host, at schema 1.2.0
-(additive over 1.1.0, #2921, which is additive over 1.0.0, #2912):
+One `osquery.host_posture.v1` record per host, at schema 1.3.0
+(additive over 1.2.0, #2826; 1.2.0 over 1.1.0, #2921; 1.1.0 over 1.0.0,
+#2912):
 
 - `host_uuid` (required)
 - `hostname` (required)
@@ -87,10 +91,21 @@ One `osquery.host_posture.v1` record per host, at schema 1.2.0
 - `reason` (1.1.0): why the result is what it is
 - `firewall_source` (1.2.0): `fleet_policy:<name>`, present only with `firewall_enabled`
 - `screen_lock_source` (1.2.0): `fleet_policy:<name>`, present only with `screen_lock_enabled`
+- `disk_used_percent` (1.3.0): 0-100
+- `host_role` (1.3.0): `production`, from the `--production-label` label
+- `host_role_source` (1.3.0): `fleet_label:<name>`, present only with `host_role`
+- `antimalware_protected` (1.3.0), with `antimalware_source` (`fleet_policy:<name>`)
+- `edr_healthy` (1.3.0), with `edr_source` (`fleet_policy:<name>`)
+
+Schema 1.3.0 also declares `memory_used_percent` and `cpu_p95_5m_percent`,
+which this connector never emits: Fleet's host API has no memory-use or
+CPU-use field, and a 5-minute p95 needs sampling a snapshot can't give
+(#2935). Another pusher may supply them. From 1.3.0 every `*_source` is
+valid only alongside its value (`dependentRequired`).
 
 Schema is `additionalProperties: false` — the connector emits only the
-declared fields. The slice's issue spec mentions `edr_running` and
-`os_patch_level`; these are not in the schema and are not emitted here.
+declared fields. The slice's issue spec mentions `os_patch_level`; it is
+not in the schema and is not emitted here.
 
 **A posture boolean is present only when the connector read it.** `false`
 means observed off; an absent key means not read. In Fleet mode:
@@ -102,6 +117,10 @@ means observed off; an absent key means not read. In Fleet mode:
 | `last_seen_at`            | `seen_time` (from the list, refined by the detail call)                         |
 | `screen_lock_enabled`     | `policies[]`: the `--screenlock-policy` policy's `response` (see below)         |
 | `firewall_enabled`        | `policies[]`: the `--firewall-policy` policy's `response` (see below)           |
+| `antimalware_protected`   | `policies[]`: the `--antimalware-policy` policy's `response` (see below)        |
+| `edr_healthy`             | `policies[]`: the `--edr-policy` policy's `response` (see below)                |
+| `disk_used_percent`       | 100 − `percent_disk_space_available`; absent if `gigs_total_disk_space` is 0    |
+| `host_role`               | `labels[]`: `production` when the `--production-label` label is on the host     |
 
 Without `--screenlock-policy`, a Fleet host's `result` is `fail` (disk
 encryption off) or `inconclusive` (screen lock not reported), never `pass`.
@@ -113,17 +132,20 @@ host's last check-in (Fleet lists offline hosts too); read `last_seen_at`
 for that. It cannot be `seen_time` because ingest rejects an `observed_at`
 more than 24 h from receipt.
 
-### Firewall and screen lock from Fleet policies (#2921)
+### Firewall, screen lock, antimalware and EDR from Fleet policies (#2921, #2826)
 
-Fleet's host API reports no firewall or screen-lock state. It does report
+Fleet's host API reports no firewall, screen-lock, antimalware or EDR
+state. It does report
 each host's result for every Fleet policy that applies to it, in the Get
 host response's `policies[]` array (`name`, `response`). So the operator
 creates one Fleet policy per question, and names it on the `run` command:
 
-| Flag                  | Field it sets         | Source written to the record              |
-| --------------------- | --------------------- | ----------------------------------------- |
-| `--firewall-policy`   | `firewall_enabled`    | `firewall_source: fleet_policy:<name>`    |
-| `--screenlock-policy` | `screen_lock_enabled` | `screen_lock_source: fleet_policy:<name>` |
+| Flag                   | Field it sets           | Source written to the record              |
+| ---------------------- | ----------------------- | ----------------------------------------- |
+| `--firewall-policy`    | `firewall_enabled`      | `firewall_source: fleet_policy:<name>`    |
+| `--screenlock-policy`  | `screen_lock_enabled`   | `screen_lock_source: fleet_policy:<name>` |
+| `--antimalware-policy` | `antimalware_protected` | `antimalware_source: fleet_policy:<name>` |
+| `--edr-policy`         | `edr_healthy`           | `edr_source: fleet_policy:<name>`         |
 
 Per host, the named policy's `response` maps as:
 
@@ -198,6 +220,50 @@ SELECT 1 WHERE
   EXISTS (SELECT 1 FROM file_lines WHERE path = '/etc/ufw/ufw.conf' AND trim(line) = 'ENABLED=yes')
   OR EXISTS (SELECT 1 FROM systemd_units WHERE id = 'firewalld.service' AND active_state = 'active');
 ```
+
+**Antimalware and EDR policies.** What passes is the operator's to
+define, and the stock controls take the policy's word for it:
+`soc2_cc6_8_malware_protection` expects the antimalware policy to pass
+only when an engine is active **and** its definitions were updated within
+7 days, and `soc2_cc7_2_anomaly_detection` expects the EDR policy to pass
+only when the agent is installed, running and healthy. Write the query
+for the engine and agent the org runs. The connector emits no definitions
+timestamp, so the 7-day bound lives in the query (#2936).
+
+An unverified Windows starting point, not taken from Fleet's library and
+not run against a live host: osquery's `windows_security_products` table
+lists Security Center products with `type`, `state` and
+`signatures_up_to_date`.
+
+```sql
+SELECT 1 FROM windows_security_products
+WHERE type = 'Antivirus' AND state = 'On' AND signatures_up_to_date = 1;
+```
+
+`signatures_up_to_date` is Security Center's own judgement, not a 7-day
+bound; tighten it if the org needs the exact bound. EDR agents differ too
+much for a generic example: check the vendor's own health signal (a
+running service or process plus its status file or registry key).
+
+### Host role from a Fleet label (#2826)
+
+`soc2_a1_1_capacity_monitoring` checks production hosts only. Fleet has no
+role field, so the operator creates a Fleet label (manual or dynamic) that
+holds the production hosts, and names it with `--production-label`. A
+host carrying a label of exactly that name is pushed with
+`host_role: production` and `host_role_source: fleet_label:<name>`. Other
+hosts carry no `host_role`. With no label named, no host is production and
+a1_1 stays inconclusive. The flag applies to `--mode=fleet` only.
+
+### Capacity (#2826)
+
+`disk_used_percent` is `100 - percent_disk_space_available` from Get host.
+When `gigs_total_disk_space` is missing or 0 (Fleet has no disk reading
+yet), or the percentage is outside 0-100, it is omitted rather than read as
+a full disk. Fleet reports no memory or CPU use, so a Fleet-only tenant's
+a1_1 fails on disk use or is inconclusive (#2935). In `--mode=local` the
+query reads disk use from osquery's `mounts` row for `/`; that mode's
+transport is still not wired.
 
 ### Scope tagging (AC-4)
 
