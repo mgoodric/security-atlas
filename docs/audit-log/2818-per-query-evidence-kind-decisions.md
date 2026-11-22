@@ -84,6 +84,13 @@ The second row is the intended reading. A control that declares two kinds of
 evidence and has received only one of them has not shown that both apply, so
 `na` from one kind should not stand for the control.
 
+Later addition (#2935): `soc2_a1_1_capacity_monitoring` became a third
+two-query stock control, over `osquery.host_posture.v1` and
+`monitoring.host_capacity.v1`. Both queries are SQL and neither returns
+`na`, so the second row cannot occur for it. Its bundle `tests/` cases cover
+the cross-kind combination
+(`docs/audit-log/2935-datadog-host-capacity-decisions.md` D4).
+
 ## D6 — manual attestations are unaffected for stock controls
 
 `manual.attestation.v1` records are written only for `manual_attested` and

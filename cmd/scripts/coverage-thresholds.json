@@ -112,6 +112,7 @@
     "connectors/datadog/internal/siemrules": 88,
     "connectors/datadog/internal/siemsignals": 90,
     "connectors/datadog/internal/firingevents": 93,
+    "connectors/datadog/internal/hostcapacity": 97,
     "connectors/grafana/cmd/atlas-grafana": 86,
     "connectors/grafana/internal/alertrules": 87,
     "connectors/grafana/internal/grafanaauth": 98,

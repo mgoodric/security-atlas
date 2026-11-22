@@ -1,0 +1,96 @@
+{
+  "error": "",
+  "from_date": 1795262100000,
+  "group_by": ["host"],
+  "message": "",
+  "query": "avg:system.cpu.idle{env:production} by {host}.rollup(avg, 15)",
+  "res_type": "time_series",
+  "resp_version": 1,
+  "series": [
+    {
+      "aggr": "avg",
+      "attributes": {},
+      "display_name": "system.cpu.idle",
+      "end": 1795262399999,
+      "expression": "avg:system.cpu.idle{env:production,host:web-1}",
+      "interval": 15000,
+      "length": 20,
+      "metric": "system.cpu.idle",
+      "pointlist": [
+        [1795262100000.0, 20],
+        [1795262115000.0, 24],
+        [1795262130000.0, 28],
+        [1795262145000.0, 32],
+        [1795262160000.0, 36],
+        [1795262175000.0, 40],
+        [1795262190000.0, 44],
+        [1795262205000.0, 48],
+        [1795262220000.0, 52],
+        [1795262235000.0, 56],
+        [1795262250000.0, 60],
+        [1795262265000.0, 64],
+        [1795262280000.0, 68],
+        [1795262295000.0, 72],
+        [1795262310000.0, 76],
+        [1795262325000.0, 80],
+        [1795262340000.0, 84],
+        [1795262355000.0, 88],
+        [1795262370000.0, 92],
+        [1795262385000.0, 96]
+      ],
+      "query_index": 0,
+      "scope": "host:web-1",
+      "start": 1795262100000,
+      "tag_set": ["host:web-1"],
+      "unit": [
+        {
+          "family": "percentage",
+          "id": 17,
+          "name": "percent",
+          "plural": "percent",
+          "scale_factor": 1.0,
+          "short_name": "%"
+        }
+      ]
+    },
+    {
+      "aggr": "avg",
+      "attributes": {},
+      "display_name": "system.cpu.idle",
+      "end": 1795262234999,
+      "expression": "avg:system.cpu.idle{env:production,host:web-2}",
+      "interval": 15000,
+      "length": 9,
+      "metric": "system.cpu.idle",
+      "pointlist": [
+        [1795262100000.0, 30],
+        [1795262115000.0, null],
+        [1795262130000.0, 25],
+        [1795262145000.0, null],
+        [1795262160000.0, 20],
+        [1795262175000.0, 22],
+        [1795262190000.0, null],
+        [1795262205000.0, 21],
+        [1795262220000.0, 23]
+      ],
+      "query_index": 0,
+      "scope": "host:web-2",
+      "start": 1795262100000,
+      "tag_set": ["host:web-2"],
+      "unit": [
+        {
+          "family": "percentage",
+          "id": 17,
+          "name": "percent",
+          "plural": "percent",
+          "scale_factor": 1.0,
+          "short_name": "%"
+        }
+      ]
+    }
+  ],
+  "status": "ok",
+  "times": [],
+  "to_date": 1795262400000,
+  "values": []
+}

@@ -25,10 +25,14 @@ const ConnectorName = "datadog-connector"
 //     slice 533; the slice-488 D1 sibling-kind split)
 //   - datadog.siem_signal.v1      (Cloud-SIEM signal-history triage outcomes,
 //     bounded pull — slice 636; the slice-533 CC7.3 sibling)
+//   - monitoring.host_capacity.v1 (per-host memory, 5-minute CPU p95 and
+//     disk use from the metrics query API, only with
+//     --capacity-production-scope — #2935)
 var SupportedKinds = []string{
 	"monitoring.alert_config.v1",
 	"datadog.siem_rule.v1",
 	"datadog.siem_signal.v1",
+	"monitoring.host_capacity.v1",
 }
 
 // PullInterval names the connector's pull cadence HONESTLY (P0-488-6). The
