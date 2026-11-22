@@ -2783,9 +2783,13 @@ type Querier interface {
 	// role-split inputs (owner_role + applicability_expr), its scf linkage (scf_id
 	// for the SCF-anchor citation), and a `has_evidence` flag (AC-6: a control with
 	// zero evidence rows is rendered as a "no evidence yet" gap, never as
-	// satisfied). RLS scopes the read to the tenant; the WHERE tenant_id clause is
+	// satisfied). #2878: has_evidence applies the same control-evidence rule as
+	// every other ledger reader (ListControlsWithLatestEvidence): control_id,
+	// control_ref, plus the tenant's control-free records of a kind in
+	// unbound_kinds (routed.ControlFreeKinds) that the control's evidence_queries
+	// declare. RLS scopes the read to the tenant; the WHERE tenant_id clause is
 	// belt-and-suspenders. Ordered for stable rendering.
-	ListInScopeControlsForChecklist(ctx context.Context, tenantID pgtype.UUID) ([]ListInScopeControlsForChecklistRow, error)
+	ListInScopeControlsForChecklist(ctx context.Context, arg ListInScopeControlsForChecklistParams) ([]ListInScopeControlsForChecklistRow, error)
 	ListIncidentControlLinks(ctx context.Context, arg ListIncidentControlLinksParams) ([]IncidentControl, error)
 	ListIncidentEvidenceLinks(ctx context.Context, arg ListIncidentEvidenceLinksParams) ([]IncidentEvidenceLink, error)
 	ListIncidentRiskLinks(ctx context.Context, arg ListIncidentRiskLinksParams) ([]IncidentRisk, error)
