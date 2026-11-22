@@ -232,6 +232,38 @@ async function mockImport(
     const req = route.request();
     const url = new URL(req.url());
     const p = url.pathname;
+    if (p === "/api/controls/imports/preview" && req.method() === "POST") {
+      // The fixture's headers are all aliases (#2836).
+      return json(route, 200, {
+        header_row: 1,
+        header_detected: true,
+        columns: [
+          ["Control ID", "id"],
+          ["Title", "title"],
+          ["Description", "description"],
+          ["Tested Under", "tested_under"],
+          ["Implementation Type", "implementation_type"],
+        ].map(([header, field], index) => ({
+          index,
+          header,
+          field,
+          mappable: true,
+        })),
+        fields: [
+          "id",
+          "title",
+          "description",
+          "tested_under",
+          "implementation_type",
+          "applicability",
+        ].map((name) => ({
+          name,
+          required: ["id", "title", "description"].includes(name),
+        })),
+        rows: [],
+        data_rows: 4,
+      });
+    }
     if (p === "/api/controls/imports" && req.method() === "POST") {
       captured.upload = req.postDataBuffer()?.toString("utf8") ?? "";
       return json(route, 201, batch());
@@ -364,6 +396,10 @@ async function uploadFixture(page: Page) {
     .getByTestId("control-import-framework")
     .selectOption({ label: "SOC 2" });
   await page.getByTestId("control-import-file").setInputFiles(FIXTURE);
+  await page.getByTestId("control-import-read").click();
+  await expect(page.getByTestId("control-import-mapping")).toBeVisible({
+    timeout: 30_000,
+  });
   await page.getByTestId("control-import-submit").click();
   await expect(page).toHaveURL(new RegExp(`/controls/imports/${BATCH_ID}$`));
   await expect(page.getByTestId("control-import-row")).toHaveCount(4, {

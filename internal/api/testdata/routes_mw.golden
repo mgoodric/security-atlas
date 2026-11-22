@@ -320,6 +320,7 @@ POST /v1/calendar/subscription 11
 POST /v1/controls/checklist/sections/{id}:approve 11
 POST /v1/controls/checklist:generate 11
 POST /v1/controls/imports 11
+POST /v1/controls/imports/preview 11
 POST /v1/controls/imports/{id}/approve-clear 11
 POST /v1/controls/imports/{id}/rows/{row}/approve 11
 POST /v1/controls/imports/{id}/rows/{row}/reject 11

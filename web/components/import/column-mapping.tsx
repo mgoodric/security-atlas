@@ -6,7 +6,7 @@
 //
 // It takes its field list as input and knows nothing about the record
 // being imported: the risk import passes the risk fields, the controls
-// import passes its own next (#2836). The mapping rules (one column per
+// import its own (#2836). The mapping rules (one column per
 // field, the required fields, the upload's column_map) are the pure helper
 // in lib/import/column-mapping.ts.
 
