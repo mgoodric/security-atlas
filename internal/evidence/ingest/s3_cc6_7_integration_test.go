@@ -65,6 +65,7 @@ func TestCC67_RoutedS3RecordsDecideDefaultEncryption(t *testing.T) {
 	}{
 		{"AES256", []push{{pass, bucket("acme-logs", true, "AES256")}}, eval.ResultPass},
 		{"aws:kms", []push{{pass, bucket("acme-data", true, "aws:kms")}}, eval.ResultPass},
+		{"aws:kms:dsse", []push{{pass, bucket("acme-regulated", true, "aws:kms:dsse")}}, eval.ResultPass},
 		{"disallowed algorithm", []push{{pass, bucket("acme-logs", true, "AES256")}, {pass, bucket("acme-fsx", true, "aws:fsx")}}, eval.ResultFail},
 		{"no default encryption", []push{{pass, bucket("acme-logs", true, "AES256")}, {fail, bucket("acme-legacy", false, "")}}, eval.ResultFail},
 		{"unread bucket", []push{{pass, bucket("acme-logs", true, "AES256")}, {inconclusive, unread}}, eval.ResultInconclusive},

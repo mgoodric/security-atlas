@@ -16,11 +16,11 @@ description: |
   connector run. It takes each bucket's latest in-window record, keyed by
   `bucket_name` and ordered by `observed_at`. A bucket passes when that
   record's `result` is pass, `encryption_enabled` is true and
-  `sse_algorithm` is `AES256` (SSE-S3) or `aws:kms` (SSE-KMS). A bucket
-  fails when the connector observed no default encryption rule (`result`
-  fail with `encryption_enabled` false), or when its default rule names
-  any other algorithm (`aws:kms:dsse`, `aws:fsx`, `aws:backup`, or a value
-  AWS adds later). Any failing bucket fails the control. Otherwise the
+  `sse_algorithm` is `AES256` (SSE-S3), `aws:kms` (SSE-KMS) or
+  `aws:kms:dsse` (dual-layer SSE-KMS). A bucket fails when the connector
+  observed no default encryption rule (`result` fail with
+  `encryption_enabled` false), or when its default rule names any other
+  algorithm (`aws:fsx`, `aws:backup`, or a value AWS adds later). Any failing bucket fails the control. Otherwise the
   control passes only when every bucket passes, and is inconclusive when
   any bucket is unread: the connector could not read its region or
   encryption (`result` inconclusive), the rule's algorithm is missing, or
@@ -56,7 +56,7 @@ evidence_queries:
   - id: all_s3_buckets_encrypted_at_rest
     language: sql
     evidence_kind: aws.s3.bucket_encryption_state.v1
-    description: "Every bucket's latest record shows default encryption with AES256 or aws:kms"
+    description: "Every bucket's latest record shows default encryption with AES256, aws:kms or aws:kms:dsse"
     expression: |
       SELECT CASE
                WHEN count(*) = 0 THEN 'inconclusive'
@@ -69,11 +69,11 @@ evidence_queries:
                bool_or(coalesce(
                  readable AND (
                    (result = 'fail' AND enc = 'false'::jsonb)
-                   OR (enc = 'true'::jsonb AND alg <> '' AND alg NOT IN ('AES256', 'aws:kms'))
+                   OR (enc = 'true'::jsonb AND alg <> '' AND alg NOT IN ('AES256', 'aws:kms', 'aws:kms:dsse'))
                  ), false)) AS any_bad,
                bool_and(coalesce(
                  readable AND result = 'pass' AND enc = 'true'::jsonb
-                   AND alg IN ('AES256', 'aws:kms'), false)) AS all_ok
+                   AND alg IN ('AES256', 'aws:kms', 'aws:kms:dsse'), false)) AS all_ok
         FROM (
           SELECT payload->>'bucket_name' AS bucket,
                  result,

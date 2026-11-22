@@ -89,9 +89,9 @@ cases:
           account_id: "111122223333"
           region: us-east-1
 
-  - name: dsse-kms-is-not-in-the-allowed-list
-    description: the allowed list is AES256 and aws:kms exactly; dual-layer KMS fails until the list names it
-    expected_state: fail
+  - name: dsse-kms-passes
+    description: dual-layer SSE-KMS is KMS-based with a second layer, so it is allowed alongside aws:kms
+    expected_state: pass
     evaluated_at: 2026-11-21T12:00:00Z
     records:
       - result: pass

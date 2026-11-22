@@ -43,22 +43,27 @@ is the "no default encryption" case the ticket names. A `fail` record that
 names an allowed algorithm is not a shape the connector emits; it is
 unread, not pass (case `fail-verdict-naming-an-allowed-algorithm-is-inconclusive`).
 
-## D2 — The allowed list is `AES256` and `aws:kms`, exactly as written
+## D2 — The allowed list is `AES256`, `aws:kms` and `aws:kms:dsse`
 
 AWS's `ServerSideEncryption` enum (aws-sdk-go-v2 `service/s3` v1.114.6,
 `types/enums.go`) has five values: `AES256`, `aws:kms`, `aws:kms:dsse`,
-`aws:fsx`, `aws:backup`. The ticket and ADR 0028 name two. I kept the list
-at those two, so `aws:kms:dsse` (dual-layer SSE-KMS) fails the control.
+`aws:fsx`, `aws:backup`. The ticket and ADR 0028 name two, `AES256` and
+`aws:kms`.
 
-This is the call Matt may want to revisit. DSSE-KMS is KMS-based and adds a
-second layer, so a bucket using it is not less encrypted than one on
-`aws:kms`. I did not widen the list because the list was settled in the
-grill and widening it changes what the check claims. The cost is a
-visible false finding on a DSSE bucket, which an operator would see and
-raise, rather than a silent pass. Adding `'aws:kms:dsse'` to both `IN`
-lists and flipping case `dsse-kms-is-not-in-the-allowed-list` is the whole
-change if Matt decides otherwise. That change would supersede the bundle
-again.
+`aws:kms:dsse` (dual-layer SSE-KMS) is allowed as well. It is KMS-based
+and adds a second layer of encryption, so a bucket using it is not less
+encrypted than one on `aws:kms`, and failing it would be a false finding.
+The first head of #2948 kept the list at the ticket's two and failed DSSE;
+review asked for it to be allowed (case `dsse-kms-passes`). This widens the
+ticket's list by one value that is strictly stronger than one already on
+it, so it does not weaken what the check claims.
+
+`aws:fsx` and `aws:backup` stay disallowed, as does any value AWS adds
+later (case `disallowed-algorithm-fails` uses `aws:fsx`). They are not
+SSE-S3 or SSE-KMS, the two options the check was settled on, and I have
+not verified what each guarantees for a bucket's objects, so the check
+does not vouch for them. A new value fails until someone reads what it
+means and adds it here.
 
 The comparison is exact and case-sensitive. AWS returns the enum
 verbatim, so `aes256` is not a value it emits; it fails as disallowed
@@ -112,8 +117,7 @@ changelog fragment carries the upgrade note.
 `soc2_cc6_7_encryption_in_transit` is superseded by a new version.
 Re-assign its owner and move exceptions and risk links to the new
 version; the old version keeps its history. A tenant whose cc6_7 passed
-can now fail (a bucket whose default rule is `aws:kms:dsse`, `aws:fsx` or
-`aws:backup`) or go inconclusive (a bucket the connector could not read,
+can now fail (a bucket whose default rule is `aws:fsx` or `aws:backup`) or go inconclusive (a bucket the connector could not read,
 which the roll-up let a passing bucket outvote).
 
 ## Not changed, noted
