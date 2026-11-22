@@ -75,20 +75,57 @@ with `git show <base>:<file>` and exits 1 when any entry is missing, listing
 each as `<hash> <bundle>`. It runs as two steps in the existing
 `stock-supersede-check` job. That job is already unconditional and already
 in merge-gate's `needs:`, so the guard gates without a new required context.
-It runs on `pull_request` (base = `pull_request.base.sha`) and `merge_group`
-(base = `merge_group.base_sha`). A merge-queue group composes PRs on a newer
-base, which is where a conflict-resolved drop would show.
+It runs on `pull_request` only (base = `pull_request.base.sha`), the same
+as the supersede step. A merge group carries no labels, so a deliberate drop
+(below) would pass its PR run and then fail in the queue. Running in the
+queue would catch nothing anyway: the queue builds the group with an
+automatic three-way merge, which cannot delete a line that neither side
+deleted. A conflict ejects the PR from the queue rather than being resolved
+there.
 
 I chose a shell script over a Go unit test because a unit test has no base
 branch to read, and CI's shallow checkout has no history.
-`scripts/check-stock-hashes-superset_test.sh` is the self-test. It covers an
-unchanged list, a hand-dropped hash, an unresolvable base (exit 2), an added
-entry, and the squash-merge loss itself against the real generator. Against
-the old generator, the two append-only cases fail.
+`scripts/check-stock-hashes-superset_test.sh` is the self-test, with 21
+assertions across 10 cases:
+
+- Cases 1-8 (15 assertions) cover the drop itself: an unchanged list, a
+  hand-dropped hash, an unresolvable base (exit 2), an added entry, the
+  squash-merge loss, the merge-then-regenerate flow (case 6), a merge
+  resolved by keeping the branch's copy, and a conflicted file.
+- Cases 9-10 (6 assertions) cover the removal path below.
+
+All 21 pass. Swapping in the old generator fails 5: the regeneration count
+and the superset check in each of cases 4 and 6, and the conflicted-file
+union in case 8. Swapping in the check without the override fails a
+different 5, the case 9-10 asserts that use `--labels`.
+
+### Removing a hash
+
+A hash should come off the list only when it is wrong: it is not the sha256
+of a `control.yaml` revision that some commit held, or its bundle id is
+wrong. Being from a revision `main` never shipped is not enough (D2). The
+sanctioned path mirrors `supersedes-stock` (#2891):
+
+1. Delete the line from `stock_manifests_gen.go` by hand. The generator
+   never removes an entry.
+2. In the same PR, add or change a decisions log under `docs/audit-log/`
+   that names each dropped hash in full and says why it is wrong.
+3. Add the `drops-stock-hash` label, then re-run `stock-supersede-check`.
+
+With both the label and the logged hash, the check passes, lists each
+dropped entry with the log that names it, and raises a `::notice`. Either
+one alone still fails. The label is needed because branch protection binds
+admins too (`enforce_admins: true`, and the ruleset has no bypass actors),
+so overriding the check is not possible, even for the maintainer. The
+decisions-log requirement makes a removal leave a reviewable reason on
+`main`.
 
 ## D4 — Restored entries
 
-The three D1 hashes are back in `stock_manifests_gen.go` (275 entries). That
-equals the union of every entry any revision of the file on `main` has held,
-checked by collecting the entries from `git show <c>:<file>` for each commit
-in `git log -- <file>` and diffing that set with the working tree.
+The three D1 hashes are back in `stock_manifests_gen.go`. After merging
+`main` at #2956, the file has 279 entries: all 276 on `main` plus the 3
+restored. I checked that this matches the union of every entry any revision
+of the file has held. The audit collects the entries from
+`git show <c>:<file>` for each commit in `git log -- <file>`, then diffs
+that set against the working tree. Both sides hold 279 entries, and the diff
+is empty.

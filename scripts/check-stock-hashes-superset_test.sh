@@ -179,6 +179,36 @@ EOF
 assert_eq "$(hash_lines "$r")" 3 "conflicted file regenerates to the union"
 assert_eq "$(grep -c '^[<=>]\{7\}' "$r/$GEN_FILE" || true)" 0 "conflict markers are gone"
 
+# Case 9: a deliberate drop passes with the drops-stock-hash label and a
+# changed decisions log naming the hash, and the output says so.
+r="$work/r9"
+new_repo "$r"
+retired="$(grep -oE '[0-9a-f]{64}' "$r/$GEN_FILE")"
+sed -i.bak "/$retired/d" "$r/$GEN_FILE"
+mkdir -p "$r/docs/audit-log"
+printf 'Retire %s: wrong bundle.\n' "$retired" >"$r/docs/audit-log/9-retire.md"
+set +e
+out="$(cd "$r" && bash "$CHECK" --labels "$(printf 'bug\ndrops-stock-hash')" main 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" 0 "labelled and logged drop"
+assert_contains "$out" "acknowledged" "labelled and logged drop"
+assert_contains "$out" "$retired soc2_a (named in docs/audit-log/9-retire.md)" "labelled and logged drop"
+
+# Case 10: the label alone, or the decisions log alone, is not enough.
+set +e
+(cd "$r" && bash "$CHECK" main >/dev/null 2>&1)
+rc=$?
+set -e
+assert_eq "$rc" 1 "logged drop without the label"
+rm "$r/docs/audit-log/9-retire.md"
+set +e
+out="$(cd "$r" && bash "$CHECK" --labels drops-stock-hash main 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" 1 "labelled drop without a decisions log"
+assert_contains "$out" "$retired soc2_a (no decisions-log entry)" "labelled drop without a decisions log"
+
 echo "check-stock-hashes-superset_test: $pass passed, $fail failed"
 if ((fail > 0)); then
 	printf '  %s\n' "${fail_messages[@]}" >&2
