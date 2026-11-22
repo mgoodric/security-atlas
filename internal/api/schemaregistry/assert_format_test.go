@@ -98,3 +98,35 @@ func TestEmbeddedSchemas_AssertFormatOptIns(t *testing.T) {
 		}
 	}
 }
+
+// #2930: opting in narrows acceptance, so a minor cannot newly turn it on.
+func TestCheckAdditiveOver_AssertFormat(t *testing.T) {
+	t.Parallel()
+	const base = `"type":"object","properties":{"at":{"type":"string","format":"date-time"}}`
+	off := []byte(`{` + base + `}`)
+	offFalse := []byte(`{"x-assert-format":false,` + base + `}`)
+	on := []byte(`{"x-assert-format":true,` + base + `}`)
+	cases := []struct {
+		name       string
+		prev, next []byte
+		ok         bool
+	}{
+		{"absent_to_on_refused", off, on, false},
+		{"false_to_on_refused", offFalse, on, false},
+		{"on_to_on_passes", on, on, true},
+		{"off_to_off_passes", off, off, true},
+		{"on_to_off_passes", on, off, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := CheckAdditiveOver(tc.prev, tc.next)
+			if tc.ok && err != nil {
+				t.Fatalf("want additive, got %v", err)
+			}
+			if !tc.ok && (err == nil || !strings.Contains(err.Error(), "new major version")) {
+				t.Fatalf("want refusal naming a new major, got %v", err)
+			}
+		})
+	}
+}

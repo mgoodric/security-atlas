@@ -42,13 +42,14 @@ violation. The key must be a JSON boolean; any other value fails
 compilation, so a typo cannot silently leave enforcement off. `false` and
 absent mean the same thing.
 
-Opt in on a new version, never by editing a published one. Opting in
-narrows what the version accepts, which `additive.go` does not detect (it
-inspects only `properties`, `required` and `additionalProperties`), so
-review a minor that opts in as you would a narrowing. Records already
-pushed keep validating against the version they were pushed under. When a
-platform version opts in, add its path to the expected list in
-`assert_format_test.go`.
+Enforced: opting in needs a new major or a new kind. Opting in narrows
+what a version accepts, so `CheckAdditiveOver` (`additive.go`) refuses a
+minor that sets `x-assert-format: true` when its predecessor did not. A
+minor whose predecessor already opted in passes. Never edit a published
+version to opt in. Records already pushed keep validating against the exact
+version they were pushed under: ingest requires `schema_version` and looks
+it up exactly, never resolving to a later minor. When a platform version
+opts in, add its path to the expected list in `assert_format_test.go`.
 
 The flag is registry-only. `internal/risk` compiles its own built-in
 methodology schemas (no `format` keywords), and

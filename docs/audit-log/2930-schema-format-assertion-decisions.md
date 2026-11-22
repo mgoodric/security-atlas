@@ -66,12 +66,61 @@ compiles each control manifest's `manual_evidence_schema`, which control
 authors write. That is a separate surface, and any change to it is its own
 decision.
 
-## D4 — The additive check does not detect an opt-in
+## D4 — Enforced: opting in needs a new major or a new kind
 
-`CheckAdditiveOver` inspects only `properties`, `required` and
-`additionalProperties`, so a minor that adds `x-assert-format: true`
-passes as additive even though it narrows acceptance. That is tolerable:
-records validate against the version they were pushed under, and the
-narrowing only reaches pushers who pick the new version. It is documented
-in the schemas README for reviewers. Teaching the additive check about it is
-left as a possible follow-up, not done here.
+Required by review of PR #2981. `CheckAdditiveOver` gains a fourth rule. A
+minor whose `next` sets `x-assert-format: true` while `prev` does not
+(absent or `false`) is refused with "x-assert-format turned on; enforcing
+format narrows acceptance, so opting in needs a new major version or a new
+kind". If both opt in, it passes. Turning the flag off widens acceptance and
+passes. The registry runs this check on every tenant minor registration
+(`service.go`, `Register`). `TestCheckAdditiveOver_AssertFormat` covers
+absent->on and false->on (both refused) and on->on, off->off and on->off
+(all pass). Only a literal `true` counts as on, the same as in
+`compileSchema`.
+
+## D5 — Version resolution: ingest never resolves to a later minor
+
+Checked by reading the code at this head:
+
+- `missingField` (`internal/evidence/ingest/ingest.go`) refuses a record
+  with an empty `schema_version` ("schema_version is required"). The REST
+  path does the same (`internal/api/evidence/service.go`).
+- `ValidatePayload` -> `lookupCompiled` (`service.go`) looks up the exact
+  `kind|semver` key: tenant cache, then global cache, then the tenant row by
+  exact semver. If none matches it returns `ErrUnknownKind`. There is no
+  major-only or "latest" fallback.
+- A grep for latest-version resolvers in `internal`, `cmd` and `pkg` finds
+  only SCF-anchor queries (`dbx/scf_anchors.sql.go`), none on the evidence
+  path.
+
+So a record pushed under `1.2.0` is only ever validated against `1.2.0`,
+and a later opted-in version cannot reach it. This is why D4's rule is
+enough.
+
+## D6 — Stored tenant schemas that already carry `x-assert-format`
+
+Before this PR the key meant nothing, so a tenant could have registered a
+schema carrying it. After this PR:
+
+- A stored tenant row with a non-boolean value (for example `"true"`) no
+  longer compiles. Tenant rows compile lazily on lookup, not at boot, so the
+  platform still starts. Pushes for that tenant's kind and version are
+  refused with `compile tenant schema: x-assert-format must be a boolean`,
+  which fails closed. Global rows come only from the embedded bundle, and
+  `TestEmbeddedSchemas_AssertFormatOptIns` shows none carries the key.
+- A stored tenant row with `true` starts enforcing `format`. This is the
+  same narrowing D4 blocks for new minors, applied to a row already
+  registered.
+
+I did not check any deployed database for such rows; I have no access to
+one from this session. The query to run against a deployment, as the
+migrate role or with RLS context per tenant (written, not executed):
+
+```sql
+SELECT tenant_id, kind, semver, schema_json->'x-assert-format' AS flag
+FROM evidence_kind_schemas
+WHERE schema_json ? 'x-assert-format';
+```
+
+No rows means neither case applies.
