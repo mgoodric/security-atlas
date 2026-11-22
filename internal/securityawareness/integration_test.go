@@ -12,7 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/securityawareness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -26,7 +28,71 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"security_training_campaigns",
 		"security_training_courses",
 		"security_training_people",
+		"control_evaluations",
+		"evidence_audit_log",
+		"evidence_records",
+		"controls",
 	)
+}
+
+// newStore builds the production wiring: a store writing completion
+// evidence through an ingest.Service over the app role, validated by the
+// DB-backed schema registry seeded with the bundled platform schemas.
+func newStore(t *testing.T, admin, app *pgxpool.Pool) *securityawareness.Store {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := schemaregistry.NewService(admin)
+	if _, _, err := reg.ImportPlatformSchemas(ctx, schemaregistry.PlatformSchemasFS()); err != nil {
+		t.Fatalf("ImportPlatformSchemas: %v", err)
+	}
+	return securityawareness.NewStore(app).WithIngest(ingest.New(app, reg))
+}
+
+// ledgerRecord is one training-completion row in the evidence ledger.
+type ledgerRecord struct {
+	ID         uuid.UUID
+	ControlID  *uuid.UUID
+	ObservedAt time.Time
+	Payload    map[string]any
+}
+
+func trainingLedger(t *testing.T, admin *pgxpool.Pool, tenant string) map[uuid.UUID]ledgerRecord {
+	t.Helper()
+	rows, err := admin.Query(context.Background(), `
+SELECT id, control_id, observed_at, payload FROM evidence_records
+WHERE tenant_id = $1 AND evidence_kind = $2`, tenant, securityawareness.EvidenceKindTrainingCompletion)
+	if err != nil {
+		t.Fatalf("query ledger: %v", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]ledgerRecord{}
+	for rows.Next() {
+		var r ledgerRecord
+		var raw []byte
+		if err := rows.Scan(&r.ID, &r.ControlID, &r.ObservedAt, &raw); err != nil {
+			t.Fatalf("scan ledger: %v", err)
+		}
+		if err := json.Unmarshal(raw, &r.Payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		out[r.ID] = r
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("ledger rows: %v", err)
+	}
+	return out
+}
+
+func assignmentEvidenceID(t *testing.T, admin *pgxpool.Pool, tenant string, id uuid.UUID) *uuid.UUID {
+	t.Helper()
+	var out *uuid.UUID
+	if err := admin.QueryRow(context.Background(), `
+SELECT evidence_record_id FROM security_training_assignments WHERE tenant_id = $1 AND id = $2`,
+		tenant, id).Scan(&out); err != nil {
+		t.Fatalf("assignment evidence id: %v", err)
+	}
+	return out
 }
 
 func tenantCtx(t *testing.T, tenant string) context.Context {
@@ -46,7 +112,7 @@ func TestAssignmentCompletionRollupReminderAndEvidence(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
-	store := securityawareness.NewStore(app)
+	store := newStore(t, admin, app)
 
 	person1, err := store.UpsertPerson(ctx, securityawareness.UpsertPersonInput{
 		Source:          securityawareness.PersonSourceManual,
@@ -109,16 +175,37 @@ func TestAssignmentCompletionRollupReminderAndEvidence(t *testing.T) {
 		AssignmentID: a1.ID,
 		CompletedAt:  completedAt,
 		Source:       securityawareness.CompletionSourceManual,
-	})
+	}, "alice-user")
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	rec, err := securityawareness.BuildCompletionEvidence(completed, "alice-user")
-	if err != nil {
-		t.Fatalf("BuildCompletionEvidence: %v", err)
+	// #2941: the completion's evidence is in the ledger, and the assignment
+	// points at it.
+	if completed.EvidenceRecordID == nil {
+		t.Fatal("Complete returned no evidence record id")
 	}
-	if rec.GetEvidenceKind() != securityawareness.EvidenceKindTrainingCompletion {
-		t.Fatalf("evidence kind = %q", rec.GetEvidenceKind())
+	if got := assignmentEvidenceID(t, admin, tenant, a1.ID); got == nil || *got != *completed.EvidenceRecordID {
+		t.Fatalf("assignment evidence_record_id = %v, want %s", got, *completed.EvidenceRecordID)
+	}
+	ledger := trainingLedger(t, admin, tenant)
+	rec, ok := ledger[*completed.EvidenceRecordID]
+	if !ok || len(ledger) != 1 {
+		t.Fatalf("ledger = %+v, want exactly the completion's record", ledger)
+	}
+	if rec.Payload["completed_at"] != completedAt.Format(time.RFC3339Nano) || rec.Payload["completion_source"] != securityawareness.CompletionSourceManual {
+		t.Fatalf("ledger payload = %+v", rec.Payload)
+	}
+	// Completing again at the same instant writes nothing new.
+	again, err := store.Complete(ctx, securityawareness.CompleteInput{
+		AssignmentID: a1.ID,
+		CompletedAt:  completedAt,
+		Source:       securityawareness.CompletionSourceManual,
+	}, "alice-user")
+	if err != nil {
+		t.Fatalf("Complete again: %v", err)
+	}
+	if again.EvidenceRecordID == nil || *again.EvidenceRecordID != *completed.EvidenceRecordID || len(trainingLedger(t, admin, tenant)) != 1 {
+		t.Fatalf("repeat Complete wrote a second record: %v", again.EvidenceRecordID)
 	}
 
 	asOf := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
@@ -253,7 +340,7 @@ func TestRosterSyncUpsertsDeactivatesAndIsIdempotent(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := rosterTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
-	store := securityawareness.NewStore(app)
+	store := newStore(t, admin, app)
 	syncer := securityawareness.NewRosterSyncer(admin, app, nil)
 
 	day1 := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
@@ -430,7 +517,7 @@ func TestRLSIsolationAcrossTenants(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
-	store := securityawareness.NewStore(app)
+	store := newStore(t, admin, app)
 
 	ctxA := tenantCtx(t, tenantA)
 	ctxB := tenantCtx(t, tenantB)
@@ -543,7 +630,7 @@ func TestImportCompletionsCSVHappyPath(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
-	store := securityawareness.NewStore(app)
+	store := newStore(t, admin, app)
 	fx := seedCampaignFixture(t, ctx, store, "happy.test")
 
 	csv := strings.Join([]string{
@@ -558,19 +645,29 @@ func TestImportCompletionsCSVHappyPath(t *testing.T) {
 	if report.Imported != 2 || report.AlreadyComplete != 0 || report.Failed != 0 {
 		t.Fatalf("report = %+v, want 2 imported", report)
 	}
+	ledger := trainingLedger(t, admin, tenant)
 	for _, res := range report.Results {
 		if res.Status != securityawareness.RowImported {
 			t.Fatalf("row %d status = %s: %s", res.Row, res.Status, res.Error)
 		}
-		if res.Evidence == nil {
-			t.Fatalf("row %d missing evidence record", res.Row)
+		rec, ok := ledger[res.EvidenceRecordID]
+		if !ok {
+			t.Fatalf("row %d evidence record %s not in the ledger", res.Row, res.EvidenceRecordID)
 		}
-		if res.Evidence.GetEvidenceKind() != securityawareness.EvidenceKindTrainingCompletion {
-			t.Fatalf("row %d evidence kind = %q", res.Row, res.Evidence.GetEvidenceKind())
-		}
-		if got := res.Evidence.GetPayload().AsMap()["completion_source"]; got != securityawareness.CompletionSourceCSV {
+		if got := rec.Payload["completion_source"]; got != securityawareness.CompletionSourceCSV {
 			t.Fatalf("row %d evidence completion_source = %v, want csv", res.Row, got)
 		}
+		// The completions are months old; observed_at is the import
+		// instant, so ingest's 24h skew check accepts them.
+		if time.Since(rec.ObservedAt) > time.Hour {
+			t.Fatalf("row %d observed_at = %s, want the import instant", res.Row, rec.ObservedAt)
+		}
+		if got := assignmentEvidenceID(t, admin, tenant, res.AssignmentID); got == nil || *got != res.EvidenceRecordID {
+			t.Fatalf("row %d assignment evidence_record_id = %v, want %s", res.Row, got, res.EvidenceRecordID)
+		}
+	}
+	if len(ledger) != 2 {
+		t.Fatalf("ledger has %d training records, want 2", len(ledger))
 	}
 	for name, id := range fx {
 		completedAt, source := assignmentState(t, admin, tenant, id)
@@ -594,7 +691,7 @@ func TestImportCompletionsCSVUnresolvableRowsDoNotFailBatch(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
-	store := securityawareness.NewStore(app)
+	store := newStore(t, admin, app)
 	fx := seedCampaignFixture(t, ctx, store, "unresolvable.test")
 
 	csv := strings.Join([]string{
@@ -638,7 +735,7 @@ func TestImportCompletionsCSVIdempotentReimport(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
-	store := securityawareness.NewStore(app)
+	store := newStore(t, admin, app)
 	fx := seedCampaignFixture(t, ctx, store, "idem.test")
 
 	csv := strings.Join([]string{
@@ -661,6 +758,9 @@ func TestImportCompletionsCSVIdempotentReimport(t *testing.T) {
 	}
 	if second.Imported != 0 || second.AlreadyComplete != 2 || second.Failed != 0 {
 		t.Fatalf("second report = %+v, want all already_complete", second)
+	}
+	if n := len(trainingLedger(t, admin, tenant)); n != 2 {
+		t.Fatalf("re-import left %d ledger records, want 2", n)
 	}
 	aliceCompleted2, source := assignmentState(t, admin, tenant, fx["alice"])
 	if !aliceCompleted1.Equal(*aliceCompleted2) || *source != securityawareness.CompletionSourceCSV {
@@ -699,7 +799,7 @@ func TestImportCompletionsCSVRLSIsolation(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
-	store := securityawareness.NewStore(app)
+	store := newStore(t, admin, app)
 	ctxA := tenantCtx(t, tenantA)
 	ctxB := tenantCtx(t, tenantB)
 	fxA := seedCampaignFixture(t, ctxA, store, "tenant-a.test")
