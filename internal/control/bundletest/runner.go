@@ -50,6 +50,9 @@ type Report struct {
 	Passed   int          `json:"passed"`
 	Failed   int          `json:"failed"`
 	Errored  int          `json:"errored"`
+	// Warnings are cases that run but cannot show what they are meant to
+	// (KindlessRecordWarnings). They do not fail the run.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // AllPassed reports whether every case passed (no failures, no errors). The CLI
@@ -98,7 +101,7 @@ func Run(ctx context.Context, bundleDir string, opts Options) (*Report, error) {
 		now = time.Now().UTC()
 	}
 
-	report := &Report{BundleID: bundle.Manifest.BundleID, Cases: make([]CaseResult, 0, len(cases))}
+	report := &Report{BundleID: bundle.Manifest.BundleID, Cases: make([]CaseResult, 0, len(cases)), Warnings: KindlessRecordWarnings(queries, cases)}
 	for i := range cases {
 		cr := runCase(ctx, &cases[i], queries, freshnessClass, now, opts.Tx)
 		report.Cases = append(report.Cases, cr)

@@ -21,6 +21,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/mgoodric/security-atlas/internal/control"
@@ -320,6 +321,58 @@ func TestGate_NoTestsAcceptedWithWarning(t *testing.T) {
 	}
 	if up.GateWarning == "" {
 		t.Fatalf("a no-tests bundle should carry a gate warning; body=%s", raw)
+	}
+}
+
+// #2882: a green upload of a bundle whose queries read two kinds, with a
+// fixture record that omits evidence_kind, still carries the lint warning.
+// That record reaches both queries in the test and neither kinded query
+// live, so a green gate is exactly where the author needs to see it.
+func TestGate_GreenTwoKindBundleWarnsOnKindlessRecord(t *testing.T) {
+	s := setupHTTP(t)
+	manifest := `bundle_schema_version: "1"
+bundle_id: gate_it_two_kinds
+title: "Two kinds (gate IT)"
+scf_anchor_id: IAC-37
+implementation_type: automated
+freshness_class: daily
+evidence_queries:
+  - id: slack
+    language: jsonpath
+    evidence_kind: slack.retention_settings.v1
+    expression: "$.encrypted"
+  - id: upload
+    language: jsonpath
+    evidence_kind: manual.upload.v1
+    expression: "$.encrypted"
+`
+	tests := `cases:
+  - name: kindless-record
+    expected_state: pass
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+        payload: { encrypted: true }
+`
+	code, raw := postGateTarball(t, s, gateTarball(t, manifest, map[string]string{"t.yaml": tests}))
+	if code != http.StatusCreated && code != http.StatusOK {
+		t.Fatalf("expected the green bundle to upload; got %d body=%s", code, raw)
+	}
+	var up struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(raw, &up); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	found := false
+	for _, w := range up.Warnings {
+		if strings.Contains(w, `test case "kindless-record": records[0] omit evidence_kind`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("green upload dropped the kindless-record warning; body=%s", raw)
 	}
 }
 

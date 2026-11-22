@@ -119,3 +119,36 @@ func TestControlsValidate_WarnsOnQueryWithoutEvidenceKind(t *testing.T) {
 		t.Errorf("kinded query warned:\n%s", out)
 	}
 }
+
+// #2882: a fixture record without evidence_kind, in a bundle whose queries
+// read two kinds, reaches both queries in the test and neither live.
+func TestControlsValidate_WarnsOnKindlessFixtureRecordInTwoKindBundle(t *testing.T) {
+	dir := writeBundle(t, "IAC-06", "2025.2")
+	path := filepath.Join(dir, "control.yaml")
+	y, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y = append(y, []byte("evidence_queries:\n"+
+		"  - id: one\n    language: jsonpath\n    evidence_kind: okta.mfa_policy.v1\n    expression: \"$.a\"\n"+
+		"  - id: two\n    language: jsonpath\n    evidence_kind: manual.upload.v1\n    expression: \"$.b\"\n")...)
+	if err := os.WriteFile(path, y, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "tests"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cases := "cases:\n" +
+		"  - name: kinded\n    expected_state: pass\n    records:\n      - result: pass\n        evidence_kind: manual.upload.v1\n" +
+		"  - name: kindless\n    expected_state: pass\n    records:\n      - result: pass\n        evidence_kind: manual.upload.v1\n      - result: pass\n"
+	if err := os.WriteFile(filepath.Join(dir, "tests", "t.yaml"), []byte(cases), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := runValidate(t, dir)
+	if !strings.Contains(out, `WARN test case "kindless": records[1] omit evidence_kind`) {
+		t.Errorf("kindless fixture record not warned:\n%s", out)
+	}
+	if strings.Contains(out, `"kinded"`) {
+		t.Errorf("kinded case warned:\n%s", out)
+	}
+}

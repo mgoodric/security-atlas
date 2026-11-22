@@ -212,6 +212,9 @@ func renderTestReportText(out io.Writer, rep *bundletest.Report) {
 			_, _ = fmt.Fprintf(out, "  FAIL  %s (expected=%s actual=%s)\n", c.Name, c.ExpectedState, c.ActualState)
 		}
 	}
+	for _, w := range rep.Warnings {
+		_, _ = fmt.Fprintf(out, "  WARN  %s\n", w)
+	}
 	_, _ = fmt.Fprintf(out, "%d passed, %d failed, %d errored of %d\n",
 		rep.Passed, rep.Failed, rep.Errored, len(rep.Cases))
 }
@@ -293,10 +296,38 @@ func validateBundle(out io.Writer, path string, catalogs []string) error {
 	for _, w := range bundle.Manifest.UnkindedQueryWarnings() {
 		_, _ = fmt.Fprintf(out, "    WARN %s\n", w)
 	}
+	fixtureWarnings, err := kindlessFixtureWarnings(path, bundle)
+	if err != nil {
+		return err
+	}
+	for _, w := range fixtureWarnings {
+		_, _ = fmt.Fprintf(out, "    WARN %s\n", w)
+	}
 	if err := bundle.ValidateApplicabilityExpr(); err != nil {
 		return err
 	}
 	return reportSCFRelease(out, &bundle.Manifest, catalogs)
+}
+
+// kindlessFixtureWarnings loads the bundle's test cases (tests/ beside a
+// directory's control.yaml, or the tarball's tests/*.yaml) and returns
+// bundletest.KindlessRecordWarnings for them (#2882).
+func kindlessFixtureWarnings(path string, bundle *control.Bundle) ([]string, error) {
+	var cases []bundletest.TestCase
+	var err error
+	if info, serr := os.Stat(path); serr == nil && info.IsDir() {
+		cases, err = bundletest.LoadTestCases(path)
+	} else {
+		cases, err = bundletest.LoadTestCasesFromFiles(bundle.TestFiles)
+	}
+	if err != nil {
+		return nil, err
+	}
+	qs := make([]bundletest.ManifestQuery, 0, len(bundle.Manifest.EvidenceQueries))
+	for _, q := range bundle.Manifest.EvidenceQueries {
+		qs = append(qs, bundletest.ManifestQuery{Language: q.Language, Expression: q.Expression, EvidenceKind: q.EvidenceKind})
+	}
+	return bundletest.KindlessRecordWarnings(bundletest.QueriesFromManifest(qs), cases), nil
 }
 
 // bundlePathsUnder returns path itself unless it is a directory without a
