@@ -3,7 +3,7 @@
 // Three emitters, three key shapes — all prefixed with the evidence kind so
 // keys never collide across modes:
 //
-//   - LocalRowKey: sha256("manual.upload|" + file_path + "|" + row + "|" + hour)
+//   - LocalRowKey: sha256("manual.upload|" + file_path + "|" + row + "|" + sha256(row_json))
 //   - S3ObjectKey: sha256("manual.upload|" + bucket + "|" + key + "|" + etag)
 //   - SFTPFileKey: sha256("manual.upload|" + host + "|" + path + "|" + mtime)
 //
@@ -20,13 +20,15 @@ import (
 
 const evidenceKind = "manual.upload"
 
-// LocalRowKey returns the idempotency key for a (file_path, row_index,
-// observed_at) tuple. observed_at is truncated to the hour in UTC so two
-// runs within the same hour produce identical keys (matches the
-// connectors/aws + connectors/github convention).
-func LocalRowKey(filePath string, rowIndex int, observedAt time.Time) string {
-	hour := observedAt.UTC().Truncate(time.Hour).Format(time.RFC3339)
-	return sha256Hex(evidenceKind + "|" + filePath + "|" + strconv.Itoa(rowIndex) + "|" + hour)
+// LocalRowKey returns the idempotency key for a CSV row: its file path,
+// its index and the sha256 of its encoded content. The row's content is
+// the freshness discriminator, the way the etag is for S3 and mtime for
+// SFTP: a re-run over an unchanged file reproduces every key, so the
+// first push's observed_at stands, and an edited row gets a new key.
+// The key carried the run hour before #2940, which made every hourly
+// re-run write each row again with a fresh observed_at.
+func LocalRowKey(filePath string, rowIndex int, rowJSON []byte) string {
+	return sha256Hex(evidenceKind + "|" + filePath + "|" + strconv.Itoa(rowIndex) + "|" + sha256Hex(string(rowJSON)))
 }
 
 // S3ObjectKey returns the idempotency key for an S3 object. The etag is the
