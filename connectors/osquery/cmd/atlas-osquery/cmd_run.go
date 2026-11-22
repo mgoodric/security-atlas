@@ -30,6 +30,9 @@ type runFlags struct {
 	hostPostureCtl string
 	firewallPolicy string
 	screenLockPol  string
+	antimalwarePol string
+	edrPolicy      string
+	prodLabel      string
 }
 
 // ErrLocalSocketNotWired is returned when --mode=local is selected. The
@@ -66,6 +69,20 @@ and --screenlock-policy; each host's pass/fail result for that policy
 becomes firewall_enabled / screen_lock_enabled. Without the flag, or when
 a host has no result for the policy, the field is omitted.
 
+Antimalware and EDR (fleet mode): likewise no Fleet field. Name a Fleet
+policy with --antimalware-policy (pass = anti-malware active with current
+definitions) and --edr-policy (pass = EDR installed, running and healthy);
+the policy's query is what defines both. They become
+antimalware_protected / edr_healthy.
+
+Host role (fleet mode): name a Fleet label with --production-label; a host
+carrying it is pushed with host_role=production. Hosts without the label
+carry no host_role.
+
+Capacity (fleet mode): disk_used_percent comes from Fleet's
+percent_disk_space_available. Fleet reports no memory or CPU use, so
+neither is pushed.
+
 Auth: set FLEET_API_TOKEN in the process environment for fleet mode. The
 local mode dials a Unix socket; the root-owned socket's filesystem
 permission is the security boundary (no token).
@@ -91,8 +108,8 @@ Fleet roles required (least-privilege):
 				if f.osqueryDSocket == "" {
 					return errors.New("--osqueryd-socket is required for --mode=local")
 				}
-				if f.firewallPolicy != "" || f.screenLockPol != "" {
-					return errors.New("--firewall-policy and --screenlock-policy name Fleet policies; they apply to --mode=fleet only")
+				if f.firewallPolicy != "" || f.screenLockPol != "" || f.antimalwarePol != "" || f.edrPolicy != "" || f.prodLabel != "" {
+					return errors.New("--firewall-policy, --screenlock-policy, --antimalware-policy, --edr-policy and --production-label name Fleet policies and labels; they apply to --mode=fleet only")
 				}
 			default:
 				return fmt.Errorf("--mode=%q invalid; want fleet or local", f.mode)
@@ -111,6 +128,9 @@ Fleet roles required (least-privilege):
 	cmd.Flags().StringVar(&f.hostPostureCtl, "host-posture-control", "", "control_id to attach to osquery.host_posture.v1 records; empty (the default) routes each record to every control that queries osquery.host_posture.v1 (#2924)")
 	cmd.Flags().StringVar(&f.firewallPolicy, "firewall-policy", "", "exact name of the Fleet policy whose per-host result is firewall_enabled (mode=fleet)")
 	cmd.Flags().StringVar(&f.screenLockPol, "screenlock-policy", "", "exact name of the Fleet policy whose per-host result is screen_lock_enabled (mode=fleet)")
+	cmd.Flags().StringVar(&f.antimalwarePol, "antimalware-policy", "", "exact name of the Fleet policy whose per-host result is antimalware_protected (mode=fleet)")
+	cmd.Flags().StringVar(&f.edrPolicy, "edr-policy", "", "exact name of the Fleet policy whose per-host result is edr_healthy (mode=fleet)")
+	cmd.Flags().StringVar(&f.prodLabel, "production-label", "", "exact name of the Fleet label that marks a host host_role=production (mode=fleet)")
 	// --token accepted for ad-hoc shells but env-var is the documented
 	// preferred path so the secret never reaches shell history.
 	cmd.Flags().StringVar(&f.token, "token-env-only-do-not-pass-on-cli", "", "")
@@ -140,8 +160,11 @@ func doRun(ctx context.Context, f runFlags) error {
 		httpClient := &http.Client{Timeout: 20 * time.Second}
 		api := osqueryposture.NewFleetClient(httpClient, f.fleetBaseURL, creds)
 		rows, err = osqueryposture.PullFromFleet(ctx, api, nil, osqueryposture.FleetPolicies{
-			Firewall:   f.firewallPolicy,
-			ScreenLock: f.screenLockPol,
+			Firewall:        f.firewallPolicy,
+			ScreenLock:      f.screenLockPol,
+			Antimalware:     f.antimalwarePol,
+			EDR:             f.edrPolicy,
+			ProductionLabel: f.prodLabel,
 		})
 		if err != nil {
 			return fmt.Errorf("fleet pull: %w", err)
@@ -219,6 +242,26 @@ func buildHostPostureRecord(p osqueryposture.HostPosture, org, env, controlID st
 	if p.ScreenLockEnabled != nil && p.ScreenLockSource != "" {
 		pm["screen_lock_source"] = p.ScreenLockSource
 	}
+	// 1.3.0 (#2826): antimalware and EDR come only from named Fleet
+	// policies, host role only from a named Fleet label. Schema 1.3.0
+	// rejects a *_source without its value (dependentRequired).
+	putBool(pm, "antimalware_protected", p.AntimalwareProtected)
+	if p.AntimalwareProtected != nil && p.AntimalwareSource != "" {
+		pm["antimalware_source"] = p.AntimalwareSource
+	}
+	putBool(pm, "edr_healthy", p.EDRHealthy)
+	if p.EDRHealthy != nil && p.EDRSource != "" {
+		pm["edr_source"] = p.EDRSource
+	}
+	if p.HostRole != "" {
+		pm["host_role"] = p.HostRole
+		if p.HostRoleSource != "" {
+			pm["host_role_source"] = p.HostRoleSource
+		}
+	}
+	if p.DiskUsedPercent != nil {
+		pm["disk_used_percent"] = *p.DiskUsedPercent
+	}
 	// last_seen_at (1.1.0) is the host's own last check-in, so a check can
 	// tell an offline host from a fresh one. observed_at stays the pull
 	// time: ingest rejects an observed_at more than 24h from receipt.
@@ -270,8 +313,10 @@ func buildHostPostureRecord(p osqueryposture.HostPosture, org, env, controlID st
 
 // HostPostureSchemaVersion is the osquery.host_posture.v1 schema the
 // connector pushes. 1.1.0 adds last_seen_at and reason (#2912); 1.2.0 adds
-// firewall_source and screen_lock_source (#2921).
-const HostPostureSchemaVersion = "1.2.0"
+// firewall_source and screen_lock_source (#2921); 1.3.0 adds
+// disk_used_percent, host_role, antimalware_protected and edr_healthy with
+// their sources (#2826).
+const HostPostureSchemaVersion = "1.3.0"
 
 func putBool(pm map[string]any, key string, b *bool) {
 	if b != nil {

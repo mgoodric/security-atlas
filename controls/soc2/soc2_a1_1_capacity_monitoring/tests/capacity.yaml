@@ -1,0 +1,452 @@
+# osquery.host_posture.v1 records at schema 1.3.0, shaped as the osquery
+# connector emits them (connectors/osquery/cmd/atlas-osquery/cmd_run.go
+# buildHostPostureRecord) plus the memory_used_percent and
+# cpu_p95_5m_percent another pusher would add: a field is present only when
+# it was read. `result` is the connector's own verdict, disk encryption plus
+# screen lock, which the query ignores.
+cases:
+  - name: every-production-host-under-passes
+    description: a non-production host over every bound is not counted
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 40
+          memory_used_percent: 50
+          cpu_p95_5m_percent: 20
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: api-2
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 84.9
+          memory_used_percent: 89.9
+          cpu_p95_5m_percent: 89.9
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: build-1
+          platform: linux
+          disk_used_percent: 99
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+
+  - name: disk-at-85-fails
+    description: 85 is not under 85
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 85
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: api-2
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+
+  - name: memory-at-90-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          memory_used_percent: 90
+          cpu_p95_5m_percent: 10
+
+  - name: cpu-at-90-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 90
+
+  - name: fleet-shape-under-is-inconclusive
+    description: Fleet supplies disk only, so memory and CPU are unread
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 29
+
+  - name: fleet-shape-disk-over-fails
+    description: a disk reading over the bound fails even with memory and CPU unread
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 91
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: api-2
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 20
+          memory_used_percent: 20
+          cpu_p95_5m_percent: 20
+
+  - name: unread-host-plus-passing-host-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 20
+          memory_used_percent: 20
+          cpu_p95_5m_percent: 20
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: api-2
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+
+  - name: no-production-host-is-inconclusive
+    description: no host carries host_role production
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          disk_used_percent: 99
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: api-2
+          platform: linux
+          disk_used_percent: 10
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+
+  - name: non-number-reading-fails
+    description: a reading that is present but not a number counts as over
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: "12"
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+
+  - name: null-reading-fails
+    description: a JSON null is present, so it counts as over, not unread
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          cpu_p95_5m_percent: 10
+          memory_used_percent: null
+
+  - name: latest-record-per-host-decides
+    description: disk was freed after an earlier in-window record had it full
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 95
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 50
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+
+  - name: last-seen-decides-before-observed-at
+    description: the later pull carries an older host check-in
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 95
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          last_seen_at: 2026-11-21T05:00:00Z
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 50
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          last_seen_at: 2026-11-21T03:00:00Z
+
+  - name: latest-record-without-role-is-not-production
+    description: the host's label was removed; its older production record is not used
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T01:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 95
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T09:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          disk_used_percent: 95
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+
+  - name: tie-with-any-over-fails
+    description: two latest records with equal times disagree
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          last_seen_at: 2026-11-21T05:00:00Z
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 90
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          last_seen_at: 2026-11-21T05:00:00Z
+
+  - name: tie-with-under-and-unread-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+
+  - name: record-without-host-uuid-is-left-out
+    description: the over records have no host_uuid, so the identified host passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          hostname: nobody
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 99
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: ""
+          hostname: nobody
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 99
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+
+  - name: only-records-without-host-uuid-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          hostname: nobody
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 10
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z

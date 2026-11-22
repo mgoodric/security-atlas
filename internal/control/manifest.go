@@ -141,26 +141,14 @@ var allowedLifecycleStates = map[string]struct{}{
 	"retired":    {},
 }
 
-// unmappedFreshnessClasses are the classes a bundle may declare although the
-// evaluation engine has no window for them, so they fall back to the 90-day
-// default. Every other allowed class comes from eval's freshness table, the
-// single source: a class the engine cannot map is refused at parse and
-// upload instead of silently widening to 90 days (#2896).
-//
-// `hourly`: unmapped; removed with a1_1's supersede in #2826. Do not add to
-// this set.
-var unmappedFreshnessClasses = map[string]struct{}{
-	"hourly": {},
-}
-
-// isAllowedFreshnessClass reports whether a bundle may declare class: eval's
-// freshness table maps it, or it is a named unmapped exception.
+// isAllowedFreshnessClass reports whether a bundle may declare class: only
+// a class eval's freshness table maps, the single source. A class the engine
+// cannot map is refused at parse and upload instead of silently widening to
+// the 90-day fallback (#2896). The one exception, `hourly` on soc2_a1_1, was
+// removed when a1_1 moved to `realtime` (#2826).
 func isAllowedFreshnessClass(class string) bool {
-	if _, known := eval.FreshnessMaxAge(class); known {
-		return true
-	}
-	_, ok := unmappedFreshnessClasses[class]
-	return ok
+	_, known := eval.FreshnessMaxAge(class)
+	return known
 }
 
 var allowedQueryLanguages = map[string]struct{}{

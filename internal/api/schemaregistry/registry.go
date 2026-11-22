@@ -112,6 +112,9 @@ func DefaultSeed() []KindVersion {
 		// #2921: 1.2.0 adds firewall_source + screen_lock_source, read from
 		// operator-named Fleet policies.
 		{Kind: "osquery.host_posture.v1", Version: "1.2.0"},
+		// #2826: 1.3.0 adds capacity, host_role, antimalware and EDR, and
+		// makes each *_source present only alongside its value.
+		{Kind: "osquery.host_posture.v1", Version: "1.3.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
 		{Kind: "change.approval.v1", Version: "1.0.0"},
 		{Kind: "change.verification.v1", Version: "1.0.0"},
