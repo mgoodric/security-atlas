@@ -71,19 +71,45 @@ type ProtectionState struct {
 type API interface {
 	ListOrgRepos(ctx context.Context, org string) ([]Repo, error)
 	GetBranchProtection(ctx context.Context, repoFullName, branch string) (*BranchProtection, error)
+	GetBranch(ctx context.Context, repoFullName, branch string) (*Branch, error)
 	GetBranchRules(ctx context.Context, repoFullName, branch string) ([]BranchRule, error)
 	GetRuleset(ctx context.Context, repoFullName string, rulesetID int64) (*Ruleset, error)
 }
 
 // Repo is the subset of GET /orgs/{org}/repos we consume. ID is GitHub's
 // stable repository id; it survives a rename, full_name does not.
+// Permissions are the caller's own on the repository. GitHub's schema
+// marks the object optional, so nil means not reported.
 type Repo struct {
-	ID            int64  `json:"id"`
-	FullName      string `json:"full_name"`
-	DefaultBranch string `json:"default_branch"`
-	Private       bool   `json:"private"`
-	Archived      bool   `json:"archived"`
+	ID            int64            `json:"id"`
+	FullName      string           `json:"full_name"`
+	DefaultBranch string           `json:"default_branch"`
+	Private       bool             `json:"private"`
+	Archived      bool             `json:"archived"`
+	Permissions   *RepoPermissions `json:"permissions,omitempty"`
 }
+
+// RepoPermissions is the subset of a minimal-repository's permissions
+// object we consume.
+type RepoPermissions struct {
+	Admin bool `json:"admin"`
+}
+
+// Branch is the subset of GET /repos/{owner}/{repo}/branches/{branch} we
+// consume.
+type Branch struct {
+	Protected *bool `json:"protected"`
+}
+
+// ErrBranchNotProtected is GetBranchProtection's answer when GitHub's 404
+// says the branch has no classic protection, as opposed to a 404 for a
+// repository or branch the token can't see.
+var ErrBranchNotProtected = errors.New("github: branch not protected")
+
+// branchNotProtected is the message of that 404. GitHub's REST description
+// documents the 404 only as not_found and doesn't give this text, so a 404
+// without it is cross-checked against GET .../branches/{b} (#2933).
+const branchNotProtected = "Branch not protected"
 
 // PullRequestReviews is the required_pull_request_reviews object of
 // GET /repos/{owner}/{repo}/branches/{branch}/protection.
@@ -135,12 +161,19 @@ type pullRequestRuleParams struct {
 
 // Ruleset is the subset of GET /repos/{owner}/{repo}/rulesets/{id} we
 // consume. GitHub returns bypass_actors only to a caller with write access
-// to the ruleset, so a nil BypassActors means "not readable", and an empty
-// non-nil slice means "nobody bypasses".
+// to the ruleset, and doesn't say whether it omits the field or sends []
+// to anyone else. bypassActorsRead decides which lists are GitHub's
+// answer. current_user_can_bypass is no evidence of write access: GitHub
+// returns it to any caller of the repository-level endpoint.
 type Ruleset struct {
 	ID           int64          `json:"id"`
+	SourceType   string         `json:"source_type,omitempty"`
 	BypassActors *[]BypassActor `json:"bypass_actors,omitempty"`
 }
+
+// sourceTypeRepository is the repository-ruleset source_type of a ruleset
+// configured on the repository itself.
+const sourceTypeRepository = "Repository"
 
 // BypassActor is one element of a ruleset's bypass_actors.
 type BypassActor struct {
@@ -204,11 +237,18 @@ func inspectRepo(ctx context.Context, api API, r Repo, observedAt time.Time) Pro
 		return state
 	}
 
-	// GitHub documents only 200 and 404 for this endpoint, and 404 means
-	// no classic protection on the branch. A ruleset may still protect it.
+	// GitHub documents only 200 and 404 for this endpoint, and returns 404
+	// both for a branch without classic protection and for a token that
+	// can't read it. Only the first means no classic protection; a ruleset
+	// may still protect the branch.
 	classic, err := api.GetBranchProtection(ctx, r.FullName, r.DefaultBranch)
 	switch {
+	case errors.Is(err, ErrBranchNotProtected):
+		classic = nil
 	case isNotFound(err):
+		if !branchUnprotected(ctx, api, r) {
+			return unread("branch protection", err)
+		}
 		classic = nil
 	case err != nil:
 		return unread("branch protection", err)
@@ -228,7 +268,7 @@ func inspectRepo(ctx context.Context, api API, r Repo, observedAt time.Time) Pro
 	state.RequireSignedCommits = &m.signed
 	state.RequireLinearHistory = &m.linear
 	state.EnforceAdmins = m.enforceAdmins(func(id int64) (bool, bool) {
-		return rulesetBindsAdmins(ctx, api, r.FullName, id)
+		return rulesetBindsAdmins(ctx, api, r, id)
 	})
 	state.ProtectionSource = m.source()
 
@@ -310,15 +350,23 @@ func (m merged) source() string {
 	}
 }
 
+// branchUnprotected cross-checks a classic-protection 404 that isn't
+// GitHub's "Branch not protected": true only when GET .../branches/{b}
+// reads protected=false. Any other answer leaves the 404 unexplained.
+func branchUnprotected(ctx context.Context, api API, r Repo) bool {
+	b, err := api.GetBranch(ctx, r.FullName, r.DefaultBranch)
+	return err == nil && b != nil && b.Protected != nil && !*b.Protected
+}
+
 // rulesetBindsAdmins reads whether a ruleset's rules bind admins: no
 // bypass actor may be an admin. ok is false when that can't be read (an
-// error, a missing id, or GitHub withholding bypass_actors).
-func rulesetBindsAdmins(ctx context.Context, api API, repo string, id int64) (binds, ok bool) {
+// error, a missing id, or bypass_actors withheld or not provably read).
+func rulesetBindsAdmins(ctx context.Context, api API, repo Repo, id int64) (binds, ok bool) {
 	if id == 0 {
 		return false, false
 	}
-	rs, err := api.GetRuleset(ctx, repo, id)
-	if err != nil || rs == nil || rs.BypassActors == nil {
+	rs, err := api.GetRuleset(ctx, repo.FullName, id)
+	if err != nil || rs == nil || !bypassActorsRead(rs, repo) {
 		return false, false
 	}
 	for _, a := range *rs.BypassActors {
@@ -327,6 +375,23 @@ func rulesetBindsAdmins(ctx context.Context, api API, repo string, id int64) (bi
 		}
 	}
 	return true, true
+}
+
+// bypassActorsRead reports whether rs.BypassActors is GitHub's answer
+// rather than a withheld one. A non-empty list is, since GitHub sends one
+// only to a caller with write access. An empty list may be either, so it
+// counts only for a repository ruleset on a repository the caller
+// administers: repository admins can edit its rulesets. An empty list on
+// an organization or enterprise ruleset stays unread (#2933).
+func bypassActorsRead(rs *Ruleset, repo Repo) bool {
+	switch {
+	case rs.BypassActors == nil:
+		return false
+	case len(*rs.BypassActors) > 0:
+		return true
+	default:
+		return rs.SourceType == sourceTypeRepository && repo.Permissions != nil && repo.Permissions.Admin
+	}
 }
 
 // enforceAdmins reports whether a required approving review binds admins:
@@ -421,8 +486,8 @@ func (c *Client) ListOrgRepos(ctx context.Context, org string) ([]Repo, error) {
 }
 
 // GetBranchProtection returns the classic protection of one branch. A 404
-// indicates no classic protection, and is surfaced through APIError so
-// the caller can distinguish it from other errors.
+// whose message is "Branch not protected" returns ErrBranchNotProtected;
+// any other 404 is an APIError carrying the body.
 func (c *Client) GetBranchProtection(ctx context.Context, repoFullName, branch string) (*BranchProtection, error) {
 	if repoFullName == "" || branch == "" {
 		return nil, errors.New("githubrepo: repo + branch required")
@@ -430,9 +495,27 @@ func (c *Client) GetBranchProtection(ctx context.Context, repoFullName, branch s
 	u := fmt.Sprintf("%s/repos/%s/branches/%s/protection", c.BaseURL, repoFullName, url.PathEscape(branch))
 	var bp BranchProtection
 	if err := c.getJSON(ctx, u, &bp, "protection"); err != nil {
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Status == http.StatusNotFound && errorMessage(ae.Body) == branchNotProtected {
+			return nil, ErrBranchNotProtected
+		}
 		return nil, err
 	}
 	return &bp, nil
+}
+
+// GetBranch returns one branch, whose protected flag cross-checks a
+// classic-protection 404.
+func (c *Client) GetBranch(ctx context.Context, repoFullName, branch string) (*Branch, error) {
+	if repoFullName == "" || branch == "" {
+		return nil, errors.New("githubrepo: repo + branch required")
+	}
+	u := fmt.Sprintf("%s/repos/%s/branches/%s", c.BaseURL, repoFullName, url.PathEscape(branch))
+	var b Branch
+	if err := c.getJSON(ctx, u, &b, "branch"); err != nil {
+		return nil, err
+	}
+	return &b, nil
 }
 
 // GetBranchRules returns every active ruleset rule that applies to the
@@ -478,9 +561,6 @@ func (c *Client) getJSON(ctx context.Context, u string, into any, what string) e
 		return err
 	}
 	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode == http.StatusNotFound {
-		return &APIError{Status: http.StatusNotFound}
-	}
 	if res.StatusCode != http.StatusOK {
 		return &APIError{Status: res.StatusCode, Body: drain(res.Body)}
 	}
@@ -586,6 +666,17 @@ func isNotFound(err error) bool {
 		return ae.Status == http.StatusNotFound
 	}
 	return false
+}
+
+// errorMessage is the message field of a GitHub error body, or "".
+func errorMessage(body string) string {
+	var e struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(body), &e) != nil {
+		return ""
+	}
+	return e.Message
 }
 
 func drain(r io.Reader) string {

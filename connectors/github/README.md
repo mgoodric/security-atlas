@@ -17,12 +17,13 @@ Slice 044 supports two auth modes:
 
 The PAT must grant exactly these read-only scopes — and no more. The `atlas-github scopes` subcommand prints this list at runtime.
 
-| Token kind       | Permission                 | Access | Gates                                                                                         |
-| ---------------- | -------------------------- | ------ | --------------------------------------------------------------------------------------------- |
-| Fine-grained PAT | Repository: Administration | Read   | `github.repo_protection.v2` (branch protection rules and rulesets)                            |
-| Fine-grained PAT | Repository: Metadata       | Read   | Listing repos under the org                                                                   |
-| Fine-grained PAT | Organization: Members      | Read   | `github.scim_user.v1` (falls back to org membership when SCIM is unavailable)                 |
-| Fine-grained PAT | Organization: Webhooks     | Read   | `webhook` subcommand: verifying that an org webhook is configured for `github.audit_event.v1` |
+| Token kind       | Permission                 | Access | Gates                                                                                                                 |
+| ---------------- | -------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------- |
+| Fine-grained PAT | Repository: Administration | Read   | `github.repo_protection.v2`: classic protection, `GET /repos/{o}/{r}/branches/{b}/protection`                         |
+| Fine-grained PAT | Repository: Metadata       | Read   | Listing repos under the org; rulesets, `GET /repos/{o}/{r}/rules/branches/{b}` and `GET /repos/{o}/{r}/rulesets/{id}` |
+| Fine-grained PAT | Repository: Contents       | Read   | Optional. `GET /repos/{o}/{r}/branches/{b}`, cross-checking a classic protection 404 (below)                          |
+| Fine-grained PAT | Organization: Members      | Read   | `github.scim_user.v1` (falls back to org membership when SCIM is unavailable)                                         |
+| Fine-grained PAT | Organization: Webhooks     | Read   | `webhook` subcommand: verifying that an org webhook is configured for `github.audit_event.v1`                         |
 
 **Banned scopes:** `admin:org`, `delete_repo`, `repo` (full write), any `write:*`. The connector's `DocumentedScopes` registry rejects these at the test level.
 
@@ -39,8 +40,8 @@ records carried no stable id (#2925).
   `--github-base-url`'s scheme and host is refused, so the token is never
   sent elsewhere.
 - **Classic protection and rulesets are merged.** The connector reads
-  `GET /repos/{o}/{r}/branches/{b}/protection` (404 means no classic
-  protection) and `GET /repos/{o}/{r}/rules/branches/{b}`, which returns
+  `GET /repos/{o}/{r}/branches/{b}/protection` and
+  `GET /repos/{o}/{r}/rules/branches/{b}`, which returns
   every active rule from repository and organization rulesets. GitHub
   enforces each source on its own, so the strictest applies:
   `required_reviews` is the highest required approving review count, and
@@ -52,20 +53,47 @@ records carried no stable id (#2925).
   ruleset whose bypass actors (`GET /repos/{o}/{r}/rulesets/{id}`) are
   only apps (`Integration`) or deploy keys. A role, team or user bypass
   actor may be an admin, so it counts as admin bypass. GitHub returns
-  `bypass_actors` only to a caller with write access to the ruleset. When
-  the answer rests on a ruleset whose bypass actors are withheld,
-  `enforce_admins` is omitted and `reason` says so.
+  `bypass_actors` only to a caller with write access to the ruleset, and
+  doesn't say whether anyone else gets no field or `[]`. So a non-empty
+  list is read; an empty list counts as "nobody bypasses" only on a
+  repository ruleset (`source_type: Repository`) of a repository the
+  listing reports the caller as admin of (`permissions.admin`). An empty
+  list on an organization or enterprise ruleset, or for a non-admin
+  caller, is treated as withheld. `current_user_can_bypass` is not used:
+  GitHub returns it to any caller of the repository endpoint, so it says
+  nothing about write access (#2933). When the answer rests on a ruleset
+  whose bypass actors are withheld, `enforce_admins` is omitted and
+  `reason` says so.
+- **A classic protection 404 is not always "unprotected".** GitHub
+  returns 404 both for a branch without classic protection and for a
+  token that can't read it. Only a 404 whose message is
+  `Branch not protected` reads as no classic protection. Any other 404 is
+  cross-checked with `GET /repos/{o}/{r}/branches/{b}`: `protected: false`
+  reads as no classic protection, and anything else (true, missing, or a
+  failed request) leaves the repository inconclusive (#2933).
 - **Unread fields are omitted.** If either protection request fails with
-  anything other than the classic endpoint's 404, the record carries only
+  anything other than a classic 404 read as above, the record carries only
   `repo_id`, `repo_full_name`, `default_branch` and `reason`, with result
   `inconclusive`. It is never pushed as unprotected.
 - **Stable id.** `repo_id` is GitHub's repository id, which survives a
   rename. The idempotency key and the cc8_1 checks key on it.
 
-**Unverified:** which fine-grained permission GitHub requires for the
-rules and ruleset endpoints. The scopes table above has not been checked
-against a live org for them. A request the token can't make fails, and
-the repository goes inconclusive rather than failing.
+**Sources and what is unverified.** The permissions in the scopes table
+come from GitHub's [Permissions required for fine-grained personal access
+tokens](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)
+page (read 2026-11-21). None of the following has been checked against a
+live org:
+
+- the `Branch not protected` message: GitHub's REST description documents
+  the 404 only as "Resource not found" and gives no body;
+- whether `protected` on `GET .../branches/{b}` is also true for a branch
+  protected only by a ruleset. If it is, such a branch whose classic 404
+  lacks that message reads inconclusive, never unprotected;
+- whether a fine-grained PAT's `permissions.admin` in the repo listing
+  reflects the user's role, so an admin's PAT gets the full bypass list.
+
+A request the token can't make fails, and the repository goes
+inconclusive rather than failing.
 
 ## Subcommands
 
