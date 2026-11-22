@@ -65,6 +65,19 @@ func IsTenantApprover(cred credstore.Credential) bool {
 	return roleLabelIsGrant(cred) && hasLabel(cred.OwnerRoles, RoleGRCEngineer)
 }
 
+// IsRiskImportDecider reports whether cred may approve or reject the rows of
+// a risk import batch (#2881): a tenant admin (IsTenantAdmin) or the approver
+// flag. It is IsTenantApprover without grc_engineer, live or as a label, by
+// Matt's decision on #2881 (spec #2812: a GRC engineer stages an import and
+// hands it to an approver). OPA still admits grc_engineer on those routes;
+// the handler is the narrower layer there (handlerNarrower2428). It applies
+// to risk import decisions only: every other approver gate, including
+// creating a category or theme for an import value, stays on
+// IsTenantApprover.
+func IsRiskImportDecider(cred credstore.Credential) bool {
+	return IsTenantAdmin(cred) || cred.IsApprover
+}
+
 // IsTenantAuditReader reports whether cred may read what OPA admits an
 // auditor to alongside admin and grc_engineer, the dashboard export
 // (#2350): a tenant approver (IsTenantApprover) or the live auditor role,

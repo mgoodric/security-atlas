@@ -5059,7 +5059,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839); category_values and theme_values list the batch's distinct category and theme values, each with the category slug or theme name it maps to, absent while unmapped (#2844) */
+        /** GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839); category_values and theme_values list the batch's distinct category and theme values, each with the category slug or theme name it maps to, absent while unmapped (#2844); uploader_user_id is the uploading person, and can_decide says whether the caller may approve or reject the rows, true for an admin or approver who is a person and did not upload the batch (#2881) */
         get: operations["get-v1-risks-imports-id"];
         put?: never;
         post?: never;
@@ -5078,7 +5078,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a row takes the category and themes its values map to, and a row with an unmapped category or theme value is rejected with those values as the reason (#2844); a tenant approver who is a person must approve (403 otherwise); each decision is audit-logged (#2839) */
+        /** POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a row takes the category and themes its values map to, and a row with an unmapped category or theme value is rejected with those values as the reason (#2844); a person who is a tenant admin or holds the approver flag must approve, never a grc_engineer and never the batch's uploader (403 otherwise, */
         post: operations["post-v1-risks-imports-id-approve"];
         delete?: never;
         options?: never;
@@ -5095,7 +5095,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/imports/{id}/rows/{row}/approve — approve one staged row, creating it as a risk through the risk store or marking it duplicate; no body; a tenant approver who is a person must approve (403 otherwise); 409 when already decided, 422 when the risk store refuses the row's values; audit-logged (#2847) */
+        /** POST /v1/risks/imports/{id}/rows/{row}/approve — approve one staged row, creating it as a risk through the risk store or marking it duplicate; no body; a person who is a tenant admin or holds the approver flag must approve, never a grc_engineer and never the batch's uploader (403 otherwise, */
         post: operations["post-v1-risks-imports-id-rows-row-approve"];
         delete?: never;
         options?: never;
@@ -5112,7 +5112,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/imports/{id}/rows/{row}/reject — reject a staged row; body {reason} (required); a tenant approver who is a person must reject; audit-logged (#2839) */
+        /** POST /v1/risks/imports/{id}/rows/{row}/reject — reject a staged row; body {reason} (required); a person who is a tenant admin or holds the approver flag must reject, never a grc_engineer and never the batch's uploader (403 otherwise, */
         post: operations["post-v1-risks-imports-id-rows-row-reject"];
         delete?: never;
         options?: never;

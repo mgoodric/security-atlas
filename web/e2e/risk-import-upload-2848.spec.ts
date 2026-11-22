@@ -109,6 +109,10 @@ async function mockImport(page: import("@playwright/test").Page) {
     source_format: "csv",
     methodology: "nist_800_30",
     uploaded_by: "u2848",
+    // #2881: the uploader never decides their own batch, so the platform
+    // reads can_decide false for them. The mock stands for the reviewing
+    // approver, who did not upload it.
+    can_decide: true,
     status: row.status === "pending" ? "staged" : "completed",
     total_rows: 1,
     staged_count: 1,

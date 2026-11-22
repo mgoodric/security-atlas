@@ -7,7 +7,8 @@
 // link) and unmapped values, then the rows refused at upload with their
 // reasons. A filter narrows to the flagged rows. An approver approves every
 // pending row, or approves and rejects single rows; anyone else sees the
-// same page read-only.
+// same page read-only. A GRC engineer and the uploader read only too (#2881):
+// the batch read's can_decide says which.
 //
 // Every decision is the platform's (internal/api/risks/riskimports): it
 // resolves the caller to the approving person and refuses a machine
@@ -31,7 +32,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { bffControlFetch } from "@/lib/api/_shared";
 import { APIError } from "@/lib/api/base";
-import { getMe } from "@/lib/api/me";
 import {
   type ApproveResult,
   type BatchProgress,
@@ -141,8 +141,9 @@ export default function RiskImportReviewPage({
     queryKey: ["risk-import", id],
     queryFn: () => bffControlFetch<RiskImportBatch>(batchPath(id)),
   });
-  const meQ = useQuery({ queryKey: ["risk-import", "me"], queryFn: getMe });
-  const mode = reviewMode(meQ.data);
+  // #2881: the batch read says whether this caller decides; a GRC
+  // engineer and the uploader read only.
+  const mode = reviewMode(batchQ.data);
 
   // A decision changes the batch and, for an approval, the tenant's
   // risks: drop the cached risks list so the Risks page shows them.
@@ -259,7 +260,8 @@ export default function RiskImportReviewPage({
           className="text-sm text-muted-foreground"
           data-testid="risk-import-read-only"
         >
-          Read-only: approving or rejecting rows requires the approver role.
+          Read-only: an admin or approver who did not upload this import
+          approves or rejects its rows.
         </p>
       )}
       {allM.isError ? (
