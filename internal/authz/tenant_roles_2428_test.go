@@ -308,15 +308,12 @@ func TestTenantGates2428_Helpers(t *testing.T) {
 // handlerNarrower2428 lists the route/role pairs where OPA admits a role
 // the handler gate refuses. Each predates #2428, which touches only admin
 // and grc_engineer: auditor reads of the dashboard export and the audit
-// workspace, and control_owner walkthrough writes. The handler stays the
+// workspace. The handler stays the
 // narrower layer there, so nothing widens; the reverse (a handler
 // admitting what OPA refuses) is never allowed.
 var handlerNarrower2428 = map[string]bool{
 	"/v1/audit-periods/" + id2428 + "/control-state auditor":                            true,
 	"/v1/audit-periods/" + id2428 + "/controls/" + id2428 + "/evidence-summary auditor": true,
-	"/v1/walkthroughs control_owner":                                                    true,
-	"/v1/walkthroughs/" + id2428 + "/attachments control_owner":                         true,
-	"/v1/walkthroughs/" + id2428 + ":finalize control_owner":                            true,
 	// #2110: OPA admits grc_engineer (controls write) and control_owner
 	// (the evaluate path rule); the handler admits neither by role, only
 	// the control's assigned owner (Matt's call: owner or admin).

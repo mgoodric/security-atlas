@@ -40,8 +40,8 @@ func TestSlice027_AuditorReadWalkthroughsAllowed(t *testing.T) {
 }
 
 // P0-1 / AC-3: auditor cannot WRITE walkthroughs at the role level.
-// Walkthroughs are authored by control_owner or grc_engineer; the
-// auditor's read access is enough.
+// Walkthroughs are authored by admin or grc_engineer; the auditor's
+// read access is enough.
 func TestSlice027_AuditorWriteWalkthroughDenied(t *testing.T) {
 	t.Parallel()
 	d := decide(t, authz.Input{
@@ -78,21 +78,33 @@ func TestSlice027_ControlOwnerReadWalkthroughsAllowed(t *testing.T) {
 	}
 }
 
-// AC-1: control owner can write walkthroughs (they author them).
-func TestSlice027_ControlOwnerWriteWalkthroughsAllowed(t *testing.T) {
+// #2708: control owner cannot write walkthroughs. Admins and GRC
+// engineers record them, matching the walkthroughs handler's canWrite
+// (authz.IsTenantApprover). Pinned on every write method so a later
+// path rule cannot reopen one of them.
+func TestSlice027_ControlOwnerWriteWalkthroughsDenied(t *testing.T) {
 	t.Parallel()
-	d := decide(t, authz.Input{
-		User: authz.UserInput{
-			ID:    "user-co",
-			Roles: []authz.Role{authz.RoleControlOwner},
-		},
-		TenantID: slice027Tenant,
-		Action:   "write",
-		Resource: authz.ResourceInput{Type: "walkthroughs"},
-		Request:  authz.RequestInput{Method: "POST", Path: "/v1/walkthroughs"},
-	})
-	if !d.Allow {
-		t.Fatalf("expected allow on control_owner write walkthroughs, got deny: %s", d.Reason)
+	const id = "6f1c2a52-3b0e-4b8e-9a51-1d6a3f0c2708"
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/v1/walkthroughs"},
+		{"POST", "/v1/walkthroughs/" + id + "/attachments"},
+		{"POST", "/v1/walkthroughs/" + id + ":finalize"},
+		{"PATCH", "/v1/walkthroughs/" + id},
+		{"DELETE", "/v1/walkthroughs/" + id},
+	} {
+		d := decide(t, authz.Input{
+			User: authz.UserInput{
+				ID:    "user-co",
+				Roles: []authz.Role{authz.RoleControlOwner},
+			},
+			TenantID: slice027Tenant,
+			Action:   "write",
+			Resource: authz.ResourceInput{Type: "walkthroughs"},
+			Request:  authz.RequestInput{Method: c.method, Path: c.path},
+		})
+		if d.Allow {
+			t.Errorf("%s %s: expected deny on control_owner write walkthroughs, got allow", c.method, c.path)
+		}
 	}
 }
 
