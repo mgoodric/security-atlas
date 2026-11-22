@@ -30,8 +30,16 @@ engine test `replay measures from the as-of instant` pins this: a check-in
 
 The bound is inclusive: a host last seen exactly 24 hours before the
 instant passes (`last-seen-exactly-24h-passes`), one minute more fails
-(`last-seen-just-over-24h-fails`). A `last_seen_at` after the instant
-(clock skew) counts as fresh; it is not a failure of monitoring.
+(`last-seen-just-over-24h-fails`).
+
+A `last_seen_at` up to one hour after the instant counts as fresh: that is
+clock skew between Fleet and the platform, not a failure of monitoring
+(`last-seen-within-1h-after-instant-passes`). More than an hour after is
+treated as unreadable, the same as a missing value, so it is
+inconclusive rather than fresh (`last-seen-over-1h-after-instant-is-inconclusive`).
+A far-future value is a bad clock or a bad record, and passing it would
+let one such record hold the host at fresh indefinitely. Review of #2932
+asked for this cap; the first head counted any future value as fresh.
 
 ## D2 — Shape follows cc6_6 after #2920
 
@@ -39,9 +47,20 @@ The dispatcher asked for #2929's cc6_6 pattern, and it fits:
 
 - Records with no or empty `host_uuid` are left out (cc6_6 D2).
 - Latest per host is `rank()` over `last_seen_at DESC NULLS LAST,
-observed_at DESC`. `last_seen_at` is cast only when it matches
-  `^YYYY-MM-DD[T ]HH:MM`, because the registry does not assert `format`
-  (cc6_6 D3); a non-matching value sorts as missing.
+observed_at DESC`. The registry does not assert `format` (cc6_6 D3),
+  so `last_seen_at` can be any string. It is cast only when it matches
+  the full RFC 3339 shape, anchored at both ends
+  (`^YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)$`), AND
+  `pg_input_is_valid(value, 'timestamptz')` (Postgres 16) accepts it.
+  The regex alone still admits `2026-13-45T25:61:00Z` or `2026-02-30...`,
+  which would error the whole query to inconclusive and hide a stale host
+  elsewhere; `pg_input_is_valid` closes that without a cast. A value that
+  fails either sorts as missing (unread). Cases
+  `malformed-last-seen-host-is-inconclusive-others-still-evaluate` and
+  `malformed-last-seen-host-does-not-hide-a-stale-host` pin it; the bundle
+  runner counts an errored query as a failed case, so both prove the query
+  ran. This is stricter than cc6_6's prefix guard, which review of #2932
+  asked for here; cc6_6 is unchanged by this PR.
 - Per host: stale (`last_seen_at` older than 24 h), fresh, or unread (no
   readable `last_seen_at`). Across hosts: any stale fails; all fresh
   passes; otherwise inconclusive. No attributable record is inconclusive.

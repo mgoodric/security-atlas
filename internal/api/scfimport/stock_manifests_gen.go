@@ -55,6 +55,7 @@ var stockManifestHashes = map[string]string{
 	"30fb9ed4104fec9f2807589ee4506372a873e89185ee7474ba9be59838372296": "soc2_cc7_2_anomaly_detection",
 	"32903444b4961f0eac42c8139a1d7fee7ef795b3d479693afcb2badb8e66a734": "soc2_cc1_2_board_oversight",
 	"34c9f2211a20a2ee87e42824ef91262c0970fe4c1312fd59b38c119f86e73130": "soc2_cc7_4_incident_response",
+	"34e560feaa0b2fedbca70dba23410b9d786dc04d95823835761364340237af93": "soc2_cc4_1_continuous_monitoring",
 	"34f77e0305afc3897e4e470d6461e7d2e29ed0e386fd08b768d08b8058d49915": "soc2_cc5_3_policies_procedures",
 	"3642483d379ccb2ef101e63e87f21e1782c791454f26458715f66217745cef7b": "soc2_cc7_1_vulnerability_detection",
 	"37a630b0d2412088c30b14fbd83fccc800aec219fcd8f2d46dc5c9c66de21211": "soc2_cc5_3_policies_procedures",

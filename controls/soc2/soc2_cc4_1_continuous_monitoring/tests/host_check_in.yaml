@@ -136,6 +136,86 @@ cases:
           hostname: dave-mbp
           last_seen_at: yesterday afternoon
 
+  - name: malformed-last-seen-host-is-inconclusive-others-still-evaluate
+    description: an impossible date, a missing offset and a date-only value are unreadable; none errors the query, and the good host is fresh
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-21T05:40:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 44444444-4444-4444-4444-444444444444
+          hostname: dave-mbp
+          last_seen_at: "2026-13-45T25:61:00Z"
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 55555555-5555-5555-5555-555555555555
+          hostname: erin-mbp
+          last_seen_at: "2026-11-21T05:40:00"
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 66666666-6666-6666-6666-666666666666
+          hostname: frank-mbp
+          last_seen_at: "2026-11-21"
+
+  - name: malformed-last-seen-host-does-not-hide-a-stale-host
+    description: the malformed value does not error the query, so the stale host still fails the control
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 44444444-4444-4444-4444-444444444444
+          hostname: dave-mbp
+          last_seen_at: "2026-02-30T10:00:00Z"
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 33333333-3333-3333-3333-333333333333
+          hostname: carol-surface
+          last_seen_at: 2026-11-19T06:00:00Z
+
+  - name: last-seen-over-1h-after-instant-is-inconclusive
+    description: a check-in two hours after the evaluation instant is clock skew or a bad value, not proof the host reported
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-21T14:00:00Z
+
+  - name: last-seen-within-1h-after-instant-passes
+    description: up to an hour of clock skew still counts as a fresh check-in
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice-mbp
+          last_seen_at: 2026-11-21T13:00:00Z
+
   - name: absent-plus-stale-fails
     description: one host observed stale fails the control even though another has no last_seen_at
     expected_state: fail

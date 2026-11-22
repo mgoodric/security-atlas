@@ -25,7 +25,9 @@ description: |
   `observed_at` shows only that the connector ran. A record without
   `last_seen_at` (a 1.0.0 record, or a host Fleet gave no `seen_time`)
   does not show when the host last reported, so it is inconclusive, not a
-  pass.
+  pass. A `last_seen_at` that is not a full RFC 3339 timestamp, or is more
+  than an hour after the evaluation instant, is treated as unreadable the
+  same way; it never errors the query, so the other hosts still decide.
 
   Records without a `host_uuid` are left out. Records that tie on both
   times carry the same `last_seen_at`, so they agree.
@@ -70,12 +72,19 @@ evidence_queries:
             SELECT payload,
                    observed_at,
                    evaluated_at,
-                   CASE
-                     WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}'
-                       THEN (payload->>'last_seen_at')::timestamptz
-                   END AS seen
-            FROM evidence
-            WHERE coalesce(payload->>'host_uuid', '') <> ''
+                   CASE WHEN ts <= evaluated_at + interval '1 hour' THEN ts END AS seen
+            FROM (
+              SELECT payload,
+                     observed_at,
+                     evaluated_at,
+                     CASE
+                       WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                            AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+                         THEN (payload->>'last_seen_at')::timestamptz
+                     END AS ts
+              FROM evidence
+              WHERE coalesce(payload->>'host_uuid', '') <> ''
+            ) AS cast_checked
           ) AS parsed
         ) AS ranked
         WHERE recency = 1
