@@ -16,11 +16,15 @@ import (
 func TestStockTwoKindBundles_FixtureRecordsDeclareEvidenceKind(t *testing.T) {
 	soc2 := filepath.Join(repoRoot(t), "controls", "soc2")
 	forEachSOC2Bundle(t, func(name string, b *control.Bundle) {
-		rep, err := bundletest.Run(t.Context(), filepath.Join(soc2, name), bundletest.Options{})
+		cases, err := bundletest.LoadTestCases(filepath.Join(soc2, name))
 		if err != nil {
-			t.Fatalf("%s: run bundle tests: %v", name, err)
+			t.Fatalf("%s: load tests: %v", name, err)
 		}
-		for _, w := range rep.Warnings {
+		qs := make([]bundletest.ManifestQuery, 0, len(b.Manifest.EvidenceQueries))
+		for _, q := range b.Manifest.EvidenceQueries {
+			qs = append(qs, bundletest.ManifestQuery{Language: q.Language, Expression: q.Expression, EvidenceKind: q.EvidenceKind})
+		}
+		for _, w := range bundletest.KindlessRecordWarnings(bundletest.QueriesFromManifest(qs), cases) {
 			t.Errorf("%s: %s", name, w)
 		}
 	})
