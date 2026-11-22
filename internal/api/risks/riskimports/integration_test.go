@@ -15,8 +15,9 @@
 // testdata/register.csv has a title row above the header, alias headers,
 // two unmapped columns, and rows that stage (a category by name, one by
 // slug, one without an ID, one whose ID the tenant already uses, one whose
-// ID only another tenant uses) and rows that are rejected (no title, an ID
-// repeated in another case, an unknown category, a bad review date).
+// ID only another tenant uses, one whose category matches none of the
+// tenant's and so stages unmapped) and rows that are rejected (no title, an
+// ID repeated in another case, a bad review date).
 package riskimports_test
 
 import (
@@ -280,8 +281,8 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 
 	// A GRC engineer stages the register.
 	b := stage(t, e, e.grcJWT)
-	if b.TotalRows != 9 || b.StagedCount != 5 || b.RejectedCount != 4 {
-		t.Fatalf("counts total=%d staged=%d rejected=%d, want 9/5/4", b.TotalRows, b.StagedCount, b.RejectedCount)
+	if b.TotalRows != 9 || b.StagedCount != 6 || b.RejectedCount != 3 {
+		t.Fatalf("counts total=%d staged=%d rejected=%d, want 9/6/3", b.TotalRows, b.StagedCount, b.RejectedCount)
 	}
 	if b.Status != riskimport.BatchStatusStaged || b.SourceFormat != "csv" || b.SourceFilename != "register.csv" {
 		t.Errorf("batch status=%s format=%s filename=%s", b.Status, b.SourceFormat, b.SourceFilename)
@@ -296,7 +297,6 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 	wantRejected := map[int]string{
 		5: riskimport.RejectMissingField,
 		6: riskimport.RejectDuplicateExternal,
-		7: riskimport.RejectUnknownCategory,
 		8: riskimport.RejectInvalidReviewDue,
 	}
 	for row, reason := range wantRejected {
@@ -317,6 +317,10 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 	if r1.OwnerUnlinked != "alice@corp.test" || r1.OwnerUserID != "" || len(r1.Flags) != 1 || r1.Flags[0] != riskimport.FlagOwnerUnlinked {
 		t.Errorf("R-001 owner user=%q unlinked=%q flags=%v", r1.OwnerUserID, r1.OwnerUnlinked, r1.Flags)
 	}
+	// "nonsense" names no category: staged, unmapped (#2844).
+	if r4 := stagedByRef(t, b, "R-004"); r4.CategoryValue != "nonsense" || r4.Category != "" {
+		t.Errorf("R-004 category value=%q mapped=%q, want nonsense unmapped", r4.CategoryValue, r4.Category)
+	}
 	if stagedByRef(t, b, "R-002").Category != "privacy" {
 		t.Errorf("R-002 category = %q, want privacy", stagedByRef(t, b, "R-002").Category)
 	}
@@ -330,7 +334,7 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 		t.Fatalf("GET batch = %d; body=%s", status, raw)
 	}
 	read := decode[riskimport.Batch](t, raw)
-	if len(read.Staged) != 5 || len(read.Rejected) != 4 || stagedByRef(t, read, "R-001").OwnerUnlinked != "alice@corp.test" {
+	if len(read.Staged) != 6 || len(read.Rejected) != 3 || stagedByRef(t, read, "R-001").OwnerUnlinked != "alice@corp.test" {
 		t.Fatalf("GET batch = %+v", read)
 	}
 
@@ -340,7 +344,7 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 		t.Fatalf("approve = %d; body=%s", status, raw)
 	}
 	res := decode[riskimport.ApproveResult](t, raw)
-	if res.ApprovedCount != 4 || len(res.Duplicates) != 1 || len(res.Skipped) != 0 {
+	if res.ApprovedCount != 4 || len(res.Duplicates) != 1 || len(res.Rejected) != 1 || len(res.Skipped) != 0 {
 		t.Fatalf("approve result = %+v", res)
 	}
 	if d := res.Duplicates[0]; d.ExternalRef != "R-EXIST" || d.RiskID != existing || d.Status != riskimport.RowStatusDuplicate {
@@ -415,14 +419,14 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 		if err := rows.Scan(&action, &actor, &ref, &riskID); err != nil {
 			t.Fatalf("scan import audit: %v", err)
 		}
-		if actor != e.approver.String() || riskID == "" {
+		if actor != e.approver.String() || (riskID == "") != (action == "reject") {
 			t.Errorf("audit row %s %s: actor=%q risk=%q", action, ref, actor, riskID)
 		}
 		audit = append(audit, action+":"+ref)
 	}
 	rows.Close()
 	sort.Strings(audit)
-	if got := strings.Join(audit, ","); got != "approve:,approve:R-001,approve:R-002,approve:R-OTHER,duplicate:R-EXIST" {
+	if got := strings.Join(audit, ","); got != "approve:,approve:R-001,approve:R-002,approve:R-OTHER,duplicate:R-EXIST,reject:R-004" {
 		t.Errorf("import audit = %s", got)
 	}
 

@@ -286,6 +286,9 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			r2447(post, "/v1/risks/imports/"+id+"/approve"),
 			r2447(post, "/v1/risks/imports/"+id+"/rows/"+id+"/approve"),
 			r2447(post, "/v1/risks/imports/"+id+"/rows/"+id+"/reject")),
+		// #2844: creating a category or theme for an import value.
+		"risks/riskimports/handlers.go Handler.MapValue": site(apr,
+			r2447(put, "/v1/risks/imports/"+id+"/values")),
 		"walkthroughs/handlers.go canWrite": site(apr,
 			r2447(post, "/v1/walkthroughs"),
 			r2447(post, "/v1/walkthroughs/"+id+"/attachments"),
