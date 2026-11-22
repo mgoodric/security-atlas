@@ -8,10 +8,11 @@
 # 2026-11-21T12:00:00Z is 2025-11-21T12:00:00Z, and the annual window
 # reaches back 400 days.
 #
-# The control also has a Rego roll-up over jira.ticket_evidence.v1. With no
-# Jira record that query is inconclusive, so the control's state is the
-# training query's pass or fail; two cases carry a Jira record to show the
-# combination.
+# The control also has a SQL query over jira.ticket_evidence.v1 training
+# tickets (#2829; its cases are in training_tickets.yaml). With no Jira
+# record, or none it can key, that query is inconclusive, so the control's
+# state is the training query's pass or fail. The two cases below carry
+# keyless Jira records to show the combination.
 cases:
   - name: every-person-current-from-allowed-source-passes
     expected_state: pass
@@ -472,7 +473,7 @@ cases:
           completion_source: manual
 
   - name: open-jira-ticket-and-current-completion-passes
-    description: the Jira roll-up is inconclusive for an open ticket; the current completion passes the control
+    description: the Jira query is inconclusive for a keyless ticket; the current completion passes the control
     expected_state: pass
     evaluated_at: 2026-11-21T12:00:00Z
     records:
@@ -496,7 +497,7 @@ cases:
           completion_source: manual
 
   - name: closed-jira-ticket-does-not-cover-a-stale-completion
-    description: the Jira roll-up passes but the training query fails, so the control fails
+    description: a closed Jira ticket does not offset the training query's failure, so the control fails
     expected_state: fail
     evaluated_at: 2026-11-21T12:00:00Z
     records:

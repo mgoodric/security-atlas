@@ -123,6 +123,9 @@ func DefaultSeed() []KindVersion {
 		// makes each *_source present only alongside its value.
 		{Kind: "osquery.host_posture.v1", Version: "1.3.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
+		// #2829: 1.1.0 adds assignee_account_id, labels, priority,
+		// severity, created_at and resolved_at.
+		{Kind: "jira.ticket_evidence.v1", Version: "1.1.0"},
 		{Kind: "change.approval.v1", Version: "1.0.0"},
 		{Kind: "change.verification.v1", Version: "1.0.0"},
 		{Kind: "manual.upload.v1", Version: "1.0.0"},
