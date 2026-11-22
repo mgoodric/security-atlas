@@ -5,6 +5,8 @@
 // Routes (appended onto the platform root router):
 //
 //	POST /v1/risks/imports          multipart upload -> staged import batch
+//	POST /v1/risks/imports/preview  the same upload -> its header mapping
+//	                                and first rows, staging nothing (#2848)
 //	GET  /v1/risks/imports/{id}     the batch with its staged and rejected rows
 //	POST /v1/risks/imports/{id}/approve
 //	                                approve every pending row; each becomes a
@@ -25,6 +27,8 @@
 //	methodology  optional, the batch's one scoring methodology: nist_800_30
 //	             (the default), qualitative_5x5 or fair (#2841)
 //	column_map   optional, repeatable "field=Header" overrides of header detection
+//	ignore_column optional, repeatable header kept unmapped whatever its
+//	             alias (#2848)
 //
 // Upload is a write on risks at the authz layer, which admin and
 // grc_engineer hold. Approve and reject also require a tenant approver who
@@ -50,6 +54,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/riskimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -74,6 +79,7 @@ func New(store *riskimport.Store) *Handler { return &Handler{store: store} }
 // generic /v1/risks/{id} routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/risks/imports", h.Create)
+	r.Post("/v1/risks/imports/preview", h.Preview)
 	r.Get("/v1/risks/imports/{id}", h.Get)
 	r.Post("/v1/risks/imports/{id}/approve", h.Approve)
 	r.Post("/v1/risks/imports/{id}/rows/{row}/approve", h.ApproveRow)
@@ -81,29 +87,36 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Put("/v1/risks/imports/{id}/values", h.MapValue)
 }
 
-// Create stages an uploaded risk register as an import batch.
-func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
-		return
-	}
-	cred, _ := authctx.CredentialFromContext(ctx)
+// upload is a parsed multipart upload: the file and its mapping fields.
+type upload struct {
+	filename    string
+	raw         []byte
+	columnMap   map[string]string
+	ignore      []string
+	methodology string
+}
 
+// readUpload reads the multipart upload Create and Preview share, writing
+// the error response itself when it returns false.
+func readUpload(w http.ResponseWriter, r *http.Request) (upload, bool) {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return upload{}, false
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, riskimport.MaxUploadBytes+multipartOverhead)
 	if err := r.ParseMultipartForm(riskimport.MaxUploadBytes + multipartOverhead); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
-			return
+			return upload{}, false
 		}
 		httpresp.WriteError(w, http.StatusBadRequest, "request must be multipart/form-data with a file field")
-		return
+		return upload{}, false
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "missing file field")
-		return
+		return upload{}, false
 	}
 	defer func() { _ = file.Close() }()
 
@@ -111,26 +124,43 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, riskimport.ErrUploadTooLarge) {
 			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
-			return
+			return upload{}, false
 		}
 		httpresp.WriteError(w, http.StatusBadRequest, "could not read upload")
-		return
+		return upload{}, false
 	}
 	columnMap, err := parseColumnMap(r.MultipartForm.Value["column_map"])
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-		return
+		return upload{}, false
 	}
 	methodology := r.MultipartForm.Value["methodology"]
 	if len(methodology) > 1 {
 		httpresp.WriteError(w, http.StatusBadRequest, "methodology is given more than once; a batch has one methodology")
+		return upload{}, false
+	}
+	return upload{
+		filename:    header.Filename,
+		raw:         raw,
+		columnMap:   columnMap,
+		ignore:      r.MultipartForm.Value["ignore_column"],
+		methodology: strings.Join(methodology, ""),
+	}, true
+}
+
+// Create stages an uploaded risk register as an import batch.
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	up, ok := readUpload(w, r)
+	if !ok {
 		return
 	}
-	batch, err := h.store.Stage(ctx, riskimport.StageInput{
-		Filename:    header.Filename,
-		Raw:         raw,
-		ColumnMap:   columnMap,
-		Methodology: strings.Join(methodology, ""),
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	batch, err := h.store.Stage(r.Context(), riskimport.StageInput{
+		Filename:    up.filename,
+		Raw:         up.raw,
+		ColumnMap:   up.columnMap,
+		Ignore:      up.ignore,
+		Methodology: up.methodology,
 		UploadedBy:  credstore.PrincipalOf(cred),
 	})
 	if err != nil {
@@ -138,6 +168,26 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusCreated, batch)
+}
+
+// Preview reads an upload with the same fields as Create and returns its
+// header row, the field each header maps to, the fields the methodology
+// reads and the first rows (#2848). Nothing is staged.
+func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
+	up, ok := readUpload(w, r)
+	if !ok {
+		return
+	}
+	p, err := riskimport.PreviewFile(up.filename, up.raw, riskimport.ParseOptions{
+		ColumnMap:   up.columnMap,
+		Ignore:      up.ignore,
+		Methodology: dbx.RiskMethodology(up.methodology),
+	})
+	if err != nil {
+		writeStageError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, p)
 }
 
 // Get returns one import batch with its staged and rejected rows.

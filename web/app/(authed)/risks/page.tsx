@@ -883,6 +883,13 @@ function RisksPageInner() {
         </a>
       ))}
       <Link
+        href="/risks/imports"
+        data-testid="risks-import-link"
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+      >
+        Import
+      </Link>
+      <Link
         href="/risks/new"
         data-testid="risks-new-link"
         className={buttonVariants({ size: "sm" })}

@@ -154,6 +154,8 @@ type StageInput struct {
 	Filename  string
 	Raw       []byte
 	ColumnMap map[string]string
+	// Ignore lists headers kept unmapped whatever their alias (#2848).
+	Ignore []string
 	// Methodology is the batch's; empty is the platform default.
 	Methodology string
 	UploadedBy  string
@@ -175,7 +177,7 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if err != nil {
 		return Batch{}, err
 	}
-	parsed, err := Parse(in.Filename, in.Raw, ParseOptions{ColumnMap: in.ColumnMap, Methodology: methodology})
+	parsed, err := Parse(in.Filename, in.Raw, ParseOptions{ColumnMap: in.ColumnMap, Ignore: in.Ignore, Methodology: methodology})
 	if err != nil {
 		return Batch{}, err
 	}
