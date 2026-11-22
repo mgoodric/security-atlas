@@ -71,6 +71,12 @@ Datadog has no host UUID, so nothing joins these records to Fleet's.
 `--capacity-control` defaults to empty: the kind is routed to every control
 that reads it (#2924).
 
+The idempotency key is the host plus the UTC hour of the window end, and
+`observed_at` is that hour. A second run in the same hour therefore collapses
+into the first record for each host: the platform keeps the first reading of
+the hour, not the latest. Schedule the surface hourly or less often. A tighter
+schedule adds no new evidence.
+
 The surface needs the `timeseries_query` permission on the Application key.
 That permission reads metric values. Without the flag the surface is skipped,
 so a key made for the other surfaces keeps working.
@@ -130,7 +136,10 @@ code path; the only operations it issues are read `GET /api/v1/monitor`,
 `GET /api/v2/security_monitoring/rules`, `GET /api/v2/security_monitoring/signals`,
 and `GET /api/v1/events`, plus `GET /api/v1/query` for host capacity. Every request
 refuses a redirect to another host or scheme, so the keys only ever reach the
-Datadog site they were sent to.
+Datadog site they were sent to. The site itself (`--site` / `DATADOG_SITE`)
+must be lowercase DNS labels under `datadoghq.com`, `datadoghq.eu` or
+`ddog-gov.com` (e.g. `us3.datadoghq.com`). Any other value, including one with
+userinfo, a port or a path, is refused before a key is sent.
 
 ## Subcommands
 

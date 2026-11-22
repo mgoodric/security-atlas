@@ -147,8 +147,44 @@ func Resolve(opts ResolveOpts) (Credential, error) {
 	if appKey == "" {
 		return Credential{}, fmt.Errorf("datadogauth: Application key required (set %s, scoped %s)", EnvAppKey, RequiredScope)
 	}
-	site := strings.TrimSpace(firstNonEmpty(opts.Site, os.Getenv(EnvSite), DefaultSite))
+	site := strings.ToLower(strings.TrimSpace(firstNonEmpty(opts.Site, os.Getenv(EnvSite), DefaultSite)))
+	if err := CheckSite(site); err != nil {
+		return Credential{}, err
+	}
 	return Credential{apiKey: apiKey, appKey: appKey, site: site}, nil
+}
+
+// siteDomains are the registrable domains Datadog's sites live under:
+// datadoghq.com (US1, and US3/US5/AP1/AP2 as subdomains), datadoghq.eu (EU1)
+// and ddog-gov.com (US1-FED). A site is one of them or a subdomain of one.
+var siteDomains = []string{"datadoghq.com", "datadoghq.eu", "ddog-gov.com"}
+
+// CheckSite refuses a site that would send the keys anywhere but a Datadog
+// API host. The site becomes the host of "https://api." + site, so a value
+// carrying userinfo ("x@evil.example"), a port, a path or any other
+// character could redirect both keys. Only lowercase DNS labels under a
+// Datadog domain pass.
+func CheckSite(site string) error {
+	bad := fmt.Errorf("datadogauth: %s %q is not a Datadog site (e.g. datadoghq.com, us3.datadoghq.com, datadoghq.eu, ddog-gov.com)", EnvSite, site)
+	if site == "" || len(site) > 253 {
+		return bad
+	}
+	for _, label := range strings.Split(site, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return bad
+		}
+		for _, r := range label {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+				return bad
+			}
+		}
+	}
+	for _, d := range siteDomains {
+		if site == d || strings.HasSuffix(site, "."+d) {
+			return nil
+		}
+	}
+	return bad
 }
 
 func firstNonEmpty(vs ...string) string {
