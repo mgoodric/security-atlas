@@ -23,6 +23,7 @@ func TestConvertFixtures(t *testing.T) {
 		{name: "table"},
 		{name: "blocks"},
 		{name: "macros"},
+		{name: "links"},
 		{name: "unsupported", unsupported: []Unsupported{
 			{Name: "ac:image", Count: 1},
 			{Name: "jira", Count: 1},
@@ -53,7 +54,7 @@ func TestConvertFixtures(t *testing.T) {
 // input must give the same bytes on every run.
 func TestConvertIsDeterministic(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"basic", "lists", "table", "blocks", "macros", "unsupported"} {
+	for _, name := range []string{"basic", "lists", "table", "blocks", "macros", "links", "unsupported"} {
 		in := readFixture(t, name+".xhtml")
 		first, err := Convert(in)
 		if err != nil {

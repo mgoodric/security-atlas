@@ -10,7 +10,10 @@
 // unified/micromark tree for a read-only render. This covers the subset
 // operators write — headings, emphasis, inline + fenced code, lists,
 // tables, block quotes, links, rules — as a pure, vitest-coverable
-// function.
+// function. #2945 added the CommonMark pieces the Confluence policy-sync
+// converter emits: backslash escapes, `<…>` link destinations,
+// `~~strikethrough~~`, and the GFM `<br>` line break inside table cells
+// (the one spelling of raw HTML recognised, and only there).
 //
 // SECURITY (load-bearing):
 //   * Input is HTML-escaped FIRST. Transforms only ever emit a fixed set
@@ -81,6 +84,7 @@ function emphasis(s: string): string {
   let out = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
   out = out.replace(/(^|[^_\w])_([^_]+)_(?!\w)/g, "$1<em>$2</em>");
+  out = out.replace(/~~([^~]+)~~/g, "<del>$1</del>");
   return out;
 }
 
@@ -105,24 +109,63 @@ function renderInline(escaped: string, refs: RefMap): string {
   const held: string[] = [];
   const hold = (html: string) => `\x00${held.push(html) - 1}\x00`;
 
+  // Backslash escapes are held as the literal character, so `\*`, `\[`
+  // or `\<` can never open emphasis, a link or an autolink (#2945).
+  const escapes = new Set<number>();
+  const holdEscape = (html: string) => {
+    escapes.add(held.length);
+    return hold(html);
+  };
+  // An escape inside an href stands for its character; any other
+  // placeholder there (a code span) leaves it, and safeHref refuses it.
+  const expandEscapes = (s: string) =>
+    s.replace(/\x00(\d+)\x00/g, (m, i: string) =>
+      escapes.has(Number(i)) ? held[Number(i)] : m,
+    );
+
   // Every pattern below stops scanning at the next opening delimiter
   // (`[^[\]]`, `[^()\s]`, `[^\s&]`), so a hostile line of repeated `[`,
   // `](` or `<` is matched in linear time rather than rescanned to the
-  // end of the line from each opener. The price: hrefs cannot contain
-  // parentheses and link text cannot contain brackets.
-  let out = escaped.replace(/`([^`]+)`/g, (_m, code: string) =>
-    hold(`<code>${code}</code>`),
+  // end of the line from each opener. The price: a bare href cannot
+  // contain parentheses (a `<…>` destination can), and link text holds a
+  // bracket only as `\[` / `\]`.
+  //
+  // Code spans and backslash escapes go in one left-to-right pass, as
+  // CommonMark has it: a backslash inside a code span is literal, and an
+  // escaped backtick cannot open one. The escapable set is ASCII
+  // punctuation, which escapeHtml has already turned into entities for
+  // `&`, `<`, `>`, `"` and `'`.
+  let out = escaped.replace(
+    /`([^`]+)`|\\(&amp;|&lt;|&gt;|&quot;|&#39;|[!#$%()*+,\-./:;=?@[\\\]^_`{|}~])/g,
+    (_m, code: string | undefined, punct: string | undefined) =>
+      code !== undefined
+        ? hold(`<code>${code}</code>`)
+        : holdEscape(punct as string),
   );
 
   // Images: alt text only, never an <img> (see header).
+  out = out.replace(/!\[([^[\]]*)\]\(&lt;(?:[^&]|&amp;)*&gt;\)/g, "$1");
   out = out.replace(/!\[([^[\]]*)\]\([^()]*\)/g, "$1");
   out = out.replace(/!\[([^[\]]*)\]\[[^[\]]*\]/g, "$1");
+
+  // Inline links with a `<…>` destination, which may hold spaces and
+  // parentheses. Spaces are percent-encoded as CommonMark does; every
+  // other character still has to pass safeHref.
+  out = out.replace(
+    /\[([^[\]]+)\]\(&lt;((?:[^&]|&amp;)*)&gt;\)/g,
+    (m, text: string, rawHref: string) => {
+      const href = safeHref(
+        unescapeHtml(expandEscapes(rawHref)).replace(/ /g, "%20"),
+      );
+      return href ? hold(anchor(href, emphasis(text))) : m;
+    },
+  );
 
   // Inline links [text](href). A rejected href leaves the source text.
   out = out.replace(
     /\[([^[\]]+)\]\(([^()\s]+)\)/g,
     (m, text: string, rawHref: string) => {
-      const href = safeHref(unescapeHtml(rawHref));
+      const href = safeHref(unescapeHtml(expandEscapes(rawHref)));
       return href ? hold(anchor(href, emphasis(text))) : m;
     },
   );
@@ -166,6 +209,24 @@ function splitRow(line: string): string[] {
   if (row.endsWith("|") && !row.endsWith("\\|")) row = row.slice(0, -1);
   // Split on pipes not escaped as `\|`.
   return row.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
+}
+
+// A pipe-table cell cannot hold a newline, so GFM writers (the Confluence
+// converter among them, #2945) break a cell's lines with a literal `<br>`.
+// That one tag, as `<br>`, `<br/>` or `<br />`, splits the RAW cell into
+// parts that are each escaped and rendered on their own, joined by a
+// `<br/>` this renderer emits. Nothing from the input becomes markup. A
+// `<br>` inside a code span or written `\<br>` is text and stays.
+function splitCellBreaks(cell: string): string[] {
+  const parts: string[] = [];
+  let from = 0;
+  for (const m of cell.matchAll(/`[^`]*`|\\[\s\S]|<br\s?\/?>/gi)) {
+    if (m[0][0] !== "<") continue;
+    parts.push(cell.slice(from, m.index));
+    from = m.index + m[0].length;
+  }
+  parts.push(cell.slice(from));
+  return parts;
 }
 
 // Checked cell by cell rather than with one whole-line pattern, whose
@@ -295,6 +356,8 @@ function joinLines(lines: string[], inline: (s: string) => string): string {
 function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
   const html: string[] = [];
   const inline = (s: string) => renderInline(escapeHtml(s), refs);
+  const cellInline = (s: string) =>
+    splitCellBreaks(s).map(inline).join("<br/>");
 
   let i = 0;
   let inUl = false;
@@ -383,10 +446,12 @@ function renderBlocks(lines: string[], refs: RefMap, depth: number): string {
         rows.push(splitRow(lines[i]));
         i++;
       }
-      const th = header.map((c) => `<th>${inline(c)}</th>`).join("");
+      const th = header.map((c) => `<th>${cellInline(c)}</th>`).join("");
       const body = rows
         .map((r) => {
-          const cells = header.map((_h, k) => `<td>${inline(r[k] ?? "")}</td>`);
+          const cells = header.map(
+            (_h, k) => `<td>${cellInline(r[k] ?? "")}</td>`,
+          );
           return `<tr>${cells.join("")}</tr>`;
         })
         .join("");
