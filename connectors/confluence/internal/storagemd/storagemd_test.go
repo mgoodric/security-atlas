@@ -1,6 +1,7 @@
 package storagemd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -118,6 +119,72 @@ func TestConvertRejectsUnparseableBody(t *testing.T) {
 	t.Parallel()
 	if _, err := Convert("<p>unterminated <![CDATA[ x"); err == nil {
 		t.Fatal("Convert accepted an unterminated CDATA section")
+	}
+}
+
+// A deeply nested body used to recurse until the goroutine stack
+// overflowed, a fatal error no recover catches. Each case here must come
+// back as an error for that page, with the test process still running.
+func TestConvertRefusesHostileBodies(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want error
+	}{
+		{"5 MB of nested <b>", strings.Repeat("<b>", 5<<20/3), ErrTooDeep},
+		{"one level past the cap", strings.Repeat("<span>", MaxDepth+1) + "x", ErrTooDeep},
+		{"nested lists past the cap", strings.Repeat("<ul><li>", MaxDepth/2+1), ErrTooDeep},
+		{"oversized body", "<p>" + strings.Repeat("a", MaxBodyBytes) + "</p>", ErrBodyTooLarge},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res, err := Convert(tc.in)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Convert error = %v, want %v", err, tc.want)
+			}
+			if res.Markdown != "" || res.Unsupported != nil {
+				t.Errorf("Convert returned output with an error: %+v", res)
+			}
+		})
+	}
+}
+
+func TestConvertAcceptsNestingAtTheCap(t *testing.T) {
+	t.Parallel()
+	in := strings.Repeat("<span>", MaxDepth) + "deep" + strings.Repeat("</span>", MaxDepth)
+	got, err := Convert(in)
+	if err != nil {
+		t.Fatalf("Convert at MaxDepth: %v", err)
+	}
+	if got.Markdown != "deep\n" {
+		t.Errorf("Markdown = %q, want %q", got.Markdown, "deep\n")
+	}
+}
+
+// Attribute values reach the output, so they are escaped or cleaned like
+// any other page text.
+func TestConvertCleansAttributeText(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, in, want string
+	}{
+		{"emoticon fallback escaped", `<p><ac:emoticon ac:name="x" ac:emoji-fallback="[a](b) *c*"/></p>`, "\\[a\\](b) \\*c\\*\n"},
+		{"emoticon name escaped", `<p><ac:emoticon ac:name="a_b*"/></p>`, ":a\\_b\\*:\n"},
+		{"code language newline and backticks stripped", "<ac:structured-macro ac:name=\"code\"><ac:parameter ac:name=\"language\">go\n# Heading```</ac:parameter><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:structured-macro>", "```go# Heading\nx\n```\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Convert(tc.in)
+			if err != nil {
+				t.Fatalf("Convert: %v", err)
+			}
+			if got.Markdown != tc.want {
+				t.Errorf("Convert(%q)\n got %q\nwant %q", tc.in, got.Markdown, tc.want)
+			}
+		})
 	}
 }
 

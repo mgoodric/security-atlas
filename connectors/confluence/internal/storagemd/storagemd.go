@@ -50,8 +50,28 @@ func ElementMarker(name string) string {
 	return "[Unsupported Confluence element: " + name + "]"
 }
 
+// Limits on one page body. The renderer recurses over the element tree,
+// so an unbounded nesting depth (writable through Confluence's REST API)
+// would overflow the goroutine stack, which is fatal and kills the
+// connector. A body past either limit is refused with an error for that
+// page instead.
+const (
+	// MaxDepth is the deepest element nesting accepted. Real pages nest a
+	// few dozen levels at most.
+	MaxDepth = 512
+	// MaxBodyBytes is the largest storage-format body accepted.
+	MaxBodyBytes = 8 << 20
+)
+
+var (
+	// ErrTooDeep is returned for a body nested deeper than MaxDepth.
+	ErrTooDeep = errors.New("storagemd: body nested too deeply")
+	// ErrBodyTooLarge is returned for a body larger than MaxBodyBytes.
+	ErrBodyTooLarge = errors.New("storagemd: body too large")
+)
+
 // Convert converts a storage-format body to Markdown. It returns an error
-// only when the body is not parseable XML.
+// when the body is not parseable XML or is past MaxDepth or MaxBodyBytes.
 func Convert(storage string) (Result, error) {
 	root, err := parse(storage)
 	if err != nil {
@@ -99,6 +119,9 @@ var voidElements = []string{"br", "hr", "img", "col", "area", "input", "wbr"}
 // decoder runs non-strict with the HTML entity table; an undeclared prefix
 // is kept as the name's Space.
 func parse(storage string) (*node, error) {
+	if len(storage) > MaxBodyBytes {
+		return nil, fmt.Errorf("%w: %d bytes, limit %d", ErrBodyTooLarge, len(storage), MaxBodyBytes)
+	}
 	d := xml.NewDecoder(strings.NewReader("<root>" + storage + "</root>"))
 	d.Strict = false
 	d.AutoClose = voidElements
@@ -123,6 +146,10 @@ func parse(storage string) (*node, error) {
 			}
 			top.children = append(top.children, n)
 			stack = append(stack, n)
+			// The stack holds the sentinel and the <root> wrapper too.
+			if len(stack)-2 > MaxDepth {
+				return nil, fmt.Errorf("%w: limit %d", ErrTooDeep, MaxDepth)
+			}
 		case xml.EndElement:
 			if len(stack) > 1 {
 				stack = stack[:len(stack)-1]
@@ -527,9 +554,9 @@ func (c *converter) inlineNode(n *node) string {
 		return c.confluenceLink(n)
 	case "ac:emoticon":
 		if fb := n.attr("ac:emoji-fallback"); fb != "" {
-			return fb
+			return escapeText(fb)
 		}
-		return ":" + n.attr("ac:name") + ":"
+		return ":" + escapeText(n.attr("ac:name")) + ":"
 	case "ac:image":
 		for _, ch := range childNodes(n, "ri:url") {
 			if u := ch.attr("ri:value"); u != "" {
@@ -617,7 +644,19 @@ func fence(body, lang string) string {
 	body = strings.TrimSuffix(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
 	body = strings.TrimPrefix(body, "\n")
 	ticks := strings.Repeat("`", max(3, longestRun(body, '`')+1))
-	return ticks + strings.TrimSpace(lang) + "\n" + body + "\n" + ticks
+	return ticks + fenceInfo(lang) + "\n" + body + "\n" + ticks
+}
+
+// fenceInfo cleans a code macro's language for the fence's info string: a
+// newline would end the fence line and a backtick is not allowed there, so
+// either could turn page text into Markdown structure.
+func fenceInfo(lang string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '`' {
+			return -1
+		}
+		return r
+	}, lang))
 }
 
 func longestRun(s string, r rune) int {
