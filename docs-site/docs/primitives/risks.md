@@ -49,6 +49,61 @@ exportable (slice 136) as CSV / JSON / XLSX for board reporting; the
 `category` column carries the category's slug and `category_name` your
 organisation's name for it, so a renamed category still round-trips.
 
+## Importing a risk register
+
+**Risks → Import** (or `POST /v1/risks/imports`) reads a CSV or XLSX
+register. Every row is staged for review or rejected with a reason, and
+nothing becomes a risk until an approver approves it. A batch has one
+scoring methodology (`nist_800_30` by default, `qualitative_5x5` or
+`fair`), and every row's scores are read in that methodology's shape.
+
+### Re-importing an export
+
+A file from the register export re-imports with no column mapping. The
+title, description, category, themes, review date, organisation risk ID
+and owner arrive as they left. So do the scores:
+
+- `inherent_score` and `residual_score` are the export's JSON. They are
+  checked against the batch's methodology with the same rule a single
+  create uses, so choose the methodology the exported risks were scored
+  with. A score of another shape (a FAIR score in a NIST batch) rejects
+  its row as `invalid_score`. An unscored risk (`{}`) imports unscored.
+- A row gives each score either as its JSON column or as its pair of
+  columns (likelihood and impact, or loss event frequency and loss
+  magnitude), not both.
+
+`owner_user_id` and `org_unit_id` are ids in the exporting
+organisation. Imported back into that organisation, the owner is
+linked when they are still an active user, and the risk is placed in
+the org unit when the row names no org unit by name. Into another
+organisation they name nothing, so they stay unmapped values on the
+row, and nothing is rejected for them. `parent_risk_ids` always stays
+unmapped: to rebuild the hierarchy, give a parent risk ID column with
+the parents' organisation risk IDs.
+
+### Text in a score column
+
+The import does not translate words into scores. The bare headers
+`Likelihood` and `Impact` are the inherent likelihood and impact of a
+`nist_800_30` or `qualitative_5x5` batch, and must hold whole numbers
+from 1 to 5. `LEF` and `LM` (and `Loss Event Frequency`, `Loss
+Magnitude`) are the inherent pair of a `fair` batch, and must hold plain
+numbers such as `0.5` or `250000`, with no currency sign or thousands
+separator.
+
+So an `Impact` column holding `High`, `Medium` or `Low` rejects every
+row that has a value in it as `invalid_score`. Either:
+
+- replace the words with numbers in the sheet before upload (for
+  example High = 4), or
+- leave the column out in the mapping step (`ignore_column=Impact` on
+  the API). Its values are then kept on each row as unmapped, and the
+  rows import unscored.
+
+In a `fair` batch, `Likelihood` and `Impact` are not score columns, so
+they stay unmapped and reject nothing. The same holds for `LEF` and
+`LM` in a NIST or 5x5 batch.
+
 ## Rolling risks up into a parent risk
 
 An org or company risk can have child risks: team findings that

@@ -1,6 +1,7 @@
 package riskimport
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"strings"
@@ -69,12 +70,22 @@ func indexOrgUnits(units []risk.OrgUnit) orgUnitIndex {
 }
 
 // applyPlacement sets the row's level and org unit from the staged risk,
-// or returns the rejection when the row cannot be placed.
-func applyPlacement(row *BatchRow, s StagedRisk, units orgUnitIndex) (RejectedRow, bool) {
+// or returns the rejection when the row cannot be placed. byID holds the org units the rows' org_unit_id cells resolved to
+// (idfallback.go); one is used only when the row names no org unit.
+func applyPlacement(row *BatchRow, s StagedRisk, units orgUnitIndex, byID map[string]risk.OrgUnit) (RejectedRow, bool) {
 	reject := func(reason, detail string) (RejectedRow, bool) {
 		return RejectedRow{RowNumber: s.RowNumber, ExternalRef: s.ExternalRef, Reason: reason, Detail: detail}, false
 	}
 	var unitLevel *dbx.RiskLevel
+	unitName := s.OrgUnit
+	if u, ok := byID[s.OrgUnitIDRef]; ok && s.OrgUnit == "" {
+		row.OrgUnitID = u.ID.String()
+		// org_unit_value is non-empty whenever org_unit_id is set.
+		unitName = cmp.Or(strings.TrimSpace(u.Name), s.OrgUnitIDRef)
+		row.OrgUnitValue = unitName
+		level := u.Level
+		unitLevel = &level
+	}
 	if s.OrgUnit != "" {
 		matches := units[orgUnitKey(s.OrgUnit)]
 		switch len(matches) {
@@ -91,7 +102,7 @@ func applyPlacement(row *BatchRow, s StagedRisk, units orgUnitIndex) (RejectedRo
 	}
 	if err := risk.CheckCreatePlacement(s.Level, unitLevel); err != nil {
 		if errors.Is(err, risk.ErrLevelMismatch) {
-			return reject(RejectLevelMismatch, fmt.Sprintf("level %q differs from org unit %q's level %q", s.Level, s.OrgUnit, *unitLevel))
+			return reject(RejectLevelMismatch, fmt.Sprintf("level %q differs from org unit %q's level %q", s.Level, unitName, *unitLevel))
 		}
 		return reject(RejectInvalidLevel, err.Error())
 	}

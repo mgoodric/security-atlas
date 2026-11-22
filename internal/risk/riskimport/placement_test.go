@@ -79,7 +79,7 @@ func TestApplyPlacement(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var row BatchRow
-			rej, ok := applyPlacement(&row, StagedRisk{RowNumber: 2, ExternalRef: "R-1", Level: tc.level, OrgUnit: tc.orgUnit}, units)
+			rej, ok := applyPlacement(&row, StagedRisk{RowNumber: 2, ExternalRef: "R-1", Level: tc.level, OrgUnit: tc.orgUnit}, units, nil)
 			if tc.wantReason != "" {
 				if ok || rej.Reason != tc.wantReason || rej.RowNumber != 2 || rej.ExternalRef != "R-1" || rej.Detail == "" {
 					t.Fatalf("applyPlacement = %+v, %v; want rejection %s", rej, ok, tc.wantReason)
