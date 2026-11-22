@@ -54,6 +54,7 @@ var kinds = []string{
 	"github.repo_protection.v2",
 	"jira.ticket_evidence.v1",
 	"k8s.networkpolicy_coverage.v1",
+	"monitoring.host_capacity.v1",
 	"okta.app_assignment.v1",
 	"okta.mfa_policy.v2",
 	"okta.user_lifecycle.v1",

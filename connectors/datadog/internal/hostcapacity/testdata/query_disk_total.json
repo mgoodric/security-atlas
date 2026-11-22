@@ -1,0 +1,72 @@
+{
+  "error": "",
+  "from_date": 1795262100000,
+  "group_by": ["host", "device"],
+  "message": "",
+  "query": "avg:system.disk.total{env:production} by {host,device}.rollup(avg, 15)",
+  "res_type": "time_series",
+  "resp_version": 1,
+  "series": [
+    {
+      "aggr": "avg",
+      "attributes": {},
+      "display_name": "system.disk.total",
+      "end": 1795262144999,
+      "expression": "avg:system.disk.total{env:production,device:/dev/sda1,host:web-1}",
+      "interval": 15000,
+      "length": 3,
+      "metric": "system.disk.total",
+      "pointlist": [
+        [1795262100000.0, 100000000000.0],
+        [1795262115000.0, 100000000000.0],
+        [1795262130000.0, 100000000000.0]
+      ],
+      "query_index": 0,
+      "scope": "device:/dev/sda1,host:web-1",
+      "start": 1795262100000,
+      "tag_set": ["device:/dev/sda1", "host:web-1"],
+      "unit": [
+        {
+          "family": "bytes",
+          "id": 2,
+          "name": "byte",
+          "plural": "bytes",
+          "scale_factor": 1.0,
+          "short_name": "B"
+        }
+      ]
+    },
+    {
+      "aggr": "avg",
+      "attributes": {},
+      "display_name": "system.disk.total",
+      "end": 1795262129999,
+      "expression": "avg:system.disk.total{env:production,device:/dev/sdb1,host:web-1}",
+      "interval": 15000,
+      "length": 2,
+      "metric": "system.disk.total",
+      "pointlist": [
+        [1795262100000.0, 100000000000.0],
+        [1795262115000.0, 100000000000.0]
+      ],
+      "query_index": 0,
+      "scope": "device:/dev/sdb1,host:web-1",
+      "start": 1795262100000,
+      "tag_set": ["device:/dev/sdb1", "host:web-1"],
+      "unit": [
+        {
+          "family": "bytes",
+          "id": 2,
+          "name": "byte",
+          "plural": "bytes",
+          "scale_factor": 1.0,
+          "short_name": "B"
+        }
+      ]
+    }
+  ],
+  "status": "ok",
+  "times": [],
+  "to_date": 1795262400000,
+  "values": []
+}
