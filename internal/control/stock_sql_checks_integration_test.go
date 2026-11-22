@@ -7,8 +7,9 @@
 //     tenant transaction, as the upload gate runs them; and
 //   - cc6_1, the tracer, and each later check (cc6_6 and cc4_1, #2822; both cc8_1
 //     bundles, #2823; the windowed cc6_3, cc1_4, cc6_5 and cc9_1, #2824;
-//     cc6_6 MFA on admin apps, #2828; the acknowledgement checks cc1_5,
-//     cc5_3 and cc7_4, #2832) are
+//     cc6_6 MFA on admin apps, #2828; cc7_1 remediation and cc1_4 training
+//     tickets, #2829; the acknowledgement checks cc1_5, cc5_3 and cc7_4,
+//     #2832) are
 //     evaluated by the live engine against evidence
 //     records in the ledger, so the query is shown to decide the stored
 //     control state and not only the fixture runner's.
@@ -743,6 +744,115 @@ func TestA11_EngineEvaluatesCapacityPayload(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := evaluateStockHostPosture(t, admin, engine, "soc2_a1_1_capacity_monitoring", tc.records); got != tc.want {
 				t.Errorf("result = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// #2829: cc7_1 vulnerability remediation and cc1_4's training-ticket query
+// decide on each ticket's latest jira.ticket_evidence.v1 payload (labels,
+// severity, created_at, resolved_at, resolution, assignee_account_id),
+// not on the Jira connector's status verdict. An open ticket's age is
+// measured from the evaluation instant, so a replay as of an earlier
+// instant sees it younger.
+func TestJiraTicketChecks_EngineEvaluatesTicketPayload(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	now := time.Now().UTC()
+	observed := now.Add(-2 * time.Hour)
+	hour := time.Hour
+	ts := func(ago time.Duration) string { return now.Add(-ago).Format(time.RFC3339Nano) }
+
+	const (
+		cc71 = "soc2_cc7_1_vulnerability_remediation"
+		cc14 = "soc2_cc1_4_competence_training"
+	)
+	vuln := func(key, severity string, createdAgo, resolvedAgo time.Duration) map[string]any {
+		p := map[string]any{
+			"ticket_key": key, "status": "In Progress", "labels": []string{"vulnerability"},
+			"created_at": ts(createdAgo),
+		}
+		if severity != "" {
+			p["severity"] = severity
+		}
+		if resolvedAgo > 0 {
+			p["status"], p["resolution"], p["resolved_at"] = "Done", "Done", ts(resolvedAgo)
+		}
+		return p
+	}
+	// ago is how long ago the ticket was resolved, or for an open ticket
+	// (no resolution) how long ago it was created.
+	training := func(key, account, resolution string, ago time.Duration) map[string]any {
+		p := map[string]any{
+			"ticket_key": key, "status": "To Do", "labels": []string{"security-training"},
+			"assignee_account_id": account,
+		}
+		if resolution != "" {
+			p["status"], p["resolution"], p["resolved_at"] = "Done", resolution, ts(ago)
+		} else if ago > 0 {
+			p["created_at"] = ts(ago)
+		}
+		return p
+	}
+	cases := []struct {
+		bundle   string
+		name     string
+		payloads []map[string]any
+		asOf     time.Time
+		want     string
+	}{
+		{cc71, "every severity within sla", []map[string]any{
+			vuln("V-1", "critical", 100*hour, 0),
+			vuln("V-2", "high", 600*hour, 0),
+			vuln("V-3", "medium", 3000*hour, 1000*hour),
+		}, eval.FarFuture, eval.ResultPass},
+		{cc71, "open critical past 168 hours", []map[string]any{vuln("V-1", "critical", 170*hour, 0)}, eval.FarFuture, eval.ResultFail},
+		{cc71, "high resolved after 721 hours", []map[string]any{vuln("V-2", "high", 800*hour, 79*hour)}, eval.FarFuture, eval.ResultFail},
+		{cc71, "replay measures from the as-of instant", []map[string]any{vuln("V-1", "critical", 170*hour, 0)}, now.Add(-10 * hour), eval.ResultPass},
+		{cc71, "no severity past 168 hours", []map[string]any{vuln("V-5", "", 200*hour, 0)}, eval.FarFuture, eval.ResultInconclusive},
+		{cc71, "only training tickets", []map[string]any{training("S-1", "acct-1", "", 0)}, eval.FarFuture, eval.ResultInconclusive},
+		{cc71, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+		{cc14, "every assignee trained within 365 days", []map[string]any{
+			training("S-1", "acct-1", "Done", 100*24*hour),
+			training("S-2", "acct-2", "Done", 364*24*hour),
+		}, eval.FarFuture, eval.ResultPass},
+		{cc14, "training resolved 366 days ago", []map[string]any{training("S-1", "acct-1", "Done", 366*24*hour)}, eval.FarFuture, eval.ResultFail},
+		{cc14, "training ticket open 31 days", []map[string]any{training("S-1", "acct-1", "", 31*24*hour)}, eval.FarFuture, eval.ResultFail},
+		{cc14, "training ticket open 29 days is in grace", []map[string]any{training("S-1", "acct-1", "", 29*24*hour)}, eval.FarFuture, eval.ResultPass},
+		{cc14, "replay measures from the as-of instant", []map[string]any{training("S-1", "acct-1", "Done", 380*24*hour)}, now.Add(-30 * 24 * hour), eval.ResultPass},
+		{cc14, "only vulnerability tickets", []map[string]any{vuln("V-1", "critical", 900*hour, 0)}, eval.FarFuture, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.bundle+"/"+tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, tc.bundle)
+			// A replay sees only records observed by its as-of instant.
+			obs := observed
+			if tc.asOf.Before(obs) {
+				obs = tc.asOf.Add(-hour)
+			}
+			for _, p := range tc.payloads {
+				// The connector's verdict is pass for a terminal status; the
+				// queries must ignore it.
+				seedStockEvidence(t, admin, tenant, ctrl, "jira.ticket_evidence.v1", obs, "pass", p)
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if states[0].Result != tc.want {
+				t.Errorf("result = %q, want %q", states[0].Result, tc.want)
 			}
 		})
 	}
