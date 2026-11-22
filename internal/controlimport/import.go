@@ -94,9 +94,12 @@ type ParseResult struct {
 
 // ParseOptions tunes header detection. ColumnMap maps a canonical field name
 // (FieldID, FieldTitle, ...) to the header text used in the file; a mapped
-// field overrides alias detection for that field.
+// field overrides alias detection for that field. Ignore lists headers kept
+// unmapped even when an alias would map them (#2836), so the web mapping
+// step's "Not imported" holds for an alias-matched column.
 type ParseOptions struct {
 	ColumnMap map[string]string
+	Ignore    []string
 }
 
 var fieldAliases = map[string][]string{
@@ -152,6 +155,15 @@ func FormatOf(filename string) string {
 
 // ParseCSVWith parses a CSV export with explicit options.
 func ParseCSVWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
+	rows, err := readCSVRows(raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseRows(rows, "csv", opts)
+}
+
+// readCSVRows reads a CSV upload's cells under the size cap.
+func readCSVRows(raw []byte) ([][]string, error) {
 	if len(raw) == 0 {
 		return nil, ErrEmptyFile
 	}
@@ -164,7 +176,7 @@ func ParseCSVWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("controlimport: read csv: %w", err)
 	}
-	return parseRows(rows, "csv", opts)
+	return rows, nil
 }
 
 // xlsxLimits bounds an uploaded workbook through internal/xlsxbound: the
@@ -182,6 +194,15 @@ var xlsxLimits = xlsxbound.Limits{
 // A 5 MiB upload can inflate to gigabytes, so the workbook is opened and read
 // under xlsxLimits; each bound maps to this package's own sentinel.
 func ParseXLSXWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
+	rows, err := readXLSXRows(raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseRows(rows, "xlsx", opts)
+}
+
+// readXLSXRows reads the first sheet's cells under xlsxLimits.
+func readXLSXRows(raw []byte) ([][]string, error) {
 	if len(raw) == 0 {
 		return nil, ErrEmptyFile
 	}
@@ -202,7 +223,7 @@ func ParseXLSXWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 	if err != nil {
 		return nil, xlsxError("read xlsx rows", err)
 	}
-	return parseRows(rows, "xlsx", opts)
+	return rows, nil
 }
 
 func xlsxError(op string, err error) error {
@@ -242,12 +263,26 @@ func newHeaderMatcher(opts ParseOptions) (headerMatcher, error) {
 		if norm == "" {
 			return nil, fmt.Errorf("%w: field %q maps to an empty header", ErrInvalidColumnMap, field)
 		}
+		if other, dup := explicit[norm]; dup {
+			return nil, fmt.Errorf("%w: header %q is mapped to both %s and %s", ErrInvalidColumnMap, header, other, field)
+		}
 		explicit[norm] = field
 		mappedFields[field] = true
 	}
+	ignored := make(map[string]bool, len(opts.Ignore))
+	for _, header := range opts.Ignore {
+		norm := normalizeHeader(header)
+		if norm == "" {
+			return nil, fmt.Errorf("%w: an ignored header is empty", ErrInvalidColumnMap)
+		}
+		if field, mapped := explicit[norm]; mapped {
+			return nil, fmt.Errorf("%w: header %q is both mapped to %s and ignored", ErrInvalidColumnMap, header, field)
+		}
+		ignored[norm] = true
+	}
 	return func(cell string) string {
 		norm := normalizeHeader(cell)
-		if norm == "" {
+		if norm == "" || ignored[norm] {
 			return ""
 		}
 		if field, ok := explicit[norm]; ok {
@@ -412,12 +447,11 @@ func SplitTestedUnder(raw string) []string {
 	return out
 }
 
+// headerSearchRows is how many leading rows the header search reads.
+const headerSearchRows = 5
+
 func findHeaderRow(rows [][]string, match headerMatcher) (int, []string) {
-	limit := 5
-	if len(rows) < limit {
-		limit = len(rows)
-	}
-	for i := 0; i < limit; i++ {
+	for i := 0; i < min(headerSearchRows, len(rows)); i++ {
 		matches := 0
 		for _, cell := range rows[i] {
 			if match(cell) != "" {

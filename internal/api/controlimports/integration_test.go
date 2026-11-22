@@ -200,6 +200,10 @@ type upload struct {
 	payload   []byte
 	framework string
 	columnMap []string
+	ignore    []string
+	// path defaults to the upload; bearer to env.bearer.
+	path   string
+	bearer string
 }
 
 func doUpload(t *testing.T, env testEnv, u upload) (int, []byte) {
@@ -219,13 +223,23 @@ func doUpload(t *testing.T, env testEnv, u upload) (int, []byte) {
 	for _, m := range u.columnMap {
 		_ = mw.WriteField("column_map", m)
 	}
+	for _, h := range u.ignore {
+		_ = mw.WriteField("ignore_column", h)
+	}
 	_ = mw.Close()
-	req, err := http.NewRequest(http.MethodPost, env.server.URL+"/v1/controls/imports", &body)
+	path, bearer := u.path, u.bearer
+	if path == "" {
+		path = "/v1/controls/imports"
+	}
+	if bearer == "" {
+		bearer = env.bearer
+	}
+	req, err := http.NewRequest(http.MethodPost, env.server.URL+path, &body)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+env.bearer)
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	return do(t, req)
 }
 

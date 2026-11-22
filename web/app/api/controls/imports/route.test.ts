@@ -23,6 +23,7 @@ import { GET as getBatch } from "./[id]/route";
 import { POST as approve } from "./[id]/rows/[row]/approve/route";
 import { POST as reject } from "./[id]/rows/[row]/reject/route";
 import { GET as listRows } from "./[id]/rows/route";
+import { POST as preview } from "./preview/route";
 import { POST as upload } from "./route";
 
 const B = "b1785000-0000-4000-8000-000000000001";
@@ -111,6 +112,29 @@ describe("control import BFF routes", () => {
       `Bearer ${TEST_BEARER_DEFAULT}`,
     );
   });
+
+  for (const [name, route, path, status] of [
+    ["upload", upload, "/v1/controls/imports", 201],
+    ["preview", preview, "/v1/controls/imports/preview", 200],
+  ] as const) {
+    test(`${name} forwards the mapping fields as sent (#2836)`, async () => {
+      const spy = upstream(status, { ok: true });
+      const form = new FormData();
+      form.append("file", new File(["Key,Headline\n"], "c.csv"));
+      form.append("framework", "soc2");
+      form.append("column_map", "id=Key");
+      form.append("column_map", "title=Headline");
+      form.append("ignore_column", "Kind");
+      const res = await route((await multipartRequest(form)) as never);
+      expect(res.status).toBe(status);
+      const { url, init } = call(spy);
+      expect(url).toBe(`http://atlas:8080${path}`);
+      const sent = init.body as FormData;
+      expect(sent.getAll("column_map")).toEqual(["id=Key", "title=Headline"]);
+      expect(sent.getAll("ignore_column")).toEqual(["Kind"]);
+      expect(sent.get("framework")).toBe("soc2");
+    });
+  }
 
   test("upload checks the bearer before reading the body", async () => {
     mockCookieGet.mockReturnValue(undefined);
