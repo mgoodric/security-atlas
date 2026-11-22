@@ -148,9 +148,10 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 					category_value, theme_values, review_due, inherent_score, residual_score, unmapped, flags, status,
 					treatment, requested_treatment, acceptance_justification, proposed_until,
 					historical_accepter, instrument_reference, linked_control_ids, unresolved_controls,
-					owner_user_id, owner_unlinked)
+					owner_user_id, owner_unlinked, level, org_unit_value, org_unit_id)
 				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $24, $8::date, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13,
-					$14, $15, $16, $17::date, $18, $19, $20::uuid[], $21, $22::uuid, $23)
+					$14, $15, $16, $17::date, $18, $19, $20::uuid[], $21, $22::uuid, $23,
+					$25::risk_level, $26, $27::uuid)
 				RETURNING id::text
 			`, tenantID, b.ID, r.RowNumber, nullable(r.ExternalRef), r.Title, r.Description,
 				r.CategoryValue, nullable(r.ReviewDue), nullable(string(r.InherentScore)), nullable(string(r.ResidualScore)),
@@ -158,6 +159,7 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 				r.Treatment, nullable(r.RequestedTreatment), r.Justification, nullable(r.ProposedUntil),
 				r.HistoricalAccepter, r.InstrumentReference, nonNil(r.LinkedControlIDs), nonNil(r.UnresolvedControls),
 				nullable(r.OwnerUserID), r.OwnerUnlinked, nonNil(r.ThemeValues),
+				nullable(r.Level), r.OrgUnitValue, nullable(r.OrgUnitID),
 			).Scan(&r.ID); err != nil {
 				return fmt.Errorf("riskimport: insert staged row %d: %w", r.RowNumber, err)
 			}
@@ -258,7 +260,8 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 		       treatment, COALESCE(requested_treatment, ''), acceptance_justification,
 		       COALESCE(to_char(proposed_until, 'YYYY-MM-DD'), ''), historical_accepter, instrument_reference,
 		       linked_control_ids::text[], unresolved_controls,
-		       COALESCE(owner_user_id::text, ''), owner_unlinked
+		       COALESCE(owner_user_id::text, ''), owner_unlinked,
+		       COALESCE(level::text, ''), org_unit_value, COALESCE(org_unit_id::text, '')
 		FROM risk_import_rows
 		WHERE batch_id = $1::uuid
 		ORDER BY row_number
@@ -276,7 +279,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 			&r.ReviewDue, &inherent, &residual, &vals, &r.Flags, &r.Status, &r.DecidedBy, &r.RiskID, &r.RejectionReason,
 			&r.Treatment, &r.RequestedTreatment, &r.Justification, &r.ProposedUntil, &r.HistoricalAccepter,
 			&r.InstrumentReference, &r.LinkedControlIDs, &r.UnresolvedControls,
-			&r.OwnerUserID, &r.OwnerUnlinked); err != nil {
+			&r.OwnerUserID, &r.OwnerUnlinked, &r.Level, &r.OrgUnitValue, &r.OrgUnitID); err != nil {
 			return nil, fmt.Errorf("riskimport: scan staged row: %w", err)
 		}
 		r.InherentScore, r.ResidualScore = rawJSON(inherent), rawJSON(residual)
