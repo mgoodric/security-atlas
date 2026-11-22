@@ -1,8 +1,10 @@
 package controlimport
 
 import (
+	"encoding/csv"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -107,6 +109,47 @@ func TestPreviewFile_Errors(t *testing.T) {
 	}
 	if _, err := PreviewFile("c.csv", []byte("\n,\n"), ParseOptions{}); !errors.Is(err, ErrEmptyFile) {
 		t.Fatalf("all-blank err = %v", err)
+	}
+}
+
+// The preview reads through the upload's readers, so it refuses a row past
+// MaxColumns exactly as the upload does, CSV and XLSX alike; a row at the
+// cap is read.
+func TestPreviewFile_ColumnCapMatchesUpload(t *testing.T) {
+	t.Parallel()
+	header := []string{"Control ID", "Title", "Description"}
+	row := func(n int) []string {
+		r := make([]string, n)
+		r[0], r[1], r[2], r[n-1] = "C-1", "T", "D", "stray"
+		return r
+	}
+	csvOf := func(rows ...[]string) []byte {
+		var b strings.Builder
+		w := csv.NewWriter(&b)
+		_ = w.WriteAll(rows)
+		return []byte(b.String())
+	}
+	over := map[string][]byte{
+		"c.csv":  csvOf(header, row(MaxColumns+1)),
+		"c.xlsx": makeControlXLSX(t, [][]string{header, row(MaxColumns + 1)}),
+	}
+	for name, raw := range over {
+		if _, err := PreviewFile(name, raw, ParseOptions{}); !errors.Is(err, ErrTooManyColumns) {
+			t.Errorf("%s preview err = %v, want ErrTooManyColumns", name, err)
+		}
+		if _, err := Parse(name, raw, ParseOptions{}); !errors.Is(err, ErrTooManyColumns) {
+			t.Errorf("%s upload err = %v, want ErrTooManyColumns", name, err)
+		}
+	}
+	atCap := map[string][]byte{
+		"c.csv":  csvOf(header, row(MaxColumns)),
+		"c.xlsx": makeControlXLSX(t, [][]string{header, row(MaxColumns)}),
+	}
+	for name, raw := range atCap {
+		p, err := PreviewFile(name, raw, ParseOptions{})
+		if err != nil || p.DataRows != 1 {
+			t.Errorf("%s at cap = %+v, %v", name, p, err)
+		}
 	}
 }
 

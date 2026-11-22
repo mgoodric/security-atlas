@@ -48,3 +48,13 @@ expressible: the step sends every unmapped column as `ignore_column`. A
 header that is both mapped and ignored is a 400. The column-map parser
 also now refuses one header mapped to two fields, as the risk import
 does. Before, one of the two won, chosen by Go map iteration order.
+
+### D5 — the 200-column cap now covers CSV too (review fold-in)
+
+The review asked that the preview enforce the upload's `MaxColumns` (200)
+with the same 400. The preview reads through the upload's own readers, so
+it does. But the cap was enforced only by the XLSX reader (`xlsxbound`).
+A CSV had no column cap on either path. `readCSVRows` now refuses a row
+past the cap, as `riskimport.readCSVRows` does, so upload and preview
+return the same 400 for both formats. It is a behaviour change for a CSV
+upload with a row past column 200, recorded in `changelog.d/2836-2.changed.md`.

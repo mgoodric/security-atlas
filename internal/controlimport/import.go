@@ -172,9 +172,21 @@ func readCSVRows(raw []byte) ([][]string, error) {
 	}
 	r := csv.NewReader(bytes.NewReader(raw))
 	r.FieldsPerRecord = -1
-	rows, err := r.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("controlimport: read csv: %w", err)
+	var rows [][]string
+	for {
+		rec, err := r.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("controlimport: read csv: %w", err)
+		}
+		// The XLSX reader enforces the column cap through xlsxbound; a CSV
+		// row past it is refused the same way, for upload and preview.
+		if len(rec) > MaxColumns {
+			return nil, ErrTooManyColumns
+		}
+		rows = append(rows, rec)
 	}
 	return rows, nil
 }

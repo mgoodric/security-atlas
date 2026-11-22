@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -162,6 +163,16 @@ func TestControlImport_PreviewMapsWithoutStaging(t *testing.T) {
 	if status, raw := doUpload(t, env, upload{filename: "odd.csv", payload: sheet, path: preview, columnMap: mapped, ignore: []string{"Key"}}); status != http.StatusBadRequest {
 		t.Errorf("mapped and ignored = %d, want 400; body=%s", status, raw)
 	}
+	// A row past the column cap is the same 400, with the same message, on
+	// preview and upload.
+	wide := []byte("ID,Title,Description\nA,B,C" + strings.Repeat(",x", controlimport.MaxColumns) + "\n")
+	pStatus, pRaw := doUpload(t, env, upload{filename: "wide.csv", payload: wide, path: preview})
+	uStatus, uRaw := doUpload(t, env, upload{filename: "wide.csv", payload: wide, framework: framework})
+	if pStatus != http.StatusBadRequest || uStatus != http.StatusBadRequest || string(pRaw) != string(uRaw) ||
+		!strings.Contains(string(pRaw), "past column 200") {
+		t.Errorf("column cap: preview %d %s, upload %d %s; want the same 400", pStatus, pRaw, uStatus, uRaw)
+	}
+
 	if n := batchCount(t, admin, tenant); n != 1 {
 		t.Fatalf("batches = %d, want the one upload", n)
 	}
