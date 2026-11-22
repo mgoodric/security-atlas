@@ -14,3 +14,4 @@ documented schema (`repository-rule-pull-request`,
 | `branch_protection.json` | `branch-protection` (Get branch protection)                                                                         |
 | `branch_rules.json`      | `repository-rule-items` (Get rules for a branch), plus a `pull_request` and a `required_signatures` rule            |
 | `ruleset.json`           | `repository-ruleset` (Get a repository ruleset), its id and source set to the org ruleset `branch_rules.json` names |
+| `branch.json`            | `branch-get` (Get a branch)                                                                                         |
