@@ -111,6 +111,7 @@ func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, cont
 		ControlID:    pgUUID(controlID),
 		ControlRef:   controlRef,
 		UnboundKinds: routed.ControlFreeKinds(),
+		RoutedKinds:  routed.Kinds(),
 		ObservedAt:   pgTimestamptz(asOf),
 	})
 	if err != nil {

@@ -864,9 +864,9 @@ ranked_controls AS (
     FROM matched_controls c
     LEFT JOIN evidence_records e
         ON e.tenant_id = $1
-       AND (e.control_id = c.id OR e.control_ref = c.id::text
+       AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL($5::text[])))
            OR (e.control_id IS NULL
-               AND e.evidence_kind = ANY($5::text[])
+               AND e.evidence_kind = ANY($6::text[])
                AND c.evidence_queries @> jsonb_build_array(
                      jsonb_build_object('evidence_kind', e.evidence_kind))))
     LEFT JOIN evidence_freshness ef
@@ -900,6 +900,7 @@ type ListActiveControlsForPortfolioParams struct {
 	Limit        int32         `json:"limit"`
 	Family       *string       `json:"family"`
 	AnchorIds    []pgtype.UUID `json:"anchor_ids"`
+	RoutedKinds  []string      `json:"routed_kinds"`
 	UnboundKinds []string      `json:"unbound_kinds"`
 }
 
@@ -957,6 +958,7 @@ func (q *Queries) ListActiveControlsForPortfolio(ctx context.Context, arg ListAc
 		arg.Limit,
 		arg.Family,
 		arg.AnchorIds,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 	)
 	if err != nil {

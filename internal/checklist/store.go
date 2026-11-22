@@ -78,6 +78,7 @@ func (s *Store) InScopeControls(ctx context.Context) ([]ControlInput, error) {
 		rows, err := q.ListInScopeControlsForChecklist(ctx, dbx.ListInScopeControlsForChecklistParams{
 			TenantID:     pgUUID(tenantID),
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 		})
 		if err != nil {
 			return fmt.Errorf("checklist: list in-scope controls: %w", err)
