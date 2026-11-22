@@ -11,7 +11,9 @@
 package datadogauth
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 )
@@ -53,12 +55,42 @@ const (
 	// monitor-alert events (sources=monitor_alert). `events_read` is the
 	// read-only minimum; NEVER grant the write scope (events_write).
 	RequiredFiringScope = "events_read"
+
+	// RequiredCapacityPermission is what the host-capacity surface
+	// (monitoring.host_capacity.v1, #2935) needs: Datadog documents
+	// GET /api/v1/query as requiring the timeseries_query permission. The
+	// surface runs only when --capacity-production-scope is set, so a key
+	// without it keeps working for the other surfaces; it is therefore not in
+	// RequiredScopes. It grants metric reads only.
+	RequiredCapacityPermission = "timeseries_query"
 )
 
 // RequiredScopes is the full least-privilege read-only scope set the connector
 // requires across every evidence surface. NEVER grant a write/admin scope.
 func RequiredScopes() []string {
 	return []string{RequiredScope, RequiredSIEMScope, RequiredSignalScope, RequiredFiringScope}
+}
+
+// ErrUnsafeRedirect is returned for a redirect that changes host or scheme.
+var ErrUnsafeRedirect = errors.New("refused redirect")
+
+// CheckRedirect is an http.Client CheckRedirect that refuses a redirect to
+// another host (port included) or another scheme, so a request carrying the
+// DD-API-KEY and DD-APPLICATION-KEY headers is only ever followed on its own
+// origin. It stops after 10 redirects, as the default does. Mirrors the
+// Confluence connector's guard (#2947).
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	orig := via[0].URL
+	if !strings.EqualFold(req.URL.Host, orig.Host) {
+		return fmt.Errorf("%w: from host %q to %q", ErrUnsafeRedirect, orig.Host, req.URL.Host)
+	}
+	if req.URL.Scheme != orig.Scheme {
+		return fmt.Errorf("%w: from %s to %s", ErrUnsafeRedirect, orig.Scheme, req.URL.Scheme)
+	}
+	return nil
 }
 
 // Credential is the resolved Datadog auth material. Both keys are kept off

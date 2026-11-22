@@ -749,6 +749,79 @@ func TestA11_EngineEvaluatesCapacityPayload(t *testing.T) {
 	}
 }
 
+// #2935: a1_1's second query reads monitoring.host_capacity.v1, and the
+// engine rolls the two queries up as any fail, then any pass. Fleet's disk
+// reading alone is never a pass.
+func TestA11_EngineEvaluatesMonitoringCapacity(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	const bundle = "soc2_a1_1_capacity_monitoring"
+	observed := time.Now().UTC().Add(-2 * time.Hour)
+	fleet := func(disk float64) map[string]any {
+		return map[string]any{
+			"host_uuid": "11111111-1111-1111-1111-111111111111", "hostname": "api-1", "platform": "linux",
+			"host_role": "production", "host_role_source": "fleet_label:Production", "disk_used_percent": disk,
+		}
+	}
+	datadog := func(host string, disk, mem, cpu float64) map[string]any {
+		p := map[string]any{
+			"source_vendor": "datadog", "host_name": host, "host_role": "production",
+			"host_role_source": "datadog_scope:env:production",
+			"window_start":     observed.Add(-5 * time.Minute).Format(time.RFC3339),
+			"window_end":       observed.Format(time.RFC3339), "cpu_sample_count": 20,
+		}
+		for k, v := range map[string]float64{"disk_used_percent": disk, "memory_used_percent": mem, "cpu_p95_5m_percent": cpu} {
+			if v >= 0 {
+				p[k] = v
+			}
+		}
+		return p
+	}
+	type rec struct {
+		kind    string
+		payload map[string]any
+	}
+	cases := []struct {
+		name    string
+		records []rec
+		want    string
+	}{
+		{"datadog under", []rec{{"monitoring.host_capacity.v1", datadog("web-1", 40, 50, 20)}}, eval.ResultPass},
+		{"datadog cpu at bound", []rec{{"monitoring.host_capacity.v1", datadog("web-1", 40, 50, 90)}}, eval.ResultFail},
+		{"datadog cpu unread", []rec{{"monitoring.host_capacity.v1", datadog("web-1", 40, 50, -1)}}, eval.ResultInconclusive},
+		{"fleet disk fine, no datadog", []rec{{"osquery.host_posture.v1", fleet(29)}}, eval.ResultInconclusive},
+		{"fleet disk fine, datadog under", []rec{{"osquery.host_posture.v1", fleet(29)}, {"monitoring.host_capacity.v1", datadog("api-1", 29, 40, 30)}}, eval.ResultPass},
+		{"fleet disk over, datadog under", []rec{{"osquery.host_posture.v1", fleet(91)}, {"monitoring.host_capacity.v1", datadog("api-1", 29, 40, 30)}}, eval.ResultFail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, bundle)
+			for _, r := range tc.records {
+				seedStockEvidence(t, admin, tenant, ctrl, r.kind, observed, "inconclusive", r.payload)
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if got := states[0].Result; got != tc.want {
+				t.Errorf("result = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // #2829: cc7_1 vulnerability remediation and cc1_4's training-ticket query
 // decide on each ticket's latest jira.ticket_evidence.v1 payload (labels,
 // severity, created_at, resolved_at, resolution, assignee_account_id),

@@ -1,0 +1,73 @@
+{
+  "error": "",
+  "from_date": 1795262100000,
+  "group_by": ["host"],
+  "message": "",
+  "query": "avg:system.mem.pct_usable{env:production} by {host}.rollup(avg, 15)",
+  "res_type": "time_series",
+  "resp_version": 1,
+  "series": [
+    {
+      "aggr": "avg",
+      "attributes": {},
+      "display_name": "system.mem.pct_usable",
+      "end": 1795262159999,
+      "expression": "avg:system.mem.pct_usable{env:production,host:web-1}",
+      "interval": 15000,
+      "length": 4,
+      "metric": "system.mem.pct_usable",
+      "pointlist": [
+        [1795262100000.0, 0.42],
+        [1795262115000.0, 0.41],
+        [1795262130000.0, 0.4],
+        [1795262145000.0, null]
+      ],
+      "query_index": 0,
+      "scope": "host:web-1",
+      "start": 1795262100000,
+      "tag_set": ["host:web-1"],
+      "unit": [
+        {
+          "family": "percentage",
+          "id": 16,
+          "name": "fraction",
+          "plural": "fractions",
+          "scale_factor": 1.0,
+          "short_name": ""
+        }
+      ]
+    },
+    {
+      "aggr": "avg",
+      "attributes": {},
+      "display_name": "system.mem.pct_usable",
+      "end": 1795262129999,
+      "expression": "avg:system.mem.pct_usable{env:production,host:web-2}",
+      "interval": 15000,
+      "length": 2,
+      "metric": "system.mem.pct_usable",
+      "pointlist": [
+        [1795262100000.0, 0.06],
+        [1795262115000.0, 0.05]
+      ],
+      "query_index": 0,
+      "scope": "host:web-2",
+      "start": 1795262100000,
+      "tag_set": ["host:web-2"],
+      "unit": [
+        {
+          "family": "percentage",
+          "id": 16,
+          "name": "fraction",
+          "plural": "fractions",
+          "scale_factor": 1.0,
+          "short_name": ""
+        }
+      ]
+    }
+  ],
+  "status": "ok",
+  "times": [],
+  "to_date": 1795262400000,
+  "values": []
+}

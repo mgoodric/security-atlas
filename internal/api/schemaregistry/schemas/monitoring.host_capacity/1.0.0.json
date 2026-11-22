@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/monitoring.host_capacity/1.0.0.json",
+  "x-evidence-kind": "monitoring.host_capacity.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["MON-02"],
+  "title": "Host capacity",
+  "description": "One record per production host per connector run: the host's memory use, 5-minute CPU p95 and disk use, read from a monitoring source over a 5-minute window (#2935). The Datadog connector emits it from the metrics query API (GET /api/v1/query, timeseries_query permission) for the hosts in the operator's production tag scope: memory from system.mem.pct_usable, CPU p95 computed by the connector from system.cpu.idle points, and disk as the fullest device's system.disk.used / system.disk.total. A reading is present only when it was read; a missing one means the source did not supply enough data for it. Routed by evidence type (#2924): a record reaches every control whose queries declare this kind. The connector's result is always inconclusive; the control's query decides. Metric values only: no dashboard, monitor, log or tag beyond host and device is collected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_vendor",
+    "host_name",
+    "host_role",
+    "host_role_source",
+    "window_start",
+    "window_end"
+  ],
+  "properties": {
+    "source_vendor": {
+      "type": "string",
+      "enum": ["datadog"],
+      "description": "The monitoring source the readings came from."
+    },
+    "host_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The host's name in the monitoring source (Datadog's host tag). It is the host key; it is not Fleet's host_uuid, and no join to osquery.host_posture.v1 is made."
+    },
+    "host_role": {
+      "type": "string",
+      "enum": ["production"],
+      "description": "The host's role. The Datadog connector reads only hosts in the operator's production scope, so every record it emits is production."
+    },
+    "host_role_source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What made the host production, e.g. datadog_scope:env:production."
+    },
+    "window_start": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Start of the 5-minute window the readings cover."
+    },
+    "window_end": {
+      "type": "string",
+      "format": "date-time",
+      "description": "End of the window. The latest reading per host is the one with the latest window_end."
+    },
+    "memory_used_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Physical memory in use, as a percent of the total, at the window's latest point. Datadog: (1 - system.mem.pct_usable) * 100."
+    },
+    "cpu_p95_5m_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Nearest-rank 95th percentile of CPU use over the window. Datadog: computed by the connector from 100 - system.cpu.idle at a 15-second rollup; absent when the window has fewer than 10 points."
+    },
+    "cpu_sample_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many CPU points the window held, whether or not a p95 was taken."
+    },
+    "disk_used_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Disk in use on the host's fullest device, as a percent. Datadog: max over devices of system.disk.used / system.disk.total * 100; absent when any device has no usable total."
+    }
+  }
+}
