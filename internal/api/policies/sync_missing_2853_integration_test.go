@@ -163,7 +163,7 @@ func TestSync_ReappearingPageClearsMissing(t *testing.T) {
 	page := syncPage("7001", "Vendor Policy", "2.0", "Review vendors yearly.", nil)
 	id := postSync(t, s.setupResult, key, http.StatusOK, page).Results[0].PolicyID
 
-	if resp := postSync(t, s.setupResult, key, http.StatusOK); resp.Missing != 1 || resp.Results[0].PolicyID != id {
+	if resp := postEmptySync(t, s.setupResult, key, "SEC", true, http.StatusOK); resp.Missing != 1 || resp.Results[0].PolicyID != id {
 		t.Fatalf("empty sync = %+v; want %s missing", resp, id)
 	}
 	if _, ok := sourceMissingItems(t, s.setupResult)[id]; !ok {
@@ -184,7 +184,7 @@ func TestSync_ReappearingPageClearsMissing(t *testing.T) {
 	// Gone again, then back with a new version: the new version starts in
 	// step, the superseded row carries no missing state, and the item
 	// clears.
-	postSync(t, s.setupResult, key, http.StatusOK)
+	postEmptySync(t, s.setupResult, key, "SEC", true, http.StatusOK)
 	bumped := postSync(t, s.setupResult, key, http.StatusOK, syncPage("7001", "Vendor Policy", "2.1", "Review vendors twice a year.", nil))
 	if bumped.NewVersion != 1 || bumped.Missing != 0 {
 		t.Fatalf("bumped sync = %+v", bumped)
@@ -217,7 +217,7 @@ func TestSync_MissingIsPerSource(t *testing.T) {
 		t.Errorf("SEC policy marked missing by an OPS run: %v", m)
 	}
 
-	empty := postSyncFrom(t, s.setupResult, key, "OPS", http.StatusOK)
+	empty := postEmptySync(t, s.setupResult, key, "OPS", true, http.StatusOK)
 	if empty.Missing != 2 {
 		t.Fatalf("empty OPS sync = %+v; want the two OPS pages missing", empty)
 	}
@@ -243,7 +243,7 @@ func TestSync_MissingIsPerTenant(t *testing.T) {
 	a := postSync(t, s.setupResult, keyA, http.StatusOK, page).Results[0].PolicyID
 	b := postSync(t, s.setupResult, keyB, http.StatusOK, page).Results[0].PolicyID
 
-	resp := postSync(t, s.setupResult, keyB, http.StatusOK)
+	resp := postEmptySync(t, s.setupResult, keyB, "SEC", true, http.StatusOK)
 	if resp.Missing != 1 || len(resp.Results) != 1 || resp.Results[0].PolicyID != b {
 		t.Fatalf("tenant B empty sync = %+v; want only %s missing", resp, b)
 	}
