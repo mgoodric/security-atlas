@@ -240,6 +240,61 @@ func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEviden
 	return items, nil
 }
 
+const listInconclusiveStreaks = `-- name: ListInconclusiveStreaks :many
+SELECT h.control_id, h.scope_cell_id, min(h.evaluated_at)::timestamptz AS inconclusive_since
+FROM (
+    SELECT ce.control_id, ce.scope_cell_id, ce.evaluated_at,
+           max(ce.evaluated_at) FILTER (WHERE ce.result <> 'inconclusive')
+               OVER (PARTITION BY ce.control_id, ce.scope_cell_id) AS last_break
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $1
+      AND ce.control_id = ANY($2::uuid[])
+      AND ce.evaluated_at <= $3
+) h
+WHERE h.last_break IS NULL OR h.evaluated_at > h.last_break
+GROUP BY h.control_id, h.scope_cell_id
+`
+
+type ListInconclusiveStreaksParams struct {
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	ControlIds []pgtype.UUID      `json:"control_ids"`
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+}
+
+type ListInconclusiveStreaksRow struct {
+	ControlID         pgtype.UUID        `json:"control_id"`
+	ScopeCellID       pgtype.UUID        `json:"scope_cell_id"`
+	InconclusiveSince pgtype.Timestamptz `json:"inconclusive_since"`
+}
+
+// #2915: when each (control, scope_cell) that is inconclusive now became
+// inconclusive. The ledger is append-only and the scheduler writes a row
+// per run, so a cell's streak starts at its earliest evaluation after its
+// latest non-inconclusive one (or its first evaluation, if it has never
+// been anything else). A cell whose latest evaluation is not inconclusive
+// has no row after its last break, so it returns nothing. Reads the
+// history of the named controls only; callers pass the controls they
+// already know are inconclusive.
+func (q *Queries) ListInconclusiveStreaks(ctx context.Context, arg ListInconclusiveStreaksParams) ([]ListInconclusiveStreaksRow, error) {
+	rows, err := q.db.Query(ctx, listInconclusiveStreaks, arg.TenantID, arg.ControlIds, arg.AsOf)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInconclusiveStreaksRow
+	for rows.Next() {
+		var i ListInconclusiveStreaksRow
+		if err := rows.Scan(&i.ControlID, &i.ScopeCellID, &i.InconclusiveSince); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestControlEvaluations = `-- name: ListLatestControlEvaluations :many
 SELECT DISTINCT ON (scope_cell_id) id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, evidence_count_in_window, last_observed_at, freshness_class, trigger, created_at, triggered_by
 FROM control_evaluations

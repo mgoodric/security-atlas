@@ -51,6 +51,27 @@ export function rollupResult(
   return "na";
 }
 
+/**
+ * inconclusiveSince is when the control's inconclusive run began: the
+ * earliest `inconclusive_since` among its inconclusive cells (#2915). Null
+ * when no cell carries one.
+ */
+export function inconclusiveSince(
+  entries: ControlStateEntry[] | undefined,
+): string | null {
+  let earliest: string | null = null;
+  let earliestMs = Infinity;
+  for (const e of entries ?? []) {
+    if (e.result !== "inconclusive" || !e.inconclusive_since) continue;
+    const ms = Date.parse(e.inconclusive_since);
+    if (!Number.isNaN(ms) && ms < earliestMs) {
+      earliestMs = ms;
+      earliest = e.inconclusive_since;
+    }
+  }
+  return earliest;
+}
+
 /** isManualImplementation is true for the controls a person attests. */
 export function isManualImplementation(
   implementationType: string | undefined,

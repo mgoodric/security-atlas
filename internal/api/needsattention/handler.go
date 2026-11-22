@@ -31,8 +31,15 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// DueSoonDays is band 4's window, the calendar's and "Coming up"'s.
+// DueSoonDays is band 6's window, the calendar's and "Coming up"'s.
 const DueSoonDays = calendar.DueSoonDays
+
+// InconclusiveDays is how long a control's rolled-up state must have been
+// inconclusive before band 4 lists it (#2915). A shorter run is a
+// connector between pulls or a freshness window rolling over; a week of
+// inconclusive is a control with no signal. See
+// docs/audit-log/2915-okta-pagination-inconclusive-decisions.md.
+const InconclusiveDays = 7
 
 // Paging bounds: the dashboard asks for 10, the full page for more.
 const (
@@ -403,11 +410,11 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 			items = append(items, MissingSourceItems(rows)...)
 		}
 		if visible["control"] {
-			ctl, n, err := controlItems(ctx, tx, q, tid)
+			ctl, n, err := controlItems(ctx, tx, q, tid, now)
 			if err != nil {
 				return err
 			}
-			h.warnLarge(ctx, tenantID, "controls", []string{BandFailing, BandOwnershipGap}, n)
+			h.warnLarge(ctx, tenantID, "controls", []string{BandFailing, BandInconclusive, BandOwnershipGap}, n)
 			items = append(items, ctl...)
 		}
 		if visible["risk"] {
@@ -576,9 +583,9 @@ func DueItems(rows []dbx.ListCalendarEventsRow, now time.Time) []Item {
 
 // controlItems reads the in-scope controls through the controls list's
 // own query (active, not superseded, worst state per control) and returns
-// the failing ones (band 1) and the unowned ones (band 5), with the
-// number of rows read.
-func controlItems(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tid pgtype.UUID) ([]Item, int, error) {
+// the failing ones (band 1), the long-inconclusive ones (band 4) and the
+// unowned ones (band 7), with the number of rows read.
+func controlItems(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tid pgtype.UUID, now time.Time) ([]Item, int, error) {
 	rows, err := q.ListActiveControlsWithState(ctx, dbx.ListActiveControlsWithStateParams{
 		TenantID: tid, SortKey: "default", RowLimit: math.MaxInt32,
 	})
@@ -586,21 +593,68 @@ func controlItems(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tid pgtype.UUI
 		return nil, 0, fmt.Errorf("list controls: %w", err)
 	}
 	var unowned []uuid.UUID
+	var inconclusive []pgtype.UUID
 	for _, c := range rows {
-		if c.LifecycleState == dbx.ControlLifecycleStateActive && !c.OwnerUserID.Valid {
+		if c.LifecycleState != dbx.ControlLifecycleStateActive {
+			continue
+		}
+		if !c.OwnerUserID.Valid {
 			unowned = append(unowned, c.ID.Bytes)
+		}
+		if c.StateResult != nil && *c.StateResult == dbx.EvidenceResultInconclusive {
+			inconclusive = append(inconclusive, c.ID)
 		}
 	}
 	created, err := createdAt(ctx, tx, tid.Bytes, unowned)
 	if err != nil {
 		return nil, 0, err
 	}
-	return ControlItems(rows, created), len(rows), nil
+	since, err := inconclusiveSince(ctx, q, tid, inconclusive, now)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ControlItems(rows, created, since, now), len(rows), nil
 }
 
-// ControlItems maps the controls list's rows to band-1 and band-5 items.
-// created holds the unowned controls' creation times.
-func ControlItems(rows []dbx.ListActiveControlsWithStateRow, created map[uuid.UUID]time.Time) []Item {
+// inconclusiveSince returns, per control, when its rolled-up state went
+// inconclusive: the earliest start among its cells' current inconclusive
+// runs. The rollup is worst-of and no cell of an inconclusive control is
+// failing, so the earliest cell run is the control's.
+func inconclusiveSince(ctx context.Context, q *dbx.Queries, tid pgtype.UUID, ids []pgtype.UUID, now time.Time) (map[uuid.UUID]time.Time, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := q.ListInconclusiveStreaks(ctx, dbx.ListInconclusiveStreaksParams{
+		TenantID: tid, ControlIds: ids, AsOf: pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("inconclusive streaks: %w", err)
+	}
+	return EarliestInconclusive(rows), nil
+}
+
+// EarliestInconclusive keys streak rows by control, keeping the earliest
+// cell run of each.
+func EarliestInconclusive(rows []dbx.ListInconclusiveStreaksRow) map[uuid.UUID]time.Time {
+	out := map[uuid.UUID]time.Time{}
+	for _, r := range rows {
+		if !r.InconclusiveSince.Valid {
+			continue
+		}
+		id := uuid.UUID(r.ControlID.Bytes)
+		if t, ok := out[id]; !ok || r.InconclusiveSince.Time.Before(t) {
+			out[id] = r.InconclusiveSince.Time
+		}
+	}
+	return out
+}
+
+// ControlItems maps the controls list's rows to band-1, band-4 and band-7
+// items. created holds the unowned controls' creation times; inconclusive
+// holds when each inconclusive control's run began, and one that began at
+// least InconclusiveDays before now is listed.
+func ControlItems(rows []dbx.ListActiveControlsWithStateRow, created, inconclusive map[uuid.UUID]time.Time, now time.Time) []Item {
+	cutoff := now.AddDate(0, 0, -InconclusiveDays)
 	var out []Item
 	for _, c := range rows {
 		if c.LifecycleState != dbx.ControlLifecycleStateActive {
@@ -621,6 +675,15 @@ func ControlItems(rows []dbx.ListActiveControlsWithStateRow, created map[uuid.UU
 				Link: links["control"] + id, Action: "Investigate",
 				Since: timePtr(c.StateEvaluatedAt), Owner: owner,
 			})
+		}
+		if c.StateResult != nil && *c.StateResult == dbx.EvidenceResultInconclusive {
+			if t, ok := inconclusive[c.ID.Bytes]; ok && !t.After(cutoff) {
+				out = append(out, Item{
+					Band: BandInconclusive, Type: "control", ID: id, Title: title,
+					Link: links["control"] + id, Action: "Check evidence source",
+					Since: &t, Owner: owner,
+				})
+			}
 		}
 		if owner == nil {
 			var since *time.Time

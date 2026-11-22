@@ -25,10 +25,8 @@ package oktapolicy
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -36,6 +34,7 @@ import (
 	"time"
 
 	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktaauth"
+	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktapage"
 )
 
 // Result mirrors the schema's pass/fail intent.
@@ -302,8 +301,8 @@ func NewClient(httpClient *http.Client, baseURL string, creds oktaauth.Credentia
 
 // ListMFAPolicies fetches MFA_ENROLL policies for the org.
 func (c *Client) ListMFAPolicies(ctx context.Context) ([]rawPolicy, error) {
-	var out []rawPolicy
-	if err := c.getJSON(ctx, "/api/v1/policies?type=MFA_ENROLL", &out); err != nil {
+	out, err := oktapage.List[rawPolicy](ctx, c.HTTP, c.BaseURL, c.Creds, "/api/v1/policies?type=MFA_ENROLL")
+	if err != nil {
 		return nil, fmt.Errorf("policies: %w", err)
 	}
 	return out, nil
@@ -323,9 +322,9 @@ type rawGroup struct {
 // using the `search` parameter Okta's List all groups operation
 // recommends. It returns "" when no BUILT_IN group is named Everyone.
 func (c *Client) EveryoneGroupID(ctx context.Context) (string, error) {
-	var groups []rawGroup
 	q := "/api/v1/groups?search=" + url.QueryEscape(`type eq "BUILT_IN"`)
-	if err := c.getJSON(ctx, q, &groups); err != nil {
+	groups, err := oktapage.List[rawGroup](ctx, c.HTTP, c.BaseURL, c.Creds, q)
+	if err != nil {
 		return "", fmt.Errorf("groups: %w", err)
 	}
 	for _, g := range groups {
@@ -336,41 +335,5 @@ func (c *Client) EveryoneGroupID(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-func (c *Client) getJSON(ctx context.Context, pathAndQuery string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+pathAndQuery, nil)
-	if err != nil {
-		return err
-	}
-	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode: %w", err)
-	}
-	return nil
-}
-
 // APIError carries Okta REST error context. The Body is bounded.
-type APIError struct {
-	Status int
-	Body   string
-}
-
-func (e *APIError) Error() string {
-	if e.Body == "" {
-		return fmt.Sprintf("okta: HTTP %d", e.Status)
-	}
-	return fmt.Sprintf("okta: HTTP %d: %s", e.Status, e.Body)
-}
-
-func drain(r io.Reader) string {
-	const max = 1 << 13
-	b, _ := io.ReadAll(io.LimitReader(r, max))
-	return string(b)
-}
+type APIError = oktapage.APIError

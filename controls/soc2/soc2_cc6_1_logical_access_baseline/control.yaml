@@ -24,7 +24,10 @@ description: |
 
   Not checked: Okta Verify with number matching also resists phishing, but
   the snapshot records only the factor key (`okta_verify`), not whether
-  number matching is on, so `okta_verify` does not count. A higher-priority
+  number matching is on, so `okta_verify` does not count. PIV and other
+  smart-card authenticators (`smart_card_idp`) resist phishing too, but the
+  connector does not map them to `webauthn`, so a policy that allows only
+  a smart card fails here. A higher-priority
   policy scoped to a subset of users can override the Everyone policy for
   them; the snapshot carries `priority`, but the query does not use it.
   Only the records the control receives are checked; a policy the
