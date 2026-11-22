@@ -6,6 +6,7 @@ package eval
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -95,6 +96,34 @@ func TestQueryInstant(t *testing.T) {
 	} {
 		if got := queryInstant(evaluatedAt, tc.asOf); !got.Equal(tc.want) {
 			t.Errorf("%s: queryInstant = %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestSQLUnguardedTimestampCasts(t *testing.T) {
+	t.Parallel()
+	guard := func(f string) string {
+		return "payload->>'" + f + "' ~ '" + RFC3339Pattern + "' AND pg_input_is_valid(payload->>'" + f + "', 'timestamptz')"
+	}
+	prefix := `payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}'`
+	for _, tc := range []struct {
+		name string
+		expr string
+		want []string
+	}{
+		{"no cast", "SELECT bool_and(observed_at >= evaluated_at) FROM evidence", nil},
+		{"bare cast", "SELECT max((payload->>'last_seen_at')::timestamptz) FROM evidence", []string{"last_seen_at"}},
+		{"start-anchored prefix guard", "SELECT CASE WHEN " + prefix + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
+		{"regex without pg_input_is_valid", "SELECT CASE WHEN payload->>'last_seen_at' ~ '" + RFC3339Pattern + "' THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
+		{"pg_input_is_valid without regex", "SELECT CASE WHEN pg_input_is_valid(payload->>'last_seen_at', 'timestamptz') THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
+		{"full guard", "SELECT CASE WHEN " + guard("last_seen_at") + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", nil},
+		{"guard on another field", "SELECT CASE WHEN " + guard("created_at") + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
+		{"date cast, spaced", "SELECT ( payload ->> 'due' ) :: DATE FROM evidence", []string{"due"}},
+		{"one guarded, one not", "SELECT CASE WHEN " + guard("a") + " THEN (payload->>'a')::timestamptz END, (payload->>'b')::timestamp FROM evidence", []string{"b"}},
+	} {
+		got := SQLUnguardedTimestampCasts(tc.expr)
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("%s: SQLUnguardedTimestampCasts = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
