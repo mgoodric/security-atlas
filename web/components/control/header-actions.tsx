@@ -69,6 +69,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Timestamp } from "@/components/ui/timestamp";
 import {
   bundleDownloadHref,
   evaluateControl,
@@ -85,6 +86,7 @@ import {
   ATTESTED_PARAM,
   evaluationLanded,
   isManualImplementation,
+  inconclusiveSince,
   rollupResult,
 } from "@/lib/attest-evaluation";
 import { enumLabel } from "@/lib/labels/enum-labels";
@@ -401,6 +403,9 @@ export function ControlStateStrip({
   const attestedAt = searchParams.get(ATTESTED_PARAM);
   const attestation = useAttestationEvaluation(controlID, attestedAt, state);
   const result = rollupResult(state?.states);
+  // #2915: an inconclusive control says how long it has had no signal.
+  const inconclusiveFrom =
+    result === "inconclusive" ? inconclusiveSince(state?.states) : null;
 
   // Resolve the freshest `last_observed_at` across cells. Three branches:
   //   1. state is undefined        → undefined  → "—"
@@ -445,6 +450,15 @@ export function ControlStateStrip({
                   {stateError ? "State unavailable" : "Not evaluated"}
                 </span>
               )}
+              {!attestation.waiting && inconclusiveFrom ? (
+                <p
+                  className="mt-1 text-xs text-muted-foreground"
+                  data-testid="control-state-inconclusive-since"
+                >
+                  Inconclusive since{" "}
+                  <Timestamp value={inconclusiveFrom} style="date" />
+                </p>
+              ) : null}
             </div>
           </StripCell>
           <StripCell label="Last evaluated">

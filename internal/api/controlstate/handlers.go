@@ -77,6 +77,9 @@ type stateWire struct {
 	EvaluatedAt           string  `json:"evaluated_at"`
 	FreshnessClass        string  `json:"freshness_class"`
 	Trigger               string  `json:"trigger"`
+	// InconclusiveSince is present when result is inconclusive: the first
+	// evaluation of the cell's current inconclusive run (#2915).
+	InconclusiveSince *string `json:"inconclusive_since,omitempty"`
 }
 
 func stateWireFrom(s eval.State) stateWire {
@@ -95,6 +98,10 @@ func stateWireFrom(s eval.State) stateWire {
 	if s.LastObservedAt != nil {
 		t := s.LastObservedAt.UTC().Format(time.RFC3339Nano)
 		w.LastObservedAt = &t
+	}
+	if s.InconclusiveSince != nil {
+		t := s.InconclusiveSince.UTC().Format(time.RFC3339Nano)
+		w.InconclusiveSince = &t
 	}
 	return w
 }

@@ -92,3 +92,25 @@ ORDER BY evaluated_at DESC;
 SELECT DISTINCT tenant_id
 FROM controls
 WHERE superseded_by IS NULL;
+
+-- name: ListInconclusiveStreaks :many
+-- #2915: when each (control, scope_cell) that is inconclusive now became
+-- inconclusive. The ledger is append-only and the scheduler writes a row
+-- per run, so a cell's streak starts at its earliest evaluation after its
+-- latest non-inconclusive one (or its first evaluation, if it has never
+-- been anything else). A cell whose latest evaluation is not inconclusive
+-- has no row after its last break, so it returns nothing. Reads the
+-- history of the named controls only; callers pass the controls they
+-- already know are inconclusive.
+SELECT h.control_id, h.scope_cell_id, min(h.evaluated_at)::timestamptz AS inconclusive_since
+FROM (
+    SELECT ce.control_id, ce.scope_cell_id, ce.evaluated_at,
+           max(ce.evaluated_at) FILTER (WHERE ce.result <> 'inconclusive')
+               OVER (PARTITION BY ce.control_id, ce.scope_cell_id) AS last_break
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = sqlc.arg(tenant_id)
+      AND ce.control_id = ANY(sqlc.arg(control_ids)::uuid[])
+      AND ce.evaluated_at <= sqlc.arg(as_of)
+) h
+WHERE h.last_break IS NULL OR h.evaluated_at > h.last_break
+GROUP BY h.control_id, h.scope_cell_id;
