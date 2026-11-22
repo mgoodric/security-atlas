@@ -187,6 +187,33 @@ func (q *Queries) ClearSyncedPolicyMissing(ctx context.Context, arg ClearSyncedP
 	return err
 }
 
+const countPublishedSyncedPoliciesInSource = `-- name: CountPublishedSyncedPoliciesInSource :one
+SELECT count(*)
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+`
+
+type CountPublishedSyncedPoliciesInSourceParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	SyncSite  *string     `json:"sync_site"`
+	SyncSpace *string     `json:"sync_space"`
+}
+
+// #2902 — the published synced rows of one source at the start of a run:
+// an empty push for a source that has some is refused without
+// allow_empty, and a run that leaves more than half of them missing
+// carries a warning. Read under LockPolicySyncSource.
+func (q *Queries) CountPublishedSyncedPoliciesInSource(ctx context.Context, arg CountPublishedSyncedPoliciesInSourceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPublishedSyncedPoliciesInSource, arg.TenantID, arg.SyncSite, arg.SyncSpace)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countTenantControls = `-- name: CountTenantControls :one
 SELECT count(*)::bigint AS n
 FROM controls
