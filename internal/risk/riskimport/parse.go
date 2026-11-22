@@ -11,7 +11,8 @@
 // category and review due; #2841 adds the inherent and residual scores, read
 // in the shape of the batch's one methodology (scores.go); #2842 adds the
 // treatment, acceptance and control links (treatment.go); #2843 the owner,
-// matched by email at staging (owner.go). Every other
+// matched by email at staging (owner.go); #2845 the level and org unit
+// (placement.go). Every other
 // column is kept on the staged row as an unmapped value and never written
 // into the description.
 package riskimport
@@ -111,7 +112,12 @@ type StagedRisk struct {
 	InstrumentReference string   `json:"instrument_reference,omitempty"`
 	ControlRefs         []string `json:"control_refs,omitempty"`
 	// Owner is the owner cell as written; staging matches it to a user.
-	Owner    string            `json:"owner,omitempty"`
+	Owner string `json:"owner,omitempty"`
+	// Level is the level cell read as a risk level, empty when blank;
+	// OrgUnit the org unit cell as written, which staging matches by name
+	// (placement.go).
+	Level    dbx.RiskLevel     `json:"level,omitempty"`
+	OrgUnit  string            `json:"org_unit,omitempty"`
 	Unmapped map[string]string `json:"unmapped"`
 }
 
@@ -194,6 +200,12 @@ var fieldAliases = map[string][]string{
 	FieldLinkedControls: {
 		"linked_controls", "linked controls", "linked_control_ids", "linked control ids", "controls",
 		"control ids", "mitigating controls",
+	},
+	// The risk export's org_unit_id is the unit's uuid in the exporting
+	// tenant, so it is deliberately not an alias: it stays unmapped.
+	FieldLevel: {"level", "risk level", "risk_level", "hierarchy level"},
+	FieldOrgUnit: {
+		"org_unit", "org unit", "org unit name", "org_unit_name", "organisation unit", "organization unit",
 	},
 }
 
@@ -465,6 +477,7 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 	var reviewDue string
 	scoreCells := map[string]string{}
 	var tc treatmentCells
+	var level string
 	for i, c := range cols {
 		if i >= len(row) {
 			break
@@ -497,6 +510,10 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 			tc.controls = val
 		case FieldOwner:
 			s.Owner = val
+		case FieldLevel:
+			level = val
+		case FieldOrgUnit:
+			s.OrgUnit = val
 		case "":
 			if c.key != "" && val != "" {
 				s.Unmapped[c.key] = val
@@ -536,6 +553,11 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 	if reason, detail, ok := readTreatment(&s, tc); !ok {
 		return reject(reason, detail)
 	}
+	l, ok := parseLevel(level)
+	if !ok {
+		return reject(RejectInvalidLevel, fmt.Sprintf("level %q is not one of team, org, company", level))
+	}
+	s.Level = l
 	if key != "" {
 		firstRowForRef[key] = rowNumber
 	}

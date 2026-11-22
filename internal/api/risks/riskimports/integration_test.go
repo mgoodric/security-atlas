@@ -76,6 +76,7 @@ func cleanupTables() []string {
 		"risk_import_batches",
 		"risk_control_links",
 		"risks",
+		"org_units",
 		"user_roles",
 		"users",
 	}
