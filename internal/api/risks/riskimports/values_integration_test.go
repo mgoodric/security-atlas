@@ -342,3 +342,28 @@ func TestRiskImport_UnmappedValueRejectsRow(t *testing.T) {
 		}
 	}
 }
+
+// TestRiskImport_BlankCategoryRejectedAtUpload: a blank or whitespace-only
+// category cell is refused as a missing required field on that row; the
+// upload still stages the rest and lists no blank value.
+func TestRiskImport_BlankCategoryRejectedAtUpload(t *testing.T) {
+	e := newEnv(t)
+	b := stageCSV(t, e, e.grcJWT, "Risk ID,Title,Category,Themes\n"+
+		"B-1,Blank category,,availability\n"+
+		"B-2,Spaces only,   ,\n"+
+		"B-3,Fine,operational,\" ; ,\"\n")
+	if b.StagedCount != 1 || b.RejectedCount != 2 {
+		t.Fatalf("staged=%d rejected=%d (%+v)", b.StagedCount, b.RejectedCount, b.Rejected)
+	}
+	for _, r := range b.Rejected {
+		if r.Reason != riskimport.RejectMissingField || r.Detail != "missing category" {
+			t.Errorf("%s rejected as %s %q", r.ExternalRef, r.Reason, r.Detail)
+		}
+	}
+	if got := valuesOf(b.CategoryValues); got != "operational=operational/1" {
+		t.Errorf("category values = %s", got)
+	}
+	if len(b.ThemeValues) != 0 {
+		t.Errorf("theme values = %+v, want none", b.ThemeValues)
+	}
+}

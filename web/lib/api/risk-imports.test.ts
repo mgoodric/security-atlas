@@ -7,6 +7,7 @@ import {
   type RiskImportBatch,
   NO_FILTER,
   approveAllMessage,
+  approveAllWarning,
   batchPath,
   batchProgress,
   emptyRowsMessage,
@@ -15,8 +16,11 @@ import {
   mappedFields,
   rejectReasonLabel,
   reviewMode,
+  rowHasUnmappedValue,
   rowPath,
   unmappedEntries,
+  unmappedPendingCount,
+  unmappedValues,
 } from "./risk-imports";
 
 function row(over: Partial<BatchRow>): BatchRow {
@@ -321,6 +325,92 @@ describe("approveAllMessage", () => {
         skipped: [{ row_id: "y", row_number: 4, reason: "archived" }],
       }),
     ).toBe("Approved 4 rows; 1 marked duplicate; 1 skipped");
+  });
+});
+
+describe("unmapped values (#2844)", () => {
+  const mapped = row({
+    id: "m",
+    category_value: "Ops",
+    category: "operational",
+    theme_values: ["Vendors"],
+    themes: ["vendor-risk"],
+  });
+  const noCategory = row({ id: "c", category_value: "nonsense", category: "" });
+  const noTheme = row({
+    id: "t",
+    category_value: "Ops",
+    category: "operational",
+    theme_values: ["Vendors", "People"],
+    themes: ["vendor-risk"],
+  });
+  const decided = row({
+    id: "d",
+    status: "rejected",
+    category_value: "nonsense",
+    category: "",
+  });
+  const b = {
+    ...batch([mapped, noCategory, noTheme, decided]),
+    category_values: [
+      {
+        kind: "category" as const,
+        value: "Ops",
+        row_count: 2,
+        target: "operational",
+      },
+      { kind: "category" as const, value: "nonsense", row_count: 2 },
+    ],
+    theme_values: [
+      {
+        kind: "theme" as const,
+        value: "Vendors",
+        row_count: 2,
+        target: "vendor-risk",
+      },
+      { kind: "theme" as const, value: "People", row_count: 1 },
+    ],
+  };
+
+  it("finds the rows and values that map to nothing", () => {
+    expect(rowHasUnmappedValue(mapped)).toBe(false);
+    expect(rowHasUnmappedValue(noCategory)).toBe(true);
+    expect(rowHasUnmappedValue(noTheme)).toBe(true);
+    // A row from before value mapping carries no category_value.
+    expect(rowHasUnmappedValue(row({}))).toBe(false);
+    expect(unmappedValues(b).map((v) => v.value)).toEqual([
+      "nonsense",
+      "People",
+    ]);
+    expect(unmappedPendingCount(b)).toBe(2);
+  });
+
+  it("names the count and values approve-all would reject", () => {
+    expect(approveAllWarning(b)).toBe(
+      '2 pending rows carry an unmapped category or theme value and will be rejected, not created (category "nonsense", theme "People"). A rejection is final: map the values first to import them.',
+    );
+    expect(approveAllWarning(batch([mapped]))).toBe("");
+  });
+
+  it("reports rows approval rejected", () => {
+    expect(
+      approveAllMessage({
+        batch_id: "b",
+        approved_count: 1,
+        approved: [],
+        duplicates: [],
+        rejected: [
+          {
+            batch_id: "b",
+            row_id: "c",
+            row_number: 4,
+            status: "rejected",
+            decided_by: "u",
+          },
+        ],
+        skipped: [],
+      }),
+    ).toBe("Approved 1 row; 1 rejected (unmapped value)");
   });
 });
 

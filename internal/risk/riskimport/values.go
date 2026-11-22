@@ -255,6 +255,17 @@ func (s *Store) MapValue(ctx context.Context, in MapValueInput) (ValueMapping, e
 // through the risk store's audited creation, then maps the value to it. The
 // caller gates it as the category and theme creation routes are gated: a
 // tenant approver.
+//
+// It runs three transactions, not one: checkMappable, then CreateCategory or
+// CreateTheme (risk.Store opens its own, which writes the taxonomy audit
+// row), then setTarget. The batch can complete, or the value's map row be
+// deleted with its batch, between the second and third. Then the category
+// or theme exists, audited, and the value is not mapped to it, and the call
+// returns setTarget's error (ErrBatchCompleted, ErrBatchNotFound). Nothing
+// is lost: the creation was explicitly asked for, is on the taxonomy audit
+// log, and the category or theme can be used, renamed or deleted as any
+// other. One transaction would need risk.Store's creation as a Tx variant,
+// which this change does not add.
 func (s *Store) CreateValue(ctx context.Context, in CreateValueInput) (ValueMapping, error) {
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
 		return ValueMapping{}, err

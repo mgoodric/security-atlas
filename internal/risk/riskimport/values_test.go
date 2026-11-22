@@ -93,3 +93,32 @@ func TestUnknownTargetError(t *testing.T) {
 		t.Errorf("errors = %q / %q", cat, theme)
 	}
 }
+
+// TestBlankCategoryIsMissing: a blank or whitespace-only category cell is a
+// missing required field at parse, so it never becomes a value of the
+// batch (risk_import_value_maps_value_chk refuses an empty value, which
+// would fail the whole upload). A theme cell of blanks and separators
+// yields no theme value.
+func TestBlankCategoryIsMissing(t *testing.T) {
+	t.Parallel()
+	got, err := ParseCSVWith([]byte("Title,Category,Themes\nBlank,,x\nSpaces,   ,\nThemes only separators,ops, ; ,\n"), ParseOptions{})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got.Rejected) != 2 {
+		t.Fatalf("rejected = %+v, want the two blank-category rows", got.Rejected)
+	}
+	for _, r := range got.Rejected {
+		if r.Reason != RejectMissingField || r.Detail != "missing category" {
+			t.Errorf("row %d rejected as %s %q", r.RowNumber, r.Reason, r.Detail)
+		}
+	}
+	if len(got.Risks) != 1 || len(got.Risks[0].Themes) != 0 {
+		t.Fatalf("staged = %+v", got.Risks)
+	}
+	for _, v := range distinctValues(got.Risks, nil, nil) {
+		if strings.TrimSpace(v.Value) == "" {
+			t.Errorf("blank %s value listed", v.Kind)
+		}
+	}
+}
