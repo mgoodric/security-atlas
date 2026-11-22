@@ -120,6 +120,12 @@ describe("describeEvent", () => {
     expect(describeEvent(row("risk", "themes_changed")).phrase).toBe(
       "changed the themes of",
     );
+    expect(describeEvent(row("risk", "child_linked")).phrase).toBe(
+      "linked a child risk to",
+    );
+    expect(describeEvent(row("risk", "child_unlinked")).phrase).toBe(
+      "unlinked a child risk from",
+    );
     expect(describeEvent(row("risk", "something_new")).phrase).toBe("changed");
     expect(
       describeEvent(row("feature_flag", "feature_flag.disable")).phrase,

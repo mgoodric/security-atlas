@@ -23,6 +23,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/risk"
@@ -71,12 +73,18 @@ func (h *Handler) ListChildren(w http.ResponseWriter, r *http.Request) {
 }
 
 // LinkChildren handles POST /v1/risks/{id}/children. Re-attaching a child
-// that is already linked is a no-op. The response is the parent's full
+// that is already linked is a no-op. Each new link writes one child_linked
+// row on the parent's audit trail by the caller (#2958). The response is the parent's full
 // children listing after the link.
 func (h *Handler) LinkChildren(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -101,18 +109,24 @@ func (h *Handler) LinkChildren(w http.ResponseWriter, r *http.Request) {
 	// The cap on children is LinkChildrenTx's alone: it counts after
 	// removing repeated ids, and its ErrTooManyChildren renders as a 400
 	// through writeLinkError (#2004).
-	if err := h.store.LinkChildren(ctx, id, childIDs); err != nil {
+	if err := h.store.LinkChildren(ctx, id, childIDs, risk.HierarchyAudit{Actor: credstore.PrincipalOf(cred)}); err != nil {
 		writeLinkError(w, r, err)
 		return
 	}
 	h.writeChildren(w, r, id, http.StatusOK)
 }
 
-// UnlinkChild handles DELETE /v1/risks/{id}/children/{child_id}.
+// UnlinkChild handles DELETE /v1/risks/{id}/children/{child_id}. It writes
+// one child_unlinked row on the parent's audit trail by the caller (#2958).
 func (h *Handler) UnlinkChild(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "credential missing")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -125,7 +139,7 @@ func (h *Handler) UnlinkChild(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "child_id must be a UUID")
 		return
 	}
-	if err := h.store.UnlinkChild(ctx, id, childID); err != nil {
+	if err := h.store.UnlinkChild(ctx, id, childID, risk.HierarchyAudit{Actor: credstore.PrincipalOf(cred)}); err != nil {
 		writeLinkError(w, r, err)
 		return
 	}

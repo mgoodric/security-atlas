@@ -31,6 +31,11 @@ import (
 //     nor a pending row, fails on that row: the row keeps its risk, records
 //     why, and is flagged parent_link_failed for review.
 //
+// Every link made writes a child_linked row on the parent (#2958) by the
+// person whose decision made it, naming the import batch and the child's
+// row. A link settled by a parent row's decision also carries a note
+// naming that row.
+//
 // Every decision that may make or settle a link takes the tenant's
 // hierarchy lock before the link reads (the parent lookup, the pending-row
 // check, the waiting-row scan), so a child and its parent decided
@@ -77,10 +82,30 @@ func lockHierarchy(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 	return nil
 }
 
+// decision is the row decision that makes or settles a link: who decided
+// it and which row it was, for the link's audit row (#2958).
+type decision struct {
+	Approver  string
+	RowID     string
+	RowNumber int
+}
+
+// linkAudit is the audit attribution of a link made for childRowID. A link
+// settled by another row's decision (a waiting row) notes that row.
+func linkAudit(batchID, childRowID string, d decision) risk.HierarchyAudit {
+	detail := map[string]any{"import_batch_id": batchID, "import_row_id": childRowID}
+	if d.RowID != childRowID {
+		detail["note"] = fmt.Sprintf("linked when the parent's import row %d was decided", d.RowNumber)
+		detail["settled_by_import_row_id"] = d.RowID
+	}
+	return risk.HierarchyAudit{Actor: d.Approver, Detail: detail}
+}
+
 // linkOwnParent links the risk an approved row just created under the
 // parent its cell names, and records the outcome on the row.
-func linkOwnParent(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID, rowID string, child uuid.UUID, parentRef string) (parentLink, error) {
-	link, err := settleLink(ctx, tx, tenantID, batchID, child, parentRef)
+func linkOwnParent(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID string, d decision, child uuid.UUID, parentRef string) (parentLink, error) {
+	rowID := d.RowID
+	link, err := settleLink(ctx, tx, tenantID, batchID, child, parentRef, linkAudit(batchID, rowID, d))
 	if err != nil {
 		return parentLink{}, err
 	}
@@ -88,8 +113,8 @@ func linkOwnParent(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID, 
 }
 
 // settleWaiting settles the links of the batch's approved rows waiting on a
-// parent row carrying ref, once that row is decided.
-func settleWaiting(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID, ref string) error {
+// parent row carrying ref, once that row is decided by d.
+func settleWaiting(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID, ref string, d decision) error {
 	if ref == "" {
 		return nil
 	}
@@ -122,7 +147,7 @@ func settleWaiting(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID, 
 		return fmt.Errorf("riskimport: list rows waiting on a parent: %w", err)
 	}
 	for _, w := range ws {
-		link, err := settleLink(ctx, tx, tenantID, batchID, w.riskID, w.parentRef)
+		link, err := settleLink(ctx, tx, tenantID, batchID, w.riskID, w.parentRef, linkAudit(batchID, w.rowID, d))
 		if err != nil {
 			return err
 		}
@@ -135,8 +160,9 @@ func settleWaiting(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID, 
 
 // settleLink resolves parentRef and links child under it. A refusal by the
 // hierarchy rules is a failed link, not an error: the savepoint around the
-// link leaves the decision's transaction usable.
-func settleLink(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID string, child uuid.UUID, parentRef string) (parentLink, error) {
+// link leaves the decision's transaction usable. A link made writes its
+// child_linked row attributed by audit.
+func settleLink(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID string, child uuid.UUID, parentRef string, audit risk.HierarchyAudit) (parentLink, error) {
 	parent, ok, err := riskWithExternalRef(ctx, tx, tenantID, parentRef)
 	if err != nil {
 		return parentLink{}, err
@@ -161,7 +187,7 @@ func settleLink(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, batchID stri
 	if err != nil {
 		return parentLink{}, fmt.Errorf("riskimport: begin parent link: %w", err)
 	}
-	if _, err := risk.LinkChildrenTx(ctx, dbx.New(sp), tenantID, parentID, []uuid.UUID{child}); err != nil {
+	if _, err := risk.LinkChildrenTx(ctx, dbx.New(sp), tenantID, parentID, []uuid.UUID{child}, audit); err != nil {
 		_ = sp.Rollback(ctx)
 		if reason, refused := linkRefusal(err, parentRef); refused {
 			return failedLink(reason), nil

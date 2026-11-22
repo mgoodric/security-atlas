@@ -530,6 +530,8 @@ export type RiskAuditEntry = {
     | "control_unlinked"
     | "created"
     | "themes_changed"
+    | "child_linked"
+    | "child_unlinked"
     | string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
