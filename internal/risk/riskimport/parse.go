@@ -146,9 +146,12 @@ type ParseResult struct {
 // detection for that field. Methodology is the batch's; empty is the
 // platform default (ResolveMethodology). Only its score fields are read, and
 // a column whose header names another methodology's score stays unmapped.
+// Ignore lists headers kept unmapped even when an alias would map them
+// (#2848), so the web mapping step can leave a recognised column out.
 type ParseOptions struct {
 	ColumnMap   map[string]string
 	Methodology dbx.RiskMethodology
+	Ignore      []string
 }
 
 // fieldAliases are the header spellings each field is recognised by. The
@@ -249,6 +252,15 @@ func FormatOf(filename string) string {
 
 // ParseCSVWith parses a CSV register with explicit options.
 func ParseCSVWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
+	rows, err := readCSVRows(raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseRows(rows, opts)
+}
+
+// readCSVRows reads a CSV register's rows under the upload caps.
+func readCSVRows(raw []byte) ([][]string, error) {
 	if len(raw) == 0 {
 		return nil, ErrEmptyFile
 	}
@@ -274,7 +286,7 @@ func ParseCSVWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 		}
 		rows = append(rows, rec)
 	}
-	return parseRows(rows, opts)
+	return rows, nil
 }
 
 // xlsxLimits bounds an uploaded workbook through internal/xlsxbound, as the
@@ -288,6 +300,15 @@ var xlsxLimits = xlsxbound.Limits{
 
 // ParseXLSXWith parses the first sheet of a workbook with explicit options.
 func ParseXLSXWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
+	rows, err := readXLSXRows(raw)
+	if err != nil {
+		return nil, err
+	}
+	return parseRows(rows, opts)
+}
+
+// readXLSXRows reads the first sheet's rows under the upload caps.
+func readXLSXRows(raw []byte) ([][]string, error) {
 	if len(raw) == 0 {
 		return nil, ErrEmptyFile
 	}
@@ -307,7 +328,7 @@ func ParseXLSXWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 	if err != nil {
 		return nil, xlsxError("read xlsx rows", err)
 	}
-	return parseRows(rows, opts)
+	return rows, nil
 }
 
 func xlsxError(op string, err error) error {
@@ -356,9 +377,20 @@ func newHeaderMatcher(opts ParseOptions) (headerMatcher, error) {
 		explicit[norm] = field
 		mappedFields[field] = true
 	}
+	ignored := make(map[string]bool, len(opts.Ignore))
+	for _, header := range opts.Ignore {
+		norm := normalizeHeader(header)
+		if norm == "" {
+			return nil, fmt.Errorf("%w: an ignored header is empty", ErrInvalidColumnMap)
+		}
+		if field, mapped := explicit[norm]; mapped {
+			return nil, fmt.Errorf("%w: header %q is both mapped to %s and ignored", ErrInvalidColumnMap, header, field)
+		}
+		ignored[norm] = true
+	}
 	return func(cell string) string {
 		norm := normalizeHeader(cell)
-		if norm == "" {
+		if norm == "" || ignored[norm] {
 			return ""
 		}
 		if field, ok := explicit[norm]; ok {

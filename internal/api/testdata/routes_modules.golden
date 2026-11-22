@@ -383,6 +383,7 @@ POST /v1/risks/categories/{ref}/archive risk
 POST /v1/risks/categories/{ref}/set-default risk
 POST /v1/risks/categories/{ref}/unarchive risk
 POST /v1/risks/imports risk
+POST /v1/risks/imports/preview risk
 POST /v1/risks/imports/{id}/approve risk
 POST /v1/risks/imports/{id}/rows/{row}/approve risk
 POST /v1/risks/imports/{id}/rows/{row}/reject risk
