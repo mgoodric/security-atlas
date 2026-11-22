@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
-	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -94,7 +94,7 @@ func (s *Store) EvidenceSet(ctx context.Context, controlID uuid.UUID) (EvidenceS
 		out.ControlTitle = ctrl.Title
 
 		total, err := q.CountEvidenceRecordsByControl(ctx, dbx.CountEvidenceRecordsByControlParams{
-			UnboundKinds: unbound.Kinds(),
+			UnboundKinds: routed.ControlFreeKinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -105,7 +105,7 @@ func (s *Store) EvidenceSet(ctx context.Context, controlID uuid.UUID) (EvidenceS
 		out.TotalCount = int(total)
 
 		recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
-			UnboundKinds: unbound.Kinds(),
+			UnboundKinds: routed.ControlFreeKinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),

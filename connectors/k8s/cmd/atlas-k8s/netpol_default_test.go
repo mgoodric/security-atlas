@@ -2,21 +2,19 @@ package main
 
 import "testing"
 
-// TestRunCmd_NetpolDefaultIsStockSegmentationControl pins the NetworkPolicy
-// record's default control id to the stock network_segmentation_default_deny
-// bundle (#2745), anchored on SCF 2026.3 NET-06 Network Segmentation (#2648).
-// Ingest resolves a bundle id to the tenant's active control (#2100), so
-// records on default flags link to it; the free-form scf:NET-06 linked to
-// nothing and left the control inconclusive.
-func TestRunCmd_NetpolDefaultIsStockSegmentationControl(t *testing.T) {
+// TestRunCmd_NetpolDefaultIsRoutedByKind pins the NetworkPolicy record's
+// default control id to none (#2924): k8s.networkpolicy_coverage.v1 is routed
+// by evidence type, so a record on default flags reaches every control that
+// queries the kind, network_segmentation_default_deny among them. Before, the
+// default bound it to that one bundle (#2745).
+func TestRunCmd_NetpolDefaultIsRoutedByKind(t *testing.T) {
 	t.Parallel()
-	const want = "network_segmentation_default_deny"
 	fl := newRunCmd().Flags().Lookup("netpol-control")
 	if fl == nil {
 		t.Fatal("--netpol-control flag not registered")
 	}
-	if fl.DefValue != want {
-		t.Errorf("--netpol-control default = %q, want %q", fl.DefValue, want)
+	if fl.DefValue != "" {
+		t.Errorf("--netpol-control default = %q, want empty", fl.DefValue)
 	}
 }
 

@@ -75,7 +75,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.roleARN, "role-arn", "", "IAM role ARN to assume [required]")
 	cmd.Flags().StringVar(&f.region, "region", "", "primary AWS region [required]")
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag; fallback when Organizations:DescribeAccount is not available")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:CRY-07", "control id to attach to each record")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "", "control_id to attach to aws.s3.bucket_encryption_state.v1 records; empty (the default) routes each record to every control that queries aws.s3.bucket_encryption_state.v1 (#2924)")
 	return cmd
 }
 
