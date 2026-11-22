@@ -98,13 +98,18 @@ func repoProtectionRecord(t *testing.T, controlID string) *evidencev1.EvidenceRe
 		"require_linear_history":     false,
 		"enforce_admins":             true,
 		"protection_source":          "classic",
+		// #2827: a production iac repo meeting both cc8_1 checks.
+		"required_status_checks": []any{"ci/build"},
+		"allow_force_pushes":     false,
+		"topics":                 []any{"iac", "production"},
+		"deploys_to_production":  true,
 	})
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
 	return record(t, func(r *evidencev1.EvidenceRecord) {
 		r.EvidenceKind = "github.repo_protection.v2"
-		r.SchemaVersion = "2.0.0"
+		r.SchemaVersion = "2.1.0"
 		r.ControlId = controlID
 		r.Payload = payload
 	})

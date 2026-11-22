@@ -96,6 +96,9 @@ func DefaultSeed() []KindVersion {
 		// #2925: the GitHub connector pushes v2 (stable repo_id, rulesets
 		// merged in, unread protection fields omitted, not zero).
 		{Kind: "github.repo_protection.v2", Version: "2.0.0"},
+		// #2827: 2.1.0 adds required status checks, force pushes, topics
+		// and deploys_to_production.
+		{Kind: "github.repo_protection.v2", Version: "2.1.0"},
 		{Kind: "github.audit_event.v1", Version: "1.0.0"},
 		{Kind: "github.scim_user.v1", Version: "1.0.0"},
 		{Kind: "okta.mfa_policy.v1", Version: "1.0.0"},

@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -341,7 +342,9 @@ func TestCC41_EngineEvaluatesHostCheckIn(t *testing.T) {
 // #2823, #2925: both cc8_1 checks decide on each repo's latest
 // github.repo_protection.v2 payload, keyed by repo_id, not on the GitHub
 // connector's verdict (required_reviews >= 1). An unread protection field
-// is omitted and leaves the check inconclusive.
+// is omitted and leaves the check inconclusive. #2827: change management
+// also requires a status check and blocked force pushes on production
+// repos, and configuration change control checks only iac repos.
 func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -353,6 +356,8 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 		repoID          int64
 		reviews         int // -1: not read
 		admins          string
+		topics          []string // nil: iac + production
+		noChecks        bool     // required_status_checks empty
 	}
 	payload := func(r rec) map[string]any {
 		p := map[string]any{
@@ -360,6 +365,12 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 			"repo_full_name": fmt.Sprintf("acme/repo-%d", r.repoID),
 			"default_branch": "main",
 		}
+		topics := r.topics
+		if topics == nil {
+			topics = []string{"iac", "production"}
+		}
+		p["topics"] = topics
+		p["deploys_to_production"] = slices.Contains(topics, "production")
 		if r.reviews < 0 {
 			p["reason"] = "branch protection: github: HTTP 502"
 			return p
@@ -369,6 +380,11 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 		p["require_signed_commits"] = false
 		p["require_linear_history"] = false
 		p["protection_source"] = "classic"
+		p["required_status_checks"] = []string{"ci/build"}
+		if r.noChecks {
+			p["required_status_checks"] = []string{}
+		}
+		p["allow_force_pushes"] = false
 		if r.admins != "" {
 			p["enforce_admins"] = r.admins == "on"
 		}
@@ -383,17 +399,21 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 		records []rec
 		want    string
 	}{
-		{"soc2_cc8_1_change_management", "reviewed and admin-enforced", []rec{{"pass", r1, 1, "on"}, {"fail", r2, 2, "on"}}, eval.ResultPass},
-		{"soc2_cc8_1_change_management", "admins not enforced", []rec{{"pass", r1, 1, "on"}, {"pass", r2, 1, "off"}}, eval.ResultFail},
-		{"soc2_cc8_1_change_management", "no approving review", []rec{{"pass", r1, 0, "on"}}, eval.ResultFail},
-		{"soc2_cc8_1_change_management", "admin enforcement unread", []rec{{"pass", r1, 1, ""}}, eval.ResultInconclusive},
-		{"soc2_cc8_1_change_management", "unread repo", []rec{{"pass", r1, 1, "on"}, {"inconclusive", r2, -1, ""}}, eval.ResultInconclusive},
+		{"soc2_cc8_1_change_management", "reviewed and admin-enforced", []rec{{"pass", r1, 1, "on", nil, false}, {"fail", r2, 2, "on", nil, false}}, eval.ResultPass},
+		{"soc2_cc8_1_change_management", "admins not enforced", []rec{{"pass", r1, 1, "on", nil, false}, {"pass", r2, 1, "off", nil, false}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "no approving review", []rec{{"pass", r1, 0, "on", nil, false}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "admin enforcement unread", []rec{{"pass", r1, 1, "", nil, false}}, eval.ResultInconclusive},
+		{"soc2_cc8_1_change_management", "unread repo", []rec{{"pass", r1, 1, "on", nil, false}, {"inconclusive", r2, -1, "", nil, false}}, eval.ResultInconclusive},
 		{"soc2_cc8_1_change_management", "no record", nil, eval.ResultInconclusive},
-		{"soc2_cc8_1_configuration_change_control", "reviewed, admins not enforced", []rec{{"fail", r1, 1, "off"}, {"pass", r2, 2, "on"}}, eval.ResultPass},
-		{"soc2_cc8_1_configuration_change_control", "no approving review", []rec{{"pass", r1, 1, "on"}, {"pass", r2, 0, "on"}}, eval.ResultFail},
-		{"soc2_cc8_1_configuration_change_control", "unread repo", []rec{{"inconclusive", r1, -1, ""}}, eval.ResultInconclusive},
-		{"soc2_cc8_1_configuration_change_control", "observed failure outranks unread", []rec{{"inconclusive", r1, -1, ""}, {"fail", r2, 0, "off"}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "production repo without status check", []rec{{"pass", r1, 1, "on", nil, false}, {"pass", r2, 1, "on", nil, true}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "non-production repo without status check", []rec{{"pass", r1, 1, "on", []string{"iac"}, true}}, eval.ResultPass},
+		{"soc2_cc8_1_configuration_change_control", "reviewed, admins not enforced", []rec{{"fail", r1, 1, "off", nil, false}, {"pass", r2, 2, "on", nil, false}}, eval.ResultPass},
+		{"soc2_cc8_1_configuration_change_control", "no approving review", []rec{{"pass", r1, 1, "on", nil, false}, {"pass", r2, 0, "on", nil, false}}, eval.ResultFail},
+		{"soc2_cc8_1_configuration_change_control", "unread repo", []rec{{"inconclusive", r1, -1, "", nil, false}}, eval.ResultInconclusive},
+		{"soc2_cc8_1_configuration_change_control", "observed failure outranks unread", []rec{{"inconclusive", r1, -1, "", nil, false}, {"fail", r2, 0, "off", nil, false}}, eval.ResultFail},
 		{"soc2_cc8_1_configuration_change_control", "no record", nil, eval.ResultInconclusive},
+		{"soc2_cc8_1_configuration_change_control", "non-iac repo is out of scope", []rec{{"pass", r1, 1, "on", nil, false}, {"fail", r2, 0, "off", []string{"web"}, false}}, eval.ResultPass},
+		{"soc2_cc8_1_configuration_change_control", "only non-iac repos", []rec{{"fail", r1, 0, "off", []string{"web"}, false}}, eval.ResultInconclusive},
 	}
 	for _, tc := range cases {
 		t.Run(tc.bundle+"/"+tc.name, func(t *testing.T) {

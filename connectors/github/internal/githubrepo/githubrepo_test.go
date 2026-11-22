@@ -111,6 +111,13 @@ func boolVal(p *bool) string {
 	return fmt.Sprint(*p)
 }
 
+func stringsVal(p *[]string) string {
+	if p == nil {
+		return "unread"
+	}
+	return fmt.Sprint(*p)
+}
+
 func intVal(p *int) string {
 	if p == nil {
 		return "unread"
@@ -400,14 +407,19 @@ func TestClient_DocumentedShapes(t *testing.T) {
 		signed         string
 		linear         string
 		source         string
+		checks         string
+		forcePushes    string
 		wantResult     githubrepo.Result
 		wantRulesetGET bool
 	}{
-		{"classic only", "branch_protection.json", "", "2", "true", "true", "true", "true", githubrepo.SourceClassic, githubrepo.ResultPass, false},
+		// GitHub's example classic protection allows force pushes.
+		{"classic only", "branch_protection.json", "", "2", "true", "true", "true", "true", githubrepo.SourceClassic, "[continuous-integration/travis-ci]", "true", githubrepo.ResultPass, false},
 		// The documented ruleset lets a Team bypass, which may hold an admin.
-		{"org ruleset only", "", "branch_rules.json", "2", "false", "true", "true", "false", githubrepo.SourceRulesets, githubrepo.ResultPass, true},
-		{"both", "branch_protection.json", "branch_rules.json", "2", "true", "true", "true", "true", githubrepo.SourceBoth, githubrepo.ResultPass, false},
-		{"neither", "", "", "0", "false", "false", "false", "false", githubrepo.SourceNone, githubrepo.ResultFail, false},
+		{"org ruleset only", "", "branch_rules.json", "2", "false", "true", "true", "false", githubrepo.SourceRulesets, "[ci/build continuous-integration/travis-ci]", "false", githubrepo.ResultPass, true},
+		// A non_fast_forward rule blocks force pushes classic allows; the
+		// shared check context is reported once.
+		{"both", "branch_protection.json", "branch_rules.json", "2", "true", "true", "true", "true", githubrepo.SourceBoth, "[ci/build continuous-integration/travis-ci]", "false", githubrepo.ResultPass, false},
+		{"neither", "", "", "0", "false", "false", "false", "false", githubrepo.SourceNone, "[]", "true", githubrepo.ResultFail, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -464,6 +476,9 @@ func TestClient_DocumentedShapes(t *testing.T) {
 				"require_signed_commits":     {boolVal(s.RequireSignedCommits), tc.signed},
 				"require_linear_history":     {boolVal(s.RequireLinearHistory), tc.linear},
 				"protection_source":          {s.ProtectionSource, tc.source},
+				"required_status_checks":     {stringsVal(s.RequiredStatusChecks), tc.checks},
+				"allow_force_pushes":         {boolVal(s.AllowForcePushes), tc.forcePushes},
+				"topics":                     {stringsVal(s.Topics), "[octocat atom electron api]"},
 				"result":                     {string(s.Result), string(tc.wantResult)},
 			}
 			for k, v := range checks {
