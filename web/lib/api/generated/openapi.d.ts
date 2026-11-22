@@ -4373,7 +4373,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/policies/{id} — a synced policy whose page body changed without a version bump carries sync_drift (detected_at, source_body_sha256) (#2851) */
+        /** GET /v1/policies/{id} — a synced policy whose page body changed without a version bump carries sync_drift (detected_at, source_body_sha256) (#2851); one whose page properties changed without one carries sync_property_drift (detected_at, keys) (#2877) */
         get: operations["get-v1-policies-id"];
         put?: never;
         post?: never;
@@ -4530,7 +4530,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body change without one drift, a page's first sync takes over a published imported policy with its title; per-page report (created, new_version, taken_over, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force) (#2850, */
+        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body or property change without one drift (property drift names the changed keys), a page's first sync takes over a published imported policy with its title; per-page report (created, new_version, taken_over, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force) (#2850, */
         post: operations["post-v1-policies_sync"];
         delete?: never;
         options?: never;

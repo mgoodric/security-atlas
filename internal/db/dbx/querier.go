@@ -4031,6 +4031,15 @@ type Querier interface {
 	// IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
 	// query returns no row, which the caller reads as "already recorded".
 	SetSyncedPolicyDrift(ctx context.Context, arg SetSyncedPolicyDriftParams) (Policy, error)
+	// #2877 — the page's properties differ from its synced row's, or match
+	// again. sync_property_drift_keys is the sorted list of property names
+	// that differ now, or NULL when none do, which clears the drift.
+	// sync_property_drift_detected_at keeps the time drift was first seen
+	// while any key differs, as body drift does.
+	//
+	// A run that sees the same keys again writes nothing: the IS DISTINCT
+	// FROM guard leaves the row alone and the query returns no row.
+	SetSyncedPolicyPropertyDrift(ctx context.Context, arg SetSyncedPolicyPropertyDriftParams) (Policy, error)
 	// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
 	// ledger (AC-2, decisions log D2). Called after recording a review when the
 	// new review's reviewed_at is the most-recent on file. updated_at is bumped so
@@ -4115,8 +4124,10 @@ type Querier interface {
 	// and version are not rewritten. synced_body_sha256 is the hash of the
 	// body it was published with; a page body that differs is recorded as
 	// drift (sync_drift_body_sha256 non-NULL), as a later run would. The
-	// historical approver stays the import's. imported_by and imported_at are
-	// cleared, as policies_imported_fields_chk requires off imported rows.
+	// historical approver stays the import's. Page properties that differ
+	// from the imported row's are recorded as property drift (#2877).
+	// imported_by and imported_at are cleared, as policies_imported_fields_chk
+	// requires off imported rows.
 	TakeOverImportedPolicy(ctx context.Context, arg TakeOverImportedPolicyParams) (Policy, error)
 	// Names are unique across the built-ins and the tenant's own themes; the
 	// two partial unique indexes only cover each namespace on its own.

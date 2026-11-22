@@ -36,6 +36,10 @@ type policyVersionWire struct {
 		DetectedAt       time.Time `json:"detected_at"`
 		SourceBodySHA256 string    `json:"source_body_sha256"`
 	} `json:"sync_drift"`
+	SyncPropertyDrift *struct {
+		DetectedAt time.Time `json:"detected_at"`
+		Keys       []string  `json:"keys"`
+	} `json:"sync_property_drift"`
 }
 
 func getPolicyVersion(t *testing.T, s setupResult, id string) policyVersionWire {

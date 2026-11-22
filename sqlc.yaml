@@ -187,6 +187,8 @@ sql:
       - "migrations/sql/20261287000000_policy_sync_missing.sql"
       # #2854: sync takes over imported policies.
       - "migrations/sql/20261289000000_policy_sync_takeover.sql"
+      # #2877: property drift on synced policies.
+      - "migrations/sql/20261296000000_policy_sync_property_drift.sql"
       - "migrations/sql/20261290000000_evidence_routed_kinds.sql"
     queries: "internal/db/queries"
     gen:

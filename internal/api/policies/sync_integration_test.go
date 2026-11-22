@@ -98,6 +98,9 @@ type syncResp struct {
 		PredecessorID   string     `json:"predecessor_id"`
 		DriftDetectedAt *time.Time `json:"drift_detected_at"`
 		MissingSince    *time.Time `json:"missing_since"`
+		// #2877 property drift.
+		PropertyDriftKeys       []string   `json:"property_drift_keys"`
+		PropertyDriftDetectedAt *time.Time `json:"property_drift_detected_at"`
 	} `json:"results"`
 }
 

@@ -149,6 +149,7 @@ SELECT
     p.imported_by, p.imported_at, p.self_approved,
     p.sync_drift_detected_at, p.sync_drift_body_sha256,
     p.sync_missing_since,
+    p.sync_property_drift_detected_at, p.sync_property_drift_keys,
     ac.ack_denominator,
     ac.ack_numerator
 FROM policies p
@@ -460,6 +461,8 @@ SET status = 'superseded',
     superseded_at = now(),
     sync_drift_detected_at = NULL,
     sync_drift_body_sha256 = NULL,
+    sync_property_drift_detected_at = NULL,
+    sync_property_drift_keys = NULL,
     sync_missing_since = NULL,
     updated_at = now()
 WHERE tenant_id = sqlc.arg('tenant_id')
@@ -499,6 +502,29 @@ WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = sqlc.arg('id')
   AND source_attribution = 'synced'
   AND status = 'published'
+RETURNING *;
+
+-- name: SetSyncedPolicyPropertyDrift :one
+-- #2877 — the page's properties differ from its synced row's, or match
+-- again. sync_property_drift_keys is the sorted list of property names
+-- that differ now, or NULL when none do, which clears the drift.
+-- sync_property_drift_detected_at keeps the time drift was first seen
+-- while any key differs, as body drift does.
+--
+-- A run that sees the same keys again writes nothing: the IS DISTINCT
+-- FROM guard leaves the row alone and the query returns no row.
+UPDATE policies
+SET sync_property_drift_detected_at = CASE
+        WHEN sqlc.narg('sync_property_drift_keys')::text[] IS NULL THEN NULL
+        ELSE COALESCE(sync_property_drift_detected_at, now())
+    END,
+    sync_property_drift_keys = sqlc.narg('sync_property_drift_keys')::text[],
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_property_drift_keys IS DISTINCT FROM sqlc.narg('sync_property_drift_keys')::text[]
 RETURNING *;
 
 -- name: LockSyncedPolicyForSuccessor :one
@@ -614,8 +640,10 @@ LIMIT 1;
 -- and version are not rewritten. synced_body_sha256 is the hash of the
 -- body it was published with; a page body that differs is recorded as
 -- drift (sync_drift_body_sha256 non-NULL), as a later run would. The
--- historical approver stays the import's. imported_by and imported_at are
--- cleared, as policies_imported_fields_chk requires off imported rows.
+-- historical approver stays the import's. Page properties that differ
+-- from the imported row's are recorded as property drift (#2877).
+-- imported_by and imported_at are cleared, as policies_imported_fields_chk
+-- requires off imported rows.
 UPDATE policies
 SET source_attribution = 'synced',
     imported_by = NULL,
@@ -629,6 +657,8 @@ SET source_attribution = 'synced',
     synced_at = now(),
     sync_drift_detected_at = CASE WHEN sqlc.narg('sync_drift_body_sha256')::text IS NULL THEN NULL ELSE now() END,
     sync_drift_body_sha256 = sqlc.narg('sync_drift_body_sha256'),
+    sync_property_drift_detected_at = CASE WHEN sqlc.narg('sync_property_drift_keys')::text[] IS NULL THEN NULL ELSE now() END,
+    sync_property_drift_keys = sqlc.narg('sync_property_drift_keys')::text[],
     updated_at = now()
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = sqlc.arg('id')

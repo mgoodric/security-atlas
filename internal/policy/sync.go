@@ -24,12 +24,13 @@ const (
 	// row and superseding it (#2851).
 	SyncStatusNewVersion = "new_version"
 	// SyncStatusUnchanged: the page's synced policy already has this
-	// version and body; nothing was written. Drift recorded by an earlier
-	// run is cleared.
+	// version, body and properties; nothing was written. Drift recorded
+	// by an earlier run is cleared.
 	SyncStatusUnchanged = "unchanged"
-	// SyncStatusDrift: the page's body changed without a version bump.
-	// No version was written; the drift is recorded on the policy
-	// (#2851).
+	// SyncStatusDrift: the page's body (#2851), its properties (#2877),
+	// or both changed without a version bump. No version was written and
+	// nothing was applied in place; the drift is recorded on the policy,
+	// body and property drift separately.
 	SyncStatusDrift = "drift"
 	// SyncStatusTakenOver: the page's first sync found a published,
 	// imported policy with its title, and took it over instead of starting
@@ -98,8 +99,10 @@ type SyncReport struct {
 // A page whose declared version changed becomes the next version of its
 // policy, superseding the previous synced row; a page whose body changed
 // without a version bump writes no version and records drift on the
-// policy instead (#2851). Drift clears when a later run's body matches
-// again or arrives with a new version.
+// policy instead (#2851), and so does a page whose properties changed
+// without one, naming the properties (#2877). Each drift clears when a
+// later run's body or properties match again, or the page arrives with a
+// new version.
 //
 // A page's first sync takes over a published, imported policy with the
 // page's title (#2854), so an adopter who imported before syncing keeps
@@ -211,33 +214,12 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 					return err
 				}
 				res.Status, res.Policy = SyncStatusNewVersion, &written
-			case cur.SyncedBodySha256 != nil && *cur.SyncedBodySha256 == hash:
-				if cur.SyncDriftDetectedAt.Valid {
-					if cur, err = q.ClearSyncedPolicyDrift(ctx, dbx.ClearSyncedPolicyDriftParams{
-						TenantID: pgUUID(tenantID), ID: cur.ID,
-					}); err != nil {
-						return fmt.Errorf("sync: clear drift on page %q: %w", p.PageID, err)
-					}
-				}
-				existing := policyFromRow(cur)
-				res.Status, res.Policy = SyncStatusUnchanged, &existing
 			default:
-				// The body changed and the version did not: what staff
-				// acknowledged is not rewritten under them. The drift is
-				// recorded on the policy and nothing else is written.
-				// No row back means this drift is already recorded.
-				drifted, err := q.SetSyncedPolicyDrift(ctx, dbx.SetSyncedPolicyDriftParams{
-					TenantID: pgUUID(tenantID), ID: cur.ID, SyncDriftBodySha256: &hash,
-				})
-				switch {
-				case errors.Is(err, pgx.ErrNoRows):
-					drifted = cur
-				case err != nil:
-					return fmt.Errorf("sync: record drift on page %q: %w", p.PageID, err)
+				// Same version: the body and properties are compared with
+				// the synced row, and what differs is recorded as drift.
+				if res, err = syncSameVersion(ctx, q, tenantID, p, cur, hash); err != nil {
+					return err
 				}
-				existing := policyFromRow(drifted)
-				res.Status, res.Policy = SyncStatusDrift, &existing
-				res.Reason = fmt.Sprintf("the page body changed without a version bump; version %q is unchanged. Bump the page's version to publish the change, or revert the edit", cur.Version)
 			}
 			results = append(results, res)
 		}
@@ -252,6 +234,145 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 		return SyncReport{}, err
 	}
 	return report, nil
+}
+
+// syncSameVersion handles a page whose synced row already has its
+// declared version. The body hash and the synced properties are compared
+// with the row: body drift (#2851) and property drift (#2877) are each
+// recorded when they differ and cleared when they match. Nothing else is
+// written, since what staff acknowledged is not rewritten under them.
+func syncSameVersion(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, p SyncPage, cur dbx.Policy, hash string) (SyncResult, error) {
+	res := SyncResult{PageID: p.PageID, Title: p.In.Title}
+	row := cur
+	bodyDrift := cur.SyncedBodySha256 == nil || *cur.SyncedBodySha256 != hash
+	switch {
+	case bodyDrift:
+		// No row back means this drift is already recorded.
+		drifted, err := q.SetSyncedPolicyDrift(ctx, dbx.SetSyncedPolicyDriftParams{
+			TenantID: pgUUID(tenantID), ID: cur.ID, SyncDriftBodySha256: &hash,
+		})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return res, fmt.Errorf("sync: record drift on page %q: %w", p.PageID, err)
+		default:
+			row = drifted
+		}
+	case cur.SyncDriftDetectedAt.Valid:
+		cleared, err := q.ClearSyncedPolicyDrift(ctx, dbx.ClearSyncedPolicyDriftParams{
+			TenantID: pgUUID(tenantID), ID: cur.ID,
+		})
+		if err != nil {
+			return res, fmt.Errorf("sync: clear drift on page %q: %w", p.PageID, err)
+		}
+		row = cleared
+	}
+	// Nil keys clear the property drift; no row back means the row
+	// already holds these keys (or none).
+	keys := syncPropertyDrift(cur, p.In)
+	updated, err := q.SetSyncedPolicyPropertyDrift(ctx, dbx.SetSyncedPolicyPropertyDriftParams{
+		TenantID: pgUUID(tenantID), ID: cur.ID, SyncPropertyDriftKeys: keys,
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return res, fmt.Errorf("sync: record property drift on page %q: %w", p.PageID, err)
+	default:
+		row = updated
+	}
+	pol := policyFromRow(row)
+	res.Policy = &pol
+	if !bodyDrift && len(keys) == 0 {
+		res.Status = SyncStatusUnchanged
+		return res, nil
+	}
+	res.Status = SyncStatusDrift
+	res.Reason = fmt.Sprintf("the page %s changed without a version bump; version %q is unchanged. Bump the page's version to publish the change, or revert the edit",
+		syncDriftWhat(bodyDrift, keys), cur.Version)
+	return res, nil
+}
+
+// syncDriftWhat names what drifted on a page, for a report reason.
+func syncDriftWhat(body bool, keys []string) string {
+	props := ""
+	if len(keys) > 0 {
+		noun := "property"
+		if len(keys) > 1 {
+			noun = "properties"
+		}
+		props = noun + " " + strings.Join(keys, ", ")
+	}
+	switch {
+	case body && props != "":
+		return "body and " + props
+	case body:
+		return "body"
+	default:
+		return props
+	}
+}
+
+// Page property names compared by syncPropertyDrift, as the sync request
+// names them. version is not among them: a version change is a bump.
+// source_url is not either: it is the page's own address, not a property
+// of the policy its staff acknowledged.
+const (
+	syncPropTitle         = "title"
+	syncPropApprovedBy    = "approved_by_name"
+	syncPropApprovedAt    = "approved_at"
+	syncPropEffectiveDate = "effective_date"
+	syncPropNextReviewAt  = "next_review_at"
+	syncPropOwnerRole     = "owner_role"
+	syncPropApproverRole  = "approver_role"
+	syncPropAckRoles      = "acknowledgment_required_roles"
+)
+
+// syncPropertyDrift returns the sorted names of the page properties in
+// that differ from row's, or nil when none do (#2877). The comparison is
+// on the values a synced insert would store, so a page synced unchanged
+// never reports drift: dates by calendar day, the acknowledgement
+// audience as a set.
+func syncPropertyDrift(row dbx.Policy, in ImportInput) []string {
+	var keys []string
+	differ := func(key string, same bool) {
+		if !same {
+			keys = append(keys, key)
+		}
+	}
+	day := func(d pgtype.Date) string {
+		if !d.Valid {
+			return ""
+		}
+		return d.Time.Format("2006-01-02")
+	}
+	approver := ""
+	if row.HistoricalApproverName != nil {
+		approver = *row.HistoricalApproverName
+	}
+	nextReview := false
+	switch {
+	case !row.NextReviewAt.Valid && in.NextReviewAt == nil:
+		nextReview = true
+	case row.NextReviewAt.Valid && in.NextReviewAt != nil:
+		nextReview = row.NextReviewAt.Time.Equal(*in.NextReviewAt)
+	}
+	differ(syncPropTitle, row.Title == in.Title)
+	differ(syncPropApprovedBy, approver == in.HistoricalApproverName)
+	differ(syncPropApprovedAt, day(row.HistoricalApprovedAt) == day(pgDate(in.HistoricalApprovedAt)))
+	differ(syncPropEffectiveDate, day(row.EffectiveDate) == day(pgDate(in.EffectiveDate)))
+	differ(syncPropNextReviewAt, nextReview)
+	differ(syncPropOwnerRole, row.OwnerRole == in.OwnerRole)
+	differ(syncPropApproverRole, row.ApproverRole == in.ApproverRole)
+	differ(syncPropAckRoles, sameRoleSet(row.AcknowledgmentRequiredRoles, in.AcknowledgmentRequiredRoles))
+	slices.Sort(keys)
+	return keys
+}
+
+func sameRoleSet(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 
 // syncMarkMissing records every published synced row of src whose page
@@ -329,8 +450,10 @@ func syncFirst(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src Sync
 		}
 		res.Status, res.Policy = SyncStatusTakenOver, &taken
 		res.Reason = fmt.Sprintf("took over imported policy %s (version %q) in place; it is now managed by this page", uuid.UUID(imported.ID.Bytes), imported.Version)
-		if taken.SyncDriftDetectedAt != nil {
-			res.Reason += ". The page body differs from the imported text, so it is reported as drift; bump the page's version to publish it"
+		body, keys := taken.SyncDriftDetectedAt != nil, taken.SyncPropertyDriftKeys
+		if body || len(keys) > 0 {
+			res.Reason += fmt.Sprintf(". The page %s differs from the imported policy, so it is reported as drift; bump the page's version to publish it",
+				syncDriftWhat(body, keys))
 		}
 		return res, nil
 	default:
@@ -393,16 +516,20 @@ func syncTakeOverInPlace(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID
 	if rowHash != hash {
 		drift = &hash
 	}
+	// The imported row keeps its properties too; page properties that
+	// differ are property drift (#2877).
+	propDrift := syncPropertyDrift(imported, p.In)
 	row, err := q.TakeOverImportedPolicy(ctx, dbx.TakeOverImportedPolicyParams{
-		TenantID:            pgUUID(tenantID),
-		ID:                  imported.ID,
-		SourceUrl:           stringPtr(p.In.SourceURL),
-		SyncSite:            &src.Site,
-		SyncSpace:           &src.Space,
-		SyncPageID:          &p.PageID,
-		SyncedBodySha256:    &rowHash,
-		SyncedBy:            &keyID,
-		SyncDriftBodySha256: drift,
+		TenantID:              pgUUID(tenantID),
+		ID:                    imported.ID,
+		SourceUrl:             stringPtr(p.In.SourceURL),
+		SyncSite:              &src.Site,
+		SyncSpace:             &src.Space,
+		SyncPageID:            &p.PageID,
+		SyncedBodySha256:      &rowHash,
+		SyncedBy:              &keyID,
+		SyncDriftBodySha256:   drift,
+		SyncPropertyDriftKeys: propDrift,
 	})
 	if err != nil {
 		return Policy{}, fmt.Errorf("sync: take over imported policy for page %q: %w", p.PageID, err)
