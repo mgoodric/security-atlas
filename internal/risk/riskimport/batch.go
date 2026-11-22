@@ -101,10 +101,20 @@ type BatchRow struct {
 	// (#2845). Approval creates the risk with both, under the create
 	// path's placement rule: with a unit and no level the risk takes the
 	// unit's level, with neither it is a team risk.
-	Level        string            `json:"level,omitempty"`
-	OrgUnitValue string            `json:"org_unit_value,omitempty"`
-	OrgUnitID    string            `json:"org_unit_id,omitempty"`
-	Unmapped     map[string]string `json:"unmapped"`
+	Level        string `json:"level,omitempty"`
+	OrgUnitValue string `json:"org_unit_value,omitempty"`
+	OrgUnitID    string `json:"org_unit_id,omitempty"`
+	// ParentRef is the row's parent-risk-ID cell. Once the row is approved,
+	// ParentLinkStatus is how linking its risk under that parent went
+	// (ParentLink*), ParentLinkError why a failed link failed, and
+	// ParentRiskID the parent a linked row was linked under (#2846). A
+	// failed link also flags the row parent_link_failed; the risk is
+	// imported either way.
+	ParentRef        string            `json:"parent_ref,omitempty"`
+	ParentLinkStatus string            `json:"parent_link_status"`
+	ParentLinkError  string            `json:"parent_link_error,omitempty"`
+	ParentRiskID     string            `json:"parent_risk_id,omitempty"`
+	Unmapped         map[string]string `json:"unmapped"`
 	// Flags are the row's review flags (Flag*), empty when none.
 	Flags     []string `json:"flags"`
 	Status    string   `json:"status"`
@@ -241,6 +251,8 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 			Level:               placements[i].Level,
 			OrgUnitValue:        placements[i].OrgUnitValue,
 			OrgUnitID:           placements[i].OrgUnitID,
+			ParentRef:           r.ParentRef,
+			ParentLinkStatus:    ParentLinkNone,
 			Unmapped:            r.Unmapped,
 			Status:              RowStatusPending,
 		}
