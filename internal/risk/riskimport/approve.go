@@ -349,6 +349,13 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 		// The risk exists now: link it under its parent, then link the
 		// rows waiting on it. A link the hierarchy rules refuse fails on
 		// its row and the risk stays imported (#2846).
+		//
+		// The lock is taken here, after the create, and only the link
+		// reads below come after it. That is enough under READ COMMITTED
+		// (each statement reads a fresh snapshot), and not under
+		// REPEATABLE READ, where the snapshot predates the lock and a
+		// child and its parent approved concurrently can each miss the
+		// other (parentlink.go).
 		if row.ParentRef != "" || row.ExternalRef != "" {
 			if err := lockHierarchy(ctx, tx, tenantID); err != nil {
 				return err

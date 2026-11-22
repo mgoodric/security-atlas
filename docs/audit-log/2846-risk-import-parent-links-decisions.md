@@ -42,18 +42,28 @@ at a time, so a child is often approved before its parent. Failing that
 child would make the outcome depend on row order. Waiting resolves the link
 when the parent row is decided, whatever the order.
 
-## D3 — Every decision that may make or settle a link takes the hierarchy lock first
+## D3 — Every decision that may make or settle a link takes the hierarchy lock before its link reads
 
 **Decision.** An approval of a row with a parent ID or an organisation risk
 ID, and any duplicate or rejection of a row with an organisation risk ID,
-takes `LockRiskHierarchy` before reading. That is the tenant-scoped
-transaction advisory lock every link path already uses.
+takes `LockRiskHierarchy` after the row is locked and decided (and, on
+approval, after the risk is created), and before the link reads: the parent
+lookup, the pending-row check and the scan for waiting rows. That is the
+tenant-scoped transaction advisory lock every link path already uses. The
+decision's earlier reads are not covered by it, and do not need to be.
 
 **Why.** If a child and its parent are approved at the same time, the child
 could read the parent row as pending while the parent's transaction reads no
-waiting child. The child would then wait forever. Under READ COMMITTED, the
-second transaction to take the lock reads after the first commits, so one of
-them always sees the other.
+waiting child. The child would then wait forever. The import's transactions
+run at READ COMMITTED, the server default, where each statement takes a
+fresh snapshot. So the second transaction to take the lock runs its link
+reads after the first commits, and one of them always sees the other.
+
+**This depends on READ COMMITTED.** Under REPEATABLE READ or SERIALIZABLE
+the snapshot is taken at the transaction's first statement, before the lock,
+and the race returns. A comment at the lock site in `approve.go` and in
+`parentlink.go` says so. Raising the isolation would need the lock moved to
+the transaction's first statement.
 
 ## D4 — One parent per row
 

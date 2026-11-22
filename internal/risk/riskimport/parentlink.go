@@ -32,9 +32,21 @@ import (
 //     why, and is flagged parent_link_failed for review.
 //
 // Every decision that may make or settle a link takes the tenant's
-// hierarchy lock before reading, so a child and its parent decided
+// hierarchy lock before the link reads (the parent lookup, the pending-row
+// check, the waiting-row scan), so a child and its parent decided
 // concurrently cannot each miss the other: the second to take the lock
-// sees the first's commit.
+// sees the first's commit. The row lock, the create and the decision's own
+// reads come earlier and are not covered by it.
+//
+// That relies on READ COMMITTED, the isolation inTx's transactions run at
+// (the server default; pool.Begin sets none): each statement takes a fresh
+// snapshot, so a read after the lock sees what the lock's previous holder
+// committed. Under REPEATABLE READ or SERIALIZABLE the snapshot is fixed by
+// the transaction's first statement, before the lock, and the lost-wakeup
+// race returns: the child reads its parent row as pending, the parent reads
+// no waiting child, and the child waits forever. Do not raise the
+// isolation of these transactions without moving the lock to their first
+// statement.
 
 // FieldParentRef is the parent-risk-ID column. Like the others it is a
 // column-map key.
