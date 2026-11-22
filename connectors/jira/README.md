@@ -117,10 +117,10 @@ Fields with empty source values are dropped from the payload to keep the wire fo
 
 ### Labels the stock controls read
 
-| Label               | Control                                                                                                       |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `vulnerability`     | `soc2_cc7_1_vulnerability_remediation`: SLA by severity, 168 / 720 / 2,160 hours for critical / high / medium |
-| `security-training` | `soc2_cc1_4_competence_training`: each assignee has a ticket resolved `Done` within 365 days                  |
+| Label               | Control                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `vulnerability`     | `soc2_cc7_1_vulnerability_remediation`: SLA by severity, 168 / 720 / 2,160 hours for critical / high / medium           |
+| `security-training` | `soc2_cc1_4_competence_training`: each assignee has a ticket resolved `Done` within 365 days, or one open under 30 days |
 
 The JQL decides which tickets reach the platform; the label decides which control's check counts a ticket. A ticket without the label is skipped by that check.
 

@@ -15,12 +15,15 @@ description: |
   and keeps it when its `labels` include `security-training` and it names
   an `assignee_account_id`; other records are left out. A ticket is
   current when its `resolution` is Done and its `resolved_at` is no more
-  than 365 days before the evaluation instant. Each assignee needs one
-  current ticket. An assignee whose tickets are all open, resolved other
+  than 365 days before the evaluation instant. An open ticket (no
+  `resolution`) is in its grace period while it is younger than 30 days
+  (720 hours): the evaluation instant is before its `created_at` plus 720
+  hours. Each assignee needs one current ticket or one in grace. An
+  assignee whose tickets are all open 30 days or longer, resolved other
   than Done, or resolved Done more than 365 days ago fails the control. An
-  assignee with no current ticket but a Done ticket whose `resolved_at` is
-  absent or unreadable leaves the query inconclusive unless another
-  assignee fails it. The query passes when every assignee has a current
+  assignee with neither but a Done ticket whose `resolved_at`, or an open
+  ticket whose `created_at`, is absent or unreadable leaves the query
+  inconclusive unless another assignee fails it. The query passes when every assignee has a current
   ticket, and is inconclusive when no ticket is kept. When two records for
   one ticket tie on `observed_at`, the worse verdict decides. The
   connector's per-record verdict is not used. Records from a connector
@@ -39,7 +42,7 @@ description: |
   inconclusive. The platform writes every completion as pass; that
   `result` is not used.
 
-  In both queries a timestamp (`completed_at`, `resolved_at`) that is not
+  In both queries a timestamp (`completed_at`, `created_at`, `resolved_at`) that is not
   a full RFC 3339 timestamp, or is more than an hour after the evaluation
   instant, is treated as unreadable and never errors the query. Records
   without a `person_id` are left out. Records count for the annual window
@@ -64,7 +67,7 @@ evidence_queries:
   - id: training_completion_within_365d
     language: sql
     evidence_kind: jira.ticket_evidence.v1
-    description: "Each assignee of a security-training ticket has one resolved Done within 365 days of the evaluation instant"
+    description: "Each assignee of a security-training ticket has one resolved Done within 365 days of the evaluation instant, or one open for under 30 days"
     expression: |
       SELECT CASE
                WHEN count(*) = 0 THEN 'inconclusive'
@@ -81,9 +84,11 @@ evidence_queries:
                    person,
                    kept,
                    CASE
-                     WHEN NOT done THEN 0
-                     WHEN resolved IS NULL THEN 1
-                     WHEN resolved >= evaluated_at - interval '8760 hours' THEN 2
+                     WHEN done AND resolved IS NULL THEN 1
+                     WHEN done AND resolved >= evaluated_at - interval '8760 hours' THEN 2
+                     WHEN done OR resolved_other THEN 0
+                     WHEN created IS NULL THEN 1
+                     WHEN evaluated_at < created + interval '720 hours' THEN 2
                      ELSE 0
                    END AS verdict,
                    rank() OVER (PARTITION BY ticket ORDER BY observed_at DESC) AS recency
@@ -92,8 +97,10 @@ evidence_queries:
                      person,
                      kept,
                      done,
+                     resolved_other,
                      observed_at,
                      evaluated_at,
+                     CASE WHEN created_ts <= evaluated_at + interval '1 hour' THEN created_ts END AS created,
                      CASE WHEN resolved_ts <= evaluated_at + interval '1 hour' THEN resolved_ts END AS resolved
               FROM (
                 SELECT payload->>'ticket_key' AS ticket,
@@ -103,8 +110,14 @@ evidence_queries:
                                 AND jsonb_typeof(payload->'assignee_account_id') = 'string'
                                 AND payload->>'assignee_account_id' <> '', false) AS kept,
                        coalesce(payload->'resolution' = '"Done"'::jsonb, false) AS done,
+                       coalesce(payload->'resolution' <> '"Done"'::jsonb AND payload->>'resolution' <> '', false) AS resolved_other,
                        observed_at,
                        evaluated_at,
+                       CASE
+                         WHEN payload->>'created_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                              AND pg_input_is_valid(payload->>'created_at', 'timestamptz')
+                           THEN (payload->>'created_at')::timestamptz
+                       END AS created_ts,
                        CASE
                          WHEN payload->>'resolved_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
                               AND pg_input_is_valid(payload->>'resolved_at', 'timestamptz')

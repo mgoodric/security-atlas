@@ -69,8 +69,8 @@ cases:
             resolved_at: "2025-11-21T11:59:59Z",
           }
 
-  - name: open-ticket-only-fails
-    description: the assignee has not completed training
+  - name: open-ticket-past-30-days-fails
+    description: the assignee has not completed training and the grace is over
     expected_state: fail
     evaluated_at: 2026-11-21T12:00:00Z
     records:
@@ -83,6 +83,7 @@ cases:
             status: To Do,
             assignee_account_id: acct-noah,
             labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
           }
 
   - name: resolved-other-than-done-fails
@@ -138,6 +139,7 @@ cases:
             status: To Do,
             assignee_account_id: acct-noah,
             labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
           }
 
   - name: newer-current-ticket-covers-a-stale-one
@@ -194,6 +196,7 @@ cases:
             status: To Do,
             assignee_account_id: acct-mia,
             labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
           }
 
   - name: done-without-resolved-at-is-inconclusive
@@ -321,6 +324,7 @@ cases:
             status: To Do,
             assignee_account_id: acct-noah,
             labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
           }
 
   - name: latest-record-decides-reopened-ticket-fails
@@ -349,6 +353,7 @@ cases:
             status: Reopened,
             assignee_account_id: acct-liam,
             labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
           }
 
   - name: latest-record-decides-resolved-ticket-passes
@@ -403,6 +408,7 @@ cases:
             status: Reopened,
             assignee_account_id: acct-liam,
             labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
           }
 
   - name: failing-ticket-query-fails-despite-current-completion
@@ -419,6 +425,7 @@ cases:
             status: To Do,
             assignee_account_id: acct-noah,
             labels: [security-training],
+            created_at: "2026-09-01T00:00:00Z",
           }
       - result: pass
         evidence_kind: security_awareness.training_completion.v1
@@ -432,3 +439,70 @@ cases:
           person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
           completed_at: 2026-10-01T12:00:00Z
           completion_source: manual
+
+  - name: open-ticket-just-under-30-days-passes
+    description: a new assignee is in grace while the ticket is younger than 720 hours
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+            created_at: "2026-10-22T12:00:01Z",
+          }
+
+  - name: open-ticket-at-30-days-fails
+    description: the grace bound is exclusive; a ticket exactly 720 hours old is past it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+            created_at: "2026-10-22T12:00:00Z",
+          }
+
+  - name: open-ticket-without-created-at-is-inconclusive
+    description: the grace cannot be measured
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+          }
+
+  - name: open-ticket-created-more-than-an-hour-ahead-is-inconclusive
+    description: an unreadable created_at, not a ticket in grace
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            ticket_key: SEC-30,
+            status: To Do,
+            assignee_account_id: acct-zoe,
+            labels: [security-training],
+            created_at: "2026-11-21T13:00:01Z",
+          }

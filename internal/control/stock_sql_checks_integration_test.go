@@ -780,13 +780,17 @@ func TestJiraTicketChecks_EngineEvaluatesTicketPayload(t *testing.T) {
 		}
 		return p
 	}
-	training := func(key, account, resolution string, resolvedAgo time.Duration) map[string]any {
+	// ago is how long ago the ticket was resolved, or for an open ticket
+	// (no resolution) how long ago it was created.
+	training := func(key, account, resolution string, ago time.Duration) map[string]any {
 		p := map[string]any{
 			"ticket_key": key, "status": "To Do", "labels": []string{"security-training"},
 			"assignee_account_id": account,
 		}
 		if resolution != "" {
-			p["status"], p["resolution"], p["resolved_at"] = "Done", resolution, ts(resolvedAgo)
+			p["status"], p["resolution"], p["resolved_at"] = "Done", resolution, ts(ago)
+		} else if ago > 0 {
+			p["created_at"] = ts(ago)
 		}
 		return p
 	}
@@ -813,7 +817,8 @@ func TestJiraTicketChecks_EngineEvaluatesTicketPayload(t *testing.T) {
 			training("S-2", "acct-2", "Done", 364*24*hour),
 		}, eval.FarFuture, eval.ResultPass},
 		{cc14, "training resolved 366 days ago", []map[string]any{training("S-1", "acct-1", "Done", 366*24*hour)}, eval.FarFuture, eval.ResultFail},
-		{cc14, "open training ticket", []map[string]any{training("S-1", "acct-1", "", 0)}, eval.FarFuture, eval.ResultFail},
+		{cc14, "training ticket open 31 days", []map[string]any{training("S-1", "acct-1", "", 31*24*hour)}, eval.FarFuture, eval.ResultFail},
+		{cc14, "training ticket open 29 days is in grace", []map[string]any{training("S-1", "acct-1", "", 29*24*hour)}, eval.FarFuture, eval.ResultPass},
 		{cc14, "replay measures from the as-of instant", []map[string]any{training("S-1", "acct-1", "Done", 380*24*hour)}, now.Add(-30 * 24 * hour), eval.ResultPass},
 		{cc14, "only vulnerability tickets", []map[string]any{vuln("V-1", "critical", 900*hour, 0)}, eval.FarFuture, eval.ResultInconclusive},
 	}

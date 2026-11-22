@@ -12,7 +12,8 @@ One bug surfaced while building, found by re-reading the query before its
 first run: cc1_4's `done` was `payload->'resolution' = '"Done"'`, which is
 NULL for an open ticket, so an open ticket fell through to "resolved Done,
 date unreadable" and was inconclusive instead of failing. It is now
-`coalesce(…, false)`, and the bundle case `open-ticket-only-fails` pins it.
+`coalesce(…, false)`, and the bundle case `open-ticket-past-30-days-fails`
+pins it.
 A first draft of cc7_1 had the same shape of bug (an unreadable
 `created_at` scored 0 through `least()` rather than 1) and was restructured
 before it ran.
@@ -55,6 +56,9 @@ data inventory's `jira.ticket_evidence` row already covers assignees.
 
 Jira's timestamps are not RFC 3339 (the offset has no colon), so the
 connector converts them to UTC RFC 3339 and drops one it cannot parse. The
+layout is `2006-01-02T15:04:05-0700`, with no fraction named: Go's parser
+accepts a fractional second of any length after the seconds field, or none,
+so `.1`, `.000` and `.123456` all parse (review, #2956). The
 queries therefore read only RFC 3339; an un-normalised value is unreadable
 (`jira-offset-without-colon-is-inconclusive`).
 
@@ -104,18 +108,21 @@ A ticket whose latest record drops the label leaves the check
     set but `resolved_at` is absent.
   - otherwise a resolved ticket (one with `resolved_at`) is 2 when
     `resolved_at ≤ created_at + SLA`, else 0;
-  - an open ticket is 2 when `evaluated_at ≤ created_at + SLA`, else 0.
+  - an open ticket is 2 when `evaluated_at < created_at + SLA`, else 0.
 - **Verdict:** `critical`/`high`/`medium` take that score. No `severity` is
   `greatest(score at 168 h, 1)`: it may be critical, so it passes only
   within the strictest SLA and otherwise cannot fail. A mistyped `severity`
   (a tenant-private schema could widen the enum) is 0.
 - **Combine:** no in-scope ticket is inconclusive; otherwise the minimum
   decides.
-- **Boundaries are inclusive for both.** The ticket says an open ticket
-  "must be younger than its SLA". An open ticket at exactly its SLA has not
-  missed it yet, and would pass if resolved at that instant, so failing it
-  would be stricter than the resolved rule. Each boundary is pinned at the
-  instant and one second past it.
+- **Resolved bound inclusive, open bound exclusive.** The ticket says a
+  closed ticket "must have been resolved within" its SLA and an open one
+  "must be younger than" it. The first build made both inclusive, so the
+  two rules agreed at the instant. Review (#2956) followed the ticket's
+  wording: an open ticket exactly as old as its SLA fails. Each resolved
+  boundary is pinned at the instant (pass) and one second past it (fail).
+  Each open boundary is pinned at the instant (fail) and one second inside
+  it (pass).
 - **Resolution kind is not read.** Won't Do counts as resolved at its
   `resolved_at`. Accepting a risk is an exception's job, not a resolution
   name's, and names vary by workflow.
@@ -132,20 +139,32 @@ A ticket whose latest record drops the label leaves the check
   record is labelled `security-training` and names an
   `assignee_account_id`. An unassigned training ticket cannot be attributed
   to a person, so it is left out rather than failing.
-- **Ticket score:** 2 when `resolution` is `Done` and `resolved_at` is
-  within 8,760 hours before `evaluated_at`; 1 when Done but `resolved_at` is
-  absent or unreadable; otherwise 0 (open, Won't Do, or Done too long ago).
+- **Ticket score:**
+
+  - resolved `Done`: 2 when `resolved_at` is within 8,760 hours before
+    `evaluated_at`, 1 when `resolved_at` is absent or unreadable, else 0;
+  - resolved other than Done (Won't Do, Duplicate): 0;
+  - open (no `resolution`): 2 while younger than 30 days,
+    `evaluated_at < created_at + interval '720 hours'`; 1 when `created_at`
+    is absent or unreadable; else 0.
+
   A tie on one ticket takes the minimum.
+
 - **Per person:** the maximum over the person's tickets. A person needs one
-  current ticket, so last year's resolved ticket and this year's open one
-  together pass while the old one is inside 365 days, and fail once it is
-  not. This is the old Rego's `some t in input.training_tix`.
+  current ticket or one in grace, so last year's resolved ticket and this
+  year's open one together pass while either holds. This is the old Rego's
+  `some t in input.training_tix`.
 - **Combine:** no kept ticket is inconclusive; otherwise the minimum over
   people decides.
-- **An open training ticket alone fails.** A new hire whose first ticket is
-  still open has not been trained; CC1.4 asks for training on hire. If
-  Matt wants a grace period for new tickets, it is one arm: score an open
-  ticket younger than N hours as 1.
+- **A 30-day grace for open training tickets (Matt, 2026-11-22).** The first
+  build failed an assignee whose only ticket was open, a new hire included.
+  Matt's call on review (#2956): an open ticket counts as fine for its first
+  30 days and fails after that. The bound is exclusive like cc7_1's open
+  bound: a ticket exactly 720 hours old is past it. The bundle pins it at
+  the instant (fail) and one second inside (pass). It also pins an open
+  ticket with no `created_at`, which is inconclusive. 1.1.0 always carries
+  `created_at`, so that case is only reachable from a tenant-private
+  writer.
 - **Resolution, not status.** The old Rego and the ticket both say
   "resolved Done"; `status` names vary by workflow and `resolution` is what
   Jira sets on resolving.

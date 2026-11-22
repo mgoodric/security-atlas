@@ -175,8 +175,9 @@ func NormalizeSeverity(v string) string {
 
 // jiraTimeLayout is the timestamp format Jira REST v3 returns, e.g.
 // "2022-10-06T07:32:47.000+0000". The offset has no colon, so it is not
-// RFC 3339.
-const jiraTimeLayout = "2006-01-02T15:04:05.000-0700"
+// RFC 3339. The layout names no fraction: time.Parse accepts a fractional
+// second of any length after the seconds field, or none.
+const jiraTimeLayout = "2006-01-02T15:04:05-0700"
 
 // ParseJiraTime parses a Jira or RFC 3339 timestamp to UTC. An empty or
 // unparseable value is nil.
