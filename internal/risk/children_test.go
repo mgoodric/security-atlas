@@ -155,10 +155,47 @@ func TestLinkChildrenTx_CapsChildren(t *testing.T) {
 	for i := range ids {
 		ids[i] = uuid.New()
 	}
-	if _, err := LinkChildrenTx(context.Background(), nil, uuid.New(), uuid.New(), ids); !errors.Is(err, ErrTooManyChildren) {
+	if _, err := LinkChildrenTx(context.Background(), nil, uuid.New(), uuid.New(), ids, HierarchyAudit{Actor: "test"}); !errors.Is(err, ErrTooManyChildren) {
 		t.Fatalf("err = %v, want ErrTooManyChildren", err)
 	}
 	if !IsChildLinkValidation(ErrTooManyChildren) {
 		t.Fatal("ErrTooManyChildren should be a 400-class validation error")
+	}
+}
+
+// A link or unlink without an actor is refused before any query, so no
+// hierarchy change is ever written without its audit row's actor (#2958).
+func TestHierarchyLinks_RequireActor(t *testing.T) {
+	t.Parallel()
+	ids := []uuid.UUID{uuid.New()}
+	if _, err := LinkChildrenTx(context.Background(), nil, uuid.New(), uuid.New(), ids, HierarchyAudit{}); !errors.Is(err, ErrTransitionInput) {
+		t.Fatalf("link err = %v, want ErrTransitionInput", err)
+	}
+	if err := UnlinkChildTx(context.Background(), nil, uuid.New(), uuid.New(), uuid.New(), HierarchyAudit{}); !errors.Is(err, ErrTransitionInput) {
+		t.Fatalf("unlink err = %v, want ErrTransitionInput", err)
+	}
+}
+
+// childAuditStates: a link moves child_risk_id from null to the child, an
+// unlink from the child to null, and Detail lands in the after state but
+// never overrides child_risk_id (#2958).
+func TestChildAuditStates(t *testing.T) {
+	t.Parallel()
+	child := uuid.New()
+	detail := map[string]any{"import_batch_id": "b1", "child_risk_id": "spoof"}
+
+	before, after := childAuditStates(child, true, detail)
+	if before["child_risk_id"] != nil || after["child_risk_id"] != child || after["import_batch_id"] != "b1" {
+		t.Fatalf("linked states = %v -> %v", before, after)
+	}
+	before, after = childAuditStates(child, false, nil)
+	if before["child_risk_id"] != child || after["child_risk_id"] != nil {
+		t.Fatalf("unlinked states = %v -> %v", before, after)
+	}
+	if _, ok := after["child_risk_id"]; !ok {
+		t.Fatal("unlinked after state must carry child_risk_id: null")
+	}
+	if detail["child_risk_id"] != "spoof" {
+		t.Fatal("childAuditStates mutated the caller's Detail")
 	}
 }

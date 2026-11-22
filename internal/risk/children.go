@@ -29,6 +29,11 @@
 // write-proposal appliers can run the same validation inside their confirm
 // transaction.
 //
+// Every link and unlink is logged (#2958): each new link writes one
+// child_linked row on the parent's audit trail, each unlink one
+// child_unlinked row, in the same transaction and by the caller's actor. A
+// re-link of a child already linked writes none.
+//
 // Every path that adds a link (this file, the MCP applier through it, and
 // the aggregation engine) first takes the tenant's hierarchy advisory lock
 // (LockRiskHierarchy), so two concurrent links cannot each pass the cycle
@@ -70,6 +75,37 @@ const MaxChildrenPerLink = 100
 // ErrTooManyChildren is returned when one link request names more than
 // MaxChildrenPerLink children.
 var ErrTooManyChildren = fmt.Errorf("risk: at most %d child risks per link request", MaxChildrenPerLink)
+
+// Audit actions the hierarchy links write (migration 20261295000000).
+const (
+	ActionChildLinked   = "child_linked"
+	ActionChildUnlinked = "child_unlinked"
+)
+
+// HierarchyAudit names who made a hierarchy link or unlink, for its audit
+// row. Detail adds keys to the row's after state, such as a risk import's
+// batch and row; it never overrides child_risk_id.
+type HierarchyAudit struct {
+	Actor  string
+	Detail map[string]any
+}
+
+// childAuditStates is the before and after state of a child_linked
+// (linked) or child_unlinked row.
+func childAuditStates(childID uuid.UUID, linked bool, detail map[string]any) (before, after map[string]any) {
+	before = map[string]any{"child_risk_id": nil}
+	after = map[string]any{}
+	for k, v := range detail {
+		after[k] = v
+	}
+	after["child_risk_id"] = nil
+	if linked {
+		after["child_risk_id"] = childID
+	} else {
+		before["child_risk_id"] = childID
+	}
+	return before, after
+}
 
 // IsChildLinkValidation reports whether err is a caller error in a link
 // request that the HTTP layer renders as a 400. A cycle (409) and a missing
@@ -233,9 +269,13 @@ func WouldCycle(ctx context.Context, q *dbx.Queries, tenantID, parentID, childID
 // LinkChildrenTx attaches childIDs under parentID inside the caller's
 // tenant transaction, after the checks in this file's header. A child that
 // is already linked is left as it is (ON CONFLICT DO NOTHING), so a repeat
-// is a no-op. It returns the deduplicated child ids it linked or found
-// linked.
-func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid.UUID, childIDs []uuid.UUID) ([]uuid.UUID, error) {
+// is a no-op and writes no audit row. Each new link writes one child_linked
+// row on the parent by audit.Actor. It returns the deduplicated child ids
+// it linked or found linked.
+func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid.UUID, childIDs []uuid.UUID, audit HierarchyAudit) ([]uuid.UUID, error) {
+	if audit.Actor == "" {
+		return nil, fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
 	if len(childIDs) == 0 {
 		return nil, ErrEmptyChildren
 	}
@@ -288,7 +328,23 @@ func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid
 			return nil, fmt.Errorf("%w: risk %s has methodology %q", ErrIncompatibleMethodology, id, child.Methodology)
 		}
 	}
+	// The hierarchy lock is held, so the existing links cannot change
+	// before the inserts below.
+	existing, err := q.ListRiskChildLinks(ctx, dbx.ListRiskChildLinksParams{
+		TenantID:     pgUUID(tenantID),
+		ParentRiskID: pgUUID(parentID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list child links: %w", err)
+	}
+	linked := make(map[uuid.UUID]bool, len(existing))
+	for _, l := range existing {
+		linked[uuid.UUID(l.ID.Bytes)] = true
+	}
 	for _, id := range children {
+		if linked[id] {
+			continue
+		}
 		if err := q.LinkRiskAggregation(ctx, dbx.LinkRiskAggregationParams{
 			ParentRiskID: pgUUID(parentID),
 			ChildRiskID:  pgUUID(id),
@@ -303,13 +359,21 @@ func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid
 			}
 			return nil, fmt.Errorf("link child %s: %w", id, err)
 		}
+		before, after := childAuditStates(id, true, audit.Detail)
+		if err := insertRiskAudit(ctx, q, tenantID, parentID, audit.Actor, ActionChildLinked, before, after); err != nil {
+			return nil, err
+		}
 	}
 	return children, nil
 }
 
 // UnlinkChildTx detaches childID from parentID inside the caller's tenant
-// transaction. ErrLinkNotFound when no such link exists in the tenant.
-func UnlinkChildTx(ctx context.Context, q *dbx.Queries, tenantID, parentID, childID uuid.UUID) error {
+// transaction and writes one child_unlinked row on the parent by
+// audit.Actor. ErrLinkNotFound when no such link exists in the tenant.
+func UnlinkChildTx(ctx context.Context, q *dbx.Queries, tenantID, parentID, childID uuid.UUID, audit HierarchyAudit) error {
+	if audit.Actor == "" {
+		return fmt.Errorf("%w: actor is required", ErrTransitionInput)
+	}
 	n, err := q.DeleteRiskAggregationLink(ctx, dbx.DeleteRiskAggregationLinkParams{
 		TenantID:     pgUUID(tenantID),
 		ParentRiskID: pgUUID(parentID),
@@ -321,26 +385,27 @@ func UnlinkChildTx(ctx context.Context, q *dbx.Queries, tenantID, parentID, chil
 	if n == 0 {
 		return ErrLinkNotFound
 	}
-	return nil
+	before, after := childAuditStates(childID, false, audit.Detail)
+	return insertRiskAudit(ctx, q, tenantID, parentID, audit.Actor, ActionChildUnlinked, before, after)
 }
 
 // LinkChildren attaches childIDs under parentID (see LinkChildrenTx). A
 // deadlock against a concurrent risk write is retried in a fresh
 // transaction (retryOnDeadlock); the link is idempotent, so a retry
 // re-validates and re-inserts from scratch.
-func (s *Store) LinkChildren(ctx context.Context, parentID uuid.UUID, childIDs []uuid.UUID) error {
+func (s *Store) LinkChildren(ctx context.Context, parentID uuid.UUID, childIDs []uuid.UUID, audit HierarchyAudit) error {
 	return retryOnDeadlock(ctx, func() error {
 		return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-			_, err := LinkChildrenTx(ctx, q, tenantID, parentID, childIDs)
+			_, err := LinkChildrenTx(ctx, q, tenantID, parentID, childIDs, audit)
 			return err
 		})
 	})
 }
 
 // UnlinkChild detaches childID from parentID (see UnlinkChildTx).
-func (s *Store) UnlinkChild(ctx context.Context, parentID, childID uuid.UUID) error {
+func (s *Store) UnlinkChild(ctx context.Context, parentID, childID uuid.UUID, audit HierarchyAudit) error {
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		return UnlinkChildTx(ctx, q, tenantID, parentID, childID)
+		return UnlinkChildTx(ctx, q, tenantID, parentID, childID, audit)
 	})
 }
 
