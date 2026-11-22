@@ -27,7 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
-	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -110,7 +110,7 @@ func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, cont
 		TenantID:     pgUUID(tenantID),
 		ControlID:    pgUUID(controlID),
 		ControlRef:   controlRef,
-		UnboundKinds: unbound.Kinds(),
+		UnboundKinds: routed.ControlFreeKinds(),
 		ObservedAt:   pgTimestamptz(asOf),
 	})
 	if err != nil {

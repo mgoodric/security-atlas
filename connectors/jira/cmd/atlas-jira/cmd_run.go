@@ -78,7 +78,7 @@ Idempotency:
 	}
 	cmd.Flags().StringVar(&f.platform, "platform", "", `target platform — "jira" or "linear" [required]`)
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.controlID, "control-id", "scf:CHG-02", "control_id to attach to jira.ticket_evidence.v1 records")
+	cmd.Flags().StringVar(&f.controlID, "control-id", "", "control_id to attach to jira.ticket_evidence.v1 records; empty (the default) routes each record to every control that queries jira.ticket_evidence.v1 (#2924)")
 
 	// Jira flags
 	cmd.Flags().StringVar(&f.jiraBaseURL, "jira-base-url", "", "Jira Cloud base URL, e.g. https://acme.atlassian.net")
