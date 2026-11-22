@@ -145,21 +145,29 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO risk_import_rows (
 					tenant_id, batch_id, row_number, external_ref, title, description,
-					category_slug, review_due, inherent_score, residual_score, unmapped, flags, status,
+					category_value, theme_values, review_due, inherent_score, residual_score, unmapped, flags, status,
 					treatment, requested_treatment, acceptance_justification, proposed_until,
 					historical_accepter, instrument_reference, linked_control_ids, unresolved_controls,
 					owner_user_id, owner_unlinked)
-				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::date, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13,
+				VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $24, $8::date, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13,
 					$14, $15, $16, $17::date, $18, $19, $20::uuid[], $21, $22::uuid, $23)
 				RETURNING id::text
 			`, tenantID, b.ID, r.RowNumber, nullable(r.ExternalRef), r.Title, r.Description,
-				r.Category, nullable(r.ReviewDue), nullable(string(r.InherentScore)), nullable(string(r.ResidualScore)),
+				r.CategoryValue, nullable(r.ReviewDue), nullable(string(r.InherentScore)), nullable(string(r.ResidualScore)),
 				string(vals), nonNil(r.Flags), r.Status,
 				r.Treatment, nullable(r.RequestedTreatment), r.Justification, nullable(r.ProposedUntil),
 				r.HistoricalAccepter, r.InstrumentReference, nonNil(r.LinkedControlIDs), nonNil(r.UnresolvedControls),
-				nullable(r.OwnerUserID), r.OwnerUnlinked,
+				nullable(r.OwnerUserID), r.OwnerUnlinked, nonNil(r.ThemeValues),
 			).Scan(&r.ID); err != nil {
 				return fmt.Errorf("riskimport: insert staged row %d: %w", r.RowNumber, err)
+			}
+		}
+		for _, v := range append(append([]ValueMapping(nil), b.CategoryValues...), b.ThemeValues...) {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO risk_import_value_maps (tenant_id, batch_id, kind, value, target)
+				VALUES ($1, $2::uuid, $3, $4, $5)
+			`, tenantID, b.ID, v.Kind, v.Value, nullable(v.Target)); err != nil {
+				return fmt.Errorf("riskimport: insert %s value %q: %w", v.Kind, v.Value, err)
 			}
 		}
 		for _, r := range b.Rejected {
@@ -181,6 +189,8 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 		b.Staged[i].Flags = nonNil(b.Staged[i].Flags)
 		b.Staged[i].LinkedControlIDs = nonNil(b.Staged[i].LinkedControlIDs)
 		b.Staged[i].UnresolvedControls = nonNil(b.Staged[i].UnresolvedControls)
+		b.Staged[i].ThemeValues = nonNil(b.Staged[i].ThemeValues)
+		b.Staged[i].Themes = nonNil(b.Staged[i].Themes)
 	}
 	b.UnmappedColumns = nonNil(b.UnmappedColumns)
 	return b, nil
@@ -214,6 +224,16 @@ func (s *Store) getBatch(ctx context.Context, id string) (Batch, error) {
 		if b.Staged, err = readStaged(ctx, tx, id); err != nil {
 			return err
 		}
+		maps, targets, err := readValueMaps(ctx, tx, id, false)
+		if err != nil {
+			return err
+		}
+		for i := range b.Staged {
+			r := &b.Staged[i]
+			r.Category, r.Themes, _ = targets.resolveRow(r.CategoryValue, r.ThemeValues)
+			r.Themes = nonNil(r.Themes)
+		}
+		b.CategoryValues, b.ThemeValues = splitByKind(maps, b.Staged)
 		b.Rejected, err = readRejected(ctx, tx, id)
 		return err
 	})
@@ -232,7 +252,7 @@ func (s *Store) getBatch(ctx context.Context, id string) (Batch, error) {
 
 func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, row_number, COALESCE(external_ref, ''), title, description, category_slug,
+		SELECT id::text, row_number, COALESCE(external_ref, ''), title, description, category_value, theme_values,
 		       COALESCE(to_char(review_due, 'YYYY-MM-DD'), ''), inherent_score::text, residual_score::text, unmapped, flags, status,
 		       COALESCE(decided_by, ''), COALESCE(risk_id::text, ''), COALESCE(rejection_reason, ''),
 		       treatment, COALESCE(requested_treatment, ''), acceptance_justification,
@@ -252,7 +272,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 		var r BatchRow
 		var vals []byte
 		var inherent, residual *string
-		if err := rows.Scan(&r.ID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description, &r.Category,
+		if err := rows.Scan(&r.ID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description, &r.CategoryValue, &r.ThemeValues,
 			&r.ReviewDue, &inherent, &residual, &vals, &r.Flags, &r.Status, &r.DecidedBy, &r.RiskID, &r.RejectionReason,
 			&r.Treatment, &r.RequestedTreatment, &r.Justification, &r.ProposedUntil, &r.HistoricalAccepter,
 			&r.InstrumentReference, &r.LinkedControlIDs, &r.UnresolvedControls,
@@ -267,6 +287,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchRow, err
 		r.Flags = nonNil(r.Flags)
 		r.LinkedControlIDs = nonNil(r.LinkedControlIDs)
 		r.UnresolvedControls = nonNil(r.UnresolvedControls)
+		r.ThemeValues = nonNil(r.ThemeValues)
 		out = append(out, r)
 	}
 	return out, rows.Err()

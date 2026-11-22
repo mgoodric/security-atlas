@@ -57,7 +57,13 @@ export type BatchRow = {
   external_ref?: string;
   title: string;
   description: string;
+  // #2844: the row's category cell and theme values as written, and the
+  // category slug and theme names the batch maps them to. category is
+  // empty while its value is unmapped; themes lists only mapped values.
+  category_value?: string;
   category: string;
+  theme_values?: string[] | null;
+  themes?: string[] | null;
   review_due?: string;
   // #2842: the treatment the risk is created with, and the register's when
   // it was downgraded to untreated. An accepted row is created proposed;
@@ -83,6 +89,14 @@ export type BatchRow = {
   rejection_reason?: string;
 };
 
+export type ValueMapping = {
+  kind: "category" | "theme";
+  value: string;
+  row_count: number;
+  target?: string;
+  mapped_by?: string;
+};
+
 export type RejectedRow = {
   row_number: number;
   external_ref?: string;
@@ -100,6 +114,10 @@ export type RiskImportBatch = {
   staged_count: number;
   rejected_count: number;
   unmapped_columns: string[] | null;
+  // #2844: the batch's distinct category and theme values, each with the
+  // category slug or theme name it maps to (absent while unmapped).
+  category_values?: ValueMapping[] | null;
+  theme_values?: ValueMapping[] | null;
   created_at: string;
   staged: BatchRow[] | null;
   rejected: RejectedRow[] | null;
@@ -196,7 +214,16 @@ export function mappedFields(row: BatchRow): [string, string][] {
   const out: [string, string][] = [];
   if (row.external_ref) out.push(["Risk ID", row.external_ref]);
   out.push(["Title", row.title]);
-  out.push(["Category", row.category]);
+  out.push([
+    "Category",
+    row.category ||
+      (row.category_value ? `${row.category_value} (unmapped)` : ""),
+  ]);
+  const themeValues = row.theme_values ?? [];
+  if (themeValues.length > 0) {
+    out.push(["Theme values", themeValues.join(", ")]);
+    out.push(["Themes", (row.themes ?? []).join(", ") || "(none mapped)"]);
+  }
   if (row.review_due) out.push(["Review due", row.review_due]);
   if (row.description) out.push(["Description", row.description]);
   if (row.owner_user_id) {

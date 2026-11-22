@@ -6220,7 +6220,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/imports/{id}:
     get:
-      summary: GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839)
+      summary: GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839); category_values and theme_values list the batch's distinct category and theme values, each with the category slug or theme name it maps to, absent while unmapped (#2844)
       tags: [risks]
       operationId: get-v1-risks-imports-id
       security:
@@ -6240,7 +6240,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/imports/{id}/approve:
     post:
-      summary: POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a tenant approver who is a person must approve (403 otherwise); each decision is audit-logged (#2839)
+      summary: POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a row takes the category and themes its values map to, and a row with an unmapped category or theme value is rejected with those values as the reason (#2844); a tenant approver who is a person must approve (403 otherwise); each decision is audit-logged (#2839)
       tags: [risks]
       operationId: post-v1-risks-imports-id-approve
       security:
@@ -6297,6 +6297,26 @@ paths:
           schema:
             type: string
         - name: row
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/imports/{id}/values:
+    put:
+      summary: PUT /v1/risks/imports/{id}/values — map one distinct category or theme value of a staged risk import batch; body {kind (category or theme), value, target?, create?}; target maps it to an existing category (slug or name) or theme (name), else 422; create {slug, name, description} creates the category or theme for it through the audited creation, a tenant approver only (403 otherwise); neither clears the mapping; 409 once the batch is completed; a write on risks (#2844)
+      tags: [risks]
+      operationId: put-v1-risks-imports-id-values
+      security:
+        - bearer: []
+      parameters:
+        - name: id
           in: path
           required: true
           schema:

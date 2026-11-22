@@ -174,6 +174,39 @@ describe("row fields", () => {
     ]);
   });
 
+  it("shows an unmapped category value, and theme values beside their mapping (#2844)", () => {
+    expect(
+      mappedFields(
+        row({
+          category_value: "Ops",
+          category: "",
+          theme_values: ["Vendors", "Availability"],
+          themes: ["availability"],
+        }),
+      ),
+    ).toEqual([
+      ["Title", "Vendor outage"],
+      ["Category", "Ops (unmapped)"],
+      ["Theme values", "Vendors, Availability"],
+      ["Themes", "availability"],
+    ]);
+    expect(
+      mappedFields(
+        row({
+          category_value: "Ops",
+          category: "operational",
+          theme_values: ["People"],
+          themes: [],
+        }),
+      ),
+    ).toEqual([
+      ["Title", "Vendor outage"],
+      ["Category", "operational"],
+      ["Theme values", "People"],
+      ["Themes", "(none mapped)"],
+    ]);
+  });
+
   it("shows an accepted row as proposed, with its accepter as history (#2842)", () => {
     expect(
       mappedFields(

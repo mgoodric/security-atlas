@@ -47,7 +47,9 @@ type RejectRowInput struct {
 
 // RowDecision is the outcome of deciding one row. Status duplicate is an
 // approval that found the row's organisation risk ID already on a risk of
-// the tenant (RiskID) and created nothing.
+// the tenant (RiskID) and created nothing. Status rejected from an
+// approval is a row with a category or theme value the batch has not
+// mapped, named in RejectionReason (#2844).
 type RowDecision struct {
 	BatchID         string `json:"batch_id"`
 	RowID           string `json:"row_id"`
@@ -74,7 +76,10 @@ type ApproveResult struct {
 	ApprovedCount int           `json:"approved_count"`
 	Approved      []RowDecision `json:"approved"`
 	Duplicates    []RowDecision `json:"duplicates"`
-	Skipped       []ApproveSkip `json:"skipped"`
+	// Rejected are the rows approval rejected for an unmapped category or
+	// theme value (#2844).
+	Rejected []RowDecision `json:"rejected"`
+	Skipped  []ApproveSkip `json:"skipped"`
 }
 
 // pendingRow is a pending row of the batch, as listed before approval.
@@ -91,7 +96,8 @@ type lockedRow struct {
 	ExternalRef   string
 	Title         string
 	Description   string
-	Category      string
+	CategoryValue string
+	ThemeValues   []string
 	ReviewDue     *time.Time
 	Methodology   dbx.RiskMethodology
 	InherentScore []byte
@@ -118,7 +124,10 @@ func (s *Store) ApprovePending(ctx context.Context, in ApproveInput) (ApproveRes
 	if err != nil {
 		return ApproveResult{}, err
 	}
-	res := ApproveResult{BatchID: in.BatchID, Approved: []RowDecision{}, Duplicates: []RowDecision{}, Skipped: []ApproveSkip{}}
+	res := ApproveResult{
+		BatchID: in.BatchID, Approved: []RowDecision{}, Duplicates: []RowDecision{},
+		Rejected: []RowDecision{}, Skipped: []ApproveSkip{},
+	}
 	for _, p := range pending {
 		d, err := s.approveRowRetrying(ctx, in, p.ID)
 		if reason, skip := skipReason(err); skip {
@@ -128,8 +137,12 @@ func (s *Store) ApprovePending(ctx context.Context, in ApproveInput) (ApproveRes
 		if err != nil {
 			return res, err
 		}
-		if d.Status == RowStatusDuplicate {
+		switch d.Status {
+		case RowStatusDuplicate:
 			res.Duplicates = append(res.Duplicates, d)
+			continue
+		case RowStatusRejected:
+			res.Rejected = append(res.Rejected, d)
 			continue
 		}
 		res.Approved = append(res.Approved, d)
@@ -168,6 +181,7 @@ func skipReason(err error) (string, bool) {
 	case errors.Is(err, ErrRowDecided),
 		errors.Is(err, risk.ErrExternalRefTaken),
 		risk.IsCategoryRefusal(err),
+		errors.Is(err, risk.ErrUnknownTheme),
 		risk.IsRecordValidation(err),
 		risk.IsTreatmentValidation(err),
 		risk.IsTransitionInput(err):
@@ -222,8 +236,10 @@ func (s *Store) pendingRows(ctx context.Context, batchID string) ([]pendingRow, 
 
 // approveRow approves one pending row in its own transaction: a row whose
 // organisation risk ID is already on a risk of the tenant is marked
-// duplicate and nothing is created; any other becomes a risk through the
-// risk store. Re-importing never updates an existing risk.
+// duplicate and nothing is created; a row with a category or theme value
+// the batch has not mapped is rejected with those values as the reason;
+// any other becomes a risk through the risk store, with the category and
+// themes its values map to. Re-importing never updates an existing risk.
 func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (RowDecision, error) {
 	var out RowDecision
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
@@ -243,6 +259,22 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			return finishDecision(ctx, tx, tenantID, out, "duplicate", "")
 		}
 
+		// The map is read FOR SHARE: a mapping change waits for this
+		// decision, so the row takes the mapping it was decided under.
+		_, targets, err := readValueMaps(ctx, tx, row.BatchID, true)
+		if err != nil {
+			return err
+		}
+		category, themes, unmapped := targets.resolveRow(row.CategoryValue, row.ThemeValues)
+		if len(unmapped) > 0 {
+			reason := "not mapped in this import batch: " + strings.Join(unmapped, ", ")
+			out.Status, out.RejectionReason = RowStatusRejected, reason
+			if err := recordDecision(ctx, tx, rowID, RowStatusRejected, in.Approver, "", reason); err != nil {
+				return err
+			}
+			return finishDecision(ctx, tx, tenantID, out, "reject", reason)
+		}
+
 		controls, err := existingControls(ctx, tx, tenantID, row.ControlIDs)
 		if err != nil {
 			return err
@@ -257,7 +289,8 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 		created, err := s.risks.CreateTx(ctx, dbx.New(tx), tenantID, risk.CreateInput{
 			Title:       row.Title,
 			Description: row.Description,
-			CategoryRef: row.Category,
+			CategoryRef: category,
+			Themes:      themes,
 			ReviewDueAt: row.ReviewDue,
 			ExternalRef: row.ExternalRef,
 			// The batch's one methodology, and the scores staged in its
@@ -347,7 +380,7 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 	var proposedUntil *time.Time
 	err := tx.QueryRow(ctx, `
 		SELECT r.batch_id::text, r.row_number, COALESCE(r.external_ref, ''), r.title, r.description,
-		       r.category_slug, r.review_due, r.inherent_score::text, r.residual_score::text,
+		       r.category_value, r.theme_values, r.review_due, r.inherent_score::text, r.residual_score::text,
 		       b.methodology, r.status, r.treatment, r.acceptance_justification, r.proposed_until,
 		       r.instrument_reference, r.linked_control_ids, r.owner_user_id, r.owner_unlinked
 		FROM risk_import_rows r
@@ -355,7 +388,7 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 		WHERE r.id = $1::uuid AND r.batch_id = $2::uuid
 		FOR UPDATE OF r
 	`, rowID, batchID).Scan(&r.BatchID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description,
-		&r.Category, &reviewDue, &inherent, &residual, &r.Methodology, &status, &r.Treatment, &r.Justification,
+		&r.CategoryValue, &r.ThemeValues, &reviewDue, &inherent, &residual, &r.Methodology, &status, &r.Treatment, &r.Justification,
 		&proposedUntil, &r.Instrument, &r.ControlIDs, &r.OwnerUserID, &r.OwnerUnlinked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedRow{}, ErrRowNotFound

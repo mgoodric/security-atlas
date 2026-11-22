@@ -64,6 +64,7 @@ const (
 	FieldDescription = "description"
 	FieldCategory    = "category"
 	FieldReviewDue   = "review_due"
+	FieldThemes      = "themes"
 )
 
 // Rejection reasons recorded on a RejectedRow. The risk_import_rejected_rows
@@ -72,7 +73,6 @@ const (
 	RejectMissingField       = "missing_required_field"
 	RejectDuplicateExternal  = "duplicate_external_ref"
 	RejectInvalidExternalRef = "invalid_external_ref"
-	RejectUnknownCategory    = "unknown_category"
 	RejectInvalidReviewDue   = "invalid_review_due"
 )
 
@@ -83,12 +83,17 @@ const blankHeaderColumnTemplate = "column %d"
 // required; the rest are optional. Unmapped holds the value of every column
 // no field took, keyed by its header.
 type StagedRisk struct {
-	RowNumber   int        `json:"row_number"`
-	ExternalRef string     `json:"external_ref,omitempty"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Category    string     `json:"category"`
-	ReviewDue   *time.Time `json:"review_due,omitempty"`
+	RowNumber   int    `json:"row_number"`
+	ExternalRef string `json:"external_ref,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	// Category is the category cell as written, trimmed; the batch maps
+	// each distinct value once (#2844).
+	Category string `json:"category"`
+	// Themes are the theme cell's values, split on commas and semicolons
+	// and trimmed, once each ignoring case.
+	Themes    []string   `json:"themes,omitempty"`
+	ReviewDue *time.Time `json:"review_due,omitempty"`
 	// InherentScore and ResidualScore are in the batch methodology's shape,
 	// as the risk will hold them; nil is unscored (a nil residual takes the
 	// create path's default).
@@ -138,7 +143,7 @@ type ParseOptions struct {
 
 // fieldAliases are the header spellings each field is recognised by. The
 // risk export's own headers are among them (external_ref, title,
-// description, category, review_due_at), so an export re-imports with no
+// description, category, themes, review_due_at), so an export re-imports with no
 // column map. The export's "id" is the risk's uuid and is deliberately not
 // an alias of external_ref. Every other export column (computed severity,
 // timestamps, ids, and fields later slices map) lands in unmapped; no
@@ -153,6 +158,7 @@ var fieldAliases = map[string][]string{
 	FieldTitle:       {"title", "risk title", "name", "risk name", "risk"},
 	FieldDescription: {"description", "risk description", "details", "risk details"},
 	FieldCategory:    {"category", "risk category", "category name", "category_name"},
+	FieldThemes:      {"themes", "theme", "risk themes", "risk theme", "risk_themes"},
 	FieldReviewDue: {
 		"review_due", "review due", "review_due_at", "review due at", "review date",
 		"next review", "next review date", "next review due",
@@ -473,6 +479,8 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 			s.Description = val
 		case FieldCategory:
 			s.Category = val
+		case FieldThemes:
+			s.Themes = splitThemes(val)
 		case FieldReviewDue:
 			reviewDue = val
 		case FieldTreatment:

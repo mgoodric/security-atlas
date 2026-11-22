@@ -253,6 +253,11 @@ type CreateInput struct {
 	// is ErrLevelMismatch.
 	Level     dbx.RiskLevel
 	OrgUnitID *uuid.UUID
+	// Themes are the risk's themes, each one of the visible vocabulary
+	// (built-in or the organisation's own); an unknown one is
+	// ErrUnknownTheme. The risk register import (#2844) sets them; the
+	// API create leaves them empty and themes are assigned afterwards.
+	Themes []string
 	// Proposer is the creator's principal (credstore.PrincipalOf), recorded
 	// as the acceptance's proposer when the risk is created with a proposed
 	// acceptance, so the approval rule can refuse them as approver (#2371).
@@ -364,6 +369,17 @@ func (s *Store) insertPrepared(ctx context.Context, q *dbx.Queries, tenantID uui
 	in, proposal, externalRef := p.in, p.proposal, p.externalRef
 	var out Risk
 	err := func() error {
+		// Themes take the locks a theme assignment takes, in its order:
+		// the vocabulary (shared), then the rules' locks, then rows.
+		themes := normaliseThemes(in.Themes)
+		if len(themes) > 0 {
+			if err := validateThemesAgainstVocab(ctx, q, tenantID, themes); err != nil {
+				return err
+			}
+			if err := s.runBeforeRiskWrite(ctx, q, tenantID, themes); err != nil {
+				return err
+			}
+		}
 		if err := CheckOwnerUser(ctx, q, tenantID, in.OwnerUserID); err != nil {
 			return err
 		}
@@ -419,11 +435,29 @@ func (s *Store) insertPrepared(ctx context.Context, q *dbx.Queries, tenantID uui
 				return fmt.Errorf("link risk to control %s: %w", ctrlID, err)
 			}
 		}
+		if len(themes) > 0 {
+			if row, err = q.UpdateRiskThemes(ctx, dbx.UpdateRiskThemesParams{
+				TenantID: pgUUID(tenantID),
+				ID:       row.ID,
+				Column3:  themes,
+			}); err != nil {
+				return fmt.Errorf("set created risk themes: %w", err)
+			}
+		}
 		out = riskFromRow(row)
 		out.CategorySlug, out.CategoryName = category.Slug, category.Name
 		out.LinkedControlIDs = append([]uuid.UUID(nil), in.LinkedControlIDs...)
 		if err := RecordCreatedTx(ctx, q, tenantID, out.ID, in.Actor, createdStateOf(out)); err != nil {
 			return err
+		}
+		// The themes the risk was created with are on its trail as a
+		// themes_changed row from none, as an assignment would write.
+		if len(themes) > 0 {
+			if err := insertRiskAudit(ctx, q, tenantID, out.ID, in.Actor, ActionThemesChanged,
+				map[string]any{"themes": []string{}},
+				map[string]any{"themes": themesValue(out.Themes)}); err != nil {
+				return err
+			}
 		}
 		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
 	}()
