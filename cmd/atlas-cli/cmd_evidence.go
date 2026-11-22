@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 )
 
 type evidencePushFlags struct {
@@ -79,14 +80,14 @@ func newEvidencePushCmd() *cobra.Command {
 				return fmt.Errorf("marshal receipt: %w", err)
 			}
 			fmt.Println(string(b))
-			warnUnlinked(cmd.ErrOrStderr(), f.control, receipt)
+			warnUnlinked(cmd.ErrOrStderr(), f.kind, f.control, receipt)
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&f.kind, "kind", "", "evidence_kind (e.g., sast.scan_result.v1) [required]")
 	cmd.Flags().StringVar(&f.schemaVersion, "schema-version", "1.0.0", "evidence_kind schema version")
-	cmd.Flags().StringVar(&f.control, "control", "", "control UUID or bundle ID (links to the active control); any other value is a free-form, unlinked reference [required]")
+	cmd.Flags().StringVar(&f.control, "control", "", "control UUID or bundle ID (links to the active control); any other value is a free-form, unlinked reference [required unless --kind is routed by evidence type]")
 	cmd.Flags().StringVar(&f.scopeJSON, "scope", "", `JSON scope, e.g. '{"environment":"prod","cloud_account":"aws:111122223333"}' [required]`)
 	cmd.Flags().StringVar(&f.observedAt, "observed-at", "", "RFC3339 timestamp when the source observed reality [required]")
 	cmd.Flags().StringVar(&f.resultStr, "result", "", "pass | fail | na | inconclusive [required]")
@@ -104,7 +105,18 @@ func newEvidencePushCmd() *cobra.Command {
 // value as a bundle ID; when no active control has that bundle ID the record
 // keeps it only as a free-form reference, which is usually a mistyped bundle
 // ID. stdout keeps only the receipt JSON, so scripts parsing it are unaffected.
-func warnUnlinked(w io.Writer, control string, receipt *evidencev1.EvidenceReceipt) {
+//
+// A kind routed by evidence type (#2931) never links: the server keeps any
+// --control only as provenance and the record reaches every control whose
+// evidence queries declare the kind. An empty receipt link is expected there,
+// so a named control gets a note saying so instead of the warning.
+func warnUnlinked(w io.Writer, kind, control string, receipt *evidencev1.EvidenceReceipt) {
+	if routed.Kind(kind) {
+		if control != "" {
+			_, _ = fmt.Fprintf(w, "note: %s is routed by evidence type; --control %q is kept as provenance only, and the record reaches every control whose evidence queries declare the kind\n", kind, control)
+		}
+		return
+	}
 	if _, err := uuid.Parse(control); err == nil {
 		return
 	}
@@ -119,7 +131,7 @@ func validatePushFlags(f *evidencePushFlags) error {
 	if f.kind == "" {
 		missing = append(missing, "--kind")
 	}
-	if f.control == "" {
+	if f.control == "" && !routed.Kind(f.kind) {
 		missing = append(missing, "--control")
 	}
 	if f.scopeJSON == "" {

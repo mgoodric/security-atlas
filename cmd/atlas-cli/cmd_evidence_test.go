@@ -12,32 +12,62 @@ import (
 // linked push, or a UUID --control, stays quiet.
 func TestWarnUnlinked(t *testing.T) {
 	const ctrlUUID = "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+	const bound, routedKind = "sast.scan_result.v1", "github.repo_protection.v2"
 	cases := []struct {
-		name     string
-		control  string
-		linked   string
-		wantWarn bool
+		name    string
+		kind    string
+		control string
+		linked  string
+		want    string // "" for silence, else the prefix of the stderr line
 	}{
-		{"bundle id unlinked", "acme_mfa_reqd", "", true},
-		{"bundle id linked", "acme_mfa_required", ctrlUUID, false},
-		{"uuid control", ctrlUUID, ctrlUUID, false},
-		{"uuid control without linkage", ctrlUUID, "", false},
+		{"bundle id unlinked", bound, "acme_mfa_reqd", "", "warning:"},
+		{"bundle id linked", bound, "acme_mfa_required", ctrlUUID, ""},
+		{"uuid control", bound, ctrlUUID, ctrlUUID, ""},
+		{"uuid control without linkage", bound, ctrlUUID, "", ""},
+		// #2931: a routed kind never links, so an unlinked receipt is not a
+		// mistyped bundle ID. Naming a control gets a note that it is
+		// provenance only; omitting it stays quiet.
+		{"routed kind with bundle id", routedKind, "soc2_cc8_1_change_management", "", "note:"},
+		{"routed kind with uuid", routedKind, ctrlUUID, "", "note:"},
+		{"routed kind without control", routedKind, "", "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			warnUnlinked(&buf, tc.control, &evidencev1.EvidenceReceipt{LinkedControlId: tc.linked})
+			warnUnlinked(&buf, tc.kind, tc.control, &evidencev1.EvidenceReceipt{LinkedControlId: tc.linked})
 			got := buf.String()
-			if tc.wantWarn {
-				if !strings.Contains(got, "warning:") || !strings.Contains(got, tc.control) {
-					t.Fatalf("want a warning naming %q, got %q", tc.control, got)
+			if tc.want == "" {
+				if got != "" {
+					t.Fatalf("want no output, got %q", got)
 				}
 				return
 			}
-			if got != "" {
-				t.Fatalf("want no warning, got %q", got)
+			if !strings.HasPrefix(got, tc.want) || !strings.Contains(got, tc.control) {
+				t.Fatalf("want a %q line naming %q, got %q", tc.want, tc.control, got)
+			}
+			if tc.want == "note:" && strings.Contains(got, "warning") {
+				t.Fatalf("routed kind must not warn, got %q", got)
 			}
 		})
+	}
+}
+
+// #2931: --control is required for a bound kind and optional for a routed
+// one, which reaches its controls by evidence type.
+func TestValidatePushFlagsControlRequiredOnlyForBoundKinds(t *testing.T) {
+	base := func(kind string) evidencePushFlags {
+		return evidencePushFlags{
+			kind: kind, scopeJSON: "{}", observedAt: "2026-11-22T00:00:00Z",
+			resultStr: "pass", payloadRef: "{}", idempotencyKey: "k", actorID: "a",
+		}
+	}
+	f := base("sast.scan_result.v1")
+	if err := validatePushFlags(&f); err == nil || !strings.Contains(err.Error(), "--control") {
+		t.Fatalf("bound kind without --control: err = %v, want one naming --control", err)
+	}
+	f = base("github.repo_protection.v2")
+	if err := validatePushFlags(&f); err != nil {
+		t.Fatalf("routed kind without --control: err = %v, want nil", err)
 	}
 }
 

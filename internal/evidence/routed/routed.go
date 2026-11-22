@@ -24,6 +24,11 @@
 //	AND evidence_kind = ANY(unbound_kinds)
 //	AND <the control's evidence_queries> @> [{"evidence_kind": evidence_kind}]
 //
+// Readers that also match control_ref against the control's UUID bind Kinds()
+// as routed_kinds and skip that leg for a routed kind (#2931): a routed record
+// pushed with an explicit control UUID keeps it in control_ref as provenance
+// only, so it reaches a control through the rule above or not at all.
+//
 // The list is closed: TestStockBundleKindsAreCategorized fails when a stock
 // bundle reads a kind that is in no category.
 package routed

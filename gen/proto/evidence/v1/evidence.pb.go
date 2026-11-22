@@ -197,8 +197,12 @@ type EvidenceRecord struct {
 	// semver and matches against published versions (full JSON-Schema check
 	// is slice 014).
 	SchemaVersion string `protobuf:"bytes,3,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
-	// Control or SCF anchor this evidence applies to. Free-form for slice 003;
-	// referential integrity to the controls table lands in slice 013.
+	// The control this evidence applies to: a control UUID, the bundle ID of
+	// the tenant's active control (#2100), or a free-form reference such as an
+	// SCF anchor, which links to no control. Required, except for a kind routed
+	// by evidence type (#2924, internal/evidence/routed): such a record is never
+	// bound to a control, any value here is kept only as provenance, and it
+	// reaches every control whose evidence queries declare its kind.
 	ControlId string `protobuf:"bytes,4,opt,name=control_id,json=controlId,proto3" json:"control_id,omitempty"`
 	// Scope dimensions for this evidence. At least one entry required. Each
 	// dimension is a key + ordered list of values (multi-valued dimensions
@@ -476,7 +480,9 @@ type EvidenceReceipt struct {
 	// EvidenceRecord.control_id as a control UUID, then as the bundle ID of
 	// the tenant's active control (#2100). Empty when neither matched and the
 	// record keeps control_id only as a free-form, unlinked reference, so a
-	// pusher can tell a mistyped bundle ID from a linked push (#2165).
+	// pusher can tell a mistyped bundle ID from a linked push (#2165). Always
+	// empty for a kind routed by evidence type (#2924), which links to no one
+	// control by design; that is not a mistyped bundle ID.
 	LinkedControlId string `protobuf:"bytes,5,opt,name=linked_control_id,json=linkedControlId,proto3" json:"linked_control_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache

@@ -125,6 +125,7 @@ func (s *Store) Rollup(ctx context.Context, controlID uuid.UUID) (Rollup, error)
 
 		recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),

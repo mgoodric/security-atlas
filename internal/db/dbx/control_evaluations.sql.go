@@ -154,14 +154,15 @@ SELECT id, tenant_id, control_id, control_ref, scope_id,
        evidence_kind, ingested_at
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3
+  AND (control_id = $2
+       OR (control_ref = $3 AND evidence_kind <> ALL($4::text[]))
        OR (control_id IS NULL
-           AND evidence_kind = ANY($4::text[])
+           AND evidence_kind = ANY($5::text[])
            AND EXISTS (SELECT 1 FROM controls uc
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
-  AND observed_at <= $5
+  AND observed_at <= $6
 ORDER BY observed_at DESC, ingested_at DESC, id DESC
 `
 
@@ -169,6 +170,7 @@ type ListEvidenceForControlAsOfParams struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	ControlID    pgtype.UUID        `json:"control_id"`
 	ControlRef   string             `json:"control_ref"`
+	RoutedKinds  []string           `json:"routed_kinds"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 }
@@ -206,6 +208,7 @@ func (q *Queries) ListEvidenceForControlAsOf(ctx context.Context, arg ListEviden
 		arg.TenantID,
 		arg.ControlID,
 		arg.ControlRef,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 		arg.ObservedAt,
 	)
