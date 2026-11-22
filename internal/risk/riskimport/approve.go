@@ -118,6 +118,8 @@ type lockedRow struct {
 	Level         dbx.RiskLevel
 	OrgUnitID     *uuid.UUID
 	ParentRef     string
+	// UploaderUserID is the batch's uploading person, '' when none (#2881).
+	UploaderUserID string
 }
 
 // ApprovePending approves every pending row of the batch. A row that fails
@@ -129,7 +131,7 @@ func (s *Store) ApprovePending(ctx context.Context, in ApproveInput) (ApproveRes
 	if strings.TrimSpace(in.Approver) == "" {
 		return ApproveResult{}, ErrApproverRequired
 	}
-	pending, err := s.pendingRows(ctx, in.BatchID)
+	pending, err := s.pendingRows(ctx, in.BatchID, in.Approver)
 	if err != nil {
 		return ApproveResult{}, err
 	}
@@ -209,18 +211,25 @@ func IsRowRefusal(err error) bool {
 	return skip && !errors.Is(err, ErrRowDecided)
 }
 
-func (s *Store) pendingRows(ctx context.Context, batchID string) ([]pendingRow, error) {
+func (s *Store) pendingRows(ctx context.Context, batchID, approver string) ([]pendingRow, error) {
 	if _, err := uuid.Parse(batchID); err != nil {
 		return nil, ErrBatchNotFound
 	}
 	var out []pendingRow
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ uuid.UUID) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM risk_import_batches WHERE id = $1::uuid)`, batchID).Scan(&exists); err != nil {
+		var uploader string
+		err := tx.QueryRow(ctx, `SELECT COALESCE(uploader_user_id::text, '') FROM risk_import_batches WHERE id = $1::uuid`, batchID).Scan(&uploader)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrBatchNotFound
+		}
+		if err != nil {
 			return fmt.Errorf("riskimport: read batch: %w", err)
 		}
-		if !exists {
-			return ErrBatchNotFound
+		// Refused before any row, so the uploader approves nothing even
+		// in a batch with no pending rows. Each row's own transaction
+		// checks again (lockPendingRow).
+		if err := notUploader(uploader, approver); err != nil {
+			return err
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT id::text, row_number, COALESCE(external_ref, '')
@@ -255,6 +264,9 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 		row, err := lockPendingRow(ctx, tx, in.BatchID, rowID)
 		if err != nil {
+			return err
+		}
+		if err := notUploader(row.UploaderUserID, in.Approver); err != nil {
 			return err
 		}
 		out = RowDecision{BatchID: row.BatchID, RowID: rowID, RowNumber: row.RowNumber, ExternalRef: row.ExternalRef, DecidedBy: in.Approver}
@@ -397,6 +409,9 @@ func (s *Store) RejectRow(ctx context.Context, in RejectRowInput) (RowDecision, 
 		if err != nil {
 			return err
 		}
+		if err := notUploader(row.UploaderUserID, in.Approver); err != nil {
+			return err
+		}
 		out = RowDecision{
 			BatchID: row.BatchID, RowID: in.RowID, RowNumber: row.RowNumber, ExternalRef: row.ExternalRef,
 			Status: RowStatusRejected, DecidedBy: in.Approver, RejectionReason: reason,
@@ -414,6 +429,15 @@ func (s *Store) RejectRow(ctx context.Context, in RejectRowInput) (RowDecision, 
 		return RowDecision{}, err
 	}
 	return out, nil
+}
+
+// notUploader refuses a decision by the batch's uploader (#2881). uploader
+// is ” when no person uploaded the batch, and then anyone may decide.
+func notUploader(uploader, approver string) error {
+	if uploader != "" && strings.EqualFold(uploader, strings.TrimSpace(approver)) {
+		return ErrSelfDecision
+	}
+	return nil
 }
 
 // lockPendingRow reads and locks the row. A concurrent decision of the same
@@ -435,7 +459,8 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 		       r.category_value, r.theme_values, r.review_due, r.inherent_score::text, r.residual_score::text,
 		       b.methodology, r.status, r.treatment, r.acceptance_justification, r.proposed_until,
 		       r.instrument_reference, r.linked_control_ids, r.owner_user_id, r.owner_unlinked,
-		       COALESCE(r.level::text, ''), r.org_unit_id, r.parent_ref
+		       COALESCE(r.level::text, ''), r.org_unit_id, r.parent_ref,
+		       COALESCE(b.uploader_user_id::text, '')
 		FROM risk_import_rows r
 		JOIN risk_import_batches b ON b.tenant_id = r.tenant_id AND b.id = r.batch_id
 		WHERE r.id = $1::uuid AND r.batch_id = $2::uuid
@@ -443,7 +468,7 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 	`, rowID, batchID).Scan(&r.BatchID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description,
 		&r.CategoryValue, &r.ThemeValues, &reviewDue, &inherent, &residual, &r.Methodology, &status, &r.Treatment, &r.Justification,
 		&proposedUntil, &r.Instrument, &r.ControlIDs, &r.OwnerUserID, &r.OwnerUnlinked,
-		&r.Level, &r.OrgUnitID, &r.ParentRef)
+		&r.Level, &r.OrgUnitID, &r.ParentRef, &r.UploaderUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedRow{}, ErrRowNotFound
 	}

@@ -31,8 +31,11 @@
 //	             alias (#2848)
 //
 // Upload is a write on risks at the authz layer, which admin and
-// grc_engineer hold. Approve and reject also require a tenant approver who
-// is a person: a machine credential is refused whatever its role. Mapping a
+// grc_engineer hold. Approve and reject also require a person who is a
+// tenant admin or holds the approver flag (authz.IsRiskImportDecider): a
+// grc_engineer stages an import and hands it to an approver (#2881, spec
+// #2812), and a machine credential is refused whatever its role. The
+// person who uploaded a batch never decides its rows (#2881). Mapping a
 // value is a write on risks, like upload; creating a category or theme for
 // it also requires a tenant approver, as POST /v1/risks/categories and
 // POST /v1/themes do, and is audited by the same calls. Tenant scoping is
@@ -156,12 +159,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	batch, err := h.store.Stage(r.Context(), riskimport.StageInput{
-		Filename:    up.filename,
-		Raw:         up.raw,
-		ColumnMap:   up.columnMap,
-		Ignore:      up.ignore,
-		Methodology: up.methodology,
-		UploadedBy:  credstore.PrincipalOf(cred),
+		Filename:       up.filename,
+		Raw:            up.raw,
+		ColumnMap:      up.columnMap,
+		Ignore:         up.ignore,
+		Methodology:    up.methodology,
+		UploadedBy:     credstore.PrincipalOf(cred),
+		UploaderUserID: uploaderUserID(cred),
 	})
 	if err != nil {
 		writeStageError(w, r, err)
@@ -190,7 +194,38 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, p)
 }
 
-// Get returns one import batch with its staged and rejected rows.
+// batchView is a batch as one caller reads it: CanDecide says whether that
+// caller may approve or reject its rows, so the page hides controls the
+// decide routes would refuse (#2881). The routes stay the authority.
+type batchView struct {
+	riskimport.Batch
+	CanDecide bool `json:"can_decide"`
+}
+
+// canDecide reports whether cred may decide the rows of b: the decide
+// routes' gate (decidingPerson) and not the batch's uploader.
+func canDecide(cred credstore.Credential, b riskimport.Batch) bool {
+	if !authz.IsRiskImportDecider(cred) {
+		return false
+	}
+	user, ok := credstore.CallerUserID(cred)
+	if !ok {
+		return false
+	}
+	return b.UploaderUserID == "" || !strings.EqualFold(b.UploaderUserID, user.String())
+}
+
+// uploaderUserID is the users(id) of the uploading person, or "" when the
+// caller is not a person.
+func uploaderUserID(cred credstore.Credential) string {
+	if u, ok := credstore.CallerUserID(cred); ok {
+		return u.String()
+	}
+	return ""
+}
+
+// Get returns one import batch with its staged and rejected rows, and
+// whether the caller may decide them.
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
@@ -206,7 +241,8 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "riskimports", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, batch)
+	cred, _ := authctx.CredentialFromContext(ctx)
+	httpresp.WriteJSON(w, http.StatusOK, batchView{Batch: batch, CanDecide: canDecide(cred, batch)})
 }
 
 // Approve approves every pending row of the batch. It takes no body. The
@@ -380,8 +416,12 @@ func writeValueError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // decidingPerson resolves the caller to the users(id) who decides. Only a
-// tenant approver who is a person decides: a machine token, an unbound API
-// key or the bootstrap credential is refused, whatever its role.
+// person who is a tenant admin or holds the approver flag decides
+// (authz.IsRiskImportDecider): a grc_engineer is refused, by Matt's
+// decision on #2881, and so are a machine token, an unbound API key and the
+// bootstrap credential, whatever their role. It is the one gate of
+// approve-all, per-row approve and reject. The store refuses the batch's
+// uploader (riskimport.ErrSelfDecision), inside the decision's transaction.
 func decidingPerson(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
@@ -392,8 +432,9 @@ func decidingPerson(w http.ResponseWriter, r *http.Request) (string, bool) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return "", false
 	}
-	if !authz.IsTenantApprover(cred) {
-		httpresp.WriteError(w, http.StatusForbidden, "approver role required to decide an import row")
+	if !authz.IsRiskImportDecider(cred) {
+		httpresp.WriteError(w, http.StatusForbidden,
+			"an admin or approver must decide an import row; a GRC engineer stages an import and hands it to an approver")
 		return "", false
 	}
 	user, ok := credstore.CallerUserID(cred)
@@ -439,7 +480,7 @@ func writeDecisionError(w http.ResponseWriter, r *http.Request, err error) {
 		httpresp.WriteError(w, http.StatusNotFound, "staged row not found in this import batch")
 	case errors.Is(err, riskimport.ErrRowDecided):
 		httpresp.WriteError(w, http.StatusConflict, msg)
-	case errors.Is(err, riskimport.ErrApproverRequired):
+	case errors.Is(err, riskimport.ErrApproverRequired), errors.Is(err, riskimport.ErrSelfDecision):
 		httpresp.WriteError(w, http.StatusForbidden, msg)
 	case errors.Is(err, riskimport.ErrReasonRequired), errors.Is(err, riskimport.ErrInvalidDecision):
 		httpresp.WriteError(w, http.StatusBadRequest, msg)

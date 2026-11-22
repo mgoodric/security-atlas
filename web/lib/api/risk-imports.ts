@@ -127,6 +127,12 @@ export type RiskImportBatch = {
   source_filename: string;
   source_format: string;
   uploaded_by: string;
+  // #2881: the users(id) of the uploading person, absent for a machine
+  // upload. That person never decides the batch's rows.
+  uploader_user_id?: string;
+  // #2881: whether the caller may approve or reject the batch's rows: an
+  // admin or approver (never a GRC engineer) who did not upload it.
+  can_decide?: boolean;
   status: string;
   total_rows: number;
   staged_count: number;
@@ -285,14 +291,17 @@ export function mappedFields(row: BatchRow): [string, string][] {
 
 export type ReviewMode = "decide" | "read-only";
 
-/** reviewMode is what the page lets the caller do. Only an approver
- *  decides (`/v1/me` is_approver); everyone else reads. The platform's
+/** reviewMode is what the page lets the caller do. Only a caller the
+ *  batch read marks `can_decide` decides: an admin or approver who did not
+ *  upload the batch. A GRC engineer and the uploader read (#2881), as does
+ *  everyone while the batch is unknown. `/v1/me` is_approver is not used: it
+ *  admits a GRC engineer, and knows nothing of the uploader. The platform's
  *  gate is the authority either way: the mode only hides buttons it would
  *  refuse. */
 export function reviewMode(
-  me: { is_approver: boolean } | undefined,
+  batch: Pick<RiskImportBatch, "can_decide"> | undefined,
 ): ReviewMode {
-  return me?.is_approver ? "decide" : "read-only";
+  return batch?.can_decide ? "decide" : "read-only";
 }
 
 /** emptyRowsMessage explains an empty row list: no staged rows at all, or
