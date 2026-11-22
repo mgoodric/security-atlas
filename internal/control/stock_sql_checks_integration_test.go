@@ -15,6 +15,7 @@ package control_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -336,8 +337,10 @@ func TestCC41_EngineEvaluatesHostCheckIn(t *testing.T) {
 	}
 }
 
-// #2823: both cc8_1 checks decide on each repo's latest protection payload,
-// not on the GitHub connector's verdict (required_reviews >= 1).
+// #2823, #2925: both cc8_1 checks decide on each repo's latest
+// github.repo_protection.v2 payload, keyed by repo_id, not on the GitHub
+// connector's verdict (required_reviews >= 1). An unread protection field
+// is omitted and leaves the check inconclusive.
 func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -346,22 +349,31 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 
 	type rec struct {
 		connectorResult string
-		repo            string
-		reviews         int
-		admins          bool
+		repoID          int64
+		reviews         int // -1: not read
+		admins          string
 	}
 	payload := func(r rec) map[string]any {
-		return map[string]any{
-			"repo_full_name":             r.repo,
-			"default_branch":             "main",
-			"required_reviews":           r.reviews,
-			"require_code_owner_reviews": false,
-			"require_signed_commits":     false,
-			"require_linear_history":     false,
-			"enforce_admins":             r.admins,
+		p := map[string]any{
+			"repo_id":        r.repoID,
+			"repo_full_name": fmt.Sprintf("acme/repo-%d", r.repoID),
+			"default_branch": "main",
 		}
+		if r.reviews < 0 {
+			p["reason"] = "branch protection: github: HTTP 502"
+			return p
+		}
+		p["required_reviews"] = r.reviews
+		p["require_code_owner_reviews"] = false
+		p["require_signed_commits"] = false
+		p["require_linear_history"] = false
+		p["protection_source"] = "classic"
+		if r.admins != "" {
+			p["enforce_admins"] = r.admins == "on"
+		}
+		return p
 	}
-	const r1, r2 = "acme/api", "acme/infra"
+	const r1, r2 = 1296269, 1296270
 	// connectorResult is the GitHub verdict (required_reviews >= 1). The
 	// queries must ignore it.
 	cases := []struct {
@@ -370,14 +382,16 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 		records []rec
 		want    string
 	}{
-		{"soc2_cc8_1_change_management", "reviewed and admin-enforced", []rec{{"pass", r1, 1, true}, {"fail", r2, 2, true}}, eval.ResultPass},
-		{"soc2_cc8_1_change_management", "admins not enforced", []rec{{"pass", r1, 1, true}, {"pass", r2, 1, false}}, eval.ResultFail},
-		{"soc2_cc8_1_change_management", "no approving review", []rec{{"pass", r1, 0, true}}, eval.ResultFail},
-		{"soc2_cc8_1_change_management", "unread repo counts as off", []rec{{"inconclusive", r1, 0, false}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "reviewed and admin-enforced", []rec{{"pass", r1, 1, "on"}, {"fail", r2, 2, "on"}}, eval.ResultPass},
+		{"soc2_cc8_1_change_management", "admins not enforced", []rec{{"pass", r1, 1, "on"}, {"pass", r2, 1, "off"}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "no approving review", []rec{{"pass", r1, 0, "on"}}, eval.ResultFail},
+		{"soc2_cc8_1_change_management", "admin enforcement unread", []rec{{"pass", r1, 1, ""}}, eval.ResultInconclusive},
+		{"soc2_cc8_1_change_management", "unread repo", []rec{{"pass", r1, 1, "on"}, {"inconclusive", r2, -1, ""}}, eval.ResultInconclusive},
 		{"soc2_cc8_1_change_management", "no record", nil, eval.ResultInconclusive},
-		{"soc2_cc8_1_configuration_change_control", "reviewed, admins not enforced", []rec{{"fail", r1, 1, false}, {"pass", r2, 2, true}}, eval.ResultPass},
-		{"soc2_cc8_1_configuration_change_control", "no approving review", []rec{{"pass", r1, 1, true}, {"pass", r2, 0, true}}, eval.ResultFail},
-		{"soc2_cc8_1_configuration_change_control", "unread repo counts as off", []rec{{"inconclusive", r1, 0, false}}, eval.ResultFail},
+		{"soc2_cc8_1_configuration_change_control", "reviewed, admins not enforced", []rec{{"fail", r1, 1, "off"}, {"pass", r2, 2, "on"}}, eval.ResultPass},
+		{"soc2_cc8_1_configuration_change_control", "no approving review", []rec{{"pass", r1, 1, "on"}, {"pass", r2, 0, "on"}}, eval.ResultFail},
+		{"soc2_cc8_1_configuration_change_control", "unread repo", []rec{{"inconclusive", r1, -1, ""}}, eval.ResultInconclusive},
+		{"soc2_cc8_1_configuration_change_control", "observed failure outranks unread", []rec{{"inconclusive", r1, -1, ""}, {"fail", r2, 0, "off"}}, eval.ResultFail},
 		{"soc2_cc8_1_configuration_change_control", "no record", nil, eval.ResultInconclusive},
 	}
 	for _, tc := range cases {
@@ -389,7 +403,7 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 			}
 			ctrl := seedStockBundleControl(t, admin, tenant, tc.bundle)
 			for _, r := range tc.records {
-				seedStockEvidence(t, admin, tenant, ctrl, "github.repo_protection.v1", observed, r.connectorResult, payload(r))
+				seedStockEvidence(t, admin, tenant, ctrl, "github.repo_protection.v2", observed, r.connectorResult, payload(r))
 			}
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)

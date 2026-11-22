@@ -266,8 +266,8 @@ func TestDoRun_RepoPushSuccess(t *testing.T) {
 		repoInspect: func(_ context.Context, _ githubrepo.API, _ string, _ func() time.Time) ([]githubrepo.ProtectionState, error) {
 			now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
 			return []githubrepo.ProtectionState{
-				{RepoFullName: "example/web", DefaultBranch: "main", Result: githubrepo.ResultPass, RequiredReviews: 2, ObservedAt: now},
-				{RepoFullName: "example/api", DefaultBranch: "main", Result: githubrepo.ResultFail, ObservedAt: now},
+				{RepoID: 1, RepoFullName: "example/web", DefaultBranch: "main", Result: githubrepo.ResultPass, RequiredReviews: intp(2), ObservedAt: now},
+				{RepoID: 2, RepoFullName: "example/api", DefaultBranch: "main", Result: githubrepo.ResultFail, ObservedAt: now},
 			}, nil
 		},
 	})
@@ -304,8 +304,8 @@ func TestDoRun_RepoPushError(t *testing.T) {
 		repoInspect: func(_ context.Context, _ githubrepo.API, _ string, _ func() time.Time) ([]githubrepo.ProtectionState, error) {
 			now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
 			return []githubrepo.ProtectionState{
-				{RepoFullName: "example/web", DefaultBranch: "main", Result: githubrepo.ResultPass, ObservedAt: now},
-				{RepoFullName: "example/api", DefaultBranch: "main", Result: githubrepo.ResultPass, ObservedAt: now},
+				{RepoID: 1, RepoFullName: "example/web", DefaultBranch: "main", Result: githubrepo.ResultPass, ObservedAt: now},
+				{RepoID: 2, RepoFullName: "example/api", DefaultBranch: "main", Result: githubrepo.ResultPass, ObservedAt: now},
 			}, nil
 		},
 	})

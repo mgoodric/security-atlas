@@ -1225,7 +1225,7 @@ var ownerRoles = []string{
 // Documented in docs/audit-log/205-demo-seed-data-decisions.md D3.
 var evidenceKindsPool = []string{
 	"osquery.host_posture.v1",
-	"github.repo_protection.v1",
+	"github.repo_protection.v2",
 	"github.audit_event.v1",
 	"github.scim_user.v1",
 	"okta.app_assignment.v1",
@@ -1260,7 +1260,7 @@ func kindToConnector(kind string) string {
 // not through ingest (see writeEvidence), so that test is the only check.
 var evidenceSchemaVersions = map[string]string{
 	"osquery.host_posture.v1":           "1.0.0",
-	"github.repo_protection.v1":         "1.0.0",
+	"github.repo_protection.v2":         "2.0.0",
 	"github.audit_event.v1":             "1.0.0",
 	"github.scim_user.v1":               "1.0.0",
 	"okta.app_assignment.v1":            "1.0.0",
@@ -1291,8 +1291,10 @@ func buildEvidencePayload(kind string, idx int, result string) map[string]any {
 			"firewall_enabled":        true,
 			"mdm_enrolled":            true,
 		}
-	case "github.repo_protection.v1":
+	case "github.repo_protection.v2":
 		return map[string]any{
+			"repo_id":                    100000 + idx,
+			"protection_source":          "classic",
 			"repo_full_name":             "demo-org/" + asset,
 			"default_branch":             "main",
 			"required_reviews":           2,
