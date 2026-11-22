@@ -99,6 +99,7 @@ type syncResp struct {
 		DriftDetectedAt *time.Time `json:"drift_detected_at"`
 		MissingSince    *time.Time `json:"missing_since"`
 	} `json:"results"`
+	Warnings []string `json:"warnings"`
 }
 
 func postSync(t *testing.T, s setupResult, key string, want int, pages ...map[string]any) syncResp {
