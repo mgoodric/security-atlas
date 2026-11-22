@@ -46,6 +46,17 @@ atlas-jira run \
   --jql 'project = CR AND status changed AFTER -90d' \
   --environment prod
 
+# Vulnerability tickets whose severity is a select custom field.
+JIRA_EMAIL=ops@example.com JIRA_API_TOKEN=... \
+atlas-jira run \
+  --endpoint platform.example.com:443 \
+  --token "$SECURITY_ATLAS_TOKEN" \
+  --platform jira \
+  --jira-base-url https://acme.atlassian.net \
+  --jql 'labels = vulnerability' \
+  --severity-field customfield_10042 \
+  --environment prod
+
 # Pull Linear issues and push jira.ticket_evidence.v1 records.
 LINEAR_API_KEY=... \
 atlas-jira run \
@@ -82,19 +93,36 @@ The `source_attribution.actor_id` follows the convention `connector:<platform>:t
 
 ## Payload shape
 
-The connector emits exactly the fields the bundled `jira.ticket_evidence/1.0.0.json` schema declares — `additionalProperties: false`, so any extra field is a schema error:
+The connector pushes schema `1.1.0` (`jira.ticket_evidence/1.1.0.json`, #2829) and emits exactly the fields it declares — `additionalProperties: false`, so any extra field is a schema error:
 
-| Field         | Source (Jira)                       | Source (Linear)                            |
-| ------------- | ----------------------------------- | ------------------------------------------ |
-| `ticket_key`  | `issue.key`                         | `issue.identifier`                         |
-| `project_key` | `issue.fields.project.key`          | `issue.team.key`                           |
-| `summary`     | `issue.fields.summary`              | `issue.title`                              |
-| `status`      | `issue.fields.status.name`          | `issue.state.name`                         |
-| `resolution`  | `issue.fields.resolution.name`      | (Linear has no separate resolution; empty) |
-| `assignee`    | `issue.fields.assignee.displayName` | `issue.assignee.name`                      |
-| `url`         | `<base>/browse/<key>`               | `issue.url`                                |
+| Field                 | Source (Jira)                                                       | Source (Linear)                            |
+| --------------------- | ------------------------------------------------------------------- | ------------------------------------------ |
+| `ticket_key`          | `issue.key`                                                         | `issue.identifier`                         |
+| `project_key`         | `issue.fields.project.key`                                          | `issue.team.key`                           |
+| `summary`             | `issue.fields.summary`                                              | `issue.title`                              |
+| `status`              | `issue.fields.status.name`                                          | `issue.state.name`                         |
+| `resolution`          | `issue.fields.resolution.name`                                      | (Linear has no separate resolution; empty) |
+| `assignee`            | `issue.fields.assignee.displayName`                                 | `issue.assignee.name`                      |
+| `url`                 | `<base>/browse/<key>`                                               | `issue.url`                                |
+| `assignee_account_id` | `issue.fields.assignee.accountId`                                   | (not emitted)                              |
+| `labels`              | `issue.fields.labels`                                               | (not emitted)                              |
+| `priority`            | `issue.fields.priority.name`                                        | (not emitted)                              |
+| `severity`            | the `--severity-field` (default `priority`), normalised (see below) | (not emitted)                              |
+| `created_at`          | `issue.fields.created`, as RFC 3339 UTC                             | (not emitted)                              |
+| `resolved_at`         | `issue.fields.resolutiondate`, as RFC 3339 UTC                      | (not emitted)                              |
 
-Fields with empty source values are dropped from the payload to keep the wire form minimal.
+Fields with empty source values are dropped from the payload to keep the wire form minimal. Jira returns timestamps as `2022-10-06T07:32:47.000+0000`; the connector converts them to RFC 3339 in UTC, and drops one it cannot parse.
+
+`severity` is one of `critical`, `high`, `medium` or `low`. The connector reads the field `--severity-field` names: `priority` (the default), or a select-list custom field such as `customfield_10042`, whose option value it reads. It maps `critical`, `high`, `medium` and `low` case-insensitively, and Jira's default priorities `Highest` and `Lowest` to `critical` and `low`. Any other value (`Major`, `P1`) leaves `severity` out; `priority` still carries the raw name.
+
+### Labels the stock controls read
+
+| Label               | Control                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `vulnerability`     | `soc2_cc7_1_vulnerability_remediation`: SLA by severity, 168 / 720 / 2,160 hours for critical / high / medium           |
+| `security-training` | `soc2_cc1_4_competence_training`: each assignee has a ticket resolved `Done` within 365 days, or one open under 30 days |
+
+The JQL decides which tickets reach the platform; the label decides which control's check counts a ticket. A ticket without the label is skipped by that check.
 
 ## Anti-criteria (P0)
 

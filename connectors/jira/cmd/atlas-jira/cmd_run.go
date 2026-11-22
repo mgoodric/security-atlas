@@ -30,6 +30,8 @@ type runFlags struct {
 	jiraEmail   string
 	jiraToken   string
 	jql         string
+	// severityField is the Jira field id severity is read from (#2829).
+	severityField string
 
 	// Linear
 	linearBaseURL string
@@ -85,6 +87,7 @@ Idempotency:
 	cmd.Flags().StringVar(&f.jiraEmail, "jira-email", "", "Jira account email (env: JIRA_EMAIL preferred)")
 	cmd.Flags().StringVar(&f.jiraToken, "jira-token", "", "Jira API token (env: JIRA_API_TOKEN preferred so the token never appears in shell history)")
 	cmd.Flags().StringVar(&f.jql, "jql", "", `JQL query, e.g. 'project = CR AND status changed AFTER -90d'`)
+	cmd.Flags().StringVar(&f.severityField, "severity-field", jiratickets.PriorityField, `Jira field id the ticket's severity is read from: "priority" or a select custom field such as "customfield_10042"; critical, high, medium and low (and priority Highest and Lowest) are recognised, case-insensitively`)
 
 	// Linear flags
 	cmd.Flags().StringVar(&f.linearBaseURL, "linear-base-url", "https://api.linear.app", "Linear API base URL")
@@ -121,7 +124,7 @@ func runJira(ctx context.Context, f runFlags, httpClient *http.Client, sdkClient
 		return fmt.Errorf("auth: %w", err)
 	}
 	api := jiratickets.NewClient(httpClient, f.jiraBaseURL, creds)
-	tickets, err := jiratickets.List(ctx, api, jiratickets.ListOpts{JQL: f.jql})
+	tickets, err := jiratickets.List(ctx, api, jiratickets.ListOpts{JQL: f.jql, SeverityField: f.severityField})
 	if err != nil {
 		return fmt.Errorf("jira list: %w", err)
 	}
@@ -174,20 +177,28 @@ func runLinear(ctx context.Context, f runFlags, httpClient *http.Client, sdkClie
 }
 
 // buildJiraTicketRecord turns a Jira Ticket into a wire EvidenceRecord.
-// The payload conforms to jira.ticket_evidence.v1 (additionalProperties:
-// false): {ticket_key, project_key, summary, status, resolution,
-// assignee, url}. Empty optional fields are dropped to keep the
-// payload minimal and the JSON Schema happy.
+// The payload conforms to jira.ticket_evidence.v1 schema 1.1.0
+// (additionalProperties: false): {ticket_key, project_key, summary,
+// status, resolution, assignee, url} plus, from #2829,
+// {assignee_account_id, labels, priority, severity, created_at,
+// resolved_at}. Empty optional fields are dropped to keep the payload
+// minimal and the JSON Schema happy.
 func buildJiraTicketRecord(t jiratickets.Ticket, env, controlID string) (*evidencev1.EvidenceRecord, error) {
 	return buildTicketRecord(ticketView{
-		TicketKey:  t.TicketKey,
-		ProjectKey: t.ProjectKey,
-		Summary:    t.Summary,
-		Status:     t.Status,
-		Resolution: t.Resolution,
-		Assignee:   t.Assignee,
-		URL:        t.URL,
-		ObservedAt: t.ObservedAt,
+		TicketKey:         t.TicketKey,
+		ProjectKey:        t.ProjectKey,
+		Summary:           t.Summary,
+		Status:            t.Status,
+		Resolution:        t.Resolution,
+		Assignee:          t.Assignee,
+		URL:               t.URL,
+		ObservedAt:        t.ObservedAt,
+		AssigneeAccountID: t.AssigneeAccountID,
+		Labels:            t.Labels,
+		Priority:          t.Priority,
+		Severity:          t.Severity,
+		CreatedAt:         t.CreatedAt,
+		ResolvedAt:        t.ResolvedAt,
 	}, "jira", env, controlID)
 }
 
@@ -216,6 +227,14 @@ type ticketView struct {
 	Assignee   string
 	URL        string
 	ObservedAt time.Time
+
+	// #2829: schema 1.1.0 fields. Linear does not fill them.
+	AssigneeAccountID string
+	Labels            []string
+	Priority          string
+	Severity          string
+	CreatedAt         *time.Time
+	ResolvedAt        *time.Time
 }
 
 func buildTicketRecord(t ticketView, platform, env, controlID string) (*evidencev1.EvidenceRecord, error) {
@@ -239,6 +258,28 @@ func buildTicketRecord(t ticketView, platform, env, controlID string) (*evidence
 	if t.URL != "" {
 		pm["url"] = t.URL
 	}
+	if t.AssigneeAccountID != "" {
+		pm["assignee_account_id"] = t.AssigneeAccountID
+	}
+	if len(t.Labels) > 0 {
+		labels := make([]any, len(t.Labels))
+		for i, l := range t.Labels {
+			labels[i] = l
+		}
+		pm["labels"] = labels
+	}
+	if t.Priority != "" {
+		pm["priority"] = t.Priority
+	}
+	if t.Severity != "" {
+		pm["severity"] = t.Severity
+	}
+	if t.CreatedAt != nil {
+		pm["created_at"] = t.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if t.ResolvedAt != nil {
+		pm["resolved_at"] = t.ResolvedAt.UTC().Format(time.RFC3339Nano)
+	}
 	payload, err := structpb.NewStruct(pm)
 	if err != nil {
 		return nil, err
@@ -253,7 +294,7 @@ func buildTicketRecord(t ticketView, platform, env, controlID string) (*evidence
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idemKey,
 		EvidenceKind:   "jira.ticket_evidence.v1",
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  "1.1.0",
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "platform", Values: []string{platform}},
