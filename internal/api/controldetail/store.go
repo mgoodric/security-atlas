@@ -78,13 +78,14 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 // cursor. It returns up to limit rows. Resolution reuses slice 012's
 // control->evidence path: (control_id = $ OR control_ref = $) with the
 // control ref being the UUID's string form. p.idOnly drops the control_ref
-// leg (#2470).
+// leg (#2470), and a routed kind never takes it (#2931).
 func (s *Store) EvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error) {
 	var rows []dbx.ListEvidenceForControlPagedRow
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		var qerr error
 		rows, qerr = q.ListEvidenceForControlPaged(ctx, dbx.ListEvidenceForControlPagedParams{
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -111,6 +112,7 @@ func (s *Store) CountEvidenceForControl(ctx context.Context, controlID uuid.UUID
 		var qerr error
 		total, qerr = q.CountEvidenceForControlWindow(ctx, dbx.CountEvidenceForControlWindowParams{
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),

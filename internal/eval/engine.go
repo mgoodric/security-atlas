@@ -122,7 +122,8 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 		// UUID string by default; evidence pushed under that string is found
 		// by ListEvidenceForControlAsOf's (control_id = $2 OR control_ref = $3).
 		// The unbound records of the kinds the control's queries declare are
-		// found alongside them (#2817, internal/evidence/unbound).
+		// found alongside them (#2817, internal/evidence/unbound). A routed
+		// kind never matches by control_ref (#2931, internal/evidence/routed).
 		controlRef := controlID.String()
 		records, err := e.store.loadEvidence(ctx, q, tenantID, controlID, controlRef, asOf)
 		if err != nil {

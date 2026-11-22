@@ -149,3 +149,18 @@ func TestStockBundleKindsAreCategorized(t *testing.T) {
 		t.Fatal("no evidence queries parsed from the stock bundles")
 	}
 }
+
+// #2931: Within keeps only the routed kinds, so a pinned (owned-only) set
+// binds an empty routed_kinds and a live set binds every routed kind.
+func TestWithin(t *testing.T) {
+	t.Parallel()
+	if got := Within(unbound.Kinds()); got == nil || len(got) != 0 {
+		t.Fatalf("Within(owned only) = %#v, want empty non-nil", got)
+	}
+	if got := Within(nil); got == nil || len(got) != 0 {
+		t.Fatalf("Within(nil) = %#v, want empty non-nil", got)
+	}
+	if got := Within(ControlFreeKinds()); !slices.Equal(got, Kinds()) {
+		t.Fatalf("Within(ControlFreeKinds()) = %v, want Kinds() %v", got, Kinds())
+	}
+}

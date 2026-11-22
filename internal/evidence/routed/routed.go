@@ -24,6 +24,11 @@
 //	AND evidence_kind = ANY(unbound_kinds)
 //	AND <the control's evidence_queries> @> [{"evidence_kind": evidence_kind}]
 //
+// Readers that also match control_ref against the control's UUID bind Kinds()
+// as routed_kinds and skip that leg for a routed kind (#2931): a routed record
+// pushed with an explicit control UUID keeps it in control_ref as provenance
+// only, so it reaches a control through the rule above or not at all.
+//
 // The list is closed: TestStockBundleKindsAreCategorized fails when a stock
 // bundle reads a kind that is in no category.
 package routed
@@ -72,6 +77,20 @@ func Kind(kind string) bool {
 // readers bind it as unbound_kinds.
 func ControlFreeKinds() []string {
 	return append(unbound.Kinds(), kinds...)
+}
+
+// Within returns the routed kinds in kinds, never nil. A reader bound to a
+// pinned set binds Within(set) as routed_kinds, so a read pinned before the
+// cutover keeps the control_ref leg for every kind, as it did before routing
+// shipped (#2931), and a read at or after it closes the leg for routed kinds.
+func Within(kinds []string) []string {
+	out := []string{}
+	for _, k := range kinds {
+		if Kind(k) {
+			out = append(out, k)
+		}
+	}
+	return out
 }
 
 // KindsAsOf returns the control-free kinds for a read pinned at anchor. A

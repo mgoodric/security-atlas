@@ -49,7 +49,8 @@ SELECT id, tenant_id, control_id, control_ref, scope_id,
        evidence_kind, ingested_at
 FROM evidence_records
 WHERE evidence_records.tenant_id = sqlc.arg(tenant_id)
-  AND (control_id = sqlc.arg(control_id) OR control_ref = sqlc.arg(control_ref)
+  AND (control_id = sqlc.arg(control_id)
+       OR (control_ref = sqlc.arg(control_ref) AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND EXISTS (SELECT 1 FROM controls uc

@@ -995,8 +995,8 @@ func TestBuildLocalRecord_HappyPath(t *testing.T) {
 	if rec.GetEvidenceKind() != "manual.upload.v1" {
 		t.Errorf("evidence_kind = %q; want manual.upload.v1", rec.GetEvidenceKind())
 	}
-	if rec.GetSchemaVersion() != "1.0.0" {
-		t.Errorf("schema_version = %q; want 1.0.0", rec.GetSchemaVersion())
+	if rec.GetSchemaVersion() != "1.1.0" {
+		t.Errorf("schema_version = %q; want 1.1.0", rec.GetSchemaVersion())
 	}
 	if rec.GetControlId() != "scf:GOV-05" {
 		t.Errorf("control_id = %q; want scf:GOV-05", rec.GetControlId())

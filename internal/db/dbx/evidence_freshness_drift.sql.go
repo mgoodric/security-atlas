@@ -135,9 +135,9 @@ SELECT
 FROM controls c
 LEFT JOIN evidence_records e
     ON e.tenant_id = c.tenant_id
-   AND (e.control_id = c.id OR e.control_ref = c.id::text
+   AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL($2::text[])))
        OR (e.control_id IS NULL
-           AND e.evidence_kind = ANY($2::text[])
+           AND e.evidence_kind = ANY($3::text[])
            AND c.evidence_queries @> jsonb_build_array(
                  jsonb_build_object('evidence_kind', e.evidence_kind))))
 WHERE c.tenant_id = $1
@@ -147,6 +147,7 @@ GROUP BY c.id, c.freshness_class
 
 type ListControlsWithLatestEvidenceParams struct {
 	TenantID     pgtype.UUID `json:"tenant_id"`
+	RoutedKinds  []string    `json:"routed_kinds"`
 	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
@@ -181,7 +182,7 @@ type ListControlsWithLatestEvidenceRow struct {
 // #2817: plus the tenant's unbound records of a kind in unbound_kinds that
 // the control's evidence_queries declare (internal/evidence/unbound).
 func (q *Queries) ListControlsWithLatestEvidence(ctx context.Context, arg ListControlsWithLatestEvidenceParams) ([]ListControlsWithLatestEvidenceRow, error) {
-	rows, err := q.db.Query(ctx, listControlsWithLatestEvidence, arg.TenantID, arg.UnboundKinds)
+	rows, err := q.db.Query(ctx, listControlsWithLatestEvidence, arg.TenantID, arg.RoutedKinds, arg.UnboundKinds)
 	if err != nil {
 		return nil, err
 	}
