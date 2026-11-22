@@ -1,23 +1,33 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc6_3_periodic_access_review
-title: "Quarterly access review completed for in-scope systems"
+title: "An access review was completed within the last 90 days"
 description: |
   Regular review of accounts and their privileges covers the
   change-and-revoke side of TSC CC6.3. The intended test is that each
   in-scope system has a completed access review within the quarter, with
   the reviewer and remediation actions captured in the record.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the platform's
-  `access_review.completion.v1`, written as pass when a review campaign is
-  completed. The control passes when any completed review is in the
-  quarterly window of 120 days (a 90-day cadence plus the engine's 30-day
-  grace). Which systems were reviewed is not checked.
+  What runs today: a SQL query over the platform's
+  `access_review.completion.v1` records. The platform writes one when a
+  review campaign is completed with no item left pending, and the
+  record's `observed_at` is the completion instant. The control passes
+  when any completed review, keyed by `review_id`, has an `observed_at`
+  within 90 days before the evaluation instant (`evaluated_at`). It fails
+  when every completed review is older than that, and no record leaves it
+  inconclusive. Records count for the quarterly window of 120 days, so a
+  review completed 91 to 120 days ago fails the control and one older
+  than that is not seen. The 90 days are counted as 2,160 hours, so the
+  bound does not move with daylight saving. The record's `result`, which
+  the platform always writes as pass, is not used.
 
-  Pending: a completed review within 90 days, in SQL over the record's
-  existing fields (#2824); and every in-scope system reviewed, which needs
-  a system inventory (#2834).
+  An `observed_at` more than an hour after the evaluation instant does not
+  show a review was completed before it; such a record is treated as
+  unreadable, and the control is inconclusive unless another review is
+  within the 90 days. Records without a `review_id` are left out.
+
+  Pending: every in-scope system reviewed. The record names the campaign,
+  not the systems it covered, so which systems were reviewed is not
+  checked; that half needs a system inventory (#2834).
 
 scf_anchor_id: IAC-12
 control_family: IAC
@@ -27,28 +37,17 @@ lifecycle_state: active
 freshness_class: quarterly
 
 evidence_queries:
-  - id: every_in_scope_system_reviewed_in_90d
-    language: rego
+  - id: access_review_completed_within_90d
+    language: sql
     evidence_kind: access_review.completion.v1
-    description: "Every in-scope system has a completed access review within 120 days (quarterly plus 30-day grace)"
+    description: "A completed access review has an observed_at within 90 days of the evaluation instant"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(observed_at >= evaluated_at - interval '2160 hours'
+                            AND observed_at <= evaluated_at + interval '1 hour') THEN 'pass'
+               WHEN bool_or(observed_at > evaluated_at + interval '1 hour') THEN 'inconclusive'
+               ELSE 'fail'
+             END
+      FROM evidence
+      WHERE coalesce(payload->>'review_id', '') <> ''

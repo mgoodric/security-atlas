@@ -91,6 +91,9 @@ func TestStockControlsKindFilterChangesOnlyCrossKindReads(t *testing.T) {
 // kind present, a declared kind with no record makes its query inconclusive,
 // which turns an all-na control inconclusive. It is the only result that
 // changes when no stray kind is present, and the decisions log records it.
+// A two-query control with a SQL query (cc1_4 since #2824) is still counted
+// but not evaluated here: its SQL query needs Postgres, and its bundle
+// tests/ cases cover the cross-kind combination instead.
 func TestStockTwoKindControls_MissingKindOnlyTurnsNAInconclusive(t *testing.T) {
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	two := map[string]bool{}
@@ -99,6 +102,9 @@ func TestStockTwoKindControls_MissingKindOnlyTurnsNAInconclusive(t *testing.T) {
 			return
 		}
 		two[name] = true
+		if hasSQLQuery(b) {
+			return
+		}
 		var before, after []eval.FixtureQuery
 		for _, q := range b.Manifest.EvidenceQueries {
 			before = append(before, eval.FixtureQuery{Language: q.Language, Expression: q.Expression})

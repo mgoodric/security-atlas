@@ -7,21 +7,40 @@ description: |
   that every employee and contractor completes security awareness training
   on hire and at least annually.
 
-  What runs today: two queries, each rolling up the verdicts of its own
-  evidence kind (any fail fails, otherwise any pass passes, no record is
-  inconclusive), and the control combines them the same way. On
-  `jira.ticket_evidence.v1` the Jira connector's verdict is the ticket's
-  status: Done, Resolved, Closed, Cancelled or Completed passes, any other
-  status is inconclusive. Labels, assignee and resolution date are not
-  checked, so any ticket the connector's JQL returns counts. On
-  `security_awareness.training_completion.v1` every record is written as
-  pass when a completion is recorded. Records count for the annual window
-  of 400 days.
+  What runs today: two queries, and the control combines them the way the
+  engine combines verdicts (any fail fails, otherwise any pass passes).
 
-  Pending: completions within 365 days from an allowed source (manual,
-  csv, lms_connector) (#2824); the Jira ticket's `security-training`
-  label, resolution and date (#2829); and every active user holding a
-  current completion, which needs a user inventory (#2834).
+  On `jira.ticket_evidence.v1` the query rolls up the Jira connector's
+  verdict, which is the ticket's status: Done, Resolved, Closed, Cancelled
+  or Completed passes, any other status is inconclusive, and no record is
+  inconclusive. Labels, assignee and resolution date are not checked, so
+  any ticket the connector's JQL returns counts.
+
+  On `security_awareness.training_completion.v1` a SQL query reads each
+  completion's payload. It takes each person's latest record, keyed by
+  `person_id` and ordered by `completed_at`, then by `observed_at`. A
+  person whose latest completion is more than 365 days before the
+  evaluation instant (`evaluated_at`), or whose latest record names a
+  `completion_source` other than manual, csv or lms_connector, fails the
+  control. Otherwise the query passes only when every person's latest
+  completion is from one of those sources and within the 365 days, and is
+  inconclusive when any person's latest record has no readable
+  `completed_at` or no `completion_source`. No record also leaves it
+  inconclusive. The platform writes every completion as pass; that
+  `result` is not used.
+
+  A `completed_at` that is not a full RFC 3339 timestamp, or is more than
+  an hour after the evaluation instant, is treated as unreadable and never
+  errors the query. Records without a `person_id` are left out. Records
+  count for the annual window of 400 days, so a person whose latest
+  completion is 366 to 400 days old fails the control and one whose
+  records are all older is not seen. The 365 days are counted as 8,760
+  hours, so the bound does not move with daylight saving or a leap day.
+
+  Pending: the Jira ticket's `security-training` label, resolution and
+  date (#2829); and every active user holding a current completion. Only
+  the people in the records the control receives are checked; that half
+  needs a user inventory (#2834).
 
 scf_anchor_id: SAT-04
 control_family: SAT
@@ -56,28 +75,50 @@ evidence_queries:
       } else := "na" if {
         count(input.records) > 0
       } else := "inconclusive"
-  - id: training_completion_records_within_365d
-    language: rego
+  - id: each_person_completed_training_within_365d
+    language: sql
     evidence_kind: security_awareness.training_completion.v1
-    description: "Every assigned security-awareness training completion is current within 400 days (annual plus 35-day grace)"
+    description: "Each person's latest training completion is from an allowed source and within 365 days of the evaluation instant"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_off) THEN 'fail'
+               WHEN bool_and(all_current) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT person,
+               bool_or(coalesce(source_off OR completed < evaluated_at - interval '8760 hours', false)) AS any_off,
+               bool_and(coalesce(source_ok AND completed >= evaluated_at - interval '8760 hours', false)) AS all_current
+        FROM (
+          SELECT payload->>'person_id' AS person,
+                 completed,
+                 evaluated_at,
+                 payload->>'completion_source' IN ('manual', 'csv', 'lms_connector') AS source_ok,
+                 payload->>'completion_source' NOT IN ('manual', 'csv', 'lms_connector') AS source_off,
+                 rank() OVER (
+                   PARTITION BY payload->>'person_id'
+                   ORDER BY completed DESC NULLS LAST, observed_at DESC
+                 ) AS recency
+          FROM (
+            SELECT payload,
+                   observed_at,
+                   evaluated_at,
+                   CASE WHEN ts <= evaluated_at + interval '1 hour' THEN ts END AS completed
+            FROM (
+              SELECT payload,
+                     observed_at,
+                     evaluated_at,
+                     CASE
+                       WHEN payload->>'completed_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                            AND pg_input_is_valid(payload->>'completed_at', 'timestamptz')
+                         THEN (payload->>'completed_at')::timestamptz
+                     END AS ts
+              FROM evidence
+              WHERE coalesce(payload->>'person_id', '') <> ''
+            ) AS cast_checked
+          ) AS parsed
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY person
+      ) AS per_person

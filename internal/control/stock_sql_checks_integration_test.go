@@ -6,7 +6,8 @@
 //   - every stock bundle's tests/ cases run through bundletest.Run inside a
 //     tenant transaction, as the upload gate runs them; and
 //   - cc6_1, the tracer, and each later check (cc6_6 and cc4_1, #2822; both cc8_1
-//     bundles, #2823) are evaluated by the live engine against evidence
+//     bundles, #2823; the windowed cc6_3, cc1_4, cc6_5 and cc9_1, #2824) are
+//     evaluated by the live engine against evidence
 //     records in the ledger, so the query is shown to decide the stored
 //     control state and not only the fixture runner's.
 
@@ -406,6 +407,118 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 				seedStockEvidence(t, admin, tenant, ctrl, "github.repo_protection.v2", observed, r.connectorResult, payload(r))
 			}
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if states[0].Result != tc.want {
+				t.Errorf("result = %q, want %q", states[0].Result, tc.want)
+			}
+		})
+	}
+}
+
+// #2824: the four windowed checks decide on the age of each record against
+// the engine's evaluation instant, not on the record's own verdict. cc6_3,
+// cc6_5 and cc9_1 need any keyed record inside 90 or 365 days of
+// observed_at; cc1_4 needs each person's latest completed_at inside 365 days
+// from an allowed completion_source. Each window is shown just inside and
+// just outside, and a replay is measured from its as-of instant.
+func TestWindowedStockChecks_EngineEvaluatesAgainstEvaluationInstant(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+
+	const (
+		cc63 = "soc2_cc6_3_periodic_access_review"
+		cc14 = "soc2_cc1_4_competence_training"
+		cc65 = "soc2_cc6_5_asset_disposal"
+		cc91 = "soc2_cc9_1_business_continuity"
+	)
+	type rec struct {
+		connectorResult string
+		ago             time.Duration
+		source          string // cc1_4 only
+	}
+	kindOf := map[string]string{
+		cc63: "access_review.completion.v1",
+		cc14: "security_awareness.training_completion.v1",
+		cc65: "manual.upload.v1",
+		cc91: "manual.upload.v1",
+	}
+	payload := func(bundle string, i int, r rec) map[string]any {
+		switch bundle {
+		case cc63:
+			return map[string]any{
+				"review_id":      fmt.Sprintf("00000000-0000-4000-8000-%012d", i),
+				"completed_by":   "alice@example.com",
+				"reviewer_role":  "campaign_reviewer",
+				"users_reviewed": 42,
+			}
+		case cc14:
+			return map[string]any{
+				"assignment_id":     fmt.Sprintf("00000000-0000-4000-8000-%012d", i),
+				"campaign_id":       "7f000000-0000-4000-8000-000000000001",
+				"campaign_name":     "annual security awareness",
+				"course_code":       "SAT-101",
+				"course_title":      "Security awareness fundamentals",
+				"person_id":         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				"completed_at":      now.Add(-r.ago).Format(time.RFC3339Nano),
+				"completion_source": r.source,
+			}
+		default:
+			return map[string]any{
+				"uploaded_by":  "owner@example.com",
+				"filename":     fmt.Sprintf("evidence-%d.pdf", i),
+				"content_type": "application/pdf",
+			}
+		}
+	}
+	// connectorResult is the record's own verdict (always pass from the
+	// platform's writers, inconclusive from the manual connector). The
+	// queries must ignore it.
+	cases := []struct {
+		bundle  string
+		name    string
+		records []rec
+		asOf    time.Time
+		want    string
+	}{
+		{cc63, "review 89 days old", []rec{{"pass", 89 * day, ""}}, eval.FarFuture, eval.ResultPass},
+		{cc63, "review 91 days old", []rec{{"pass", 91 * day, ""}}, eval.FarFuture, eval.ResultFail},
+		{cc63, "replay measures from the as-of instant", []rec{{"pass", 100 * day, ""}}, now.Add(-20 * day), eval.ResultPass},
+		{cc63, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+		{cc65, "upload 89 days old", []rec{{"inconclusive", 89 * day, ""}}, eval.FarFuture, eval.ResultPass},
+		{cc65, "upload 91 days old", []rec{{"inconclusive", 91 * day, ""}}, eval.FarFuture, eval.ResultFail},
+		{cc65, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+		{cc91, "upload 364 days old", []rec{{"inconclusive", 364 * day, ""}}, eval.FarFuture, eval.ResultPass},
+		{cc91, "upload 366 days old", []rec{{"inconclusive", 366 * day, ""}}, eval.FarFuture, eval.ResultFail},
+		{cc91, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+		{cc14, "completion 364 days old", []rec{{"pass", 364 * day, "lms_connector"}}, eval.FarFuture, eval.ResultPass},
+		{cc14, "completion 366 days old", []rec{{"pass", 366 * day, "csv"}}, eval.FarFuture, eval.ResultFail},
+		{cc14, "disallowed completion source", []rec{{"pass", 10 * day, "self_attested"}}, eval.FarFuture, eval.ResultFail},
+		{cc14, "replay measures from the as-of instant", []rec{{"pass", 380 * day, "manual"}}, now.Add(-30 * day), eval.ResultPass},
+		{cc14, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.bundle+"/"+tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, tc.bundle)
+			for i, r := range tc.records {
+				seedStockEvidence(t, admin, tenant, ctrl, kindOf[tc.bundle], now.Add(-r.ago), r.connectorResult, payload(tc.bundle, i, r))
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)
 			}
 			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)

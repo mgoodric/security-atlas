@@ -1,0 +1,180 @@
+# access_review.completion.v1 records, shaped as the platform writes them
+# (internal/accessreview/store.go CompletionEvidencePayload and
+# ingestCompletion): one record per completed campaign, `observed_at` is the
+# completion instant, `result` is always pass. The payload has no completion
+# time of its own, so the window is on `observed_at`. Every case pins
+# `evaluated_at`, so the 90-day window is fixed and the cases do not age:
+# 90 days before 2026-11-21T12:00:00Z is 2026-08-23T12:00:00Z.
+cases:
+  - name: review-completed-inside-90d-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-10-01T15:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+          users_terminated: 3
+          users_role_changed: 0
+
+  - name: review-exactly-90d-passes
+    description: the window is inclusive at 90 days
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-08-23T12:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+
+  - name: review-just-over-90d-fails
+    description: inside the 120-day quarterly window, so the record is seen, but outside the 90-day check
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-08-23T11:59:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+
+  - name: review-older-than-quarterly-window-is-not-seen
+    description: a review 130 days old falls outside the engine's 120-day window, so there is no record to judge
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-07-14T12:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+
+  - name: one-recent-review-passes-beside-an-old-one
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-08-10T12:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-11-10T09:00:00Z
+        payload:
+          review_id: 6d1e8f20-3c4b-4a59-8e71-2b9c0d4f6a12
+          completed_by: bob@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 40
+
+  - name: record-result-is-not-used
+    description: a pushed record carrying fail is still a completed review inside the window
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-11-01T12:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+
+  - name: observed-within-1h-after-instant-passes
+    description: up to an hour of clock skew still counts as completed by the instant
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-11-21T13:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+
+  - name: observed-over-1h-after-instant-is-inconclusive
+    description: a completion two hours after the instant does not show a review was done by it, and the only other review is stale
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-11-21T14:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-08-01T12:00:00Z
+        payload:
+          review_id: 6d1e8f20-3c4b-4a59-8e71-2b9c0d4f6a12
+          completed_by: bob@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 40
+
+  - name: record-without-review-id-is-left-out
+    description: the recent record has no review_id, so only the stale review counts
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-08-01T12:00:00Z
+        payload:
+          review_id: 0b6f3c1e-8a52-4d4e-9d8e-5f1c2a7b9e01
+          completed_by: alice@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 42
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          completed_by: mallory@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 1
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          review_id: ""
+          completed_by: mallory@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 1
+
+  - name: only-records-without-review-id-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: access_review.completion.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          completed_by: mallory@example.com
+          reviewer_role: campaign_reviewer
+          users_reviewed: 1
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
