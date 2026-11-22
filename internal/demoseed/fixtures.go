@@ -94,6 +94,10 @@ type controlFixture struct {
 	ImplementationType string // 'automated' | 'semi_automated' | 'manual_attested' | 'manual_periodic'
 	OwnerRole          string
 	Lifecycle          string // always 'active' for demo
+	// EvidenceKind is the kind this control's evidence rows carry
+	// (controlEvidenceKinds, #2903). It is not a column: it decides
+	// which kind buildFixturesFor writes for the control's rows.
+	EvidenceKind string
 }
 
 // riskFixture is one row of `risks`.
@@ -489,6 +493,7 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 			ImplementationType: cImplTypes[i%len(cImplTypes)],
 			OwnerRole:          ownerRoles[i%len(ownerRoles)],
 			Lifecycle:          "active",
+			EvidenceKind:       controlEvidenceKind(cTitles[i]),
 		})
 	}
 
@@ -691,6 +696,7 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 		{0.10, 91, 365},
 	}
 	cellID := fs.scope.CellID
+	kindSeq := map[string]int{}
 	for i := 0; i < nEvidence; i++ {
 		// Pick a band by index.
 		band := bands[0]
@@ -706,11 +712,19 @@ func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet 
 		bandLen := band.MaxDays - band.MinDays
 		days := band.MinDays + (i % (bandLen + 1))
 		obs := now.AddDate(0, 0, -days)
-		controlID := fs.controls[i%len(fs.controls)].ID
-		kind := evidenceKindsPool[i%len(evidenceKindsPool)]
+		// #2903: a row carries its control's kind, so a control holds the
+		// kind its subject produces (S3 rows on the encryption-at-rest
+		// control, MFA policy rows on the MFA control).
+		control := fs.controls[i%len(fs.controls)]
+		controlID := control.ID
+		kind := control.EvidenceKind
 		result := evidenceResults[i%len(evidenceResults)]
 		freshness := evidenceFreshness[i%len(evidenceFreshness)]
-		payload := buildEvidencePayload(kind, i, result)
+		// seq numbers the rows of one kind, so a kind's payloads vary row
+		// to row however many controls share the kind.
+		seq := kindSeq[kind]
+		kindSeq[kind]++
+		payload := buildEvidencePayload(kind, seq, result)
 		provenance := map[string]any{
 			"connector":     kindToConnector(kind),
 			"connector_run": fmt.Sprintf("demo-run-%d", i),
@@ -1238,6 +1252,79 @@ var evidenceKindsPool = []string{
 	"manual.upload.v1",
 }
 
+// controlEvidenceKinds names the evidence kind each demo control's rows
+// carry, keyed by control title (#2903). Each kind goes to the controls
+// whose subject that source reports on: S3 bucket encryption to the
+// encryption-at-rest and cloud-configuration controls, the Okta MFA policy
+// to the MFA control, host posture to the endpoint controls. Process
+// controls with no connector source take a manual attestation or upload.
+// Before #2903 a row's kind was evidenceKindsPool[i%len(pool)], whatever
+// its control, so the MFA control held S3 rows. Every title in
+// buildFixturesFor's cTitles has an entry
+// (TestControlEvidenceKinds_CoverEveryTitle).
+var controlEvidenceKinds = map[string]string{
+	"Multi-factor authentication required for all human access": "okta.mfa_policy.v2",
+	"Quarterly access review across production systems":         "access_review.completion.v1",
+	"Endpoint encryption baseline enforced via MDM":             "osquery.host_posture.v1",
+	"Continuous vulnerability scanning of cloud workloads":      "sast.scan_result.v1",
+	"Encryption-at-rest on every data store":                    "aws.s3.bucket_encryption_state.v1",
+	"Annual third-party penetration test":                       "manual.upload.v1",
+	"Documented incident response runbook":                      "manual.attestation.v1",
+	"30-day log retention for production services":              "manual.attestation.v1",
+	"Backup verification with quarterly restore drill":          "manual.upload.v1",
+	"Change-management approval gate on production deploys":     "github.repo_protection.v2",
+	"SAST scanning enabled on every commit":                     "sast.scan_result.v1",
+	"Container image baseline scan":                             "sast.scan_result.v1",
+	"Secrets management via centralized vault":                  "manual.attestation.v1",
+	"Privileged access management for break-glass accounts":     "okta.app_assignment.v1",
+	"Network segmentation between prod and non-prod":            "manual.attestation.v1",
+	"Web application firewall in front of customer-facing apps": "manual.attestation.v1",
+	"DDoS protection on edge endpoints":                         "manual.attestation.v1",
+	"Anti-malware coverage on every endpoint":                   "osquery.host_posture.v1",
+	"Cloud configuration drift detection":                       "aws.s3.bucket_encryption_state.v1",
+	"Identity-provider single source of truth":                  "okta.app_assignment.v1",
+	"OS patching cadence — critical within 14 days":             "osquery.host_posture.v1",
+	"Mobile device management on company-issued devices":        "osquery.host_posture.v1",
+	"Physical access controls at data centers":                  "manual.attestation.v1",
+	"Visitor log retention for 90 days":                         "manual.upload.v1",
+	"Disaster recovery plan tested annually":                    "manual.attestation.v1",
+	"Business continuity tabletop exercise":                     "manual.attestation.v1",
+	"Vendor due-diligence questionnaire on onboarding":          "manual.upload.v1",
+	"Annual security awareness training for all staff":          "manual.attestation.v1",
+	"Phishing simulation cadence — monthly":                     "manual.attestation.v1",
+	"Background checks on all new hires":                        "manual.attestation.v1",
+	"Termination access removal SLA — 24 hours":                 "okta.user_lifecycle.v1",
+	"Service account inventory with quarterly review":           "github.scim_user.v1",
+	"Hardware inventory tracked in CMDB":                        "osquery.host_posture.v1",
+	"Software inventory via endpoint agent":                     "osquery.host_posture.v1",
+	"Data classification labels enforced in document storage":   "manual.attestation.v1",
+	"PII tokenization for analytical workloads":                 "manual.attestation.v1",
+	"Encryption key rotation cadence — annual":                  "aws.s3.bucket_encryption_state.v1",
+	"TLS 1.2+ enforced on all external endpoints":               "manual.attestation.v1",
+	"Code review required before merge":                         "github.repo_protection.v2",
+	"Branch protection on default branches":                     "github.repo_protection.v2",
+	"Two-person rule for production secret access":              "github.audit_event.v1",
+	"GDPR data-subject request handling SLA":                    "manual.attestation.v1",
+	"HIPAA-aligned PHI handling for healthcare data":            "manual.attestation.v1",
+	"PCI scope minimization documented":                         "manual.upload.v1",
+	"Cloud account boundary controls":                           "aws.s3.bucket_encryption_state.v1",
+	"Cross-region failover validated quarterly":                 "manual.attestation.v1",
+	"Time synchronization across infrastructure":                "osquery.host_posture.v1",
+	"Centralized audit log aggregation":                         "github.audit_event.v1",
+	"User behavior analytics on privileged accounts":            "github.audit_event.v1",
+	"Threat intelligence feed integration":                      "manual.attestation.v1",
+}
+
+// controlEvidenceKind is the kind a demo control's rows carry. A title
+// without an entry gets a manual attestation, the kind any control can
+// hold; the coverage test keeps that fallback unused.
+func controlEvidenceKind(title string) string {
+	if kind, ok := controlEvidenceKinds[title]; ok {
+		return kind
+	}
+	return "manual.attestation.v1"
+}
+
 var evidenceResults = []string{"pass", "pass", "pass", "pass", "pass", "pass", "pass", "fail", "inconclusive", "na"}
 var evidenceFreshness = []string{"daily", "daily", "weekly", "weekly", "monthly", "monthly", "monthly", "quarterly"}
 
@@ -1360,9 +1447,9 @@ func buildEvidencePayload(kind string, idx int, result string) map[string]any {
 			p["reason"] = "get bucket encryption: AccessDenied"
 		default:
 			p["encryption_enabled"] = true
-			// Alternate per pool cycle: idx%len(pool) is fixed for a
-			// kind, so idx%2 alone would give every S3 row one algorithm.
-			if (idx/len(evidenceKindsPool))%2 == 0 {
+			// buildFixturesFor passes a row's place among the S3 rows as
+			// idx, so successive rows alternate between the algorithms.
+			if idx%2 == 0 {
 				p["sse_algorithm"] = "aws:kms"
 				p["kms_key_id"] = "alias/atlas-demo"
 				p["bucket_key_enabled"] = true
