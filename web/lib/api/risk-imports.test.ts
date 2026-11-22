@@ -262,6 +262,19 @@ describe("row fields", () => {
     ]);
   });
 
+  it("shows the level and the org unit as written (#2845)", () => {
+    expect(
+      mappedFields(
+        row({ level: "org", org_unit_value: "Platform", org_unit_id: "ou-1" }),
+      ),
+    ).toEqual([
+      ["Title", "Vendor outage"],
+      ["Category", "operational"],
+      ["Level", "org"],
+      ["Org unit", "Platform"],
+    ]);
+  });
+
   it("lists unmapped values by header, blanks left out", () => {
     expect(
       unmappedEntries(

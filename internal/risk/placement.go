@@ -70,6 +70,17 @@ func resolveLevel(requested dbx.RiskLevel, unitLevel *dbx.RiskLevel, fallback db
 	}
 }
 
+// CheckCreatePlacement applies the create path's placement rule to a
+// requested level (empty when none is named) and the level of the
+// requested org unit (nil when none), without writing anything: it returns
+// the placement validation error Create would return, or nil. The risk
+// register import (#2845) checks a row at staging with it, so the row is
+// rejected with a reason before an approver sees it.
+func CheckCreatePlacement(requested dbx.RiskLevel, unitLevel *dbx.RiskLevel) error {
+	_, err := resolveLevel(requested, unitLevel, dbx.RiskLevelTeam)
+	return err
+}
+
 // orgUnitLevel reads the level of org unit id within the tenant. A nil id
 // returns a nil level.
 func orgUnitLevel(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, id *uuid.UUID) (*dbx.RiskLevel, error) {
