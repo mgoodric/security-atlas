@@ -87,3 +87,52 @@ func TestOsqueryHostPosture130_Validation(t *testing.T) {
 		})
 	}
 }
+
+// #2936: 1.4.0 adds antimalware_definitions_updated_at with its source and
+// must stay additive over 1.3.0.
+func TestOsqueryHostPosture140_AdditiveOver130(t *testing.T) {
+	t.Parallel()
+	if err := CheckAdditiveOver(readHostPosture(t, "1.3.0"), readHostPosture(t, "1.4.0")); err != nil {
+		t.Fatalf("1.4.0 is not additive over 1.3.0: %v", err)
+	}
+}
+
+// #2936: under 1.4.0 antimalware_definitions_source is valid only alongside
+// the date, and names a fleet_report. 1.4.0 does not opt into format
+// assertion (#2930), so a malformed date is accepted here; the cc6_8 query
+// guards the value instead.
+func TestOsqueryHostPosture140_Validation(t *testing.T) {
+	t.Parallel()
+	reg, err := NewEmbedded(PlatformSchemasFS())
+	if err != nil {
+		t.Fatalf("NewEmbedded: %v", err)
+	}
+	const tenant = "11111111-1111-1111-1111-111111111111"
+	cases := []struct {
+		name    string
+		version string
+		payload string
+		ok      bool
+	}{
+		{"date_and_source", "1.4.0", `{"host_uuid":"u","hostname":"h","antimalware_definitions_updated_at":"2026-11-20T03:00:00Z","antimalware_definitions_source":"fleet_report:AV definitions"}`, true},
+		{"date_without_source", "1.4.0", `{"host_uuid":"u","hostname":"h","antimalware_definitions_updated_at":"2026-11-20T03:00:00Z"}`, true},
+		{"source_alone", "1.4.0", `{"host_uuid":"u","hostname":"h","antimalware_definitions_source":"fleet_report:AV definitions"}`, false},
+		{"source_wrong_prefix", "1.4.0", `{"host_uuid":"u","hostname":"h","antimalware_definitions_updated_at":"2026-11-20T03:00:00Z","antimalware_definitions_source":"fleet_policy:AV"}`, false},
+		{"date_not_a_string", "1.4.0", `{"host_uuid":"u","hostname":"h","antimalware_definitions_updated_at":1763607600}`, false},
+		{"malformed_date_not_asserted", "1.4.0", `{"host_uuid":"u","hostname":"h","antimalware_definitions_updated_at":"not-a-date"}`, true},
+		{"v130_payload_under_v140", "1.4.0", `{"host_uuid":"u","hostname":"h","antimalware_protected":true,"antimalware_source":"fleet_policy:AV"}`, true},
+		{"v130_rejects_new_fields", "1.3.0", `{"host_uuid":"u","hostname":"h","antimalware_definitions_updated_at":"2026-11-20T03:00:00Z"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := reg.ValidatePayload(context.Background(), tenant, "osquery.host_posture.v1", tc.version, []byte(tc.payload))
+			if tc.ok && err != nil {
+				t.Fatalf("want valid, got %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("want rejected, got valid")
+			}
+		})
+	}
+}

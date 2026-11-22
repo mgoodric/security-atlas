@@ -11,6 +11,11 @@
 //     Those two are read only from operator-written Fleet policies named
 //     in FleetPolicies: a policy's `response` of "pass" or "fail" becomes
 //     true or false, and anything else leaves the field unread (#2921).
+//     The anti-malware definitions date is read from one column of an
+//     operator-named Fleet report (a saved query whose per-host results
+//     Fleet stores): GET /api/v1/fleet/hosts/{id}/reports finds the report
+//     by exact name, GET /api/v1/fleet/hosts/{id}/reports/{report_id}
+//     returns the host's rows (#2936).
 //
 //   - Local osqueryd extension socket mode. The connector dials a
 //     Unix-domain socket and submits a Thrift-shaped osquery SQL query.
@@ -38,6 +43,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -101,6 +107,14 @@ type HostPosture struct {
 	AntimalwareSource    string
 	EDRHealthy           *bool
 	EDRSource            string
+
+	// AntimalwareDefinitionsUpdatedAt is when the host's anti-malware
+	// definitions were last updated, read from one column of an
+	// operator-named Fleet report; AntimalwareDefinitionsSource is then
+	// "fleet_report:<name>". Zero when not read. The value is only as good
+	// as the operator's query (#2936).
+	AntimalwareDefinitionsUpdatedAt time.Time
+	AntimalwareDefinitionsSource    string
 
 	// LastSeen is when the host last checked in with Fleet (Fleet's
 	// `seen_time`). Zero when unknown. It is not ObservedAt: Fleet lists
@@ -194,6 +208,33 @@ type FleetPolicies struct {
 	// ProductionLabel is a Fleet label, not a policy: a host carrying it is
 	// host_role "production".
 	ProductionLabel string
+	// DefinitionsReport and DefinitionsColumn name a Fleet report (a saved
+	// query) and the column of its results that holds the anti-malware
+	// definitions date. Both or neither; empty means not read (#2936).
+	DefinitionsReport string
+	DefinitionsColumn string
+}
+
+// HostReportSummary is the subset of one "List host's reports" entry
+// (GET /api/v1/fleet/hosts/{id}/reports) the connector reads.
+type HostReportSummary struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
+}
+
+// HostReportData is the subset of "Get host's report data"
+// (GET /api/v1/fleet/hosts/{id}/reports/{report_id}) the connector reads:
+// one entry per result row, each a column-name to string-value map. Fleet
+// documents an empty results array when the host has no stored results.
+type HostReportData struct {
+	Results []HostReportRow `json:"results"`
+}
+
+// HostReportRow is one result row of a host's report data. Fleet's examples
+// show every column value as a JSON string (osquery returns text); a value
+// of any other JSON type is read as unread, not converted.
+type HostReportRow struct {
+	Columns map[string]any `json:"columns"`
 }
 
 // HostMDM is the subset of Fleet's host `mdm` object the connector reads.
@@ -208,6 +249,10 @@ type HostMDM struct {
 type FleetAPI interface {
 	ListHosts(ctx context.Context) ([]HostListEntry, error)
 	GetHost(ctx context.Context, id uint64) (*HostDetail, error)
+	// ListHostReports lists the reports Fleet holds for one host whose
+	// name matches the search keywords; the caller matches names exactly.
+	ListHostReports(ctx context.Context, hostID uint64, name string) ([]HostReportSummary, error)
+	GetHostReport(ctx context.Context, hostID, reportID uint64) (*HostReportData, error)
 }
 
 // LocalQueryer is the narrow local-osqueryd surface Pull depends on when
@@ -256,6 +301,16 @@ func PullFromFleet(ctx context.Context, api FleetAPI, now func() time.Time, pol 
 		}
 		fillFromDetail(&row, detail, pol)
 		row.Result, row.Reason = evaluate(row)
+		if pol.DefinitionsReport != "" && pol.DefinitionsColumn != "" {
+			t, err := definitionsUpdatedAt(ctx, api, h.ID, pol.DefinitionsReport, pol.DefinitionsColumn)
+			switch {
+			case err != nil:
+				row.Reason += "; antimalware definitions report: " + err.Error()
+			case !t.IsZero():
+				row.AntimalwareDefinitionsUpdatedAt = t
+				row.AntimalwareDefinitionsSource = "fleet_report:" + pol.DefinitionsReport
+			}
+		}
 		out = append(out, row)
 	}
 	return out, nil
@@ -446,6 +501,50 @@ func (c *FleetClient) GetHost(ctx context.Context, id uint64) (*HostDetail, erro
 	return &out, nil
 }
 
+// ListHostReports calls GET /api/v1/fleet/hosts/{id}/reports with the
+// report name as the `query` search keywords. Fleet's search is not an
+// exact match, so the caller filters by name.
+func (c *FleetClient) ListHostReports(ctx context.Context, hostID uint64, name string) ([]HostReportSummary, error) {
+	u := c.BaseURL + "/api/v1/fleet/hosts/" + strconv.FormatUint(hostID, 10) + "/reports?per_page=100&query=" + url.QueryEscape(name)
+	var raw struct {
+		Reports []HostReportSummary `json:"reports"`
+	}
+	if err := c.getJSON(ctx, u, &raw); err != nil {
+		return nil, err
+	}
+	return raw.Reports, nil
+}
+
+// GetHostReport calls GET /api/v1/fleet/hosts/{id}/reports/{report_id}.
+func (c *FleetClient) GetHostReport(ctx context.Context, hostID, reportID uint64) (*HostReportData, error) {
+	u := c.BaseURL + "/api/v1/fleet/hosts/" + strconv.FormatUint(hostID, 10) + "/reports/" + strconv.FormatUint(reportID, 10)
+	var out HostReportData
+	if err := c.getJSON(ctx, u, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *FleetClient) getJSON(ctx context.Context, u string, into any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	c.Creds.Apply(req)
+	res, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		return &APIError{Status: res.StatusCode, Retry: res.Header.Get("Retry-After"), Body: drain(res.Body)}
+	}
+	if err := json.NewDecoder(res.Body).Decode(into); err != nil {
+		return fmt.Errorf("decode %s: %w", u, err)
+	}
+	return nil
+}
+
 // ErrHostNotFound is the sentinel Fleet returns when a host has been
 // removed between the list call and the detail call.
 var ErrHostNotFound = errors.New("osqueryposture: fleet host not found")
@@ -579,6 +678,73 @@ func policyResponse(policies []HostPolicy, name string) *bool {
 		out = boolPtr(v)
 	}
 	return out
+}
+
+// definitionsUpdatedAt reads the anti-malware definitions date from one
+// column of the operator's named Fleet report for one host. It returns the
+// zero time, unread, when no report has exactly that name, when more than
+// one does, when the host has no result rows, or when any row's column is
+// missing or not a date: a set the connector cannot read whole is not read.
+// When the rows disagree it returns the oldest, so a host with two
+// engines is judged by its most out-of-date one. An API error is returned
+// so the caller can name it in the record's reason.
+func definitionsUpdatedAt(ctx context.Context, api FleetAPI, hostID uint64, report, column string) (time.Time, error) {
+	reports, err := api.ListHostReports(ctx, hostID, report)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var id uint64
+	matches := 0
+	for _, r := range reports {
+		if r.Name == report {
+			id = r.ID
+			matches++
+		}
+	}
+	if matches != 1 {
+		return time.Time{}, nil
+	}
+	data, err := api.GetHostReport(ctx, hostID, id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if data == nil || len(data.Results) == 0 {
+		return time.Time{}, nil
+	}
+	var oldest time.Time
+	for _, row := range data.Results {
+		v, _ := row.Columns[column].(string)
+		t := parseDefinitionsTime(v)
+		if t.IsZero() {
+			return time.Time{}, nil
+		}
+		if oldest.IsZero() || t.Before(oldest) {
+			oldest = t
+		}
+	}
+	return oldest, nil
+}
+
+// parseDefinitionsTime reads a report column as a date. osquery returns
+// every column as a string; two shapes are accepted: RFC 3339 (with a zone)
+// and whole Unix epoch seconds, the shape osquery's own time columns use.
+// Zero (the epoch itself), a negative number and anything else are unread.
+func parseDefinitionsTime(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		if n <= 0 {
+			return time.Time{}
+		}
+		return time.Unix(n, 0).UTC()
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 // mdmEnrolled maps Fleet's mdm.enrollment_status to a boolean. "On (...)"

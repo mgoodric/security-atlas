@@ -58,7 +58,9 @@ atlas-osquery run \
   --screenlock-policy "Screen lock enabled (macOS)" \
   --antimalware-policy "Anti-malware current" \
   --edr-policy "EDR healthy" \
-  --production-label "Production"
+  --production-label "Production" \
+  --antimalware-definitions-report "AV definitions" \
+  --antimalware-definitions-column last_updated
 
 # Local osqueryd socket mode (configuration surface only in slice 047).
 atlas-osquery run \
@@ -75,9 +77,9 @@ atlas-osquery scopes
 
 ## Evidence shape
 
-One `osquery.host_posture.v1` record per host, at schema 1.3.0
-(additive over 1.2.0, #2826; 1.2.0 over 1.1.0, #2921; 1.1.0 over 1.0.0,
-#2912):
+One `osquery.host_posture.v1` record per host, at schema 1.4.0
+(additive over 1.3.0, #2936; 1.3.0 over 1.2.0, #2826; 1.2.0 over 1.1.0,
+#2921; 1.1.0 over 1.0.0, #2912):
 
 - `host_uuid` (required)
 - `hostname` (required)
@@ -96,6 +98,9 @@ One `osquery.host_posture.v1` record per host, at schema 1.3.0
 - `host_role_source` (1.3.0): `fleet_label:<name>`, present only with `host_role`
 - `antimalware_protected` (1.3.0), with `antimalware_source` (`fleet_policy:<name>`)
 - `edr_healthy` (1.3.0), with `edr_source` (`fleet_policy:<name>`)
+- `antimalware_definitions_updated_at` (1.4.0): RFC 3339 UTC, with
+  `antimalware_definitions_source` (`fleet_report:<name>`), present only
+  with the date
 
 Schema 1.3.0 also declares `memory_used_percent` and `cpu_p95_5m_percent`,
 which this connector never emits: Fleet's host API has no memory-use or
@@ -121,6 +126,9 @@ means observed off; an absent key means not read. In Fleet mode:
 | `edr_healthy`             | `policies[]`: the `--edr-policy` policy's `response` (see below)                |
 | `disk_used_percent`       | 100 − `percent_disk_space_available`; absent if `gigs_total_disk_space` is 0    |
 | `host_role`               | `labels[]`: `production` when the `--production-label` label is on the host     |
+
+`antimalware_definitions_updated_at` is not in Get host; it comes from a
+Fleet report (see "Anti-malware definitions date" below).
 
 Without `--screenlock-policy`, a Fleet host's `result` is `fail` (disk
 encryption off) or `inconclusive` (screen lock not reported), never `pass`.
@@ -227,8 +235,8 @@ define, and the stock controls take the policy's word for it:
 only when an engine is active **and** its definitions were updated within
 7 days, and `soc2_cc7_2_anomaly_detection` expects the EDR policy to pass
 only when the agent is installed, running and healthy. Write the query
-for the engine and agent the org runs. The connector emits no definitions
-timestamp, so the 7-day bound lives in the query (#2936).
+for the engine and agent the org runs. Unless a definitions report is
+named (next section), the 7-day bound lives only in the policy query.
 
 An unverified Windows starting point, not taken from Fleet's library and
 not run against a live host: osquery's `windows_security_products` table
@@ -244,6 +252,48 @@ WHERE type = 'Antivirus' AND state = 'On' AND signatures_up_to_date = 1;
 bound; tighten it if the org needs the exact bound. EDR agents differ too
 much for a generic example: check the vendor's own health signal (a
 running service or process plus its status file or registry key).
+
+### Anti-malware definitions date from a Fleet report (#2936)
+
+No osquery table reports when Defender, XProtect or Falcon definitions
+were last updated (the osquery table specs were checked on 2026-11-22;
+`windows_security_products` has only the `signatures_up_to_date` flag),
+and Fleet's Get host has no such field. So the date comes from a query the
+operator writes. Save it as a Fleet report (a saved query whose per-host
+results Fleet stores, `discard_data: false`), and name the report and the
+result column that holds the date:
+
+| Flag                               | What it names                                 |
+| ---------------------------------- | --------------------------------------------- |
+| `--antimalware-definitions-report` | the report, by exact name                     |
+| `--antimalware-definitions-column` | the column of its results that holds the date |
+
+The two are set together, and apply to `--mode=fleet` only. Per host, the
+connector finds the report with `GET /api/v1/fleet/hosts/{id}/reports`
+(exact name match, after Fleet's keyword search) and reads its rows with
+`GET /api/v1/fleet/hosts/{id}/reports/{report_id}`:
+
+| Host's report                                         | Record                                     |
+| ----------------------------------------------------- | ------------------------------------------ |
+| one row, column is RFC 3339 with a zone or epoch secs | `antimalware_definitions_updated_at` (UTC) |
+| several rows, every one readable                      | the oldest of them                         |
+| any row missing the column, or not a date             | omitted                                    |
+| no rows, no report of that name, or two of that name  | omitted                                    |
+| the lookup fails (HTTP error)                         | omitted; `reason` names the error          |
+
+`antimalware_definitions_source` is then `fleet_report:<name>`.
+`soc2_cc6_8_malware_protection` fails a host whose date is more than 168
+hours before the evaluation instant, and judges a host with no date on
+`antimalware_protected` alone.
+
+**The date is only as good as the operator's query.** The connector checks
+that the column parses as a date, not that it is a definitions date. No
+query for any engine has been verified against a live host, and the Fleet
+report endpoints were built from Fleet's REST API docs (read 2026-11-22),
+not exercised against a running Fleet. Where an engine keeps its last
+update time is the operator's to find; Microsoft documents it for Defender
+as `MSFT_MpComputerStatus.AntivirusSignatureLastUpdated` (WMI), which
+osquery has no table for.
 
 ### Host role from a Fleet label (#2826)
 

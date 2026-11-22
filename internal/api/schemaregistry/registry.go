@@ -125,6 +125,9 @@ func DefaultSeed() []KindVersion {
 		// #2826: 1.3.0 adds capacity, host_role, antimalware and EDR, and
 		// makes each *_source present only alongside its value.
 		{Kind: "osquery.host_posture.v1", Version: "1.3.0"},
+		// #2936: 1.4.0 adds antimalware_definitions_updated_at, read from an
+		// operator-named Fleet report, with antimalware_definitions_source.
+		{Kind: "osquery.host_posture.v1", Version: "1.4.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
 		// #2829: 1.1.0 adds assignee_account_id, labels, priority,
 		// severity, created_at and resolved_at.
