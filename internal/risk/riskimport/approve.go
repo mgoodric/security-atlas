@@ -268,7 +268,7 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			}
 			// Nothing is created, so the row links nothing; rows waiting
 			// on it link under the risk it duplicates.
-			if err := settleWaitingOn(ctx, tx, tenantID, row); err != nil {
+			if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, rowID, row.RowNumber}); err != nil {
 				return err
 			}
 			return finishDecision(ctx, tx, tenantID, out, "duplicate", "")
@@ -287,7 +287,7 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			if err := recordDecision(ctx, tx, rowID, RowStatusRejected, in.Approver, "", reason); err != nil {
 				return err
 			}
-			if err := settleWaitingOn(ctx, tx, tenantID, row); err != nil {
+			if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, rowID, row.RowNumber}); err != nil {
 				return err
 			}
 			return finishDecision(ctx, tx, tenantID, out, "reject", reason)
@@ -362,13 +362,13 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			}
 		}
 		if row.ParentRef != "" {
-			link, err := linkOwnParent(ctx, tx, tenantID, row.BatchID, rowID, created.ID, row.ParentRef)
+			link, err := linkOwnParent(ctx, tx, tenantID, row.BatchID, decision{in.Approver, rowID, row.RowNumber}, created.ID, row.ParentRef)
 			if err != nil {
 				return err
 			}
 			out.ParentLinkStatus, out.ParentLinkError, out.ParentRiskID = link.Status, link.Error, link.ParentID
 		}
-		if err := settleWaiting(ctx, tx, tenantID, row.BatchID, row.ExternalRef); err != nil {
+		if err := settleWaiting(ctx, tx, tenantID, row.BatchID, row.ExternalRef, decision{in.Approver, rowID, row.RowNumber}); err != nil {
 			return err
 		}
 		return finishDecision(ctx, tx, tenantID, out, "approve", "")
@@ -405,7 +405,7 @@ func (s *Store) RejectRow(ctx context.Context, in RejectRowInput) (RowDecision, 
 			return err
 		}
 		// Rows waiting on a rejected parent row fail their link.
-		if err := settleWaitingOn(ctx, tx, tenantID, row); err != nil {
+		if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, in.RowID, row.RowNumber}); err != nil {
 			return err
 		}
 		return finishDecision(ctx, tx, tenantID, out, "reject", reason)
@@ -552,12 +552,12 @@ func finishDecision(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d RowDec
 // settleWaitingOn settles the links of the rows waiting on a row decided
 // without creating a risk (a duplicate or a rejection), under the
 // hierarchy lock.
-func settleWaitingOn(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, row lockedRow) error {
+func settleWaitingOn(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, row lockedRow, d decision) error {
 	if row.ExternalRef == "" {
 		return nil
 	}
 	if err := lockHierarchy(ctx, tx, tenantID); err != nil {
 		return err
 	}
-	return settleWaiting(ctx, tx, tenantID, row.BatchID, row.ExternalRef)
+	return settleWaiting(ctx, tx, tenantID, row.BatchID, row.ExternalRef, d)
 }

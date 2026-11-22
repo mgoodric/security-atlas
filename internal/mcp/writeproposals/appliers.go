@@ -606,8 +606,8 @@ type LinkChildRisksInput struct {
 // ApplyLinkChildRisks attaches existing risks as children of an existing
 // risk (#1748). It runs risk.LinkChildrenTx, the validation
 // POST /v1/risks/{id}/children uses (level order, no cycle, same tenant),
-// inside the confirm transaction. It returns the parent's id for
-// applied_subject.
+// inside the confirm transaction. Each new link is logged by the confirmer
+// (#2958). It returns the parent's id for applied_subject.
 func ApplyLinkChildRisks(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
 	var in LinkChildRisksInput
 	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
@@ -628,7 +628,8 @@ func ApplyLinkChildRisks(ctx context.Context, tx pgx.Tx, p Proposal) (string, er
 		}
 		childIDs[i] = id
 	}
-	if _, err := risk.LinkChildrenTx(ctx, dbx.New(tx), p.TenantID, parentID, childIDs); err != nil {
+	if _, err := risk.LinkChildrenTx(ctx, dbx.New(tx), p.TenantID, parentID, childIDs,
+		risk.HierarchyAudit{Actor: p.Confirmer.Actor()}); err != nil {
 		return "", fmt.Errorf("apply link_child_risks: %w", err)
 	}
 	return parentID.String(), nil
@@ -642,8 +643,9 @@ type UnlinkChildRiskInput struct {
 }
 
 // ApplyUnlinkChildRisk detaches one child from its parent (#1748) through
-// risk.UnlinkChildTx, as DELETE /v1/risks/{id}/children/{child_id} does. It
-// returns the parent's id for applied_subject.
+// risk.UnlinkChildTx, as DELETE /v1/risks/{id}/children/{child_id} does,
+// logged by the confirmer (#2958). It returns the parent's id for
+// applied_subject.
 func ApplyUnlinkChildRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
 	var in UnlinkChildRiskInput
 	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
@@ -657,7 +659,8 @@ func ApplyUnlinkChildRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, e
 	if err != nil {
 		return "", fmt.Errorf("%w: apply unlink_child_risk: child_risk_id must be UUID", ErrInvalidInput)
 	}
-	if err := risk.UnlinkChildTx(ctx, dbx.New(tx), p.TenantID, parentID, childID); err != nil {
+	if err := risk.UnlinkChildTx(ctx, dbx.New(tx), p.TenantID, parentID, childID,
+		risk.HierarchyAudit{Actor: p.Confirmer.Actor()}); err != nil {
 		return "", fmt.Errorf("apply unlink_child_risk: %w", err)
 	}
 	return parentID.String(), nil

@@ -6,9 +6,10 @@
 //
 // #2138: who made a change shows as a name through <Person> ("System" for a
 // `system:` actor), and an id-valued field (owner, approver, control, org
-// unit) shows the person's name or the item's title. The control and org
-// unit lists are fetched only when an entry names one; an id neither list
-// knows reads "Unknown control" or "Unknown org unit", never the id.
+// unit, child risk) shows the person's name or the item's title. The
+// control, org unit and risk lists are fetched only when an entry names
+// one; an id no list knows reads "Unknown control", "Unknown org unit" or
+// "Unknown risk", never the id.
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -18,7 +19,7 @@ import { Person } from "@/components/ui/person";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
 import { fetchHierarchyOrgUnits } from "@/lib/api/risk-hierarchy";
-import { fetchRiskAuditLog } from "@/lib/api/risks";
+import { fetchRiskAuditLog, fetchRisksListWithRollUps } from "@/lib/api/risks";
 
 import {
   historyActionLabel,
@@ -50,8 +51,20 @@ export function RiskHistory({ riskId }: { riskId: string }) {
     enabled: needs("org_unit"),
   });
 
+  // #2958: a child risk named by a hierarchy link or unlink.
+  const risks = useQuery({
+    queryKey: ["risk-history", "risks"],
+    queryFn: fetchRisksListWithRollUps,
+    staleTime: 30_000,
+    enabled: needs("risk"),
+  });
+
   const titleOf = (ref: HistoryChange["ref"], v: string) => {
     if (v === "none") return v;
+    if (ref === "risk") {
+      const r = (risks.data?.risks ?? []).find((x) => x.id === v);
+      return r?.title ?? (risks.isLoading ? "…" : "Unknown risk");
+    }
     if (ref === "control") {
       const c = (controls.data ?? []).find((x) => x.id === v);
       return c?.title ?? (controls.isLoading ? "…" : "Unknown control");

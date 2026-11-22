@@ -72,7 +72,8 @@ func TestHierarchyLock_PathsTakeItFirstAndOnlyWhenARuleMatches_2004(t *testing.T
 			return err
 		}},
 		{"LinkChildrenTx", true, func(ctx context.Context, tx pgx.Tx) error {
-			_, err := risk.LinkChildrenTx(ctx, dbx.New(tx), tenantID, uuid.New(), []uuid.UUID{uuid.New()})
+			_, err := risk.LinkChildrenTx(ctx, dbx.New(tx), tenantID, uuid.New(), []uuid.UUID{uuid.New()},
+				risk.HierarchyAudit{Actor: "test"})
 			if errors.Is(err, risk.ErrNotFound) {
 				return nil // reached the parent read, so it held the lock
 			}
