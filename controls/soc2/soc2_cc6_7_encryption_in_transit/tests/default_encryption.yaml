@@ -1,0 +1,334 @@
+# aws.s3.bucket_encryption_state.v1 records, shaped as the AWS connector
+# emits them at schema 1.1.0 (connectors/aws/cmd/aws-connector/cmd_run.go
+# buildRecord): `encryption_enabled` is `result == pass`, so it is false on
+# an inconclusive record too; `sse_algorithm`, `kms_key_id`, `region` and
+# `reason` are omitted when empty. observed_at is truncated to the hour.
+# `result` is the connector's verdict, which passes any default rule
+# whatever its algorithm.
+cases:
+  - name: aes256-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: aws-kms-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-customer-data
+          encryption_enabled: true
+          sse_algorithm: aws:kms
+          kms_key_id: alias/acme-data
+          bucket_key_enabled: true
+          account_id: "111122223333"
+          region: us-west-2
+
+  - name: aes256-and-aws-kms-pass
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-customer-data
+          encryption_enabled: true
+          sse_algorithm: aws:kms
+          kms_key_id: arn:aws:kms:us-west-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab
+          bucket_key_enabled: true
+          account_id: "111122223333"
+          region: us-west-2
+
+  - name: disallowed-algorithm-fails
+    description: the connector's verdict passes any default rule; aws:fsx is not an allowed algorithm
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-fsx-export
+          encryption_enabled: true
+          sse_algorithm: aws:fsx
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: dsse-kms-is-not-in-the-allowed-list
+    description: the allowed list is AES256 and aws:kms exactly; dual-layer KMS fails until the list names it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-regulated
+          encryption_enabled: true
+          sse_algorithm: aws:kms:dsse
+          kms_key_id: alias/acme-regulated
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: algorithm-is-case-sensitive
+    description: AWS returns the enum exactly; a lower-cased aes256 is not a value AWS emits
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: aes256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: no-default-encryption-fails
+    description: ServerSideEncryptionConfigurationNotFoundError; the connector emits fail with no algorithm
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+      - result: fail
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          encryption_enabled: false
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: eu-west-1
+
+  - name: unread-bucket-is-inconclusive
+    description: encryption_enabled is false because the connector could not read it, not because it is off
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+      - result: inconclusive
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-restricted
+          encryption_enabled: false
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+          reason: "get-bucket-encryption: AccessDenied"
+
+  - name: unread-bucket-does-not-hide-an-unencrypted-one
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-restricted
+          encryption_enabled: false
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          reason: "resolve region: AccessDenied"
+      - result: fail
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          encryption_enabled: false
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: eu-west-1
+
+  - name: encrypted-with-no-algorithm-is-inconclusive
+    description: a pass with no sse_algorithm does not say which algorithm is in force
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: latest-record-per-bucket-decides
+    description: the bucket was unencrypted yesterday and has AES256 default encryption today
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          encryption_enabled: false
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: eu-west-1
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: eu-west-1
+
+  - name: latest-unencrypted-record-fails-after-an-earlier-pass
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          encryption_enabled: true
+          sse_algorithm: aws:kms
+          bucket_key_enabled: true
+          account_id: "111122223333"
+          region: eu-west-1
+      - result: fail
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          encryption_enabled: false
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: eu-west-1
+
+  - name: tied-latest-with-one-failing-record-fails
+    description: two pushes in the same hour share an observed_at; a tied fail is not outvoted
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+      - result: fail
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: false
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: fail-verdict-naming-an-allowed-algorithm-is-inconclusive
+    description: not a shape the connector emits; the record shows neither pass nor fail
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: observed-at-over-1h-after-instant-is-inconclusive
+    description: a latest record more than an hour after the evaluation instant is unreadable, not proof
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T14:00:00Z
+        payload:
+          bucket_name: acme-logs
+          encryption_enabled: true
+          sse_algorithm: AES256
+          bucket_key_enabled: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: record-without-bucket-name-is-left-out
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_encryption_state.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          encryption_enabled: false
+          bucket_key_enabled: false
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records: []
