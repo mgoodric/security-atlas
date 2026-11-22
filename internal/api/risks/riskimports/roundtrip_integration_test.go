@@ -20,8 +20,9 @@ import (
 // TestRiskImport_ExportRoundTrip exports a tenant's register and uploads
 // the file into another tenant with no column map. The fields the import
 // maps arrive on the new risks; every other export column (the uuid,
-// computed severity, timestamps, ids, and fields not yet mapped) lands in
-// unmapped and rejects nothing.
+// computed severity, timestamps, other ids) lands in unmapped and rejects
+// nothing. owner_user_id and org_unit_id, blank on every row here, are not
+// listed (#2898).
 func TestRiskImport_ExportRoundTrip(t *testing.T) {
 	src := newEnv(t)
 	due := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
@@ -41,9 +42,9 @@ func TestRiskImport_ExportRoundTrip(t *testing.T) {
 
 	wantUnmapped := strings.Join([]string{
 		"id", "methodology",
-		"inherent_score", "residual_score", "severity", "org_unit_id",
+		"severity",
 		"created_at", "updated_at", "acceptance_status", "parent_risk_ids", "category_name", "status",
-		"closure_reason", "owner_user_id", "owner_name",
+		"closure_reason", "owner_name",
 	}, ",")
 
 	// The subtests share the destination tenant and run in order: csv

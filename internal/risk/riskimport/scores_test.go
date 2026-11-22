@@ -168,7 +168,7 @@ func TestParseScoresRejectionDetail(t *testing.T) {
 	}{
 		{dbx.RiskMethodologyQualitative5x5, "Likelihood,Impact", "3,", "inherent impact is missing: give both inherent likelihood and inherent impact, or neither"},
 		{dbx.RiskMethodologyQualitative5x5, "Likelihood,Impact", "7,2", `inherent likelihood "7" is not a whole number from 1 to 5`},
-		{dbx.RiskMethodologyNist80030, "Residual Likelihood,Residual Impact", "2,2", "residual scores need inherent scores: give inherent likelihood and inherent impact too"},
+		{dbx.RiskMethodologyNist80030, "Residual Likelihood,Residual Impact", "2,2", "residual scores need inherent scores: give inherent likelihood and inherent impact, or inherent score, too"},
 		{dbx.RiskMethodologyFair, "LEF,LM", "0.5,\"1,000\"", `inherent loss magnitude "1,000" is not a plain non-negative number such as 0.5 or 250000`},
 		{dbx.RiskMethodologyQualitative5x5, "Likelihood,Impact", strings.Repeat("9", 60) + ",2", `inherent likelihood "` + strings.Repeat("9", 40) + `…" is not a whole number from 1 to 5`},
 	}
