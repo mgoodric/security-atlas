@@ -158,9 +158,18 @@ func TestAcknowledge2817_ReachesStockAckControls(t *testing.T) {
 		t.Fatalf("want 1 unbound policy.acknowledgment.v1 record, got %d", unbound)
 	}
 
+	// Each control receives the one record. Since #2832 each judges it: one
+	// user acknowledging one of the five stock titles fails cc1_5, a current
+	// version passes cc5_3, and a policy that is not the IR plan leaves cc7_4
+	// inconclusive.
+	afterAck := map[string]string{
+		"soc2_cc1_5_accountability_acknowledgment": eval.ResultFail,
+		"soc2_cc5_3_policies_procedures":           eval.ResultPass,
+		"soc2_cc7_4_incident_response":             eval.ResultInconclusive,
+	}
 	for _, b := range ackStockBundles {
-		if res, n := evaluate(b); res != eval.ResultPass || n != 1 {
-			t.Errorf("%s after ack: got (%s, %d in window), want (pass, 1)", b, res, n)
+		if res, n := evaluate(b); res != afterAck[b] || n != 1 {
+			t.Errorf("%s after ack: got (%s, %d in window), want (%s, 1)", b, res, n, afterAck[b])
 		}
 	}
 

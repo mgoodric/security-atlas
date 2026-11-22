@@ -8,17 +8,32 @@ description: |
   Information Security, Access Control, Vendor Management, Incident
   Response and Change Management.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the tenant's
-  `policy.acknowledgment.v1` acknowledgements (#2869), and each one is
-  recorded as pass. The control therefore passes on any acknowledgement of
-  any policy in the weekly window of 30 days. Which policies, which
-  versions and which users are not checked.
+  What runs today: a SQL query over the tenant's `policy.acknowledgment.v1`
+  records, which only the acknowledgement handler writes (#2869, #2873).
+  It judges every user who appears in the weekly window of 30 days, keyed
+  by the payload's `user_id`. For each user and policy title it takes the
+  latest acknowledgement by `observed_at`. A user passes when those cover
+  all five stock titles: "Information Security Policy", "Access Control
+  Policy", "Vendor Management Policy", "Incident Response Plan" and
+  "Change Management Policy". The title is the policy's title at
+  acknowledgement time, snapshotted into the payload's `policy_title`
+  (#2832). A user fails when their acknowledgements carry titles but miss
+  one or more of the five. Any failing user fails the control; it passes
+  only when every user passes.
 
-  Pending: acknowledgements covering all five core policies in their
-  current version (#2832); and every active user having acknowledged them,
-  which needs a user inventory (#2834).
+  A user is unread, and the control inconclusive unless another user
+  fails, when one of their records carries no `policy_title`
+  (acknowledgements recorded before #2832) or has an `observed_at` more
+  than an hour after the evaluation instant. When a user's latest records
+  for a title tie on `observed_at`, the title counts only if every tied
+  record's `result` is pass. Records without a `user_id` are left out,
+  and no record leaves the control inconclusive.
+
+  Not checked: titles are matched exactly, so a renamed stock policy no
+  longer counts as one of the five. Which version was acknowledged is
+  cc5_3's check, not this one. Users with no acknowledgement in the window
+  are not counted at all: every active user having acknowledged the five
+  needs a user inventory (#2834).
 
 scf_anchor_id: HRS-02
 control_family: HRS
@@ -29,27 +44,55 @@ freshness_class: weekly
 
 evidence_queries:
   - id: all_users_acknowledged_core_policies
-    language: rego
+    language: sql
     evidence_kind: policy.acknowledgment.v1
-    description: "Every active user has acknowledged all 5 v1 stock policies in current version"
+    description: "Every user with an in-window acknowledgement has acknowledged all five stock policy titles"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 2 THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT user_id,
+               CASE
+                 WHEN count(DISTINCT title) FILTER (
+                        WHERE core AND NOT future AND recency = 1 AND tie_ok
+                      ) = 5 THEN 2
+                 WHEN bool_or(title IS NULL OR future) THEN 1
+                 ELSE 0
+               END AS verdict
+        FROM (
+          SELECT user_id, title, future,
+                 title IN (
+                   'Information Security Policy',
+                   'Access Control Policy',
+                   'Vendor Management Policy',
+                   'Incident Response Plan',
+                   'Change Management Policy'
+                 ) AS core,
+                 rank() OVER (
+                   PARTITION BY user_id, title, future
+                   ORDER BY observed_at DESC
+                 ) AS recency,
+                 bool_and(result = 'pass') OVER (
+                   PARTITION BY user_id, title, future, observed_at
+                 ) AS tie_ok
+          FROM (
+            SELECT payload->>'user_id' AS user_id,
+                   CASE
+                     WHEN jsonb_typeof(payload->'policy_title') = 'string'
+                          AND payload->>'policy_title' <> ''
+                       THEN payload->>'policy_title'
+                   END AS title,
+                   result,
+                   observed_at,
+                   observed_at > evaluated_at + interval '1 hour' AS future
+            FROM evidence
+            WHERE jsonb_typeof(payload->'user_id') = 'string'
+              AND payload->>'user_id' <> ''
+          ) AS keyed
+        ) AS ranked
+        GROUP BY user_id
+      ) AS per_user
