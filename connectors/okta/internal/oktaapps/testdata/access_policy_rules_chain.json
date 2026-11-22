@@ -1,0 +1,36 @@
+[
+  {
+    "id": "rul1chain",
+    "status": "ACTIVE",
+    "name": "Method chain",
+    "priority": 0,
+    "system": false,
+    "conditions": null,
+    "actions": {
+      "appSignOn": {
+        "access": "ALLOW",
+        "verificationMethod": {
+          "type": "AUTH_METHOD_CHAIN",
+          "chains": [
+            {
+              "authenticationMethods": [
+                { "key": "okta_password", "method": "password" }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "type": "ACCESS_POLICY"
+  },
+  {
+    "id": "ruleId",
+    "status": "ACTIVE",
+    "name": "Catch-all rule",
+    "priority": 99,
+    "system": true,
+    "conditions": null,
+    "actions": { "appSignOn": { "access": "DENY" } },
+    "type": "ACCESS_POLICY"
+  }
+]
