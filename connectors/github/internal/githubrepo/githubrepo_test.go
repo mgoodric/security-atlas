@@ -3,6 +3,7 @@ package githubrepo_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -21,8 +22,9 @@ import (
 type fakeAPI struct {
 	repos      []githubrepo.Repo
 	prot       map[string]*githubrepo.BranchProtection
-	notFound   map[string]bool
+	notFound   map[string]bool // classic protection: "Branch not protected"
 	errOn      map[string]error
+	branches   map[string]*githubrepo.Branch
 	rules      map[string][]githubrepo.BranchRule
 	rulesErrOn map[string]error
 	rulesets   map[int64]*githubrepo.Ruleset
@@ -37,9 +39,17 @@ func (f *fakeAPI) GetBranchProtection(_ context.Context, repo, _ string) (*githu
 		return nil, e
 	}
 	if f.notFound[repo] {
-		return nil, &githubrepo.APIError{Status: http.StatusNotFound}
+		return nil, githubrepo.ErrBranchNotProtected
 	}
 	return f.prot[repo], nil
+}
+
+func (f *fakeAPI) GetBranch(_ context.Context, repo, _ string) (*githubrepo.Branch, error) {
+	b, ok := f.branches[repo]
+	if !ok {
+		return nil, &githubrepo.APIError{Status: http.StatusNotFound}
+	}
+	return b, nil
 }
 
 func (f *fakeAPI) GetBranchRules(_ context.Context, repo, _ string) ([]githubrepo.BranchRule, error) {
@@ -69,9 +79,17 @@ func prRule(rulesetID int64, n int) githubrepo.BranchRule {
 	}
 }
 
+// bypass is an organization ruleset with these bypass actors.
 func bypass(actors ...githubrepo.BypassActor) *githubrepo.Ruleset {
 	list := append([]githubrepo.BypassActor{}, actors...)
-	return &githubrepo.Ruleset{BypassActors: &list}
+	return &githubrepo.Ruleset{SourceType: "Organization", BypassActors: &list}
+}
+
+// repoBypass is a repository ruleset with these bypass actors.
+func repoBypass(actors ...githubrepo.BypassActor) *githubrepo.Ruleset {
+	rs := bypass(actors...)
+	rs.SourceType = "Repository"
+	return rs
 }
 
 func inspectOne(t *testing.T, api *fakeAPI) githubrepo.ProtectionState {
@@ -101,6 +119,14 @@ func intVal(p *int) string {
 }
 
 var repoA = githubrepo.Repo{ID: 101, FullName: "org/a", DefaultBranch: "main"}
+
+// repoAWith is repoA as the listing reports it to a caller with or
+// without admin on it.
+func repoAWith(admin bool) githubrepo.Repo {
+	r := repoA
+	r.Permissions = &githubrepo.RepoPermissions{Admin: admin}
+	return r
+}
 
 func TestInspect_PassWhenReviewsRequired(t *testing.T) {
 	s := inspectOne(t, &fakeAPI{
@@ -199,25 +225,36 @@ func TestInspect_FetchErrorLeavesFieldsUnread(t *testing.T) {
 func TestInspect_RulesetOnly(t *testing.T) {
 	cases := []struct {
 		name    string
+		repo    githubrepo.Repo // zero value: repoA, no permissions reported
 		ruleset *githubrepo.Ruleset
 		want    string
 	}{
-		{"nobody bypasses", bypass(), "true"},
-		{"only an app and a deploy key bypass", bypass(
+		{"nobody bypasses a repository ruleset the caller administers", repoAWith(true), repoBypass(), "true"},
+		// #2933: GitHub may send [] rather than omit bypass_actors to a
+		// caller without write access, so [] alone proves nothing.
+		{"empty bypass list, caller is not a repository admin", repoAWith(false), repoBypass(), "unread"},
+		{"empty bypass list, permissions not reported", githubrepo.Repo{}, repoBypass(), "unread"},
+		{"empty bypass list on an organization ruleset", repoAWith(true), bypass(), "unread"},
+		{"empty bypass list, source_type missing", repoAWith(true), &githubrepo.Ruleset{BypassActors: &[]githubrepo.BypassActor{}}, "unread"},
+		{"only an app and a deploy key bypass", githubrepo.Repo{}, bypass(
 			githubrepo.BypassActor{ActorType: "Integration"},
 			githubrepo.BypassActor{ActorType: "DeployKey"},
 		), "true"},
-		{"org admins bypass", bypass(githubrepo.BypassActor{ActorType: "OrganizationAdmin"}), "false"},
-		{"a repository role bypasses", bypass(githubrepo.BypassActor{ActorType: "RepositoryRole"}), "false"},
-		{"a team bypasses on pull requests", bypass(githubrepo.BypassActor{ActorType: "Team", BypassMode: "pull_request"}), "false"},
-		{"a user bypasses", bypass(githubrepo.BypassActor{ActorType: "User"}), "false"},
-		{"bypass actors withheld", &githubrepo.Ruleset{}, "unread"},
-		{"ruleset not readable", nil, "unread"},
+		{"org admins bypass", githubrepo.Repo{}, bypass(githubrepo.BypassActor{ActorType: "OrganizationAdmin"}), "false"},
+		{"a repository role bypasses", githubrepo.Repo{}, bypass(githubrepo.BypassActor{ActorType: "RepositoryRole"}), "false"},
+		{"a team bypasses on pull requests", githubrepo.Repo{}, bypass(githubrepo.BypassActor{ActorType: "Team", BypassMode: "pull_request"}), "false"},
+		{"a user bypasses", githubrepo.Repo{}, bypass(githubrepo.BypassActor{ActorType: "User"}), "false"},
+		{"bypass actors withheld", repoAWith(true), &githubrepo.Ruleset{}, "unread"},
+		{"ruleset not readable", githubrepo.Repo{}, nil, "unread"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			repo := tc.repo
+			if repo.ID == 0 {
+				repo = repoA
+			}
 			api := &fakeAPI{
-				repos:    []githubrepo.Repo{repoA},
+				repos:    []githubrepo.Repo{repo},
 				notFound: map[string]bool{"org/a": true},
 				rules:    map[string][]githubrepo.BranchRule{"org/a": {prRule(9, 2)}},
 				rulesets: map[int64]*githubrepo.Ruleset{},
@@ -247,7 +284,7 @@ func TestInspect_RulesetOnly(t *testing.T) {
 func TestInspect_MergesClassicAndRulesets(t *testing.T) {
 	t.Run("ruleset raises the review count and binds admins", func(t *testing.T) {
 		s := inspectOne(t, &fakeAPI{
-			repos: []githubrepo.Repo{repoA},
+			repos: []githubrepo.Repo{repoAWith(true)},
 			prot: map[string]*githubrepo.BranchProtection{"org/a": {
 				RequiredPullRequestReviews: reviews(1, false),
 				EnforceAdmins:              &githubrepo.Enabled{Enabled: false},
@@ -256,7 +293,7 @@ func TestInspect_MergesClassicAndRulesets(t *testing.T) {
 				prRule(9, 3),
 				{Type: "required_linear_history", RulesetID: 9},
 			}},
-			rulesets: map[int64]*githubrepo.Ruleset{9: bypass()},
+			rulesets: map[int64]*githubrepo.Ruleset{9: repoBypass()},
 		})
 		if intVal(s.RequiredReviews) != "3" || boolVal(s.EnforceAdmins) != "true" || boolVal(s.RequireLinearHistory) != "true" {
 			t.Errorf("reviews=%s enforce_admins=%s linear=%s; want 3 true true",
@@ -553,5 +590,145 @@ func TestClient_GetRulesetWithheldBypass(t *testing.T) {
 	}
 	if rs.BypassActors != nil {
 		t.Fatalf("BypassActors = %v; want nil (withheld)", *rs.BypassActors)
+	}
+}
+
+// #2933: classic protection answers 404 both for an unprotected branch
+// and for a token that can't read it. Only the first reads as no classic
+// protection; the rest leave the repo inconclusive, never failed.
+func TestInspect_ClassicNotFound(t *testing.T) {
+	f, tr := false, true
+	cases := []struct {
+		name     string
+		branch   *githubrepo.Branch // nil: GET branch answers 404
+		wantRead bool
+	}{
+		{"branch reads unprotected", &githubrepo.Branch{Protected: &f}, true},
+		{"branch reads protected", &githubrepo.Branch{Protected: &tr}, false},
+		{"branch omits protected", &githubrepo.Branch{}, false},
+		{"branch not readable", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{
+				repos: []githubrepo.Repo{repoA},
+				errOn: map[string]error{"org/a": &githubrepo.APIError{Status: http.StatusNotFound, Body: `{"message":"Not Found"}`}},
+			}
+			if tc.branch != nil {
+				api.branches = map[string]*githubrepo.Branch{"org/a": tc.branch}
+			}
+			s := inspectOne(t, api)
+			if tc.wantRead {
+				if s.Result != githubrepo.ResultFail || s.ProtectionSource != githubrepo.SourceNone {
+					t.Errorf("result=%q source=%q; want fail none", s.Result, s.ProtectionSource)
+				}
+				return
+			}
+			if s.Result != githubrepo.ResultInconclusive || s.ProtectionSource != "" || s.RequiredReviews != nil {
+				t.Errorf("result=%q source=%q reviews=%s; want inconclusive with fields unread",
+					s.Result, s.ProtectionSource, intVal(s.RequiredReviews))
+			}
+			if !strings.Contains(s.Reason, "branch protection") {
+				t.Errorf("reason = %q; want it to name branch protection", s.Reason)
+			}
+		})
+	}
+}
+
+func TestClient_GetBranchProtection404(t *testing.T) {
+	cases := []struct {
+		name          string
+		body          string
+		wantSentinel  bool
+		wantBodyInErr bool
+	}{
+		{"branch not protected", `{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest"}`, true, false},
+		{"not found", `{"message":"Not Found","documentation_url":"https://docs.github.com/rest"}`, false, true},
+		{"empty body", ``, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/repos/org/a/branches/main/protection", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			srv := httptest.NewServer(mux)
+			t.Cleanup(srv.Close)
+
+			_, err := newClient(t, srv).GetBranchProtection(context.Background(), "org/a", "main")
+			if got := errors.Is(err, githubrepo.ErrBranchNotProtected); got != tc.wantSentinel {
+				t.Fatalf("errors.Is(ErrBranchNotProtected) = %v; want %v (err=%v)", got, tc.wantSentinel, err)
+			}
+			if tc.wantSentinel {
+				return
+			}
+			var ae *githubrepo.APIError
+			if !errors.As(err, &ae) || ae.Status != http.StatusNotFound {
+				t.Fatalf("err = %v; want APIError 404", err)
+			}
+			if tc.wantBodyInErr && !strings.Contains(ae.Body, "Not Found") {
+				t.Errorf("Body = %q; want the 404 body kept", ae.Body)
+			}
+		})
+	}
+}
+
+func TestClient_GetBranchDocumentedShape(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/octocat/Hello-World/branches/main", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(fixture(t, "branch.json"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	b, err := newClient(t, srv).GetBranch(context.Background(), "octocat/Hello-World", "main")
+	if err != nil {
+		t.Fatalf("GetBranch: %v", err)
+	}
+	if b.Protected == nil || *b.Protected {
+		t.Fatalf("Protected = %s; want false", boolVal(b.Protected))
+	}
+}
+
+// #2933 over HTTP: a repository ruleset answering bypass_actors: [] binds
+// admins only for a caller the repo listing reports as admin. The shapes
+// are GitHub's minimal-repository and repository-ruleset, with the bypass
+// list emptied.
+func TestClient_EmptyBypassNeedsAdmin(t *testing.T) {
+	for _, admin := range []bool{true, false} {
+		t.Run(fmt.Sprintf("admin=%v", admin), func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/orgs/octocat/repos", func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `[{"id":1296269,"full_name":"octocat/Hello-World","default_branch":"master","archived":false,
+					"permissions":{"admin":%v,"push":%v,"pull":true}}]`, admin, admin)
+			})
+			mux.HandleFunc("/repos/octocat/Hello-World/branches/master/protection", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"Branch not protected"}`))
+			})
+			mux.HandleFunc("/repos/octocat/Hello-World/rules/branches/master", func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`[{"type":"pull_request","ruleset_source_type":"Repository","ruleset_source":"octocat/Hello-World",
+					"ruleset_id":42,"parameters":{"required_approving_review_count":1,"require_code_owner_review":false}}]`))
+			})
+			mux.HandleFunc("/repos/octocat/Hello-World/rulesets/42", func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"id":42,"name":"super cool ruleset","target":"branch","source_type":"Repository",
+					"source":"monalisa/my-repo","enforcement":"active","bypass_actors":[]}`))
+			})
+			srv := httptest.NewServer(mux)
+			t.Cleanup(srv.Close)
+
+			got, err := githubrepo.Inspect(context.Background(), newClient(t, srv), "octocat", nil)
+			if err != nil || len(got) != 1 {
+				t.Fatalf("Inspect = %d states, %v", len(got), err)
+			}
+			want := "unread"
+			if admin {
+				want = "true"
+			}
+			if g := boolVal(got[0].EnforceAdmins); g != want {
+				t.Errorf("enforce_admins = %s; want %s", g, want)
+			}
+		})
 	}
 }

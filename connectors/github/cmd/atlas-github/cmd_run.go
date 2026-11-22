@@ -81,8 +81,9 @@ func newRunCmd() *cobra.Command {
 and push to the platform.
 
 PAT scopes required:
-  - Repository: Administration: Read  (gates github.repo_protection.v2)
-  - Repository: Metadata:       Read
+  - Repository: Administration: Read  (classic branch protection)
+  - Repository: Metadata:       Read  (repo listing, rulesets)
+  - Repository: Contents:       Read  (optional: cross-checks a protection 404)
   - Organization: Members:      Read  (gates github.scim_user.v1)
   - Organization: Webhooks:     Read
 
