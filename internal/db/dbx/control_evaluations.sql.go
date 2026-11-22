@@ -155,7 +155,7 @@ SELECT id, tenant_id, control_id, control_ref, scope_id,
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
   AND (control_id = $2
-       OR (control_ref = $3 AND evidence_kind <> ALL($4::text[]))
+       OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY($5::text[])
            AND EXISTS (SELECT 1 FROM controls uc

@@ -15,7 +15,7 @@ const countEvidenceRecordsByControl = `-- name: CountEvidenceRecordsByControl :o
 SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL($4::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY($5::text[])
            AND EXISTS (SELECT 1 FROM controls uc
@@ -53,7 +53,7 @@ const countEvidenceRecordsByControlBeforeHorizon = `-- name: CountEvidenceRecord
 SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL($4::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY($5::text[])
            AND EXISTS (SELECT 1 FROM controls uc
@@ -510,7 +510,7 @@ const listEvidenceRecordsByControl = `-- name: ListEvidenceRecordsByControl :man
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL($6::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($6::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY($7::text[])
            AND EXISTS (SELECT 1 FROM controls uc
@@ -594,7 +594,7 @@ const listEvidenceRecordsByControlBeforeHorizon = `-- name: ListEvidenceRecordsB
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL($6::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($6::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY($7::text[])
            AND EXISTS (SELECT 1 FROM controls uc

@@ -333,7 +333,7 @@ SELECT
     EXISTS (
         SELECT 1 FROM evidence_records e
         WHERE e.tenant_id = c.tenant_id
-          AND (e.control_id = c.id OR (e.control_ref = c.id::text AND e.evidence_kind <> ALL($2::text[]))
+          AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL($2::text[])))
               OR (e.control_id IS NULL
                   AND e.evidence_kind = ANY($3::text[])
                   AND c.evidence_queries @> jsonb_build_array(

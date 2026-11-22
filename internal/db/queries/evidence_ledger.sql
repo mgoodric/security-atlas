@@ -60,7 +60,7 @@ WHERE id = $1
 SELECT *
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND EXISTS (SELECT 1 FROM controls uc
@@ -81,7 +81,7 @@ SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
 SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND EXISTS (SELECT 1 FROM controls uc
@@ -105,7 +105,7 @@ WHERE evidence_records.tenant_id = $1
 SELECT *
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND EXISTS (SELECT 1 FROM controls uc
@@ -126,7 +126,7 @@ LIMIT $4 OFFSET $5;
 SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (control_ref = $3 AND evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[]))
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND EXISTS (SELECT 1 FROM controls uc

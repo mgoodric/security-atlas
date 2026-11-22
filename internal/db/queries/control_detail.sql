@@ -48,7 +48,7 @@ SELECT id, tenant_id, control_id, control_ref, scope_id,
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
   AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3
-                            AND evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[]))
+                            AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND EXISTS (SELECT 1 FROM controls uc
@@ -73,7 +73,7 @@ SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
   AND (control_id = $2 OR (NOT sqlc.arg(id_only)::boolean AND control_ref = $3
-                            AND evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[]))
+                            AND (evidence_kind IS NULL OR evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (control_id IS NULL
            AND evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND EXISTS (SELECT 1 FROM controls uc

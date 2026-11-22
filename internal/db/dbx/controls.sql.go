@@ -864,7 +864,7 @@ ranked_controls AS (
     FROM matched_controls c
     LEFT JOIN evidence_records e
         ON e.tenant_id = $1
-       AND (e.control_id = c.id OR (e.control_ref = c.id::text AND e.evidence_kind <> ALL($5::text[]))
+       AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL($5::text[])))
            OR (e.control_id IS NULL
                AND e.evidence_kind = ANY($6::text[])
                AND c.evidence_queries @> jsonb_build_array(

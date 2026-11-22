@@ -191,11 +191,11 @@ func readerCounts(t *testing.T, app *pgxpool.Pool, tenant string, ctrl uuid.UUID
 	return got
 }
 
-// insertLegacyRefRow copies the ledger row src as a new row of a bound
-// (non-routed) kind with control_id NULL and control_ref = ref: the shape a
-// control_ref-only record has. It is inserted as the owner; readers then see
-// it through RLS as the app role.
-func insertLegacyRefRow(t *testing.T, admin *pgxpool.Pool, src uuid.UUID, ref string) uuid.UUID {
+// insertLegacyRefRow copies the ledger row src as a new row of kind (a bound,
+// non-routed kind, or NULL: evidence_kind is nullable) with control_id NULL
+// and control_ref = ref: the shape a control_ref-only record has. It is
+// inserted as the owner; readers then see it through RLS as the app role.
+func insertLegacyRefRow(t *testing.T, admin *pgxpool.Pool, src uuid.UUID, ref string, kind *string) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
 	id := uuid.New()
@@ -211,8 +211,8 @@ func insertLegacyRefRow(t *testing.T, admin *pgxpool.Pool, src uuid.UUID, ref st
 		{`CREATE TEMP TABLE legacy_2931 ON COMMIT DROP AS SELECT * FROM evidence_records WHERE id = $1`,
 			[]any{src}},
 		{`UPDATE legacy_2931 SET id = $1, control_id = NULL, control_ref = $2,
-		        evidence_kind = 'test.bound_kind_2931.v1', idempotency_key = $3`,
-			[]any{id, ref, "legacy-2931-" + id.String()}},
+		        evidence_kind = $3, idempotency_key = $4`,
+			[]any{id, ref, kind, "legacy-2931-" + id.String()}},
 		{`INSERT INTO evidence_records SELECT * FROM legacy_2931`, nil},
 	} {
 		if _, err := tx.Exec(ctx, s.sql, s.args...); err != nil {
@@ -263,12 +263,22 @@ func TestRouted2931_ExplicitUUIDOnUndeclaredControlIsReadByNoReader(t *testing.T
 		}
 	}
 
-	// A bound kind's control_ref-only row still reaches the control it
-	// names: the control_ref leg is closed only for routed kinds.
-	legacy := insertLegacyRefRow(t, admin, rec, undeclared.String())
-	for name, n := range readerCounts(t, app, tenantA, undeclared, map[uuid.UUID]bool{legacy: true}) {
-		if n != 1 {
-			t.Errorf("bound-kind control_ref row: %s = %d, want 1", name, n)
+	// A control_ref-only row of a bound kind, or of no kind, still reaches
+	// the control it names: the control_ref leg is closed only for routed
+	// kinds. The NULL kind is the case `evidence_kind <> ALL(...)` alone gets
+	// wrong (NULL, so the leg would close).
+	boundKind := "test.bound_kind_2931.v1"
+	legacy := map[uuid.UUID]bool{}
+	for _, kind := range []*string{&boundKind, nil} {
+		legacy[insertLegacyRefRow(t, admin, rec, undeclared.String(), kind)] = true
+	}
+	for name, n := range readerCounts(t, app, tenantA, undeclared, legacy) {
+		want := int64(2)
+		if name == "checklist.ListInScopeControlsForChecklist" {
+			want = 1 // has_evidence is a boolean
+		}
+		if n != want {
+			t.Errorf("bound-kind and NULL-kind control_ref rows: %s = %d, want %d", name, n, want)
 		}
 	}
 }
