@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/jira.ticket_evidence/1.1.0.json",
+  "x-evidence-kind": "jira.ticket_evidence.v1",
+  "x-semver": "1.1.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CHG-02", "GOV-05"],
+  "title": "Jira ticket evidence",
+  "description": "One Jira ticket cited as evidence (e.g., a change ticket). 1.1.0 (#2829) adds assignee_account_id, labels, priority, severity, created_at and resolved_at; a field the connector has no value for is omitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ticket_key", "status"],
+  "properties": {
+    "ticket_key": { "type": "string", "minLength": 1 },
+    "project_key": { "type": "string" },
+    "summary": { "type": "string" },
+    "status": { "type": "string", "minLength": 1 },
+    "resolution": { "type": "string" },
+    "assignee": { "type": "string" },
+    "url": { "type": "string", "format": "uri" },
+    "assignee_account_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The assignee's Jira accountId. Stable where the display name is not."
+    },
+    "labels": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "The issue's labels, verbatim. Omitted when it has none."
+    },
+    "priority": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The name of the issue's priority, verbatim."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"],
+      "description": "The connector's --severity-field (default priority) normalised: critical, high, medium or low, case-insensitively, and priority Highest and Lowest as critical and low. Omitted when the value is absent or not one of those."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the issue was created (Jira field created), RFC 3339 in UTC."
+    },
+    "resolved_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the issue was resolved (Jira field resolutiondate), RFC 3339 in UTC. Omitted while it is unresolved."
+    }
+  }
+}
