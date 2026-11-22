@@ -171,6 +171,34 @@ describe("risk history format (#2104)", () => {
     ]);
   });
 
+  test("a child risk link and unlink read as the child risk (#2958)", () => {
+    const child = "0b1f5a3e-3c55-4b8e-9d0e-2b6f8a9c1d42";
+    expect(historyActionLabel("child_linked")).toBe("Child risk linked");
+    expect(historyActionLabel("child_unlinked")).toBe("Child risk unlinked");
+    expect(
+      historyChanges(
+        entry(
+          "child_linked",
+          { child_risk_id: null },
+          { child_risk_id: child },
+        ),
+      ),
+    ).toEqual([
+      { field: "Child risk", before: "none", after: child, ref: "risk" },
+    ]);
+    expect(
+      historyChanges(
+        entry(
+          "child_unlinked",
+          { child_risk_id: child },
+          { child_risk_id: null },
+        ),
+      ),
+    ).toEqual([
+      { field: "Child risk", before: child, after: "none", ref: "risk" },
+    ]);
+  });
+
   test("id-valued fields carry the kind of thing they name (#2138)", () => {
     const changes = historyChanges(
       entry(
