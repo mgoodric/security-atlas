@@ -36,6 +36,15 @@ const (
 	FieldResidualLossMagnitude      = "residual_loss_magnitude"
 )
 
+// FieldInherentScore and FieldResidualScore are whole scores as JSON, the
+// shape the risk export writes them in (#2898). They apply to every
+// methodology: the JSON is put through the batch methodology's create
+// rule, so a score of another shape is rejected rather than read.
+const (
+	FieldInherentScore = "inherent_score"
+	FieldResidualScore = "residual_score"
+)
+
 // RejectInvalidScore is a row whose score cells do not make a score its
 // batch's methodology accepts.
 const RejectInvalidScore = "invalid_score"
@@ -146,44 +155,66 @@ func fairCell(raw string) (any, bool) {
 }
 
 // scoresFromCells builds a row's inherent and residual scores from its score
-// cells. Both are nil for an unscored row. A pair is given whole or not at
-// all, and a residual needs an inherent, as on a single create. The scores
-// are then put through risk.PrepareCreateScores, the create path's own rule,
-// so a staged score is one approval will accept, and what is staged is what
-// the risk will hold (a FAIR score with its derived annualized loss
-// exposure). ok false carries the rejection detail.
+// cells. Both are nil for an unscored row. Each score is given either as a
+// pair of cells or as one JSON cell, the export's shape (#2898), not both.
+// A pair is given whole or not at all, and a residual needs an inherent, as
+// on a single create. The scores are then put through
+// risk.PrepareCreateScores, the create path's own rule, so a staged score is
+// one approval will accept, and what is staged is what the risk will hold (a
+// FAIR score with its derived annualized loss exposure). A JSON score of
+// another methodology's shape fails that rule. ok false carries the
+// rejection detail.
 func scoresFromCells(m dbx.RiskMethodology, cells map[string]string) (inherent, residual json.RawMessage, detail string, ok bool) {
 	shape := shapeFor(m)
-	inh, detail, ok := scorePair(shape, shape.inherent, cells)
+	inhJSON, detail, ok := scoreJSON(shape, shape.inherent, FieldInherentScore, cells)
 	if !ok {
 		return nil, nil, detail, false
 	}
-	res, detail, ok := scorePair(shape, shape.residual, cells)
+	resJSON, detail, ok := scoreJSON(shape, shape.residual, FieldResidualScore, cells)
 	if !ok {
 		return nil, nil, detail, false
 	}
-	if inh == nil && res != nil {
-		return nil, nil, fmt.Sprintf("residual scores need inherent scores: give %s and %s too",
-			fieldLabel(shape.inherent[0]), fieldLabel(shape.inherent[1])), false
+	if inhJSON == nil && resJSON != nil {
+		return nil, nil, fmt.Sprintf("residual scores need inherent scores: give %s and %s, or %s, too",
+			fieldLabel(shape.inherent[0]), fieldLabel(shape.inherent[1]), fieldLabel(FieldInherentScore)), false
 	}
-	if inh == nil {
+	if inhJSON == nil {
 		return nil, nil, "", true
-	}
-	inhJSON, err := json.Marshal(inh)
-	if err != nil {
-		return nil, nil, "inherent score could not be encoded", false
-	}
-	var resJSON []byte
-	if res != nil {
-		if resJSON, err = json.Marshal(res); err != nil {
-			return nil, nil, "residual score could not be encoded", false
-		}
 	}
 	prepInh, prepRes, err := risk.PrepareCreateScores(m, inhJSON, resJSON)
 	if err != nil {
 		return nil, nil, strings.TrimPrefix(err.Error(), "risk: "), false
 	}
 	return json.RawMessage(prepInh), scoredOrNil(prepRes), "", true
+}
+
+// scoreJSON reads one score, from its pair of cells or its JSON cell, as
+// JSON; nil is no score. A JSON cell holding an unscored blob (null or {},
+// as the export writes an unscored risk) is no score.
+func scoreJSON(shape scoreShape, fields [2]string, jsonField string, cells map[string]string) ([]byte, string, bool) {
+	pair, detail, ok := scorePair(shape, fields, cells)
+	if !ok {
+		return nil, detail, false
+	}
+	raw := cells[jsonField]
+	if raw != "" && pair != nil {
+		return nil, fmt.Sprintf("give the score as %s or as %s and %s, not both",
+			fieldLabel(jsonField), fieldLabel(fields[0]), fieldLabel(fields[1])), false
+	}
+	if raw != "" {
+		if scoredOrNil(json.RawMessage(raw)) == nil {
+			return nil, "", true
+		}
+		return []byte(raw), "", true
+	}
+	if pair == nil {
+		return nil, "", true
+	}
+	out, err := json.Marshal(pair)
+	if err != nil {
+		return nil, fieldLabel(jsonField) + " could not be encoded", false
+	}
+	return out, "", true
 }
 
 // scorePair reads one pair of cells into {key: value}. Both blank is nil

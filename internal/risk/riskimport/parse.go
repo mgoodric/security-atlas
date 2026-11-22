@@ -119,6 +119,12 @@ type StagedRisk struct {
 	// (placement.go).
 	Level   dbx.RiskLevel `json:"level,omitempty"`
 	OrgUnit string        `json:"org_unit,omitempty"`
+	// OwnerUserIDRef and OrgUnitIDRef are the export's owner_user_id and
+	// org_unit_id cells as written. Each is also kept in Unmapped until
+	// staging finds it names a user or org unit of the uploading tenant
+	// (idfallback.go).
+	OwnerUserIDRef string `json:"-"`
+	OrgUnitIDRef   string `json:"-"`
 	// ParentRef is the parent-risk-ID cell as written: the organisation
 	// risk ID of the risk this one rolls up to (parentlink.go).
 	ParentRef string            `json:"parent_ref,omitempty"`
@@ -139,6 +145,9 @@ type ParseResult struct {
 	Risks           []StagedRisk        `json:"risks"`
 	Rejected        []RejectedRow       `json:"rejected"`
 	UnmappedColumns []string            `json:"unmapped_columns"`
+	// idColumns maps each id field (idfallback.go) the file has to the key
+	// its values are kept under in Unmapped.
+	idColumns map[string]string
 }
 
 // ParseOptions tunes header detection. ColumnMap maps a canonical field name
@@ -156,11 +165,12 @@ type ParseOptions struct {
 
 // fieldAliases are the header spellings each field is recognised by. The
 // risk export's own headers are among them (external_ref, title,
-// description, category, themes, review_due_at), so an export re-imports with no
-// column map. The export's "id" is the risk's uuid and is deliberately not
+// description, category, themes, review_due_at, inherent_score,
+// residual_score, owner_user_id, org_unit_id), so an export re-imports with
+// no column map. The export's "id" is the risk's uuid and is deliberately not
 // an alias of external_ref. Every other export column (computed severity,
-// timestamps, ids, and fields later slices map) lands in unmapped; no
-// export header is an alias of a second field, so none errors.
+// timestamps, other ids) lands in unmapped; no export header is an alias of
+// a second field, so none errors.
 // TestRiskImport_ExportRoundTrip pins this against the export's real
 // header in CSV and XLSX.
 var fieldAliases = map[string][]string{
@@ -189,12 +199,18 @@ var fieldAliases = map[string][]string{
 	},
 	FieldResidualLossEventFrequency: {"residual_loss_event_frequency", "residual loss event frequency", "residual lef"},
 	FieldResidualLossMagnitude:      {"residual_loss_magnitude", "residual loss magnitude", "residual lm"},
+	// The risk export's score columns, JSON in the score's own shape (#2898).
+	FieldInherentScore: {"inherent_score", "inherent score"},
+	FieldResidualScore: {"residual_score", "residual score"},
 	// treatment_owner is the risk export's free-text owner header.
 	FieldOwner: {
 		"owner", "risk owner", "owner email", "owner e-mail", "risk owner email", "owner_email",
 		"treatment owner", "treatment_owner",
 	},
-	FieldTreatment: {"treatment", "risk treatment", "treatment decision", "risk response"},
+	// The risk export's owner_user_id: used only when it names an active
+	// user of the uploading tenant, kept unmapped otherwise (idfallback.go).
+	FieldOwnerUserID: {"owner_user_id", "owner user id"},
+	FieldTreatment:   {"treatment", "risk treatment", "treatment decision", "risk response"},
 	FieldJustification: {
 		"justification", "acceptance justification", "acceptance_justification", "acceptance rationale", "rationale",
 	},
@@ -208,9 +224,11 @@ var fieldAliases = map[string][]string{
 		"linked_controls", "linked controls", "linked_control_ids", "linked control ids", "controls",
 		"control ids", "mitigating controls",
 	},
-	// The risk export's org_unit_id is the unit's uuid in the exporting
-	// tenant, so it is deliberately not an alias: it stays unmapped.
-	FieldLevel: {"level", "risk level", "risk_level", "hierarchy level"},
+	// The risk export's org_unit_id is the unit's uuid. It is used only when
+	// it names an org unit of the uploading tenant, and kept unmapped
+	// otherwise (idfallback.go).
+	FieldOrgUnitID: {"org_unit_id", "org unit id"},
+	FieldLevel:     {"level", "risk level", "risk_level", "hierarchy level"},
 	FieldOrgUnit: {
 		"org_unit", "org unit", "org unit name", "org_unit_name", "organisation unit", "organization unit",
 	},
@@ -453,8 +471,14 @@ func parseRows(rows [][]string, opts ParseOptions) (*ParseResult, error) {
 		UnmappedColumns: make([]string, 0),
 	}
 	for _, c := range cols {
-		if c.field == "" && c.key != "" {
+		if c.key != "" {
 			out.UnmappedColumns = append(out.UnmappedColumns, c.key)
+		}
+		if c.field != "" && c.key != "" {
+			if out.idColumns == nil {
+				out.idColumns = map[string]string{}
+			}
+			out.idColumns[c.field] = c.key
 		}
 	}
 	firstRowForRef := make(map[string]int)
@@ -483,10 +507,14 @@ func mapColumns(headers []string, match headerMatcher, data [][]string) []column
 	keys := map[string]bool{}
 	for i, h := range headers {
 		h = strings.TrimSpace(h)
-		if field := match(h); field != "" && !taken[field] {
-			taken[field] = true
-			cols[i] = column{field: field}
-			continue
+		var field string
+		if f := match(h); f != "" && !taken[f] {
+			taken[f] = true
+			field = f
+			if !isIDField(f) {
+				cols[i] = column{field: f}
+				continue
+			}
 		}
 		key := h
 		if key == "" {
@@ -499,7 +527,7 @@ func mapColumns(headers []string, match headerMatcher, data [][]string) []column
 			key = fmt.Sprintf("%s (column %d)", key, i+1)
 		}
 		keys[key] = true
-		cols[i] = column{key: key}
+		cols[i] = column{field: field, key: key}
 	}
 	return cols
 }
@@ -559,6 +587,16 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 			s.OrgUnit = val
 		case FieldParentRef:
 			s.ParentRef = val
+		case FieldOwnerUserID, FieldOrgUnitID:
+			if val == "" {
+				break
+			}
+			if c.field == FieldOwnerUserID {
+				s.OwnerUserIDRef = val
+			} else {
+				s.OrgUnitIDRef = val
+			}
+			s.Unmapped[c.key] = val
 		case "":
 			if c.key != "" && val != "" {
 				s.Unmapped[c.key] = val
