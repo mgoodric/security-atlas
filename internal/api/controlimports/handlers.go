@@ -3,6 +3,9 @@
 // Routes (appended onto the platform root router):
 //
 //	POST /v1/controls/imports        multipart upload -> staged import batch
+//	POST /v1/controls/imports/preview
+//	                                 the same upload -> its header mapping
+//	                                 and first rows, staging nothing (#2836)
 //	GET  /v1/controls/imports/{id}   the batch with its counts and rows
 //	GET  /v1/controls/imports/{id}/rows
 //	                                 staged rows with their ranked SCF anchor
@@ -33,6 +36,8 @@
 //	file        the CSV or XLSX control sheet (required)
 //	framework   slug of the framework the tested-under codes belong to (required)
 //	column_map  optional, repeatable "field=Header" overrides of header detection
+//	ignore_column
+//	            optional, repeatable header kept unmapped whatever its alias (#2836)
 //
 // Every non-blank data row is returned either staged or rejected with a
 // reason. Tenant scoping is enforced by RLS via controlimport.Store.
@@ -76,6 +81,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Put("/v1/controls/imports/settings", h.PutSettings)
 	}
 	r.Post("/v1/controls/imports", h.Create)
+	r.Post("/v1/controls/imports/preview", h.Preview)
 	r.Get("/v1/controls/imports/{id}", h.Get)
 	r.Get("/v1/controls/imports/{id}/rows", h.ListRows)
 	if h.exporter != nil {
@@ -88,29 +94,35 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	}
 }
 
-// Create stages an uploaded control sheet as an import batch.
-func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	if _, err := tenancy.TenantFromContext(ctx); err != nil {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
-		return
-	}
-	cred, _ := authctx.CredentialFromContext(ctx)
+// upload is a parsed multipart upload: the file and its mapping fields.
+type upload struct {
+	filename  string
+	raw       []byte
+	columnMap map[string]string
+	ignore    []string
+}
 
+// readUpload reads the multipart upload Create and Preview share, writing
+// the error response itself when it returns false.
+func readUpload(w http.ResponseWriter, r *http.Request) (upload, bool) {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return upload{}, false
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, controlimport.MaxUploadBytes+multipartOverhead)
 	if err := r.ParseMultipartForm(controlimport.MaxUploadBytes + multipartOverhead); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
-			return
+			return upload{}, false
 		}
 		httpresp.WriteError(w, http.StatusBadRequest, "request must be multipart/form-data with a file field")
-		return
+		return upload{}, false
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "missing file field")
-		return
+		return upload{}, false
 	}
 	defer func() { _ = file.Close() }()
 
@@ -118,22 +130,37 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, controlimport.ErrUploadTooLarge) {
 			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
-			return
+			return upload{}, false
 		}
 		httpresp.WriteError(w, http.StatusBadRequest, "could not read upload")
-		return
+		return upload{}, false
 	}
 	columnMap, err := parseColumnMap(r.MultipartForm.Value["column_map"])
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return upload{}, false
+	}
+	return upload{
+		filename:  header.Filename,
+		raw:       raw,
+		columnMap: columnMap,
+		ignore:    r.MultipartForm.Value["ignore_column"],
+	}, true
+}
+
+// Create stages an uploaded control sheet as an import batch.
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	up, ok := readUpload(w, r)
+	if !ok {
 		return
 	}
-
-	batch, err := h.stager.Stage(ctx, controlimport.StageInput{
-		Filename:      header.Filename,
-		Raw:           raw,
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	batch, err := h.stager.Stage(r.Context(), controlimport.StageInput{
+		Filename:      up.filename,
+		Raw:           up.raw,
 		FrameworkSlug: r.FormValue("framework"),
-		ColumnMap:     columnMap,
+		ColumnMap:     up.columnMap,
+		Ignore:        up.ignore,
 		UploadedBy:    cred.ID,
 	})
 	if err != nil {
@@ -141,6 +168,25 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusCreated, batch)
+}
+
+// Preview reads an upload with the same fields as Create (framework is not
+// needed) and returns its header row, the field each header maps to, the
+// fields a control row reads and the first rows (#2836). Nothing is staged.
+func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
+	up, ok := readUpload(w, r)
+	if !ok {
+		return
+	}
+	p, err := controlimport.PreviewFile(up.filename, up.raw, controlimport.ParseOptions{
+		ColumnMap: up.columnMap,
+		Ignore:    up.ignore,
+	})
+	if err != nil {
+		writeStageError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, p)
 }
 
 // Get returns one import batch with its staged and rejected rows.

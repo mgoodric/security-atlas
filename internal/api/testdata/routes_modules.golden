@@ -320,6 +320,7 @@ POST /v1/calendar/subscription dashboard
 POST /v1/controls/checklist/sections/{id}:approve controls
 POST /v1/controls/checklist:generate controls
 POST /v1/controls/imports controls
+POST /v1/controls/imports/preview controls
 POST /v1/controls/imports/{id}/approve-clear controls
 POST /v1/controls/imports/{id}/rows/{row}/approve controls
 POST /v1/controls/imports/{id}/rows/{row}/reject controls
