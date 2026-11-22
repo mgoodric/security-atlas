@@ -172,9 +172,13 @@ the security-awareness domain writer.
   query receives only directly pushed records. Once wired, the 24 h
   `observed_at` skew bound would refuse back-dated completions, since the
   writer sets `observed_at` to `completed_at`.
-- **#2924 (routing, in flight):** I commented there that `manual.upload.v1`
+- **#2924 (routing, PR #2927, merged into this branch):** `manual.upload.v1`
   must stay bound. If it were routed by kind, one upload would satisfy both
-  cc6_5 and cc9_1, because neither reads the upload's content.
+  cc6_5 and cc9_1, because neither reads the upload's content. #2927 keeps
+  it bound, along with `access_review.completion.v1` and
+  `security_awareness.training_completion.v1`
+  (`internal/evidence/routed/routed_test.go` `boundKinds`), so all four
+  controls still read only records pushed to them.
 
 The bundle fixtures use the shapes the schemas accept, which are the shapes
 the check will see once those tickets land.
