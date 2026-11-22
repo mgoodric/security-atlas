@@ -8,15 +8,37 @@ description: |
   sample admin paths first, is that every Okta app classified admin or
   infrastructure enforces MFA at sign-in.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the Okta
-  connector's `okta.app_assignment.v1`, which it emits as inconclusive by
-  design, leaving the decision to the platform. This control is therefore
-  inconclusive whatever the assignments contain.
+  What runs today: a SQL query over the payloads of the Okta connector's
+  `okta.app_assignment.v1` records, one per app per connector run. It
+  takes each app's latest in-window record, keyed by `app_id`; records
+  without an `app_id` are left out. An ACTIVE app whose `classification`
+  is `admin` or `infrastructure` must have `sign_on_mfa_required` true.
+  The operator classifies apps on the connector (`--admin-apps`,
+  `--infrastructure-apps`, lists of Okta app ids), and every other app is
+  then `standard`, which the query skips, as it skips an app that is not
+  ACTIVE. The connector sets `sign_on_mfa_required` from the app's app
+  sign-in policy (the policy its `_links.accessPolicy` names): true when
+  every active rule denies access or allows it with an assurance method
+  whose factor mode is 2FA, false when any active rule allows 1FA,
+  whatever that rule's conditions.
 
-  Pending: the app's classification and whether its sign-on policy
-  requires MFA, which the connector does not emit yet (#2828).
+  One admin or infrastructure app without MFA fails the control, whatever
+  the other apps report, and so does a mistyped field. An app whose
+  `sign_on_mfa_required` is omitted (no app sign-in policy, as in a
+  Classic Engine org; a rule using an authentication method chain; rules
+  the connector could not read) leaves the control inconclusive unless
+  another app fails it. An app with no `classification` (the operator
+  classified no app, or a 1.0.0 record from a connector older than #2828)
+  may be admin: it passes only if it requires MFA, and is otherwise
+  inconclusive. With no app in scope, the control is inconclusive. When
+  two records for one app tie on `observed_at`, the worse verdict decides.
+  The connector's per-record verdict is not used.
+
+  Not checked: MFA required by the global session policy rather than the
+  app sign-in policy does not count, so an app that relies on it fails.
+  Whether an app is internet-facing is not read; the operator's
+  classification stands in for it. Only the records the control receives
+  are checked: an app the connector did not report is not seen.
 
 scf_anchor_id: IAC-37
 control_family: IAC
@@ -27,27 +49,44 @@ freshness_class: daily
 
 evidence_queries:
   - id: mfa_enforced_on_admin_apps
-    language: rego
+    language: sql
     evidence_kind: okta.app_assignment.v1
-    description: "Every admin/infrastructure app has MFA required at sign-in"
+    description: "Every active admin or infrastructure Okta app's latest record shows its app sign-in policy requires MFA"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN count(*) FILTER (WHERE in_scope) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 1 THEN 'inconclusive'
+               ELSE 'pass'
+             END
+      FROM (
+        SELECT app, min(verdict) AS verdict, bool_or(in_scope) AS in_scope
+        FROM (
+          SELECT app,
+                 in_scope,
+                 CASE
+                   WHEN NOT in_scope THEN 2
+                   WHEN class IS NULL THEN greatest(mfa, 1)
+                   WHEN class IN ('"admin"'::jsonb, '"infrastructure"'::jsonb) THEN mfa
+                   ELSE 0
+                 END AS verdict,
+                 rank() OVER (PARTITION BY app ORDER BY observed_at DESC) AS recency
+          FROM (
+            SELECT payload->>'app_id' AS app,
+                   observed_at,
+                   payload->'classification' AS class,
+                   coalesce(payload->>'status' = 'ACTIVE', false)
+                     AND payload->'classification' IS DISTINCT FROM '"standard"'::jsonb AS in_scope,
+                   CASE
+                     WHEN payload->'sign_on_mfa_required' IS NULL THEN 1
+                     WHEN payload->'sign_on_mfa_required' = 'true'::jsonb THEN 2
+                     ELSE 0
+                   END AS mfa
+            FROM evidence
+            WHERE jsonb_typeof(payload->'app_id') = 'string'
+              AND payload->>'app_id' <> ''
+          ) AS checked
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY app
+      ) AS per_app
