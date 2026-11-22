@@ -131,12 +131,15 @@ func TestStockTwoKindControls_MissingKindOnlyTurnsNAInconclusive(t *testing.T) {
 			}
 		}
 	})
-	for _, want := range []string{"soc2_cc1_4_competence_training", "soc2_p4_2_retention_schedule"} {
-		if !two[want] {
-			t.Errorf("%s no longer has two queries; update this test and the #2818 decisions log", want)
+	// a1_1 joined in #2935 (osquery.host_posture.v1 and
+	// monitoring.host_capacity.v1, both SQL).
+	want := []string{"soc2_a1_1_capacity_monitoring", "soc2_cc1_4_competence_training", "soc2_p4_2_retention_schedule"}
+	for _, w := range want {
+		if !two[w] {
+			t.Errorf("%s no longer has two queries; update this test and the #2818 decisions log", w)
 		}
 	}
-	if len(two) != 2 {
+	if len(two) != len(want) {
 		t.Errorf("two-query stock controls = %v; update this test and the #2818 decisions log", two)
 	}
 }

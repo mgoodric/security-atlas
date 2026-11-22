@@ -234,6 +234,10 @@ func DefaultSeed() []KindVersion {
 		// record struct has no field that can hold them; a reflection guard fails
 		// the build if one is added).
 		{Kind: "monitoring.alert_firing.v1", Version: "1.0.0"},
+		// #2935: per-host memory use, 5-minute CPU p95 and disk use from a
+		// monitoring source (the Datadog metrics query API), routed by type.
+		// a1_1 reads it alongside osquery.host_posture.v1.
+		{Kind: "monitoring.host_capacity.v1", Version: "1.0.0"},
 		// Slice 533: Datadog Cloud-SIEM / Security-Monitoring detection-rule
 		// inventory — the deliberate slice-488 D1 sibling-kind SPLIT (a detection
 		// rule carries a severity + detection-class field monitoring.alert_config
