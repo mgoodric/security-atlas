@@ -86,6 +86,9 @@ func New(seed []KindVersion) *InMemory {
 func DefaultSeed() []KindVersion {
 	return []KindVersion{
 		{Kind: "sast.scan_result.v1", Version: "1.0.0"},
+		// #2831: 1.1.0 adds repository and findings (rule_id, severity,
+		// suppressed), which cc7_1 detection, pi1_2 and pi1_3 read.
+		{Kind: "sast.scan_result.v1", Version: "1.1.0"},
 		{Kind: "access_review.completion.v1", Version: "1.0.0"},
 		{Kind: "personnel_security.workflow.v1", Version: "1.0.0"},
 		{Kind: "manual.attestation.v1", Version: "1.0.0"},

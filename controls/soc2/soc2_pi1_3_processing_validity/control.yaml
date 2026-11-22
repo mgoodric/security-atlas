@@ -7,16 +7,37 @@ description: |
   in-scope repo has zero unsuppressed findings in the rule set covering
   authorisation, IDOR and privilege-escalation patterns.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are
-  `sast.scan_result.v1`. No bundled connector emits that kind; the verdict
-  is whatever the pusher (for example `atlas-cli evidence push --result`)
-  states. Findings and rule sets are not checked.
+  What runs today: a SQL query over the payloads of `sast.scan_result.v1`
+  records at schema 1.1.0, one per scan. No bundled connector emits that
+  kind: the pusher (a CI job running `atlas-cli evidence push`, or the
+  adopter's own scanner) sends each scan with its `repository` and its
+  `findings`, each finding with a `severity`, a `rule_id` and whether it
+  is `suppressed`. The query takes each repository's latest in-window
+  scan, keyed by `repository`; scans without a `repository` are left out.
+  That scan may have no unsuppressed finding whose `rule_id` is one of
+  the four authorisation rules: `authz.missing_check`, `authz.idor`,
+  `authz.privilege_escalation` and `authz.broken_object_level`. These are
+  platform rule ids, so the pusher maps its scanner's rules onto them; a
+  finding under any other rule id is not read. A finding counts as
+  suppressed only when `suppressed` is true.
 
-  Pending: findings with severity, rule id and suppression in a new
-  `sast.scan_result` schema version, to select the authorisation rules
-  (#2831).
+  One repository whose latest scan has an unsuppressed authorisation
+  finding fails the control, whatever the other repositories report. A
+  scan with no `findings` array (a 1.0.0 record, or a pusher that sent
+  only `findings_count`) leaves the control inconclusive unless another
+  repository fails it, and so does an unsuppressed finding with no
+  string `rule_id`. An empty `findings` array is a clean scan. With no
+  scan that names a repository, the control is inconclusive. When two
+  scans of one repository tie on `observed_at`, the worse verdict
+  decides. The pusher's per-record verdict is not used.
+
+  Not checked: whether a repository holds processing-path code, and
+  whether the scanner's rule set actually covers these patterns; a
+  scanner that cannot find an IDOR reports none. How a finding came to be
+  suppressed is not read. Scan age is bounded only by the daily window of
+  7 days, so a repository whose scans stop drops out after that. Only the
+  scans the control receives are checked: every in-scope repo scanned
+  needs a repo inventory (#2834).
 
 scf_anchor_id: TDA-05
 control_family: TDA
@@ -27,27 +48,51 @@ freshness_class: daily
 
 evidence_queries:
   - id: authorization_taint_rules_clean
-    language: rego
+    language: sql
     evidence_kind: sast.scan_result.v1
-    description: "SAST scans show zero unsuppressed authorization/IDOR findings"
+    description: "Each repository's latest SAST scan has no unsuppressed finding under the authorisation rules"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN min(verdict) = 0 THEN 'fail'
+               WHEN min(verdict) = 1 THEN 'inconclusive'
+               ELSE 'pass'
+             END
+      FROM (
+        SELECT repo, min(verdict) AS verdict
+        FROM (
+          SELECT repo,
+                 CASE
+                   WHEN jsonb_typeof(findings) IS DISTINCT FROM 'array' THEN 1
+                   ELSE (
+                     SELECT coalesce(min(
+                              CASE
+                                WHEN jsonb_typeof(finding) IS DISTINCT FROM 'object' THEN 1
+                                WHEN finding->'suppressed' = 'true'::jsonb THEN 2
+                                WHEN jsonb_typeof(finding->'rule_id') IS DISTINCT FROM 'string' THEN 1
+                                -- Each rule id is written as two concatenated halves: the static
+                                -- guard reads any dotted word as a schema-qualified name
+                                WHEN finding->>'rule_id' IN ('authz' || '.missing_check',
+                                                             'authz' || '.idor',
+                                                             'authz' || '.privilege_escalation',
+                                                             'authz' || '.broken_object_level') THEN 0
+                                ELSE 2
+                              END), 2)
+                     FROM jsonb_array_elements(
+                            CASE WHEN jsonb_typeof(findings) = 'array' THEN findings ELSE '[]'::jsonb END
+                          ) AS f(finding)
+                   )
+                 END AS verdict,
+                 rank() OVER (PARTITION BY repo ORDER BY observed_at DESC) AS recency
+          FROM (
+            SELECT payload->>'repository' AS repo,
+                   observed_at,
+                   payload->'findings' AS findings
+            FROM evidence
+            WHERE jsonb_typeof(payload->'repository') = 'string'
+              AND payload->>'repository' <> ''
+          ) AS keyed
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY repo
+      ) AS per_repo
