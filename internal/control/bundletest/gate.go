@@ -50,7 +50,7 @@ func RunFromFiles(ctx context.Context, bundleID, freshnessClass string, queries 
 		now = time.Now().UTC()
 	}
 
-	report := &Report{BundleID: bundleID, Cases: make([]CaseResult, 0, len(cases))}
+	report := &Report{BundleID: bundleID, Cases: make([]CaseResult, 0, len(cases)), Warnings: KindlessRecordWarnings(queries, cases)}
 	for i := range cases {
 		cr := runCase(ctx, &cases[i], queries, freshnessClass, now, opts.Tx)
 		report.Cases = append(report.Cases, cr)
@@ -86,6 +86,12 @@ type ManifestQuery struct {
 	Language     string
 	Expression   string
 	EvidenceKind string // "" = every kind (#2818)
+}
+
+// LoadTestCasesFromFiles is LoadTestCases for a bundle read from a tarball,
+// whose tests/*.yaml bytes are in control.Bundle.TestFiles.
+func LoadTestCasesFromFiles(testFiles map[string][]byte) ([]TestCase, error) {
+	return loadTestCasesFromBytes(testFiles)
 }
 
 // loadTestCasesFromBytes is the in-memory counterpart of LoadTestCases: it
