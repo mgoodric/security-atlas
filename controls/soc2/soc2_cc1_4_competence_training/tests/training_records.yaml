@@ -1,0 +1,524 @@
+# security_awareness.training_completion.v1 records, shaped as the platform
+# builds them (internal/securityawareness/store.go BuildCompletionEvidence):
+# one per completed assignment, `observed_at` equal to `completed_at`,
+# `result` always pass, which the query ignores. The registered schema
+# (1.0.0) enumerates completion_source as manual, csv or lms_connector; a
+# tenant-private schema of the same kind and version can widen that, so the
+# query checks it too. Every case pins `evaluated_at`: 365 days before
+# 2026-11-21T12:00:00Z is 2025-11-21T12:00:00Z, and the annual window
+# reaches back 400 days.
+#
+# The control also has a Rego roll-up over jira.ticket_evidence.v1. With no
+# Jira record that query is inconclusive, so the control's state is the
+# training query's pass or fail; two cases carry a Jira record to show the
+# combination.
+cases:
+  - name: every-person-current-from-allowed-source-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-02-10T09:30:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-02-10T09:30:00Z
+          completion_source: lms_connector
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-06-01T14:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000002
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+          completed_at: 2026-06-01T14:00:00.123456Z
+          completion_source: csv
+
+  - name: completed-exactly-365d-passes
+    description: the window is inclusive at 365 days
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-21T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2025-11-21T12:00:00Z
+          completion_source: manual
+
+  - name: completed-just-over-365d-fails
+    description: inside the 400-day annual window, so the record is seen, but outside the 365-day check
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-06-01T14:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000002
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+          completed_at: 2026-06-01T14:00:00Z
+          completion_source: csv
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-21T11:59:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000002
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2025-11-21T11:59:00Z
+          completion_source: lms_connector
+
+  - name: disallowed-completion-source-fails
+    description: a completion from a source outside manual, csv and lms_connector does not count, whatever its date
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: self_attested
+
+  - name: empty-completion-source-fails
+    description: an empty string is a source that is present and not allowed
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: ""
+
+  - name: latest-record-from-disallowed-source-fails-despite-earlier-allowed-one
+    description: the person's newest completion decides; an older allowed completion does not cover it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-03-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-03-01T12:00:00Z
+          completion_source: lms_connector
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-09-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000003
+          campaign_id: 7f000000-0000-4000-8000-000000000003
+          campaign_name: Phishing refresher
+          course_code: SAT-201
+          course_title: Phishing refresher
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-09-01T12:00:00Z
+          completion_source: self_attested
+
+  - name: tied-latest-records-one-disallowed-fails
+    description: two records tie on completed_at and observed_at; the disallowed one fails the person
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-09-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-09-01T12:00:00Z
+          completion_source: lms_connector
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-09-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000003
+          campaign_id: 7f000000-0000-4000-8000-000000000003
+          campaign_name: Phishing refresher
+          course_code: SAT-201
+          course_title: Phishing refresher
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-09-01T12:00:00Z
+          completion_source: vendor_portal
+
+  - name: absent-completion-source-is-inconclusive
+    description: a record without completion_source does not say where the completion came from
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+
+  - name: absent-completed-at-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completion_source: manual
+
+  - name: malformed-completed-at-is-inconclusive-others-still-evaluate
+    description: an impossible date, a missing offset and a date-only value are unreadable; none errors the query, and the other person is current
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: manual
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000002
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+          completed_at: "2026-02-30T10:00:00Z"
+          completion_source: manual
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000004
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: cccccccc-cccc-4ccc-8ccc-cccccccccccc
+          completed_at: "2026-10-01T12:00:00"
+          completion_source: manual
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000005
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: dddddddd-dddd-4ddd-8ddd-dddddddddddd
+          completed_at: "2026-10-01"
+          completion_source: manual
+
+  - name: malformed-completed-at-does-not-hide-a-stale-person
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000002
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+          completed_at: "2026-13-45T25:61:00Z"
+          completion_source: manual
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000002
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2025-11-01T12:00:00Z
+          completion_source: lms_connector
+
+  - name: completed-within-1h-after-instant-passes
+    description: up to an hour of clock skew still counts as completed by the instant
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-11-21T13:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-11-21T13:00:00Z
+          completion_source: manual
+
+  - name: completed-over-1h-after-instant-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-11-21T11:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-11-21T14:00:00Z
+          completion_source: manual
+
+  - name: latest-completion-per-person-decides
+    description: last year's completion is stale, this year's is current
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000002
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2025-11-01T12:00:00Z
+          completion_source: lms_connector
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-20T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000006
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-20T12:00:00Z
+          completion_source: lms_connector
+
+  - name: later-record-with-unreadable-completed-at-does-not-hide-a-stale-completion
+    description: an unreadable completed_at sorts after every readable one, so the stale completion decides
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000002
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2025-11-01T12:00:00Z
+          completion_source: lms_connector
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-20T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000006
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: last month
+          completion_source: lms_connector
+
+  - name: record-without-person-id-is-left-out
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: manual
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000007
+          campaign_id: 7f000000-0000-4000-8000-000000000002
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          completed_at: 2025-11-01T12:00:00Z
+          completion_source: self_attested
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000008
+          campaign_id: 7f000000-0000-4000-8000-000000000002
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: ""
+          completed_at: 2025-11-01T12:00:00Z
+          completion_source: self_attested
+
+  - name: only-records-without-person-id-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: manual
+
+  - name: record-result-is-not-used
+    description: a completion pushed with result fail is still a current completion
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: manual
+
+  - name: open-jira-ticket-and-current-completion-passes
+    description: the Jira roll-up is inconclusive for an open ticket; the current completion passes the control
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          key: SEC-101
+          status: In Progress
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: manual
+
+  - name: closed-jira-ticket-does-not-cover-a-stale-completion
+    description: the Jira roll-up passes but the training query fails, so the control fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          key: SEC-101
+          status: Done
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2025-11-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000002
+          campaign_name: FY25 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2025-11-01T12:00:00Z
+          completion_source: lms_connector
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z

@@ -1,0 +1,140 @@
+# manual.upload.v1 records pushed to this control, shaped to the registered
+# schema (internal/api/schemaregistry/schemas/manual.upload/1.0.0.json:
+# uploaded_by, filename, content_type, size_bytes, description). The manual
+# connector writes every upload as inconclusive for a person to judge; the
+# query ignores `result`. The window is on `observed_at`, the push time.
+# Every case pins `evaluated_at`: 90 days before 2026-11-21T12:00:00Z is
+# 2026-08-23T12:00:00Z, and the quarterly window reaches back 120 days.
+cases:
+  - name: upload-inside-90d-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-10-05T16:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q3.pdf
+          content_type: application/pdf
+          size_bytes: 48213
+          description: Q3 device disposal log with serials and wipe certificates
+
+  - name: upload-exactly-90d-passes
+    description: the window is inclusive at 90 days
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-08-23T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q2.pdf
+          content_type: application/pdf
+
+  - name: upload-just-over-90d-fails
+    description: inside the 120-day quarterly window, so the record is seen, but outside the 90-day check
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-08-23T11:59:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q2.pdf
+          content_type: application/pdf
+
+  - name: upload-older-than-quarterly-window-is-not-seen
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-07-14T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q2.pdf
+          content_type: application/pdf
+
+  - name: one-recent-upload-passes-beside-an-old-one
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-08-01T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q2.pdf
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-15T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: ebs-deletion-log-2026-11.csv
+          content_type: text/csv
+
+  - name: observed-within-1h-after-instant-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-21T13:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q4.pdf
+          content_type: application/pdf
+
+  - name: observed-over-1h-after-instant-is-inconclusive
+    description: an upload two hours after the instant does not show one existed by it, and the only other upload is stale
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-21T14:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q4.pdf
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-08-01T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q2.pdf
+          content_type: application/pdf
+
+  - name: record-without-filename-is-left-out
+    description: the recent record names no file, so only the stale upload counts
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-08-01T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: disposal-log-2026-q2.pdf
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          content_type: application/pdf
+      - result: inconclusive
+        evidence_kind: manual.upload.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          uploaded_by: it-ops@example.com
+          filename: ""
+          content_type: application/pdf
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
