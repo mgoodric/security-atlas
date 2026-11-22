@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/manual.upload/1.1.0.json",
+  "x-evidence-kind": "manual.upload.v1",
+  "x-semver": "1.1.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["GOV-05"],
+  "title": "Manual file upload",
+  "description": "A human-uploaded artifact (PDF, screenshot, signed letter) cited as evidence. v1.1 adds the source fields the manual connector records for each path: row_index and payload_b64 for a local CSV row; bucket, etag and last_modified for an S3 object; host, remote_path and mtime for an SFTP file. All are optional, so a 1.0.0 payload is a valid 1.1.0 payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["uploaded_by", "filename", "content_type"],
+  "properties": {
+    "uploaded_by": { "type": "string", "minLength": 1 },
+    "filename": { "type": "string", "minLength": 1 },
+    "content_type": { "type": "string", "minLength": 1 },
+    "size_bytes": { "type": "integer", "minimum": 0 },
+    "description": { "type": "string" },
+    "row_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Local CSV path: the data row's index in the file."
+    },
+    "payload_b64": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "description": "Local CSV path: the row as a JSON object keyed by header, base64-encoded."
+    },
+    "bucket": {
+      "type": "string",
+      "description": "S3 path: the bucket holding the object."
+    },
+    "etag": {
+      "type": "string",
+      "description": "S3 path: the object's ETag when the connector read it."
+    },
+    "last_modified": {
+      "type": "string",
+      "description": "S3 path: the object's Last-Modified time, RFC 3339."
+    },
+    "host": {
+      "type": "string",
+      "description": "SFTP path: the server the file was read from."
+    },
+    "remote_path": {
+      "type": "string",
+      "description": "SFTP path: the file's full path on the server."
+    },
+    "mtime": {
+      "type": "string",
+      "description": "SFTP path: the file's modification time, RFC 3339 with nanoseconds."
+    }
+  }
+}

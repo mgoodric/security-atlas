@@ -132,6 +132,10 @@ func DefaultSeed() []KindVersion {
 		{Kind: "change.approval.v1", Version: "1.0.0"},
 		{Kind: "change.verification.v1", Version: "1.0.0"},
 		{Kind: "manual.upload.v1", Version: "1.0.0"},
+		// #2940: 1.1.0 declares the per-path source fields the manual
+		// connector emits (row_index, payload_b64, bucket, etag,
+		// last_modified, host, remote_path, mtime).
+		{Kind: "manual.upload.v1", Version: "1.1.0"},
 		// #1751: the MCP update_control_state override evidence, now routed
 		// through ingest.Service.Process instead of a raw ledger INSERT.
 		{Kind: "manual.control_state_override.v1", Version: "1.0.0"},

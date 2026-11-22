@@ -95,7 +95,7 @@ func doLocal(ctx context.Context, f localFlags, warn *os.File) error {
 
 	now := time.Now().UTC().Truncate(time.Hour)
 	filename := filepath.Base(f.file)
-	pushed, skipped := 0, 0
+	pushed, already, skipped := 0, 0, 0
 	for _, row := range rows {
 		rec, err := buildLocalRecord(row, f.file, filename, f.controlID, scope, now)
 		if errors.Is(err, errPayloadTooLarge) {
@@ -106,15 +106,18 @@ func doLocal(ctx context.Context, f localFlags, warn *os.File) error {
 		if err != nil {
 			return fmt.Errorf("build record row=%d: %w", row.Index, err)
 		}
-		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err = client.Push(pctx, rec)
-		cancel()
+		held, err := pushRecord(ctx, client, rec)
 		if err != nil {
 			return fmt.Errorf("push row=%d: %w", row.Index, err)
 		}
+		if held {
+			_, _ = fmt.Fprintf(warn, "already ingested row %d: its key is in the ledger under an earlier push (AlreadyExists); not pushed again\n", row.Index)
+			already++
+			continue
+		}
 		pushed++
 	}
-	fmt.Printf("pushed %d records, skipped %d (file=%s)\n", pushed, skipped, filename)
+	fmt.Printf("pushed %d records, %d already ingested, skipped %d (file=%s)\n", pushed, already, skipped, filename)
 	return nil
 }
 
@@ -145,9 +148,9 @@ func buildLocalRecord(row manualcsv.Row, filePath, filename, controlID string, s
 		return nil, err
 	}
 	return &evidencev1.EvidenceRecord{
-		IdempotencyKey: idem.LocalRowKey(filePath, row.Index, observedAt),
+		IdempotencyKey: idem.LocalRowKey(filePath, row.Index, rowJSON),
 		EvidenceKind:   "manual.upload.v1",
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  schemaVersion,
 		ControlId:      controlID,
 		Scope:          scope,
 		ObservedAt:     timestamppb.New(observedAt),
