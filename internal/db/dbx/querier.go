@@ -292,6 +292,11 @@ type Querier interface {
 	// #2817: plus the tenant's unbound records of a kind in unbound_kinds that
 	// the control's evidence_queries declare (internal/evidence/unbound).
 	CountPopulationEvidence(ctx context.Context, arg CountPopulationEvidenceParams) (int64, error)
+	// #2902 — the published synced rows of one source at the start of a run:
+	// an empty push for a source that has some is refused without
+	// allow_empty, and a run that leaves more than half of them missing
+	// carries a warning. Read under LockPolicySyncSource.
+	CountPublishedSyncedPoliciesInSource(ctx context.Context, arg CountPublishedSyncedPoliciesInSourceParams) (int64, error)
 	// Rate denominator (#2586): the distinct active users holding a live
 	// user_roles row the policy's audience names, or any live role when the
 	// audience is 'everyone'. This is the set the authz engine resolves
