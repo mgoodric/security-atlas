@@ -1,0 +1,24 @@
+{
+  "id": 73,
+  "name": "super cool ruleset",
+  "target": "branch",
+  "source_type": "Organization",
+  "source": "my-org",
+  "enforcement": "active",
+  "bypass_actors": [
+    {
+      "actor_id": 234,
+      "actor_type": "Team",
+      "bypass_mode": "always"
+    }
+  ],
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main", "refs/heads/master"],
+      "exclude": ["refs/heads/dev*"]
+    }
+  },
+  "node_id": "RRS_lACkVXNlcgQB",
+  "created_at": "2023-07-15T08:43:03Z",
+  "updated_at": "2023-08-23T16:29:47Z"
+}

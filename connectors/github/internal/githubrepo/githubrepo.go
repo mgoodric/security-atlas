@@ -1,5 +1,11 @@
-// Package githubrepo inspects org repos and their default-branch
-// protection rules, producing one ProtectionState per repository.
+// Package githubrepo inspects org repos and the rules that protect their
+// default branch, producing one ProtectionState per repository.
+//
+// A default branch can be protected two ways, and GitHub enforces both:
+// classic branch protection (GET .../branches/{b}/protection) and
+// rulesets, at the repository or organization level
+// (GET .../rules/branches/{b}). Inspect reads both and merges them into
+// the effective protection (#2925).
 //
 // The package is built around the small API interface so tests can swap
 // in an httptest.NewServer-backed transport without depending on
@@ -15,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,16 +37,30 @@ const (
 	ResultInconclusive Result = "inconclusive"
 )
 
+// Where a branch's protection comes from. Reported as the
+// protection_source field of github.repo_protection.v2.
+const (
+	SourceNone     = "none"
+	SourceClassic  = "classic"
+	SourceRulesets = "rulesets"
+	SourceBoth     = "classic_and_rulesets"
+)
+
 // ProtectionState is one record the cmd layer turns into an evidence
-// record. Field names map 1:1 to github.repo_protection.v1 schema.
+// record. Field names map 1:1 to the github.repo_protection.v2 schema.
+//
+// A nil pointer is a field the connector did not read. It is omitted from
+// the payload, never reported as 0 or false (#2925).
 type ProtectionState struct {
+	RepoID                  int64
 	RepoFullName            string
 	DefaultBranch           string
-	RequiredReviews         int
-	RequireCodeOwnerReviews bool
-	RequireSignedCommits    bool
-	RequireLinearHistory    bool
-	EnforceAdmins           bool
+	RequiredReviews         *int
+	RequireCodeOwnerReviews *bool
+	RequireSignedCommits    *bool
+	RequireLinearHistory    *bool
+	EnforceAdmins           *bool
+	ProtectionSource        string // "" when not read
 	Result                  Result
 	Reason                  string
 	ObservedAt              time.Time
@@ -50,37 +71,102 @@ type ProtectionState struct {
 type API interface {
 	ListOrgRepos(ctx context.Context, org string) ([]Repo, error)
 	GetBranchProtection(ctx context.Context, repoFullName, branch string) (*BranchProtection, error)
+	GetBranchRules(ctx context.Context, repoFullName, branch string) ([]BranchRule, error)
+	GetRuleset(ctx context.Context, repoFullName string, rulesetID int64) (*Ruleset, error)
 }
 
-// Repo is the subset of GET /orgs/{org}/repos we consume.
+// Repo is the subset of GET /orgs/{org}/repos we consume. ID is GitHub's
+// stable repository id; it survives a rename, full_name does not.
 type Repo struct {
+	ID            int64  `json:"id"`
 	FullName      string `json:"full_name"`
 	DefaultBranch string `json:"default_branch"`
 	Private       bool   `json:"private"`
 	Archived      bool   `json:"archived"`
 }
 
+// PullRequestReviews is the required_pull_request_reviews object of
+// GET /repos/{owner}/{repo}/branches/{branch}/protection.
+type PullRequestReviews struct {
+	RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
+	RequireCodeOwnerReviews      bool `json:"require_code_owner_reviews"`
+}
+
+// Enabled is the {url, enabled} object GitHub uses for several classic
+// protection settings.
+type Enabled struct {
+	Enabled bool `json:"enabled"`
+}
+
 // BranchProtection is the subset of
 // GET /repos/{owner}/{repo}/branches/{branch}/protection we consume.
 type BranchProtection struct {
-	RequiredPullRequestReviews *struct {
-		RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
-		RequireCodeOwnerReviews      bool `json:"require_code_owner_reviews"`
-	} `json:"required_pull_request_reviews,omitempty"`
-	RequiredSignatures *struct {
-		Enabled bool `json:"enabled"`
-	} `json:"required_signatures,omitempty"`
-	RequiredLinearHistory *struct {
-		Enabled bool `json:"enabled"`
-	} `json:"required_linear_history,omitempty"`
-	EnforceAdmins *struct {
-		Enabled bool `json:"enabled"`
-	} `json:"enforce_admins,omitempty"`
+	RequiredPullRequestReviews *PullRequestReviews `json:"required_pull_request_reviews,omitempty"`
+	RequiredSignatures         *Enabled            `json:"required_signatures,omitempty"`
+	RequiredLinearHistory      *Enabled            `json:"required_linear_history,omitempty"`
+	EnforceAdmins              *Enabled            `json:"enforce_admins,omitempty"`
+}
+
+// BranchRule is one element of GET /repos/{owner}/{repo}/rules/branches/{branch}:
+// an active rule from a ruleset at any level, with the ruleset it came from.
+type BranchRule struct {
+	Type              string          `json:"type"`
+	Parameters        json.RawMessage `json:"parameters,omitempty"`
+	RulesetSourceType string          `json:"ruleset_source_type,omitempty"`
+	RulesetSource     string          `json:"ruleset_source,omitempty"`
+	RulesetID         int64           `json:"ruleset_id,omitempty"`
+}
+
+// Rule types we read. GitHub documents more; the rest don't bear on the
+// fields this kind reports.
+const (
+	ruleTypePullRequest           = "pull_request"
+	ruleTypeRequiredSignatures    = "required_signatures"
+	ruleTypeRequiredLinearHistory = "required_linear_history"
+)
+
+// pullRequestRuleParams is the subset of a pull_request rule's parameters
+// we consume. Note the singular require_code_owner_review, unlike the
+// classic API's require_code_owner_reviews.
+type pullRequestRuleParams struct {
+	RequiredApprovingReviewCount int  `json:"required_approving_review_count"`
+	RequireCodeOwnerReview       bool `json:"require_code_owner_review"`
+}
+
+// Ruleset is the subset of GET /repos/{owner}/{repo}/rulesets/{id} we
+// consume. GitHub returns bypass_actors only to a caller with write access
+// to the ruleset, so a nil BypassActors means "not readable", and an empty
+// non-nil slice means "nobody bypasses".
+type Ruleset struct {
+	ID           int64          `json:"id"`
+	BypassActors *[]BypassActor `json:"bypass_actors,omitempty"`
+}
+
+// BypassActor is one element of a ruleset's bypass_actors.
+type BypassActor struct {
+	ActorID    *int64 `json:"actor_id"`
+	ActorType  string `json:"actor_type"`
+	BypassMode string `json:"bypass_mode,omitempty"`
+}
+
+// mayBeAdmin reports whether a bypass actor can be, or include, a
+// repository or organization admin. GitHub's actor types are Integration,
+// OrganizationAdmin, RepositoryRole, Team, DeployKey and User. Only an app
+// (Integration) and a deploy key are never a person; a role, team or user
+// may be an admin, and we don't resolve which.
+func (a BypassActor) mayBeAdmin() bool {
+	switch a.ActorType {
+	case "Integration", "DeployKey":
+		return false
+	default:
+		return true
+	}
 }
 
 // Inspect lists every active repo in org and returns one ProtectionState
-// per repo. Errors fetching one repo's protection are recorded on the
-// state (Result=Inconclusive, Reason=...) rather than aborting the run.
+// per repo. A repo whose protection could not be read is recorded with
+// Result=Inconclusive, a Reason and no protection fields, rather than
+// aborting the run or reporting the unread fields as off.
 func Inspect(ctx context.Context, api API, org string, now func() time.Time) ([]ProtectionState, error) {
 	if api == nil {
 		return nil, errors.New("githubrepo: API is nil")
@@ -97,64 +183,205 @@ func Inspect(ctx context.Context, api API, org string, now func() time.Time) ([]
 	}
 	out := make([]ProtectionState, 0, len(repos))
 	for _, r := range repos {
-		if r.Archived || r.FullName == "" || r.DefaultBranch == "" {
+		if r.Archived || r.ID == 0 || r.FullName == "" || r.DefaultBranch == "" {
 			continue
 		}
-		state := ProtectionState{
-			RepoFullName:  r.FullName,
-			DefaultBranch: r.DefaultBranch,
-			ObservedAt:    now(),
-		}
-		bp, err := api.GetBranchProtection(ctx, r.FullName, r.DefaultBranch)
-		switch {
-		case isNotFound(err):
-			// 404 here means "no protection configured" — that is a
-			// definitive FAIL, not inconclusive.
-			state.Result = ResultFail
-			state.Reason = "no branch protection configured on default branch"
-		case err != nil:
-			state.Result = ResultInconclusive
-			state.Reason = err.Error()
-		default:
-			fill(&state, bp)
-			state.Result, state.Reason = evaluate(state)
-		}
-		out = append(out, state)
+		out = append(out, inspectRepo(ctx, api, r, now()))
 	}
 	return out, nil
 }
 
-func fill(s *ProtectionState, bp *BranchProtection) {
-	if bp == nil {
-		return
+func inspectRepo(ctx context.Context, api API, r Repo, observedAt time.Time) ProtectionState {
+	state := ProtectionState{
+		RepoID:        r.ID,
+		RepoFullName:  r.FullName,
+		DefaultBranch: r.DefaultBranch,
+		ObservedAt:    observedAt,
 	}
-	if bp.RequiredPullRequestReviews != nil {
-		s.RequiredReviews = bp.RequiredPullRequestReviews.RequiredApprovingReviewCount
-		s.RequireCodeOwnerReviews = bp.RequiredPullRequestReviews.RequireCodeOwnerReviews
+	unread := func(what string, err error) ProtectionState {
+		state.Result = ResultInconclusive
+		state.Reason = what + ": " + err.Error()
+		return state
 	}
-	if bp.RequiredSignatures != nil {
-		s.RequireSignedCommits = bp.RequiredSignatures.Enabled
+
+	// GitHub documents only 200 and 404 for this endpoint, and 404 means
+	// no classic protection on the branch. A ruleset may still protect it.
+	classic, err := api.GetBranchProtection(ctx, r.FullName, r.DefaultBranch)
+	switch {
+	case isNotFound(err):
+		classic = nil
+	case err != nil:
+		return unread("branch protection", err)
 	}
-	if bp.RequiredLinearHistory != nil {
-		s.RequireLinearHistory = bp.RequiredLinearHistory.Enabled
+	rules, err := api.GetBranchRules(ctx, r.FullName, r.DefaultBranch)
+	if err != nil {
+		return unread("branch rules", err)
 	}
-	if bp.EnforceAdmins != nil {
-		s.EnforceAdmins = bp.EnforceAdmins.Enabled
+
+	m, err := merge(classic, rules)
+	if err != nil {
+		return unread("branch rules", err)
+	}
+	reviews := m.reviews
+	state.RequiredReviews = &reviews
+	state.RequireCodeOwnerReviews = &m.codeOwner
+	state.RequireSignedCommits = &m.signed
+	state.RequireLinearHistory = &m.linear
+	state.EnforceAdmins = m.enforceAdmins(func(id int64) (bool, bool) {
+		return rulesetBindsAdmins(ctx, api, r.FullName, id)
+	})
+	state.ProtectionSource = m.source()
+
+	switch {
+	case m.source() == SourceNone:
+		state.Result = ResultFail
+		state.Reason = "no branch protection or ruleset on default branch"
+	default:
+		state.Result, state.Reason = evaluate(reviews)
+	}
+	if state.EnforceAdmins == nil {
+		state.Reason += "; admin enforcement unknown: a reviewing ruleset's bypass actors are not readable"
+	}
+	return state
+}
+
+// merged is the effective protection of one branch, across classic
+// protection and every active ruleset. GitHub enforces each source on its
+// own, so the strictest applies: the highest review count, and any source
+// requiring a setting turns it on.
+type merged struct {
+	classic        *BranchProtection
+	rulesetRules   bool
+	reviews        int
+	codeOwner      bool
+	signed         bool
+	linear         bool
+	reviewRulesets []int64 // rulesets with a pull_request rule requiring >= 1 review, sorted
+}
+
+func merge(classic *BranchProtection, rules []BranchRule) (merged, error) {
+	m := merged{classic: classic, rulesetRules: len(rules) > 0}
+	if classic != nil {
+		if pr := classic.RequiredPullRequestReviews; pr != nil {
+			m.reviews = pr.RequiredApprovingReviewCount
+			m.codeOwner = pr.RequireCodeOwnerReviews
+		}
+		m.signed = classic.RequiredSignatures != nil && classic.RequiredSignatures.Enabled
+		m.linear = classic.RequiredLinearHistory != nil && classic.RequiredLinearHistory.Enabled
+	}
+	seen := map[int64]bool{}
+	for _, rule := range rules {
+		switch rule.Type {
+		case ruleTypePullRequest:
+			var p pullRequestRuleParams
+			if len(rule.Parameters) > 0 {
+				if err := json.Unmarshal(rule.Parameters, &p); err != nil {
+					return merged{}, fmt.Errorf("decode pull_request rule of ruleset %d: %w", rule.RulesetID, err)
+				}
+			}
+			if p.RequiredApprovingReviewCount > m.reviews {
+				m.reviews = p.RequiredApprovingReviewCount
+			}
+			m.codeOwner = m.codeOwner || p.RequireCodeOwnerReview
+			if p.RequiredApprovingReviewCount >= 1 && !seen[rule.RulesetID] {
+				seen[rule.RulesetID] = true
+				m.reviewRulesets = append(m.reviewRulesets, rule.RulesetID)
+			}
+		case ruleTypeRequiredSignatures:
+			m.signed = true
+		case ruleTypeRequiredLinearHistory:
+			m.linear = true
+		}
+	}
+	sort.Slice(m.reviewRulesets, func(i, j int) bool { return m.reviewRulesets[i] < m.reviewRulesets[j] })
+	return m, nil
+}
+
+func (m merged) source() string {
+	switch {
+	case m.classic != nil && m.rulesetRules:
+		return SourceBoth
+	case m.classic != nil:
+		return SourceClassic
+	case m.rulesetRules:
+		return SourceRulesets
+	default:
+		return SourceNone
 	}
 }
 
-// evaluate computes pass/fail per AC-3. v1 rule: required_reviews >= 1
-// passes; anything else fails. Slice 044 deliberately keeps this rule
-// shallow so the evaluator (slice 015) owns the policy ladder, not the
-// connector.
-func evaluate(s ProtectionState) (Result, string) {
-	if s.RequiredReviews >= 1 {
-		return ResultPass, fmt.Sprintf("required_reviews=%d", s.RequiredReviews)
+// rulesetBindsAdmins reads whether a ruleset's rules bind admins: no
+// bypass actor may be an admin. ok is false when that can't be read (an
+// error, a missing id, or GitHub withholding bypass_actors).
+func rulesetBindsAdmins(ctx context.Context, api API, repo string, id int64) (binds, ok bool) {
+	if id == 0 {
+		return false, false
+	}
+	rs, err := api.GetRuleset(ctx, repo, id)
+	if err != nil || rs == nil || rs.BypassActors == nil {
+		return false, false
+	}
+	for _, a := range *rs.BypassActors {
+		if a.mayBeAdmin() {
+			return false, true
+		}
+	}
+	return true, true
+}
+
+// enforceAdmins reports whether a required approving review binds admins:
+// true when at least one source requiring a review does (classic
+// enforce_admins, or a ruleset no admin can bypass), false when every such
+// source is read and none does, and nil when that depends on a ruleset
+// whose bypass actors we could not read. With no source requiring a
+// review, it is classic enforce_admins, or false when there is no classic
+// protection.
+//
+// Rulesets are read only until one binds, so a branch whose classic
+// protection already binds admins costs no ruleset request.
+func (m merged) enforceAdmins(bindsAdmins func(rulesetID int64) (binds, ok bool)) *bool {
+	t, f := true, false
+	classicBinds := m.classic != nil && m.classic.EnforceAdmins != nil && m.classic.EnforceAdmins.Enabled
+	classicReviews := m.classic != nil && m.classic.RequiredPullRequestReviews != nil &&
+		m.classic.RequiredPullRequestReviews.RequiredApprovingReviewCount >= 1
+	if classicReviews && classicBinds {
+		return &t
+	}
+	unknown := false
+	for _, id := range m.reviewRulesets {
+		binds, ok := bindsAdmins(id)
+		switch {
+		case !ok:
+			unknown = true
+		case binds:
+			return &t
+		}
+	}
+	if unknown {
+		return nil
+	}
+	if !classicReviews && len(m.reviewRulesets) == 0 {
+		return &classicBinds
+	}
+	return &f
+}
+
+// evaluate computes the connector's own verdict. v1 rule:
+// required_reviews >= 1 passes; anything else fails. Slice 044
+// deliberately keeps this rule shallow so the evaluator (slice 015) owns
+// the policy ladder, not the connector.
+func evaluate(reviews int) (Result, string) {
+	if reviews >= 1 {
+		return ResultPass, fmt.Sprintf("required_reviews=%d", reviews)
 	}
 	return ResultFail, "required_reviews=0"
 }
 
 // ---- REST client ----
+
+// maxPages bounds how many Link: rel="next" pages one listing follows.
+// At GitHub's per_page maximum of 100 that is 100,000 items.
+const maxPages = 1000
 
 // Client is a thin wrapper around http.Client carrying GitHub auth +
 // JSON decoding. Tests construct one against an httptest server.
@@ -176,59 +403,168 @@ func NewClient(httpClient *http.Client, baseURL string, creds githubauth.Credent
 	return &Client{HTTP: httpClient, BaseURL: strings.TrimRight(baseURL, "/"), Creds: creds}
 }
 
-// ListOrgRepos returns every non-archived repo under org. v1 pulls only
-// the first 100 — pagination lands when org sizes demand it.
+// ListOrgRepos returns every repo under org, following GitHub's
+// Link: rel="next" pagination. Archived repos are returned; Inspect
+// skips them.
 func (c *Client) ListOrgRepos(ctx context.Context, org string) ([]Repo, error) {
 	u := fmt.Sprintf("%s/orgs/%s/repos?per_page=100&type=all", c.BaseURL, url.PathEscape(org))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return nil, &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
 	var out []Repo
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode repos: %w", err)
-	}
-	return out, nil
+	err := c.getPages(ctx, u, func(body io.Reader) error {
+		var page []Repo
+		if err := json.NewDecoder(body).Decode(&page); err != nil {
+			return fmt.Errorf("decode repos: %w", err)
+		}
+		out = append(out, page...)
+		return nil
+	})
+	return out, err
 }
 
-// GetBranchProtection returns the protection state of one branch. A 404
-// indicates no protection — surfaced through APIError so the caller can
-// distinguish from other errors.
+// GetBranchProtection returns the classic protection of one branch. A 404
+// indicates no classic protection, and is surfaced through APIError so
+// the caller can distinguish it from other errors.
 func (c *Client) GetBranchProtection(ctx context.Context, repoFullName, branch string) (*BranchProtection, error) {
 	if repoFullName == "" || branch == "" {
 		return nil, errors.New("githubrepo: repo + branch required")
 	}
 	u := fmt.Sprintf("%s/repos/%s/branches/%s/protection", c.BaseURL, repoFullName, url.PathEscape(branch))
+	var bp BranchProtection
+	if err := c.getJSON(ctx, u, &bp, "protection"); err != nil {
+		return nil, err
+	}
+	return &bp, nil
+}
+
+// GetBranchRules returns every active ruleset rule that applies to the
+// branch, at any level, following Link: rel="next" pagination.
+func (c *Client) GetBranchRules(ctx context.Context, repoFullName, branch string) ([]BranchRule, error) {
+	if repoFullName == "" || branch == "" {
+		return nil, errors.New("githubrepo: repo + branch required")
+	}
+	u := fmt.Sprintf("%s/repos/%s/rules/branches/%s?per_page=100", c.BaseURL, repoFullName, url.PathEscape(branch))
+	out := []BranchRule{}
+	err := c.getPages(ctx, u, func(body io.Reader) error {
+		var page []BranchRule
+		if err := json.NewDecoder(body).Decode(&page); err != nil {
+			return fmt.Errorf("decode rules: %w", err)
+		}
+		out = append(out, page...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetRuleset returns one ruleset that applies to the repository, including
+// one configured at the organization level (includes_parents defaults to
+// true).
+func (c *Client) GetRuleset(ctx context.Context, repoFullName string, rulesetID int64) (*Ruleset, error) {
+	if repoFullName == "" || rulesetID == 0 {
+		return nil, errors.New("githubrepo: repo + ruleset id required")
+	}
+	u := fmt.Sprintf("%s/repos/%s/rulesets/%d", c.BaseURL, repoFullName, rulesetID)
+	var rs Ruleset
+	if err := c.getJSON(ctx, u, &rs, "ruleset"); err != nil {
+		return nil, err
+	}
+	return &rs, nil
+}
+
+func (c *Client) getJSON(ctx context.Context, u string, into any, what string) error {
+	res, err := c.do(ctx, u)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode == http.StatusNotFound {
+		return &APIError{Status: http.StatusNotFound}
+	}
+	if res.StatusCode != http.StatusOK {
+		return &APIError{Status: res.StatusCode, Body: drain(res.Body)}
+	}
+	if err := json.NewDecoder(res.Body).Decode(into); err != nil {
+		return fmt.Errorf("decode %s: %w", what, err)
+	}
+	return nil
+}
+
+// getPages GETs u and every page its Link: rel="next" chain names,
+// handing each 200 body to decode. A next link must stay on BaseURL's
+// scheme and host, so the credential is never sent elsewhere.
+func (c *Client) getPages(ctx context.Context, u string, decode func(io.Reader) error) error {
+	base, err := url.Parse(c.BaseURL)
+	if err != nil {
+		return fmt.Errorf("githubrepo: base url: %w", err)
+	}
+	for page := 0; u != ""; page++ {
+		if page >= maxPages {
+			return fmt.Errorf("githubrepo: more than %d pages at %s", maxPages, u)
+		}
+		res, err := c.do(ctx, u)
+		if err != nil {
+			return err
+		}
+		if res.StatusCode != http.StatusOK {
+			ae := &APIError{Status: res.StatusCode, Body: drain(res.Body)}
+			_ = res.Body.Close()
+			return ae
+		}
+		err = decode(res.Body)
+		_ = res.Body.Close()
+		if err != nil {
+			return err
+		}
+		next := nextLink(res.Header.Values("Link"))
+		if next == "" {
+			return nil
+		}
+		nu, err := url.Parse(next)
+		if err != nil {
+			return fmt.Errorf("githubrepo: next link %q: %w", next, err)
+		}
+		if nu.Scheme != base.Scheme || nu.Host != base.Host {
+			return fmt.Errorf("githubrepo: next link %q leaves %s", next, c.BaseURL)
+		}
+		u = nu.String()
+	}
+	return nil
+}
+
+func (c *Client) do(ctx context.Context, u string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
+	return c.HTTP.Do(req)
+}
+
+// nextLink returns the rel="next" target of an RFC 8288 Link header as
+// GitHub sends it (`<url>; rel="next", <url>; rel="last"`), or "".
+func nextLink(headers []string) string {
+	for _, h := range headers {
+		for _, part := range strings.Split(h, ",") {
+			segs := strings.Split(part, ";")
+			target := strings.TrimSpace(segs[0])
+			if !strings.HasPrefix(target, "<") || !strings.HasSuffix(target, ">") {
+				continue
+			}
+			for _, p := range segs[1:] {
+				k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+				if !ok || !strings.EqualFold(strings.TrimSpace(k), "rel") {
+					continue
+				}
+				for _, rel := range strings.Fields(strings.Trim(strings.TrimSpace(v), `"`)) {
+					if rel == "next" {
+						return target[1 : len(target)-1]
+					}
+				}
+			}
+		}
 	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode == http.StatusNotFound {
-		return nil, &APIError{Status: 404}
-	}
-	if res.StatusCode != http.StatusOK {
-		return nil, &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	var bp BranchProtection
-	if err := json.NewDecoder(res.Body).Decode(&bp); err != nil {
-		return nil, fmt.Errorf("decode protection: %w", err)
-	}
-	return &bp, nil
+	return ""
 }
 
 // APIError carries GitHub REST error context. The Body is bounded.

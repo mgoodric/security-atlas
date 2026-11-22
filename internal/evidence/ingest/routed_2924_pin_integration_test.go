@@ -37,15 +37,15 @@ func routingCutover(t *testing.T, admin *pgxpool.Pool) time.Time {
 	return cut
 }
 
-// insertRepoProtection writes one github.repo_protection.v1 ledger row as the
+// insertRepoProtection writes one github.repo_protection.v2 ledger row as the
 // owner role, the way a row stored before this change looks: bound to ctrl
 // when ctrl is valid, else control-free under control_ref 'scf:TDA-06'.
 func insertRepoProtection(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl *uuid.UUID, observed time.Time) uuid.UUID {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{
-		"repo_full_name": "acme/api", "default_branch": "main", "required_reviews": 1,
+		"repo_id": 1, "repo_full_name": "acme/api", "default_branch": "main", "required_reviews": 1,
 		"require_code_owner_reviews": false, "require_signed_commits": false,
-		"require_linear_history": false, "enforce_admins": true,
+		"require_linear_history": false, "enforce_admins": true, "protection_source": "classic",
 	})
 	id := uuid.New()
 	var controlID any
@@ -58,7 +58,7 @@ func insertRepoProtection(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl
 			id, tenant_id, control_id, evidence_kind, observed_at, ingested_at,
 			provenance, result, payload, hash, control_ref
 		)
-		VALUES ($1, $2, $3, 'github.repo_protection.v1', $4, now(), '{}'::jsonb, 'pass', $5::jsonb, $6, $7)
+		VALUES ($1, $2, $3, 'github.repo_protection.v2', $4, now(), '{}'::jsonb, 'pass', $5::jsonb, $6, $7)
 	`, id, tenant, controlID, observed, string(body), "hash-pin-"+id.String()[:8], ref); err != nil {
 		t.Fatalf("insert repo protection row: %v", err)
 	}

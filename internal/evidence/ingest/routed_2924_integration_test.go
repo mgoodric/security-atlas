@@ -88,6 +88,7 @@ func evaluateInWindow(t *testing.T, admin, app *pgxpool.Pool, tenant string, ctr
 func repoProtectionRecord(t *testing.T, controlID string) *evidencev1.EvidenceRecord {
 	t.Helper()
 	payload, err := structpb.NewStruct(map[string]any{
+		"repo_id":                    1,
 		"repo_full_name":             "acme/api",
 		"default_branch":             "main",
 		"required_reviews":           1,
@@ -95,13 +96,14 @@ func repoProtectionRecord(t *testing.T, controlID string) *evidencev1.EvidenceRe
 		"require_signed_commits":     false,
 		"require_linear_history":     false,
 		"enforce_admins":             true,
+		"protection_source":          "classic",
 	})
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
 	return record(t, func(r *evidencev1.EvidenceRecord) {
-		r.EvidenceKind = "github.repo_protection.v1"
-		r.SchemaVersion = "1.0.0"
+		r.EvidenceKind = "github.repo_protection.v2"
+		r.SchemaVersion = "2.0.0"
 		r.ControlId = controlID
 		r.Payload = payload
 	})

@@ -1,7 +1,7 @@
 // Package routed names the evidence kinds that are routed to controls by
 // evidence type (#2924).
 //
-// A connector observes a system, not a control: one github.repo_protection.v1
+// A connector observes a system, not a control: one github.repo_protection.v2
 // record answers both cc8_1 bundles, one osquery.host_posture.v1 record
 // answers cc6_6 and cc4_1. A record of a routed kind is therefore stored bound
 // to no control (control_id NULL); any wire control_id is kept only as

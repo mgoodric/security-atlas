@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/github.repo_protection/2.0.0.json",
+  "x-evidence-kind": "github.repo_protection.v2",
+  "x-semver": "2.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CHG-02"],
+  "title": "GitHub repository default-branch protection state",
+  "description": "The effective protection of one repository's default branch, merged from classic branch protection and every active ruleset that applies to it. Supersedes github.repo_protection.v1, which reported an unreadable repository's fields as 0 and false, ignored rulesets, and had no stable repository id. A protection field the connector could not read is omitted, never reported as off.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["repo_id", "repo_full_name", "default_branch"],
+  "properties": {
+    "repo_id": {
+      "description": "GitHub's repository id. Stable across renames; checks key on it.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "repo_full_name": { "type": "string", "minLength": 1 },
+    "default_branch": { "type": "string", "minLength": 1 },
+    "required_reviews": {
+      "description": "The highest required approving review count across classic protection and active rulesets.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "require_code_owner_reviews": { "type": "boolean" },
+    "require_signed_commits": { "type": "boolean" },
+    "require_linear_history": { "type": "boolean" },
+    "enforce_admins": {
+      "description": "A source that requires an approving review binds admins: classic enforce_admins, or a ruleset none of whose bypass actors can be an admin (only an app or a deploy key may bypass). Omitted when that rests on a ruleset whose bypass actors the token can't read.",
+      "type": "boolean"
+    },
+    "protection_source": {
+      "description": "Where the branch's protection comes from.",
+      "type": "string",
+      "enum": ["none", "classic", "rulesets", "classic_and_rulesets"]
+    },
+    "reason": {
+      "description": "Why the connector's verdict is what it is; for an inconclusive record, what could not be read.",
+      "type": "string"
+    }
+  }
+}

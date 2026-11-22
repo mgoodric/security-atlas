@@ -11,7 +11,7 @@ import (
 func TestRepoProtectionKey_StableWithinHour(t *testing.T) {
 	t1 := time.Date(2026, 5, 11, 14, 0, 0, 0, time.UTC)
 	t2 := time.Date(2026, 5, 11, 14, 59, 59, 0, time.UTC)
-	if a, b := idem.RepoProtectionKey("mgoodric/security-atlas", t1), idem.RepoProtectionKey("mgoodric/security-atlas", t2); a != b {
+	if a, b := idem.RepoProtectionKey(1296269, t1), idem.RepoProtectionKey(1296269, t2); a != b {
 		t.Fatalf("keys differ within hour: %s vs %s", a, b)
 	}
 }
@@ -19,8 +19,16 @@ func TestRepoProtectionKey_StableWithinHour(t *testing.T) {
 func TestRepoProtectionKey_RotatesOnHour(t *testing.T) {
 	t1 := time.Date(2026, 5, 11, 14, 59, 59, 0, time.UTC)
 	t2 := time.Date(2026, 5, 11, 15, 0, 0, 0, time.UTC)
-	if idem.RepoProtectionKey("mgoodric/security-atlas", t1) == idem.RepoProtectionKey("mgoodric/security-atlas", t2) {
+	if idem.RepoProtectionKey(1296269, t1) == idem.RepoProtectionKey(1296269, t2) {
 		t.Fatal("keys identical across hour boundary")
+	}
+}
+
+// #2925: the key follows GitHub's stable repo id, so each repo gets its own.
+func TestRepoProtectionKey_DistinctPerRepoID(t *testing.T) {
+	now := time.Now().UTC()
+	if idem.RepoProtectionKey(1, now) == idem.RepoProtectionKey(2, now) {
+		t.Fatal("different repo ids collided on key")
 	}
 }
 
@@ -59,7 +67,7 @@ func TestDeliveryKey_EmptyOnBlank(t *testing.T) {
 }
 
 func TestRepoProtectionKey_IsHex(t *testing.T) {
-	k := idem.RepoProtectionKey("a/b", time.Now())
+	k := idem.RepoProtectionKey(42, time.Now())
 	if len(k) != 64 {
 		t.Fatalf("key length = %d; want 64 hex chars", len(k))
 	}
