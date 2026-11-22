@@ -209,12 +209,15 @@ type controlBreakdownWire struct {
 	OperationalNoData    bool    `json:"operational_no_data"`
 }
 
+// residualWire is the derived residual. An unscored risk (#2511) has
+// Unscored true and null inherent and residual scores (#2867).
 type residualWire struct {
-	InherentScore                float64                `json:"inherent_score"`
-	ResidualScore                float64                `json:"residual_score"`
+	InherentScore                *float64               `json:"inherent_score"`
+	ResidualScore                *float64               `json:"residual_score"`
 	WeightedControlEffectiveness float64                `json:"weighted_control_effectiveness"`
 	Breakdown                    []controlBreakdownWire `json:"effectiveness_breakdown"`
 	Warning                      string                 `json:"warning,omitempty"`
+	Unscored                     bool                   `json:"unscored,omitempty"`
 }
 
 func residualWireFrom(res risk.ResidualResult) residualWire {
@@ -232,11 +235,14 @@ func residualWireFrom(res risk.ResidualResult) residualWire {
 			OperationalNoData:    b.OperationalNoData,
 		}
 	}
-	return residualWire{
-		InherentScore:                res.InherentScore,
-		ResidualScore:                res.ResidualScore,
+	wire := residualWire{
 		WeightedControlEffectiveness: res.WeightedControlEffectiveness,
 		Breakdown:                    bd,
 		Warning:                      res.Warning,
+		Unscored:                     res.Unscored,
 	}
+	if !res.Unscored {
+		wire.InherentScore, wire.ResidualScore = &res.InherentScore, &res.ResidualScore
+	}
+	return wire
 }
