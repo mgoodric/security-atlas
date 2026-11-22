@@ -30,6 +30,8 @@ func newPermissionsCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
 				"Application key", datadogauth.RequiredFiringScope, "monitoring.alert_firing.v1 (monitor alert-firing history)")
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
+				"Application key", datadogauth.RequiredCapacityPermission, "monitoring.host_capacity.v1 (host capacity; only with --capacity-production-scope)")
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
 				"API key", "(no scope — identifies the org)", "required alongside the Application key")
 			_ = tw.Flush()
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(),
@@ -38,7 +40,8 @@ NEVER grant a write/admin Application-key scope (no monitors_write, no
 security_monitoring_rules_write, no security_monitoring_signals_write, no
 events_write, no admin). The connector issues only read GETs against
 /api/v1/monitor, /api/v2/security_monitoring/rules,
-/api/v2/security_monitoring/signals, and /api/v1/events.`))
+/api/v2/security_monitoring/signals, /api/v1/events, and (host capacity
+only) /api/v1/query.`))
 		},
 	}
 }

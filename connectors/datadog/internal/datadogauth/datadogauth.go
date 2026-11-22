@@ -11,7 +11,9 @@
 package datadogauth
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 )
@@ -53,12 +55,42 @@ const (
 	// monitor-alert events (sources=monitor_alert). `events_read` is the
 	// read-only minimum; NEVER grant the write scope (events_write).
 	RequiredFiringScope = "events_read"
+
+	// RequiredCapacityPermission is what the host-capacity surface
+	// (monitoring.host_capacity.v1, #2935) needs: Datadog documents
+	// GET /api/v1/query as requiring the timeseries_query permission. The
+	// surface runs only when --capacity-production-scope is set, so a key
+	// without it keeps working for the other surfaces; it is therefore not in
+	// RequiredScopes. It grants metric reads only.
+	RequiredCapacityPermission = "timeseries_query"
 )
 
 // RequiredScopes is the full least-privilege read-only scope set the connector
 // requires across every evidence surface. NEVER grant a write/admin scope.
 func RequiredScopes() []string {
 	return []string{RequiredScope, RequiredSIEMScope, RequiredSignalScope, RequiredFiringScope}
+}
+
+// ErrUnsafeRedirect is returned for a redirect that changes host or scheme.
+var ErrUnsafeRedirect = errors.New("refused redirect")
+
+// CheckRedirect is an http.Client CheckRedirect that refuses a redirect to
+// another host (port included) or another scheme, so a request carrying the
+// DD-API-KEY and DD-APPLICATION-KEY headers is only ever followed on its own
+// origin. It stops after 10 redirects, as the default does. Mirrors the
+// Confluence connector's guard (#2947).
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	orig := via[0].URL
+	if !strings.EqualFold(req.URL.Host, orig.Host) {
+		return fmt.Errorf("%w: from host %q to %q", ErrUnsafeRedirect, orig.Host, req.URL.Host)
+	}
+	if req.URL.Scheme != orig.Scheme {
+		return fmt.Errorf("%w: from %s to %s", ErrUnsafeRedirect, orig.Scheme, req.URL.Scheme)
+	}
+	return nil
 }
 
 // Credential is the resolved Datadog auth material. Both keys are kept off
@@ -115,8 +147,44 @@ func Resolve(opts ResolveOpts) (Credential, error) {
 	if appKey == "" {
 		return Credential{}, fmt.Errorf("datadogauth: Application key required (set %s, scoped %s)", EnvAppKey, RequiredScope)
 	}
-	site := strings.TrimSpace(firstNonEmpty(opts.Site, os.Getenv(EnvSite), DefaultSite))
+	site := strings.ToLower(strings.TrimSpace(firstNonEmpty(opts.Site, os.Getenv(EnvSite), DefaultSite)))
+	if err := CheckSite(site); err != nil {
+		return Credential{}, err
+	}
 	return Credential{apiKey: apiKey, appKey: appKey, site: site}, nil
+}
+
+// siteDomains are the registrable domains Datadog's sites live under:
+// datadoghq.com (US1, and US3/US5/AP1/AP2 as subdomains), datadoghq.eu (EU1)
+// and ddog-gov.com (US1-FED). A site is one of them or a subdomain of one.
+var siteDomains = []string{"datadoghq.com", "datadoghq.eu", "ddog-gov.com"}
+
+// CheckSite refuses a site that would send the keys anywhere but a Datadog
+// API host. The site becomes the host of "https://api." + site, so a value
+// carrying userinfo ("x@evil.example"), a port, a path or any other
+// character could redirect both keys. Only lowercase DNS labels under a
+// Datadog domain pass.
+func CheckSite(site string) error {
+	bad := fmt.Errorf("datadogauth: %s %q is not a Datadog site (e.g. datadoghq.com, us3.datadoghq.com, datadoghq.eu, ddog-gov.com)", EnvSite, site)
+	if site == "" || len(site) > 253 {
+		return bad
+	}
+	for _, label := range strings.Split(site, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return bad
+		}
+		for _, r := range label {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+				return bad
+			}
+		}
+	}
+	for _, d := range siteDomains {
+		if site == d || strings.HasSuffix(site, "."+d) {
+			return nil
+		}
+	}
+	return bad
 }
 
 func firstNonEmpty(vs ...string) string {

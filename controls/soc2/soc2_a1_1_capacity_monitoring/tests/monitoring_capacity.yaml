@@ -1,0 +1,479 @@
+# monitoring.host_capacity.v1 records at schema 1.0.0, shaped as the Datadog
+# connector emits them (connectors/datadog/internal/hostcapacity/record.go
+# Build, #2935): one per host in --capacity-production-scope, so host_role is
+# always production; a reading is present only when it was read. `result` is
+# always inconclusive, which the query ignores. The connector's readings are
+# built from Datadog's documented metrics query response, not from a live
+# tenant (connectors/datadog/internal/hostcapacity/testdata/README.md).
+#
+# The control rolls its two queries up as any fail, then any pass. Cases
+# with no osquery.host_posture.v1 record leave that query inconclusive, so
+# the control's state is this query's. The last four cases combine both.
+cases:
+  - name: datadog-every-host-under-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 60
+          cpu_p95_5m_percent: 76
+          disk_used_percent: 80
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-2
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 89.99
+          cpu_p95_5m_percent: 89.99
+          disk_used_percent: 84.99
+
+  - name: datadog-disk-at-85-fails
+    description: 85 is not under 85
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 85
+
+  - name: datadog-memory-at-90-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 90
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+
+  - name: datadog-cpu-p95-at-90-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 90
+          disk_used_percent: 10
+
+  - name: datadog-too-few-cpu-points-is-inconclusive
+    description: the connector leaves out a p95 from 6 points; one unread host keeps the control from passing
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-2
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 6
+          memory_used_percent: 10
+          disk_used_percent: 10
+
+  - name: datadog-unread-host-and-over-host-fails
+    description: an over reading fails even with another host unread
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 95
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-2
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 0
+
+  - name: datadog-non-number-reading-fails
+    description: a reading that is present but not a number counts as over
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: "10"
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+
+  - name: datadog-latest-window-wins-over-an-older-fail
+    description: the older window was over; the newer one, pushed in the same hour, is under
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:30:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+          disk_used_percent: 99
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T12:20:00Z
+          window_end: 2026-11-21T12:25:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+
+  - name: datadog-latest-window-fail-overrides-an-older-pass
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:30:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T12:20:00Z
+          window_end: 2026-11-21T12:25:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 95
+          disk_used_percent: 10
+
+  - name: datadog-tied-latest-records-one-over-fails
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 86
+
+  - name: datadog-record-without-host-name-is-left-out
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: ""
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+          disk_used_percent: 99
+
+  - name: both-osquery-disk-fine-without-datadog-is-inconclusive
+    description: Fleet supplies disk only; with no Datadog record neither query passes, so a missing reading is not a pass
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 29
+
+  - name: both-osquery-disk-fine-and-datadog-under-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 29
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: api-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 40
+          cpu_p95_5m_percent: 30
+          disk_used_percent: 29
+
+  - name: both-osquery-disk-over-fails-despite-datadog-pass
+    description: Fleet's disk reading is over; the Datadog pass does not hide it
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 91
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: api-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 40
+          cpu_p95_5m_percent: 30
+          disk_used_percent: 29
+
+  - name: both-datadog-over-fails-despite-osquery-pass
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: api-1
+          platform: linux
+          host_role: production
+          host_role_source: fleet_label:Production
+          disk_used_percent: 29
+          memory_used_percent: 40
+          cpu_p95_5m_percent: 30
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: api-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 92
+          cpu_p95_5m_percent: 30
+          disk_used_percent: 29
+
+  - name: datadog-future-window-end-ranks-below-a-readable-one
+    description: a window_end more than an hour after evaluated_at cannot hide the readable over record
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 95
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2027-01-01T00:00:00Z
+          window_end: 2027-01-01T00:05:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+
+  - name: datadog-malformed-window-end-ranks-below-and-does-not-error
+    description: an unreadable window_end ranks as a missing one; the readable record decides
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: "2026-02-30T25:61:00Z"
+          cpu_sample_count: 20
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+          disk_used_percent: 99
