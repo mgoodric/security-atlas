@@ -13,7 +13,7 @@
 import type { RiskAuditEntry } from "@/lib/api/risks";
 import { enumLabel, humanizeEnum } from "@/lib/labels/enum-labels";
 
-export type HistoryRef = "person" | "control" | "org_unit";
+export type HistoryRef = "person" | "control" | "org_unit" | "risk";
 
 export type HistoryChange = {
   field: string;
@@ -30,6 +30,7 @@ const REF_FIELDS: Record<string, HistoryRef> = {
   closed_by: "person",
   control_id: "control",
   org_unit_id: "org_unit",
+  child_risk_id: "risk",
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -66,6 +67,8 @@ const FIELD_LABELS: Record<string, string> = {
   control_id: "Control",
   // #2835: theme changes.
   themes: "Themes",
+  // #2958: hierarchy links.
+  child_risk_id: "Child risk",
 };
 
 // Keys an entry carries that are not a change a reader needs to see.
@@ -101,6 +104,10 @@ export function historyActionLabel(action: string): string {
       return "Created";
     case "themes_changed":
       return "Themes changed";
+    case "child_linked":
+      return "Child risk linked";
+    case "child_unlinked":
+      return "Child risk unlinked";
     default:
       return humanizeEnum(action);
   }
