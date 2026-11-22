@@ -2090,8 +2090,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/controls/imports — upload a CSV/XLSX control sheet as a staged import batch (#1779) */
+        /** POST /v1/controls/imports — upload a CSV/XLSX control sheet as a staged import batch (#1779); repeatable column_map field=Header, and repeatable ignore_column=Header keeps a column unmapped whatever its alias (#2836) */
         post: operations["post-v1-controls-imports"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/controls/imports/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/controls/imports/preview — read a CSV/XLSX control sheet with the upload's fields (file, column_map, ignore_column; framework not needed) and return its header row, whether it was detected (two columns that map to a field) or offered as the fullest of the first rows, each column with the field it maps to and whether a column map can name it, the fields a control row reads (id, title and description required), the first 5 data rows and the data row count; nothing is staged; the upload's caps and 400s (#2836) */
+        post: operations["post-v1-controls-imports-preview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9219,6 +9236,26 @@ export interface operations {
         };
     };
     "post-v1-controls-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-controls-imports-preview": {
         parameters: {
             query?: never;
             header?: never;

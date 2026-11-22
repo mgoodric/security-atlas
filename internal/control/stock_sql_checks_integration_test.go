@@ -9,7 +9,7 @@
 //     bundles, #2823; the windowed cc6_3, cc1_4, cc6_5 and cc9_1, #2824;
 //     cc6_6 MFA on admin apps, #2828; cc7_1 remediation and cc1_4 training
 //     tickets, #2829; the acknowledgement checks cc1_5, cc5_3 and cc7_4,
-//     #2832) are
+//     #2832; the SAST checks cc7_1 detection, pi1_2 and pi1_3, #2831) are
 //     evaluated by the live engine against evidence
 //     records in the ledger, so the query is shown to decide the stored
 //     control state and not only the fixture runner's.
@@ -840,6 +840,100 @@ func TestJiraTicketChecks_EngineEvaluatesTicketPayload(t *testing.T) {
 				// The connector's verdict is pass for a terminal status; the
 				// queries must ignore it.
 				seedStockEvidence(t, admin, tenant, ctrl, "jira.ticket_evidence.v1", obs, "pass", p)
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if states[0].Result != tc.want {
+				t.Errorf("result = %q, want %q", states[0].Result, tc.want)
+			}
+		})
+	}
+}
+
+// #2831: cc7_1 vulnerability detection, pi1_2 and pi1_3 decide on each
+// repository's latest sast.scan_result.v1 payload (repository, findings),
+// not on the pusher's verdict. cc7_1's 168-hour scan-age bound equals the
+// daily freshness window, so live it can only bite at the window's edge;
+// the bundle's tests/ cases pin it with an exact evaluated_at.
+func TestSASTChecks_EngineEvaluatesScanPayload(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	now := time.Now().UTC()
+	hour := time.Hour
+
+	const (
+		cc71 = "soc2_cc7_1_vulnerability_detection"
+		pi12 = "soc2_pi1_2_input_completeness"
+		pi13 = "soc2_pi1_3_processing_validity"
+	)
+	type scan struct {
+		ago     time.Duration
+		payload map[string]any
+	}
+	finding := func(rule, severity string, suppressed bool) map[string]any {
+		return map[string]any{"rule_id": rule, "severity": severity, "suppressed": suppressed}
+	}
+	scanOf := func(ago time.Duration, repo string, findings ...map[string]any) scan {
+		if findings == nil {
+			findings = []map[string]any{}
+		}
+		return scan{ago, map[string]any{
+			"tool": "semgrep", "findings_count": len(findings), "repository": repo, "findings": findings,
+		}}
+	}
+	v100 := scan{2 * hour, map[string]any{"tool": "semgrep", "findings_count": 0}}
+	cases := []struct {
+		bundle string
+		name   string
+		scans  []scan
+		asOf   time.Time
+		want   string
+	}{
+		{cc71, "clean scans", []scan{
+			scanOf(2*hour, "acme/api"),
+			scanOf(3*hour, "acme/web", finding("go.sqli", "critical", true), finding("go.weak_hash", "high", false)),
+		}, eval.FarFuture, eval.ResultPass},
+		{cc71, "unsuppressed critical", []scan{scanOf(2*hour, "acme/api", finding("go.sqli", "critical", false))}, eval.FarFuture, eval.ResultFail},
+		{cc71, "latest scan decides", []scan{
+			scanOf(30*hour, "acme/api", finding("go.sqli", "critical", false)),
+			scanOf(2*hour, "acme/api"),
+		}, eval.FarFuture, eval.ResultPass},
+		{cc71, "1.0.0 record", []scan{v100}, eval.FarFuture, eval.ResultInconclusive},
+		{cc71, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+		{pi12, "no input-validation finding", []scan{
+			scanOf(2*hour, "acme/api", finding("injection.sql", "high", true), finding("authz.idor", "high", false)),
+		}, eval.FarFuture, eval.ResultPass},
+		{pi12, "unsuppressed injection.command", []scan{scanOf(2*hour, "acme/api", finding("injection.command", "low", false))}, eval.FarFuture, eval.ResultFail},
+		{pi12, "1.0.0 record", []scan{v100}, eval.FarFuture, eval.ResultInconclusive},
+		{pi12, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+		{pi13, "no authorisation finding", []scan{
+			scanOf(2*hour, "acme/api", finding("authz.idor", "critical", true), finding("injection.sql", "high", false)),
+		}, eval.FarFuture, eval.ResultPass},
+		{pi13, "unsuppressed authz.broken_object_level", []scan{scanOf(2*hour, "acme/api", finding("authz.broken_object_level", "medium", false))}, eval.FarFuture, eval.ResultFail},
+		{pi13, "1.0.0 record", []scan{v100}, eval.FarFuture, eval.ResultInconclusive},
+		{pi13, "no record", nil, eval.FarFuture, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.bundle+"/"+tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, tc.bundle)
+			for _, s := range tc.scans {
+				// The pusher's verdict is always pass here; the queries
+				// must ignore it.
+				seedStockEvidence(t, admin, tenant, ctrl, "sast.scan_result.v1", now.Add(-s.ago), "pass", s.payload)
 			}
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, tc.asOf); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)

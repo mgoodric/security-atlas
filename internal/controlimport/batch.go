@@ -162,7 +162,9 @@ type StageInput struct {
 	Raw           []byte
 	FrameworkSlug string
 	ColumnMap     map[string]string
-	UploadedBy    string
+	// Ignore lists headers kept unmapped whatever their alias (#2836).
+	Ignore     []string
+	UploadedBy string
 }
 
 // Stager turns an uploaded control sheet into a persisted import batch.
@@ -232,7 +234,7 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if len(in.Raw) > MaxUploadBytes {
 		return Batch{}, ErrUploadTooLarge
 	}
-	parsed, err := Parse(in.Filename, in.Raw, ParseOptions{ColumnMap: in.ColumnMap})
+	parsed, err := Parse(in.Filename, in.Raw, ParseOptions{ColumnMap: in.ColumnMap, Ignore: in.Ignore})
 	if err != nil {
 		return Batch{}, err
 	}

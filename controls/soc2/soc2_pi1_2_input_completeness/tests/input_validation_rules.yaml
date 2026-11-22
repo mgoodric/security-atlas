@@ -1,0 +1,406 @@
+# sast.scan_result.v1 records at schema 1.1.0 (#2831): one per scan, with
+# the repository scanned and every finding as {rule_id, severity,
+# suppressed}. No bundled connector emits the kind; a pusher sends it
+# through `atlas-cli evidence push`. `result` is the pusher's own verdict,
+# which the query ignores, so most cases set it to the opposite of the
+# expected state.
+#
+# The input-validation rules are injection.sql, injection.command,
+# deserialization.unsafe and input.schema_violation, matched exactly.
+cases:
+  - name: no-input-validation-finding-passes
+    description: other rules' findings, and a suppressed input-validation finding, do not fail
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 3,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: injection.sql,
+                  severity: critical,
+                  suppressed: true,
+                },
+                { rule_id: authz.idor, severity: high, suppressed: false },
+                {
+                  rule_id: go.tls.skip_verify,
+                  severity: critical,
+                  suppressed: false,
+                },
+              ],
+          }
+      - result: fail
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 0,
+            repository: acme/web,
+            findings: [],
+          }
+
+  - name: unsuppressed-injection-sql-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [{ rule_id: injection.sql, severity: low, suppressed: false }],
+          }
+
+  - name: unsuppressed-injection-command-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: injection.command,
+                  severity: high,
+                  suppressed: false,
+                },
+              ],
+          }
+
+  - name: unsuppressed-deserialization-unsafe-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: deserialization.unsafe,
+                  severity: medium,
+                  suppressed: false,
+                },
+              ],
+          }
+
+  - name: unsuppressed-input-schema-violation-fails
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: input.schema_violation,
+                  severity: info,
+                  suppressed: false,
+                },
+              ],
+          }
+
+  - name: rule-ids-match-exactly
+    description: a scanner's own rule ids, a different case and a longer id are not the platform rule ids
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 3,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: Injection.SQL,
+                  severity: critical,
+                  suppressed: false,
+                },
+                {
+                  rule_id: injection.sql.tainted,
+                  severity: critical,
+                  suppressed: false,
+                },
+                {
+                  rule_id: injection_sql,
+                  severity: critical,
+                  suppressed: false,
+                },
+              ],
+          }
+
+  - name: scan-six-days-old-still-decides
+    description: this check bounds scan age only by the 7-day window
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-16T12:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [{ rule_id: injection.sql, severity: high, suppressed: false }],
+          }
+
+  - name: one-failing-repository-fails-the-control
+    description: a failure outranks an unreadable scan and a clean one
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 0,
+            repository: acme/api,
+            findings: [],
+          }
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload: { tool: semgrep, findings_count: 0, repository: acme/web }
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/worker,
+            findings:
+              [
+                {
+                  rule_id: deserialization.unsafe,
+                  severity: high,
+                  suppressed: false,
+                },
+              ],
+          }
+
+  - name: v100-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload: { tool: semgrep, findings_count: 0, ruleset: p/ci }
+
+  - name: no-findings-array-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload: { tool: semgrep, findings_count: 0, repository: acme/api }
+
+  - name: unsuppressed-finding-without-rule-id-is-inconclusive
+    description: a tenant-private schema could drop rule_id; the finding may be an input-validation one
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 2,
+            repository: acme/api,
+            findings:
+              [
+                { severity: high, suppressed: false },
+                { rule_id: 42, severity: high, suppressed: false },
+              ],
+          }
+
+  - name: suppressed-finding-without-rule-id-passes
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings: [{ severity: high, suppressed: true }],
+          }
+
+  - name: suppressed-must-be-true
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [{ rule_id: injection.sql, severity: high, suppressed: "true" }],
+          }
+
+  - name: finding-not-an-object-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings: [injection.sql],
+          }
+
+  - name: latest-scan-decides-pass
+    expected_state: pass
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [{ rule_id: injection.sql, severity: high, suppressed: false }],
+          }
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 0,
+            repository: acme/api,
+            findings: [],
+          }
+
+  - name: latest-scan-decides-fail
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 0,
+            repository: acme/api,
+            findings: [],
+          }
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [
+                {
+                  rule_id: injection.command,
+                  severity: high,
+                  suppressed: false,
+                },
+              ],
+          }
+
+  - name: tie-on-observed-at-worse-scan-wins
+    expected_state: fail
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 0,
+            repository: acme/api,
+            findings: [],
+          }
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: codeql,
+            findings_count: 1,
+            repository: acme/api,
+            findings:
+              [{ rule_id: injection.sql, severity: high, suppressed: false }],
+          }
+
+  - name: keyless-scan-is-left-out
+    description: a scan with no repository, which would fail, is not seen
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: sast.scan_result.v1
+        observed_at: 2026-11-22T06:00:00Z
+        payload:
+          {
+            tool: semgrep,
+            findings_count: 1,
+            findings:
+              [{ rule_id: injection.sql, severity: high, suppressed: false }],
+          }
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-22T12:00:00Z
+    records: []
