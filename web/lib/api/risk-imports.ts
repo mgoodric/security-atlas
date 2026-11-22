@@ -91,6 +91,14 @@ export type BatchRow = {
   level?: string;
   org_unit_value?: string;
   org_unit_id?: string;
+  // #2846: the row's parent-risk-ID cell and, once approved, how linking
+  // its risk under that parent went: none, waiting on a pending parent row
+  // of the batch, linked (parent_risk_id), or failed (parent_link_error,
+  // with the parent_link_failed flag). The risk imports either way.
+  parent_ref?: string;
+  parent_link_status?: string;
+  parent_link_error?: string;
+  parent_risk_id?: string;
   unmapped: Record<string, string> | null;
   flags: string[] | null;
   status: RowStatus | string;
@@ -247,6 +255,7 @@ export function mappedFields(row: BatchRow): [string, string][] {
   if (row.org_unit_value) {
     out.push(["Org unit", row.org_unit_value]);
   }
+  if (row.parent_ref) out.push(["Parent risk ID", parentLinkText(row)]);
   if (row.treatment) {
     out.push([
       "Treatment",
@@ -362,3 +371,20 @@ export function rowPath(batchID: string, rowID: string, verb: string): string {
 }
 
 export { bffPostJSON as postJSON } from "./_shared";
+
+/** parentLinkText shows a row's parent risk ID with how its link went. */
+export function parentLinkText(row: BatchRow): string {
+  const ref = row.parent_ref ?? "";
+  switch (row.parent_link_status) {
+    case "linked":
+      return `${ref} (linked)`;
+    case "waiting":
+      return `${ref} (waiting for its row)`;
+    case "failed":
+      return row.parent_link_error
+        ? `${ref} (link failed: ${row.parent_link_error})`
+        : `${ref} (link failed)`;
+    default:
+      return ref;
+  }
+}

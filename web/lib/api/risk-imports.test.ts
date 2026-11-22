@@ -275,6 +275,26 @@ describe("row fields", () => {
     ]);
   });
 
+  it("shows the parent risk ID with how its link went (#2846)", () => {
+    const parent = (over: Partial<BatchRow>) =>
+      mappedFields(row({ parent_ref: "R-1", ...over })).at(-1);
+    expect(parent({ parent_link_status: "none" })).toEqual([
+      "Parent risk ID",
+      "R-1",
+    ]);
+    expect(parent({ parent_link_status: "waiting" })).toEqual([
+      "Parent risk ID",
+      "R-1 (waiting for its row)",
+    ]);
+    expect(parent({ parent_link_status: "linked" })).toEqual([
+      "Parent risk ID",
+      "R-1 (linked)",
+    ]);
+    expect(
+      parent({ parent_link_status: "failed", parent_link_error: "cycle" }),
+    ).toEqual(["Parent risk ID", "R-1 (link failed: cycle)"]);
+  });
+
   it("lists unmapped values by header, blanks left out", () => {
     expect(
       unmappedEntries(

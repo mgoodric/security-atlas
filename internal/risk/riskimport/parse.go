@@ -12,7 +12,8 @@
 // in the shape of the batch's one methodology (scores.go); #2842 adds the
 // treatment, acceptance and control links (treatment.go); #2843 the owner,
 // matched by email at staging (owner.go); #2845 the level and org unit
-// (placement.go). Every other
+// (placement.go); #2846 the parent risk ID, linked at approval
+// (parentlink.go). Every other
 // column is kept on the staged row as an unmapped value and never written
 // into the description.
 package riskimport
@@ -116,9 +117,12 @@ type StagedRisk struct {
 	// Level is the level cell read as a risk level, empty when blank;
 	// OrgUnit the org unit cell as written, which staging matches by name
 	// (placement.go).
-	Level    dbx.RiskLevel     `json:"level,omitempty"`
-	OrgUnit  string            `json:"org_unit,omitempty"`
-	Unmapped map[string]string `json:"unmapped"`
+	Level   dbx.RiskLevel `json:"level,omitempty"`
+	OrgUnit string        `json:"org_unit,omitempty"`
+	// ParentRef is the parent-risk-ID cell as written: the organisation
+	// risk ID of the risk this one rolls up to (parentlink.go).
+	ParentRef string            `json:"parent_ref,omitempty"`
+	Unmapped  map[string]string `json:"unmapped"`
 }
 
 // RejectedRow is a data row that could not be staged, with the reason.
@@ -206,6 +210,13 @@ var fieldAliases = map[string][]string{
 	FieldLevel: {"level", "risk level", "risk_level", "hierarchy level"},
 	FieldOrgUnit: {
 		"org_unit", "org unit", "org unit name", "org_unit_name", "organisation unit", "organization unit",
+	},
+	// The risk export's parent_risk_ids holds the parents' uuids in the
+	// exporting tenant, so it is deliberately not an alias: it stays
+	// unmapped.
+	FieldParentRef: {
+		"parent_ref", "parent ref", "parent risk id", "parent_risk_id", "parent risk", "parent",
+		"parent risk ref", "parent risk reference", "parent external ref", "parent_external_ref",
 	},
 }
 
@@ -514,6 +525,8 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 			level = val
 		case FieldOrgUnit:
 			s.OrgUnit = val
+		case FieldParentRef:
+			s.ParentRef = val
 		case "":
 			if c.key != "" && val != "" {
 				s.Unmapped[c.key] = val
