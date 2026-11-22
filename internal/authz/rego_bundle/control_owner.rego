@@ -104,9 +104,7 @@ allow if {
 control_owner_writable_resources := {
     "evidence",
     "artifacts",
-    # Slice 027: control owner can author walkthroughs for their
-    # controls. The walkthrough.created_by stamp + the control's
-    # owner_role intersection is the per-row gate; rego allows the
-    # action at the role level.
-    "walkthroughs",
+    # #2708: walkthroughs are not here. Admins and GRC engineers record
+    # them (walkthroughs canWrite is authz.IsTenantApprover); a control
+    # owner reads them through the read set above.
 }

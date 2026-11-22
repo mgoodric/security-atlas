@@ -117,9 +117,9 @@ auditor_period_matches if {
 # AC-4 ("auditor and the control's owner can read").
 #
 # Auditor write on walkthroughs is intentionally NOT granted at the
-# auditor-role layer; walkthroughs can be authored by control_owner or
-# grc_engineer (see control_owner.rego + grc_engineer.rego). An auditor
-# who needs to record a walkthrough does so via their assigned engineer
+# auditor-role layer; walkthroughs are authored by admin or grc_engineer
+# only (grc_engineer.rego; #2708 removed control_owner). An auditor who
+# needs to record a walkthrough does so via their assigned engineer
 # credential or has the grc_engineer role flag set on their credential.
 allow if {
     has_role("auditor")
