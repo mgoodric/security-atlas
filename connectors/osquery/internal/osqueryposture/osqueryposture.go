@@ -24,7 +24,8 @@
 // osquery.host_posture.v1 schema at 1.2.0 (host_uuid, hostname, platform,
 // os_version, disk_encryption_enabled, screen_lock_enabled,
 // firewall_enabled, mdm_enrolled, last_seen_at, reason, firewall_source,
-// screen_lock_source). The schema
+// screen_lock_source; 1.3.0 adds disk_used_percent, host_role(_source),
+// antimalware_protected/_source and edr_healthy/_source). The schema
 // declares additionalProperties:false so this package emits only those
 // fields. A posture field the connector did not read is nil and is left
 // out of the payload, never sent as false (#2912).
@@ -77,6 +78,29 @@ type HostPosture struct {
 	// osquery row.
 	FirewallSource   string
 	ScreenLockSource string
+
+	// DiskUsedPercent is the share of the host's disk in use, 0-100. Fleet:
+	// 100 minus percent_disk_space_available, read only when Fleet also
+	// reports a non-zero gigs_total_disk_space. nil when not read. Fleet's
+	// host API has no memory-use or CPU-use field, so the connector emits
+	// neither (#2826).
+	DiskUsedPercent *float64
+
+	// HostRole is "production" when the host carries the operator-named
+	// production Fleet label, and empty (not read) otherwise; HostRoleSource
+	// is then "fleet_label:<name>".
+	HostRole       string
+	HostRoleSource string
+
+	// AntimalwareProtected and EDRHealthy are read only from operator-named
+	// Fleet policies, like firewall and screen lock: Fleet's host API has no
+	// antimalware or EDR field. The policy's query holds what "protected"
+	// and "healthy" mean (engine, definitions age, agent health). nil when
+	// not read; the *Source fields name the policy.
+	AntimalwareProtected *bool
+	AntimalwareSource    string
+	EDRHealthy           *bool
+	EDRSource            string
 
 	// LastSeen is when the host last checked in with Fleet (Fleet's
 	// `seen_time`). Zero when unknown. It is not ObservedAt: Fleet lists
@@ -133,6 +157,19 @@ type HostDetail struct {
 	DiskEncryptionEnabled *bool        `json:"disk_encryption_enabled"`
 	MDM                   *HostMDM     `json:"mdm"`
 	Policies              []HostPolicy `json:"policies"`
+	// PercentDiskSpaceAvailable and GigsTotalDiskSpace are the documented
+	// Get host disk keys (example values 71 and 246). A zero or missing
+	// total is taken as "Fleet has no disk reading yet", not a full disk.
+	PercentDiskSpaceAvailable *float64    `json:"percent_disk_space_available"`
+	GigsTotalDiskSpace        *float64    `json:"gigs_total_disk_space"`
+	Labels                    []HostLabel `json:"labels"`
+}
+
+// HostLabel is the subset of one Get host `labels[]` entry the connector
+// reads.
+type HostLabel struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
 }
 
 // HostPolicy is the subset of one Get host `policies[]` entry the
@@ -144,13 +181,19 @@ type HostPolicy struct {
 	Response string `json:"response"`
 }
 
-// FleetPolicies names the operator's Fleet policies that answer the two
-// posture questions Fleet's host API has no field for. An empty name means
-// the field is not read. The operator writes and maintains the policies;
-// the connector only reads each host's response (#2921).
+// FleetPolicies names the operator's Fleet policies (and the one label)
+// that answer posture questions Fleet's host API has no field for. An empty
+// name means the field is not read. The operator writes and maintains the
+// policies and the label; the connector only reads each host's policy
+// response and label membership (#2921, #2826).
 type FleetPolicies struct {
-	Firewall   string
-	ScreenLock string
+	Firewall    string
+	ScreenLock  string
+	Antimalware string
+	EDR         string
+	// ProductionLabel is a Fleet label, not a policy: a host carrying it is
+	// host_role "production".
+	ProductionLabel string
 }
 
 // HostMDM is the subset of Fleet's host `mdm` object the connector reads.
@@ -253,6 +296,7 @@ func PullFromLocal(ctx context.Context, q LocalQueryer, now func() time.Time) ([
 			ScreenLockEnabled:     parseBool(r["screen_lock_enabled"]),
 			FirewallEnabled:       parseBool(r["firewall_enabled"]),
 			MDMEnrolled:           parseBool(r["mdm_enrolled"]),
+			DiskUsedPercent:       parsePercent(r["disk_used_percent"]),
 			LastSeen:              now(),
 			ObservedAt:            now(),
 		}
@@ -274,13 +318,17 @@ SELECT
   d.encrypted                 AS disk_encryption_enabled,
   sc.enabled                  AS screen_lock_enabled,
   a.global_state              AS firewall_enabled,
-  m.enrolled                  AS mdm_enrolled
+  m.enrolled                  AS mdm_enrolled,
+  CASE WHEN mt.blocks > 0
+       THEN ROUND(100.0 * (mt.blocks - mt.blocks_available) / mt.blocks, 1)
+  END                         AS disk_used_percent
 FROM system_info s
 LEFT JOIN os_version o
 LEFT JOIN disk_encryption d ON d.name = s.hostname
 LEFT JOIN screenlock sc
 LEFT JOIN alf a
 LEFT JOIN mdm m
+LEFT JOIN mounts mt ON mt.path = '/'
 LIMIT 1;
 `
 
@@ -459,6 +507,46 @@ func fillFromDetail(p *HostPosture, d *HostDetail, pol FleetPolicies) {
 		p.ScreenLockEnabled = v
 		p.ScreenLockSource = "fleet_policy:" + pol.ScreenLock
 	}
+	// Antimalware and EDR: likewise no Get host field (#2826).
+	if v := policyResponse(d.Policies, pol.Antimalware); v != nil {
+		p.AntimalwareProtected = v
+		p.AntimalwareSource = "fleet_policy:" + pol.Antimalware
+	}
+	if v := policyResponse(d.Policies, pol.EDR); v != nil {
+		p.EDRHealthy = v
+		p.EDRSource = "fleet_policy:" + pol.EDR
+	}
+	p.DiskUsedPercent = diskUsedPercent(d)
+	if pol.ProductionLabel != "" && hasLabel(d.Labels, pol.ProductionLabel) {
+		p.HostRole = "production"
+		p.HostRoleSource = "fleet_label:" + pol.ProductionLabel
+	}
+}
+
+// diskUsedPercent derives disk use from Fleet's percent_disk_space_available.
+// It is nil when Fleet omits the percentage, when gigs_total_disk_space is
+// missing or zero (no disk reading yet, which would otherwise read as a
+// full disk), or when the percentage is outside 0-100.
+func diskUsedPercent(d *HostDetail) *float64 {
+	if d.PercentDiskSpaceAvailable == nil || d.GigsTotalDiskSpace == nil || *d.GigsTotalDiskSpace <= 0 {
+		return nil
+	}
+	avail := *d.PercentDiskSpaceAvailable
+	if avail < 0 || avail > 100 {
+		return nil
+	}
+	used := 100 - avail
+	return &used
+}
+
+// hasLabel reports whether the host carries a label with exactly this name.
+func hasLabel(labels []HostLabel, name string) bool {
+	for _, l := range labels {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // policyResponse reads the named policy's result for one host: "pass" is
@@ -554,6 +642,20 @@ func parseBool(s string) *bool {
 	default:
 		return nil
 	}
+}
+
+// parsePercent reads an osquery-row percentage. An empty (NULL) column, a
+// non-number, or a value outside 0-100 is unread.
+func parsePercent(s string) *float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || v < 0 || v > 100 {
+		return nil
+	}
+	return &v
 }
 
 func firstNonEmpty(a, b string) string {

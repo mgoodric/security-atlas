@@ -14,6 +14,8 @@ import (
 
 func ptr(b bool) *bool { return &b }
 
+func f64(v float64) *float64 { return &v }
+
 // validatePushed runs a record built by buildHostPostureRecord through the
 // check the DB-backed ingest stage applies to every push: protojson-marshal
 // the payload, then ValidatePayload against the registered schema for the
@@ -79,6 +81,27 @@ func TestBuildHostPostureRecord_ConformsAndOmitsUnread(t *testing.T) {
 			},
 			absent: []string{"firewall_enabled", "firewall_source", "screen_lock_enabled", "screen_lock_source"},
 		},
+		// #2826: disk use, host role, antimalware and EDR, each with its
+		// source, validate under 1.3.0.
+		"fleet_host_capacity_role_antimalware_edr": {
+			in: osqueryposture.HostPosture{
+				HostUUID: "u6", Hostname: "srv-1", Platform: "linux",
+				DiskUsedPercent: f64(29), HostRole: "production", HostRoleSource: "fleet_label:Production",
+				AntimalwareProtected: ptr(true), AntimalwareSource: "fleet_policy:Anti-malware current",
+				EDRHealthy: ptr(false), EDRSource: "fleet_policy:EDR healthy",
+				LastSeen: seen, Result: osqueryposture.ResultInconclusive, Reason: "disk_encryption and screen_lock not reported", ObservedAt: pull,
+			},
+			present: []string{"disk_used_percent", "host_role", "host_role_source", "antimalware_protected", "antimalware_source", "edr_healthy", "edr_source"},
+			absent:  []string{"memory_used_percent", "cpu_p95_5m_percent"},
+		},
+		// A policy source without its result is not emitted on its own:
+		// 1.3.0's dependentRequired would reject it.
+		"antimalware_edr_source_without_value": {
+			in: osqueryposture.HostPosture{
+				HostUUID: "u7", Hostname: "srv-2", AntimalwareSource: "fleet_policy:a", EDRSource: "fleet_policy:e", ObservedAt: pull,
+			},
+			absent: []string{"antimalware_protected", "antimalware_source", "edr_healthy", "edr_source", "host_role", "host_role_source", "disk_used_percent"},
+		},
 		"detail_fetch_failed": {
 			in: osqueryposture.HostPosture{
 				HostUUID: "u2", Hostname: "x", Platform: "darwin", LastSeen: seen,
@@ -134,7 +157,7 @@ func TestBuildHostPostureRecord_LastSeenIsNotObservedAt(t *testing.T) {
 	if got := rec.GetObservedAt().AsTime(); !got.Equal(pull) {
 		t.Errorf("observed_at = %v; want pull time %v", got, pull)
 	}
-	if rec.GetSchemaVersion() != "1.2.0" {
-		t.Errorf("schema_version = %q; want 1.2.0", rec.GetSchemaVersion())
+	if rec.GetSchemaVersion() != "1.3.0" {
+		t.Errorf("schema_version = %q; want 1.3.0", rec.GetSchemaVersion())
 	}
 }

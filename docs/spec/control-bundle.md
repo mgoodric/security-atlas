@@ -56,7 +56,7 @@ When uploaded as a tarball, the archive **MUST**:
 | `control_family`         | string      | SCF taxonomy family (AST, BCD, CFG, ...). Inferred from the SCF anchor if omitted.                                                                                                        |
 | `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                                                                                     |
 | `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                                                                                      |
-| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI. See §2.2.1 for each class's window.                                          |
+| `freshness_class`        | enum        | `realtime`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI. See §2.2.1 for each class's window.                                                    |
 | `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.                                                                      |
 | `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.                                                                              |
 | `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                                                                                           |
@@ -92,10 +92,9 @@ The calendar repeats it as `CASE c.freshness_class` blocks in
 fails if any class window or the 90-day fallback differs from the Go table, so
 change both together (#2868). The Go table is also the source of
 the classes a bundle may declare: parse and upload refuse any class the table
-does not map, so a typo cannot silently widen a control's window (#2896). The
-one exception is `hourly`, which the engine does not map and which falls back
-to the `monthly` 90-day window. It is kept only for stock `soc2_a1_1` and is
-removed when #2826 supersedes that bundle; do not declare it in new bundles. Why the windows carry grace,
+does not map, so a typo cannot silently widen a control's window (#2896).
+There are no exceptions: `hourly`, kept for stock `soc2_a1_1` until that
+bundle moved to `realtime`, is refused like any other class (#2826). Why the windows carry grace,
 and why they were kept rather than narrowed to the cadence, is recorded in
 `docs/audit-log/2816-freshness-window-grace-decisions.md`.
 

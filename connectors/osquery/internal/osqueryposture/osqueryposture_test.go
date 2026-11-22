@@ -21,7 +21,10 @@ import (
 // omits disk_encryption_enabled, which the docs say Fleet does when it
 // doesn't know the status (#2912). Host 1's policies[] is the docs' Get
 // host example array verbatim (ids 2, 3, 1: "fail", "", "pass"); Fleet's
-// own example names are kept so the shape stays traceable (#2921).
+// own example names are kept so the shape stays traceable (#2921). Host 1's
+// disk keys (174.98 / 71 / 246) and its labels[] entry are the docs' Get
+// host macOS example values; host 2 reports a zero total, the shape of a
+// host with no disk reading yet (#2826).
 const (
 	fleetListHosts = `{
 		"hosts": [
@@ -42,6 +45,14 @@ const (
 			"hostname": "Annas-MacBook-Pro.local", "uuid": "392547dc-0000-0000-a87a-d701ff75bc65",
 			"platform": "darwin", "os_version": "macOS 15.2", "computer_name": "Anna's MacBook Pro",
 			"disk_encryption_enabled": true, "status": "online",
+			"gigs_disk_space_available": 174.98, "percent_disk_space_available": 71,
+			"gigs_total_disk_space": 246,
+			"labels": [
+				{"created_at": "2021-08-19T02:02:17Z", "updated_at": "2021-08-19T02:02:17Z",
+				 "id": 12, "name": "Hosts with Chrome installed", "description": "",
+				 "query": "SELECT * FROM apps WHERE name LIKE \"%Chrome%\"", "platform": "",
+				 "label_type": "regular", "label_membership_type": "dynamic"}
+			],
 			"mdm": {"encryption_key_available": true, "enrollment_status": "On (manual)",
 			        "is_personal_enrollment": false, "name": "Fleet", "connected_to_fleet": true,
 			        "device_status": "unlocked", "pending_action": ""},
@@ -62,6 +73,8 @@ const (
 			"id": 2, "seen_time": "2021-08-19T21:14:58Z", "hostname": "win-1", "uuid": "uuid-B",
 			"platform": "windows", "os_version": "Windows 11",
 			"disk_encryption_enabled": false, "status": "online",
+			"gigs_disk_space_available": 0, "percent_disk_space_available": 0,
+			"gigs_total_disk_space": 0,
 			"mdm": {"enrollment_status": "On (automatic)", "name": "Fleet"}
 		}
 	}`
@@ -204,6 +217,95 @@ func TestPullFromFleet_NamedPoliciesFromDocumentedShape(t *testing.T) {
 	}
 	if empty.Result != osqueryposture.ResultInconclusive || empty.Reason != "screen_lock not reported" {
 		t.Errorf("mac with empty responses = %q (%q); want inconclusive", empty.Result, empty.Reason)
+	}
+}
+
+// #2826: disk use from the documented disk keys, host role from a named
+// label, antimalware and EDR from named policies, all through the real HTTP
+// decode. Host 1 carries the label, passes "SomeQuery" and fails
+// "SomeQuery2"; host 2 reports a zero disk total; host 3 has none of it.
+func TestPullFromFleet_CapacityRoleAntimalwareEDR(t *testing.T) {
+	byUUID := pullFakeWith(t, osqueryposture.FleetPolicies{
+		Antimalware:     "SomeQuery",
+		EDR:             "SomeQuery2",
+		ProductionLabel: "Hosts with Chrome installed",
+	})
+	mac := byUUID["392547dc-0000-0000-a87a-d701ff75bc65"]
+	if mac.DiskUsedPercent == nil || *mac.DiskUsedPercent != 29 {
+		t.Errorf("mac disk_used_percent = %v; want 29 (100 - 71)", mac.DiskUsedPercent)
+	}
+	if mac.HostRole != "production" || mac.HostRoleSource != "fleet_label:Hosts with Chrome installed" {
+		t.Errorf("mac role = %q (%q); want production from the label", mac.HostRole, mac.HostRoleSource)
+	}
+	if !boolIs(mac.AntimalwareProtected, true) || mac.AntimalwareSource != "fleet_policy:SomeQuery" {
+		t.Errorf("mac antimalware = %v (%q); want true from SomeQuery", strBool(mac.AntimalwareProtected), mac.AntimalwareSource)
+	}
+	if !boolIs(mac.EDRHealthy, false) || mac.EDRSource != "fleet_policy:SomeQuery2" {
+		t.Errorf("mac edr = %v (%q); want false from SomeQuery2", strBool(mac.EDRHealthy), mac.EDRSource)
+	}
+	// The connector's own verdict is unchanged: disk encryption + screen lock.
+	if mac.Result != osqueryposture.ResultInconclusive {
+		t.Errorf("mac result = %q; want inconclusive (screen lock unread)", mac.Result)
+	}
+	for _, u := range []string{"uuid-B", "uuid-C"} {
+		h := byUUID[u]
+		if h.DiskUsedPercent != nil {
+			t.Errorf("%s disk_used_percent = %v; want unread", u, *h.DiskUsedPercent)
+		}
+		if h.HostRole != "" || h.AntimalwareProtected != nil || h.EDRHealthy != nil {
+			t.Errorf("%s has no labels or policies but role/antimalware/edr read: %+v", u, h)
+		}
+	}
+}
+
+// Without the names, none of role, antimalware or EDR is read; disk use
+// needs no name.
+func TestPullFromFleet_NewFieldsUnreadWithoutNames(t *testing.T) {
+	mac := pullFake(t)["392547dc-0000-0000-a87a-d701ff75bc65"]
+	if mac.HostRole != "" || mac.AntimalwareProtected != nil || mac.EDRHealthy != nil {
+		t.Errorf("unnamed label/policies read: %+v", mac)
+	}
+	if mac.DiskUsedPercent == nil || *mac.DiskUsedPercent != 29 {
+		t.Errorf("disk_used_percent = %v; want 29", mac.DiskUsedPercent)
+	}
+}
+
+// diskUsedPercent rules: a missing percentage or total, a zero total, or a
+// percentage outside 0-100 is unread.
+func TestPullFromFleet_DiskUsedPercentRules(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name         string
+		avail, total *float64
+		want         *float64
+	}{
+		{"documented", f(71), f(246), f(29)},
+		{"full_disk", f(0), f(246), f(100)},
+		{"empty_disk", f(100), f(246), f(0)},
+		{"no_percent", nil, f(246), nil},
+		{"no_total", f(71), nil, nil},
+		{"zero_total", f(0), f(0), nil},
+		{"over_100", f(120), f(246), nil},
+		{"negative", f(-1), f(246), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{
+				hosts:  []osqueryposture.HostListEntry{{ID: 1, UUID: "u", Hostname: "h"}},
+				detail: map[uint64]osqueryposture.HostDetail{1: {ID: 1, UUID: "u", PercentDiskSpaceAvailable: tc.avail, GigsTotalDiskSpace: tc.total}},
+			}
+			rows, err := osqueryposture.PullFromFleet(context.Background(), api, nil, osqueryposture.FleetPolicies{})
+			if err != nil {
+				t.Fatalf("PullFromFleet: %v", err)
+			}
+			got := rows[0].DiskUsedPercent
+			switch {
+			case tc.want == nil && got != nil:
+				t.Errorf("got %v; want unread", *got)
+			case tc.want != nil && (got == nil || *got != *tc.want):
+				t.Errorf("got %v; want %v", got, *tc.want)
+			}
+		})
 	}
 }
 
@@ -364,6 +466,7 @@ func TestPullFromLocal_OneRow(t *testing.T) {
 			"screen_lock_enabled":     "true",
 			"firewall_enabled":        "1",
 			"mdm_enrolled":            "0",
+			"disk_used_percent":       "42.5",
 		},
 	}}
 	rows, err := osqueryposture.PullFromLocal(context.Background(), q, func() time.Time {
@@ -384,6 +487,24 @@ func TestPullFromLocal_OneRow(t *testing.T) {
 	}
 	if r.Result != osqueryposture.ResultPass {
 		t.Errorf("result = %q; want pass", r.Result)
+	}
+	if r.DiskUsedPercent == nil || *r.DiskUsedPercent != 42.5 {
+		t.Errorf("disk_used_percent = %v; want 42.5", r.DiskUsedPercent)
+	}
+}
+
+// #2826: a NULL, non-numeric or out-of-range disk_used_percent column is
+// unread, never 0.
+func TestPullFromLocal_DiskUsedPercentUnread(t *testing.T) {
+	for _, v := range []string{"", "n/a", "-0.1", "100.1"} {
+		q := &fakeLocal{rows: []map[string]string{{"uuid": "u", "disk_used_percent": v}}}
+		rows, err := osqueryposture.PullFromLocal(context.Background(), q, nil)
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("PullFromLocal: %v", err)
+		}
+		if rows[0].DiskUsedPercent != nil {
+			t.Errorf("disk_used_percent %q read as %v; want unread", v, *rows[0].DiskUsedPercent)
+		}
 	}
 }
 

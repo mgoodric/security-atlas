@@ -347,3 +347,119 @@ func TestCC81_EngineEvaluatesRepoProtectionPayload(t *testing.T) {
 		})
 	}
 }
+
+type hostPostureRec struct {
+	connectorResult string
+	payload         map[string]any
+}
+
+// evaluateStockHostPosture seeds one tenant with the bundle and the given
+// osquery.host_posture.v1 payloads (each with its connector verdict), runs
+// the engine and returns the stored control state.
+func evaluateStockHostPosture(t *testing.T, admin *pgxpool.Pool, engine *eval.Engine, bundle string, records []hostPostureRec) string {
+	t.Helper()
+	observed := time.Now().UTC().Add(-2 * time.Hour)
+	tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+	ctx, err := tenancy.WithTenant(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	ctrl := seedStockBundleControl(t, admin, tenant, bundle)
+	for _, r := range records {
+		seedStockEvidence(t, admin, tenant, ctrl, "osquery.host_posture.v1", observed, r.connectorResult, r.payload)
+	}
+	if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl: %v", err)
+	}
+	states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("want 1 state, got %d", len(states))
+	}
+	return states[0].Result
+}
+
+// #2826: cc6_8 and cc7_2 decide on each host's latest antimalware_protected
+// / edr_healthy (read from a named Fleet policy), not on the osquery
+// connector's verdict. Absent is inconclusive, an observed false fails.
+func TestCC68CC72_EngineEvaluatesPolicyBooleanPayload(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	const h1, h2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	for _, b := range []struct{ bundle, field, source string }{
+		{"soc2_cc6_8_malware_protection", "antimalware_protected", "antimalware_source"},
+		{"soc2_cc7_2_anomaly_detection", "edr_healthy", "edr_source"},
+	} {
+		rec := func(connectorResult, host, v string) hostPostureRec {
+			p := map[string]any{"host_uuid": host, "hostname": "host-" + host[:4], "platform": "darwin", "disk_encryption_enabled": true}
+			if v != "" {
+				p[b.field] = v == "on"
+				p[b.source] = "fleet_policy:named"
+			}
+			return hostPostureRec{connectorResult, p}
+		}
+		cases := []struct {
+			name    string
+			records []hostPostureRec
+			want    string
+		}{
+			{"every host on", []hostPostureRec{rec("fail", h1, "on"), rec("pass", h2, "on")}, eval.ResultPass},
+			{"one host off", []hostPostureRec{rec("pass", h1, "on"), rec("pass", h2, "off")}, eval.ResultFail},
+			{"unread host", []hostPostureRec{rec("pass", h1, "on"), rec("pass", h2, "")}, eval.ResultInconclusive},
+			{"unread plus off fails", []hostPostureRec{rec("pass", h1, ""), rec("pass", h2, "off")}, eval.ResultFail},
+			{"no record", nil, eval.ResultInconclusive},
+		}
+		for _, tc := range cases {
+			t.Run(b.bundle+"/"+tc.name, func(t *testing.T) {
+				if got := evaluateStockHostPosture(t, admin, engine, b.bundle, tc.records); got != tc.want {
+					t.Errorf("result = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	}
+}
+
+// #2826: a1_1 decides on each production host's latest disk, memory and
+// CPU p95 readings, not on the osquery connector's verdict.
+func TestA11_EngineEvaluatesCapacityPayload(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	const h1, h2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	// Readings are disk, memory, CPU p95; a negative value is not read.
+	rec := func(connectorResult, host string, prod bool, disk, mem, cpu float64) hostPostureRec {
+		p := map[string]any{"host_uuid": host, "hostname": "host-" + host[:4], "platform": "linux"}
+		if prod {
+			p["host_role"] = "production"
+			p["host_role_source"] = "fleet_label:Production"
+		}
+		for k, v := range map[string]float64{"disk_used_percent": disk, "memory_used_percent": mem, "cpu_p95_5m_percent": cpu} {
+			if v >= 0 {
+				p[k] = v
+			}
+		}
+		return hostPostureRec{connectorResult, p}
+	}
+	cases := []struct {
+		name    string
+		records []hostPostureRec
+		want    string
+	}{
+		{"every production host under", []hostPostureRec{rec("fail", h1, true, 40, 50, 20), rec("pass", h2, false, 99, 99, 99)}, eval.ResultPass},
+		{"disk at bound", []hostPostureRec{rec("pass", h1, true, 85, 10, 10)}, eval.ResultFail},
+		{"fleet shape, disk only", []hostPostureRec{rec("pass", h1, true, 29, -1, -1)}, eval.ResultInconclusive},
+		{"fleet shape, disk over", []hostPostureRec{rec("pass", h1, true, 91, -1, -1)}, eval.ResultFail},
+		{"no production host", []hostPostureRec{rec("pass", h1, false, 99, 99, 99)}, eval.ResultInconclusive},
+		{"no record", nil, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evaluateStockHostPosture(t, admin, engine, "soc2_a1_1_capacity_monitoring", tc.records); got != tc.want {
+				t.Errorf("result = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
