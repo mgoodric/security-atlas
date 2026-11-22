@@ -11,17 +11,39 @@ description: |
   config). NOTE: this scoping is a judgment call; see the review log for
   the alternative.
 
-  What runs today: the query rolls up the connector's per-record verdicts:
-  any fail fails the control, otherwise any pass passes it, and no
-  in-window record leaves it inconclusive. The records are the AWS
-  connector's `aws.s3.bucket_encryption_state.v1`, whose verdict is that
-  the bucket has a default server-side encryption rule: a bucket with one
-  passes, a bucket without one fails, and a bucket whose region or
-  encryption could not be read is inconclusive. The algorithm is not
-  checked.
+  What runs today: a SQL query over the payloads of the AWS connector's
+  `aws.s3.bucket_encryption_state.v1` records, one per bucket per
+  connector run. It takes each bucket's latest in-window record, keyed by
+  `bucket_name` and ordered by `observed_at`. A bucket passes when that
+  record's `result` is pass, `encryption_enabled` is true and
+  `sse_algorithm` is `AES256` (SSE-S3), `aws:kms` (SSE-KMS) or
+  `aws:kms:dsse` (dual-layer SSE-KMS). A bucket fails when the connector
+  observed no default encryption rule (`result` fail with
+  `encryption_enabled` false), or when its default rule names any other
+  algorithm (`aws:fsx`, `aws:backup`, or a value AWS adds later). Any failing bucket fails the control. Otherwise the
+  control passes only when every bucket passes, and is inconclusive when
+  any bucket is unread: the connector could not read its region or
+  encryption (`result` inconclusive), the rule's algorithm is missing, or
+  the latest record's `observed_at` is more than an hour after the
+  evaluation instant. No in-window record also leaves it inconclusive.
 
-  Pending: default encryption with an allowed algorithm (AES256, aws:kms),
-  in SQL over the record's existing fields (#2825).
+  Why `result` is read and not `encryption_enabled` alone: schema 1.0.0
+  requires `encryption_enabled`, so the connector writes it false on an
+  inconclusive record too, meaning "not observed" (#2815). A false
+  `encryption_enabled` fails a bucket only when the connector's verdict
+  is fail, which it gives only for AWS's
+  `ServerSideEncryptionConfigurationNotFoundError` or a configuration
+  with no default rule.
+
+  Records without a `bucket_name` are left out. When a bucket's latest
+  records tie on `observed_at` (the connector truncates it to the hour),
+  the bucket passes only if every tied record passes, and any tied
+  failing record fails it.
+
+  Not checked: which KMS key is used, whether it is customer-managed, or
+  the bucket policy (a deny on unencrypted uploads). Only the buckets the
+  connector reported are checked: a bucket in an account the connector
+  does not read is not seen, which waits on an inventory (#2834).
 
 scf_anchor_id: CRY-05
 control_family: CRY
@@ -32,27 +54,42 @@ freshness_class: daily
 
 evidence_queries:
   - id: all_s3_buckets_encrypted_at_rest
-    language: rego
+    language: sql
     evidence_kind: aws.s3.bucket_encryption_state.v1
-    description: "Every S3 bucket has default encryption enabled with SSE-S3 or SSE-KMS"
+    description: "Every bucket's latest record shows default encryption with AES256, aws:kms or aws:kms:dsse"
     expression: |
-      package evidence.query
-
-      # The sandbox input is {records: [{result}]}: one verdict per in-window
-      # record, decided by the connector that emitted it against the check the
-      # description above names. This rolls them up with the engine's precedence
-      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
-      # inconclusive). See internal/eval/rego.go.
-
-      result := "fail" if {
-        some r in input.records
-        r.result == "fail"
-      } else := "pass" if {
-        some r in input.records
-        r.result == "pass"
-      } else := "inconclusive" if {
-        some r in input.records
-        r.result == "inconclusive"
-      } else := "na" if {
-        count(input.records) > 0
-      } else := "inconclusive"
+      SELECT CASE
+               WHEN count(*) = 0 THEN 'inconclusive'
+               WHEN bool_or(any_bad) THEN 'fail'
+               WHEN bool_and(all_ok) THEN 'pass'
+               ELSE 'inconclusive'
+             END
+      FROM (
+        SELECT bucket,
+               bool_or(coalesce(
+                 readable AND (
+                   (result = 'fail' AND enc = 'false'::jsonb)
+                   OR (enc = 'true'::jsonb AND alg <> '' AND alg NOT IN ('AES256', 'aws:kms', 'aws:kms:dsse'))
+                 ), false)) AS any_bad,
+               bool_and(coalesce(
+                 readable AND result = 'pass' AND enc = 'true'::jsonb
+                   AND alg IN ('AES256', 'aws:kms', 'aws:kms:dsse'), false)) AS all_ok
+        FROM (
+          SELECT payload->>'bucket_name' AS bucket,
+                 result,
+                 payload->'encryption_enabled' AS enc,
+                 CASE
+                   WHEN jsonb_typeof(payload->'sse_algorithm') = 'string'
+                     THEN payload->>'sse_algorithm'
+                 END AS alg,
+                 observed_at <= evaluated_at + interval '1 hour' AS readable,
+                 rank() OVER (
+                   PARTITION BY payload->>'bucket_name'
+                   ORDER BY observed_at DESC
+                 ) AS recency
+          FROM evidence
+          WHERE coalesce(payload->>'bucket_name', '') <> ''
+        ) AS ranked
+        WHERE recency = 1
+        GROUP BY bucket
+      ) AS per_bucket
