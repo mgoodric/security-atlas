@@ -83,9 +83,16 @@ type BatchRow struct {
 	// LinkedControlIDs are the tenant controls the row's linked-controls
 	// cell resolved to, by control id or bundle id; UnresolvedControls the
 	// refs that matched none.
-	LinkedControlIDs   []string          `json:"linked_control_ids"`
-	UnresolvedControls []string          `json:"unresolved_controls"`
-	Unmapped           map[string]string `json:"unmapped"`
+	LinkedControlIDs   []string `json:"linked_control_ids"`
+	UnresolvedControls []string `json:"unresolved_controls"`
+	// OwnerUserID is the active user of the tenant the owner cell matched
+	// by email; OwnerUnlinked the cell when it matched none, which also
+	// flags the row owner_unlinked (#2843). At most one is set.
+	// OwnerEmail is the linked user's email, for review.
+	OwnerUserID   string            `json:"owner_user_id,omitempty"`
+	OwnerEmail    string            `json:"owner_email,omitempty"`
+	OwnerUnlinked string            `json:"owner_unlinked,omitempty"`
+	Unmapped      map[string]string `json:"unmapped"`
 	// Flags are the row's review flags (Flag*), empty when none.
 	Flags     []string `json:"flags"`
 	Status    string   `json:"status"`
@@ -148,11 +155,16 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if err != nil {
 		return Batch{}, fmt.Errorf("riskimport: list categories: %w", err)
 	}
-	var refs []string
+	var refs, owners []string
 	for _, r := range parsed.Risks {
 		refs = append(refs, r.ControlRefs...)
+		owners = append(owners, r.Owner)
 	}
 	controls, err := s.resolveControls(ctx, refs)
+	if err != nil {
+		return Batch{}, err
+	}
+	ownerIDs, err := s.resolveOwners(ctx, owners)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -199,6 +211,7 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 			row.ProposedUntil = r.ProposedUntil.Format(time.DateOnly)
 		}
 		applyTreatmentRules(&row, r.Treatment, r.ControlRefs, controls)
+		applyOwner(&row, r.Owner, ownerIDs)
 		b.Staged = append(b.Staged, row)
 	}
 	sort.SliceStable(b.Rejected, func(i, j int) bool { return b.Rejected[i].RowNumber < b.Rejected[j].RowNumber })
