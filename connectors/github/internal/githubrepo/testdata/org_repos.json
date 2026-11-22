@@ -6,6 +6,7 @@
     "full_name": "octocat/Hello-World",
     "private": false,
     "default_branch": "master",
-    "archived": false
+    "archived": false,
+    "topics": ["octocat", "atom", "electron", "api"]
   }
 ]
