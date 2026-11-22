@@ -122,12 +122,15 @@ describe("filterRows", () => {
 });
 
 describe("reviewMode", () => {
-  it("lets an approver decide", () => {
-    expect(reviewMode({ is_approver: true })).toBe("decide");
+  it("lets a caller the batch read marks can_decide decide", () => {
+    expect(reviewMode({ can_decide: true })).toBe("decide");
   });
 
-  it("is read-only for a non-approver, and while /v1/me is unknown", () => {
-    expect(reviewMode({ is_approver: false })).toBe("read-only");
+  // #2881: the platform sets can_decide false for a GRC engineer and for
+  // the batch's uploader, so the decide controls are hidden for both.
+  it("is read-only when can_decide is false or absent, and while the batch is unknown", () => {
+    expect(reviewMode({ can_decide: false })).toBe("read-only");
+    expect(reviewMode({})).toBe("read-only");
     expect(reviewMode(undefined)).toBe("read-only");
   });
 });
