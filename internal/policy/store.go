@@ -215,6 +215,12 @@ type Policy struct {
 	// and the hex sha256 of the body the source holds now.
 	SyncDriftDetectedAt *time.Time
 	SyncDriftBodySHA256 *string
+	// Sync property drift (#2877). Set only on a published synced row
+	// whose page properties changed without a version bump: when a sync
+	// run first saw it, and the sorted property names that differ now.
+	// Separate from body drift; either, both or neither may be set.
+	SyncPropertyDriftDetectedAt *time.Time
+	SyncPropertyDriftKeys       []string
 	// SyncMissingSince is set on a published synced row whose page a sync
 	// run found absent (#2853): when a run first found it missing. The
 	// policy stays in force.
@@ -1313,6 +1319,13 @@ func policyFromRow(r dbx.Policy) Policy {
 	if r.SyncDriftBodySha256 != nil {
 		v := *r.SyncDriftBodySha256
 		out.SyncDriftBodySHA256 = &v
+	}
+	if r.SyncPropertyDriftDetectedAt.Valid {
+		t := r.SyncPropertyDriftDetectedAt.Time
+		out.SyncPropertyDriftDetectedAt = &t
+	}
+	if r.SyncPropertyDriftKeys != nil {
+		out.SyncPropertyDriftKeys = append([]string{}, r.SyncPropertyDriftKeys...)
 	}
 	if r.SyncMissingSince.Valid {
 		t := r.SyncMissingSince.Time

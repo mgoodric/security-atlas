@@ -58,8 +58,10 @@ func TestSync2910_TakeOverWhitespaceOnlyIsNotDrift(t *testing.T) {
 
 	resp := postSync(t, s.setupResult, key, http.StatusOK, syncPage("6001", "Access Control Policy", "1.0", page, nil))
 	res := resp.Results[0]
-	if resp.TakenOver != 1 || res.PolicyID != imported || res.DriftDetectedAt != nil || strings.Contains(res.Reason, "drift") {
-		t.Fatalf("sync = %+v; want taken_over of %s without drift", resp, imported)
+	// Body drift only: the page's properties differ from the import
+	// fixture's, which is property drift (#2877) and not under test here.
+	if resp.TakenOver != 1 || res.PolicyID != imported || res.DriftDetectedAt != nil || strings.Contains(res.Reason, "page body") {
+		t.Fatalf("sync = %+v; want taken_over of %s without body drift", resp, imported)
 	}
 	v := getPolicyVersion(t, s.setupResult, imported)
 	if v.BodyMd != body || v.SyncDrift != nil {
@@ -70,8 +72,8 @@ func TestSync2910_TakeOverWhitespaceOnlyIsNotDrift(t *testing.T) {
 	}
 
 	again := postSync(t, s.setupResult, key, http.StatusOK, syncPage("6001", "Access Control Policy", "1.0", page, nil))
-	if again.Unchanged != 1 || again.Drift != 0 {
-		t.Errorf("re-push = %+v; want unchanged", again)
+	if r := again.Results[0]; r.DriftDetectedAt != nil || strings.Contains(r.Reason, "page body") {
+		t.Errorf("re-push = %+v; want no body drift", again)
 	}
 }
 

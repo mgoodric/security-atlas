@@ -3071,6 +3071,8 @@ type Policy struct {
 	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
 	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
 	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
+	SyncPropertyDriftDetectedAt pgtype.Timestamptz `json:"sync_property_drift_detected_at"`
+	SyncPropertyDriftKeys       []string           `json:"sync_property_drift_keys"`
 }
 
 type PolicyAcknowledgment struct {
