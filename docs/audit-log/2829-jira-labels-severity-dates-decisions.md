@@ -156,12 +156,21 @@ A ticket whose latest record drops the label leaves the check
 
 ## D6 — Supersedes both stock bundles
 
-Both `control.yaml` files change (Rego to SQL, descriptions), so both
-manifest hashes change and both bundles are superseded on the next boot.
-`stock_manifests_gen.go` was regenerated. The upgrade note is in
-`changelog.d/2829.changed.md`. The behaviour change an upgrader sees first:
-cc7_1 used to pass on any closed ticket in the window, and on 1.0.0 records
-(no labels) it is now inconclusive.
+`soc2_cc7_1_vulnerability_remediation` (query `vuln_tickets_within_sla`)
+and `soc2_cc1_4_competence_training` (query
+`training_completion_within_365d`) change query language (Rego to SQL),
+expression and description, so both manifest hashes change and both
+bundles are superseded on the next boot. Owners, evidence, exceptions and
+risk links stay on the old versions. `stock_manifests_gen.go` was
+regenerated.
+
+Upgrade note (also in `changelog.d/2829.changed.md`): upgrade the Jira
+connector with the platform, label vulnerability tickets `vulnerability`
+and training tickets `security-training`, and set `--severity-field` when
+severity is a custom field. Until then, 1.0.0 records carry no labels and
+both Jira checks are inconclusive. The behaviour change an upgrader sees
+first: cc7_1 used to pass on any closed ticket in the window, and on 1.0.0
+records it is now inconclusive.
 
 ## Not changed
 
