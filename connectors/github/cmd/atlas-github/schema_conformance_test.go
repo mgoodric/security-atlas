@@ -27,12 +27,12 @@ func validatePushed(t *testing.T, s githubrepo.ProtectionState) (map[string]any,
 	if err != nil {
 		t.Fatalf("NewEmbedded: %v", err)
 	}
-	rec, err := buildRepoProtectionRecord(s, "example", "prod", "scf:TDA-06")
+	rec, err := buildRepoProtectionRecord(s, "example", "prod", "scf:TDA-06", defaultProductionTopic)
 	if err != nil {
 		t.Fatalf("buildRepoProtectionRecord: %v", err)
 	}
-	if rec.GetEvidenceKind() != "github.repo_protection.v2" || rec.GetSchemaVersion() != "2.0.0" {
-		t.Fatalf("kind/version = %s/%s; want github.repo_protection.v2/2.0.0", rec.GetEvidenceKind(), rec.GetSchemaVersion())
+	if rec.GetEvidenceKind() != "github.repo_protection.v2" || rec.GetSchemaVersion() != "2.1.0" {
+		t.Fatalf("kind/version = %s/%s; want github.repo_protection.v2/2.1.0", rec.GetEvidenceKind(), rec.GetSchemaVersion())
 	}
 	payloadJSON, err := protojson.Marshal(rec.GetPayload())
 	if err != nil {
@@ -50,7 +50,10 @@ func TestBuildRepoProtectionRecord_ConformsAndOmitsUnread(t *testing.T) {
 	protection := []string{
 		"required_reviews", "require_code_owner_reviews", "require_signed_commits",
 		"require_linear_history", "enforce_admins", "protection_source",
+		"required_status_checks", "allow_force_pushes",
 	}
+	topics := func(t ...string) *[]string { return &t }
+	checks := func(c ...string) *[]string { return &c }
 	cases := map[string]struct {
 		in      githubrepo.ProtectionState
 		present []string
@@ -59,10 +62,20 @@ func TestBuildRepoProtectionRecord_ConformsAndOmitsUnread(t *testing.T) {
 		"fetch_failed": {
 			in: githubrepo.ProtectionState{
 				RepoID: 1296269, RepoFullName: "octocat/Hello-World", DefaultBranch: "master",
+				Topics: topics("iac"),
 				Result: githubrepo.ResultInconclusive, Reason: "branch protection: github: HTTP 502", ObservedAt: now,
 			},
-			present: []string{"repo_id", "repo_full_name", "default_branch", "reason"},
+			present: []string{"repo_id", "repo_full_name", "default_branch", "reason", "topics", "deploys_to_production"},
 			absent:  protection,
+		},
+		"topics_not_listed": {
+			in: githubrepo.ProtectionState{
+				RepoID: 9, RepoFullName: "octocat/quiet", DefaultBranch: "main",
+				RequiredReviews: intp(1), RequiredStatusChecks: checks(), AllowForcePushes: boolp(false),
+				ProtectionSource: githubrepo.SourceClassic, Result: githubrepo.ResultPass, ObservedAt: now,
+			},
+			present: []string{"required_status_checks", "allow_force_pushes"},
+			absent:  []string{"topics", "deploys_to_production"},
 		},
 		"ruleset_bypass_withheld": {
 			in: githubrepo.ProtectionState{
@@ -79,6 +92,7 @@ func TestBuildRepoProtectionRecord_ConformsAndOmitsUnread(t *testing.T) {
 				RepoID: 7, RepoFullName: "octocat/open", DefaultBranch: "main",
 				RequiredReviews: intp(0), RequireCodeOwnerReviews: boolp(false), RequireSignedCommits: boolp(false),
 				RequireLinearHistory: boolp(false), EnforceAdmins: boolp(false), ProtectionSource: githubrepo.SourceNone,
+				RequiredStatusChecks: checks(), AllowForcePushes: boolp(true), Topics: topics(),
 				Result: githubrepo.ResultFail, Reason: "no branch protection or ruleset on default branch", ObservedAt: now,
 			},
 			present: append([]string{"repo_id"}, protection...),
@@ -88,9 +102,10 @@ func TestBuildRepoProtectionRecord_ConformsAndOmitsUnread(t *testing.T) {
 				RepoID: 8, RepoFullName: "octocat/api", DefaultBranch: "main",
 				RequiredReviews: intp(3), RequireCodeOwnerReviews: boolp(true), RequireSignedCommits: boolp(true),
 				RequireLinearHistory: boolp(true), EnforceAdmins: boolp(true), ProtectionSource: githubrepo.SourceBoth,
+				RequiredStatusChecks: checks("ci/build", "ci/test"), AllowForcePushes: boolp(false), Topics: topics("production", "iac"),
 				Result: githubrepo.ResultPass, Reason: "required_reviews=3", ObservedAt: now,
 			},
-			present: append([]string{"repo_id"}, protection...),
+			present: append([]string{"repo_id", "topics", "deploys_to_production"}, protection...),
 		},
 	}
 	for name, tc := range cases {
@@ -110,6 +125,37 @@ func TestBuildRepoProtectionRecord_ConformsAndOmitsUnread(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// #2827: deploys_to_production is whether the listed topics include the
+// --production-topic, and travels with topics.
+func TestBuildRepoProtectionRecord_DeploysToProduction(t *testing.T) {
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		topics []string
+		topic  string
+		want   bool
+	}{
+		{[]string{"production", "iac"}, defaultProductionTopic, true},
+		{[]string{"iac"}, defaultProductionTopic, false},
+		{[]string{}, defaultProductionTopic, false},
+		{[]string{"prod"}, "prod", true},
+		{[]string{"production"}, "prod", false},
+	}
+	for _, tc := range cases {
+		s := githubrepo.ProtectionState{
+			RepoID: 1, RepoFullName: "o/r", DefaultBranch: "main", Topics: &tc.topics,
+			Result: githubrepo.ResultInconclusive, ObservedAt: now,
+		}
+		rec, err := buildRepoProtectionRecord(s, "o", "prod", "", tc.topic)
+		if err != nil {
+			t.Fatalf("buildRepoProtectionRecord: %v", err)
+		}
+		got, ok := rec.GetPayload().AsMap()["deploys_to_production"]
+		if !ok || got != tc.want {
+			t.Errorf("topics %v, --production-topic %q: deploys_to_production = %v (present %v); want %v", tc.topics, tc.topic, got, ok, tc.want)
+		}
 	}
 }
 

@@ -150,7 +150,7 @@ func TestRun_PushesRepoProtectionAndSCIM(t *testing.T) {
 		t.Fatalf("unexpected inspect result: %+v", states)
 	}
 
-	rec, err := buildRepoProtectionRecord(states[0], "example", "prod", "scf:TDA-06")
+	rec, err := buildRepoProtectionRecord(states[0], "example", "prod", "scf:TDA-06", defaultProductionTopic)
 	if err != nil {
 		t.Fatalf("buildRepoProtectionRecord: %v", err)
 	}
@@ -205,11 +205,11 @@ func TestRun_RepoProtectionDedupes(t *testing.T) {
 		Result:          githubrepo.ResultPass,
 		ObservedAt:      time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	r1, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06")
+	r1, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06", defaultProductionTopic)
 	if err != nil {
 		t.Fatalf("buildRepoProtectionRecord: %v", err)
 	}
-	r2, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06")
+	r2, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06", defaultProductionTopic)
 	if err != nil {
 		t.Fatalf("buildRepoProtectionRecord: %v", err)
 	}
