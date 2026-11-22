@@ -24,7 +24,7 @@
 -- Constitutional invariant #6: policies keeps its RLS policies; this
 -- migration adds no table.
 --
--- Reversible via 20261296000000_policy_sync_property_drift.down.sql.
+-- Reversible via 20261297000000_policy_sync_property_drift.down.sql.
 
 ALTER TABLE policies
     ADD COLUMN sync_property_drift_detected_at TIMESTAMPTZ NULL,

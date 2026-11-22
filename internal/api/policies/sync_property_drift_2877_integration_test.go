@@ -205,7 +205,7 @@ func TestSync2877_TakeOverInPlaceWithDifferentPropertiesIsDrift(t *testing.T) {
 
 // The property drift columns are rejected on a row that is not synced,
 // must come together, and need at least one key
-// (20261296000000_policy_sync_property_drift).
+// (20261297000000_policy_sync_property_drift).
 func TestSync2877_PropertyDriftOnlyOnSyncedRows(t *testing.T) {
 	s := newSyncSetup(t)
 	_, key := s.issueKey(t, s.tenant, apikeystore.IssueInput{Purpose: credstore.PurposePolicySync})
