@@ -93,7 +93,11 @@ pull path conservative — three list calls per run, plus per-resource
 lookups for app groups and user factors, and one rules call per distinct
 app sign-in policy. A 200-user / 50-app tenant
 generates roughly 253 requests per full run, well under the budget.
-Pagination is deferred to a follow-up slice when org sizes demand it.
+Every list call follows Okta's `Link: <…>; rel="next"` cursor until the
+listing is exhausted (#2915), so each further page of 200 adds one
+request. A next link that leaves the configured org's scheme and host is
+refused, so the token is never sent elsewhere, and one listing stops
+with an error after 1,000 pages.
 
 ## Anti-criteria (P0)
 

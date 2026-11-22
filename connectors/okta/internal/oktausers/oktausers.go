@@ -12,16 +12,15 @@ package oktausers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktaauth"
+	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktapage"
 )
 
 // Result mirrors the connector's pass/fail intent.
@@ -189,74 +188,32 @@ func NewClient(httpClient *http.Client, baseURL string, creds oktaauth.Credentia
 	return &Client{HTTP: httpClient, BaseURL: strings.TrimRight(baseURL, "/"), Creds: creds}
 }
 
-// ListUsers fetches the first page of users.
+// ListUsers fetches every user, following Okta's Link: rel="next"
+// pagination.
 func (c *Client) ListUsers(ctx context.Context) ([]rawUser, error) {
-	u := c.BaseURL + "/api/v1/users?limit=200"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	out, err := oktapage.List[rawUser](ctx, c.HTTP, c.BaseURL, c.Creds, "/api/v1/users?limit=200")
 	if err != nil {
-		return nil, err
-	}
-	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return nil, &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	var out []rawUser
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode users: %w", err)
+		return nil, fmt.Errorf("users: %w", err)
 	}
 	return out, nil
 }
 
-// ListUserFactors fetches the MFA factor list for one user.
+// ListUserFactors fetches the MFA factor list for one user. A 404 means
+// no factors yet.
 func (c *Client) ListUserFactors(ctx context.Context, userID string) ([]rawFactor, error) {
 	if userID == "" {
 		return nil, errors.New("oktausers: userID required")
 	}
-	u := fmt.Sprintf("%s/api/v1/users/%s/factors", c.BaseURL, url.PathEscape(userID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode == http.StatusNotFound {
-		// No factors yet.
+	out, err := oktapage.List[rawFactor](ctx, c.HTTP, c.BaseURL, c.Creds, fmt.Sprintf("/api/v1/users/%s/factors", url.PathEscape(userID)))
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
 		return nil, nil
 	}
-	if res.StatusCode != http.StatusOK {
-		return nil, &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	var out []rawFactor
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode factors: %w", err)
+	if err != nil {
+		return nil, fmt.Errorf("factors: %w", err)
 	}
 	return out, nil
 }
 
 // APIError carries Okta REST error context.
-type APIError struct {
-	Status int
-	Body   string
-}
-
-func (e *APIError) Error() string {
-	if e.Body == "" {
-		return fmt.Sprintf("okta: HTTP %d", e.Status)
-	}
-	return fmt.Sprintf("okta: HTTP %d: %s", e.Status, e.Body)
-}
-
-func drain(r io.Reader) string {
-	const max = 1 << 13
-	b, _ := io.ReadAll(io.LimitReader(r, max))
-	return string(b)
-}
+type APIError = oktapage.APIError

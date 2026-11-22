@@ -27,6 +27,7 @@ const BAND_VARIANTS: Record<string, BadgeVariant> = {
   failing: "critical",
   approval: "info",
   source_missing: "warning",
+  inconclusive: "warning",
   overdue: "warning",
   due_soon: "secondary",
   ownership_gap: "outline",

@@ -4130,7 +4130,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134) */
+        /** GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, controls inconclusive for 7 days or more, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134) */
         get: operations["get-v1-needs-attention"];
         put?: never;
         post?: never;
