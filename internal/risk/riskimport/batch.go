@@ -94,9 +94,17 @@ type BatchRow struct {
 	// OwnerUserID is the active user of the tenant the owner cell matched
 	// by email; OwnerUnlinked the cell when it matched none, which also
 	// flags the row owner_unlinked (#2843). At most one is set.
-	OwnerUserID   string            `json:"owner_user_id,omitempty"`
-	OwnerUnlinked string            `json:"owner_unlinked,omitempty"`
-	Unmapped      map[string]string `json:"unmapped"`
+	OwnerUserID   string `json:"owner_user_id,omitempty"`
+	OwnerUnlinked string `json:"owner_unlinked,omitempty"`
+	// Level is the level the row's cell names, empty when none; OrgUnitID
+	// the tenant org unit its org unit cell (OrgUnitValue) matched by name
+	// (#2845). Approval creates the risk with both, under the create
+	// path's placement rule: with a unit and no level the risk takes the
+	// unit's level, with neither it is a team risk.
+	Level        string            `json:"level,omitempty"`
+	OrgUnitValue string            `json:"org_unit_value,omitempty"`
+	OrgUnitID    string            `json:"org_unit_id,omitempty"`
+	Unmapped     map[string]string `json:"unmapped"`
 	// Flags are the row's review flags (Flag*), empty when none.
 	Flags     []string `json:"flags"`
 	Status    string   `json:"status"`
@@ -144,7 +152,8 @@ type StageInput struct {
 // Stage parses the upload and persists the batch with its distinct category
 // and theme values, each mapped to the active category or visible theme it
 // already names. A value that names none stays unmapped for the reviewer
-// to map; staging never creates one and never rejects a row for it.
+// to map; staging never creates one and never rejects a row for it. A row
+// whose org unit or level cannot be placed is rejected (placement.go).
 func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
 		return Batch{}, err
@@ -168,8 +177,36 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if err != nil {
 		return Batch{}, fmt.Errorf("riskimport: list themes: %w", err)
 	}
-	var refs, owners []string
+	units, err := s.risks.ListOrgUnits(ctx)
+	if err != nil {
+		return Batch{}, fmt.Errorf("riskimport: list org units: %w", err)
+	}
+	byName := indexOrgUnits(units)
+	b := Batch{
+		SourceFilename:  in.Filename,
+		SourceFormat:    FormatOf(in.Filename),
+		Methodology:     string(parsed.Methodology),
+		UploadedBy:      in.UploadedBy,
+		Status:          BatchStatusStaged,
+		UnmappedColumns: parsed.UnmappedColumns,
+		Staged:          make([]BatchRow, 0, len(parsed.Risks)),
+		Rejected:        append(make([]RejectedRow, 0, len(parsed.Rejected)), parsed.Rejected...),
+	}
+	// Placement is checked first, so a rejected row adds no category or
+	// theme value to the batch.
+	placed := make([]StagedRisk, 0, len(parsed.Risks))
+	placements := make([]BatchRow, 0, len(parsed.Risks))
 	for _, r := range parsed.Risks {
+		var p BatchRow
+		if rej, ok := applyPlacement(&p, r, byName); !ok {
+			b.Rejected = append(b.Rejected, rej)
+			continue
+		}
+		placed = append(placed, r)
+		placements = append(placements, p)
+	}
+	var refs, owners []string
+	for _, r := range placed {
 		refs = append(refs, r.ControlRefs...)
 		owners = append(owners, r.Owner)
 	}
@@ -181,22 +218,12 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if err != nil {
 		return Batch{}, err
 	}
-	b := Batch{
-		SourceFilename:  in.Filename,
-		SourceFormat:    FormatOf(in.Filename),
-		Methodology:     string(parsed.Methodology),
-		UploadedBy:      in.UploadedBy,
-		Status:          BatchStatusStaged,
-		UnmappedColumns: parsed.UnmappedColumns,
-		Staged:          make([]BatchRow, 0, len(parsed.Risks)),
-		Rejected:        append(make([]RejectedRow, 0, len(parsed.Rejected)), parsed.Rejected...),
-	}
-	values := distinctValues(parsed.Risks, cats, themes)
+	values := distinctValues(placed, cats, themes)
 	targets := valueTargets{ValueKindCategory: {}, ValueKindTheme: {}}
 	for _, v := range values {
 		targets[v.Kind][valueKey(v.Value)] = v.Target
 	}
-	for _, r := range parsed.Risks {
+	for i, r := range placed {
 		row := BatchRow{
 			RowNumber:     r.RowNumber,
 			ExternalRef:   r.ExternalRef,
@@ -211,6 +238,9 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 			// an accepter (#2371).
 			HistoricalAccepter:  r.HistoricalAccepter,
 			InstrumentReference: r.InstrumentReference,
+			Level:               placements[i].Level,
+			OrgUnitValue:        placements[i].OrgUnitValue,
+			OrgUnitID:           placements[i].OrgUnitID,
 			Unmapped:            r.Unmapped,
 			Status:              RowStatusPending,
 		}

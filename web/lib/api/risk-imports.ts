@@ -45,6 +45,10 @@ export const REJECT_REASON_LABELS: Record<string, string> = {
   invalid_review_due: "Invalid review date",
   invalid_treatment: "Unknown treatment",
   invalid_acceptance: "Acceptance missing its justification or until-date",
+  invalid_level: "Unknown level",
+  unknown_org_unit: "Unknown org unit",
+  ambiguous_org_unit: "Org unit name shared by more than one unit",
+  level_mismatch: "Level differs from the org unit's level",
 };
 
 export function rejectReasonLabel(reason: string): string {
@@ -81,6 +85,12 @@ export type BatchRow = {
   // <Person> (/v1/people); the row carries only the id.
   owner_user_id?: string;
   owner_unlinked?: string;
+  // #2845: the level the row names (absent when none), and the org unit
+  // cell with the tenant org unit it matched by name. With a unit and no
+  // level the risk takes the unit's level; with neither it is a team risk.
+  level?: string;
+  org_unit_value?: string;
+  org_unit_id?: string;
   unmapped: Record<string, string> | null;
   flags: string[] | null;
   status: RowStatus | string;
@@ -232,6 +242,10 @@ export function mappedFields(row: BatchRow): [string, string][] {
     out.push(["Owner", row.owner_user_id]);
   } else if (row.owner_unlinked) {
     out.push(["Owner (unlinked)", row.owner_unlinked]);
+  }
+  if (row.level) out.push(["Level", row.level]);
+  if (row.org_unit_value) {
+    out.push(["Org unit", row.org_unit_value]);
   }
   if (row.treatment) {
     out.push([
