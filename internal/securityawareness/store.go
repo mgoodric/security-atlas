@@ -164,6 +164,9 @@ func (s *Store) Complete(ctx context.Context, in CompleteInput, actorID string) 
 	if in.AssignmentID == uuid.Nil || in.CompletedAt.IsZero() || !validCompletionSource(in.Source) || strings.TrimSpace(actorID) == "" {
 		return AssignmentDetail{}, ErrInvalidInput
 	}
+	if completedInFuture(in.CompletedAt, s.clock()) {
+		return AssignmentDetail{}, ErrInvalidInput
+	}
 	var out AssignmentDetail
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 		var err error
@@ -597,6 +600,16 @@ func timePtrUTC(v *time.Time) *time.Time {
 	}
 	t := v.UTC()
 	return &t
+}
+
+// MaxCompletedAtLead is how far after the recording instant a completed_at
+// may fall. It allows for clock skew, the same hour cc1_4 allows before it
+// treats a completed_at as unreadable. Past it the completion is refused: a
+// typo such as 2027 would otherwise be stored as a current completion.
+const MaxCompletedAtLead = time.Hour
+
+func completedInFuture(completedAt, now time.Time) bool {
+	return completedAt.After(now.Add(MaxCompletedAtLead))
 }
 
 // trainingEvidenceKey keys one completion of one assignment at its exact

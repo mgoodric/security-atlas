@@ -52,6 +52,9 @@ silently dropped.
   (phishing results still upsert, deduplicated on
   `(assignment, simulation_id)`). If that completion has no ledger
   record yet (it was recorded before #2941), the re-import writes one.
+- **No future completions.** A row whose `completed_at` is more than one
+  hour after the import is a per-row `error`; the other rows still import
+  (#2941 D5).
 - **No overwrites.** A row whose assignment is completed at a different
   instant — for example, a manual completion recorded in the UI — is a
   per-row `error` (`refusing to overwrite`). Reconciling divergent

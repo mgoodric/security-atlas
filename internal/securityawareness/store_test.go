@@ -124,6 +124,25 @@ func TestTrainingEvidenceKey_DistinguishesInstantsOnOneDay(t *testing.T) {
 	}
 }
 
+func TestCompletedInFuture_AllowsOneHourOfSkew(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		at   time.Time
+		want bool
+	}{
+		{now.Add(-400 * 24 * time.Hour), false},
+		{now, false},
+		{now.Add(MaxCompletedAtLead), false},
+		{now.Add(MaxCompletedAtLead + time.Second), true},
+		{time.Date(2027, 11, 22, 12, 0, 0, 0, time.UTC), true},
+	}
+	for _, tc := range cases {
+		if got := completedInFuture(tc.at, now); got != tc.want {
+			t.Errorf("completedInFuture(%s) = %v, want %v", tc.at, got, tc.want)
+		}
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, v := range values {
 		if v == want {

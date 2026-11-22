@@ -168,6 +168,55 @@ func TestCompleteWithoutIngestFailsClosed(t *testing.T) {
 	}
 }
 
+// A completed_at more than an hour after now is refused, by Complete and
+// per row by the CSV import, and writes no completion or evidence. A typo
+// such as 2027 would otherwise count as a current completion until then.
+func TestFutureCompletedAtIsRefused(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := tenantCtx(t, tenant)
+	store := newStore(t, admin, app)
+	fx := seedCampaignFixture(t, ctx, store, "future.test")
+	now := time.Now().UTC()
+
+	_, err := store.Complete(ctx, securityawareness.CompleteInput{
+		AssignmentID: fx["alice"],
+		CompletedAt:  now.Add(2 * time.Hour),
+		Source:       securityawareness.CompletionSourceManual,
+	}, "operator-1")
+	if !errors.Is(err, securityawareness.ErrInvalidInput) {
+		t.Fatalf("Complete 2h ahead err = %v, want ErrInvalidInput", err)
+	}
+	if completedAt, _ := assignmentState(t, admin, tenant, fx["alice"]); completedAt != nil {
+		t.Fatalf("future completion stored: %v", completedAt)
+	}
+
+	csv := strings.Join([]string{
+		completionCSVHeader,
+		"alice@future.test,,,SAT-2026,2026 annual," + now.AddDate(1, 0, 0).Format(time.RFC3339) + ",,,,",
+		"bob@future.test,,,SAT-2026,2026 annual," + now.Add(-time.Hour).Format(time.RFC3339) + ",,,,",
+	}, "\n")
+	report, err := store.ImportCompletionsCSV(ctx, strings.NewReader(csv), "importer-1", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("ImportCompletionsCSV: %v", err)
+	}
+	if report.Imported != 1 || report.Failed != 1 {
+		t.Fatalf("report = %+v, want bob imported and alice refused", report)
+	}
+	for _, res := range report.Results {
+		if res.Row == 1 && (res.Status != securityawareness.RowError || !strings.Contains(res.Error, "after the import")) {
+			t.Fatalf("row 1 = %+v, want a future completed_at refusal", res)
+		}
+	}
+	if completedAt, _ := assignmentState(t, admin, tenant, fx["alice"]); completedAt != nil {
+		t.Fatalf("future csv completion stored: %v", completedAt)
+	}
+	if n := len(trainingLedger(t, admin, tenant)); n != 1 {
+		t.Fatalf("ledger has %d records, want only bob's", n)
+	}
+}
+
 // A completion recorded before #2941 has no ledger record. Re-importing it
 // at the same instant writes one and links it, without changing the
 // completion.

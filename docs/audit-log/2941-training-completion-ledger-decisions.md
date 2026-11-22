@@ -100,4 +100,18 @@ recording why not. They are not exposed here:
 
 Until that surface lands, nothing in a running deployment calls `Complete`
 or `ImportCompletionsCSV`. cc1_4 still sees only pushed records in
-production. The follow-up is recommended in the PR.
+production. The follow-up is filed for Matt's authorization decision.
+
+## D5 — A future `completed_at` is refused
+
+Added in review. With `observed_at` now the recording instant, nothing
+bounded `completed_at` from above. A typo such as 2027 would be stored as
+a completion. cc1_4 treats a `completed_at` more than an hour after the
+evaluation instant as unreadable, so the record would leave the person
+inconclusive until 2027 and then count as current for a further year.
+
+`Complete` returns `ErrInvalidInput`, and the CSV import reports that row
+as an `error` and imports the rest, when `completed_at` is more than
+`MaxCompletedAtLead` (1 hour) after the store's clock. The hour matches
+cc1_4's own clock-skew allowance. The check is in the store, not the
+parser, because the parser has no clock.

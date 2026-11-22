@@ -129,6 +129,17 @@ func (s *Store) ImportCompletionsCSV(ctx context.Context, r io.Reader, actorID s
 	for _, f := range parseFailures {
 		report.add(f)
 	}
+	now := s.clock()
+	current := rows[:0]
+	for _, row := range rows {
+		if completedInFuture(row.completedAt, now) {
+			report.add(RowResult{Row: row.row, Status: RowError, Error: fmt.Sprintf(
+				"completed_at %s is more than %s after the import", row.completedAt.UTC().Format(time.RFC3339), MaxCompletedAtLead)})
+			continue
+		}
+		current = append(current, row)
+	}
+	rows = current
 	if len(rows) == 0 {
 		return report, nil
 	}
