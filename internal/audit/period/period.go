@@ -34,7 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
-	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -354,9 +354,14 @@ func (s *Store) ControlState(ctx context.Context, periodID, controlID uuid.UUID)
 		}
 		// When the period is still open, frozen_at is NULL; the SQL
 		// uses COALESCE(..., 'infinity') so the call falls through to
-		// live state.
+		// live state. A period frozen before the routing cutover reads
+		// no control-free routed record (#2924).
+		kinds, err := routed.KindsForPeriod(ctx, q, p.FrozenAt)
+		if err != nil {
+			return err
+		}
 		rows, err := q.ListEvidenceForPeriodControl(ctx, dbx.ListEvidenceForPeriodControlParams{
-			UnboundKinds: unbound.Kinds(),
+			UnboundKinds: kinds,
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			FrozenAt:     p.FrozenAt,

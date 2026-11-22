@@ -125,7 +125,7 @@ Fleet roles required (least-privilege):
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.fleetBaseURL, "fleet-base-url", "", "Fleet base URL (e.g. https://fleet.example.com) [required for fleet mode]")
 	cmd.Flags().StringVar(&f.osqueryDSocket, "osqueryd-socket", "/var/osquery/osquery.em", "local osqueryd extension socket path (mode=local)")
-	cmd.Flags().StringVar(&f.hostPostureCtl, "host-posture-control", "scf:END-03", "control_id to attach to osquery.host_posture.v1 records")
+	cmd.Flags().StringVar(&f.hostPostureCtl, "host-posture-control", "", "control_id to attach to osquery.host_posture.v1 records; empty (the default) routes each record to every control that queries osquery.host_posture.v1 (#2924)")
 	cmd.Flags().StringVar(&f.firewallPolicy, "firewall-policy", "", "exact name of the Fleet policy whose per-host result is firewall_enabled (mode=fleet)")
 	cmd.Flags().StringVar(&f.screenLockPol, "screenlock-policy", "", "exact name of the Fleet policy whose per-host result is screen_lock_enabled (mode=fleet)")
 	cmd.Flags().StringVar(&f.antimalwarePol, "antimalware-policy", "", "exact name of the Fleet policy whose per-host result is antimalware_protected (mode=fleet)")

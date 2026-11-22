@@ -352,28 +352,28 @@ atlas-k8s run --cluster prod-us-east --environment prod --auth-mode in-cluster
 atlas-k8s permissions
 ```
 
-| Flag                              | Subcommand  | Required | Default                             | Notes                                                                                                         |
-| --------------------------------- | ----------- | -------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `--endpoint`                      | both        | yes      | env `SECURITY_ATLAS_ENDPOINT`       | platform gRPC endpoint                                                                                        |
-| `--token`                         | both        | yes      | env `SECURITY_ATLAS_TOKEN`          | security-atlas bearer token                                                                                   |
-| `--insecure`                      | both        | no       | `false`                             | disables TLS; loopback endpoints only                                                                         |
-| `--cluster`                       | `run`       | yes      | —                                   | cluster identifier; scopes every record                                                                       |
-| `--environment`                   | `run`       | yes      | —                                   | environment scope tag; records are never emitted un-scoped                                                    |
-| `--api-server`                    | `run`       | no\*     | env `KUBERNETES_API_SERVER`         | API server URL (\*required, via flag or env)                                                                  |
-| `--auth-mode`                     | `run`       | no       | `kubeconfig-token`                  | `kubeconfig-token` or `in-cluster`                                                                            |
-| `--rbac-control`                  | `run`       | no       | `scf:IAC-10`                        | control id attached to RBAC records                                                                           |
-| `--workload-control`              | `run`       | no       | `scf:CFG-04`                        | control id attached to workload records                                                                       |
-| `--netpol-control`                | `run`       | no       | `network_segmentation_default_deny` | control id for NetworkPolicy records; the default links the stock NET-06 segmentation control                 |
-| `--pss-control`                   | `run`       | no       | `scf:CFG-04`                        | control id attached to PSS admission records                                                                  |
-| `--secret-control`                | `run`       | no       | `scf:CRY-02`                        | control id attached to Secret-inventory records                                                               |
-| `--skip-rbac`                     | `run`       | no       | `false`                             | skip the `k8s.rbac_binding.v1` pull                                                                           |
-| `--skip-workload`                 | `run`       | no       | `false`                             | skip the `k8s.workload_security_context.v1` pull                                                              |
-| `--skip-netpol`                   | `run`       | no       | `false`                             | skip the `k8s.networkpolicy_coverage.v1` pull                                                                 |
-| `--skip-pss`                      | `run`       | no       | `false`                             | skip the `k8s.pod_security_admission.v1` pull                                                                 |
-| `--collect-secret-inventory`      | `run`       | no       | `false`                             | **opt-in** `k8s.secret_inventory.v1` (Secret metadata only; needs the extra `secrets` get/list grant)         |
-| `--cluster` / `--environment`     | `subscribe` | yes      | —                                   | same scoping as `run`; required on the event-driven profile                                                   |
-| `--skip-rbac` / `--skip-workload` | `subscribe` | no       | `false`                             | do not watch that surface (at least one must remain enabled)                                                  |
-| `--coalesce-cap`                  | `subscribe` | no       | `100000`                            | in-process per-hour idempotency-key set cap (DoS bound; the platform hour-window key is the durable collapse) |
+| Flag                              | Subcommand  | Required | Default                       | Notes                                                                                                         |
+| --------------------------------- | ----------- | -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--endpoint`                      | both        | yes      | env `SECURITY_ATLAS_ENDPOINT` | platform gRPC endpoint                                                                                        |
+| `--token`                         | both        | yes      | env `SECURITY_ATLAS_TOKEN`    | security-atlas bearer token                                                                                   |
+| `--insecure`                      | both        | no       | `false`                       | disables TLS; loopback endpoints only                                                                         |
+| `--cluster`                       | `run`       | yes      | —                             | cluster identifier; scopes every record                                                                       |
+| `--environment`                   | `run`       | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                    |
+| `--api-server`                    | `run`       | no\*     | env `KUBERNETES_API_SERVER`   | API server URL (\*required, via flag or env)                                                                  |
+| `--auth-mode`                     | `run`       | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                                                                            |
+| `--rbac-control`                  | `run`       | no       | `scf:IAC-10`                  | control id attached to RBAC records                                                                           |
+| `--workload-control`              | `run`       | no       | `scf:CFG-04`                  | control id attached to workload records                                                                       |
+| `--netpol-control`                | `run`       | no       | (empty)                       | control id for NetworkPolicy records; empty routes each record to every control that queries the kind (#2924) |
+| `--pss-control`                   | `run`       | no       | `scf:CFG-04`                  | control id attached to PSS admission records                                                                  |
+| `--secret-control`                | `run`       | no       | `scf:CRY-02`                  | control id attached to Secret-inventory records                                                               |
+| `--skip-rbac`                     | `run`       | no       | `false`                       | skip the `k8s.rbac_binding.v1` pull                                                                           |
+| `--skip-workload`                 | `run`       | no       | `false`                       | skip the `k8s.workload_security_context.v1` pull                                                              |
+| `--skip-netpol`                   | `run`       | no       | `false`                       | skip the `k8s.networkpolicy_coverage.v1` pull                                                                 |
+| `--skip-pss`                      | `run`       | no       | `false`                       | skip the `k8s.pod_security_admission.v1` pull                                                                 |
+| `--collect-secret-inventory`      | `run`       | no       | `false`                       | **opt-in** `k8s.secret_inventory.v1` (Secret metadata only; needs the extra `secrets` get/list grant)         |
+| `--cluster` / `--environment`     | `subscribe` | yes      | —                             | same scoping as `run`; required on the event-driven profile                                                   |
+| `--skip-rbac` / `--skip-workload` | `subscribe` | no       | `false`                       | do not watch that surface (at least one must remain enabled)                                                  |
+| `--coalesce-cap`                  | `subscribe` | no       | `100000`                      | in-process per-hour idempotency-key set cap (DoS bound; the platform hour-window key is the durable collapse) |
 
 The cluster token is **only** read from `KUBECONFIG_TOKEN` (or the projected
 in-cluster mount) — never a CLI flag — so it never lands in shell history. It is

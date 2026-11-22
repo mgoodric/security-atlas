@@ -2386,6 +2386,11 @@ type EvidenceRecord struct {
 	ObservedAtNanos *int64 `json:"observed_at_nanos"`
 }
 
+type EvidenceRoutingCutover struct {
+	Singleton bool               `json:"singleton"`
+	CutAt     pgtype.Timestamptz `json:"cut_at"`
+}
+
 type Exception struct {
 	ID                   pgtype.UUID        `json:"id"`
 	TenantID             pgtype.UUID        `json:"tenant_id"`
