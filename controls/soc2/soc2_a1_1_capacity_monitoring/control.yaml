@@ -33,6 +33,11 @@ description: |
   before schema 1.3.0 carry none of these fields, so their hosts are not
   production.
 
+  A `last_seen_at` that is not a full RFC 3339 timestamp, or is more
+  than an hour after the evaluation instant (`evaluated_at`), ranks as a
+  missing one does: below every readable value. It never errors the
+  query, so the other hosts still decide.
+
   Records without a `host_uuid` are left out. When a host's latest
   records tie on both times, the host is production if any tied record
   says so, fails if any tied record is over a bound, and passes only if

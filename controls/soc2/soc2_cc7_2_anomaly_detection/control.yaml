@@ -29,6 +29,11 @@ description: |
   result for it yet, has no `edr_healthy`. With no policy named, every host is
   unread and the control stays inconclusive.
 
+  A `last_seen_at` that is not a full RFC 3339 timestamp, or is more
+  than an hour after the evaluation instant (`evaluated_at`), ranks as a
+  missing one does: below every readable value. It never errors the
+  query, so the other hosts still decide.
+
   Records without a `host_uuid` are left out. When a host's latest
   records tie on both times, the host counts as EDR-on only if every
   tied record says true, and any tied false fails it.
