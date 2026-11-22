@@ -5,7 +5,7 @@
 // its alias detection gave it). The helper keeps one column per field,
 // reports what the mapping is missing, and turns it into the upload's
 // repeatable `column_map=field=Header` and `ignore_column=Header` fields.
-// The risk import uses it now; the controls import adopts it next (#2836).
+// The risk import and the controls import (#2836) both use it.
 
 /** A field a column can map to. */
 export type MappingField = {
