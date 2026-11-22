@@ -85,6 +85,10 @@ func (s *Store) resolveOwners(ctx context.Context, owners []string) (map[string]
 // owner_unlinked flag. A blank cell leaves the row without an owner.
 func applyOwner(row *BatchRow, owner string, resolved map[string]uuid.UUID) {
 	owner = strings.TrimSpace(owner)
+	if row.OwnerUserID != "" {
+		// The row's owner_user_id resolved (idfallback.go).
+		return
+	}
 	if owner == "" {
 		return
 	}

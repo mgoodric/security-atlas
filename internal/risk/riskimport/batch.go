@@ -203,6 +203,10 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		return Batch{}, fmt.Errorf("riskimport: list org units: %w", err)
 	}
 	byName := indexOrgUnits(units)
+	unitsByID, err := s.resolveOrgUnitIDs(ctx, parsed.Risks)
+	if err != nil {
+		return Batch{}, err
+	}
 	b := Batch{
 		SourceFilename:  in.Filename,
 		SourceFormat:    FormatOf(in.Filename),
@@ -220,23 +224,28 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	placements := make([]BatchRow, 0, len(parsed.Risks))
 	for _, r := range parsed.Risks {
 		var p BatchRow
-		if rej, ok := applyPlacement(&p, r, byName); !ok {
+		if rej, ok := applyPlacement(&p, r, byName, unitsByID); !ok {
 			b.Rejected = append(b.Rejected, rej)
 			continue
 		}
 		placed = append(placed, r)
 		placements = append(placements, p)
 	}
-	var refs, owners []string
+	var refs, owners, ownerIDRefs []string
 	for _, r := range placed {
 		refs = append(refs, r.ControlRefs...)
 		owners = append(owners, r.Owner)
+		ownerIDRefs = append(ownerIDRefs, r.OwnerUserIDRef)
 	}
 	controls, err := s.resolveControls(ctx, refs)
 	if err != nil {
 		return Batch{}, err
 	}
 	ownerIDs, err := s.resolveOwners(ctx, owners)
+	if err != nil {
+		return Batch{}, err
+	}
+	ownerUsers, err := s.resolveOwnerUserIDs(ctx, ownerIDRefs)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -275,11 +284,20 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 			row.ProposedUntil = r.ProposedUntil.Format(time.DateOnly)
 		}
 		applyTreatmentRules(&row, r.Treatment, r.ControlRefs, controls)
+		// A resolved id cell is used, so it is no longer an unmapped value.
+		if id, ok := ownerUsers[r.OwnerUserIDRef]; ok {
+			row.OwnerUserID = id.String()
+			delete(row.Unmapped, parsed.idColumns[FieldOwnerUserID])
+		}
+		if _, ok := unitsByID[r.OrgUnitIDRef]; ok && r.OrgUnit == "" {
+			delete(row.Unmapped, parsed.idColumns[FieldOrgUnitID])
+		}
 		applyOwner(&row, r.Owner, ownerIDs)
 		row.Category, row.Themes, _ = targets.resolveRow(row.CategoryValue, row.ThemeValues)
 		b.Staged = append(b.Staged, row)
 	}
 	sort.SliceStable(b.Rejected, func(i, j int) bool { return b.Rejected[i].RowNumber < b.Rejected[j].RowNumber })
+	dropUsedIDColumns(&b, parsed.idColumns)
 	b.StagedCount = len(b.Staged)
 	b.RejectedCount = len(b.Rejected)
 	b.TotalRows = b.StagedCount + b.RejectedCount
