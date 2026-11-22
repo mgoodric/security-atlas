@@ -96,7 +96,8 @@ type uploadResp struct {
 	// declares none. Empty for an unanchored control.
 	SCFRelease string `json:"scf_release,omitempty"`
 	// Warnings are non-fatal notes on the upload, such as the deprecation
-	// of a control.yaml with no scf_release (#1770).
+	// of a control.yaml with no scf_release (#1770), or a bundle test record
+	// without evidence_kind in a two-kind bundle (#2882).
 	Warnings []string `json:"warnings,omitempty"`
 }
 
@@ -268,7 +269,7 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		GateWarning:    verdict.warning,
 		GateTestReport: verdict.advisoryReport,
 		SCFRelease:     result.SCFRelease,
-		Warnings:       result.Warnings,
+		Warnings:       append(result.Warnings, verdict.fixtureWarnings()...),
 	}
 	// Issue #1738: warn when the anchor earns no framework credit. The control
 	// is already persisted, so a failed lookup is logged, not returned. The
