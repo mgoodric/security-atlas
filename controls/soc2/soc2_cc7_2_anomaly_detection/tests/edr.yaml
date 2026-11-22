@@ -283,3 +283,75 @@ cases:
   - name: no-record-is-inconclusive
     expected_state: inconclusive
     evaluated_at: 2026-11-21T12:00:00Z
+
+  - name: malformed-last-seen-does-not-hide-a-failing-host
+    description: "month 13 passes a prefix guard and errors the cast; the full guard reads it as missing, so the off host still fails (#2939)"
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice
+          platform: linux
+          edr_healthy: true
+          last_seen_at: "2026-13-45T00:00:00Z"
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: bob
+          platform: linux
+          edr_healthy: false
+          last_seen_at: 2026-11-21T05:00:00Z
+
+  - name: malformed-last-seen-host-is-decided-on-its-field
+    description: "February 30th is read as a missing last_seen_at, as an absent one is; the query runs and the host's field decides (#2939)"
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice
+          platform: linux
+          edr_healthy: true
+          last_seen_at: "2026-02-30T05:00:00Z"
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 22222222-2222-2222-2222-222222222222
+          hostname: bob
+          platform: linux
+          edr_healthy: true
+          last_seen_at: 2026-11-21T05:00:00Z
+
+  - name: future-last-seen-sorts-as-missing
+    description: "a last_seen_at more than 1 h after evaluated_at is unreadable, so it does not outrank the host's older readable record (#2939)"
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice
+          platform: linux
+          edr_healthy: true
+          last_seen_at: 2026-11-22T12:00:00Z
+      - result: pass
+        evidence_kind: osquery.host_posture.v1
+        observed_at: 2026-11-21T05:00:00Z
+        payload:
+          host_uuid: 11111111-1111-1111-1111-111111111111
+          hostname: alice
+          platform: linux
+          edr_healthy: false
+          last_seen_at: 2026-11-21T05:00:00Z

@@ -86,3 +86,21 @@ func TestStockSQLChecksNeverReadTheWallClock(t *testing.T) {
 		}
 	})
 }
+
+// #2939: a stock SQL check casts a payload timestamp only behind the full
+// guard (RFC3339Pattern and pg_input_is_valid), so one malformed record is
+// read as missing instead of erroring the query and making the control
+// inconclusive for every host. The start-anchored prefix guard the first
+// osquery checks used admits 2026-13-45T00:00Z, which errors the cast.
+func TestStockSQLChecksGuardTimestampCasts(t *testing.T) {
+	forEachSOC2Bundle(t, func(name string, b *control.Bundle) {
+		for _, q := range b.Manifest.EvidenceQueries {
+			if q.Language != "sql" {
+				continue
+			}
+			for _, field := range eval.SQLUnguardedTimestampCasts(q.Expression) {
+				t.Errorf("%s / %s: casts payload->>'%s' without the full guard; match it against eval.RFC3339Pattern AND pg_input_is_valid(payload->>'%s', 'timestamptz') first (docs/spec/control-bundle.md, \"Reading a payload timestamp\")", name, q.ID, field, field)
+			}
+		}
+	})
+}

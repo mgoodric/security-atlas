@@ -30,6 +30,11 @@ description: |
   With no firewall policy named, every Fleet host is unread and the
   control stays inconclusive.
 
+  A `last_seen_at` that is not a full RFC 3339 timestamp, or is more
+  than an hour after the evaluation instant (`evaluated_at`), ranks as a
+  missing one does: below every readable value. It never errors the
+  query, so the other hosts still decide.
+
   Records without a `host_uuid` are left out. When a host's latest
   records tie on both times, the host counts as on only if every tied
   record says true, and any tied false fails it.
@@ -68,8 +73,12 @@ evidence_queries:
                  rank() OVER (
                    PARTITION BY payload->>'host_uuid'
                    ORDER BY CASE
-                              WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}'
-                                THEN (payload->>'last_seen_at')::timestamptz
+                              WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+                                   AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+                                THEN CASE
+                                       WHEN (payload->>'last_seen_at')::timestamptz <= evaluated_at + interval '1 hour'
+                                         THEN (payload->>'last_seen_at')::timestamptz
+                                     END
                             END DESC NULLS LAST,
                             observed_at DESC
                  ) AS recency

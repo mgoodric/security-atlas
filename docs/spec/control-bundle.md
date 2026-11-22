@@ -234,6 +234,50 @@ the wall clock. A test refuses them in the stock bundles under `controls/`
 (`eval.SQLUsesWallClock`). A tenant's own query is not refused, but it gives a
 replay the wrong answer.
 
+#### Reading a payload timestamp
+
+A payload field is whatever string the pusher sent, and one value that does
+not cast errors the whole query: the control goes inconclusive, and that one
+bad record hides every other record's result. So cast a payload timestamp
+only behind this guard, and treat a value more than an hour after the
+evaluation instant as unreadable (#2939):
+
+```sql
+CASE
+  WHEN payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$'
+       AND pg_input_is_valid(payload->>'last_seen_at', 'timestamptz')
+    THEN CASE
+           WHEN (payload->>'last_seen_at')::timestamptz <= evaluated_at + interval '1 hour'
+             THEN (payload->>'last_seen_at')::timestamptz
+         END
+END
+```
+
+- **The regex** is the full RFC 3339 shape, anchored at both ends
+  (`eval.RFC3339Pattern`). A start-anchored prefix such as
+  `'^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}'` admits
+  `2026-13-45T00:00Z`, which then errors the cast.
+- **`pg_input_is_valid`** (Postgres 16) rejects what the regex still
+  admits, such as month 13 or February 30th, without casting.
+- **The cast sits in a `THEN`**, so it runs only for a value both checks
+  accepted. `AND` operands have no guaranteed evaluation order, so
+  `WHEN <guard> AND value::timestamptz <= …` can still error.
+- **The cap**: a value more than an hour after `evaluated_at` is clock skew
+  gone wrong or a bad record. An hour covers ordinary skew between the
+  source and the platform. Past that, the value reads as NULL, as a missing
+  one does, so a far-future value cannot hold a record at "latest" or
+  "fresh" indefinitely.
+
+A NULL then means "not read", and the query decides what that implies. If
+the timestamp is what the check asks about (cc4_1's check-in time), the
+record is inconclusive. If it only orders records (the osquery posture
+checks rank each host's latest record by it), it sorts `NULLS LAST` and the
+checked field decides. A test refuses a payload cast to a date or time type
+in the stock bundles under `controls/` unless both the regex and
+`pg_input_is_valid` guard that field (`eval.SQLUnguardedTimestampCasts`).
+The cap is not linted. Each bundle's tests carry a future-value case
+instead.
+
 A minimal **manual** control:
 
 ```yaml
