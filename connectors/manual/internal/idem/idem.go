@@ -5,7 +5,7 @@
 //
 //   - LocalRowKey: sha256("manual.upload|" + file_path + "|" + row + "|" + sha256(row_json))
 //   - S3ObjectKey: sha256("manual.upload|" + bucket + "|" + key + "|" + etag)
-//   - SFTPFileKey: sha256("manual.upload|" + host + "|" + path + "|" + mtime)
+//   - SFTPFileKey: sha256("manual.upload|" + host + "|" + path + "|" + mtime + "|" + size)
 //
 // Each is deterministic on its inputs: re-running the connector against the
 // same source must produce byte-identical keys so the ledger dedupes.
@@ -41,9 +41,11 @@ func S3ObjectKey(bucket, key, etag string) string {
 
 // SFTPFileKey returns the idempotency key for an SFTP file. mtime is the
 // freshness discriminator: when the remote file is rewritten with a newer
-// modification time, the connector emits a new record.
-func SFTPFileKey(host, path string, mtime time.Time) string {
-	return sha256Hex(evidenceKind + "|" + host + "|" + path + "|" + mtime.UTC().Format(time.RFC3339Nano))
+// modification time, the connector emits a new record. size covers what
+// mtime misses (#2940): a rewrite within the server's mtime resolution,
+// often one second, or a copy that keeps the source's mtime.
+func SFTPFileKey(host, path string, mtime time.Time, size int64) string {
+	return sha256Hex(evidenceKind + "|" + host + "|" + path + "|" + mtime.UTC().Format(time.RFC3339Nano) + "|" + strconv.FormatInt(size, 10))
 }
 
 func sha256Hex(s string) string {

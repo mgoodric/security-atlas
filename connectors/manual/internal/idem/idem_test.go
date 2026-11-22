@@ -81,8 +81,8 @@ func TestS3ObjectKey_Shape(t *testing.T) {
 func TestSFTPFileKey_Deterministic(t *testing.T) {
 	t.Parallel()
 	mtime := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC)
-	a := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime)
-	b := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime)
+	a := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime, 2048)
+	b := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime, 2048)
 	if a != b {
 		t.Fatal("SFTPFileKey not deterministic")
 	}
@@ -92,18 +92,28 @@ func TestSFTPFileKey_MtimeDistinguishes(t *testing.T) {
 	t.Parallel()
 	m1 := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC)
 	m2 := time.Date(2026, 5, 12, 4, 17, 34, 0, time.UTC)
-	a := SFTPFileKey("h", "/p", m1)
-	b := SFTPFileKey("h", "/p", m2)
+	a := SFTPFileKey("h", "/p", m1, 1)
+	b := SFTPFileKey("h", "/p", m2, 1)
 	if a == b {
 		t.Fatal("mtime must enter the hash")
+	}
+}
+
+// #2940: a file rewritten within its mtime's resolution, or copied with
+// its mtime kept, still gets a new key when its size changes.
+func TestSFTPFileKey_SizeDistinguishes(t *testing.T) {
+	t.Parallel()
+	mtime := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC)
+	if SFTPFileKey("h", "/p", mtime, 100) == SFTPFileKey("h", "/p", mtime, 101) {
+		t.Fatal("size must enter the hash")
 	}
 }
 
 func TestSFTPFileKey_Shape(t *testing.T) {
 	t.Parallel()
 	mtime := time.Date(2026, 5, 12, 4, 17, 33, 0, time.UTC).UTC()
-	want := hash("manual.upload|sftp.example.com|/inbox/q1.pdf|" + mtime.Format(time.RFC3339Nano))
-	got := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime)
+	want := hash("manual.upload|sftp.example.com|/inbox/q1.pdf|" + mtime.Format(time.RFC3339Nano) + "|2048")
+	got := SFTPFileKey("sftp.example.com", "/inbox/q1.pdf", mtime, 2048)
 	if got != want {
 		t.Fatalf("unexpected key shape:\n got %q\nwant %q", got, want)
 	}

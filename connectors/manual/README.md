@@ -100,19 +100,27 @@ so keys never collide across transports:
 | ------- | ---------------------------------------------------------------------------- |
 | `local` | `"manual.upload\|" + file_path + "\|" + row_index + "\|" + sha256(row_json)` |
 | `s3`    | `"manual.upload\|" + bucket    + "\|" + key       + "\|" + etag`             |
-| `sftp`  | `"manual.upload\|" + host      + "\|" + path      + "\|" + mtime`            |
+| `sftp`  | `"manual.upload\|" + host + "\|" + path + "\|" + mtime + "\|" + size`        |
 
-The row content, S3 etag and SFTP mtime are the freshness
+The row content, S3 etag and SFTP mtime plus size are the freshness
 discriminators: when the source item changes, a new key is derived and
-the ledger gets a fresh record. Nothing about the run enters a key.
+the ledger gets a fresh record. Nothing about the run enters a key. An
+SFTP file rewritten to the same size within the server's mtime
+resolution, or copied with its mtime kept, still keeps its key.
 
 `observed_at` is the run's hour (UTC), so it is when the connector first
 pushed that version of the item. A re-run over an unchanged item reuses
 its key; ingest dedupes it within the same hour and answers
 `AlreadyExists` after that (its content hash covers `observed_at`). The
 connector counts either as already ingested and moves on, so the first
-push's `observed_at` stands. Each run prints
+push's `observed_at` stands. Each skipped item gets a warning on
+stderr naming it, and the run prints
 `pushed N records, M already ingested`.
+
+Each such skip after the first hour also writes an ingest audit row
+with decision `rejected_idempotency_mismatch`. That is ingest recording
+the reused key, not a failed push: a scheduled re-run over an unchanged
+bucket writes one such row per item per run.
 
 ## CSV parser caps (DoS guards)
 

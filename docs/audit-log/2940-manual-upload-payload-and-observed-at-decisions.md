@@ -74,7 +74,15 @@ Changes:
   source item and the hash still differs, the difference can only come
   from the run's own inputs: `observed_at`, or the `--control-id` and
   `--scope` flags (see Known limits). The ledger keeps the first record,
-  and its `observed_at` is the one that stands. Covered by `TestPushRecord` (including the SDK's
+  and its `observed_at` is the one that stands. Each skipped item is
+  named in a warning on stderr.
+- **SFTP key includes size** (review on #2989): `SFTPFileKey(host, path,
+mtime, size)`. Without it, a file rewritten within the server's mtime
+  resolution (often one second), or copied with its mtime kept, kept its
+  key, and its new content was skipped as `AlreadyExists`. A rewrite to
+  the same size within that window still keeps its key. Hashing the
+  content would close that gap, but it means downloading every matched
+  file on every run. Covered by `TestPushRecord` (including the SDK's
   `%w` wrapping) and `TestBuildLocalRecord_KeyIgnoresRunTime`.
 
 Two things were considered and not done:
@@ -87,6 +95,14 @@ Two things were considered and not done:
   that fails the skew bound.
 
 ## Known limits
+
+- **Re-runs write audit rows for unchanged items.** Ingest audits every
+  `ErrIdempotencyMismatch` (`auditPersistFailure` in
+  `internal/evidence/ingest/ingest.go`). Every unchanged item re-pushed
+  after the first hour writes one `rejected_idempotency_mismatch` audit
+  row per run, so a scheduled run over a large unchanged bucket adds that
+  many rows each time. The row records the reused key, not a lost
+  record.
 
 - **The local key change re-pushes each row once.** After upgrading, the
   first local run writes every row once under its new key, with that

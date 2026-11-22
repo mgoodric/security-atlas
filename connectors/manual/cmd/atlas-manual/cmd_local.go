@@ -111,6 +111,7 @@ func doLocal(ctx context.Context, f localFlags, warn *os.File) error {
 			return fmt.Errorf("push row=%d: %w", row.Index, err)
 		}
 		if held {
+			_, _ = fmt.Fprintf(warn, "already ingested row %d: its key is in the ledger under an earlier push (AlreadyExists); not pushed again\n", row.Index)
 			already++
 			continue
 		}

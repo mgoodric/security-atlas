@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -146,6 +147,7 @@ func doSFTP(ctx context.Context, f sftpFlags) error {
 			return fmt.Errorf("push %q: %w", p, err)
 		}
 		if held {
+			_, _ = fmt.Fprintf(os.Stderr, "already ingested %q: its key is in the ledger under an earlier push (AlreadyExists); not pushed again\n", p)
 			already++
 			continue
 		}
@@ -170,7 +172,7 @@ func buildSFTPRecord(host, path string, size int64, mtime time.Time, controlID s
 		return nil, err
 	}
 	return &evidencev1.EvidenceRecord{
-		IdempotencyKey: idem.SFTPFileKey(host, path, mtime),
+		IdempotencyKey: idem.SFTPFileKey(host, path, mtime, size),
 		EvidenceKind:   "manual.upload.v1",
 		SchemaVersion:  schemaVersion,
 		ControlId:      controlID,
