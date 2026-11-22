@@ -13,6 +13,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/riskimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -148,11 +149,73 @@ func TestHandlersRequireTenant(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		fn   http.HandlerFunc
-	}{{"create", h.Create}, {"get", h.Get}, {"approve", h.Approve}, {"reject", h.Reject}} {
+	}{{"create", h.Create}, {"get", h.Get}, {"approve", h.Approve}, {"reject", h.Reject}, {"map value", h.MapValue}} {
 		rec := httptest.NewRecorder()
 		tc.fn(rec, httptest.NewRequest(http.MethodPost, "/v1/risks/imports", nil).WithContext(context.Background()))
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s without tenant = %d, want 401", tc.name, rec.Code)
+		}
+	}
+}
+
+func TestWriteValueErrorStatuses(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err      error
+		status   int
+		contains string
+	}{
+		{riskimport.ErrBatchNotFound, http.StatusNotFound, "import batch not found"},
+		{riskimport.ErrValueNotFound, http.StatusNotFound, "no such value"},
+		{riskimport.ErrBatchCompleted, http.StatusConflict, "completed"},
+		{risk.ErrCategoryConflict, http.StatusConflict, "already in use"},
+		{risk.ErrThemeConflict, http.StatusConflict, "already in use"},
+		{riskimport.ErrInvalidValueKind, http.StatusBadRequest, "category or theme"},
+		{&risk.InvalidCategoryError{Reason: "slug must be lowercase"}, http.StatusBadRequest, "slug must be lowercase"},
+		{&risk.InvalidThemeError{Reason: "name must be lowercase"}, http.StatusBadRequest, "name must be lowercase"},
+		{&riskimport.UnknownTargetError{Kind: "category", Target: "nope", Valid: []string{"operational"}}, http.StatusUnprocessableEntity, "valid: operational"},
+		{errors.New("db down"), http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		writeValueError(rec, httptest.NewRequest(http.MethodPut, "/v1/risks/imports/x/values", nil), tc.err)
+		assertError(t, rec, tc.err, tc.status, tc.contains)
+	}
+}
+
+// TestMapValueRefusals: a body that names no value or gives both target and
+// create is a 400, and creating a category or theme needs a tenant
+// approver. Each is refused before the store is reached (it is nil here).
+func TestMapValueRefusals(t *testing.T) {
+	t.Parallel()
+	tenant := uuid.NewString()
+	user := "user:" + uuid.NewString()
+	approver := credstore.Credential{ID: "jwt:1", TenantID: tenant, UserID: user, IsApprover: true}
+	person := credstore.Credential{ID: "jwt:2", TenantID: tenant, UserID: user}
+	h := New(nil)
+	for _, tc := range []struct {
+		name   string
+		cred   credstore.Credential
+		body   string
+		status int
+		want   string
+	}{
+		{"no value", approver, `{"kind":"category","target":"operational"}`, http.StatusBadRequest, "value is required"},
+		{"target and create", approver, `{"kind":"category","value":"Ops","target":"operational","create":{"slug":"ops","name":"Ops"}}`, http.StatusBadRequest, "not both"},
+		{"unknown field", approver, `{"kind":"category","value":"Ops","slug":"ops"}`, http.StatusBadRequest, "unknown field"},
+		{"create category without approver rights", person, `{"kind":"category","value":"Ops","create":{"slug":"ops","name":"Ops"}}`, http.StatusForbidden, "approver role required"},
+		{"create theme without approver rights", person, `{"kind":"theme","value":"Vendors","create":{"name":"vendors"}}`, http.StatusForbidden, "approver role required"},
+	} {
+		ctx, err := tenancy.WithTenant(context.Background(), tenant)
+		if err != nil {
+			t.Fatalf("WithTenant: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPut, "/v1/risks/imports/x/values", strings.NewReader(tc.body)).
+			WithContext(authctx.WithCredential(ctx, tc.cred))
+		rec := httptest.NewRecorder()
+		h.MapValue(rec, req)
+		if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: status=%d body=%s; want %d containing %q", tc.name, rec.Code, rec.Body.String(), tc.status, tc.want)
 		}
 	}
 }

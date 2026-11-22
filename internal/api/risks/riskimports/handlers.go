@@ -13,6 +13,11 @@
 //	                                approve one staged row (#2847)
 //	POST /v1/risks/imports/{id}/rows/{row}/reject
 //	                                reject one staged row with a reason
+//	PUT  /v1/risks/imports/{id}/values
+//	                                map one distinct category or theme value
+//	                                of the batch to an existing category or
+//	                                theme, clear its mapping, or create the
+//	                                category or theme for it (#2844)
 //
 // The upload's multipart fields:
 //
@@ -23,8 +28,11 @@
 //
 // Upload is a write on risks at the authz layer, which admin and
 // grc_engineer hold. Approve and reject also require a tenant approver who
-// is a person: a machine credential is refused whatever its role. Tenant
-// scoping is enforced by RLS via riskimport.Store.
+// is a person: a machine credential is refused whatever its role. Mapping a
+// value is a write on risks, like upload; creating a category or theme for
+// it also requires a tenant approver, as POST /v1/risks/categories and
+// POST /v1/themes do, and is audited by the same calls. Tenant scoping is
+// enforced by RLS via riskimport.Store.
 package riskimports
 
 import (
@@ -42,6 +50,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/riskimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -69,6 +78,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/risks/imports/{id}/approve", h.Approve)
 	r.Post("/v1/risks/imports/{id}/rows/{row}/approve", h.ApproveRow)
 	r.Post("/v1/risks/imports/{id}/rows/{row}/reject", h.Reject)
+	r.Put("/v1/risks/imports/{id}/values", h.MapValue)
 }
 
 // Create stages an uploaded risk register as an import batch.
@@ -217,6 +227,106 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, d)
+}
+
+// createValueBody is the category or theme to create for a value: slug,
+// name and description for a category; name and description for a theme.
+type createValueBody struct {
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// mapValueBody maps one value of the batch. Exactly one of target and
+// create is given, or neither to clear the mapping.
+type mapValueBody struct {
+	Kind   string           `json:"kind"`
+	Value  string           `json:"value"`
+	Target string           `json:"target"`
+	Create *createValueBody `json:"create"`
+}
+
+// MapValue maps one distinct category or theme value of a staged batch
+// (#2844): to an existing category (slug or name) or theme (name) with
+// target, to a category or theme created for it with create, or back to
+// unmapped with neither. Rows take the mapping at approval.
+func (h *Handler) MapValue(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	cred, ok := authctx.CredentialFromContext(ctx)
+	if !ok || cred.ID == "" {
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
+		return
+	}
+	var body mapValueBody
+	dec := json.NewDecoder(io.LimitReader(r.Body, maxDecisionBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "body must be a JSON object: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(body.Value) == "" {
+		httpresp.WriteError(w, http.StatusBadRequest, "value is required")
+		return
+	}
+	var (
+		m   riskimport.ValueMapping
+		err error
+	)
+	if body.Create != nil {
+		if strings.TrimSpace(body.Target) != "" {
+			httpresp.WriteError(w, http.StatusBadRequest, "give target or create, not both")
+			return
+		}
+		if !authz.IsTenantApprover(cred) {
+			httpresp.WriteError(w, http.StatusForbidden, "approver role required to create a category or theme")
+			return
+		}
+		m, err = h.store.CreateValue(ctx, riskimport.CreateValueInput{
+			BatchID: chi.URLParam(r, "id"), Kind: body.Kind, Value: body.Value,
+			Slug: body.Create.Slug, Name: body.Create.Name, Description: body.Create.Description,
+			// The actor the category and theme routes record (actorFrom).
+			Actor:    cred.ID,
+			MappedBy: credstore.PrincipalOf(cred),
+		})
+	} else {
+		m, err = h.store.MapValue(ctx, riskimport.MapValueInput{
+			BatchID: chi.URLParam(r, "id"), Kind: body.Kind, Value: body.Value, Target: body.Target,
+			Actor: credstore.PrincipalOf(cred),
+		})
+	}
+	if err != nil {
+		writeValueError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, m)
+}
+
+func writeValueError(w http.ResponseWriter, r *http.Request, err error) {
+	var unknown *riskimport.UnknownTargetError
+	var badCategory *risk.InvalidCategoryError
+	var badTheme *risk.InvalidThemeError
+	switch {
+	case errors.Is(err, riskimport.ErrBatchNotFound):
+		httpresp.WriteError(w, http.StatusNotFound, "import batch not found")
+	case errors.Is(err, riskimport.ErrValueNotFound):
+		httpresp.WriteError(w, http.StatusNotFound, "the import batch has no such value")
+	case errors.Is(err, riskimport.ErrBatchCompleted),
+		errors.Is(err, risk.ErrCategoryConflict),
+		errors.Is(err, risk.ErrThemeConflict):
+		httpresp.WriteError(w, http.StatusConflict, strings.TrimPrefix(strings.TrimPrefix(err.Error(), "riskimport: "), "risk: "))
+	case errors.Is(err, riskimport.ErrInvalidValueKind),
+		errors.As(err, &badCategory),
+		errors.As(err, &badTheme):
+		httpresp.WriteError(w, http.StatusBadRequest, strings.TrimPrefix(strings.TrimPrefix(err.Error(), "riskimport: "), "risk: "))
+	case errors.As(err, &unknown):
+		httpresp.WriteError(w, http.StatusUnprocessableEntity, strings.TrimPrefix(err.Error(), "riskimport: "))
+	default:
+		httperr.WriteInternal(w, r, "riskimports", err)
+	}
 }
 
 // decidingPerson resolves the caller to the users(id) who decides. Only a

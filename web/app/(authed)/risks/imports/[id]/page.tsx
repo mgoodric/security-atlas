@@ -44,6 +44,7 @@ import {
   ROW_STATUSES,
   ROW_STATUS_LABELS,
   approveAllMessage,
+  approveAllWarning,
   batchPath,
   batchProgress,
   emptyRowsMessage,
@@ -55,7 +56,50 @@ import {
   reviewMode,
   rowPath,
   unmappedEntries,
+  unmappedPendingCount,
+  unmappedValues,
 } from "@/lib/api/risk-imports";
+
+// ValueMappings lists the batch's distinct category and theme values and
+// what each maps to (#2844), with how many map to nothing. A row carrying
+// an unmapped value is rejected at approval.
+function ValueMappings({ batch }: { batch: RiskImportBatch }) {
+  const groups = [
+    { label: "Category values", values: batch.category_values ?? [] },
+    { label: "Theme values", values: batch.theme_values ?? [] },
+  ].filter((g) => g.values.length > 0);
+  if (groups.length === 0) return null;
+  const unmapped = unmappedValues(batch).length;
+  return (
+    <section className="space-y-2 text-sm" data-testid="risk-import-values">
+      <p>
+        <span className="font-medium">Category and theme values</span>{" "}
+        <Badge
+          variant={unmapped > 0 ? "warning" : "pass"}
+          data-testid="risk-import-unmapped-count"
+        >
+          {unmapped} unmapped
+        </Badge>
+      </p>
+      {groups.map((g) => (
+        <div key={g.label}>
+          <span className="text-muted-foreground">{g.label}: </span>
+          {g.values.map((v, i) => (
+            <span key={`${v.kind}:${v.value}`} data-unmapped={!v.target}>
+              {i > 0 ? ", " : ""}
+              {v.value} ({v.row_count}) &rarr;{" "}
+              {v.target ? (
+                v.target
+              ) : (
+                <span className="font-medium text-destructive">unmapped</span>
+              )}
+            </span>
+          ))}
+        </div>
+      ))}
+    </section>
+  );
+}
 
 function statusVariant(status: string) {
   switch (status) {
@@ -139,6 +183,8 @@ export default function RiskImportReviewPage({
   const rows = filterRows(batch.staged, filter);
   const unmappedColumns = batch.unmapped_columns ?? [];
   const rejected = batch.rejected ?? [];
+  const unmappedPending = unmappedPendingCount(batch);
+  const allWarning = approveAllWarning(batch);
 
   return (
     <DetailHeader
@@ -176,7 +222,11 @@ export default function RiskImportReviewPage({
             <ConfirmInline
               prompt={`Approve all ${progress.pending} pending ${
                 progress.pending === 1 ? "row" : "rows"
-              }?`}
+              }?${
+                unmappedPending > 0
+                  ? ` ${unmappedPending} will be rejected for an unmapped value.`
+                  : ""
+              }`}
               confirmLabel="Approve all pending"
               busy={allM.isPending}
               onCancel={() => setConfirmingAll(false)}
@@ -192,6 +242,14 @@ export default function RiskImportReviewPage({
                     } included.`
                   : ""}{" "}
                 A row whose risk ID is already in use is marked duplicate.
+                {allWarning ? (
+                  <span
+                    className="mt-1 block font-medium text-destructive"
+                    data-testid="risk-import-approve-all-unmapped"
+                  >
+                    {allWarning}
+                  </span>
+                ) : null}
               </span>
             </ConfirmInline>
           ) : null}
@@ -221,6 +279,8 @@ export default function RiskImportReviewPage({
           {unmappedColumns.join(", ")}
         </p>
       ) : null}
+
+      <ValueMappings batch={batch} />
 
       <FilterPills
         pills={[

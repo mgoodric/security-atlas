@@ -5042,7 +5042,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839) */
+        /** GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839); category_values and theme_values list the batch's distinct category and theme values, each with the category slug or theme name it maps to, absent while unmapped (#2844) */
         get: operations["get-v1-risks-imports-id"];
         put?: never;
         post?: never;
@@ -5061,7 +5061,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a tenant approver who is a person must approve (403 otherwise); each decision is audit-logged (#2839) */
+        /** POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a row takes the category and themes its values map to, and a row with an unmapped category or theme value is rejected with those values as the reason (#2844); a tenant approver who is a person must approve (403 otherwise); each decision is audit-logged (#2839) */
         post: operations["post-v1-risks-imports-id-approve"];
         delete?: never;
         options?: never;
@@ -5097,6 +5097,23 @@ export interface paths {
         put?: never;
         /** POST /v1/risks/imports/{id}/rows/{row}/reject — reject a staged row; body {reason} (required); a tenant approver who is a person must reject; audit-logged (#2839) */
         post: operations["post-v1-risks-imports-id-rows-row-reject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/risks/imports/{id}/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** PUT /v1/risks/imports/{id}/values — map one distinct category or theme value of a staged risk import batch; body {kind (category or theme), value, target?, create?}; target maps it to an existing category (slug or name) or theme (name), else 422; create {slug, name, description} creates the category or theme for it through the audited creation, a tenant approver only (403 otherwise); neither clears the mapping; 409 once the batch is completed; a write on risks (#2844) */
+        put: operations["put-v1-risks-imports-id-values"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -13681,6 +13698,28 @@ export interface operations {
             path: {
                 id: string;
                 row: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "put-v1-risks-imports-id-values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
             };
             cookie?: never;
         };

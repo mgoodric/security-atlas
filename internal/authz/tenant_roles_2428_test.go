@@ -89,6 +89,8 @@ var routes2428 = []route2428{
 	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/approve", tenantApproverGate},
 	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/approve", tenantApproverGate},
 	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/reject", tenantApproverGate},
+	// #2844: creating a category or theme for a risk import value.
+	{http.MethodPut, "/v1/risks/imports/" + id2428 + "/values", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist:generate", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist/sections/" + id2428 + ":approve", tenantApproverGate},
 	// #2350: admin, grc_engineer or auditor, as OPA admits the export.

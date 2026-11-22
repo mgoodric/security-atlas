@@ -28,7 +28,7 @@ func TestRiskImport_ExportRoundTrip(t *testing.T) {
 	store := risk.NewStore(src.app)
 	for _, in := range []risk.CreateInput{
 		{Title: "Vendor outage", Description: "The payments vendor is down for a day.", CategoryRef: "operational",
-			ExternalRef: "R-001", ReviewDueAt: &due},
+			ExternalRef: "R-001", ReviewDueAt: &due, Themes: []string{"vendor-risk", "availability"}},
 		{Title: "Records kept too long", CategoryRef: "privacy", ExternalRef: "R-002"},
 		{Title: "Risk without an ID", CategoryRef: "financial"},
 	} {
@@ -41,7 +41,7 @@ func TestRiskImport_ExportRoundTrip(t *testing.T) {
 
 	wantUnmapped := strings.Join([]string{
 		"id", "methodology",
-		"inherent_score", "residual_score", "severity", "org_unit_id", "themes",
+		"inherent_score", "residual_score", "severity", "org_unit_id",
 		"created_at", "updated_at", "acceptance_status", "parent_risk_ids", "category_name", "status",
 		"closure_reason", "owner_user_id", "owner_name",
 	}, ",")
@@ -74,7 +74,8 @@ func TestRiskImport_ExportRoundTrip(t *testing.T) {
 			}
 			r1 := stagedByRef(t, b, "R-001")
 			if r1.Title != "Vendor outage" || r1.Description != "The payments vendor is down for a day." ||
-				r1.Category != "operational" || r1.ReviewDue != "2027-02-01" {
+				r1.Category != "operational" || r1.ReviewDue != "2027-02-01" ||
+				strings.Join(r1.Themes, ",") != "availability,vendor-risk" {
 				t.Errorf("R-001 staged as %+v", r1)
 			}
 			if r1.Unmapped["category_name"] != "Operational" || r1.Unmapped["status"] != "open" || r1.Unmapped["id"] == "" {
@@ -101,6 +102,15 @@ func TestRiskImport_ExportRoundTrip(t *testing.T) {
 			}
 			if title != "Vendor outage" || desc != "The payments vendor is down for a day." || cat != "operational" || review != "2027-02-01" {
 				t.Errorf("imported R-001 = %q %q %q %q", title, desc, cat, review)
+			}
+			var themes string
+			if err := dst.admin.QueryRow(context.Background(), `
+				SELECT array_to_string(themes, ',') FROM risks
+				WHERE tenant_id = $1 AND external_ref = 'R-001'`, dst.tenant).Scan(&themes); err != nil {
+				t.Fatalf("read imported R-001 themes: %v", err)
+			}
+			if themes != "availability,vendor-risk" {
+				t.Errorf("imported R-001 themes = %q", themes)
 			}
 		})
 	}

@@ -56,8 +56,14 @@ type BatchRow struct {
 	ExternalRef string `json:"external_ref,omitempty"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	// Category is the slug of the tenant category the row's value matched.
-	Category string `json:"category"`
+	// CategoryValue is the row's category cell; Category the slug of the
+	// tenant category the batch maps it to, empty while unmapped (#2844).
+	CategoryValue string `json:"category_value"`
+	Category      string `json:"category"`
+	// ThemeValues are the row's theme values; Themes the theme names the
+	// mapped ones map to.
+	ThemeValues []string `json:"theme_values"`
+	Themes      []string `json:"themes"`
 	// ReviewDue is a YYYY-MM-DD date, empty when unset.
 	ReviewDue string `json:"review_due,omitempty"`
 	// InherentScore and ResidualScore are in the batch methodology's
@@ -109,16 +115,20 @@ type Batch struct {
 	SourceFormat   string `json:"source_format"`
 	// Methodology is the one scoring methodology every risk of the batch
 	// is created with (#2841).
-	Methodology     string        `json:"methodology"`
-	UploadedBy      string        `json:"uploaded_by"`
-	Status          string        `json:"status"`
-	TotalRows       int           `json:"total_rows"`
-	StagedCount     int           `json:"staged_count"`
-	RejectedCount   int           `json:"rejected_count"`
-	UnmappedColumns []string      `json:"unmapped_columns"`
-	CreatedAt       time.Time     `json:"created_at"`
-	Staged          []BatchRow    `json:"staged"`
-	Rejected        []RejectedRow `json:"rejected"`
+	Methodology     string   `json:"methodology"`
+	UploadedBy      string   `json:"uploaded_by"`
+	Status          string   `json:"status"`
+	TotalRows       int      `json:"total_rows"`
+	StagedCount     int      `json:"staged_count"`
+	RejectedCount   int      `json:"rejected_count"`
+	UnmappedColumns []string `json:"unmapped_columns"`
+	// CategoryValues and ThemeValues are the batch's distinct category and
+	// theme values, each with the category or theme it maps to (#2844).
+	CategoryValues []ValueMapping `json:"category_values"`
+	ThemeValues    []ValueMapping `json:"theme_values"`
+	CreatedAt      time.Time      `json:"created_at"`
+	Staged         []BatchRow     `json:"staged"`
+	Rejected       []RejectedRow  `json:"rejected"`
 }
 
 // StageInput is one upload to stage.
@@ -131,9 +141,10 @@ type StageInput struct {
 	UploadedBy  string
 }
 
-// Stage parses the upload, matches each row's category to one of the
-// tenant's, and persists the batch. A row whose category matches none
-// becomes a rejected row; nothing is dropped.
+// Stage parses the upload and persists the batch with its distinct category
+// and theme values, each mapped to the active category or visible theme it
+// already names. A value that names none stays unmapped for the reviewer
+// to map; staging never creates one and never rejects a row for it.
 func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
 		return Batch{}, err
@@ -152,6 +163,10 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	cats, err := s.risks.ListCategories(ctx)
 	if err != nil {
 		return Batch{}, fmt.Errorf("riskimport: list categories: %w", err)
+	}
+	themes, err := s.risks.ListVisibleThemes(ctx)
+	if err != nil {
+		return Batch{}, fmt.Errorf("riskimport: list themes: %w", err)
 	}
 	var refs, owners []string
 	for _, r := range parsed.Risks {
@@ -176,22 +191,19 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		Staged:          make([]BatchRow, 0, len(parsed.Risks)),
 		Rejected:        append(make([]RejectedRow, 0, len(parsed.Rejected)), parsed.Rejected...),
 	}
+	values := distinctValues(parsed.Risks, cats, themes)
+	targets := valueTargets{ValueKindCategory: {}, ValueKindTheme: {}}
+	for _, v := range values {
+		targets[v.Kind][valueKey(v.Value)] = v.Target
+	}
 	for _, r := range parsed.Risks {
-		slug, ok := MatchCategory(cats, r.Category)
-		if !ok {
-			b.Rejected = append(b.Rejected, RejectedRow{
-				RowNumber: r.RowNumber, ExternalRef: r.ExternalRef, Reason: RejectUnknownCategory,
-				Detail: fmt.Sprintf("category %q matches none of this organisation's categories by slug or name; valid: %s",
-					r.Category, strings.Join(activeSlugs(cats), ", ")),
-			})
-			continue
-		}
 		row := BatchRow{
 			RowNumber:     r.RowNumber,
 			ExternalRef:   r.ExternalRef,
 			Title:         r.Title,
 			Description:   r.Description,
-			Category:      slug,
+			CategoryValue: r.Category,
+			ThemeValues:   r.Themes,
 			InherentScore: r.InherentScore,
 			ResidualScore: r.ResidualScore,
 			Justification: r.Justification,
@@ -210,12 +222,14 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		}
 		applyTreatmentRules(&row, r.Treatment, r.ControlRefs, controls)
 		applyOwner(&row, r.Owner, ownerIDs)
+		row.Category, row.Themes, _ = targets.resolveRow(row.CategoryValue, row.ThemeValues)
 		b.Staged = append(b.Staged, row)
 	}
 	sort.SliceStable(b.Rejected, func(i, j int) bool { return b.Rejected[i].RowNumber < b.Rejected[j].RowNumber })
 	b.StagedCount = len(b.Staged)
 	b.RejectedCount = len(b.Rejected)
 	b.TotalRows = b.StagedCount + b.RejectedCount
+	b.CategoryValues, b.ThemeValues = splitByKind(values, b.Staged)
 	return s.createBatch(ctx, b)
 }
 
@@ -230,8 +244,8 @@ func (s *Store) Get(ctx context.Context, id string) (Batch, error) {
 // MatchCategory returns the slug of the active category ref names: by exact
 // slug, or else by display name, case-insensitively on the trimmed value.
 // An archived category takes no new risks, so it never matches, and a name
-// shared by two active categories matches neither. Value mapping (spec
-// #2812, Q13) replaces this in a later slice.
+// shared by two active categories matches neither. It is how a batch's
+// category value is mapped at upload, and how a mapping target is read.
 func MatchCategory(cats []risk.Category, ref string) (string, bool) {
 	ref = strings.TrimSpace(ref)
 	for _, c := range cats {
