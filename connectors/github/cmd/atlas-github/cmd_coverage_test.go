@@ -560,7 +560,7 @@ func TestBuildRepoProtectionRecord_AllResults(t *testing.T) {
 				Result:        tc.in,
 				ObservedAt:    time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
 			}
-			rec, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06")
+			rec, err := buildRepoProtectionRecord(state, "example", "prod", "scf:TDA-06", defaultProductionTopic)
 			if err != nil {
 				t.Fatalf("buildRepoProtectionRecord: %v", err)
 			}

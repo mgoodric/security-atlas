@@ -60,7 +60,10 @@ type ProtectionState struct {
 	RequireSignedCommits    *bool
 	RequireLinearHistory    *bool
 	EnforceAdmins           *bool
-	ProtectionSource        string // "" when not read
+	RequiredStatusChecks    *[]string // contexts, sorted and unique
+	AllowForcePushes        *bool
+	Topics                  *[]string // from the repository listing
+	ProtectionSource        string    // "" when not read
 	Result                  Result
 	Reason                  string
 	ObservedAt              time.Time
@@ -87,6 +90,9 @@ type Repo struct {
 	Private       bool             `json:"private"`
 	Archived      bool             `json:"archived"`
 	Permissions   *RepoPermissions `json:"permissions,omitempty"`
+	// Topics is optional in GitHub's minimal-repository schema, so nil
+	// means not reported, and [] means the repository has none.
+	Topics *[]string `json:"topics,omitempty"`
 }
 
 // RepoPermissions is the subset of a minimal-repository's permissions
@@ -131,6 +137,22 @@ type BranchProtection struct {
 	RequiredSignatures         *Enabled            `json:"required_signatures,omitempty"`
 	RequiredLinearHistory      *Enabled            `json:"required_linear_history,omitempty"`
 	EnforceAdmins              *Enabled            `json:"enforce_admins,omitempty"`
+	RequiredStatusChecks       *StatusChecks       `json:"required_status_checks,omitempty"`
+	AllowForcePushes           *Enabled            `json:"allow_force_pushes,omitempty"`
+}
+
+// StatusChecks is the required_status_checks object of classic protection.
+// GitHub's schema names both contexts and checks; its example sends only
+// contexts, so the connector reads the union.
+type StatusChecks struct {
+	Contexts []string      `json:"contexts"`
+	Checks   []StatusCheck `json:"checks"`
+}
+
+// StatusCheck is one required check, in classic protection's checks or a
+// required_status_checks rule's parameters.
+type StatusCheck struct {
+	Context string `json:"context"`
 }
 
 // BranchRule is one element of GET /repos/{owner}/{repo}/rules/branches/{branch}:
@@ -149,7 +171,15 @@ const (
 	ruleTypePullRequest           = "pull_request"
 	ruleTypeRequiredSignatures    = "required_signatures"
 	ruleTypeRequiredLinearHistory = "required_linear_history"
+	ruleTypeRequiredStatusChecks  = "required_status_checks"
+	ruleTypeNonFastForward        = "non_fast_forward"
 )
+
+// statusChecksRuleParams is the subset of a required_status_checks rule's
+// parameters we consume.
+type statusChecksRuleParams struct {
+	RequiredStatusChecks []StatusCheck `json:"required_status_checks"`
+}
 
 // pullRequestRuleParams is the subset of a pull_request rule's parameters
 // we consume. Note the singular require_code_owner_review, unlike the
@@ -229,6 +259,7 @@ func inspectRepo(ctx context.Context, api API, r Repo, observedAt time.Time) Pro
 		RepoID:        r.ID,
 		RepoFullName:  r.FullName,
 		DefaultBranch: r.DefaultBranch,
+		Topics:        r.Topics,
 		ObservedAt:    observedAt,
 	}
 	unread := func(what string, err error) ProtectionState {
@@ -267,6 +298,9 @@ func inspectRepo(ctx context.Context, api API, r Repo, observedAt time.Time) Pro
 	state.RequireCodeOwnerReviews = &m.codeOwner
 	state.RequireSignedCommits = &m.signed
 	state.RequireLinearHistory = &m.linear
+	checks := m.statusChecks()
+	state.RequiredStatusChecks = &checks
+	state.AllowForcePushes = m.allowForcePushes()
 	state.EnforceAdmins = m.enforceAdmins(func(id int64) (bool, bool) {
 		return rulesetBindsAdmins(ctx, api, r, id)
 	})
@@ -296,12 +330,22 @@ type merged struct {
 	codeOwner      bool
 	signed         bool
 	linear         bool
-	reviewRulesets []int64 // rulesets with a pull_request rule requiring >= 1 review, sorted
+	checks         map[string]bool // required status check contexts
+	nonFastForward bool            // a non_fast_forward rule blocks force pushes
+	reviewRulesets []int64         // rulesets with a pull_request rule requiring >= 1 review, sorted
 }
 
 func merge(classic *BranchProtection, rules []BranchRule) (merged, error) {
-	m := merged{classic: classic, rulesetRules: len(rules) > 0}
+	m := merged{classic: classic, rulesetRules: len(rules) > 0, checks: map[string]bool{}}
 	if classic != nil {
+		if sc := classic.RequiredStatusChecks; sc != nil {
+			for _, c := range sc.Contexts {
+				m.addCheck(c)
+			}
+			for _, c := range sc.Checks {
+				m.addCheck(c.Context)
+			}
+		}
 		if pr := classic.RequiredPullRequestReviews; pr != nil {
 			m.reviews = pr.RequiredApprovingReviewCount
 			m.codeOwner = pr.RequireCodeOwnerReviews
@@ -331,10 +375,58 @@ func merge(classic *BranchProtection, rules []BranchRule) (merged, error) {
 			m.signed = true
 		case ruleTypeRequiredLinearHistory:
 			m.linear = true
+		case ruleTypeRequiredStatusChecks:
+			var p statusChecksRuleParams
+			if err := json.Unmarshal(rule.Parameters, &p); err != nil {
+				return merged{}, fmt.Errorf("decode required_status_checks rule of ruleset %d: %w", rule.RulesetID, err)
+			}
+			for _, c := range p.RequiredStatusChecks {
+				m.addCheck(c.Context)
+			}
+		case ruleTypeNonFastForward:
+			m.nonFastForward = true
 		}
 	}
 	sort.Slice(m.reviewRulesets, func(i, j int) bool { return m.reviewRulesets[i] < m.reviewRulesets[j] })
 	return m, nil
+}
+
+func (m merged) addCheck(context string) {
+	if context != "" {
+		m.checks[context] = true
+	}
+}
+
+// statusChecks is every required status check context, from classic
+// protection and every required_status_checks rule, sorted. Empty when no
+// source requires one.
+func (m merged) statusChecks() []string {
+	out := make([]string, 0, len(m.checks))
+	for c := range m.checks {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// allowForcePushes reports whether force pushes to the branch are allowed:
+// false when classic protection disables them or a non_fast_forward rule
+// blocks them, true when no source blocks them, and nil when classic
+// protection omits allow_force_pushes and no rule decides it. Who may
+// bypass the block (classic admins, ruleset bypass actors) is not read.
+func (m merged) allowForcePushes() *bool {
+	t, f := true, false
+	if m.nonFastForward {
+		return &f
+	}
+	if m.classic == nil {
+		return &t
+	}
+	if m.classic.AllowForcePushes == nil {
+		return nil
+	}
+	allowed := m.classic.AllowForcePushes.Enabled
+	return &allowed
 }
 
 func (m merged) source() string {
