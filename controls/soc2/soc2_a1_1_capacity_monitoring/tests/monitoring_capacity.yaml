@@ -409,3 +409,71 @@ cases:
           memory_used_percent: 92
           cpu_p95_5m_percent: 30
           disk_used_percent: 29
+
+  - name: datadog-future-window-end-ranks-below-a-readable-one
+    description: a window_end more than an hour after evaluated_at cannot hide the readable over record
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 95
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2027-01-01T00:00:00Z
+          window_end: 2027-01-01T00:05:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+
+  - name: datadog-malformed-window-end-ranks-below-and-does-not-error
+    description: an unreadable window_end ranks as a missing one; the readable record decides
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: 2026-11-21T12:00:00Z
+          cpu_sample_count: 20
+          memory_used_percent: 10
+          cpu_p95_5m_percent: 10
+          disk_used_percent: 10
+      - result: inconclusive
+        evidence_kind: monitoring.host_capacity.v1
+        observed_at: 2026-11-21T12:00:00Z
+        payload:
+          source_vendor: datadog
+          host_name: web-1
+          host_role: production
+          host_role_source: datadog_scope:env:production
+          window_start: 2026-11-21T11:55:00Z
+          window_end: "2026-02-30T25:61:00Z"
+          cpu_sample_count: 20
+          memory_used_percent: 99
+          cpu_p95_5m_percent: 99
+          disk_used_percent: 99

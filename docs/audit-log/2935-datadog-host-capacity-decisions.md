@@ -153,6 +153,30 @@ The description and the new query change the manifest hash.
 dropped nothing. The PR carries `supersedes-stock`. On the next boot the old
 version is superseded; owners, exceptions and risk links stay on it.
 
+## D7: review fold-ins
+
+- **Site allowlist.** `--site` / `DATADOG_SITE` became the host of
+  `https://api.<site>` unchecked, so `x@evil.example` would have sent both
+  keys to `evil.example`. `datadogauth.Resolve` now lowercases the site, then
+  `CheckSite` admits only DNS labels equal to or under `datadoghq.com`,
+  `datadoghq.eu` or `ddog-gov.com`.
+  - A domain suffix rather than an exact list, so a new Datadog region under
+    those domains works without a release.
+  - The site list itself was not re-read from Datadog's docs for this; the
+    three domains are the ones the existing tests and README already used,
+    plus `ddog-gov.com` for US1-FED.
+- **`window_end` guard.** #2988 (#2939) merged first and gave the osquery
+  query's `last_seen_at` rank key the full RFC 3339 +
+  `pg_input_is_valid` guard and a one-hour future cap. The Datadog query's
+  `window_end` key now has the same, enforced by
+  `TestStockSQLChecksGuardTimestampCasts`. Two cases cover it:
+  `datadog-future-window-end-ranks-below-a-readable-one` (seen failing with
+  the cap removed) and
+  `datadog-malformed-window-end-ranks-below-and-does-not-error`.
+- **Hashes.** After merging #2988, the a1_1 manifest hash is `a0713d2f…`.
+  `9b5bed40…` (this PR's first revision) stays on the list, which only
+  gains lines against `main`.
+
 ## Mutation checks
 
 Each check was run against the scratch Postgres, with
