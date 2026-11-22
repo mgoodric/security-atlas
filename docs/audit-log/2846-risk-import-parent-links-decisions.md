@@ -95,3 +95,22 @@ when its closing link would make a risk its own ancestor.
 cycle at least one link fails the level rule. The cycle check runs before
 the level check, so a loop is reported as a cycle on the row whose link
 would close it. The integration test pins both cases.
+
+## D7 — An imported link writes no risk audit row, like every other link path
+
+**Decision.** A parent link made by the import writes no `risk_audit_log`
+row. The import's own audit row for the row's decision
+(`risk_import_audit_log`) and the row's `parent_link_status` record what
+happened.
+
+**Why.** No link path writes a hierarchy audit row today.
+`POST /v1/risks/{id}/children`, the MCP `link_child_risks` applier and
+unlink all run `risk.LinkChildrenTx` / `UnlinkChildTx`, which write none.
+`risk_audit_log_action_type_check` has no hierarchy action. Writing one from
+the import alone would audit imported links and leave links made in the app
+unaudited: a second mechanism next to the layer that owns links. The gap
+belongs to the risk store and is tracked in #2958 (add
+`child_linked` / `child_unlinked` in `LinkChildrenTx`, with an actor, for
+every path). When #2958 lands, the import inherits the row through
+`LinkChildrenTx`. It should pass the deciding approver as actor, and note
+when a waiting link was settled by the parent row's decision.
