@@ -10,7 +10,8 @@
 // The tracer (#2839) maps the organisation risk ID, title, description,
 // category and review due; #2841 adds the inherent and residual scores, read
 // in the shape of the batch's one methodology (scores.go); #2842 adds the
-// treatment, acceptance and control links (treatment.go). Every other
+// treatment, acceptance and control links (treatment.go); #2843 the owner,
+// matched by email at staging (owner.go). Every other
 // column is kept on the staged row as an unmapped value and never written
 // into the description.
 package riskimport
@@ -101,10 +102,12 @@ type StagedRisk struct {
 	ProposedUntil *time.Time `json:"proposed_until,omitempty"`
 	// HistoricalAccepter is the register's accepter, kept as history: an
 	// import never records who accepted a risk (#2371).
-	HistoricalAccepter  string            `json:"historical_accepter,omitempty"`
-	InstrumentReference string            `json:"instrument_reference,omitempty"`
-	ControlRefs         []string          `json:"control_refs,omitempty"`
-	Unmapped            map[string]string `json:"unmapped"`
+	HistoricalAccepter  string   `json:"historical_accepter,omitempty"`
+	InstrumentReference string   `json:"instrument_reference,omitempty"`
+	ControlRefs         []string `json:"control_refs,omitempty"`
+	// Owner is the owner cell as written; staging matches it to a user.
+	Owner    string            `json:"owner,omitempty"`
+	Unmapped map[string]string `json:"unmapped"`
 }
 
 // RejectedRow is a data row that could not be staged, with the reason.
@@ -167,7 +170,12 @@ var fieldAliases = map[string][]string{
 	},
 	FieldResidualLossEventFrequency: {"residual_loss_event_frequency", "residual loss event frequency", "residual lef"},
 	FieldResidualLossMagnitude:      {"residual_loss_magnitude", "residual loss magnitude", "residual lm"},
-	FieldTreatment:                  {"treatment", "risk treatment", "treatment decision", "risk response"},
+	// treatment_owner is the risk export's free-text owner header.
+	FieldOwner: {
+		"owner", "risk owner", "owner email", "owner e-mail", "risk owner email", "owner_email",
+		"treatment owner", "treatment_owner",
+	},
+	FieldTreatment: {"treatment", "risk treatment", "treatment decision", "risk response"},
 	FieldJustification: {
 		"justification", "acceptance justification", "acceptance_justification", "acceptance rationale", "rationale",
 	},
@@ -479,6 +487,8 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 			tc.instrument = val
 		case FieldLinkedControls:
 			tc.controls = val
+		case FieldOwner:
+			s.Owner = val
 		case "":
 			if c.key != "" && val != "" {
 				s.Unmapped[c.key] = val

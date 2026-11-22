@@ -104,14 +104,14 @@ func TestParseCSV(t *testing.T) {
 		},
 		{
 			name: "unmapped columns are kept and never reach the description",
-			csv:  "Title,Category,Description,Owner,,Target Date\nOutage,operational,Vendor down,alice@corp.test,stray,2027-03-01\nSecond,operational,,,,\n",
+			csv:  "Title,Category,Description,Notes,,Target Date\nOutage,operational,Vendor down,see ticket,stray,2027-03-01\nSecond,operational,,,,\n",
 			wantRisks: []rowSummary{
 				{Row: 2, Title: "Outage", Desc: "Vendor down", Cat: "operational",
-					Unmapped: map[string]string{"Owner": "alice@corp.test", "column 5": "stray", "Target Date": "2027-03-01"}},
+					Unmapped: map[string]string{"Notes": "see ticket", "column 5": "stray", "Target Date": "2027-03-01"}},
 				{Row: 3, Title: "Second", Cat: "operational", Unmapped: map[string]string{}},
 			},
 			wantRejected: map[int]string{},
-			wantUnmapped: []string{"Owner", "column 5", "Target Date"},
+			wantUnmapped: []string{"Notes", "column 5", "Target Date"},
 		},
 		{
 			name: "a repeated risk ID in the file is rejected, ignoring case",
@@ -178,7 +178,7 @@ func TestParseCSVErrors(t *testing.T) {
 		{"no title column", []byte("Risk ID,Category\nR-1,operational\n"), nil, ErrNoHeaderRow},
 		{"no category column", []byte("Risk ID,Title\nR-1,Outage\n"), nil, ErrNoHeaderRow},
 		{"header below the search window", []byte(strings.Repeat("note\n", headerSearchRows) + "Title,Category\nA,operational\n"), nil, ErrNoHeaderRow},
-		{"unknown column map field", []byte("Title,Category\n"), map[string]string{"owner": "Owner"}, ErrInvalidColumnMap},
+		{"unknown column map field", []byte("Title,Category\n"), map[string]string{"nonsense": "Owner"}, ErrInvalidColumnMap},
 		{"one header mapped twice", []byte("Title,Category\n"), map[string]string{FieldTitle: "X", FieldDescription: "x"}, ErrInvalidColumnMap},
 		{"mapped header absent", []byte("Title,Category\nA,operational\n"), map[string]string{FieldDescription: "Notes"}, ErrMappedColumnAbsent},
 		{"required field mapped to an absent header", []byte("Title,Category\nA,operational\n"), map[string]string{FieldTitle: "Headline"}, ErrMappedColumnAbsent},
@@ -237,11 +237,11 @@ func TestParseXLSX(t *testing.T) {
 		{
 			name: "header on the first row",
 			rows: [][]any{
-				{"Risk ID", "Title", "Category", "Owner"},
+				{"Risk ID", "Title", "Category", "Notes"},
 				{"R-1", "Outage", "operational", "alice@corp.test"},
 				{"r-1", "Repeat", "operational", ""},
 			},
-			wantRisks:    []rowSummary{{Row: 2, Ref: "R-1", Title: "Outage", Cat: "operational", Unmapped: map[string]string{"Owner": "alice@corp.test"}}},
+			wantRisks:    []rowSummary{{Row: 2, Ref: "R-1", Title: "Outage", Cat: "operational", Unmapped: map[string]string{"Notes": "alice@corp.test"}}},
 			wantRejected: map[int]string{3: RejectDuplicateExternal},
 		},
 		{
@@ -384,7 +384,7 @@ func TestFieldNames(t *testing.T) {
 	t.Parallel()
 	got := fmt.Sprint(FieldNames())
 	want := "[accepted_until accepter category description external_ref inherent_impact inherent_likelihood " +
-		"inherent_loss_event_frequency inherent_loss_magnitude instrument_reference justification linked_controls " +
+		"inherent_loss_event_frequency inherent_loss_magnitude instrument_reference justification linked_controls owner " +
 		"residual_impact residual_likelihood residual_loss_event_frequency residual_loss_magnitude review_due title treatment]"
 	if got != want {
 		t.Errorf("FieldNames = %s", got)

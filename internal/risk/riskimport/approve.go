@@ -101,6 +101,8 @@ type lockedRow struct {
 	ProposedUntil *time.Time
 	Instrument    string
 	ControlIDs    []uuid.UUID
+	OwnerUserID   *uuid.UUID
+	OwnerUnlinked string
 }
 
 // ApprovePending approves every pending row of the batch. A row that fails
@@ -245,6 +247,10 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 		if err != nil {
 			return err
 		}
+		owner, unlinked, err := approvalOwner(ctx, tx, tenantID, row.OwnerUserID, row.OwnerUnlinked)
+		if err != nil {
+			return err
+		}
 		// An accepted row proposes its acceptance; the create path never
 		// approves one, and the register's accepter is not sent (#2371).
 		status, justification, until := proposalOf(row.Treatment, row.Justification, row.ProposedUntil)
@@ -267,6 +273,10 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			ProposedUntil:       until,
 			InstrumentReference: row.Instrument,
 			LinkedControlIDs:    controls,
+			// The owner matched by email at staging, or the cell as the
+			// unlinked owner (#2843).
+			OwnerUserID:    owner,
+			TreatmentOwner: unlinked,
 			// The approving person creates the risk and is named on its
 			// `created` audit row (#2835).
 			Actor:            in.Approver,
@@ -339,14 +349,14 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 		SELECT r.batch_id::text, r.row_number, COALESCE(r.external_ref, ''), r.title, r.description,
 		       r.category_slug, r.review_due, r.inherent_score::text, r.residual_score::text,
 		       b.methodology, r.status, r.treatment, r.acceptance_justification, r.proposed_until,
-		       r.instrument_reference, r.linked_control_ids
+		       r.instrument_reference, r.linked_control_ids, r.owner_user_id, r.owner_unlinked
 		FROM risk_import_rows r
 		JOIN risk_import_batches b ON b.tenant_id = r.tenant_id AND b.id = r.batch_id
 		WHERE r.id = $1::uuid AND r.batch_id = $2::uuid
 		FOR UPDATE OF r
 	`, rowID, batchID).Scan(&r.BatchID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description,
 		&r.Category, &reviewDue, &inherent, &residual, &r.Methodology, &status, &r.Treatment, &r.Justification,
-		&proposedUntil, &r.Instrument, &r.ControlIDs)
+		&proposedUntil, &r.Instrument, &r.ControlIDs, &r.OwnerUserID, &r.OwnerUnlinked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedRow{}, ErrRowNotFound
 	}

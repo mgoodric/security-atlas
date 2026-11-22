@@ -25,6 +25,7 @@ import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Person } from "@/components/ui/person";
 import { ConfirmInline } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
@@ -420,7 +421,13 @@ function ImportRow({
         {mappedFields(row).map(([k, v]) => (
           <div key={k} className="contents">
             <dt className="text-muted-foreground">{k}</dt>
-            <dd className={k === "Risk ID" ? "font-mono" : undefined}>{v}</dd>
+            <dd className={k === "Risk ID" ? "font-mono" : undefined}>
+              {k === "Owner" && row.owner_user_id ? (
+                <Person id={row.owner_user_id} testId="risk-import-row-owner" />
+              ) : (
+                v
+              )}
+            </dd>
           </div>
         ))}
       </dl>

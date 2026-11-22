@@ -133,9 +133,15 @@ func TestRiskImport_ApproveOneRowRefusedStaysPending(t *testing.T) {
 func TestRiskImport_RowFlags(t *testing.T) {
 	e := newEnv(t)
 	b := stage(t, e, e.grcJWT)
+	// Only the fixture's two rows with an owner no user has are flagged
+	// (#2843); every other row's flags are an empty list, never null.
 	for _, r := range b.Staged {
-		if r.Flags == nil || len(r.Flags) != 0 {
-			t.Fatalf("row %d flags = %#v, want empty", r.RowNumber, r.Flags)
+		want := 0
+		if r.ExternalRef == "R-001" || r.ExternalRef == "R-002" {
+			want = 1
+		}
+		if r.Flags == nil || len(r.Flags) != want {
+			t.Fatalf("row %d flags = %#v, want %d", r.RowNumber, r.Flags, want)
 		}
 	}
 	row := stagedByRef(t, b, "R-002")
