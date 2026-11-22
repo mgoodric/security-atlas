@@ -13,6 +13,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -119,13 +120,15 @@ func hostPostureRecord(t *testing.T) *evidencev1.EvidenceRecord {
 		"screen_lock_enabled":     true,
 		"firewall_enabled":        true,
 		"mdm_enrolled":            true,
+		// cc4_1 decides on the host's check-in time (#2822).
+		"last_seen_at": time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
 	})
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
 	return record(t, func(r *evidencev1.EvidenceRecord) {
 		r.EvidenceKind = "osquery.host_posture.v1"
-		r.SchemaVersion = "1.0.0"
+		r.SchemaVersion = "1.2.0"
 		r.ControlId = ""
 		r.Payload = payload
 	})
