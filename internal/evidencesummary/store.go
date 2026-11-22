@@ -95,6 +95,7 @@ func (s *Store) EvidenceSet(ctx context.Context, controlID uuid.UUID) (EvidenceS
 
 		total, err := q.CountEvidenceRecordsByControl(ctx, dbx.CountEvidenceRecordsByControlParams{
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -106,6 +107,7 @@ func (s *Store) EvidenceSet(ctx context.Context, controlID uuid.UUID) (EvidenceS
 
 		recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),

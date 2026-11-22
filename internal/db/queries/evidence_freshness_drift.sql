@@ -32,7 +32,7 @@ SELECT
 FROM controls c
 LEFT JOIN evidence_records e
     ON e.tenant_id = c.tenant_id
-   AND (e.control_id = c.id OR e.control_ref = c.id::text
+   AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL(sqlc.arg(routed_kinds)::text[])))
        OR (e.control_id IS NULL
            AND e.evidence_kind = ANY(sqlc.arg(unbound_kinds)::text[])
            AND c.evidence_queries @> jsonb_build_array(

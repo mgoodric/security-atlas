@@ -15,9 +15,10 @@ const countEvidenceForControlWindow = `-- name: CountEvidenceForControlWindow :o
 SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3)
+  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3
+                            AND (evidence_kind IS NULL OR evidence_kind <> ALL($7::text[])))
        OR (control_id IS NULL
-           AND evidence_kind = ANY($7::text[])
+           AND evidence_kind = ANY($8::text[])
            AND EXISTS (SELECT 1 FROM controls uc
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
@@ -33,6 +34,7 @@ type CountEvidenceForControlWindowParams struct {
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	IDOnly       bool               `json:"id_only"`
+	RoutedKinds  []string           `json:"routed_kinds"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 }
 
@@ -48,6 +50,7 @@ func (q *Queries) CountEvidenceForControlWindow(ctx context.Context, arg CountEv
 		arg.ObservedAt,
 		arg.ObservedAt_2,
 		arg.IDOnly,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 	)
 	var count int64
@@ -257,9 +260,10 @@ SELECT id, tenant_id, control_id, control_ref, scope_id,
        source_attribution
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3)
+  AND (control_id = $2 OR (NOT $6::boolean AND control_ref = $3
+                            AND (evidence_kind IS NULL OR evidence_kind <> ALL($7::text[])))
        OR (control_id IS NULL
-           AND evidence_kind = ANY($7::text[])
+           AND evidence_kind = ANY($8::text[])
            AND EXISTS (SELECT 1 FROM controls uc
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
@@ -267,11 +271,11 @@ WHERE evidence_records.tenant_id = $1
   AND observed_at >= $4
   AND observed_at <= $5
   AND (
-        observed_at < $8
-        OR (observed_at = $8 AND evidence_records.id < $9)
+        observed_at < $9
+        OR (observed_at = $9 AND evidence_records.id < $10)
       )
 ORDER BY observed_at DESC, id DESC
-LIMIT $10
+LIMIT $11
 `
 
 type ListEvidenceForControlPagedParams struct {
@@ -281,6 +285,7 @@ type ListEvidenceForControlPagedParams struct {
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	ObservedAt_2 pgtype.Timestamptz `json:"observed_at_2"`
 	IDOnly       bool               `json:"id_only"`
+	RoutedKinds  []string           `json:"routed_kinds"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	CursorTs     pgtype.Timestamptz `json:"cursor_ts"`
 	CursorID     pgtype.UUID        `json:"cursor_id"`
@@ -353,6 +358,7 @@ func (q *Queries) ListEvidenceForControlPaged(ctx context.Context, arg ListEvide
 		arg.ObservedAt,
 		arg.ObservedAt_2,
 		arg.IDOnly,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 		arg.CursorTs,
 		arg.CursorID,

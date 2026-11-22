@@ -102,8 +102,8 @@ the tables below cover the flags operators reach for most often.
 ## evidence
 
 `evidence push` writes one record over gRPC. Required: `--kind`,
-`--control`, `--scope`, `--observed-at`, `--result`, `--payload`,
-`--idempotency-key`, `--actor-id`.
+`--control` (except for a kind routed by evidence type, below), `--scope`,
+`--observed-at`, `--result`, `--payload`, `--idempotency-key`, `--actor-id`.
 
 ```sh
 security-atlas-cli evidence push \
@@ -127,6 +127,13 @@ to, and is absent when it linked to none. When `--control` is not a UUID and
 the record did not link, the CLI also prints a warning on stderr, which is
 usually a mistyped bundle ID. A bundle ID cannot be UUID-shaped: the push
 reads a UUID as a control ID, so `controls upload` rejects such a bundle.
+
+Connector kinds such as `github.repo_protection.v2` or
+`osquery.host_posture.v1` are routed by evidence type: the record links to no
+one control and reaches every control whose evidence queries declare its kind.
+The full list is in `internal/evidence/routed`. For these kinds `--control` is
+optional; a value you pass is kept as provenance only, `linkedControlId` is
+always absent, and the CLI prints a note on stderr instead of the warning.
 Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `service_account`), `--session-id`, `--payload-uri`.
 

@@ -144,6 +144,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		}
 		total, err := q.CountEvidenceRecordsByControlBeforeHorizon(ctx, dbx.CountEvidenceRecordsByControlBeforeHorizonParams{
 			UnboundKinds: kinds,
+			RoutedKinds:  routed.Within(kinds),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -156,6 +157,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 
 		recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
 			UnboundKinds: kinds,
+			RoutedKinds:  routed.Within(kinds),
 			TenantID:     pgUUID(tenantID),
 			ControlID:    pgUUID(controlID),
 			ControlRef:   controlID.String(),
@@ -238,6 +240,7 @@ func (s *PeriodStore) ResolveBeforeHorizon(ctx context.Context, id, controlID uu
 		for {
 			recs, err := q.ListEvidenceRecordsByControlBeforeHorizon(ctx, dbx.ListEvidenceRecordsByControlBeforeHorizonParams{
 				UnboundKinds: kinds,
+				RoutedKinds:  routed.Within(kinds),
 				TenantID:     pgUUID(tenantID),
 				ControlID:    pgUUID(controlID),
 				ControlRef:   controlID.String(),
