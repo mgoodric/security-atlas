@@ -4975,7 +4975,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/needs-attention:
     get:
-      summary: GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134)
+      summary: GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, controls inconclusive for 7 days or more, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134)
       tags: [dashboard]
       operationId: get-v1-needs-attention
       security:

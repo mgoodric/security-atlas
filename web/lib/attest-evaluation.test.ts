@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ControlStateEntry } from "@/lib/api/control-detail";
 import {
   evaluationLanded,
+  inconclusiveSince,
   isManualImplementation,
   rollupResult,
 } from "@/lib/attest-evaluation";
@@ -96,5 +97,34 @@ describe("isManualImplementation", () => {
     expect(isManualImplementation("manual_periodic")).toBe(true);
     expect(isManualImplementation("automated")).toBe(false);
     expect(isManualImplementation(undefined)).toBe(false);
+  });
+});
+
+describe("inconclusiveSince", () => {
+  it("is the earliest run start among the inconclusive cells", () => {
+    expect(
+      inconclusiveSince([
+        entry({
+          result: "inconclusive",
+          inconclusive_since: "2026-11-10T00:00:00Z",
+        }),
+        entry({
+          scope_cell_id: "c1",
+          result: "inconclusive",
+          inconclusive_since: "2026-10-01T00:00:00Z",
+        }),
+      ]),
+    ).toBe("2026-10-01T00:00:00Z");
+  });
+
+  it("ignores cells that are not inconclusive or carry no date", () => {
+    expect(
+      inconclusiveSince([
+        entry({ result: "pass", inconclusive_since: "2026-01-01T00:00:00Z" }),
+        entry({ result: "inconclusive" }),
+        entry({ result: "inconclusive", inconclusive_since: "not a date" }),
+      ]),
+    ).toBeNull();
+    expect(inconclusiveSince(undefined)).toBeNull();
   });
 });

@@ -129,6 +129,9 @@ export type ControlStateEntry = {
   evaluated_at: string;
   freshness_class: string;
   trigger: string;
+  // Present when result is inconclusive: the first evaluation of the
+  // cell's current inconclusive run (#2915).
+  inconclusive_since?: string;
 };
 
 export type ControlStateResponse = {

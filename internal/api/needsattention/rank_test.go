@@ -45,6 +45,7 @@ func TestRank_BandOrderThenOldestThenID(t *testing.T) {
 		{Band: BandDueSoon, Type: "risk", ID: "soon-late", DueAt: days(9)},
 		{Band: BandDueSoon, Type: "risk", ID: "soon-early", DueAt: days(2)},
 		{Band: BandOverdue, Type: "policy", ID: "over", DueAt: days(-5)},
+		{Band: BandInconclusive, Type: "control", ID: "inc", Since: days(-30)},
 		{Band: BandApproval, Type: "exception", ID: "appr-undated"},
 		{Band: BandApproval, Type: "exception", ID: "appr-dated", Since: days(-1)},
 		{Band: BandFailing, Type: "control", ID: "fail-b", Since: days(-2)},
@@ -54,6 +55,7 @@ func TestRank_BandOrderThenOldestThenID(t *testing.T) {
 	want := []string{
 		"failing/fail-a", "failing/fail-b",
 		"approval/appr-dated", "approval/appr-undated",
+		"inconclusive/inc",
 		"overdue/over",
 		"due_soon/soon-early", "due_soon/soon-late",
 		"ownership_gap/gap",
@@ -208,7 +210,7 @@ func TestControlItems(t *testing.T) {
 		ctl(&fail, false, dbx.ControlLifecycleStateDraft),  // not in scope
 	}
 	bands := map[string]int{}
-	for _, it := range ControlItems(rows, nil) {
+	for _, it := range ControlItems(rows, nil, nil, now2134) {
 		bands[it.Band]++
 		if it.Band == BandFailing && it.Since == nil {
 			t.Errorf("failing item without since: %+v", it)
@@ -216,6 +218,59 @@ func TestControlItems(t *testing.T) {
 	}
 	if bands[BandFailing] != 2 || bands[BandOwnershipGap] != 2 || len(bands) != 2 {
 		t.Fatalf("bands = %v; want 2 failing, 2 gaps", bands)
+	}
+}
+
+func TestControlItems_LongInconclusive(t *testing.T) {
+	t.Parallel()
+	inc := dbx.EvidenceResultInconclusive
+	ctl := func(state dbx.ControlLifecycleState) dbx.ListActiveControlsWithStateRow {
+		return dbx.ListActiveControlsWithStateRow{
+			ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, Title: "c", LifecycleState: state, StateResult: &inc,
+			OwnerUserID: pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		}
+	}
+	long, atThreshold, recent, unknown, draft := ctl(dbx.ControlLifecycleStateActive), ctl(dbx.ControlLifecycleStateActive),
+		ctl(dbx.ControlLifecycleStateActive), ctl(dbx.ControlLifecycleStateActive), ctl(dbx.ControlLifecycleStateDraft)
+	since := map[uuid.UUID]time.Time{
+		long.ID.Bytes:        *days(-30),
+		atThreshold.ID.Bytes: *days(-InconclusiveDays),
+		recent.ID.Bytes:      *days(-InconclusiveDays + 1),
+		draft.ID.Bytes:       *days(-30),
+	}
+	got := map[uuid.UUID]Item{}
+	for _, it := range ControlItems([]dbx.ListActiveControlsWithStateRow{long, atThreshold, recent, unknown, draft}, nil, since, now2134) {
+		if it.Band != BandInconclusive {
+			t.Fatalf("unexpected item %+v", it)
+		}
+		got[uuid.MustParse(it.ID)] = it
+	}
+	if len(got) != 2 {
+		t.Fatalf("items = %v; want the 30-day and the threshold-day controls only", got)
+	}
+	if it := got[long.ID.Bytes]; it.Since == nil || !it.Since.Equal(*days(-30)) || it.Owner == nil || it.Action == "" {
+		t.Errorf("long item = %+v; want since 30 days ago, an owner and an action", it)
+	}
+	if _, ok := got[atThreshold.ID.Bytes]; !ok {
+		t.Error("a run exactly InconclusiveDays old is not listed")
+	}
+}
+
+func TestEarliestInconclusive(t *testing.T) {
+	t.Parallel()
+	a, b := uuid.New(), uuid.New()
+	row := func(id uuid.UUID, at *time.Time) dbx.ListInconclusiveStreaksRow {
+		r := dbx.ListInconclusiveStreaksRow{ControlID: pgtype.UUID{Bytes: id, Valid: true}}
+		if at != nil {
+			r.InconclusiveSince = pgtype.Timestamptz{Time: *at, Valid: true}
+		}
+		return r
+	}
+	got := EarliestInconclusive([]dbx.ListInconclusiveStreaksRow{
+		row(a, days(-3)), row(a, days(-10)), row(a, days(-5)), row(b, nil),
+	})
+	if len(got) != 1 || !got[a].Equal(*days(-10)) {
+		t.Fatalf("got %v; want a at its earliest cell run, b dropped", got)
 	}
 }
 
