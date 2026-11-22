@@ -117,6 +117,68 @@ rc=$?
 set -e
 assert_eq "$rc" 0 "added entry"
 
+# Case 6: the #2956 flow. main and a PR branch each regenerate with a
+# working-tree revision that never gets committed, so each side's file holds
+# a hash the other's history cannot reproduce. Merge main, then regenerate.
+# Whether git merges the file cleanly depends on where the two hashes sort;
+# a conflicted file parses the same way, since both sides' entry lines stay
+# between the markers. The pre-#2963 generator dropped main's draft here
+# (cc6_7 `263888e5`, twice: #2955 and #2956's main merge).
+r="$work/r6"
+new_repo "$r"
+git -C "$r" checkout -q -b pr
+printf 'bundle_id: soc2_a\nv: pr-draft\n' >"$r/controls/soc2/soc2_a/control.yaml"
+(cd "$r" && bash "$GEN" >/dev/null)
+git -C "$r" checkout -q -- controls
+git -C "$r" commit -q -am "pr: gen with a draft"
+git -C "$r" checkout -q main
+printf 'bundle_id: soc2_a\nv: main-draft\n' >"$r/controls/soc2/soc2_a/control.yaml"
+(cd "$r" && bash "$GEN" >/dev/null)
+git -C "$r" checkout -q -- controls
+git -C "$r" commit -q -am "main: gen with a draft"
+main_draft="$(git -C "$r" diff HEAD~1 -- "$GEN_FILE" | sed -n 's/^+[[:space:]]*"\([0-9a-f]\{64\}\)".*/\1/p')"
+git -C "$r" checkout -q pr
+git -C "$r" merge -q --no-edit main >/dev/null 2>&1 || true
+(cd "$r" && bash "$GEN" >/dev/null)
+assert_eq "$(hash_lines "$r")" 3 "regenerating after the merge keeps both drafts"
+set +e
+(cd "$r" && bash "$CHECK" main >/dev/null 2>&1)
+rc=$?
+set -e
+assert_eq "$rc" 0 "merge plus regeneration is a superset of main"
+
+# Case 7: the merge resolved by keeping the branch's pre-merge copy of the
+# file drops main's draft, and the check names it.
+git -C "$r" show "ORIG_HEAD:$GEN_FILE" >"$r/$GEN_FILE"
+set +e
+out="$(cd "$r" && bash "$CHECK" main 2>&1)"
+rc=$?
+set -e
+assert_eq "$rc" 1 "merge resolved with the branch copy"
+assert_contains "$out" "$main_draft soc2_a" "merge resolved with the branch copy"
+
+# Case 8: a conflicted file (markers and all) regenerates to the union.
+r="$work/r8"
+new_repo "$r"
+kept="$(grep -oE '[0-9a-f]{64}' "$r/$GEN_FILE")"
+ours="$(printf 'c%.0s' $(seq 64))"
+theirs="$(printf 'd%.0s' $(seq 64))"
+cat >"$r/$GEN_FILE" <<EOF
+package scfimport
+
+var stockManifestHashes = map[string]string{
+<<<<<<< HEAD
+	"$ours": "soc2_a",
+=======
+	"$theirs": "soc2_a",
+>>>>>>> main
+	"$kept": "soc2_a",
+}
+EOF
+(cd "$r" && bash "$GEN" >/dev/null)
+assert_eq "$(hash_lines "$r")" 3 "conflicted file regenerates to the union"
+assert_eq "$(grep -c '^[<=>]\{7\}' "$r/$GEN_FILE" || true)" 0 "conflict markers are gone"
+
 echo "check-stock-hashes-superset_test: $pass passed, $fail failed"
 if ((fail > 0)); then
 	printf '  %s\n' "${fail_messages[@]}" >&2

@@ -39,6 +39,14 @@ file exactly (272 hashes), so no merge resolution was involved. The cc6_1 and
 cc4_1 rows are inferred from the same mechanism, because the old generator on
 `main` omits both. I did not fetch their branch commits.
 
+The same thing dropped `263888e5…` a second time, during #2956's merge of
+`main`. #2956 had restored the hash by hand. Merging `main` and then
+regenerating rebuilt the list from the merged history, which still did not
+hold the bytes, and the hash went again. The worker restored it by hand
+before #2956 merged. The self-test reproduces this flow (case 6): two
+branches each commit a hash from a draft revision, the PR branch merges
+`main` and regenerates, and the old generator keeps 1 of the 3 hashes.
+
 What this means in practice: `main` never shipped any of the three
 revisions, so the only tenants they could matter for are installs
 bootstrapped from those PR branches. The ticket's "shipped hash" overstates
