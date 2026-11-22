@@ -22,10 +22,8 @@ package oktaapps
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -34,6 +32,7 @@ import (
 	"time"
 
 	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktaauth"
+	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktapage"
 )
 
 // Assignment is one record the cmd layer turns into an evidence record.
@@ -302,100 +301,42 @@ func NewClient(httpClient *http.Client, baseURL string, creds oktaauth.Credentia
 	return &Client{HTTP: httpClient, BaseURL: strings.TrimRight(baseURL, "/"), Creds: creds}
 }
 
-// ListApps fetches the first page of apps. v1 pulls only the first 200;
-// pagination lands when org sizes demand it.
+// ListApps fetches every app, following Okta's Link: rel="next"
+// pagination.
 func (c *Client) ListApps(ctx context.Context) ([]rawApp, error) {
-	u := c.BaseURL + "/api/v1/apps?limit=200"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	out, err := oktapage.List[rawApp](ctx, c.HTTP, c.BaseURL, c.Creds, "/api/v1/apps?limit=200")
 	if err != nil {
-		return nil, err
-	}
-	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return nil, &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	var out []rawApp
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode apps: %w", err)
+		return nil, fmt.Errorf("apps: %w", err)
 	}
 	return out, nil
 }
 
-// ListAppGroups fetches the groups assigned to one app.
+// ListAppGroups fetches every group assigned to one app.
 func (c *Client) ListAppGroups(ctx context.Context, appID string) ([]rawGroup, error) {
 	if appID == "" {
 		return nil, errors.New("oktaapps: appID required")
 	}
-	u := fmt.Sprintf("%s/api/v1/apps/%s/groups", c.BaseURL, url.PathEscape(appID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	out, err := oktapage.List[rawGroup](ctx, c.HTTP, c.BaseURL, c.Creds, fmt.Sprintf("/api/v1/apps/%s/groups", url.PathEscape(appID)))
 	if err != nil {
-		return nil, err
-	}
-	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return nil, &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	var out []rawGroup
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode app groups: %w", err)
+		return nil, fmt.Errorf("app groups: %w", err)
 	}
 	return out, nil
 }
 
-// ListPolicyRules fetches the rules of one policy.
+// ListPolicyRules fetches every rule of one policy.
 func (c *Client) ListPolicyRules(ctx context.Context, policyID string) ([]rawRule, error) {
 	if policyID == "" {
 		return nil, errors.New("oktaapps: policyID required")
 	}
-	u := fmt.Sprintf("%s/api/v1/policies/%s/rules", c.BaseURL, url.PathEscape(policyID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	out, err := oktapage.List[rawRule](ctx, c.HTTP, c.BaseURL, c.Creds, fmt.Sprintf("/api/v1/policies/%s/rules", url.PathEscape(policyID)))
 	if err != nil {
-		return nil, err
-	}
-	c.Creds.Apply(req)
-	res, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusOK {
-		return nil, &APIError{Status: res.StatusCode, Body: drain(res.Body)}
-	}
-	var out []rawRule
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode policy rules: %w", err)
+		return nil, fmt.Errorf("policy rules: %w", err)
 	}
 	return out, nil
 }
 
 // APIError carries Okta REST error context.
-type APIError struct {
-	Status int
-	Body   string
-}
-
-func (e *APIError) Error() string {
-	if e.Body == "" {
-		return fmt.Sprintf("okta: HTTP %d", e.Status)
-	}
-	return fmt.Sprintf("okta: HTTP %d: %s", e.Status, e.Body)
-}
-
-func drain(r io.Reader) string {
-	const max = 1 << 13
-	b, _ := io.ReadAll(io.LimitReader(r, max))
-	return string(b)
-}
+type APIError = oktapage.APIError
 
 func firstNonEmpty(a, b string) string {
 	if a != "" {

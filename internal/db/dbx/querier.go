@@ -2801,6 +2801,15 @@ type Querier interface {
 	ListIncidentTimeline(ctx context.Context, arg ListIncidentTimelineParams) ([]IncidentTimeline, error)
 	ListIncidentVendorLinks(ctx context.Context, arg ListIncidentVendorLinksParams) ([]IncidentVendor, error)
 	ListIncidents(ctx context.Context, tenantID pgtype.UUID) ([]Incident, error)
+	// #2915: when each (control, scope_cell) that is inconclusive now became
+	// inconclusive. The ledger is append-only and the scheduler writes a row
+	// per run, so a cell's streak starts at its earliest evaluation after its
+	// latest non-inconclusive one (or its first evaluation, if it has never
+	// been anything else). A cell whose latest evaluation is not inconclusive
+	// has no row after its last break, so it returns nothing. Reads the
+	// history of the named controls only; callers pass the controls they
+	// already know are inconclusive.
+	ListInconclusiveStreaks(ctx context.Context, arg ListInconclusiveStreaksParams) ([]ListInconclusiveStreaksRow, error)
 	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
 	// collapses the append-only history to the current row per cell. Used by
 	// GET /v1/controls/:id/state when no scope filter is supplied.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -35,6 +36,9 @@ type State struct {
 	EvaluatedAt           time.Time
 	FreshnessClass        string
 	Trigger               string
+	// InconclusiveSince is set when Result is inconclusive: the first
+	// evaluation of the cell's current unbroken inconclusive run (#2915).
+	InconclusiveSince *time.Time
 }
 
 // ControlState returns the current evaluated state of a control.
@@ -84,12 +88,64 @@ func (e *Engine) ControlState(ctx context.Context, controlID uuid.UUID, scopePre
 			}
 			out = append(out, st)
 		}
-		return nil
+		return attachInconclusiveSince(ctx, q, tenantID, controlID, asOf, out)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// attachInconclusiveSince sets InconclusiveSince on the inconclusive
+// states. It reads the ledger only when at least one state is
+// inconclusive.
+func attachInconclusiveSince(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID, asOf time.Time, states []State) error {
+	inconclusive := false
+	for _, st := range states {
+		inconclusive = inconclusive || st.Result == string(dbx.EvidenceResultInconclusive)
+	}
+	if !inconclusive {
+		return nil
+	}
+	rows, err := q.ListInconclusiveStreaks(ctx, dbx.ListInconclusiveStreaksParams{
+		TenantID:   pgUUID(tenantID),
+		ControlIds: []pgtype.UUID{pgUUID(controlID)},
+		AsOf:       pgTimestamptz(asOf),
+	})
+	if err != nil {
+		return err
+	}
+	since := InconclusiveSinceByCell(rows)
+	for i := range states {
+		if states[i].Result != string(dbx.EvidenceResultInconclusive) {
+			continue
+		}
+		key := uuid.Nil
+		if states[i].ScopeCellID != nil {
+			key = *states[i].ScopeCellID
+		}
+		if t, ok := since[key]; ok {
+			states[i].InconclusiveSince = &t
+		}
+	}
+	return nil
+}
+
+// InconclusiveSinceByCell keys ListInconclusiveStreaks rows by scope cell,
+// uuid.Nil standing for the whole-tenant cell.
+func InconclusiveSinceByCell(rows []dbx.ListInconclusiveStreaksRow) map[uuid.UUID]time.Time {
+	out := make(map[uuid.UUID]time.Time, len(rows))
+	for _, r := range rows {
+		if !r.InconclusiveSince.Valid {
+			continue
+		}
+		key := uuid.Nil
+		if r.ScopeCellID.Valid {
+			key = r.ScopeCellID.Bytes
+		}
+		out[key] = r.InconclusiveSince.Time
+	}
+	return out
 }
 
 // mustListCells reads the tenant's scope-cell universe via the resolver.
