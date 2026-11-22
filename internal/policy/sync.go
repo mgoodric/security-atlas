@@ -47,6 +47,12 @@ const (
 	SyncStatusMissing = "missing"
 )
 
+// ErrSyncEmptyRefused is returned by Sync for a push with no pages for a
+// source that has published synced policies, unless the caller allows
+// it (#2902): a connector bug that sends nothing would otherwise mark
+// every policy of the source missing.
+var ErrSyncEmptyRefused = errors.New("sync: an empty push for a source with published synced policies; set allow_empty to confirm the source is now empty")
+
 // syncMissingReason is the report's reason on a missing result.
 const syncMissingReason = "the page is no longer in this source's labelled set: it lost its label or was deleted. The published policy stays in force; restore the label to clear this"
 
@@ -88,6 +94,9 @@ type SyncResult struct {
 // id.
 type SyncReport struct {
 	Results []SyncResult
+	// Warnings are run-level notes, such as a run that leaves more than
+	// half of the source's policies missing (#2902).
+	Warnings []string
 }
 
 // Sync applies one full-set push from a policy-sync key (#2850). Every
@@ -119,12 +128,18 @@ type SyncReport struct {
 // is present, and any missing state on it is cleared. Only rows of this
 // source in the caller's tenant are considered.
 //
+// A push that carries no page, valid or invalid, for a source that has
+// published synced policies is refused with ErrSyncEmptyRefused and
+// writes nothing, unless allowEmpty says the source is now empty
+// (#2902). A run that leaves more than half of the source's published
+// synced policies missing carries a warning in the report.
+//
 // invalid are pages the caller refused (a missing or invalid property);
 // they are reported as skipped and written nowhere. Unlike Import, valid
 // pages are written even when another page is skipped. Runs for one source
 // are serialised, so an overlapping run cannot create a page twice.
 // Everything runs in one transaction.
-func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, invalid []SyncResult, keyID string) (SyncReport, error) {
+func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, invalid []SyncResult, allowEmpty bool, keyID string) (SyncReport, error) {
 	if keyID == "" {
 		return SyncReport{}, ErrCreatedByRequired
 	}
@@ -136,6 +151,15 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			SyncSpace: src.Space,
 		}); err != nil {
 			return fmt.Errorf("sync: lock source: %w", err)
+		}
+		synced, err := q.CountPublishedSyncedPoliciesInSource(ctx, dbx.CountPublishedSyncedPoliciesInSourceParams{
+			TenantID: pgUUID(tenantID), SyncSite: &src.Site, SyncSpace: &src.Space,
+		})
+		if err != nil {
+			return fmt.Errorf("sync: count source policies: %w", err)
+		}
+		if len(pages) == 0 && len(invalid) == 0 && synced > 0 && !allowEmpty {
+			return ErrSyncEmptyRefused
 		}
 		// Every page the run carries is present, valid or not: a page
 		// with a bad property is still labelled.
@@ -228,6 +252,11 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			return err
 		}
 		report.Results = append(results, missing...)
+		if int64(len(missing))*2 > synced {
+			report.Warnings = append(report.Warnings, fmt.Sprintf(
+				"%d of this source's %d published synced policies are missing from this push. If those pages were not deleted or unlabelled, check the connector",
+				len(missing), synced))
+		}
 		return nil
 	})
 	if err != nil {

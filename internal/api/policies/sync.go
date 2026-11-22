@@ -27,6 +27,10 @@ const (
 type syncReq struct {
 	Source syncSourceReq `json:"source"`
 	Pages  []syncPageReq `json:"pages"`
+	// AllowEmpty confirms that an empty pages list means the source is
+	// now empty (#2902); without it an empty push for a source with
+	// published synced policies is refused.
+	AllowEmpty bool `json:"allow_empty"`
 }
 
 type syncSourceReq struct {
@@ -92,6 +96,7 @@ type syncRespWire struct {
 	Skipped    int              `json:"skipped"`
 	Missing    int              `json:"missing"`
 	Results    []syncResultWire `json:"results"`
+	Warnings   []string         `json:"warnings,omitempty"`
 }
 
 // SyncPolicies handles POST /v1/policies:sync (#2850): a full-set push of
@@ -106,9 +111,10 @@ type syncRespWire struct {
 // from the push is reported missing and its policy left in force
 // (#2853); see policy.Store.Sync.
 //
-// Response: 200 with the per-page report. 400 when the request itself is
-// malformed (no source, too many pages); a bad page is reported, not
-// refused.
+// Response: 200 with the per-page report and any run warnings. 400 when
+// the request itself is malformed (no source, too many pages); a bad page
+// is reported, not refused. 422 for an empty pages list for a source
+// with published synced policies, unless allow_empty is true (#2902).
 func (h *Handler) SyncPolicies(w http.ResponseWriter, r *http.Request) {
 	ctx, cred, ok := h.tenantCredContext(r)
 	if !ok {
@@ -144,7 +150,12 @@ func (h *Handler) SyncPolicies(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pages, invalid := parseSyncPages(req.Pages)
-	report, err := h.store.Sync(ctx, src, pages, invalid, cred.ID)
+	report, err := h.store.Sync(ctx, src, pages, invalid, req.AllowEmpty, cred.ID)
+	if errors.Is(err, policy.ErrSyncEmptyRefused) {
+		httpresp.WriteError(w, http.StatusUnprocessableEntity,
+			"pages is empty but this source has published synced policies; an empty push would mark every one missing. Set allow_empty: true if the source is now empty")
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "sync policies", err)
 		return
@@ -224,7 +235,7 @@ func decodeSyncProperties(raw json.RawMessage) (syncProperties, error) {
 }
 
 func wireFromSyncReport(r policy.SyncReport) syncRespWire {
-	out := syncRespWire{Results: make([]syncResultWire, 0, len(r.Results))}
+	out := syncRespWire{Results: make([]syncResultWire, 0, len(r.Results)), Warnings: r.Warnings}
 	for _, res := range r.Results {
 		rw := syncResultWire{PageID: res.PageID, Title: res.Title, Status: res.Status, Reason: res.Reason}
 		if res.Policy != nil {

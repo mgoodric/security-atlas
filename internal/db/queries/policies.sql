@@ -576,6 +576,19 @@ WHERE tenant_id = sqlc.arg('tenant_id')
   AND NOT (sync_page_id = ANY(sqlc.arg('present_page_ids')::text[]))
   AND sync_missing_since IS NULL;
 
+-- name: CountPublishedSyncedPoliciesInSource :one
+-- #2902 — the published synced rows of one source at the start of a run:
+-- an empty push for a source that has some is refused without
+-- allow_empty, and a run that leaves more than half of them missing
+-- carries a warning. Read under LockPolicySyncSource.
+SELECT count(*)
+FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = sqlc.arg('sync_site')
+  AND sync_space = sqlc.arg('sync_space');
+
 -- name: ListSyncedPoliciesMissingFromSource :many
 -- #2853 — the published synced rows of one source whose page a run found
 -- absent, for that run's report. Read after MarkSyncedPoliciesMissing in

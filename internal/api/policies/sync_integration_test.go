@@ -102,6 +102,7 @@ type syncResp struct {
 		PropertyDriftKeys       []string   `json:"property_drift_keys"`
 		PropertyDriftDetectedAt *time.Time `json:"property_drift_detected_at"`
 	} `json:"results"`
+	Warnings []string `json:"warnings"`
 }
 
 func postSync(t *testing.T, s setupResult, key string, want int, pages ...map[string]any) syncResp {
