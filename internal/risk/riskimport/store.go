@@ -128,11 +128,11 @@ func (s *Store) createBatch(ctx context.Context, b Batch) (Batch, error) {
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO risk_import_batches (
 				tenant_id, source_filename, source_format, methodology, uploaded_by, status,
-				total_rows, staged_count, rejected_count, unmapped_columns)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+				total_rows, staged_count, rejected_count, unmapped_columns, uploader_user_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::uuid)
 			RETURNING id::text, created_at
 		`, tenantID, b.SourceFilename, b.SourceFormat, b.Methodology, b.UploadedBy, b.Status,
-			b.TotalRows, b.StagedCount, b.RejectedCount, string(unmapped),
+			b.TotalRows, b.StagedCount, b.RejectedCount, string(unmapped), nullable(b.UploaderUserID),
 		).Scan(&b.ID, &b.CreatedAt); err != nil {
 			return fmt.Errorf("riskimport: insert batch: %w", err)
 		}
@@ -208,11 +208,12 @@ func (s *Store) getBatch(ctx context.Context, id string) (Batch, error) {
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ uuid.UUID) error {
 		var unmapped []byte
 		err := tx.QueryRow(ctx, `
-			SELECT id::text, source_filename, source_format, methodology, uploaded_by, status,
+			SELECT id::text, source_filename, source_format, methodology, uploaded_by,
+			       COALESCE(uploader_user_id::text, ''), status,
 			       total_rows, staged_count, rejected_count, unmapped_columns, created_at
 			FROM risk_import_batches
 			WHERE id = $1::uuid
-		`, id).Scan(&b.ID, &b.SourceFilename, &b.SourceFormat, &b.Methodology, &b.UploadedBy, &b.Status,
+		`, id).Scan(&b.ID, &b.SourceFilename, &b.SourceFormat, &b.Methodology, &b.UploadedBy, &b.UploaderUserID, &b.Status,
 			&b.TotalRows, &b.StagedCount, &b.RejectedCount, &unmapped, &b.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrBatchNotFound
