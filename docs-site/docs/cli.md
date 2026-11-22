@@ -134,6 +134,77 @@ The gRPC endpoint accepts API keys only, not a UI session token; issue one
 with `credentials issue`. [Push a first manual attestation](first-manual-attestation.md)
 walks the whole path.
 
+### Pushing a SAST scan with findings
+
+No bundled connector emits `sast.scan_result.v1`; a CI job pushes each scan
+itself. Three stock controls read the findings, from schema version 1.1.0
+on (#2831):
+
+| Control                              | Fails when the repository's latest scan…                                                                                           |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `soc2_cc7_1_vulnerability_detection` | is 168 hours old or older, or has an unsuppressed `critical` finding                                                               |
+| `soc2_pi1_2_input_completeness`      | has an unsuppressed finding under `injection.sql`, `injection.command`, `deserialization.unsafe` or `input.schema_violation`       |
+| `soc2_pi1_3_processing_validity`     | has an unsuppressed finding under `authz.missing_check`, `authz.idor`, `authz.privilege_escalation` or `authz.broken_object_level` |
+
+The payload names the `repository` and lists every finding, suppressed ones
+included, as `rule_id`, `severity` (`critical`, `high`, `medium`, `low` or
+`info`) and `suppressed`:
+
+```json
+{
+  "tool": "semgrep",
+  "tool_version": "1.90.0",
+  "findings_count": 2,
+  "repository": "acme/api",
+  "report_uri": "https://ci.example.com/runs/1234/sarif",
+  "findings": [
+    { "rule_id": "injection.sql", "severity": "high", "suppressed": false },
+    {
+      "rule_id": "python.flask.debug-enabled",
+      "severity": "low",
+      "suppressed": true
+    }
+  ]
+}
+```
+
+- **Rule ids.** pi1_2 and pi1_3 match the platform rule ids above exactly.
+  Your scanner has its own, so the CI job maps the rules you treat as SQL
+  injection, IDOR and so on onto them before pushing. Any other rule id is
+  kept as sent and is read only by cc7_1, for its severity.
+- **Severity.** Map the scanner's levels onto the five values. A SARIF
+  `error` is not necessarily `critical`; decide which of your levels is.
+- **Every finding.** Send the whole list for each scan: the latest scan of a
+  repository replaces the earlier one. An empty `findings` array is a clean
+  scan. A scan without `findings` (a 1.0.0 record) leaves all three
+  controls inconclusive.
+- **One push per control.** `sast.scan_result.v1` is bound to the control
+  named in `--control`, so a scan reaches only that control. Push the same
+  payload once for each control that should judge it, each with its own
+  idempotency key.
+- **Size.** An inline payload is capped at 1 MiB, roughly ten thousand
+  findings. Put the full report at `report_uri`.
+
+```sh
+for control in soc2_cc7_1_vulnerability_detection \
+               soc2_pi1_2_input_completeness \
+               soc2_pi1_3_processing_validity; do
+  security-atlas-cli evidence push \
+    --kind sast.scan_result.v1 \
+    --schema-version 1.1.0 \
+    --control "$control" \
+    --scope '{"environment":"prod"}' \
+    --observed-at "$(date -u +%FT%TZ)" \
+    --result inconclusive \
+    --payload @./scan-result.json \
+    --idempotency-key "sast-$GITHUB_RUN_ID-$control" \
+    --actor-id "github-actions"
+done
+```
+
+`--result` is still required, but these three controls ignore it and decide
+on the findings.
+
 `evidence verify` re-hashes the ledger and reports mismatches:
 
 ```sh
