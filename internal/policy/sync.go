@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -266,14 +267,16 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 }
 
 // syncSameVersion handles a page whose synced row already has its
-// declared version. The body hash and the synced properties are compared
-// with the row: body drift (#2851) and property drift (#2877) are each
-// recorded when they differ and cleared when they match. Nothing else is
-// written, since what staff acknowledged is not rewritten under them.
+// declared version. The body and the synced properties are compared with
+// the row: body drift (#2851) and property drift (#2877) are each
+// recorded when they differ and cleared when they match. The body
+// comparison ignores whitespace (#2910); the hashes recorded are of the
+// body as sent. Nothing else is written, since what staff acknowledged is
+// not rewritten under them.
 func syncSameVersion(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, p SyncPage, cur dbx.Policy, hash string) (SyncResult, error) {
 	res := SyncResult{PageID: p.PageID, Title: p.In.Title}
 	row := cur
-	bodyDrift := cur.SyncedBodySha256 == nil || *cur.SyncedBodySha256 != hash
+	bodyDrift := bodyDrifted(cur.BodyMd, p.In.BodyMd)
 	switch {
 	case bodyDrift:
 		// No row back means this drift is already recorded.
@@ -542,7 +545,7 @@ func syncFirst(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src Sync
 func syncTakeOverInPlace(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, imported dbx.Policy, hash, keyID string) (Policy, error) {
 	rowHash := bodySHA256(imported.BodyMd)
 	var drift *string
-	if rowHash != hash {
+	if bodyDrifted(imported.BodyMd, p.In.BodyMd) {
 		drift = &hash
 	}
 	// The imported row keeps its properties too; page properties that
@@ -563,7 +566,7 @@ func syncTakeOverInPlace(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID
 	if err != nil {
 		return Policy{}, fmt.Errorf("sync: take over imported policy for page %q: %w", p.PageID, err)
 	}
-	if err := syncAuditTakeover(ctx, q, tenantID, p, row, imported.SourceAttribution, keyID, &rowHash); err != nil {
+	if err := syncAuditTakeover(ctx, q, tenantID, p, row, imported.SourceAttribution, keyID, takeoverAudit{bodyHash: &rowHash, driftHash: drift}); err != nil {
 		return Policy{}, err
 	}
 	return policyFromRow(row), nil
@@ -587,7 +590,9 @@ func syncTakeOverAsNextVersion(ctx context.Context, q *dbx.Queries, tenantID uui
 	if err != nil {
 		return Policy{}, err
 	}
-	if err := syncAuditTakeover(ctx, q, tenantID, p, superseded, imported.SourceAttribution, keyID, nil); err != nil {
+	if err := syncAuditTakeover(ctx, q, tenantID, p, superseded, imported.SourceAttribution, keyID, takeoverAudit{
+		previousState: imported.Status, newState: superseded.Status,
+	}); err != nil {
 		return Policy{}, err
 	}
 	return written, nil
@@ -596,7 +601,7 @@ func syncTakeOverAsNextVersion(ctx context.Context, q *dbx.Queries, tenantID uui
 // syncAuditTakeover writes the 'sync_takeover' row on the taken-over
 // policy: the key as actor, the page id as source file, the page URL, and
 // the attribution the policy had before.
-func syncAuditTakeover(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, p SyncPage, row dbx.Policy, prevAttribution, keyID string, bodyHash *string) error {
+func syncAuditTakeover(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, p SyncPage, row dbx.Policy, prevAttribution, keyID string, a takeoverAudit) error {
 	if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
 		TenantID:                  pgUUID(tenantID),
 		PolicyID:                  row.ID,
@@ -608,12 +613,24 @@ func syncAuditTakeover(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, 
 		SourceUrl:                 stringPtr(p.In.SourceURL),
 		PolicyTitle:               &row.Title,
 		PolicyVersion:             &row.Version,
-		BodySha256:                bodyHash,
+		BodySha256:                a.bodyHash,
+		PreviousState:             stringPtr(a.previousState),
+		NewState:                  stringPtr(a.newState),
 		PreviousSourceAttribution: &prevAttribution,
+		SyncDriftBodySha256:       a.driftHash,
 	}); err != nil {
 		return fmt.Errorf("sync: takeover audit log: %w", err)
 	}
 	return nil
+}
+
+// takeoverAudit is what differs between the two takeover shapes' audit
+// rows (#2910). In place: the row's own body hash, and the page's hash
+// when the page drifted from it. Chained: the imported row's status before
+// and after it was superseded.
+type takeoverAudit struct {
+	bodyHash, driftHash     *string
+	previousState, newState string
 }
 
 func syncCreate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, p SyncPage, hash, keyID string) (Policy, error) {
@@ -704,4 +721,31 @@ func validateSyncPage(p SyncPage) error {
 		return errors.New("policy: page url is required")
 	}
 	return validateImport(p.In)
+}
+
+// normalizeDriftBody is the form a body is compared in for sync drift
+// (#2910): line endings as \n, trailing whitespace stripped from every
+// line, runs of blank lines collapsed to one, and trailing newlines
+// trimmed. The connector's Confluence-to-Markdown conversion differs from
+// an export in exactly these ways, and none of them changes the content.
+// Only the comparison uses it; every recorded hash is of the body as sent.
+func normalizeDriftBody(body string) string {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	body = strings.ReplaceAll(body, "\r", "\n")
+	lines := strings.Split(body, "\n")
+	out := lines[:0]
+	for _, l := range lines {
+		l = strings.TrimRightFunc(l, unicode.IsSpace)
+		if l == "" && len(out) > 0 && out[len(out)-1] == "" {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+}
+
+// bodyDrifted reports whether a page body differs in content from the
+// body a synced row holds, ignoring what normalizeDriftBody removes.
+func bodyDrifted(stored, page string) bool {
+	return normalizeDriftBody(stored) != normalizeDriftBody(page)
 }
