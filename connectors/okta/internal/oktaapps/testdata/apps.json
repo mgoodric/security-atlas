@@ -1,0 +1,73 @@
+[
+  {
+    "id": "0oa1admin",
+    "name": "okta_admin_console",
+    "label": "Okta Admin Console",
+    "status": "ACTIVE",
+    "signOnMode": "OPENID_CONNECT",
+    "_links": {
+      "accessPolicy": {
+        "href": "https://example.okta.com/api/v1/policies/rst1mfa"
+      },
+      "groups": {
+        "href": "https://example.okta.com/api/v1/apps/0oa1admin/groups"
+      }
+    }
+  },
+  {
+    "id": "0oa2aws",
+    "name": "amazon_aws",
+    "label": "AWS",
+    "status": "ACTIVE",
+    "signOnMode": "SAML_2_0",
+    "_links": {
+      "accessPolicy": {
+        "href": "https://example.okta.com/api/v1/policies/rst2default"
+      }
+    }
+  },
+  {
+    "id": "0oa3slack",
+    "name": "slack",
+    "label": "Slack",
+    "status": "ACTIVE",
+    "signOnMode": "SAML_2_0",
+    "_links": {
+      "accessPolicy": {
+        "href": "https://example.okta.com/api/v1/policies/rst2default"
+      }
+    }
+  },
+  {
+    "id": "0oa4chain",
+    "name": "vault",
+    "label": "Vault",
+    "status": "ACTIVE",
+    "signOnMode": "OPENID_CONNECT",
+    "_links": {
+      "accessPolicy": {
+        "href": "https://example.okta.com/api/v1/policies/rst3chain"
+      }
+    }
+  },
+  {
+    "id": "0oa5classic",
+    "name": "bookmark",
+    "label": "Wiki",
+    "status": "ACTIVE",
+    "signOnMode": "BOOKMARK",
+    "_links": {}
+  },
+  {
+    "id": "0oa6broken",
+    "name": "github",
+    "label": "GitHub",
+    "status": "ACTIVE",
+    "signOnMode": "SAML_2_0",
+    "_links": {
+      "accessPolicy": {
+        "href": "https://example.okta.com/api/v1/policies/rst4gone"
+      }
+    }
+  }
+]

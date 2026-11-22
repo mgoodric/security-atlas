@@ -6,8 +6,9 @@
 //   - every stock bundle's tests/ cases run through bundletest.Run inside a
 //     tenant transaction, as the upload gate runs them; and
 //   - cc6_1, the tracer, and each later check (cc6_6 and cc4_1, #2822; both cc8_1
-//     bundles, #2823; the windowed cc6_3, cc1_4, cc6_5 and cc9_1, #2824; the
-//     acknowledgement checks cc1_5, cc5_3 and cc7_4, #2832) are
+//     bundles, #2823; the windowed cc6_3, cc1_4, cc6_5 and cc9_1, #2824;
+//     cc6_6 MFA on admin apps, #2828; the acknowledgement checks cc1_5,
+//     cc5_3 and cc7_4, #2832) are
 //     evaluated by the live engine against evidence
 //     records in the ledger, so the query is shown to decide the stored
 //     control state and not only the fixture runner's.
@@ -248,6 +249,81 @@ func TestCC66_EngineEvaluatesHostFirewallPayload(t *testing.T) {
 			ctrl := seedStockBundleControl(t, admin, tenant, cc66Bundle)
 			for _, r := range tc.records {
 				seedStockEvidence(t, admin, tenant, ctrl, "osquery.host_posture.v1", observed, r.connectorResult, payload(r))
+			}
+			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+				t.Fatalf("EvaluateControl: %v", err)
+			}
+			states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+			if err != nil {
+				t.Fatalf("ControlState: %v", err)
+			}
+			if len(states) != 1 {
+				t.Fatalf("want 1 state, got %d", len(states))
+			}
+			if states[0].Result != tc.want {
+				t.Errorf("result = %q, want %q", states[0].Result, tc.want)
+			}
+		})
+	}
+}
+
+const cc66MFABundle = "soc2_cc6_6_mfa_external_threats"
+
+// #2828: cc6_6 MFA on admin apps decides on each app's latest
+// okta.app_assignment.v1 payload (classification, sign_on_mfa_required),
+// not on the Okta connector's verdict, which is always inconclusive.
+func TestCC66_EngineEvaluatesAdminAppMFAPayload(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	observed := time.Now().UTC().Add(-2 * time.Hour)
+
+	type rec struct {
+		id    string
+		class string // "" when unclassified
+		mfa   string // "on", "off", or "" for undecided
+	}
+	payload := func(r rec) map[string]any {
+		p := map[string]any{
+			"app_id":               r.id,
+			"app_name":             "app-" + r.id,
+			"status":               "ACTIVE",
+			"assigned_group_ids":   []string{"00g1"},
+			"assigned_group_count": 1,
+			"sign_on_policy_id":    "rst1",
+		}
+		if r.class != "" {
+			p["classification"] = r.class
+		}
+		if r.mfa == "" {
+			p["reason"] = "rule rul1 verification method is not ASSURANCE"
+		} else {
+			p["sign_on_mfa_required"] = r.mfa == "on"
+		}
+		return p
+	}
+	cases := []struct {
+		name    string
+		records []rec
+		want    string
+	}{
+		{"admin and infrastructure require mfa", []rec{{"0oa1", "admin", "on"}, {"0oa2", "infrastructure", "on"}, {"0oa3", "standard", "off"}}, eval.ResultPass},
+		{"admin app allows 1fa", []rec{{"0oa1", "admin", "off"}, {"0oa2", "infrastructure", "on"}}, eval.ResultFail},
+		{"admin app undecided", []rec{{"0oa1", "admin", ""}}, eval.ResultInconclusive},
+		{"only standard apps", []rec{{"0oa3", "standard", "off"}}, eval.ResultInconclusive},
+		{"unclassified app allows 1fa", []rec{{"0oa1", "", "off"}}, eval.ResultInconclusive},
+		{"no record", nil, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+			ctx, err := tenancy.WithTenant(context.Background(), tenant)
+			if err != nil {
+				t.Fatalf("WithTenant: %v", err)
+			}
+			ctrl := seedStockBundleControl(t, admin, tenant, cc66MFABundle)
+			for _, r := range tc.records {
+				seedStockEvidence(t, admin, tenant, ctrl, "okta.app_assignment.v1", observed, "inconclusive", payload(r))
 			}
 			if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
 				t.Fatalf("EvaluateControl: %v", err)
