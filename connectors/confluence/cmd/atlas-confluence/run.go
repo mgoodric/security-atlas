@@ -42,7 +42,24 @@ type config struct {
 	// history.
 	atlasKey string
 	timeout  time.Duration
+	// maxSkipped is how many pages the converter may refuse before an
+	// accepted push still exits ExitNeedsAttention.
+	maxSkipped int
 }
+
+// ExitNeedsAttention is the exit status of a run whose push the platform
+// accepted, but which a scheduler should alert on: more pages refused by
+// the converter than --max-skipped, or a platform warning. Exit 1 means
+// nothing was pushed, or the platform refused the push.
+const ExitNeedsAttention = 3
+
+// exitError carries an exit status other than 1 to main.
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e *exitError) Error() string { return e.msg }
 
 // resolve fills unset values from the environment and checks them.
 func (c *config) resolve() error {
@@ -72,6 +89,9 @@ func (c *config) resolve() error {
 	if c.timeout <= 0 {
 		return errors.New("--timeout must be positive")
 	}
+	if c.maxSkipped < 0 {
+		return errors.New("--max-skipped must be zero or more")
+	}
 	return nil
 }
 
@@ -99,8 +119,15 @@ appear in a process listing or shell history:
   CONFLUENCE_API_TOKEN             the Confluence API token
   SECURITY_ATLAS_POLICY_SYNC_KEY   the policy-sync API key
 
-A failure reading Confluence, or a refused push, exits non-zero. Nothing
-is pushed unless the whole labelled set was read.`,
+Exit status:
+  0  the push was accepted
+  1  nothing was pushed (a Confluence failure, no labelled pages, no
+     convertible body), or the platform refused the push
+  3  the push was accepted, but more than --max-skipped pages were left
+     out because their body could not be converted, or the platform
+     returned a warning. Alert on it.
+
+Nothing is pushed unless the whole labelled set was read.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -119,6 +146,7 @@ is pushed unless the whole labelled set was read.`,
 	f.StringVar(&c.confluenceEmail, "confluence-email", "", "Atlassian account email (env "+confluenceapi.EnvEmail+" preferred)")
 	f.StringVar(&c.atlasURL, "atlas-url", "", "security-atlas base URL, e.g. https://atlas.example.com (env "+EnvAtlasURL+")")
 	f.DurationVar(&c.timeout, "timeout", 10*time.Minute, "limit on the whole run")
+	f.IntVar(&c.maxSkipped, "max-skipped", 0, "pages the converter may refuse before the run exits 3")
 	return cmd
 }
 
@@ -163,7 +191,25 @@ func run(ctx context.Context, c config, hc *http.Client, out io.Writer) error {
 		return err
 	}
 	policysync.WriteReport(out, rep, notes)
-	return nil
+	return needsAttention(c.maxSkipped, policysync.ConverterSkipped(notes), len(rep.Warnings))
+}
+
+// needsAttention turns an accepted push the scheduler should still alert
+// on into an ExitNeedsAttention error. A converter regression that
+// refuses many but not all pages would otherwise exit 0 while the
+// platform marks those policies missing.
+func needsAttention(maxSkipped, skipped, warnings int) error {
+	var why []string
+	if skipped > maxSkipped {
+		why = append(why, fmt.Sprintf("%d page(s) skipped by connector, more than --max-skipped=%d", skipped, maxSkipped))
+	}
+	if warnings > 0 {
+		why = append(why, fmt.Sprintf("%d platform warning(s)", warnings))
+	}
+	if len(why) == 0 {
+		return nil
+	}
+	return &exitError{code: ExitNeedsAttention, msg: "push accepted, needs attention: " + strings.Join(why, "; ")}
 }
 
 func firstNonEmpty(vals ...string) string {
