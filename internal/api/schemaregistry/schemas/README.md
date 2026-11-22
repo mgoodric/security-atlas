@@ -24,6 +24,36 @@ extension keys:
 | `x-semver`              | yes      | `1.0.0`                             | Must match the filename (without `.json`).   |
 | `x-owner`               | yes      | `platform`                          | Team / connector that authored the schema.   |
 | `x-default-scf-anchors` | no       | `["IAC-37"]`                        | Optional default control mapping for ingest. |
+| `x-assert-format`       | no       | `true`                              | Enforce `format` keywords. See below.        |
+
+## `format` keywords are annotations unless the version opts in (#2930)
+
+JSON Schema 2020-12 treats `format` (`date-time`, `date`, `uri`, `email`,
+`uuid`, ...) as an annotation by default, and so does the registry: a
+version without `x-assert-format` accepts `"last_seen_at": "not-a-date"`
+even when the property declares `format: date-time`. Every version
+registered before #2930 is in that state, and its acceptance does not
+change.
+
+A version that sets `"x-assert-format": true` has its `format` keywords
+enforced at ingest (`compileSchema` calls the validator's
+`AssertFormat()`), so a malformed value is refused like any other schema
+violation. The key must be a JSON boolean; any other value fails
+compilation, so a typo cannot silently leave enforcement off. `false` and
+absent mean the same thing.
+
+Opt in on a new version, never by editing a published one. Opting in
+narrows what the version accepts, which `additive.go` does not detect (it
+inspects only `properties`, `required` and `additionalProperties`), so
+review a minor that opts in as you would a narrowing. Records already
+pushed keep validating against the version they were pushed under. When a
+platform version opts in, add its path to the expected list in
+`assert_format_test.go`.
+
+The flag is registry-only. `internal/risk` compiles its own built-in
+methodology schemas (no `format` keywords), and
+`internal/control/attestation` compiles each control's
+`manual_evidence_schema`; neither loads a registry schema.
 
 ## Version-bump discipline (slice 014)
 

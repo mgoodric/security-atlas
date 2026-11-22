@@ -667,11 +667,29 @@ func (s *Service) InvalidateTenant(tenantID string) {
 
 // ---- helpers ----
 
+// assertFormatKey opts one schema version into enforcing its `format`
+// keywords (#2930). Without it, `format` is an annotation only, which is the
+// JSON Schema 2020-12 default and what every version registered before the
+// key existed was accepted under. Opting in is per version so an existing
+// version's acceptance never changes.
+const assertFormatKey = "x-assert-format"
+
 func compileSchema(body []byte) (*jsonschema.Schema, error) {
 	c := jsonschema.NewCompiler()
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
+	}
+	if obj, ok := doc.(map[string]any); ok {
+		if v, present := obj[assertFormatKey]; present {
+			on, isBool := v.(bool)
+			if !isBool {
+				return nil, fmt.Errorf("%s must be a boolean, got %T", assertFormatKey, v)
+			}
+			if on {
+				c.AssertFormat()
+			}
+		}
 	}
 	// Use a stable, file-like URL so $id references inside the schema
 	// resolve consistently.
