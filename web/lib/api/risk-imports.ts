@@ -57,7 +57,13 @@ export type BatchRow = {
   external_ref?: string;
   title: string;
   description: string;
+  // #2844: the row's category cell and theme values as written, and the
+  // category slug and theme names the batch maps them to. category is
+  // empty while its value is unmapped; themes lists only mapped values.
+  category_value?: string;
   category: string;
+  theme_values?: string[] | null;
+  themes?: string[] | null;
   review_due?: string;
   // #2842: the treatment the risk is created with, and the register's when
   // it was downgraded to untreated. An accepted row is created proposed;
@@ -83,6 +89,14 @@ export type BatchRow = {
   rejection_reason?: string;
 };
 
+export type ValueMapping = {
+  kind: "category" | "theme";
+  value: string;
+  row_count: number;
+  target?: string;
+  mapped_by?: string;
+};
+
 export type RejectedRow = {
   row_number: number;
   external_ref?: string;
@@ -100,6 +114,10 @@ export type RiskImportBatch = {
   staged_count: number;
   rejected_count: number;
   unmapped_columns: string[] | null;
+  // #2844: the batch's distinct category and theme values, each with the
+  // category slug or theme name it maps to (absent while unmapped).
+  category_values?: ValueMapping[] | null;
+  theme_values?: ValueMapping[] | null;
   created_at: string;
   staged: BatchRow[] | null;
   rejected: RejectedRow[] | null;
@@ -121,6 +139,8 @@ export type ApproveResult = {
   approved_count: number;
   approved: RowDecision[] | null;
   duplicates: RowDecision[] | null;
+  // #2844: rows approval rejected for an unmapped category or theme value.
+  rejected?: RowDecision[] | null;
   skipped:
     | {
         row_id: string;
@@ -196,7 +216,16 @@ export function mappedFields(row: BatchRow): [string, string][] {
   const out: [string, string][] = [];
   if (row.external_ref) out.push(["Risk ID", row.external_ref]);
   out.push(["Title", row.title]);
-  out.push(["Category", row.category]);
+  out.push([
+    "Category",
+    row.category ||
+      (row.category_value ? `${row.category_value} (unmapped)` : ""),
+  ]);
+  const themeValues = row.theme_values ?? [];
+  if (themeValues.length > 0) {
+    out.push(["Theme values", themeValues.join(", ")]);
+    out.push(["Themes", (row.themes ?? []).join(", ") || "(none mapped)"]);
+  }
   if (row.review_due) out.push(["Review due", row.review_due]);
   if (row.description) out.push(["Description", row.description]);
   if (row.owner_user_id) {
@@ -256,13 +285,58 @@ export function emptyRowsMessage(batch: RiskImportBatch, f: RowFilter): string {
 /** approveAllMessage summarises an approve-all for a toast. */
 export function approveAllMessage(r: ApproveResult): string {
   const dup = r.duplicates?.length ?? 0;
+  const rejected = r.rejected?.length ?? 0;
   const skipped = r.skipped?.length ?? 0;
   const parts = [
     `Approved ${r.approved_count} ${r.approved_count === 1 ? "row" : "rows"}`,
   ];
   if (dup > 0) parts.push(`${dup} marked duplicate`);
+  if (rejected > 0) parts.push(`${rejected} rejected (unmapped value)`);
   if (skipped > 0) parts.push(`${skipped} skipped`);
   return parts.join("; ");
+}
+
+/** unmappedValues lists the batch's category and theme values that map to
+ *  nothing yet (#2844), categories first. */
+export function unmappedValues(batch: RiskImportBatch): ValueMapping[] {
+  return [
+    ...(batch.category_values ?? []),
+    ...(batch.theme_values ?? []),
+  ].filter((v) => !v.target);
+}
+
+/** rowHasUnmappedValue: the row's category value, or any of its theme
+ *  values, maps to nothing. Approval rejects such a row (#2844). */
+export function rowHasUnmappedValue(row: BatchRow): boolean {
+  if (row.category_value !== undefined && !row.category) return true;
+  return (row.themes ?? []).length < (row.theme_values ?? []).length;
+}
+
+/** unmappedPendingCount is how many pending rows approval would reject for
+ *  an unmapped value. */
+export function unmappedPendingCount(batch: RiskImportBatch): number {
+  return (batch.staged ?? []).filter(
+    (r) => r.status === "pending" && rowHasUnmappedValue(r),
+  ).length;
+}
+
+/** approveAllWarning names what approve-all would reject: the pending rows
+ *  carrying an unmapped value, and those values. Empty when there are none.
+ *  A rejection is final; the review page cannot map values yet. */
+export function approveAllWarning(batch: RiskImportBatch): string {
+  const rows = unmappedPendingCount(batch);
+  if (rows === 0) return "";
+  const values = unmappedValues(batch).map((v) => `${v.kind} "${v.value}"`);
+  return (
+    `${rows} pending ${
+      rows === 1 ? "row carries" : "rows carry"
+    } an unmapped ` +
+    `category or theme value and will be rejected, not created` +
+    (values.length > 0 ? ` (${values.join(", ")})` : "") +
+    `. A rejection is final: map the values first to import ${
+      rows === 1 ? "it" : "them"
+    }.`
+  );
 }
 
 export function batchPath(id: string): string {

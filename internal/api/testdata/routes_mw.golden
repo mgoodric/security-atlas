@@ -415,3 +415,4 @@ PUT /v1/me/email-channel 11
 PUT /v1/me/slack-channel 11
 PUT /v1/me/webhook-channel 11
 PUT /v1/metrics/{id}/target 11
+PUT /v1/risks/imports/{id}/values 11

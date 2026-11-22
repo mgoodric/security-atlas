@@ -44,7 +44,9 @@ func newRisksImportCmd() *cobra.Command {
 		Short: "upload a CSV/XLSX risk register and stage it as an import batch",
 		Long: "Upload your risk register (CSV or XLSX) for import. Every row is either staged for " +
 			"review or reported as rejected with a reason (missing title or category, a repeated " +
-			"risk ID, an unknown category, a bad review date, an invalid score). Scores are read in " +
+			"risk ID, a bad review date, an invalid score). Each distinct category and theme value is " +
+			"mapped once for the batch; a value that names none of the organisation's stays unmapped " +
+			"until mapped, and a row still carrying one is rejected at approval. Scores are read in " +
 			"the shape of --methodology: likelihood and impact (1-5) for nist_800_30 and " +
 			"qualitative_5x5, loss event frequency and loss magnitude for fair. Columns no risk field takes are kept " +
 			"on the staged rows. --column-map field=Header overrides header detection (fields: " +
