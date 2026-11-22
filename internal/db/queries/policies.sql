@@ -299,7 +299,7 @@ INSERT INTO policy_audit_log (
     previous_state, new_state,
     body_sha256, editors,
     previous_linked_control_ids, new_linked_control_ids,
-    previous_source_attribution
+    previous_source_attribution, sync_drift_body_sha256
 )
 VALUES (
     sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
@@ -309,7 +309,7 @@ VALUES (
     sqlc.narg('previous_state'), sqlc.narg('new_state'),
     sqlc.narg('body_sha256'), sqlc.narg('editors'),
     sqlc.narg('previous_linked_control_ids'), sqlc.narg('new_linked_control_ids'),
-    sqlc.narg('previous_source_attribution')
+    sqlc.narg('previous_source_attribution'), sqlc.narg('sync_drift_body_sha256')
 )
 RETURNING *;
 

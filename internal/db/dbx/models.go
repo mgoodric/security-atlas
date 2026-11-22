@@ -3110,6 +3110,7 @@ type PolicyAuditLog struct {
 	PreviousLinkedControlIds  []pgtype.UUID      `json:"previous_linked_control_ids"`
 	NewLinkedControlIds       []pgtype.UUID      `json:"new_linked_control_ids"`
 	PreviousSourceAttribution *string            `json:"previous_source_attribution"`
+	SyncDriftBodySha256       *string            `json:"sync_drift_body_sha256"`
 }
 
 type Population struct {

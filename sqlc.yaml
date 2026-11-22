@@ -188,6 +188,8 @@ sql:
       # #2854: sync takes over imported policies.
       - "migrations/sql/20261289000000_policy_sync_takeover.sql"
       - "migrations/sql/20261290000000_evidence_routed_kinds.sql"
+      # #2910: the drifted page hash on an in-place sync takeover.
+      - "migrations/sql/20261298000000_policy_audit_sync_drift.sql"
     queries: "internal/db/queries"
     gen:
       go:
