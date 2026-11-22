@@ -18,9 +18,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/routed"
+	"github.com/mgoodric/security-atlas/internal/evidencesummary"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -280,5 +282,79 @@ func TestRouted2931_ExplicitUUIDOnUndeclaredControlIsReadByNoReader(t *testing.T
 		if n != want {
 			t.Errorf("bound-kind and NULL-kind control_ref rows: %s = %d, want %d", name, n, want)
 		}
+	}
+}
+
+// #2931 review: a period frozen before the routing cutover keeps reading
+// what it read then. Before routing shipped, a control-free row of a
+// now-routed kind whose control_ref names the control reached it through the
+// control_ref leg. The pinned read binds no routed kinds, so that leg stays
+// open: the frozen evidence set still lists, counts and cites the row. The
+// pinned read still keeps out the control-free row it never had (scf: ref).
+func TestRouted2931_PeriodFrozenBeforeCutoverKeepsRefOnlyRoutedRow(t *testing.T) {
+	_, app, _ := boot(t)
+	admin := dbtest.NewMigratePool(t)
+	ctx, err := tenancy.WithTenant(context.Background(), tenantA)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	cut := routingCutover(t, admin)
+	ctrl := seedRoutedStockControl(t, admin, tenantA, cc81Bundles[0])
+	// Registered after the control's cleanup, so it runs first; the ledger is
+	// append-only, so it is truncated the way boot() resets it.
+	t.Cleanup(func() {
+		for _, stmt := range []string{
+			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
+			`DELETE FROM audit_periods WHERE tenant_id = $1`,
+		} {
+			if _, err := admin.Exec(context.Background(), stmt, tenantA); err != nil {
+				t.Logf("cleanup %s: %v", stmt, err)
+			}
+		}
+		if _, err := admin.Exec(context.Background(), `TRUNCATE evidence_records CASCADE`); err != nil {
+			t.Logf("cleanup truncate evidence_records: %v", err)
+		}
+	})
+	fw := pinFrameworkVersion(t, admin)
+	periods := period.NewStore(app)
+	summaries := evidencesummary.NewPeriodStore(app)
+
+	frozenAt := cut.Add(-30 * time.Minute)
+	p, err := periods.Create(ctx, period.CreateInput{
+		Name:               "FY25 frozen before routing (#2931)",
+		FrameworkVersionID: fw,
+		PeriodStart:        cut.Add(-24 * time.Hour),
+		PeriodEnd:          time.Now().Add(24 * time.Hour),
+		CreatedBy:          "key_test_2931",
+	})
+	if err != nil {
+		t.Fatalf("create period: %v", err)
+	}
+	if _, err := periods.Freeze(ctx, p.ID, "key_test_2931", frozenAt); err != nil {
+		t.Fatalf("freeze period: %v", err)
+	}
+
+	// Both rows observed before the horizon. scfRow is control-free under
+	// 'scf:TDA-06'; refRow is the same kind under the control's UUID.
+	scfRow := insertRepoProtection(t, admin, tenantA, nil, cut.Add(-90*time.Minute))
+	routedKind := "github.repo_protection.v2"
+	refRow := insertLegacyRefRow(t, admin, scfRow, ctrl.String(), &routedKind)
+
+	set, err := summaries.PeriodEvidenceSet(ctx, ctrl, p.ID)
+	if err != nil {
+		t.Fatalf("period evidence set: %v", err)
+	}
+	var listed []uuid.UUID
+	for _, r := range set.Records {
+		listed = append(listed, r.EvidenceID)
+	}
+	if set.TotalCount != 1 || len(listed) != 1 || listed[0] != refRow {
+		t.Errorf("pinned period evidence set = %v (total %d), want only the ref-only row %s", listed, set.TotalCount, refRow)
+	}
+	if _, ok, err := summaries.ResolveBeforeHorizon(ctx, refRow, ctrl, frozenAt); err != nil || !ok {
+		t.Errorf("pinned period resolves the ref-only routed row: ok=%v err=%v, want true", ok, err)
+	}
+	if _, ok, err := summaries.ResolveBeforeHorizon(ctx, scfRow, ctrl, frozenAt); err != nil || ok {
+		t.Errorf("pinned period resolves the scf: routed row: ok=%v err=%v, want false", ok, err)
 	}
 }
