@@ -73,8 +73,26 @@ records carried no stable id (#2925).
   failed request) leaves the repository inconclusive (#2933).
 - **Unread fields are omitted.** If either protection request fails with
   anything other than a classic 404 read as above, the record carries only
-  `repo_id`, `repo_full_name`, `default_branch` and `reason`, with result
-  `inconclusive`. It is never pushed as unprotected.
+  `repo_id`, `repo_full_name`, `default_branch`, `topics`,
+  `deploys_to_production` and `reason`, with result `inconclusive`. It is
+  never pushed as unprotected.
+- **Status checks and force pushes (2.1.0, #2827).**
+  `required_status_checks` is every required check context from classic
+  protection (`contexts` and `checks`) and every `required_status_checks`
+  rule, sorted; `[]` when no source requires one. `allow_force_pushes` is
+  false when classic protection disables force pushes or a
+  `non_fast_forward` rule blocks them, true when nothing blocks them, and
+  omitted when classic protection doesn't report the setting and no rule
+  decides it. Who may bypass a required check or a force-push block is not
+  read.
+- **Topics and production (2.1.0, #2827).** `topics` comes from the
+  repository listing, so it is present even when protection is unread.
+  `deploys_to_production` is true when the topics include
+  `--production-topic` (default `production`). Both are omitted when the
+  listing doesn't report topics. The cc8_1 configuration-change-control
+  check reads `topics` for `iac`; change management applies its
+  production conditions to repositories with `deploys_to_production`
+  true.
 - **Stable id.** `repo_id` is GitHub's repository id, which survives a
   rename. The idempotency key and the cc8_1 checks key on it.
 
