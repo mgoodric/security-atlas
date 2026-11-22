@@ -76,6 +76,10 @@ type ResidualResult struct {
 	// Warning is "no_controls_linked" when Breakdown is empty (AC-7); empty
 	// string otherwise.
 	Warning string `json:"warning,omitempty"`
+	// Unscored is true for a risk with no inherent_score (#2511): there is
+	// no residual to derive, so InherentScore and ResidualScore are 0 and
+	// mean nothing. The breakdown is still derived (#2867).
+	Unscored bool `json:"unscored,omitempty"`
 }
 
 // ResidualDeriver computes and persists residual risk. Construct with
@@ -133,12 +137,18 @@ func (d *ResidualDeriver) Derive(ctx context.Context, riskID uuid.UUID, recomput
 		return ResidualResult{}, err
 	}
 
-	inherent, err := inherentScalar(methodology, inherentJSON)
-	if err != nil {
-		return ResidualResult{}, fmt.Errorf("risk %s inherent_score: %w", riskID, err)
+	// #2867: an unscored risk (#2511) is a valid row with no residual,
+	// not a derivation failure.
+	unscored := unscoredScore(inherentJSON)
+	var inherent float64
+	if !unscored {
+		inherent, err = inherentScalar(methodology, inherentJSON)
+		if err != nil {
+			return ResidualResult{}, fmt.Errorf("risk %s inherent_score: %w", riskID, err)
+		}
 	}
 
-	result := ResidualResult{RiskID: riskID, InherentScore: inherent}
+	result := ResidualResult{RiskID: riskID, InherentScore: inherent, Unscored: unscored}
 	if len(links) == 0 {
 		// AC-7: no linked controls -> residual equals inherent, warning set.
 		result.ResidualScore = inherent
@@ -158,7 +168,9 @@ func (d *ResidualDeriver) Derive(ctx context.Context, riskID uuid.UUID, recomput
 		perControl = append(perControl, bd.ControlEffectiveness)
 	}
 	result.WeightedControlEffectiveness = WeightedEffectiveness(perControl)
-	result.ResidualScore = ResidualScore(inherent, result.WeightedControlEffectiveness)
+	if !unscored {
+		result.ResidualScore = ResidualScore(inherent, result.WeightedControlEffectiveness)
+	}
 	return result, nil
 }
 
@@ -171,6 +183,12 @@ func (d *ResidualDeriver) DeriveAndPersist(ctx context.Context, riskID uuid.UUID
 	result, err := d.Derive(ctx, riskID, recompute)
 	if err != nil {
 		return ResidualResult{}, err
+	}
+	if result.Unscored {
+		// An unscored risk keeps residual_score `{}`: PrepareCreateScores
+		// refuses a residual without an inherent score, and a stored blob
+		// of zeros would read as scored (#2867).
+		return result, nil
 	}
 	blob, err := json.Marshal(residualBlobFromResult(result))
 	if err != nil {
