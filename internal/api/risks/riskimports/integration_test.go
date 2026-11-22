@@ -286,7 +286,7 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 	if b.Status != riskimport.BatchStatusStaged || b.SourceFormat != "csv" || b.SourceFilename != "register.csv" {
 		t.Errorf("batch status=%s format=%s filename=%s", b.Status, b.SourceFormat, b.SourceFilename)
 	}
-	if got := strings.Join(b.UnmappedColumns, "|"); got != "Risk Owner|Target Date" {
+	if got := strings.Join(b.UnmappedColumns, "|"); got != "Target Date" {
 		t.Errorf("unmapped columns = %q", got)
 	}
 	gotRejected := map[int]string{}
@@ -309,8 +309,13 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 		r1.Description != "The primary payments vendor is unavailable for a business day." {
 		t.Errorf("R-001 staged as %+v", r1)
 	}
-	if r1.Unmapped["Risk Owner"] != "alice@corp.test" || r1.Unmapped["Target Date"] != "2027-03-01" || len(r1.Unmapped) != 2 {
+	if r1.Unmapped["Target Date"] != "2027-03-01" || len(r1.Unmapped) != 1 {
 		t.Errorf("R-001 unmapped = %v", r1.Unmapped)
+	}
+	// No user of the tenant has the address, so the owner stays unlinked
+	// and the row is flagged (#2843).
+	if r1.OwnerUnlinked != "alice@corp.test" || r1.OwnerUserID != "" || len(r1.Flags) != 1 || r1.Flags[0] != riskimport.FlagOwnerUnlinked {
+		t.Errorf("R-001 owner user=%q unlinked=%q flags=%v", r1.OwnerUserID, r1.OwnerUnlinked, r1.Flags)
 	}
 	if stagedByRef(t, b, "R-002").Category != "privacy" {
 		t.Errorf("R-002 category = %q, want privacy", stagedByRef(t, b, "R-002").Category)
@@ -325,7 +330,7 @@ func TestRiskImport_UploadStageApproveCreatesRisks(t *testing.T) {
 		t.Fatalf("GET batch = %d; body=%s", status, raw)
 	}
 	read := decode[riskimport.Batch](t, raw)
-	if len(read.Staged) != 5 || len(read.Rejected) != 4 || stagedByRef(t, read, "R-001").Unmapped["Risk Owner"] != "alice@corp.test" {
+	if len(read.Staged) != 5 || len(read.Rejected) != 4 || stagedByRef(t, read, "R-001").OwnerUnlinked != "alice@corp.test" {
 		t.Fatalf("GET batch = %+v", read)
 	}
 
