@@ -1,0 +1,28 @@
+> **Info**
+>
+> Read this first.
+
+> **Warning: Do not share**
+>
+> Credentials stay in the vault.
+>
+> - Never in email
+
+> **Note**
+>
+> A note.
+
+````bash
+aws iam list-users
+echo "a <b> & ```"
+````
+
+```
+raw *text*
+```
+
+**Details**
+
+Hidden detail.
+
+Approved 2026-03-01 per Security Charter.
