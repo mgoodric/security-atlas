@@ -24,6 +24,37 @@ extension keys:
 | `x-semver`              | yes      | `1.0.0`                             | Must match the filename (without `.json`).   |
 | `x-owner`               | yes      | `platform`                          | Team / connector that authored the schema.   |
 | `x-default-scf-anchors` | no       | `["IAC-37"]`                        | Optional default control mapping for ingest. |
+| `x-assert-format`       | no       | `true`                              | Enforce `format` keywords. See below.        |
+
+## `format` keywords are annotations unless the version opts in (#2930)
+
+JSON Schema 2020-12 treats `format` (`date-time`, `date`, `uri`, `email`,
+`uuid`, ...) as an annotation by default, and so does the registry: a
+version without `x-assert-format` accepts `"last_seen_at": "not-a-date"`
+even when the property declares `format: date-time`. Every version
+registered before #2930 is in that state, and its acceptance does not
+change.
+
+A version that sets `"x-assert-format": true` has its `format` keywords
+enforced at ingest (`compileSchema` calls the validator's
+`AssertFormat()`), so a malformed value is refused like any other schema
+violation. The key must be a JSON boolean; any other value fails
+compilation, so a typo cannot silently leave enforcement off. `false` and
+absent mean the same thing.
+
+Enforced: opting in needs a new major or a new kind. Opting in narrows
+what a version accepts, so `CheckAdditiveOver` (`additive.go`) refuses a
+minor that sets `x-assert-format: true` when its predecessor did not. A
+minor whose predecessor already opted in passes. Never edit a published
+version to opt in. Records already pushed keep validating against the exact
+version they were pushed under: ingest requires `schema_version` and looks
+it up exactly, never resolving to a later minor. When a platform version
+opts in, add its path to the expected list in `assert_format_test.go`.
+
+The flag is registry-only. `internal/risk` compiles its own built-in
+methodology schemas (no `format` keywords), and
+`internal/control/attestation` compiles each control's
+`manual_evidence_schema`; neither loads a registry schema.
 
 ## Version-bump discipline (slice 014)
 
