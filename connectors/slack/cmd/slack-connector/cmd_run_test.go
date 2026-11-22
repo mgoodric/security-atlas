@@ -267,15 +267,16 @@ func TestMapResult(t *testing.T) {
 	}
 }
 
-// TestRunCmd_RetentionDefaultIsRetentionControl pins the retention record's
-// default control id to SCF 2026.3 DCH-27 Media & Data Retention (#2387).
-func TestRunCmd_RetentionDefaultIsRetentionControl(t *testing.T) {
+// TestRunCmd_RetentionDefaultIsRoutedByKind pins the retention record's
+// default control id to none (#2924): slack.retention_settings.v1 is routed by
+// evidence type, so the record reaches every control that queries the kind.
+func TestRunCmd_RetentionDefaultIsRoutedByKind(t *testing.T) {
 	t.Parallel()
 	fl := newRunCmd().Flags().Lookup("retention-control-id")
 	if fl == nil {
 		t.Fatal("--retention-control-id flag not registered")
 	}
-	if fl.DefValue != "scf:DCH-27" {
-		t.Errorf("--retention-control-id default = %q, want %q", fl.DefValue, "scf:DCH-27")
+	if fl.DefValue != "" {
+		t.Errorf("--retention-control-id default = %q, want empty", fl.DefValue)
 	}
 }

@@ -42,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/canonjson"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/evidence/redact"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/evidence/unbound"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -804,9 +805,11 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 
 	// Try parsing control_id as a UUID. If it parses, set both columns.
 	// If not (e.g., "scf:VPM-06"), leave control_id NULL and set
-	// control_ref only.
+	// control_ref only. A routed kind (#2924) is never bound: it reaches
+	// every control that queries its kind, and the wire control_id stays
+	// in control_ref as provenance only.
 	var controlID pgtype.UUID
-	if u, perr := uuid.Parse(rec.ControlId); perr == nil {
+	if u, perr := uuid.Parse(rec.ControlId); perr == nil && !routed.Kind(rec.EvidenceKind) {
 		controlID = pgtype.UUID{Bytes: u, Valid: true}
 	}
 
@@ -883,7 +886,7 @@ func (s *Service) persist(ctx context.Context, tx pgx.Tx, p *prepared, opts Ledg
 	// control_ref keeps the wire value either way: verify rebuilds the
 	// hashed record from it.
 	controlID := p.controlID
-	if !controlID.Valid && p.rec.ControlId != "" {
+	if !controlID.Valid && p.rec.ControlId != "" && !routed.Kind(p.rec.EvidenceKind) {
 		ctrl, cerr := q.GetActiveControlByBundleID(ctx, dbx.GetActiveControlByBundleIDParams{
 			TenantID: pgUUID(p.cred.TenantID),
 			BundleID: p.rec.ControlId,
@@ -1083,7 +1086,8 @@ func missingField(r *evidencev1.EvidenceRecord) string {
 		return "evidence_kind is required"
 	case r.GetSchemaVersion() == "":
 		return "schema_version is required"
-	case r.GetControlId() == "":
+	case r.GetControlId() == "" && !routed.Kind(r.GetEvidenceKind()):
+		// #2924: a routed kind is bound to no control, so it may omit one.
 		return "control_id is required"
 	case len(r.GetScope()) == 0:
 		return "scope is required (at least one dimension)"
