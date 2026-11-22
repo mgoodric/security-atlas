@@ -3856,6 +3856,31 @@ jobs:
           PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
           go run ./cmd/scripts/stock-supersede-check --base "$BASE_SHA" --labels "$PR_LABELS"
 
+      # #2963: the stock hash list is append-only. A hash dropped from
+      # stock_manifests_gen.go makes IsStockManifest treat a tenant still on
+      # that revision as custom, silently. Fails listing the dropped entries,
+      # unless the PR carries `drops-stock-hash` AND a changed
+      # docs/audit-log/*.md names each dropped hash (after adding the label,
+      # re-run the failed job). PR-only, like the supersede step: a merge
+      # group carries no labels, and the queue's automatic three-way merge
+      # cannot delete a line that neither side deleted.
+      # Local repro: `bash scripts/check-stock-hashes-superset.sh origin/main`
+      - name: Stock hash list self-test
+        run: bash scripts/check-stock-hashes-superset_test.sh
+
+      - name: Stock hash list keeps every base entry
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          PR_LABELS="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.labels[].name')"
+          bash scripts/check-stock-hashes-superset.sh --labels "$PR_LABELS" "$BASE_SHA"
+
   # ====================================================================
   # #1887 — merge-gate needs-completeness (HARD FAIL).
   #
