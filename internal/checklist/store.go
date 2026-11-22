@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/routed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -74,7 +75,10 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, *dbx.
 func (s *Store) InScopeControls(ctx context.Context) ([]ControlInput, error) {
 	var out []ControlInput
 	err := s.inTx(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
-		rows, err := q.ListInScopeControlsForChecklist(ctx, pgUUID(tenantID))
+		rows, err := q.ListInScopeControlsForChecklist(ctx, dbx.ListInScopeControlsForChecklistParams{
+			TenantID:     pgUUID(tenantID),
+			UnboundKinds: routed.ControlFreeKinds(),
+		})
 		if err != nil {
 			return fmt.Errorf("checklist: list in-scope controls: %w", err)
 		}
