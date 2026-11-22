@@ -74,6 +74,19 @@ type gateVerdict struct {
 	advisoryReport *bundletest.Report
 }
 
+// fixtureWarnings returns the test report's non-fatal warnings
+// (bundletest.KindlessRecordWarnings, #2882) for an accepted upload, from
+// the green report or the advisory one.
+func (b gateVerdict) fixtureWarnings() []string {
+	switch {
+	case b.report != nil:
+		return b.report.Warnings
+	case b.advisoryReport != nil:
+		return b.advisoryReport.Warnings
+	}
+	return nil
+}
+
 // hasTests reports whether the bundle carried any tests/*.yaml files.
 func (b gateVerdict) hasTests() bool { return b.report != nil && len(b.report.Cases) > 0 }
 

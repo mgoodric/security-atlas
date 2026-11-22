@@ -520,6 +520,48 @@ cases:
           completed_at: 2025-11-01T12:00:00Z
           completion_source: lms_connector
 
+  # #2882: each record's payload passes its own kind's query and would fail
+  # the other's. The Jira record also carries a stale completion; the
+  # completion record also carries a ticket resolved other than Done. Each
+  # query reads only its kind (#2818), so the control passes. If either
+  # query read the other kind's record, the control would fail.
+  - name: each-query-reads-only-its-own-kind
+    description: a stale completion inside a Jira record and a Won't Do ticket inside a completion record reach neither query
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: jira.ticket_evidence.v1
+        observed_at: 2026-11-20T12:00:00Z
+        payload:
+          ticket_key: SEC-1
+          status: Done
+          resolution: Done
+          assignee_account_id: acct-mia
+          labels: [security-training]
+          resolved_at: "2026-03-01T10:00:00Z"
+          person_id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+          completed_at: 2025-11-01T12:00:00Z
+          completion_source: lms_connector
+      - result: pass
+        evidence_kind: security_awareness.training_completion.v1
+        observed_at: 2026-10-01T12:00:00Z
+        payload:
+          assignment_id: 9a1c2b3d-0000-4000-8000-000000000001
+          campaign_id: 7f000000-0000-4000-8000-000000000001
+          campaign_name: FY26 annual security awareness
+          course_code: SAT-101
+          course_title: Security awareness fundamentals
+          person_id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+          completed_at: 2026-10-01T12:00:00Z
+          completion_source: manual
+          ticket_key: SEC-9
+          status: Closed
+          resolution: Won't Do
+          assignee_account_id: acct-emma
+          labels: [security-training]
+          resolved_at: "2026-10-01T10:00:00Z"
+
   - name: no-record-is-inconclusive
     expected_state: inconclusive
     evaluated_at: 2026-11-21T12:00:00Z
