@@ -19,7 +19,7 @@ import (
 
 func TestLabelGrant2674_GatesAgreeAcrossShapes(t *testing.T) {
 	t.Parallel()
-	gates := []gate2428{tenantAdminGate, tenantApproverGate, auditReaderGate, riskReaderGate, anyRoleGate,
+	gates := []gate2428{tenantAdminGate, tenantApproverGate, auditReaderGate, riskReaderGate, anyRoleGate, riskImportDeciderGate,
 		{"IsTenantControlOwner", authz.IsTenantControlOwner}}
 	shapes := []struct {
 		name    string

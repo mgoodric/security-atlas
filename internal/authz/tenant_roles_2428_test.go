@@ -37,6 +37,8 @@ var (
 	riskReaderGate     = gate2428{"IsTenantRiskReader", authz.IsTenantRiskReader}
 	auditReaderGate    = gate2428{"IsTenantAuditReader", authz.IsTenantAuditReader}
 	anyRoleGate        = gate2428{"HasAnyTenantRole", authz.HasAnyTenantRole}
+	// #2881: risk import decisions, IsTenantApprover without grc_engineer.
+	riskImportDeciderGate = gate2428{"IsRiskImportDecider", authz.IsRiskImportDecider}
 )
 
 // route2428 is one switched route and the gate its handler calls.
@@ -85,11 +87,13 @@ var routes2428 = []route2428{
 	{http.MethodPatch, "/v1/risks/" + id2428 + "/acceptance/approve", tenantApproverGate},
 	{http.MethodPatch, "/v1/risks/" + id2428 + "/acceptance/reject", tenantApproverGate},
 	{http.MethodPatch, "/v1/risks/" + id2428 + "/acceptance/revoke", tenantApproverGate},
-	// #2839: deciding a risk import's rows.
-	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/approve", tenantApproverGate},
-	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/approve", tenantApproverGate},
-	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/reject", tenantApproverGate},
-	// #2844: creating a category or theme for a risk import value.
+	// #2839: deciding a risk import's rows. Admin only by role since #2881:
+	// grc_engineer is refused (handlerNarrower2428).
+	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/approve", riskImportDeciderGate},
+	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/approve", riskImportDeciderGate},
+	{http.MethodPost, "/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/reject", riskImportDeciderGate},
+	// #2844: creating a category or theme for a risk import value. It stays
+	// on the taxonomy gate, not narrowed with import decisions (#2881).
 	{http.MethodPut, "/v1/risks/imports/" + id2428 + "/values", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist:generate", tenantApproverGate},
 	{http.MethodPost, "/v1/controls/checklist/sections/" + id2428 + ":approve", tenantApproverGate},
@@ -257,7 +261,7 @@ var tenantRoles2428 = []authz.Role{
 // signed-in person holding exactly one tenant role.
 func wantAdmit2428(g gate2428, role authz.Role) bool {
 	switch g.name {
-	case tenantAdminGate.name:
+	case tenantAdminGate.name, riskImportDeciderGate.name:
 		return role == authz.RoleAdmin
 	case riskReaderGate.name:
 		return role == authz.RoleAdmin || role == authz.RoleGRCEngineer || role == authz.RoleViewer
@@ -304,6 +308,11 @@ func TestTenantGates2428_Helpers(t *testing.T) {
 		if got := authz.IsTenantApprover(c.cred); got != c.approver {
 			t.Errorf("%s: IsTenantApprover = %v, want %v", c.name, got, c.approver)
 		}
+		// #2881: IsRiskImportDecider is IsTenantApprover without
+		// grc_engineer: a tenant admin or the approver flag.
+		if got, want := authz.IsRiskImportDecider(c.cred), c.admin || c.cred.IsApprover; got != want {
+			t.Errorf("%s: IsRiskImportDecider = %v, want %v", c.name, got, want)
+		}
 	}
 }
 
@@ -341,6 +350,11 @@ var handlerNarrower2428 = map[string]bool{
 	"/v1/admin/features grc_engineer": true,
 	// ... and the API key list (no plaintext); the handler refuses it.
 	"/v1/admin/credentials grc_engineer": true,
+	// #2881: OPA admits grc_engineer to approve on risks; deciding a risk
+	// import's rows refuses it (Matt's decision, spec #2812).
+	"/v1/risks/imports/" + id2428 + "/approve grc_engineer":                     true,
+	"/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/approve grc_engineer": true,
+	"/v1/risks/imports/" + id2428 + "/rows/" + id2428 + "/reject grc_engineer":  true,
 }
 
 // TestTenantGates2428_HandlerAgreesWithOPA runs the real bundle for every

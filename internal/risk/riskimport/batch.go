@@ -21,8 +21,11 @@ var (
 	ErrRowDecided = errors.New("riskimport: staged row is already decided")
 	// ErrApproverRequired is a decision with no deciding person.
 	ErrApproverRequired = errors.New("riskimport: a decision requires the deciding person")
-	ErrReasonRequired   = errors.New("riskimport: rejection requires a reason")
-	ErrInvalidDecision  = errors.New("riskimport: invalid decision")
+	// ErrSelfDecision is a decision by the person who uploaded the batch
+	// (#2881): the uploader never approves or rejects their own batch.
+	ErrSelfDecision    = errors.New("riskimport: the uploader of an import batch cannot approve or reject its rows; another approver must decide")
+	ErrReasonRequired  = errors.New("riskimport: rejection requires a reason")
+	ErrInvalidDecision = errors.New("riskimport: invalid decision")
 )
 
 // Batch and row statuses.
@@ -133,8 +136,11 @@ type Batch struct {
 	SourceFormat   string `json:"source_format"`
 	// Methodology is the one scoring methodology every risk of the batch
 	// is created with (#2841).
-	Methodology     string   `json:"methodology"`
-	UploadedBy      string   `json:"uploaded_by"`
+	Methodology string `json:"methodology"`
+	UploadedBy  string `json:"uploaded_by"`
+	// UploaderUserID is the users(id) of the person who uploaded the batch,
+	// empty when no person did (#2881). That person never decides its rows.
+	UploaderUserID  string   `json:"uploader_user_id,omitempty"`
 	Status          string   `json:"status"`
 	TotalRows       int      `json:"total_rows"`
 	StagedCount     int      `json:"staged_count"`
@@ -159,6 +165,9 @@ type StageInput struct {
 	// Methodology is the batch's; empty is the platform default.
 	Methodology string
 	UploadedBy  string
+	// UploaderUserID is the users(id) of the uploading person, empty for a
+	// machine credential (#2881).
+	UploaderUserID string
 }
 
 // Stage parses the upload and persists the batch with its distinct category
@@ -199,6 +208,7 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		SourceFormat:    FormatOf(in.Filename),
 		Methodology:     string(parsed.Methodology),
 		UploadedBy:      in.UploadedBy,
+		UploaderUserID:  in.UploaderUserID,
 		Status:          BatchStatusStaged,
 		UnmappedColumns: parsed.UnmappedColumns,
 		Staged:          make([]BatchRow, 0, len(parsed.Risks)),

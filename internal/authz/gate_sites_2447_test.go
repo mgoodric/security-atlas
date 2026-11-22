@@ -54,6 +54,7 @@ const (
 	auditReader2447 = "IsTenantAuditReader"
 	anyRole2447     = "HasAnyTenantRole"
 	ctlOwner2447    = "IsTenantControlOwner"
+	importDec2447   = "IsRiskImportDecider"
 )
 
 // gateSites2447 is keyed by "<dir under internal/api>/<file> <func>", with
@@ -282,11 +283,15 @@ var gateSites2447 = func() map[string]gateSite2447 {
 			r2447(patch, "/v1/risks/"+id+"/acceptance/approve"),
 			r2447(patch, "/v1/risks/"+id+"/acceptance/reject"),
 			r2447(patch, "/v1/risks/"+id+"/acceptance/revoke")),
-		"risks/riskimports/handlers.go decidingPerson": site(apr,
+		// #2881: admin or the approver flag; grc_engineer is refused.
+		"risks/riskimports/handlers.go decidingPerson": site([]string{importDec2447},
 			r2447(post, "/v1/risks/imports/"+id+"/approve"),
 			r2447(post, "/v1/risks/imports/"+id+"/rows/"+id+"/approve"),
 			r2447(post, "/v1/risks/imports/"+id+"/rows/"+id+"/reject")),
-		// #2844: creating a category or theme for an import value.
+		"risks/riskimports/handlers.go canDecide": notRoute([]string{importDec2447},
+			"the batch read's can_decide flag; the page hides the decide controls the decide routes refuse (#2881)"),
+		// #2844: creating a category or theme for an import value, on the
+		// taxonomy gate (not narrowed by #2881).
 		"risks/riskimports/handlers.go Handler.MapValue": site(apr,
 			r2447(put, "/v1/risks/imports/"+id+"/values")),
 		"walkthroughs/handlers.go canWrite": site(apr,
@@ -309,7 +314,7 @@ const authzImport2447 = "github.com/mgoodric/security-atlas/internal/authz"
 // isHelper2447 reports whether name is one of the inventoried helpers.
 func isHelper2447(name string) bool {
 	switch name {
-	case admin2447, approver2447, riskReader2447, auditReader2447, anyRole2447, ctlOwner2447:
+	case admin2447, approver2447, riskReader2447, auditReader2447, anyRole2447, ctlOwner2447, importDec2447:
 		return true
 	}
 	return false

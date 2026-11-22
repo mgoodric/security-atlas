@@ -77,6 +77,7 @@ func TestWriteDecisionErrorStatuses(t *testing.T) {
 		{riskimport.ErrRowNotFound, http.StatusNotFound, "staged row not found"},
 		{riskimport.ErrRowDecided, http.StatusConflict, "already decided"},
 		{riskimport.ErrApproverRequired, http.StatusForbidden, "deciding person"},
+		{riskimport.ErrSelfDecision, http.StatusForbidden, "uploader of an import batch cannot approve or reject"},
 		{riskimport.ErrReasonRequired, http.StatusBadRequest, "reason"},
 		{riskimport.ErrInvalidDecision, http.StatusBadRequest, "invalid decision"},
 		{errors.New("db down"), http.StatusInternalServerError, ""},
@@ -103,9 +104,10 @@ func assertError(t *testing.T, rec *httptest.ResponseRecorder, err error, status
 	}
 }
 
-// TestDecidingPerson: only a tenant approver who is a person decides. A
-// machine credential with the approver flag is refused, as is a person
-// without approver rights.
+// TestDecidingPerson: only a person who is a tenant admin or holds the
+// approver flag decides. A machine credential with the approver flag is
+// refused, as is a person without approver rights, and a grc_engineer
+// (#2881), whose role IsTenantApprover admits elsewhere.
 func TestDecidingPerson(t *testing.T) {
 	t.Parallel()
 	tenant := uuid.NewString()
@@ -120,7 +122,10 @@ func TestDecidingPerson(t *testing.T) {
 		{"key bound to a person", credstore.Credential{ID: "key_bound", TenantID: tenant, UserID: user.String(), IsApprover: true}, http.StatusOK, user.String()},
 		{"machine token", credstore.Credential{ID: "jwt:2", TenantID: tenant, UserID: "oauth_client:ci", IsApprover: true}, http.StatusForbidden, "a person must approve"},
 		{"unbound key", credstore.Credential{ID: "key_unbound", TenantID: tenant, UserID: "key_unbound", IsApprover: true}, http.StatusForbidden, "a person must approve"},
-		{"person without approver rights", credstore.Credential{ID: "jwt:3", TenantID: tenant, UserID: "user:" + user.String()}, http.StatusForbidden, "approver role required"},
+		{"person without approver rights", credstore.Credential{ID: "jwt:3", TenantID: tenant, UserID: "user:" + user.String()}, http.StatusForbidden, "an admin or approver must decide"},
+		{"live tenant admin", credstore.Credential{ID: "jwt:4", TenantID: tenant, UserID: "user:" + user.String(), TenantRoles: []string{"admin"}}, http.StatusOK, user.String()},
+		{"live grc_engineer", credstore.Credential{ID: "jwt:5", TenantID: tenant, UserID: "user:" + user.String(), TenantRoles: []string{"grc_engineer"}}, http.StatusForbidden, "a GRC engineer stages an import"},
+		{"key bound to a grc_engineer", credstore.Credential{ID: "key_grc", TenantID: tenant, UserID: user.String(), TenantRoles: []string{"grc_engineer"}}, http.StatusForbidden, "a GRC engineer stages an import"},
 	}
 	for _, tc := range cases {
 		ctx, err := tenancy.WithTenant(context.Background(), tenant)
@@ -139,6 +144,58 @@ func TestDecidingPerson(t *testing.T) {
 		}
 		if ok || rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.want) {
 			t.Errorf("%s: ok=%v status=%d body=%s; want %d containing %q", tc.name, ok, rec.Code, rec.Body.String(), tc.status, tc.want)
+		}
+	}
+}
+
+// TestDecideRoutesRefuseGRCEngineer (#2881): approve-all, per-row approve
+// and reject each refuse a grc_engineer with 403 before the store is
+// reached (it is nil here).
+func TestDecideRoutesRefuseGRCEngineer(t *testing.T) {
+	t.Parallel()
+	tenant := uuid.NewString()
+	grc := credstore.Credential{ID: "jwt:grc", TenantID: tenant, UserID: "user:" + uuid.NewString(), TenantRoles: []string{"grc_engineer"}}
+	h := New(nil)
+	for _, tc := range []struct {
+		name string
+		fn   http.HandlerFunc
+	}{{"approve all", h.Approve}, {"approve row", h.ApproveRow}, {"reject row", h.Reject}} {
+		ctx, err := tenancy.WithTenant(context.Background(), tenant)
+		if err != nil {
+			t.Fatalf("WithTenant: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/risks/imports/x/approve", strings.NewReader(`{"reason":"no"}`)).
+			WithContext(authctx.WithCredential(ctx, grc))
+		rec := httptest.NewRecorder()
+		tc.fn(rec, req)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "a GRC engineer stages an import") {
+			t.Errorf("%s as grc_engineer: status=%d body=%s; want 403", tc.name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestCanDecide: the page's can_decide is the decide gate and not the
+// uploader (#2881).
+func TestCanDecide(t *testing.T) {
+	t.Parallel()
+	uploader, other := uuid.New(), uuid.New()
+	batch := riskimport.Batch{UploaderUserID: uploader.String()}
+	for _, tc := range []struct {
+		name  string
+		cred  credstore.Credential
+		batch riskimport.Batch
+		want  bool
+	}{
+		{"another approver", credstore.Credential{ID: "jwt:1", UserID: "user:" + other.String(), IsApprover: true}, batch, true},
+		{"another live admin", credstore.Credential{ID: "jwt:2", UserID: "user:" + other.String(), TenantRoles: []string{"admin"}}, batch, true},
+		{"the uploader, an approver", credstore.Credential{ID: "jwt:3", UserID: "user:" + uploader.String(), IsApprover: true}, batch, false},
+		{"the uploader through a bound key", credstore.Credential{ID: "key_up", UserID: uploader.String(), IsApprover: true}, batch, false},
+		{"a grc_engineer", credstore.Credential{ID: "jwt:4", UserID: "user:" + other.String(), TenantRoles: []string{"grc_engineer"}}, batch, false},
+		{"a machine approver", credstore.Credential{ID: "jwt:5", UserID: "oauth_client:ci", IsApprover: true}, batch, false},
+		{"an approver, no person uploaded", credstore.Credential{ID: "jwt:6", UserID: "user:" + uploader.String(), IsApprover: true}, riskimport.Batch{}, true},
+	} {
+		if got := canDecide(tc.cred, tc.batch); got != tc.want {
+			t.Errorf("%s: canDecide = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
