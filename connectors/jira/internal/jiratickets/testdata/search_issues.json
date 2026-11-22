@@ -1,0 +1,105 @@
+{
+  "expand": "names,schema",
+  "startAt": 0,
+  "maxResults": 100,
+  "total": 4,
+  "issues": [
+    {
+      "expand": "",
+      "id": "10101",
+      "self": "https://your-domain.atlassian.net/rest/api/3/issue/10101",
+      "key": "SEC-101",
+      "fields": {
+        "summary": "Annual security awareness training: Alice",
+        "status": {
+          "self": "https://your-domain.atlassian.net/rest/api/3/status/10001",
+          "name": "Done",
+          "id": "10001"
+        },
+        "resolution": {
+          "self": "https://your-domain.atlassian.net/rest/api/3/resolution/10000",
+          "id": "10000",
+          "name": "Done",
+          "description": "Work has been completed on this issue."
+        },
+        "assignee": {
+          "self": "https://your-domain.atlassian.net/rest/api/3/user?accountId=5b10a2844c20165700ede21g",
+          "accountId": "5b10a2844c20165700ede21g",
+          "displayName": "Mia Krystof",
+          "active": true
+        },
+        "project": {
+          "self": "https://your-domain.atlassian.net/rest/api/3/project/10000",
+          "id": "10000",
+          "key": "SEC",
+          "name": "Security"
+        },
+        "labels": ["security-training", "fy26"],
+        "priority": {
+          "self": "https://your-domain.atlassian.net/rest/api/3/priority/3",
+          "iconUrl": "https://your-domain.atlassian.net/images/icons/priorities/medium.svg",
+          "name": "Medium",
+          "id": "3"
+        },
+        "created": "2026-02-01T09:00:00.000+0000",
+        "resolutiondate": "2026-02-03T16:45:12.307+0100"
+      }
+    },
+    {
+      "expand": "",
+      "id": "10102",
+      "self": "https://your-domain.atlassian.net/rest/api/3/issue/10102",
+      "key": "VULN-7",
+      "fields": {
+        "summary": "CVE-2026-0001 in base image",
+        "status": { "name": "In Progress", "id": "3" },
+        "resolution": null,
+        "assignee": null,
+        "project": { "key": "VULN" },
+        "labels": ["vulnerability"],
+        "priority": { "name": "Highest", "id": "1" },
+        "created": "2026-11-18T07:32:47.000+0000",
+        "resolutiondate": null,
+        "customfield_10042": {
+          "self": "https://your-domain.atlassian.net/rest/api/3/customFieldOption/10200",
+          "value": "High",
+          "id": "10200"
+        }
+      }
+    },
+    {
+      "expand": "",
+      "id": "10103",
+      "self": "https://your-domain.atlassian.net/rest/api/3/issue/10103",
+      "key": "VULN-8",
+      "fields": {
+        "summary": "Outdated TLS library",
+        "status": { "name": "Closed", "id": "6" },
+        "resolution": { "name": "Done", "id": "10000" },
+        "assignee": {
+          "accountId": "5b10ac8d82e05b22cc7d4ef5",
+          "displayName": "Emma Richards"
+        },
+        "project": { "key": "VULN" },
+        "labels": [],
+        "priority": { "name": "Trivial", "id": "2" },
+        "created": "2026-10-01T00:00:00.000-0700",
+        "resolutiondate": "2026-10-20T12:00:00.000-0700",
+        "customfield_10042": null
+      }
+    },
+    {
+      "expand": "",
+      "id": "10104",
+      "self": "https://your-domain.atlassian.net/rest/api/3/issue/10104",
+      "key": "VULN-9",
+      "fields": {
+        "summary": "Unparseable dates",
+        "status": { "name": "To Do", "id": "1" },
+        "project": { "key": "VULN" },
+        "created": "yesterday",
+        "customfield_10042": "critical"
+      }
+    }
+  ]
+}
