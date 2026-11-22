@@ -39,6 +39,18 @@ func importPolicy(t *testing.T, s syncSetup, title, version string) (string, str
 	return id, body
 }
 
+// importedPageProps are the page properties that match what importPolicy
+// imports, so a page carrying them is in step with the imported row's
+// properties (#2877).
+func importedPageProps() map[string]any {
+	return map[string]any{
+		"approved_at":                   "2024-02-01",
+		"effective_date":                "2024-02-15",
+		"next_review_at":                "2025-02-01",
+		"acknowledgment_required_roles": []string{"grc_engineer"},
+	}
+}
+
 type takeoverAuditRow struct {
 	policyID, actor, sourceFile, sourceURL, version, previous string
 }
@@ -103,7 +115,7 @@ func TestSync2854_TakeOverSameVersionInPlace(t *testing.T) {
 	s.do(t, http.MethodPost, "/v1/policies/"+imported+"/acknowledge", []byte("{}"), engineer, http.StatusCreated)
 	before := countPolicies(t, s.setupResult, s.tenant)
 
-	page := syncPage("5001", "Access Control Policy", "1.0", body, nil)
+	page := syncPage("5001", "Access Control Policy", "1.0", body, importedPageProps())
 	resp := postSync(t, s.setupResult, key, http.StatusOK, page)
 	if resp.TakenOver != 1 || resp.Created != 0 || resp.NewVersion != 0 || resp.Unchanged != 0 || len(resp.Results) != 1 {
 		t.Fatalf("first sync = %+v; want one taken_over", resp)

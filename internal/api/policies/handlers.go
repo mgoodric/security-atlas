@@ -185,6 +185,10 @@ type policyWire struct {
 	// SyncDrift is set on a synced policy whose page body changed without
 	// a version bump (#2851); absent when the policy is in step.
 	SyncDrift *policySyncDriftWire `json:"sync_drift,omitempty"`
+	// SyncPropertyDrift is set on a synced policy whose page properties
+	// changed without a version bump (#2877); absent when they match.
+	// Independent of SyncDrift.
+	SyncPropertyDrift *policySyncPropertyDriftWire `json:"sync_property_drift,omitempty"`
 	// SyncMissingSince is set on a synced policy whose page a sync run
 	// found absent (#2853): it lost its label or was deleted. The policy
 	// stays in force.
@@ -207,6 +211,21 @@ func syncDriftWire(at *time.Time, hash *string) *policySyncDriftWire {
 		return nil
 	}
 	return &policySyncDriftWire{DetectedAt: *at, SourceBodySHA256: *hash}
+}
+
+// policySyncPropertyDriftWire is a synced policy's property drift
+// (#2877): when a sync run first saw a page property differ from the
+// published version, and the page property names that differ now.
+type policySyncPropertyDriftWire struct {
+	DetectedAt time.Time `json:"detected_at"`
+	Keys       []string  `json:"keys"`
+}
+
+func syncPropertyDriftWire(at *time.Time, keys []string) *policySyncPropertyDriftWire {
+	if at == nil || len(keys) == 0 {
+		return nil
+	}
+	return &policySyncPropertyDriftWire{DetectedAt: *at, Keys: keys}
 }
 
 // CreatePolicy handles POST /v1/policies (AC-1 part A).
@@ -479,6 +498,7 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		ImportedBy:                  r.ImportedBy,
 		ImportedAt:                  timestamptzPtr(r.ImportedAt),
 		SyncDrift:                   syncDriftWire(timestamptzPtr(r.SyncDriftDetectedAt), r.SyncDriftBodySha256),
+		SyncPropertyDrift:           syncPropertyDriftWire(timestamptzPtr(r.SyncPropertyDriftDetectedAt), r.SyncPropertyDriftKeys),
 		SyncMissingSince:            timestamptzPtr(r.SyncMissingSince),
 		CreatedAt:                   r.CreatedAt.Time,
 		UpdatedAt:                   r.UpdatedAt.Time,
@@ -1142,6 +1162,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		ImportedBy:                  p.ImportedBy,
 		ImportedAt:                  p.ImportedAt,
 		SyncDrift:                   syncDriftWire(p.SyncDriftDetectedAt, p.SyncDriftBodySHA256),
+		SyncPropertyDrift:           syncPropertyDriftWire(p.SyncPropertyDriftDetectedAt, p.SyncPropertyDriftKeys),
 		SyncMissingSince:            p.SyncMissingSince,
 		CreatedAt:                   p.CreatedAt,
 		UpdatedAt:                   p.UpdatedAt,
