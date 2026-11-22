@@ -6,7 +6,8 @@
 //   - every stock bundle's tests/ cases run through bundletest.Run inside a
 //     tenant transaction, as the upload gate runs them; and
 //   - cc6_1, the tracer, and each later check (cc6_6 and cc4_1, #2822; both cc8_1
-//     bundles, #2823; the windowed cc6_3, cc1_4, cc6_5 and cc9_1, #2824) are
+//     bundles, #2823; the windowed cc6_3, cc1_4, cc6_5 and cc9_1, #2824; the
+//     acknowledgement checks cc1_5, cc5_3 and cc7_4, #2832) are
 //     evaluated by the live engine against evidence
 //     records in the ledger, so the query is shown to decide the stored
 //     control state and not only the fixture runner's.
@@ -665,6 +666,101 @@ func TestA11_EngineEvaluatesCapacityPayload(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := evaluateStockHostPosture(t, admin, engine, "soc2_a1_1_capacity_monitoring", tc.records); got != tc.want {
+				t.Errorf("result = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// ackRec is one policy.acknowledgment.v1 record: who acknowledged which
+// policy title and version, and how long before the evaluation.
+type ackRec struct {
+	user, title, versionID string
+	ago                    time.Duration
+}
+
+// evaluateStockAcks seeds one tenant with the bundle and the given
+// acknowledgements, shaped as the handler writes them since #2832, runs the
+// engine and returns the stored control state.
+func evaluateStockAcks(t *testing.T, admin *pgxpool.Pool, engine *eval.Engine, bundle string, records []ackRec) string {
+	t.Helper()
+	now := time.Now().UTC()
+	tenant := dbtest.SeedTenant(t, admin, "control_evaluations", "evidence_records", "controls")
+	ctx, err := tenancy.WithTenant(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	ctrl := seedStockBundleControl(t, admin, tenant, bundle)
+	for _, r := range records {
+		at := now.Add(-r.ago)
+		seedStockEvidence(t, admin, tenant, ctrl, "policy.acknowledgment.v1", at, eval.ResultPass, map[string]any{
+			"policy_id":         r.versionID,
+			"policy_version_id": r.versionID,
+			"user_id":           r.user,
+			"acknowledged_at":   at.Format(time.RFC3339Nano),
+			"policy_title":      r.title,
+			"policy_version":    "1",
+		})
+	}
+	if _, err := engine.EvaluateControl(ctx, ctrl, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl: %v", err)
+	}
+	states, err := engine.ControlState(ctx, ctrl, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("want 1 state, got %d", len(states))
+	}
+	return states[0].Result
+}
+
+// #2832: cc1_5, cc5_3 and cc7_4 decide on the acknowledgement payload's
+// policy_title, policy_version_id and user_id, not on the handler's verdict,
+// which is always pass.
+func TestAckChecks_EngineEvaluatesAcknowledgementPayload(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
+	const u1, u2 = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+	const v1, v2 = "b0000000-0000-0000-0000-000000000001", "b0000000-0000-0000-0000-000000000002"
+	five := []string{
+		"Information Security Policy", "Access Control Policy", "Vendor Management Policy",
+		"Incident Response Plan", "Change Management Policy",
+	}
+	acksOf := func(user string, titles ...string) []ackRec {
+		out := make([]ackRec, len(titles))
+		for i, title := range titles {
+			out[i] = ackRec{user, title, fmt.Sprintf("a0000000-0000-0000-0000-00000000000%d", i+1), 2 * time.Hour}
+		}
+		return out
+	}
+	cases := []struct {
+		bundle, name string
+		records      []ackRec
+		want         string
+	}{
+		{"soc2_cc1_5_accountability_acknowledgment", "every user covers all five", append(acksOf(u1, five...), acksOf(u2, five...)...), eval.ResultPass},
+		{"soc2_cc1_5_accountability_acknowledgment", "one user misses a title", append(acksOf(u1, five...), acksOf(u2, five[:4]...)...), eval.ResultFail},
+		{"soc2_cc1_5_accountability_acknowledgment", "no record", nil, eval.ResultInconclusive},
+		{"soc2_cc5_3_policies_procedures", "current version", []ackRec{
+			{u1, "Information Security Policy", v1, 72 * time.Hour},
+			{u2, "Information Security Policy", v2, 48 * time.Hour},
+			{u1, "Information Security Policy", v2, 24 * time.Hour},
+		}, eval.ResultPass},
+		{"soc2_cc5_3_policies_procedures", "superseded version acknowledged", []ackRec{
+			{u1, "Information Security Policy", v1, 72 * time.Hour},
+			{u2, "Information Security Policy", v2, 48 * time.Hour},
+			{u1, "Information Security Policy", v1, 24 * time.Hour},
+		}, eval.ResultFail},
+		{"soc2_cc5_3_policies_procedures", "no record", nil, eval.ResultInconclusive},
+		{"soc2_cc7_4_incident_response", "IR plan acknowledged", acksOf(u1, "Incident Response Plan"), eval.ResultPass},
+		{"soc2_cc7_4_incident_response", "other policies only", acksOf(u1, five[:3]...), eval.ResultInconclusive},
+		{"soc2_cc7_4_incident_response", "no record", nil, eval.ResultInconclusive},
+	}
+	for _, tc := range cases {
+		t.Run(tc.bundle+"/"+tc.name, func(t *testing.T) {
+			if got := evaluateStockAcks(t, admin, engine, tc.bundle, tc.records); got != tc.want {
 				t.Errorf("result = %q, want %q", got, tc.want)
 			}
 		})

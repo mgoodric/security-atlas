@@ -115,6 +115,11 @@ type Ack struct {
 	AckToken         string
 	EvidenceRecordID *uuid.UUID
 	Deduplicated     bool
+	// PolicyTitle and PolicyVersion are the acknowledged policy row's
+	// title and version string, snapshotted into the evidence payload so
+	// the stock ack checks can tell which policy a record is for (#2832).
+	PolicyTitle   string
+	PolicyVersion string
 }
 
 // RateResult is the result of AckStore.Rate. Denominator zero produces
@@ -280,6 +285,7 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 	}
 	token := DeriveAckToken(in.Caller.UserID, in.PolicyID.String(), observed)
 	var out Ack
+	var title, version string
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		policyRow, perr := q.GetPolicyForAcknowledge(ctx, dbx.GetPolicyForAcknowledgeParams{
 			TenantID: pgUUID(tenantID),
@@ -316,6 +322,7 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 		if policyRow.Status != StatePublished {
 			return ErrAckPolicyNotPublished
 		}
+		title, version = policyRow.Title, policyRow.Version
 		// Idempotency probe: existing row with same token deduplicates.
 		existing, gerr := q.GetAcknowledgmentByToken(ctx, dbx.GetAcknowledgmentByTokenParams{
 			TenantID: pgUUID(tenantID),
@@ -358,6 +365,9 @@ func (s *AckStore) Record(ctx context.Context, in RecordInput) (Ack, error) {
 		out = ackFromRow(row, false)
 		return nil
 	})
+	if err == nil {
+		out.PolicyTitle, out.PolicyVersion = title, version
+	}
 	return out, err
 }
 

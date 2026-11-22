@@ -24,6 +24,16 @@ func hasSQLQuery(b *control.Bundle) bool {
 	return false
 }
 
+// stockSQLChecksWithoutFail lists the stock SQL checks that cannot fail on
+// the records they receive, each with the reason. Such a check states it
+// never fails in its description, and its "every X" half is pending the
+// inventory design (#2834, ADR 0028 decision 4).
+var stockSQLChecksWithoutFail = map[string]string{
+	// Received acknowledgements show that someone acknowledged the IR plan,
+	// never that an on-call person did not (#2832).
+	"soc2_cc7_4_incident_response": "#2832: no fail state until the on-call inventory (#2834)",
+}
+
 // #2821 pattern: a stock payload check ships with bundle tests that state
 // what passes, what fails, and that an empty ledger is inconclusive, so the
 // upload gate and the integration tier both exercise the query.
@@ -46,7 +56,14 @@ func TestStockSQLChecksShipBundleTests(t *testing.T) {
 				seen["empty"] = true
 			}
 		}
-		for _, want := range []string{eval.ResultPass, eval.ResultFail, "empty"} {
+		wants := []string{eval.ResultPass, eval.ResultFail, "empty"}
+		if reason, ok := stockSQLChecksWithoutFail[name]; ok {
+			if seen[eval.ResultFail] {
+				t.Errorf("%s: has a \"fail\" case but is listed as never failing (%s); drop it from stockSQLChecksWithoutFail", name, reason)
+			}
+			wants = []string{eval.ResultPass, "empty"}
+		}
+		for _, want := range wants {
 			if !seen[want] {
 				t.Errorf("%s: tests/ has no %q case; a SQL payload check needs a pass, a fail and an empty-ledger inconclusive case", name, want)
 			}
