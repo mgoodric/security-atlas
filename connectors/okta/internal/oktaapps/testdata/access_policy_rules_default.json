@@ -1,0 +1,24 @@
+[
+  {
+    "id": "ruleId",
+    "status": "ACTIVE",
+    "name": "Catch-all rule",
+    "priority": 99,
+    "created": "2024-04-25T17:35:02.000Z",
+    "lastUpdated": "2024-04-25T17:35:02.000Z",
+    "system": true,
+    "conditions": null,
+    "actions": {
+      "appSignOn": {
+        "access": "ALLOW",
+        "verificationMethod": {
+          "factorMode": "1FA",
+          "type": "ASSURANCE",
+          "reauthenticateIn": "PT12H",
+          "constraints": []
+        }
+      }
+    },
+    "type": "ACCESS_POLICY"
+  }
+]

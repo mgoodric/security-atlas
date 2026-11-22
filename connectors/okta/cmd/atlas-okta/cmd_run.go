@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -54,6 +55,10 @@ type runFlags struct {
 	skipMFAPolicy    bool
 	skipAppAssign    bool
 	skipUserLife     bool
+	// adminApps and infraApps are the Okta app ids the operator classifies
+	// admin and infrastructure (#2828); with both empty no app is classified.
+	adminApps []string
+	infraApps []string
 }
 
 func newRunCmd() *cobra.Command {
@@ -65,7 +70,9 @@ func newRunCmd() *cobra.Command {
 transform to evidence records, and push to the platform.
 
 Okta scopes required (least-privilege, Read-only Administrator):
-  - okta.policies.read  (gates okta.mfa_policy.v2)
+  - okta.policies.read  (gates okta.mfa_policy.v2, and the app sign-in
+                         policy rules behind sign_on_mfa_required in
+                         okta.app_assignment.v1)
   - okta.apps.read      (gates okta.app_assignment.v1)
   - okta.groups.read    (gates okta.app_assignment.v1, and the Everyone
                          group lookup for okta.mfa_policy.v2)
@@ -102,6 +109,8 @@ appears in shell history.`,
 	cmd.Flags().StringVar(&f.mfaPolicyControl, "mfa-policy-control", "", "control_id to attach to okta.mfa_policy.v2 records; empty (the default) routes each record to every control that queries okta.mfa_policy.v2 (#2924)")
 	cmd.Flags().StringVar(&f.appAssignControl, "app-assignment-control", "", "control_id to attach to okta.app_assignment.v1 records; empty (the default) routes each record to every control that queries okta.app_assignment.v1 (#2924)")
 	cmd.Flags().StringVar(&f.userLifeControl, "user-lifecycle-control", "", "control_id to attach to okta.user_lifecycle.v1 records; empty (the default) routes each record to every control that queries okta.user_lifecycle.v1 (#2924)")
+	cmd.Flags().StringSliceVar(&f.adminApps, "admin-apps", nil, "Okta app ids to classify admin in okta.app_assignment.v1 (comma-separated or repeated); with this and --infrastructure-apps both empty, no app is classified (#2828)")
+	cmd.Flags().StringSliceVar(&f.infraApps, "infrastructure-apps", nil, "Okta app ids to classify infrastructure in okta.app_assignment.v1; once either list is set, every other app is standard (#2828)")
 	cmd.Flags().BoolVar(&f.skipMFAPolicy, "skip-mfa-policy", false, "skip okta.mfa_policy.v2 pull")
 	cmd.Flags().BoolVar(&f.skipAppAssign, "skip-app-assignment", false, "skip okta.app_assignment.v1 pull")
 	cmd.Flags().BoolVar(&f.skipUserLife, "skip-user-lifecycle", false, "skip okta.user_lifecycle.v1 pull")
@@ -149,6 +158,9 @@ func doRun(ctx context.Context, f runFlags) error {
 		assignments, err := oktaappsPull(ctx, api, nil)
 		if err != nil {
 			return fmt.Errorf("app assignment pull: %w", err)
+		}
+		for _, id := range oktaapps.Classify(assignments, f.adminApps, f.infraApps) {
+			fmt.Fprintf(os.Stderr, "warning: classified app %s is not among the Okta apps pulled\n", id)
 		}
 		for _, a := range assignments {
 			rec, err := buildAppAssignmentRecord(a, f.org, f.environment, f.appAssignControl)
@@ -240,6 +252,20 @@ func buildAppAssignmentRecord(a oktaapps.Assignment, org, env, controlID string)
 	if a.SignOnMode != "" {
 		pm["sign_on_mode"] = a.SignOnMode
 	}
+	// #2828 (1.1.0): each field is omitted when the connector has no value
+	// for it, never sent as a default.
+	if a.Classification != "" {
+		pm["classification"] = a.Classification
+	}
+	if a.SignOnPolicyID != "" {
+		pm["sign_on_policy_id"] = a.SignOnPolicyID
+	}
+	if a.SignOnMFARequired != nil {
+		pm["sign_on_mfa_required"] = *a.SignOnMFARequired
+	}
+	if a.Reason != "" {
+		pm["reason"] = a.Reason
+	}
 	payload, err := structpb.NewStruct(pm)
 	if err != nil {
 		return nil, err
@@ -247,7 +273,7 @@ func buildAppAssignmentRecord(a oktaapps.Assignment, org, env, controlID string)
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.AppAssignmentKey(a.AppID, now),
 		EvidenceKind:   "okta.app_assignment.v1",
-		SchemaVersion:  "1.0.0",
+		SchemaVersion:  "1.1.0",
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{org}},

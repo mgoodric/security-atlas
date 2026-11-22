@@ -106,6 +106,10 @@ func DefaultSeed() []KindVersion {
 		// Everyone, canonical webauthn, policy status).
 		{Kind: "okta.mfa_policy.v2", Version: "2.0.0"},
 		{Kind: "okta.app_assignment.v1", Version: "1.0.0"},
+		// #2828: 1.1.0 adds classification and whether the app sign-in
+		// policy requires MFA (sign_on_policy_id, sign_on_mfa_required,
+		// reason).
+		{Kind: "okta.app_assignment.v1", Version: "1.1.0"},
 		{Kind: "okta.user_lifecycle.v1", Version: "1.0.0"},
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
