@@ -245,6 +245,43 @@ func SQLUsesWallClock(expr string) bool {
 	return wallClockSQL.MatchString(expr)
 }
 
+// RFC3339Pattern is the POSIX regex a stock SQL check matches a payload
+// timestamp against before casting it: the full RFC 3339 shape, anchored at
+// both ends. It still admits a month 13 or a February 30th, so the guard
+// pairs it with pg_input_is_valid (docs/spec/control-bundle.md, "Reading a
+// payload timestamp"; #2939).
+const RFC3339Pattern = `^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$`
+
+// payloadTimeCast matches a cast of a payload text field to a date or time
+// type, capturing the field name.
+var payloadTimeCast = regexp.MustCompile(`(?i)\(\s*payload\s*->>\s*'([^']+)'\s*\)\s*::\s*(?:timestamptz|timestamp|date|time)\b`)
+
+// SQLUnguardedTimestampCasts returns, in order of first appearance, the
+// payload fields a SQL evidence query casts to a date or time type without
+// the guard the spec documents: the field matched against RFC3339Pattern
+// and accepted by pg_input_is_valid(payload->>'field', 'timestamptz'). A
+// cast without both errors the whole query on one malformed record, so one
+// bad host makes the control inconclusive and hides every other host
+// (#2939). The stock bundles under controls/ are held to it by a test; the
+// engine does not refuse a tenant's query on it.
+func SQLUnguardedTimestampCasts(expr string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range payloadTimeCast.FindAllStringSubmatch(expr, -1) {
+		field := m[1]
+		if seen[field] {
+			continue
+		}
+		seen[field] = true
+		shape := "payload->>'" + field + "' ~ '" + RFC3339Pattern + "'"
+		valid := "pg_input_is_valid(payload->>'" + field + "', 'timestamptz')"
+		if !strings.Contains(expr, shape) || !strings.Contains(expr, valid) {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
 // classifySQLValue maps one selected value to a control result. A bool maps
 // true→pass / false→fail; a string must already be a result enum member;
 // anything else is an error (loud, not silent).
