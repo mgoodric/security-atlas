@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/1password.org_policy/2.0.0.json",
+  "x-evidence-kind": "1password.org_policy.v2",
+  "x-semver": "2.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-01"],
+  "title": "1Password account audit-stream and membership state",
+  "description": "Account state read from 1Password's documented APIs (#2968). org_id and audit_events_enabled come from the Events API introspect endpoint (GET /api/v2/auth/introspect); the member counts come from the Users API (GET /v1/accounts/{account}/users). v1's two_factor_required, minimum_password_length and domain_restrictions_enabled are gone: no documented 1Password API reports them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "org_id",
+    "audit_events_enabled",
+    "active_members",
+    "suspended_members"
+  ],
+  "properties": {
+    "org_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The account's UUID, as the Events API introspect response's account_uuid reports it."
+    },
+    "audit_events_enabled": {
+      "type": "boolean",
+      "description": "True when the Events Reporting integration whose token the connector holds is authorized for audit events (introspect features include auditevents). False means the account's audit-event stream does not reach this deployment through that integration; another integration on the account may still read it."
+    },
+    "active_members": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Users the Users API reports with state ACTIVE."
+    },
+    "suspended_members": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Users the Users API reports with state SUSPENDED. Users in any other state (the API omits state for them, e.g. pending confirmation) are in neither count."
+    }
+  }
+}

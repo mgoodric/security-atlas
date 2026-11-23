@@ -1,80 +1,111 @@
 // Package opauth resolves 1Password API credentials for the connector.
 //
-// 1Password Business exposes its API via Service Accounts. A Service
-// Account is a non-human identity that ships with a single bearer
-// token (the Service Account JWT) and per-vault grants (`read_items`,
-// `write_items`,
-// `manage_vault`). Slice 046 is read-only by construction — the
-// DocumentedScopes test rejects any non-read keyword.
+// #2968: the connector reads two documented 1Password APIs, and each has
+// its own credential:
+//
+//   - the Events API, with the bearer token of an Events Reporting
+//     integration (www.1password.dev/events-api/authorization.md);
+//   - the Users API, with an OAuth application's client ID and client
+//     secret, exchanged for a 15-minute access token by the client
+//     credentials grant (www.1password.dev/users-api/authorization.md).
+//
+// All three values come from the environment only. No flag carries a
+// secret, so none reaches `ps` or shell history (#2947).
 //
 // Anti-criterion: no log line in this package — or anywhere downstream of
-// Resolve — may emit token material. TestCredential_StringRedacts pins
+// Resolve — may emit token material. TestCredentials_StringRedacts pins
 // this; %v / %s formatting flows through the String method which only
-// reveals the byte length of the bearer.
+// reveals byte lengths.
 package opauth
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 )
 
-// EnvServiceAccountToken is the canonical env var carrying the
-// 1Password Business Service Account bearer.
-const EnvServiceAccountToken = "ONEPASSWORD_SERVICE_ACCOUNT_TOKEN"
+// The environment variables carrying the connector's 1Password secrets.
+const (
+	EnvEventsToken       = "ONEPASSWORD_EVENTS_TOKEN"
+	EnvUsersClientID     = "ONEPASSWORD_USERS_CLIENT_ID"
+	EnvUsersClientSecret = "ONEPASSWORD_USERS_CLIENT_SECRET"
+)
 
-// Mode discriminates which credential family Resolve returned. v1 ships
-// only the Service Account path; the constant exists so a future Mode
-// (e.g. Connect server token) slots in without breaking callers.
-type Mode string
-
-// ModeServiceAccount is the only Mode slice 046 ships.
-const ModeServiceAccount Mode = "service_account"
-
-// Credential is the resolved auth material plus a Bearer-style header
-// applicator. The bearer value is kept off String to prevent accidental
-// log leakage.
-type Credential struct {
-	Mode   Mode
-	bearer string
+// Credentials is the resolved auth material. Every value is kept off
+// String so accidental %v / %+v formatting cannot leak it.
+type Credentials struct {
+	eventsToken  string
+	clientID     string
+	clientSecret string
 }
 
-// String never reveals the bearer value. Tests rely on this.
-func (c Credential) String() string {
-	return fmt.Sprintf("opauth.Credential{Mode: %s, bearer: <redacted %d bytes>}", c.Mode, len(c.bearer))
+// String never reveals a secret. Tests rely on this.
+func (c Credentials) String() string {
+	return fmt.Sprintf("opauth.Credentials{events_token: <redacted %d bytes>, users_client_id: <redacted %d bytes>, users_client_secret: <redacted %d bytes>}",
+		len(c.eventsToken), len(c.clientID), len(c.clientSecret))
 }
 
-// Apply sets the Authorization + Accept headers on req. Use the
-// *http.Request returned from http.NewRequestWithContext; we mutate in
-// place.
-func (c Credential) Apply(req *http.Request) {
-	if c.bearer == "" {
-		return
+// GoString keeps %#v from printing the struct fields.
+func (c Credentials) GoString() string { return c.String() }
+
+// ApplyEvents sets the Events Reporting bearer on req.
+func (c Credentials) ApplyEvents(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+c.eventsToken)
+	req.Header.Set("Accept", "application/json")
+}
+
+// ApplyUsersClient sets HTTP Basic client authentication on a Users API
+// token request, the method 1Password's docs recommend.
+func (c Credentials) ApplyUsersClient(req *http.Request) {
+	req.SetBasicAuth(c.clientID, c.clientSecret)
+}
+
+// Resolve reads the three secrets from the environment. Every one is
+// required; the error names the missing variables, never a value.
+func Resolve() (Credentials, error) {
+	c := Credentials{
+		eventsToken:  strings.TrimSpace(os.Getenv(EnvEventsToken)),
+		clientID:     strings.TrimSpace(os.Getenv(EnvUsersClientID)),
+		clientSecret: strings.TrimSpace(os.Getenv(EnvUsersClientSecret)),
 	}
-	req.Header.Set("Authorization", "Bearer "+c.bearer)
-	if req.Header.Get("Accept") == "" {
-		req.Header.Set("Accept", "application/json")
+	var missing []string
+	if c.eventsToken == "" {
+		missing = append(missing, EnvEventsToken)
 	}
+	if c.clientID == "" {
+		missing = append(missing, EnvUsersClientID)
+	}
+	if c.clientSecret == "" {
+		missing = append(missing, EnvUsersClientSecret)
+	}
+	if len(missing) > 0 {
+		return Credentials{}, fmt.Errorf("opauth: set %s", strings.Join(missing, ", "))
+	}
+	return c, nil
 }
 
-// ResolveOpts is the input to Resolve. The cmd layer parses cobra flags
-// then threads them through opts so this package never imports cobra.
-type ResolveOpts struct {
-	// Token lets the caller pass an explicit Service Account token.
-	// Empty falls back to env. The env path is preferred so the secret
-	// never appears in shell history or process listings.
-	Token string
-}
+// ErrUnsafeRedirect is returned for a redirect that changes host or scheme.
+var ErrUnsafeRedirect = errors.New("refused redirect")
 
-// Resolve returns the live credential. Service Account path: token is
-// required and the returned Credential.Apply attaches it.
-func Resolve(opts ResolveOpts) (Credential, error) {
-	tok := strings.TrimSpace(firstNonEmpty(opts.Token, os.Getenv(EnvServiceAccountToken)))
-	if tok == "" {
-		return Credential{}, fmt.Errorf("opauth: Service Account token required (set %s or pass --token)", EnvServiceAccountToken)
+// CheckRedirect is an http.Client CheckRedirect that refuses a redirect to
+// another host (port included) or another scheme, so a request carrying a
+// 1Password bearer or client secret is only ever followed on its own
+// origin. It stops after 10 redirects, as the default does. Mirrors the
+// Confluence (#2947) and Datadog (#2935) connectors' guard.
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
 	}
-	return Credential{Mode: ModeServiceAccount, bearer: tok}, nil
+	orig := via[0].URL
+	if !strings.EqualFold(req.URL.Host, orig.Host) {
+		return fmt.Errorf("%w: from host %q to %q", ErrUnsafeRedirect, orig.Host, req.URL.Host)
+	}
+	if req.URL.Scheme != orig.Scheme {
+		return fmt.Errorf("%w: from %s to %s", ErrUnsafeRedirect, orig.Scheme, req.URL.Scheme)
+	}
+	return nil
 }
 
 // Scope is one documented least-privilege grant. The cmd `scopes`
@@ -87,32 +118,23 @@ type Scope struct {
 	TokenKind string
 }
 
-// DocumentedScopes returns the canonical least-privilege grants this
-// connector needs. 1Password Service Accounts are scoped per-vault.
-// The connector requires only the vaults that carry org-policy posture
-// (typically the "Private" / "Employee" / org-management vault), with
-// read_items only. Anti-criterion: any grant containing a write/manage/
-// admin keyword fails TestDocumentedScopes_NoWriteOrManageOrAdmin.
+// DocumentedScopes returns the grants this connector needs, named as
+// 1Password names them. Anti-criterion: any grant containing a
+// write/manage/admin/suspend keyword fails
+// TestDocumentedScopes_NoWriteOrManageOrAdmin.
 func DocumentedScopes() []Scope {
 	return []Scope{
 		{
-			Name:      "vault:read_items",
+			Name:      "auditevents",
 			Access:    "Read",
-			Gates:     "1password.org_policy.v1 (org id, 2FA-required, minimum password length, domain restrictions, active members)",
-			TokenKind: "Service Account",
+			Gates:     "1password.org_policy.v2 (org_id, audit_events_enabled via GET /api/v2/auth/introspect)",
+			TokenKind: "Events Reporting integration",
 		},
 		{
-			Name:      "account:read",
+			Name:      "users.view",
 			Access:    "Read",
-			Gates:     "1password.org_policy.v1 (account metadata — org_id, active_members count)",
-			TokenKind: "Service Account",
+			Gates:     "1password.org_policy.v2 (active_members, suspended_members via GET /v1/accounts/{account}/users)",
+			TokenKind: "Users API OAuth application",
 		},
 	}
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }

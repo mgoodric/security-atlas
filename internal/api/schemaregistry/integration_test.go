@@ -145,6 +145,7 @@ func TestImport_TenPlatformSchemas(t *testing.T) {
 		"okta.mfa_policy.v1",
 		"okta.mfa_policy.v2",
 		"1password.org_policy.v1",
+		"1password.org_policy.v2",
 		"osquery.host_posture.v1",
 		"jira.ticket_evidence.v1",
 		"manual.upload.v1",

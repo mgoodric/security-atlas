@@ -1,6 +1,8 @@
 package idem_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +30,16 @@ func TestOrgPolicyKey_DistinctPerOrg(t *testing.T) {
 	now := time.Now().UTC()
 	if idem.OrgPolicyKey("o1", now) == idem.OrgPolicyKey("o2", now) {
 		t.Fatal("different orgs collided on key")
+	}
+}
+
+// #2968: v1 keyed on "1password.org_policy|"; the v2 key must differ so the
+// two kinds never collapse to one ledger row.
+func TestOrgPolicyKey_DiffersFromV1Key(t *testing.T) {
+	at := time.Date(2026, 11, 22, 14, 0, 0, 0, time.UTC)
+	sum := sha256.Sum256([]byte("1password.org_policy|acme|" + at.Format(time.RFC3339)))
+	if idem.OrgPolicyKey("acme", at) == hex.EncodeToString(sum[:]) {
+		t.Fatal("v2 key equals the v1 derivation")
 	}
 }
 
