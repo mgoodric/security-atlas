@@ -5113,7 +5113,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/risks/imports/{id}/close — close a staged risk import batch nobody will finish; body {reason} (required); every pending row is rejected with the reason import closed: <reason> and audit-logged as a rejection, rows of any import waiting on them link, keep waiting on another pending row carrying the ID, or fail with the parent_link_failed flag, and the batch's own rows still waiting on an ID no pending row carries fail; the batch is closed and takes no further decision or mapping; a person who is a tenant admin or holds the approver flag must close, never a grc_engineer and never the batch's uploader (403 otherwise); 409 when the batch is already completed or closed (#3002) */
+        /** POST /v1/risks/imports/{id}/close — close a staged risk import batch nobody will finish; body {reason} (required); every pending row is rejected with the close reason, prefixed import closed, and audit-logged as a rejection, rows of any import waiting on them link, keep waiting on another pending row carrying the ID, or fail with the parent_link_failed flag, and the batch's own rows still waiting on an ID no pending row carries fail; the batch is closed and takes no further decision or mapping; a person who is a tenant admin or holds the approver flag must close, never a grc_engineer and never the batch's uploader (403 otherwise); 409 when the batch is already completed or closed (#3002) */
         post: operations["post-v1-risks-imports-id-close"];
         delete?: never;
         options?: never;
