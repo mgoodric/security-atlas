@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import {
   formatHistoryValue,
   historyActionLabel,
+  historyEntryLabel,
   historyChanges,
 } from "./history-format";
 
@@ -197,6 +198,50 @@ describe("risk history format (#2104)", () => {
     ).toEqual([
       { field: "Child risk", before: child, after: "none", ref: "risk" },
     ]);
+  });
+
+  test("a parent's link row on the child's History reads as the parent (#2961)", () => {
+    const child = "0b1f5a3e-3c55-4b8e-9d0e-2b6f8a9c1d42";
+    const parent = "7c2d9e10-1a2b-4c3d-8e4f-5a6b7c8d9e0f";
+    const linked = {
+      ...entry(
+        "child_linked",
+        { child_risk_id: null },
+        { child_risk_id: child },
+      ),
+      parent_risk_id: parent,
+    };
+    expect(historyEntryLabel(linked)).toBe("Linked under a parent risk");
+    expect(historyChanges(linked)).toEqual([
+      { field: "Parent risk", before: "none", after: parent, ref: "risk" },
+    ]);
+    const unlinked = {
+      ...entry(
+        "child_unlinked",
+        { child_risk_id: child },
+        { child_risk_id: null, note: "unlinked because a risk was deleted" },
+      ),
+      parent_risk_id: parent,
+    };
+    expect(historyEntryLabel(unlinked)).toBe("Unlinked from a parent risk");
+    expect(historyChanges(unlinked)).toEqual([
+      { field: "Parent risk", before: parent, after: "none", ref: "risk" },
+      {
+        field: "Note",
+        before: "none",
+        after: "unlinked because a risk was deleted",
+      },
+    ]);
+    // The parent's own row keeps its label.
+    expect(
+      historyEntryLabel(
+        entry(
+          "child_linked",
+          { child_risk_id: null },
+          { child_risk_id: child },
+        ),
+      ),
+    ).toBe("Child risk linked");
   });
 
   test("id-valued fields carry the kind of thing they name (#2138)", () => {

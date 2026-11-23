@@ -68,3 +68,6 @@ audit row included.
 is shown) through a new `risk` ref kind, read from the register
 (`fetchRisksListWithRollUps`) only when an entry names one. A child no
 longer in the register reads "Unknown risk".
+
+(D2's child-side view and D5's rule and aggregate links were picked up by
+#2961; see `2961-risk-hierarchy-audit-followups-decisions.md`.)

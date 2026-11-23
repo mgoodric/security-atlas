@@ -631,6 +631,12 @@ type Querier interface {
 	// Detach one child from one parent, reporting how many rows went, so the
 	// caller can tell a removed link from one that never existed (#1748).
 	DeleteRiskAggregationLink(ctx context.Context, arg DeleteRiskAggregationLinkParams) (int64, error)
+	// #2961: drop every hierarchy link a risk is either end of, before the
+	// risk itself is deleted, and return them so the delete writes a
+	// child_unlinked row per link. The FK cascade would drop the same rows
+	// silently. The caller holds the hierarchy lock, so no link can be added
+	// between this and the risk's delete.
+	DeleteRiskAggregationLinksForRisk(ctx context.Context, arg DeleteRiskAggregationLinksForRiskParams) ([]DeleteRiskAggregationLinksForRiskRow, error)
 	DeleteRiskCategory(ctx context.Context, arg DeleteRiskCategoryParams) error
 	// Delete one of the caller's own views. The user_id predicate means a
 	// caller can never delete another user's view even within the same tenant.
@@ -3083,6 +3089,12 @@ type Querier interface {
 	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
 	// #2311: capped at row_limit; the caller asks for one more than it shows
 	// to learn whether older rows exist.
+	//
+	// #2961: also the child_linked / child_unlinked rows on a parent's trail
+	// that name this risk as the child, so a child's History shows being
+	// linked under or unlinked from a parent without a second row. Their
+	// risk_id is the parent's. The COALESCE matches the partial index
+	// risk_audit_log_child_link (migration 20261300000000).
 	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
 	// The tenant's categories, active and archived, by display name.
 	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]OrgRiskCategory, error)
@@ -4171,7 +4183,9 @@ type Querier interface {
 	UnlinkDecisionException(ctx context.Context, arg UnlinkDecisionExceptionParams) error
 	UnlinkDecisionRisk(ctx context.Context, arg UnlinkDecisionRiskParams) error
 	UnlinkDecisionScopePredicate(ctx context.Context, arg UnlinkDecisionScopePredicateParams) error
-	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) error
+	// #2961: reports rows removed, so the aggregation engine writes its
+	// child_unlinked row only for a link it actually dropped.
+	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) (int64, error)
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
 	// Updates the editable fields + status in one statement. The DB transition
 	// trigger (action_plans_status_transition_trg) rejects an illegal status

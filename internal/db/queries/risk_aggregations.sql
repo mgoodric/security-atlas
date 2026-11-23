@@ -6,7 +6,9 @@ INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, rule_id, tenant_id
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (parent_risk_id, child_risk_id) DO NOTHING;
 
--- name: UnlinkRiskAggregation :exec
+-- name: UnlinkRiskAggregation :execrows
+-- #2961: reports rows removed, so the aggregation engine writes its
+-- child_unlinked row only for a link it actually dropped.
 DELETE FROM risk_aggregations
 WHERE tenant_id = $1 AND parent_risk_id = $2 AND child_risk_id = $3;
 
@@ -103,3 +105,14 @@ WHERE ra.tenant_id = $1
   AND c.status = 'open'
 GROUP BY ra.parent_risk_id
 ORDER BY ra.parent_risk_id ASC;
+
+-- name: DeleteRiskAggregationLinksForRisk :many
+-- #2961: drop every hierarchy link a risk is either end of, before the
+-- risk itself is deleted, and return them so the delete writes a
+-- child_unlinked row per link. The FK cascade would drop the same rows
+-- silently. The caller holds the hierarchy lock, so no link can be added
+-- between this and the risk's delete.
+DELETE FROM risk_aggregations
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (parent_risk_id = sqlc.arg(risk_id) OR child_risk_id = sqlc.arg(risk_id))
+RETURNING parent_risk_id, child_risk_id;

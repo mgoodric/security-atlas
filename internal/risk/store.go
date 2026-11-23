@@ -730,6 +730,10 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID, actor string) error {
 	return retryOnDeadlock(ctx, func() error { return s.deleteOnce(ctx, id, actor) })
 }
 
+// riskDeletedNote is the note on a child_unlinked row a risk delete writes
+// (#2961), so History tells it from an unlink made by hand.
+const riskDeletedNote = "unlinked because a risk was deleted"
+
 func (s *Store) deleteOnce(ctx context.Context, id uuid.UUID, actor string) error {
 	return s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		// Check existence first so we can return ErrNotFound rather than a
@@ -750,6 +754,12 @@ func (s *Store) deleteOnce(ctx context.Context, id uuid.UUID, actor string) erro
 		// A meta-risk's themes include its rule's target theme, so deleting
 		// one also waits out an evaluation that is updating it.
 		preLocked := row.Themes
+		// The hierarchy lock before the rules' locks, the order every link
+		// path takes them in (#2953). Holding it, no link to this risk can
+		// be added before its links are dropped below (#2961).
+		if err := q.LockRiskHierarchy(ctx, pgUUID(tenantID)); err != nil {
+			return fmt.Errorf("lock risk hierarchy: %w", err)
+		}
 		if err := s.runBeforeRiskWrite(ctx, q, tenantID, preLocked); err != nil {
 			return err
 		}
@@ -768,11 +778,30 @@ func (s *Store) deleteOnce(ctx context.Context, id uuid.UUID, actor string) erro
 		if err := s.checkRuleLocks(lastAttempt, preLocked, row.Themes); err != nil {
 			return err
 		}
+		// Drop the risk's hierarchy links here rather than through the FK
+		// cascade, so each writes a child_unlinked row on its parent's
+		// trail by the deleting actor (#2961): on each surviving parent of
+		// a deleted child, and on a deleted parent for each of its
+		// children, whose History reads it from there.
+		links, err := q.DeleteRiskAggregationLinksForRisk(ctx, dbx.DeleteRiskAggregationLinksForRiskParams{
+			TenantID: pgUUID(tenantID),
+			RiskID:   pgUUID(id),
+		})
+		if err != nil {
+			return fmt.Errorf("delete risk hierarchy links: %w", err)
+		}
 		if err := q.DeleteRisk(ctx, dbx.DeleteRiskParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
 		}); err != nil {
 			return fmt.Errorf("delete risk: %w", err)
+		}
+		for _, l := range links {
+			if err := RecordChildUnlinkedTx(ctx, q, tenantID,
+				uuid.UUID(l.ParentRiskID.Bytes), uuid.UUID(l.ChildRiskID.Bytes),
+				HierarchyAudit{Actor: actor, Detail: map[string]any{"note": riskDeletedNote}}); err != nil {
+				return err
+			}
 		}
 		// The trail outlives the risk (#2107): risk_audit_log has no
 		// foreign key to risks and refuses DELETE, so this row stays.
