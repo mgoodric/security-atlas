@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -126,7 +127,11 @@ func (fc *fakeConfluence) requestCount() int {
 // set, is answered instead.
 type fakePlatform struct {
 	status int
-	srv    *httptest.Server
+	// errBody, when set, is the body answered with status.
+	errBody string
+	// warnings are returned in the report.
+	warnings []string
+	srv      *httptest.Server
 
 	mu     sync.Mutex
 	pushes []map[string]any
@@ -148,7 +153,11 @@ func newFakePlatform(t *testing.T, status int) *fakePlatform {
 		fp.auths = append(fp.auths, r.Header.Get("Authorization"))
 		fp.mu.Unlock()
 		if fp.status != 0 {
-			http.Error(w, `{"error":"policy sync requires a policy-sync API key"}`, fp.status)
+			body := fp.errBody
+			if body == "" {
+				body = `{"error":"policy sync requires a policy-sync API key"}`
+			}
+			http.Error(w, body, fp.status)
 			return
 		}
 		rep := map[string]any{"results": []any{}}
@@ -165,6 +174,9 @@ func newFakePlatform(t *testing.T, status int) *fakePlatform {
 			results = append(results, map[string]any{"page_id": page["id"], "title": page["title"], "status": "created", "policy_id": "pol-" + page["id"].(string), "version": "1.0"})
 		}
 		rep["created"], rep["skipped"], rep["results"] = created, skipped, results
+		if fp.warnings != nil {
+			rep["warnings"] = fp.warnings
+		}
 		_ = json.NewEncoder(w).Encode(rep)
 	}))
 	t.Cleanup(fp.srv.Close)
@@ -177,7 +189,7 @@ func (fp *fakePlatform) recorded() ([]map[string]any, []string) {
 	return fp.pushes, fp.auths
 }
 
-func runAgainst(t *testing.T, fc *fakeConfluence, fp *fakePlatform) (string, error) {
+func runAgainst(t *testing.T, fc *fakeConfluence, fp *fakePlatform, args ...string) (string, error) {
 	t.Helper()
 	t.Setenv("CONFLUENCE_EMAIL", testEmail)
 	t.Setenv("CONFLUENCE_API_TOKEN", testToken)
@@ -188,7 +200,7 @@ func runAgainst(t *testing.T, fc *fakeConfluence, fp *fakePlatform) (string, err
 	t.Setenv(EnvAtlasURL, fp.srv.URL)
 	var out bytes.Buffer
 	cmd := newRootCmd(&out)
-	cmd.SetArgs([]string{"run", "--timeout", "30s"})
+	cmd.SetArgs(append([]string{"run", "--timeout", "30s"}, args...))
 	cmd.SetContext(context.Background())
 	err := cmd.Execute()
 	return out.String(), err
@@ -304,6 +316,70 @@ func TestRun_PlatformRefusalFails(t *testing.T) {
 	}
 }
 
+func TestRun_PlatformWarningExitsNeedsAttention(t *testing.T) {
+	fc := newFakeConfluence(t, []fakePage{{ID: "1", Title: "Good", Storage: fullProps + "<p>a</p>"}}, -1)
+	fp := newFakePlatform(t, 0)
+	fp.warnings = []string{"3 of this source's 4 published synced policies are missing from this push"}
+	out, err := runAgainst(t, fc, fp)
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != ExitNeedsAttention || !strings.Contains(err.Error(), "1 platform warning(s)") {
+		t.Fatalf("err = %v, want exit %d for a platform warning", err, ExitNeedsAttention)
+	}
+	if !strings.Contains(out, "warning: 3 of this source's 4 published synced policies are missing from this push\n") {
+		t.Errorf("report does not print the warning:\n%s", out)
+	}
+}
+
+func TestRun_EmptyPushRefusalIsExplained(t *testing.T) {
+	fc := newFakeConfluence(t, []fakePage{{ID: "1", Title: "Good", Storage: fullProps + "<p>a</p>"}}, -1)
+	fp := newFakePlatform(t, http.StatusUnprocessableEntity)
+	fp.errBody = `{"error":"pages is empty but this source has published synced policies"}`
+	_, err := runAgainst(t, fc, fp)
+	want := "push sync: platform refused an empty push (HTTP 422): pages is empty but this source has published synced policies"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	var ee *exitError
+	if errors.As(err, &ee) {
+		t.Fatalf("a refused push exits 1, got exit %d", ee.code)
+	}
+}
+
+func TestExitCode(t *testing.T) {
+	if got := exitCode(errors.New("push sync: HTTP 403")); got != 1 {
+		t.Errorf("plain error: exit %d, want 1", got)
+	}
+	wrapped := fmt.Errorf("run: %w", needsAttention(0, 1, 0))
+	if got := exitCode(wrapped); got != ExitNeedsAttention {
+		t.Errorf("needs attention: exit %d, want %d", got, ExitNeedsAttention)
+	}
+}
+
+func TestNeedsAttention(t *testing.T) {
+	for _, tc := range []struct {
+		max, skipped, warnings int
+		want                   string
+	}{
+		{0, 0, 0, ""},
+		{2, 2, 0, ""},
+		{2, 3, 0, "3 page(s) skipped by connector, more than --max-skipped=2"},
+		{0, 0, 1, "1 platform warning(s)"},
+		{0, 1, 2, "1 page(s) skipped by connector, more than --max-skipped=0; 2 platform warning(s)"},
+	} {
+		err := needsAttention(tc.max, tc.skipped, tc.warnings)
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("needsAttention(%d,%d,%d) = %v, want nil", tc.max, tc.skipped, tc.warnings, err)
+			}
+			continue
+		}
+		var ee *exitError
+		if !errors.As(err, &ee) || ee.code != ExitNeedsAttention || !strings.HasSuffix(err.Error(), tc.want) {
+			t.Errorf("needsAttention(%d,%d,%d) = %v, want exit %d ending %q", tc.max, tc.skipped, tc.warnings, err, ExitNeedsAttention, tc.want)
+		}
+	}
+}
+
 func TestRun_EmptySetPushesNothing(t *testing.T) {
 	fc := newFakeConfluence(t, nil, -1)
 	fp := newFakePlatform(t, 0)
@@ -324,8 +400,11 @@ func TestRun_UnconvertibleBodyIsReportedAndLeftOut(t *testing.T) {
 	}, -1)
 	fp := newFakePlatform(t, 0)
 	out, err := runAgainst(t, fc, fp)
-	if err != nil {
-		t.Fatalf("run: %v", err)
+	// The push is accepted, but one skip is over the default
+	// --max-skipped=0, so the run exits ExitNeedsAttention.
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != ExitNeedsAttention || !strings.Contains(err.Error(), "1 page(s) skipped by connector") {
+		t.Fatalf("run: err = %v, want exit %d for one skipped page", err, ExitNeedsAttention)
 	}
 	pushes, _ := fp.recorded()
 	if n := len(pushes[0]["pages"].([]any)); n != 1 {
@@ -334,6 +413,15 @@ func TestRun_UnconvertibleBodyIsReportedAndLeftOut(t *testing.T) {
 	if !strings.Contains(out, `page 2 "Deep": skipped by connector reason=body not converted`) ||
 		!strings.Contains(out, "skipped_by_connector=1") {
 		t.Errorf("report:\n%s", out)
+	}
+
+	// Within --max-skipped the run exits 0.
+	fc1 := newFakeConfluence(t, []fakePage{
+		{ID: "1", Title: "Good", Storage: fullProps + "<p>a</p>"},
+		{ID: "2", Title: "Deep", Storage: deep},
+	}, -1)
+	if _, err := runAgainst(t, fc1, newFakePlatform(t, 0), "--max-skipped", "1"); err != nil {
+		t.Fatalf("run with --max-skipped=1: %v", err)
 	}
 
 	// When no body converts at all, nothing is pushed.
@@ -366,6 +454,10 @@ func TestRun_Configuration(t *testing.T) {
 	c := config{site: "https://acme.atlassian.net", space: "POL", atlasURL: "https://atlas.example.com", atlasKey: "k"}
 	if err := c.resolve(); err == nil || !strings.Contains(err.Error(), "--timeout") {
 		t.Errorf("zero timeout: err = %v", err)
+	}
+	neg := config{site: "https://acme.atlassian.net", space: "POL", atlasURL: "https://atlas.example.com", atlasKey: "k", timeout: time.Minute, maxSkipped: -1}
+	if err := neg.resolve(); err == nil || !strings.Contains(err.Error(), "--max-skipped") {
+		t.Errorf("negative --max-skipped: err = %v", err)
 	}
 	if c.label != defaultLabel {
 		t.Errorf("label = %q, want the default %q", c.label, defaultLabel)
