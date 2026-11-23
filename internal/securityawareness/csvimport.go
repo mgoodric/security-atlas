@@ -3,8 +3,8 @@
 // real LMS connector exists. Rows key a person (source_person_id preferred,
 // work_email fallback — both tenant-unique at the DB layer), a course code,
 // and a campaign name; matched rows complete the assignment with
-// completion_source 'csv' and carry the same completion-evidence record the
-// manual path builds. Row-level problems are reported per row; only an
+// completion_source 'csv' and write the same completion-evidence record to
+// the ledger that the manual path writes (#2941). Row-level problems are reported per row; only an
 // infrastructure error aborts (and rolls back) the batch.
 //
 // Contract doc: docs/spec/security-awareness-csv-completion-import.md
@@ -21,8 +21,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
-	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 )
 
 // CSV column names (header-matched case-insensitively).
@@ -66,13 +64,14 @@ const (
 )
 
 // RowResult is the per-row outcome. Row is the 1-based data-row number
-// (the header is row 0). Evidence is set only for RowImported rows.
+// (the header is row 0). EvidenceRecordID is the ledger record holding the
+// row's completion, set for RowImported and RowAlreadyComplete rows.
 type RowResult struct {
-	Row          int
-	Status       string
-	AssignmentID uuid.UUID
-	Error        string
-	Evidence     *evidencev1.EvidenceRecord
+	Row              int
+	Status           string
+	AssignmentID     uuid.UUID
+	Error            string
+	EvidenceRecordID uuid.UUID
 }
 
 // ImportReport summarizes one ImportCompletionsCSV call.
@@ -110,15 +109,17 @@ type completionRow struct {
 // ImportCompletionsCSV parses r per the CSV completion-import contract and
 // records completions (completion_source 'csv') against existing
 // assignments, plus phishing-simulation results where the phishing column
-// group is present. actorID attributes the built evidence records, exactly
-// as the manual Complete + BuildCompletionEvidence path does.
+// group is present. Each completion's evidence goes through ingest in the
+// import transaction, attributed to actorID, exactly as Complete writes it.
+// An ingest refusal is an infrastructure error and rolls the batch back.
 //
 // All matched rows commit in ONE transaction: per-row validation and
 // resolution failures are collected in the report and never abort the
 // batch, while an infrastructure error returns non-nil and rolls the whole
 // batch back — the batch never partially corrupts state. Re-importing the
 // same file is idempotent: rows whose assignment is already completed at
-// the same instant report RowAlreadyComplete without rewriting.
+// the same instant report RowAlreadyComplete without rewriting, and get a
+// ledger record only if they have none.
 func (s *Store) ImportCompletionsCSV(ctx context.Context, r io.Reader, actorID string, lim CSVImportLimits) (ImportReport, error) {
 	var report ImportReport
 	rows, parseFailures, err := parseCompletionCSV(r, lim)
@@ -128,12 +129,23 @@ func (s *Store) ImportCompletionsCSV(ctx context.Context, r io.Reader, actorID s
 	for _, f := range parseFailures {
 		report.add(f)
 	}
+	now := s.clock()
+	current := rows[:0]
+	for _, row := range rows {
+		if completedInFuture(row.completedAt, now) {
+			report.add(RowResult{Row: row.row, Status: RowError, Error: fmt.Sprintf(
+				"completed_at %s is more than %s after the import", row.completedAt.UTC().Format(time.RFC3339), MaxCompletedAtLead)})
+			continue
+		}
+		current = append(current, row)
+	}
+	rows = current
 	if len(rows) == 0 {
 		return report, nil
 	}
 	err = s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 		for _, row := range rows {
-			res, err := ingestCompletion(ctx, tx, tenantID, row, CompletionSourceCSV, actorID)
+			res, err := s.ingestCompletion(ctx, tx, tenantID, row, CompletionSourceCSV, actorID)
 			if err != nil {
 				return fmt.Errorf("securityawareness: csv import row %d: %w", row.row, err)
 			}
@@ -158,7 +170,7 @@ func (s *Store) ImportCompletionsCSV(ctx context.Context, r io.Reader, actorID s
 // turns into a whole-batch rollback. Every row-level failure path here is
 // a no-rows or pre-validated condition, never a failed SQL statement, so
 // the transaction stays usable for subsequent rows.
-func ingestCompletion(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, row completionRow, source, actorID string) (RowResult, error) {
+func (s *Store) ingestCompletion(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, row completionRow, source, actorID string) (RowResult, error) {
 	res := RowResult{Row: row.row}
 	personID, rowErr, err := resolvePerson(ctx, tx, tenantID, row)
 	if err != nil {
@@ -199,14 +211,27 @@ WHERE a.tenant_id = $1 AND a.person_id = $2 AND lower(c.code) = lower($3) AND lo
 		if err != nil {
 			return res, err
 		}
-		evidence, err := BuildCompletionEvidence(detail, actorID)
-		if err != nil {
+		if err := s.ensureCompletionEvidence(ctx, tx, tenantID, &detail, actorID); err != nil {
 			return res, err
 		}
-		res.Status, res.Evidence = RowImported, evidence
+		res.Status, res.EvidenceRecordID = RowImported, *detail.EvidenceRecordID
 	case completedAt.Equal(row.completedAt):
-		// Idempotent re-import: same instant, nothing to rewrite.
-		res.Status = RowAlreadyComplete
+		// Idempotent re-import: same instant, nothing to rewrite. A
+		// completion recorded before #2941 has no ledger record yet, so
+		// it gets one here.
+		var detail AssignmentDetail
+		if err := scanAssignment(tx.QueryRow(ctx, `
+SELECT id, campaign_id, person_id, due_at, assigned_at, completed_at, completion_source, evidence_record_id
+FROM security_training_assignments WHERE tenant_id = $1 AND id = $2`, tenantID, assignmentID), &detail.Assignment); err != nil {
+			return res, err
+		}
+		if err := loadAssignmentDetail(ctx, tx, tenantID, &detail); err != nil {
+			return res, err
+		}
+		if err := s.ensureCompletionEvidence(ctx, tx, tenantID, &detail, actorID); err != nil {
+			return res, err
+		}
+		res.Status, res.EvidenceRecordID = RowAlreadyComplete, *detail.EvidenceRecordID
 	default:
 		existingSource := "unknown"
 		if completionSource != nil {
