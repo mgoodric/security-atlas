@@ -193,7 +193,7 @@ sql:
       # #2910: the drifted page hash on an in-place sync takeover.
       - "migrations/sql/20261298000000_policy_audit_sync_drift.sql"
       # #3000: unreadable pages on synced policies.
-      - "migrations/sql/20261302000000_policy_sync_unreadable.sql"
+      - "migrations/sql/20261304000000_policy_sync_unreadable.sql"
     queries: "internal/db/queries"
     gen:
       go:

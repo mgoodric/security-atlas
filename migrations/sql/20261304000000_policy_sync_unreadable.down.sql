@@ -1,4 +1,4 @@
--- security-atlas -- reverse 20261302000000_policy_sync_unreadable.sql.
+-- security-atlas -- reverse 20261304000000_policy_sync_unreadable.sql.
 --
 -- The unreadable state is derived: the next sync run records it again
 -- from the pages it carries. Dropping it loses nothing a run cannot

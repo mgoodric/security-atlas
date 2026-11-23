@@ -21,7 +21,7 @@
 -- Constitutional invariant #6: policies keeps its RLS policies; this
 -- migration adds no table.
 --
--- Reversible via 20261302000000_policy_sync_unreadable.down.sql.
+-- Reversible via 20261304000000_policy_sync_unreadable.down.sql.
 
 ALTER TABLE policies
     ADD COLUMN sync_unreadable_since TIMESTAMPTZ NULL,
