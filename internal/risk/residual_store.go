@@ -40,7 +40,8 @@ const WarningNoControlsLinked = "no_controls_linked"
 
 // ErrUnderivable marks a deterministic derive failure: the risk row itself
 // cannot yield a residual (a malformed non-empty inherent_score, or a
-// methodology with no scalar score). Retrying reads the same row and fails
+// methodology with no scalar score), or a linked control whose stored
+// evidence_queries cannot be read (#3005). Retrying reads the same row and fails
 // the same way, so the residual subscriber terms the message instead of
 // redelivering it (#2964). Transient DB and connection errors are never
 // wrapped with it.
@@ -232,11 +233,19 @@ func (d *ResidualDeriver) controlBreakdown(ctx context.Context, controlID uuid.U
 		// written the new row. EvaluateControl is idempotent (append-only,
 		// latest-by-evaluated_at wins) so the extra row is harmless.
 		if _, err := d.engine.EvaluateControl(ctx, controlID, eval.TriggerIngest, eval.FarFuture); err != nil {
-			if !errors.Is(err, eval.ErrControlNotFound) {
+			switch {
+			case errors.Is(err, eval.ErrControlNotFound):
+				// A linked control that no longer exists in-tenant contributes
+				// nothing — fall through with zeroed operational/coverage.
+			case errors.Is(err, eval.ErrUnevaluable):
+				// The control as stored cannot be evaluated, so no new
+				// evaluation row is coming (#3005): fall through and read the
+				// rows it already has. Failing here would hold back the
+				// residual of every risk linked to it, and the eval
+				// subscriber already logs and counts the control.
+			default:
 				return ControlBreakdown{}, fmt.Errorf("recompute control %s: %w", controlID, err)
 			}
-			// A linked control that no longer exists in-tenant contributes
-			// nothing — fall through with zeroed operational/coverage.
 		}
 	}
 
@@ -247,11 +256,11 @@ func (d *ResidualDeriver) controlBreakdown(ctx context.Context, controlID uuid.U
 
 	operational, noData, err := d.operationalScore(ctx, controlID)
 	if err != nil {
-		return ControlBreakdown{}, err
+		return ControlBreakdown{}, underivableIfUnevaluable(err)
 	}
 	coverage, err := d.coverageScore(ctx, controlID)
 	if err != nil {
-		return ControlBreakdown{}, err
+		return ControlBreakdown{}, underivableIfUnevaluable(err)
 	}
 
 	components := EffectivenessComponents{
@@ -273,6 +282,18 @@ func (d *ResidualDeriver) controlBreakdown(ctx context.Context, controlID uuid.U
 		ControlEffectiveness: ControlEffectiveness(components),
 		OperationalNoData:    noData,
 	}, nil
+}
+
+// underivableIfUnevaluable marks a read of a linked control's evaluations
+// as ErrUnderivable when the control cannot be read as stored (#3005): its
+// evidence_queries do not parse, so every read fails the same way. A zero
+// score in its place would claim a measured 0% effectiveness. Any other
+// error is returned as is.
+func underivableIfUnevaluable(err error) error {
+	if errors.Is(err, eval.ErrUnevaluable) {
+		return fmt.Errorf("%w: %w", ErrUnderivable, err)
+	}
+	return err
 }
 
 // operationalScore reuses slice 012's eval.Engine.Effectiveness — the rolling

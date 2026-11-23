@@ -282,6 +282,41 @@ func newStore(t *testing.T, migrate, app *pgxpool.Pool, now time.Time) *personne
 		WithIngest(ingest.New(app, reg).WithClock(clock))
 }
 
+// #3005: a worker event bound to a control UUID the tenant does not have is
+// ErrControlNotFound (the subscriber terms it), and writes no checklist. The
+// same event bound to a real control still creates one.
+func TestHandleWorkerEventUnknownControlIsErrControlNotFound(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	migrate := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, migrate)
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	store := newStore(t, migrate, app, now)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	w := worker.Worker{
+		SourceHRIS: worker.HRISRippling,
+		WorkerID:   "rippling-worker-3005",
+		Status:     worker.StatusTerminated,
+		EndDate:    now.Add(-24 * time.Hour),
+	}
+	_, err := store.HandleWorkerEvent(ctx, w, "evt-3005", uuid.New())
+	if !errors.Is(err, personnelsecurity.ErrControlNotFound) {
+		t.Fatalf("unknown control: err = %v, want ErrControlNotFound", err)
+	}
+	var n int
+	if err := migrate.QueryRow(context.Background(),
+		`SELECT count(*) FROM personnel_security_checklists WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count checklists: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("unknown control left %d checklists, want 0", n)
+	}
+
+	if _, err := store.HandleWorkerEvent(ctx, w, "evt-3005", seedAccessControl(t, migrate, tenant)); err != nil {
+		t.Fatalf("known control: %v", err)
+	}
+}
+
 // #1830: completion evidence goes through ingest.Service.ProcessInTx. A
 // completion whose caller-supplied observed_at is outside the skew window
 // is refused with ErrObservedAtSkew, the item stays open, no ledger row

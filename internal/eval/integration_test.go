@@ -536,6 +536,40 @@ func TestControlState_UnknownControlIsNotFound(t *testing.T) {
 	}
 }
 
+// #3005: EvaluateControl's deterministic failures carry the sentinels the
+// ingest subscriber classifies on: an unknown control is ErrControlNotFound
+// (it was an unwrapped scope error, so the subscriber NAKed it forever), and
+// a stored applicability_expr or evidence query that cannot run is
+// ErrUnevaluable.
+func TestEvaluateControl_DeterministicFailuresAreClassified(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+	engine := newEngine(app)
+
+	if _, err := engine.EvaluateControl(ctx, uuid.New(), eval.TriggerIngest, eval.FarFuture); !errors.Is(err, eval.ErrControlNotFound) {
+		t.Fatalf("unknown control: err = %v, want ErrControlNotFound", err)
+	}
+
+	badScope := seedControl(t, admin, tenant, "automated", "", "")
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE controls SET applicability_expr = '{"op":"bogus"}' WHERE id = $1`, badScope); err != nil {
+		t.Fatalf("set applicability_expr: %v", err)
+	}
+	if _, err := engine.EvaluateControl(ctx, badScope, eval.TriggerIngest, eval.FarFuture); !errors.Is(err, eval.ErrUnevaluable) {
+		t.Fatalf("bad applicability_expr: err = %v, want ErrUnevaluable", err)
+	}
+
+	badRego := seedControl(t, admin, tenant, "automated", "",
+		`[{"id":"broken","language":"rego","expression":`+jsonString("package evidence.query\nresult := ")+`}]`)
+	seedEvidence(t, admin, tenant, badRego, "pass", time.Now().Add(-time.Hour))
+	_, err := engine.EvaluateControl(ctx, badRego, eval.TriggerIngest, eval.FarFuture)
+	if !errors.Is(err, eval.ErrUnevaluable) || !errors.Is(err, eval.ErrRegoQuery) {
+		t.Fatalf("bad rego: err = %v, want ErrUnevaluable and ErrRegoQuery", err)
+	}
+}
+
 // ===== Rego evidence query path — bundle-declared query drives the result ==
 
 func TestEvaluateControl_RegoEvidenceQueryDrivesResult(t *testing.T) {

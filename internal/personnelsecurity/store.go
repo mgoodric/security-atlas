@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -24,6 +25,10 @@ import (
 // EvidenceCredentialID is the system credential the store ingests
 // checklist-completion evidence under.
 const EvidenceCredentialID = "system:personnel-security"
+
+// pgErrForeignKeyViolation is the SQLSTATE for a foreign key that does not
+// resolve.
+const pgErrForeignKeyViolation = "23503"
 
 type Store struct {
 	pool   *pgxpool.Pool
@@ -329,6 +334,11 @@ func (s *Store) create(ctx context.Context, in createInput) (Checklist, error) {
 			CreatedBy:         in.CreatedBy,
 		})
 		if err != nil {
+			// The checklist row's only foreign key is (tenant_id, control_id).
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == pgErrForeignKeyViolation {
+				return fmt.Errorf("%w: %s", ErrControlNotFound, in.ControlID)
+			}
 			return err
 		}
 		var items []dbx.PersonnelSecurityChecklistItem

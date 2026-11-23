@@ -38,10 +38,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/protobuf/proto"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
@@ -226,9 +230,19 @@ func (s *WorkerEventSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 			_ = msg.Ack()
 			return
 		}
+		if errors.Is(err, ErrControlNotFound) {
+			// The record binds the roster to a control UUID the tenant does
+			// not have: every redelivery hits the same foreign key, and
+			// MaxDeliver is unlimited (#3005).
+			countUnknownControl(tctx)
+			s.logger.Warn("personnel security subscriber: bound control not found; terming",
+				"tenant", tenantID, "control", controlID, "source", string(w.SourceHRIS), "err", err.Error())
+			_ = msg.Term()
+			return
+		}
 		s.logger.Warn("personnel security subscriber: handle worker event; will redeliver",
 			"tenant", tenantID, "err", err.Error())
-		_ = msg.NakWithDelay(2 * time.Second)
+		_ = msg.NakWithDelay(streambuf.RedeliveryDelay(msg))
 		return
 	}
 	if err := msg.Ack(); err != nil {
@@ -326,6 +340,36 @@ func payloadDate(pm map[string]any, key string) time.Time {
 	}
 	return t
 }
+
+// unknownControlEvents counts worker-lifecycle messages the subscriber termed
+// because their bound control is not in the tenant (#3005). The OTel counter
+// is created on first use, after main has wired the MeterProvider; the
+// in-process count lets tests assert it without a collector.
+var unknownControlEvents struct {
+	once    sync.Once
+	counter metric.Int64Counter
+	n       atomic.Uint64
+}
+
+func countUnknownControl(ctx context.Context) {
+	unknownControlEvents.n.Add(1)
+	unknownControlEvents.once.Do(func() {
+		c, err := otel.Meter("github.com/mgoodric/security-atlas/internal/personnelsecurity").Int64Counter(
+			"atlas.personnelsecurity.unknown_control",
+			metric.WithDescription("Worker lifecycle messages termed because their bound control is not in the tenant"))
+		if err == nil {
+			unknownControlEvents.counter = c
+		}
+	})
+	if c := unknownControlEvents.counter; c != nil {
+		c.Add(ctx, 1)
+	}
+}
+
+// UnknownControlEvents returns how many worker-lifecycle messages the
+// subscriber has termed for an unknown bound control since the process
+// started.
+func UnknownControlEvents() uint64 { return unknownControlEvents.n.Load() }
 
 // discardWriter is a no-op io.Writer for the default discard logger.
 type discardWriter struct{}

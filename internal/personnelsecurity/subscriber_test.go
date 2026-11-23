@@ -17,6 +17,7 @@
 //                                       fallback at evidence time)
 //  9. store transient error           → NakWithDelay (will retry)
 // 10. store sentinel (no checklist)   → Ack (not retryable)
+// 11. bound control not in tenant     → Term + counted (#3005)
 //
 // Branches deliberately left to integration (a real JetStream + Postgres is
 // the only honest test): Start's consumer create + pull loop, the
@@ -27,6 +28,7 @@ package personnelsecurity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -332,6 +334,25 @@ func TestHandleAcksOnStoreSentinel(t *testing.T) {
 	acks, naks, _ := msg.outcome()
 	if acks != 1 || naks != 0 {
 		t.Fatalf("acks/naks = %d/%d, want 1/0", acks, naks)
+	}
+}
+
+// #3005: a bound control the tenant does not have fails the same way on
+// every redelivery, so the message is termed and counted, not NAKed.
+func TestHandleTermsOnUnknownBoundControl(t *testing.T) {
+	t.Parallel()
+	creator := &fakeCreator{err: fmt.Errorf("%w: %s", ErrControlNotFound, uuid.New())}
+	s := newTestSubscriber(creator)
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	msg := buildWorkerMsg(t, terminatedWorker(now, now.Add(-24*time.Hour)), uuid.NewString(), uuid.NewString())
+	before := UnknownControlEvents()
+	s.handle(context.Background(), msg)
+	acks, naks, terms := msg.outcome()
+	if acks != 0 || naks != 0 || terms != 1 {
+		t.Fatalf("acks/naks/terms = %d/%d/%d, want 0/0/1", acks, naks, terms)
+	}
+	if got := UnknownControlEvents() - before; got < 1 {
+		t.Fatalf("unknown control count delta = %d, want >= 1", got)
 	}
 }
 

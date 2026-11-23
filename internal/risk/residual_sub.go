@@ -203,7 +203,7 @@ func (s *ResidualSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	riskIDs, err := s.listLinkedRisks(tctx, tenantID, controlID)
 	if err != nil {
 		s.logger.Warn("residual subscriber: list linked risks; will redeliver", "control", controlID, "err", err.Error())
-		_ = msg.NakWithDelay(2 * time.Second)
+		_ = msg.NakWithDelay(streambuf.RedeliveryDelay(msg))
 		return
 	}
 	if len(riskIDs) == 0 {
@@ -237,7 +237,7 @@ func (s *ResidualSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	if len(transient) > 0 {
 		s.logger.Warn("residual subscriber: recompute; will redeliver",
 			"control", controlID, "failed", len(transient), "err", errors.Join(transient...).Error())
-		_ = msg.NakWithDelay(2 * time.Second)
+		_ = msg.NakWithDelay(streambuf.RedeliveryDelay(msg))
 		return
 	}
 	if len(underivable) > 0 {

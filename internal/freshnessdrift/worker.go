@@ -272,7 +272,7 @@ func (s *RefreshSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	}
 	if err := s.newRefresher().RefreshTenant(tctx, drift.TriggerIngest); err != nil {
 		s.logger.Warn("freshnessdrift subscriber: refresh; will redeliver", "tenant", tenantID, "err", err.Error())
-		_ = msg.NakWithDelay(2 * time.Second)
+		_ = msg.NakWithDelay(streambuf.RedeliveryDelay(msg))
 		return
 	}
 	if err := msg.Ack(); err != nil {

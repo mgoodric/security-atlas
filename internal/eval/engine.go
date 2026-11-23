@@ -90,6 +90,26 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 // control_evaluations_triggered_by_manual_only CHECK enforces the same rule.
 var ErrActorNotManual = errors.New("eval: an actor is recorded only on a manual evaluation")
 
+// ErrUnevaluable marks an evaluation failure that comes from what is stored,
+// not from the database or the clock: a malformed applicability_expr,
+// evidence_queries or exception predicate, an evidence query that does not
+// compile or pass the SQL guard, or a query whose result is not a valid
+// result value. Evaluating again reads the same rows and fails the same way,
+// so the ingest subscriber terms the message instead of redelivering it
+// (#3005). Connection errors, statement timeouts and query runtime errors are
+// never wrapped with it: they may pass on a retry.
+var ErrUnevaluable = errors.New("eval: control cannot be evaluated as stored")
+
+// unevaluableError marks err as ErrUnevaluable without changing its message.
+type unevaluableError struct{ err error }
+
+func (e unevaluableError) Error() string   { return e.err.Error() }
+func (e unevaluableError) Unwrap() []error { return []error{e.err, ErrUnevaluable} }
+
+// unevaluable wraps err so errors.Is(err, ErrUnevaluable) holds and every
+// sentinel err already wraps still matches.
+func unevaluable(err error) error { return unevaluableError{err: err} }
+
 // EvaluateControlBy is EvaluateControl recording who started the run: actor
 // is stamped as triggered_by on every row the run appends (#2479). It is the
 // caller's principal (credstore.PrincipalOf) for POST
@@ -105,6 +125,12 @@ func (e *Engine) EvaluateControlBy(ctx context.Context, controlID uuid.UUID, tri
 	// read-skew hazard.
 	cells, err := e.cells.ControlApplicability(ctx, controlID)
 	if err != nil {
+		switch {
+		case errors.Is(err, scope.ErrControlNotFound):
+			return 0, fmt.Errorf("resolve applicable cells: %w: %w", ErrControlNotFound, err)
+		case errors.Is(err, scope.ErrBadApplicability):
+			return 0, unevaluable(fmt.Errorf("resolve applicable cells: %w", err))
+		}
 		return 0, fmt.Errorf("resolve applicable cells: %w", err)
 	}
 
@@ -216,7 +242,8 @@ func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, re
 	// status 'active', the next evaluation is the normal result again.
 	excepted, err := exceptedIn(exceptions, cell, now)
 	if err != nil {
-		return evaluationRow{}, fmt.Errorf("control %s: %w", meta.id, err)
+		// A stored exception predicate that does not parse fails every time.
+		return evaluationRow{}, unevaluable(fmt.Errorf("control %s: %w", meta.id, err))
 	}
 	if excepted {
 		result = ResultExcepted
@@ -271,11 +298,11 @@ func (e *Engine) evalQueries(ctx context.Context, tx pgx.Tx, meta controlMeta, i
 	perQuery := make([]inWindowRecord, 0, len(meta.queries))
 	for _, q := range meta.queries {
 		if q.Expression == "" {
-			return "", fmt.Errorf("control %s evidence query (language %q): expression is empty", meta.id, q.Language)
+			return "", unevaluable(fmt.Errorf("control %s evidence query (language %q): expression is empty", meta.id, q.Language))
 		}
 		if !SupportedQueryLanguages[q.Language] {
 			// FAIL LOUD — never silently skip a persisted query.
-			return "", fmt.Errorf("control %s evidence query: unsupported language %q (engine supports rego|sql|jsonpath)", meta.id, q.Language)
+			return "", unevaluable(fmt.Errorf("control %s evidence query: unsupported language %q (engine supports rego|sql|jsonpath)", meta.id, q.Language))
 		}
 
 		// #2818: each query sees only the records of its declared kind.
@@ -399,7 +426,7 @@ func parseEvidenceQueries(evidenceQueriesJSON []byte) ([]evidenceQueryManifest, 
 	}
 	var queries []evidenceQueryManifest
 	if err := json.Unmarshal(evidenceQueriesJSON, &queries); err != nil {
-		return nil, fmt.Errorf("parse evidence_queries: %w", err)
+		return nil, unevaluable(fmt.Errorf("parse evidence_queries: %w", err))
 	}
 	return queries, nil
 }
