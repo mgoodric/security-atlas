@@ -74,7 +74,11 @@ const (
 )
 
 func policy(id string, prio int, group string) string {
-	return `{"type":"OKTA_SIGN_ON","id":"` + id + `","status":"ACTIVE","priority":` + strconv.Itoa(prio) + `,"conditions":{"people":{"groups":{"include":["` + group + `"]}}}}`
+	return policyWith(id, prio, `{"people":{"groups":{"include":["`+group+`"]}}}`)
+}
+
+func policyWith(id string, prio int, conds string) string {
+	return `{"type":"OKTA_SIGN_ON","id":"` + id + `","status":"ACTIVE","priority":` + strconv.Itoa(prio) + `,"conditions":` + conds + `}`
 }
 
 func rule(id string, prio int, conds, signon string) string {
@@ -103,6 +107,14 @@ func TestPull_SessionMFACases(t *testing.T) {
 			map[string]string{"p1": `[` + rule("r1", 1, anywhere, mfa) + `]`, "pdef": defRules}, "", true, ""},
 		{"everyone policy with a zoned mfa rule falls through to the default", `[` + policy("p1", 1, everyone) + `,` + def + `]`,
 			map[string]string{"p1": `[` + rule("r1", 1, zone, mfa) + `]`, "pdef": defRules}, "", false, ""},
+		{"everyone policy excluding a group does not shadow the default", `[` + policyWith("p1", 1, `{"people":{"groups":{"include":["`+everyone+`"],"exclude":["00g1contractors"]}}}`) + `,` + def + `]`,
+			map[string]string{"p1": `[` + rule("r1", 1, anywhere, mfa) + `]`, "pdef": defRules}, "", false, ""},
+		{"everyone policy excluding a user does not shadow the default", `[` + policyWith("p1", 1, `{"people":{"groups":{"include":["`+everyone+`"]},"users":{"exclude":["00u1svc"]}}}`) + `,` + def + `]`,
+			map[string]string{"p1": `[` + rule("r1", 1, anywhere, mfa) + `]`, "pdef": defRules}, "", false, ""},
+		{"everyone policy with another condition does not shadow the default", `[` + policyWith("p1", 1, `{"people":{"groups":{"include":["`+everyone+`"]}},"network":{"connection":"ZONE","include":["nzo1"]}}`) + `,` + def + `]`,
+			map[string]string{"p1": `[` + rule("r1", 1, anywhere, mfa) + `]`, "pdef": defRules}, "", false, ""},
+		{"everyone policy with empty excludes shadows the default", `[` + policyWith("p1", 1, `{"people":{"groups":{"include":["`+everyone+`"],"exclude":[]},"users":{"exclude":[]}}}`) + `,` + def + `]`,
+			map[string]string{"p1": `[` + rule("r1", 1, anywhere, mfa) + `]`, "pdef": defRules}, "", true, ""},
 		{"group policy does not shadow the default", `[` + policy("p1", 1, "00g1admins") + `,` + def + `]`,
 			map[string]string{"p1": `[` + rule("r1", 1, anywhere, mfa) + `]`, "pdef": defRules}, "", false, ""},
 		{"mfa catch-all rule shadows the default rule", `[` + def + `]`,

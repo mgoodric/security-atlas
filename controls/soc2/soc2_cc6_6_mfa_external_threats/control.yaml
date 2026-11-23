@@ -30,9 +30,10 @@ description: |
   which every sign-in passes before any app: true when every reachable
   active rule denies access or requires a factor, false when a reachable
   rule allows a session without one. A rule after a catch-all rule of the
-  same policy is unreachable, and so is every policy after one that
-  includes the Everyone group and has an active catch-all rule; any other
-  rule counts as reachable.
+  same policy is unreachable, and so is every policy after one whose only
+  condition includes the Everyone group, with no group or user excluded,
+  and that has an active catch-all rule; any other rule counts as
+  reachable.
 
   One admin or infrastructure app for which both say false fails the
   control, whatever the other apps report, and so does a mistyped field.

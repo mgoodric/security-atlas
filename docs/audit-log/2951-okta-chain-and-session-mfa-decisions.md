@@ -97,10 +97,21 @@ counts every active rule as reachable except two cases it can prove from
 the policy objects:
 
 - a rule after a catch-all rule in the same policy;
-- every policy after one that includes the Everyone group and has an
-  active catch-all rule. A user who matches no rule of a matched policy
-  goes on to the next policy, so the Everyone condition alone does not
-  shadow anything.
+- every policy after one that covers every user and has an active
+  catch-all rule. A user who matches no rule of a matched policy goes on
+  to the next policy, so the Everyone condition alone does not shadow
+  anything.
+
+A policy covers every user only when its sole condition is
+`people.groups.include` naming the Everyone group. `PolicyPeopleCondition`
+also carries `groups.exclude`, `users.include` and `users.exclude`. A
+non-empty one of these, or any other condition, leaves some users to fall
+through to a later policy, which may allow one factor. Such a policy
+therefore shadows nothing. The first cut checked only `groups.include`,
+and the #2997 review found the false pass that followed: an Everyone
+policy that excludes a group, with an MFA catch-all, hid a 1FA Default
+Policy. `TestPull_SessionMFACases` now covers group, user and network
+exclusions.
 
 A rule is catch-all when it has no conditions, or each condition it has
 selects everything: `people` with empty user and group lists, `network`

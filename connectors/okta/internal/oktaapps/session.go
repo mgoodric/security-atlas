@@ -19,32 +19,55 @@ import (
 // OpenAPI spec). The connector does not resolve group membership, so it
 // treats every active rule as reachable except where it can show
 // otherwise: a rule after a catch-all rule of the same policy, and every
-// policy after one that includes the Everyone group and has an active
-// catch-all rule.
+// policy after one whose only condition includes the Everyone group, with
+// no exclusion, and that has an active catch-all rule.
 
 type rawSessionPolicy struct {
-	ID         string `json:"id"`
-	Status     string `json:"status"`
-	Priority   *int   `json:"priority"`
-	Conditions *struct {
-		People *struct {
-			Groups *struct {
-				Include []string `json:"include"`
-			} `json:"groups"`
-		} `json:"people"`
-	} `json:"conditions"`
+	ID         string          `json:"id"`
+	Status     string          `json:"status"`
+	Priority   *int            `json:"priority"`
+	Conditions json.RawMessage `json:"conditions"`
 }
 
-func (p rawSessionPolicy) includes(groupID string) bool {
-	if groupID == "" || p.Conditions == nil || p.Conditions.People == nil || p.Conditions.People.Groups == nil {
+// coversEveryone reports whether every user meets the policy's
+// conditions: its only condition is people.groups.include, which names
+// the Everyone group. Any exclusion (people.groups.exclude,
+// people.users.exclude, both in PolicyPeopleCondition), a user include,
+// or any other condition leaves some users to fall through to the next
+// policy, so the policy then shadows nothing (#2951 review).
+func (p rawSessionPolicy) coversEveryone(everyoneID string) bool {
+	if everyoneID == "" {
 		return false
 	}
-	for _, g := range p.Conditions.People.Groups.Include {
-		if g == groupID {
-			return true
-		}
+	var conds map[string]map[string]any
+	if err := json.Unmarshal(p.Conditions, &conds); err != nil {
+		return false
 	}
-	return false
+	if len(conds) != 1 {
+		return false
+	}
+	people, ok := conds["people"]
+	if !ok {
+		return false
+	}
+	includesEveryone := func(v any) bool {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return false
+		}
+		inc, ok := m["include"].([]any)
+		if !ok || !onlyKeys(m, map[string]func(any) bool{"include": func(any) bool { return true }, "exclude": emptyList}) {
+			return false
+		}
+		for _, g := range inc {
+			if g == everyoneID {
+				return true
+			}
+		}
+		return false
+	}
+	return onlyKeys(people, map[string]func(any) bool{"groups": includesEveryone, "users": emptyInclExcl}) &&
+		people["groups"] != nil
 }
 
 // sessionMFA decides whether the global session policy requires MFA for
@@ -95,7 +118,7 @@ func sessionMFA(ctx context.Context, api API) mfaVerdict {
 		if why != "" {
 			undecided = why
 		}
-		if ordered && catchAll && p.includes(everyoneID) {
+		if ordered && catchAll && p.coversEveryone(everyoneID) {
 			break
 		}
 	}

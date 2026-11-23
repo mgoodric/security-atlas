@@ -46,8 +46,9 @@ record per app. Three fields decide `soc2_cc6_6_mfa_external_threats`:
   every reachable active rule denies access or sets `requireFactor`, and
   false when a reachable rule allows a session without it. A rule after a
   catch-all rule of its policy is unreachable, and so is every policy
-  after one that includes the Everyone group and has an active catch-all
-  rule; group membership is not resolved. It is omitted, with
+  after one whose only condition includes the Everyone group, with no
+  exclusion, and that has an active catch-all rule; group membership is
+  not resolved. It is omitted, with
   `session_reason`, when there is no active policy, when the policies or
   the Everyone group could not be read, or when a reachable rule has no
   `signon` action. Decisions: `docs/audit-log/2951-okta-chain-and-session-mfa-decisions.md`.
