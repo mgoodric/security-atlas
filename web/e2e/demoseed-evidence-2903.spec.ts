@@ -9,10 +9,15 @@
 // renders exactly those rows, kind and result, for each control.
 //
 // The seed is idempotent: on a re-run against the same database it finds
-// its tenant and changes nothing. It needs the Go toolchain (`go run`),
-// psql, and DATABASE_URL as a BYPASSRLS DSN; CI's Playwright job has all
-// three. DATABASE_URL_APP, when set, lets the seed run the post-seed
-// evaluation too; the list itself reads only the ledger.
+// its tenant and changes nothing, so a re-run would assert whatever an
+// older seed wrote. beforeAll therefore tears the tenant down first when
+// it exists (#2980), and each run asserts a fresh seed.
+//
+// It needs atlas-cli, psql, and DATABASE_URL as a BYPASSRLS DSN.
+// ATLAS_CLI_BIN names a prebuilt atlas-cli; CI's Playwright job sets it to
+// the binary the shared build job uploads. Without it the spec falls back
+// to `go run ./cmd/atlas-cli`. DATABASE_URL_APP, when set, lets the seed
+// run the post-seed evaluation too; the list itself reads only the ledger.
 //
 // Run locally:
 //   cd web
@@ -50,6 +55,25 @@ function psql(sql: string): string {
   ).trim();
 }
 
+// Runs `atlas-cli demo <args>`: the prebuilt binary when ATLAS_CLI_BIN is
+// set, else `go run` from the repo root.
+function demo(...args: string[]): void {
+  const bin = process.env.ATLAS_CLI_BIN;
+  const [cmd, argv] = bin
+    ? [bin, ["demo", ...args]]
+    : ["go", ["run", "./cmd/atlas-cli", "demo", ...args]];
+  execFileSync(cmd, argv, {
+    cwd: REPO_ROOT,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      ATLAS_ENABLE_DEMO_SEED: "true",
+      // The e2e database already holds other tenants.
+      ATLAS_ALLOW_MULTI_TENANT: "true",
+    },
+  });
+}
+
 // The table branch only: at `mobileMode="cards"` the list also mounts a
 // hidden card stack that repeats every cell testid.
 function table(page: Page) {
@@ -65,22 +89,15 @@ test.describe("demo seed evidence renders on /evidence (#2903)", () => {
   let controls: SeededControl[] = [];
 
   test.beforeAll(() => {
-    // `go run` compiles atlas-cli first; allow for a cold build cache.
+    // Without ATLAS_CLI_BIN, `go run` compiles atlas-cli first; allow for
+    // a cold build cache.
     test.setTimeout(600_000);
-    execFileSync(
-      "go",
-      ["run", "./cmd/atlas-cli", "demo", "seed", "--tenant-slug", SLUG],
-      {
-        cwd: REPO_ROOT,
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          ATLAS_ENABLE_DEMO_SEED: "true",
-          // The e2e database already holds other tenants.
-          ATLAS_ALLOW_MULTI_TENANT: "true",
-        },
-      },
-    );
+    // Teardown refuses a slug with no tenant, so tear down only an earlier
+    // run's tenant.
+    if (psql(`SELECT count(*) FROM tenants WHERE slug = '${SLUG}'`) !== "0") {
+      demo("teardown", "--tenant-slug", SLUG);
+    }
+    demo("seed", "--tenant-slug", SLUG);
 
     tenantId = psql(`SELECT id FROM tenants WHERE slug = '${SLUG}'`);
     expect(tenantId, `no tenant with slug ${SLUG} after the seed`).toMatch(
