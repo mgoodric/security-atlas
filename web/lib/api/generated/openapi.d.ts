@@ -5042,7 +5042,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** GET /v1/risks/imports — the organisation's 100 newest risk import batches, newest first, each with its status (staged | completed | closed), counts, pending_count, waiting_count (its approved rows waiting on a pending parent row of any import) and children_waiting_count (approved rows of any import waiting on its pending rows), and closed_by, closed_at and close_reason once closed; a batch has no expiry (#3002) */
+        get: operations["get-v1-risks-imports"];
         put?: never;
         /** POST /v1/risks/imports — upload a CSV/XLSX risk register (multipart file, repeatable column_map field=Header, methodology nist_800_30 (default) | qualitative_5x5 | fair, else 400) as a staged import batch; every row is staged or rejected with a reason; inherent and residual scores are read from columns in the methodology's shape (likelihood and impact 1..5, or FAIR loss event frequency and loss magnitude), a row with none imports unscored and a row with an invalid score is rejected (invalid_score); the risk export's inherent_score and residual_score JSON columns are read through the same rule, never alongside the same score's pair of columns; the export's owner_user_id links the owner when it is an active user of the uploading tenant, and org_unit_id places the risk when it is an org unit of that tenant and no org unit name is given, else either stays unmapped (#2898); the export's parent_risk_ids links the approved risk under each id that is a risk of the uploading tenant when no parent risk ID is given, ids that are not staying unmapped (#2957); a treatment column maps to the treatment (an unknown value is rejected, invalid_treatment); an accepted row stages a proposed acceptance with its justification and until-date, never an approved one, and is rejected (invalid_acceptance) without both, the register accepter kept on the staged row as historical; a linked-controls column resolves to the tenant controls by control id or bundle id; mitigate with no resolved control, or transfer with no instrument reference, stages as untreated flagged treatment_downgraded (#2842); capped at 5 MiB, 5000 rows and 200 columns; a write on risks (#2839); repeatable ignore_column=Header keeps a column unmapped whatever its alias (#2848) */
         post: operations["post-v1-risks-imports"];
@@ -5076,7 +5077,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839); category_values and theme_values list the batch's distinct category and theme values, each with the category slug or theme name it maps to, absent while unmapped (#2844); uploader_user_id is the uploading person, and can_decide says whether the caller may approve or reject the rows, true for an admin or approver who is a person and did not upload the batch (#2881) */
+        /** GET /v1/risks/imports/{id} — a risk import batch with its methodology, counts, unmapped columns, staged rows (each with its unmapped values and decision) and rejected rows with their reasons (#2839); category_values and theme_values list the batch's distinct category and theme values, each with the category slug or theme name it maps to, absent while unmapped (#2844); uploader_user_id is the uploading person, and can_decide says whether the caller may approve or reject the rows, true for an admin or approver who is a person and did not upload the batch (#2881); a closed batch carries closed_by, closed_at and close_reason (#3002) */
         get: operations["get-v1-risks-imports-id"];
         put?: never;
         post?: never;
@@ -5097,6 +5098,23 @@ export interface paths {
         put?: never;
         /** POST /v1/risks/imports/{id}/approve — approve every pending row, creating each as a risk through the risk store; a row whose organisation risk ID is already on a risk of the tenant is marked duplicate and nothing is created; a row takes the category and themes its values map to, and a row with an unmapped category or theme value is rejected with those values as the reason (#2844); a person who is a tenant admin or holds the approver flag must approve, never a grc_engineer and never the batch's uploader (403 otherwise, */
         post: operations["post-v1-risks-imports-id-approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/risks/imports/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /v1/risks/imports/{id}/close — close a staged risk import batch nobody will finish; body {reason} (required); every pending row is rejected with the reason import closed: <reason> and audit-logged as a rejection, rows of any import waiting on them link, keep waiting on another pending row carrying the ID, or fail with the parent_link_failed flag, and the batch's own rows still waiting on an ID no pending row carries fail; the batch is closed and takes no further decision or mapping; a person who is a tenant admin or holds the approver flag must close, never a grc_engineer and never the batch's uploader (403 otherwise); 409 when the batch is already completed or closed (#3002) */
+        post: operations["post-v1-risks-imports-id-close"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5145,7 +5163,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** PUT /v1/risks/imports/{id}/values — map one distinct category or theme value of a staged risk import batch; body {kind (category or theme), value, target?, create?}; target maps it to an existing category (slug or name) or theme (name), else 422; create {slug, name, description} creates the category or theme for it through the audited creation, a tenant approver only (403 otherwise); neither clears the mapping; 409 once the batch is completed; a write on risks (#2844) */
+        /** PUT /v1/risks/imports/{id}/values — map one distinct category or theme value of a staged risk import batch; body {kind (category or theme), value, target?, create?}; target maps it to an existing category (slug or name) or theme (name), else 422; create {slug, name, description} creates the category or theme for it through the audited creation, a tenant approver only (403 otherwise); neither clears the mapping; 409 once the batch is completed or closed; a write on risks (#2844) */
         put: operations["put-v1-risks-imports-id-values"];
         post?: never;
         delete?: never;
@@ -13658,6 +13676,26 @@ export interface operations {
             };
         };
     };
+    "get-v1-risks-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
     "post-v1-risks-imports": {
         parameters: {
             query?: never;
@@ -13721,6 +13759,28 @@ export interface operations {
         };
     };
     "post-v1-risks-imports-id-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Default response envelope. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ack"];
+                };
+            };
+        };
+    };
+    "post-v1-risks-imports-id-close": {
         parameters: {
             query?: never;
             header?: never;

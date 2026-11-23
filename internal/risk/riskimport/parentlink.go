@@ -31,10 +31,12 @@ import (
 //     it are linked (it became a risk, or was a duplicate of one), keep
 //     waiting (it was rejected, and another pending row carries the ID) or
 //     fail (it was rejected, and none does);
-//   - when the row's own batch completes, a row still waiting on an ID no
-//     pending row of the tenant carries fails (failStranded). Decisions
-//     settle waiting rows as they go, so this is a backstop: a row
-//     stranded there would otherwise wait for ever, unflagged;
+//   - when the row's own batch completes or is closed (#3002), a row still
+//     waiting on an ID no pending row of the tenant carries fails
+//     (failStranded). Decisions settle waiting rows as they go, so this is
+//     a backstop: a row stranded there would otherwise wait for ever,
+//     unflagged. Closing a batch rejects its pending rows, which settles
+//     the rows of every batch waiting on them;
 //   - a link that breaks a rule, or names a parent that is neither a risk
 //     nor a pending row, fails on that row: the row keeps its risk, records
 //     why, and is flagged parent_link_failed for review.
@@ -197,12 +199,41 @@ func settleWaiting(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, ref strin
 	return nil
 }
 
-// failStranded fails the rows of a batch that has just completed which are
-// still waiting on a parent ID no pending row of the tenant carries. A row
-// waiting on a pending row of another batch keeps waiting: that row's
-// decision settles it. d is the decision that completed the batch. The
+// batchEnd is how a batch stopped taking decisions, for failStranded: the
+// verb its reasons use (completed, closed) and the audit attribution of a
+// link it still makes.
+type batchEnd struct {
+	BatchID string
+	Verb    string
+	Audit   func(w waitingRow) risk.HierarchyAudit
+}
+
+// completedBy is the end of a batch whose last pending row d decided.
+func completedBy(d decision) batchEnd {
+	return batchEnd{BatchID: d.BatchID, Verb: "completed", Audit: func(w waitingRow) risk.HierarchyAudit {
+		return risk.HierarchyAudit{Actor: d.Approver, Detail: map[string]any{
+			"import_batch_id": w.batchID, "import_row_id": w.rowID,
+			"settled_by_import_row_id": d.RowID, "note": "linked when its import completed",
+		}}
+	}}
+}
+
+// closedBy is the end of a batch the approver closed (#3002).
+func closedBy(batchID, approver string) batchEnd {
+	return batchEnd{BatchID: batchID, Verb: "was closed", Audit: func(w waitingRow) risk.HierarchyAudit {
+		return risk.HierarchyAudit{Actor: approver, Detail: map[string]any{
+			"import_batch_id": w.batchID, "import_row_id": w.rowID,
+			"note": "linked when its import was closed",
+		}}
+	}}
+}
+
+// failStranded fails the rows of a batch that has just completed or been
+// closed which are still waiting on a parent ID no pending row of the
+// tenant carries. A row waiting on a pending row of another batch keeps
+// waiting: that row's decision, or the close of its batch, settles it. The
 // caller holds the hierarchy lock.
-func failStranded(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d decision) error {
+func failStranded(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, end batchEnd) error {
 	ws, err := waitingRows(ctx, tx, `
 		SELECT w.id::text, w.batch_id::text, w.risk_id, w.parent_ref
 		FROM risk_import_rows w
@@ -213,21 +244,15 @@ func failStranded(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d decision
 			  AND p.external_ref IS NOT NULL AND lower(p.external_ref) = lower(w.parent_ref))
 		ORDER BY w.row_number
 		FOR UPDATE OF w
-	`, tenantID, d.BatchID)
+	`, tenantID, end.BatchID)
 	if err != nil {
 		return err
 	}
 	for _, w := range ws {
 		// settleLink re-reads the parent, so a parent that is a risk by
-		// now is still linked, by the person whose decision completed the
-		// batch. Otherwise the row fails.
-		link, err := settleLink(ctx, tx, tenantID, w.riskID, w.parentRef, risk.HierarchyAudit{
-			Actor: d.Approver,
-			Detail: map[string]any{
-				"import_batch_id": w.batchID, "import_row_id": w.rowID,
-				"settled_by_import_row_id": d.RowID, "note": "linked when its import completed",
-			},
-		})
+		// now is still linked, by the person who ended the batch.
+		// Otherwise the row fails.
+		link, err := settleLink(ctx, tx, tenantID, w.riskID, w.parentRef, end.Audit(w))
 		if err != nil {
 			return err
 		}
@@ -235,7 +260,7 @@ func failStranded(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d decision
 			continue
 		}
 		if link.Status == ParentLinkFailed {
-			link.Error = strandedParent(w.parentRef, link.Error)
+			link.Error = strandedParent(w.parentRef, end.Verb, link.Error)
 		}
 		if err := recordParentLink(ctx, tx, w.rowID, link); err != nil {
 			return err
@@ -336,9 +361,9 @@ func unknownParent(ref string) string {
 }
 
 // strandedParent is the reason a row that was still waiting when its
-// import completed failed.
-func strandedParent(ref, reason string) string {
-	return fmt.Sprintf("still waiting on parent risk ID %q when this import completed: %s", ref, reason)
+// import completed or was closed (verb) failed.
+func strandedParent(ref, verb, reason string) string {
+	return fmt.Sprintf("still waiting on parent risk ID %q when this import %s: %s", ref, verb, reason)
 }
 
 // linkRefusal names why the hierarchy rules refused a link, or reports the

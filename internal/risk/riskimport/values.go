@@ -38,7 +38,7 @@ const (
 
 var (
 	// ErrBatchCompleted is a mapping change on a batch with no pending row.
-	ErrBatchCompleted = errors.New("riskimport: import batch is completed; its value mapping is final")
+	ErrBatchCompleted = errors.New("riskimport: import batch is completed or closed; its value mapping is final")
 	// ErrValueNotFound is a mapping of a value the batch does not have.
 	ErrValueNotFound = errors.New("riskimport: the batch has no such value")
 	// ErrInvalidValueKind is a kind other than category or theme.

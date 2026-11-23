@@ -20,7 +20,7 @@ vi.mock("next/headers", () => ({
 
 import { PUT as mapValue } from "./[id]/values/route";
 import { POST as preview } from "./preview/route";
-import { POST as upload } from "./route";
+import { GET as list, POST as upload } from "./route";
 
 const B = "b2848000-0000-4000-8000-000000000001";
 
@@ -56,6 +56,18 @@ describe("risk import upload BFF routes", () => {
     process.env.ATLAS_HTTP_URL = "http://atlas:8080";
   });
   afterEach(() => vi.restoreAllMocks());
+
+  test("GET lists the imports with the bearer and is not cached (#3002)", async () => {
+    const spy = upstream(200, { batches: [] });
+    const res = await list();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const { url, init } = call(spy);
+    expect(url).toBe("http://atlas:8080/v1/risks/imports");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      `Bearer ${TEST_BEARER_DEFAULT}`,
+    );
+  });
 
   for (const [name, route, path, status] of [
     ["upload", upload, "/v1/risks/imports", 201],
