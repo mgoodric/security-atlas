@@ -36,6 +36,7 @@ import {
   type ApproveResult,
   type BatchProgress,
   type BatchRow,
+  type CloseResult,
   type RiskImportBatch,
   type RowDecision,
   type RowFilter,
@@ -47,6 +48,10 @@ import {
   approveAllWarning,
   batchPath,
   batchProgress,
+  batchStatusLabel,
+  batchStatusVariant,
+  canClose,
+  closeMessage,
   emptyRowsMessage,
   filterRows,
   flagLabel,
@@ -149,6 +154,7 @@ export default function RiskImportReviewPage({
   // risks: drop the cached risks list so the Risks page shows them.
   function refresh() {
     void qc.invalidateQueries({ queryKey: ["risk-import", id] });
+    void qc.invalidateQueries({ queryKey: ["risk-imports"] });
     void qc.invalidateQueries({ queryKey: ["risks"] });
   }
 
@@ -198,10 +204,11 @@ export default function RiskImportReviewPage({
         <>
           <Badge variant="secondary">{batch.source_format.toUpperCase()}</Badge>
           <Badge
-            variant={batch.status === "completed" ? "pass" : "info"}
+            variant={batchStatusVariant(batch.status)}
             data-testid="risk-import-batch-status"
+            data-status={batch.status}
           >
-            {batch.status === "completed" ? "Completed" : "Awaiting review"}
+            {batchStatusLabel(batch.status)}
           </Badge>
         </>
       }
@@ -254,6 +261,13 @@ export default function RiskImportReviewPage({
               </span>
             </ConfirmInline>
           ) : null}
+          {canClose(batch) ? (
+            <CloseImport
+              batchID={id}
+              pending={progress.pending}
+              onClosed={refresh}
+            />
+          ) : null}
         </div>
       ) : (
         <p
@@ -264,6 +278,21 @@ export default function RiskImportReviewPage({
           approves or rejects its rows.
         </p>
       )}
+      {batch.status === "closed" ? (
+        <p className="text-sm" data-testid="risk-import-closed">
+          Closed
+          {batch.closed_at
+            ? ` on ${new Date(batch.closed_at).toLocaleDateString()}`
+            : ""}
+          {batch.closed_by ? (
+            <>
+              {" "}
+              by <Person id={batch.closed_by} />
+            </>
+          ) : null}
+          : {batch.close_reason}
+        </p>
+      ) : null}
       {allM.isError ? (
         <Alert
           variant="destructive"
@@ -368,6 +397,89 @@ export default function RiskImportReviewPage({
         </section>
       ) : null}
     </DetailHeader>
+  );
+}
+
+// CloseImport closes a staged import nobody will finish (#3002): every
+// pending row is rejected with the reason, and rows of any import waiting
+// on them are settled. A reason is required before sending.
+function CloseImport({
+  batchID,
+  pending,
+  onClosed,
+}: {
+  batchID: string;
+  pending: number;
+  onClosed: () => void;
+}) {
+  const { toast } = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState("");
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const closeM = useMutation({
+    mutationFn: () =>
+      postJSON<CloseResult>(`${batchPath(batchID)}/close`, {
+        reason: reason.trim(),
+      }),
+    onSuccess: (r) => {
+      toast(closeMessage(r));
+      setConfirming(false);
+    },
+    onSettled: onClosed,
+  });
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        ref={buttonRef}
+        disabled={closeM.isPending}
+        onClick={() => setConfirming(true)}
+        data-testid="risk-import-close"
+      >
+        Close import
+      </Button>
+      {confirming ? (
+        <ConfirmInline
+          prompt={`Close this import? Its ${pending} pending ${
+            pending === 1 ? "row is" : "rows are"
+          } rejected with your reason, and it takes no further decision.`}
+          confirmLabel="Close import"
+          busy={closeM.isPending || reason.trim() === ""}
+          initialFocus={reasonRef}
+          returnFocus={() => buttonRef.current}
+          onCancel={() => {
+            setConfirming(false);
+            setReason("");
+          }}
+          onConfirm={() => closeM.mutate()}
+          data-testid="risk-import-close-confirm"
+        >
+          <span className="text-xs text-muted-foreground">
+            Rows of any import waiting on these rows as their parent are linked
+            elsewhere if another pending row carries the risk ID, and otherwise
+            fail their parent link.
+          </span>
+          <textarea
+            ref={reasonRef}
+            aria-label="Reason for closing"
+            placeholder="Reason (required)"
+            className="w-full rounded-md border p-2 text-sm"
+            rows={2}
+            maxLength={2000}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            data-testid="risk-import-close-reason"
+          />
+        </ConfirmInline>
+      ) : null}
+      {closeM.isError ? (
+        <Alert variant="destructive" data-testid="risk-import-close-error">
+          <AlertDescription>{closeM.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+    </>
   );
 }
 

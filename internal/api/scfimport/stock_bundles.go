@@ -45,6 +45,7 @@ var StockControlBundleIDs = []string{
 	"soc2_cc6_6_mfa_external_threats",
 	"soc2_cc6_7_data_classification",
 	"soc2_cc6_7_encryption_in_transit",
+	"soc2_cc6_7_s3_tls_enforced",
 	"soc2_cc6_8_malware_protection",
 	"soc2_cc7_1_vulnerability_detection",
 	"soc2_cc7_1_vulnerability_remediation",

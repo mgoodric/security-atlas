@@ -172,6 +172,28 @@ async function mockImport(page: import("@playwright/test").Page) {
       captured.upload = req.postDataBuffer()?.toString("utf8") ?? "";
       return json(route, 201, batch());
     }
+    // #3002: the recent imports under the upload form.
+    if (p === "/api/risks/imports" && req.method() === "GET") {
+      return json(route, 200, {
+        batches: [
+          {
+            id: BATCH_ID,
+            source_filename: "abandoned.csv",
+            source_format: "csv",
+            methodology: "nist_800_30",
+            uploaded_by: "user:u2848",
+            status: "staged",
+            total_rows: 3,
+            staged_count: 3,
+            rejected_count: 0,
+            pending_count: 2,
+            waiting_count: 0,
+            children_waiting_count: 1,
+            created_at: "2026-11-01T00:00:00Z",
+          },
+        ],
+      });
+    }
     if (
       p === `/api/risks/imports/${BATCH_ID}/values` &&
       req.method() === "PUT"
@@ -236,6 +258,15 @@ test.describe("risk import upload with the column-mapping step (#2848)", () => {
     const captured = await mockImport(page);
 
     await page.goto("/risks/imports");
+    // #3002: recent imports with their pending and waiting counts.
+    const listed = page.getByTestId("risk-import-list-row");
+    await expect(listed).toHaveCount(1, { timeout: 30_000 });
+    await expect(listed.getByTestId("risk-import-list-counts")).toHaveText(
+      "2 pending · 1 row waiting on this import",
+    );
+    await expect(page.getByTestId("risk-import-list")).toContainText(
+      "Imports do not expire",
+    );
     await page.getByTestId("risk-import-file").setInputFiles(FIXTURE);
     await page
       .getByTestId("risk-import-methodology")

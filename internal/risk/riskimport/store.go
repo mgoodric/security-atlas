@@ -210,11 +210,13 @@ func (s *Store) getBatch(ctx context.Context, id string) (Batch, error) {
 		err := tx.QueryRow(ctx, `
 			SELECT id::text, source_filename, source_format, methodology, uploaded_by,
 			       COALESCE(uploader_user_id::text, ''), status,
-			       total_rows, staged_count, rejected_count, unmapped_columns, created_at
+			       total_rows, staged_count, rejected_count, unmapped_columns, created_at,
+			       COALESCE(closed_by, ''), closed_at, COALESCE(close_reason, '')
 			FROM risk_import_batches
 			WHERE id = $1::uuid
 		`, id).Scan(&b.ID, &b.SourceFilename, &b.SourceFormat, &b.Methodology, &b.UploadedBy, &b.UploaderUserID, &b.Status,
-			&b.TotalRows, &b.StagedCount, &b.RejectedCount, &unmapped, &b.CreatedAt)
+			&b.TotalRows, &b.StagedCount, &b.RejectedCount, &unmapped, &b.CreatedAt,
+			&b.ClosedBy, &b.ClosedAt, &b.CloseReason)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrBatchNotFound
 		}

@@ -1,0 +1,275 @@
+# aws.s3.bucket_tls_enforcement.v1 records, shaped as the AWS connector
+# emits them at schema 1.0.0 (connectors/aws/cmd/aws-connector/cmd_run.go
+# buildTLSRecord): policy_present and denies_insecure_transport are set
+# only when the policy was read or found absent, and omitted on an unread
+# bucket; region and reason are omitted when empty. observed_at is
+# truncated to the hour.
+cases:
+  - name: enforced-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: every-bucket-enforced-passes
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+          region: us-east-1
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-customer-data
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+          region: us-west-2
+
+  - name: no-bucket-policy-fails
+    description: NoSuchBucketPolicy; nothing denies plain-HTTP requests
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+          region: us-east-1
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          policy_present: false
+          denies_insecure_transport: false
+          account_id: "111122223333"
+          region: eu-west-1
+
+  - name: policy-without-tls-deny-fails
+    description: the bucket has a policy, but no statement denies aws:SecureTransport false
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: false
+          account_id: "111122223333"
+          region: us-east-1
+
+  - name: unread-policy-is-inconclusive
+    description: GetBucketPolicy was refused; the booleans are omitted, not false
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+          region: us-east-1
+      - result: inconclusive
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-restricted
+          account_id: "111122223333"
+          region: us-east-1
+          reason: "get-bucket-policy: AccessDenied"
+
+  - name: unread-bucket-does-not-hide-an-unenforced-one
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: inconclusive
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-restricted
+          account_id: "111122223333"
+          reason: "resolve region: AccessDenied"
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-legacy-uploads
+          policy_present: false
+          denies_insecure_transport: false
+          account_id: "111122223333"
+          region: eu-west-1
+
+  - name: fail-verdict-without-the-field-is-inconclusive
+    description: not a shape the connector emits; a fail needs denies_insecure_transport false
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          account_id: "111122223333"
+
+  - name: pass-verdict-contradicting-the-field-is-inconclusive
+    description: not a shape the connector emits; the record shows neither pass nor fail
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: false
+          account_id: "111122223333"
+
+  - name: string-true-is-not-a-boolean
+    description: denies_insecure_transport must be the JSON boolean true
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: "true"
+          account_id: "111122223333"
+
+  - name: latest-record-per-bucket-decides
+    description: the bucket had no policy yesterday and denies plain HTTP today
+    expected_state: pass
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: false
+          denies_insecure_transport: false
+          account_id: "111122223333"
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+
+  - name: latest-unenforced-record-fails-after-an-earlier-pass
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-20T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: false
+          account_id: "111122223333"
+
+  - name: tied-latest-with-one-failing-record-fails
+    description: two pushes in the same hour share an observed_at; a tied fail is not outvoted
+    expected_state: fail
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: false
+          account_id: "111122223333"
+
+  - name: observed-at-over-1h-after-instant-is-inconclusive
+    description: a latest record more than an hour after the evaluation instant is unreadable, not proof
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: pass
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T14:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: true
+          denies_insecure_transport: true
+          account_id: "111122223333"
+
+  - name: future-failing-record-is-unreadable-too
+    description: the 1-hour cap reads a future record as unread whatever it says
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T14:00:00Z
+        payload:
+          bucket_name: acme-logs
+          policy_present: false
+          denies_insecure_transport: false
+          account_id: "111122223333"
+
+  - name: record-without-bucket-name-is-left-out
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records:
+      - result: fail
+        evidence_kind: aws.s3.bucket_tls_enforcement.v1
+        observed_at: 2026-11-21T06:00:00Z
+        payload:
+          policy_present: false
+          denies_insecure_transport: false
+
+  - name: no-record-is-inconclusive
+    expected_state: inconclusive
+    evaluated_at: 2026-11-21T12:00:00Z
+    records: []
