@@ -119,6 +119,9 @@ func DefaultSeed() []KindVersion {
 		{Kind: "okta.app_assignment.v1", Version: "1.2.0"},
 		{Kind: "okta.user_lifecycle.v1", Version: "1.0.0"},
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
+		// #2968: the 1Password connector pushes v2, read from the documented
+		// Events and Users APIs; v1's policy fields had no documented source.
+		{Kind: "1password.org_policy.v2", Version: "2.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
 		// #2912: the osquery connector pushes 1.1.0 (adds last_seen_at +
 		// reason; unread posture booleans omitted, not false).

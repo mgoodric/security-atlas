@@ -1,87 +1,123 @@
 package opauth_test
 
 import (
+	"errors"
 	"fmt"
-	"net/http/httptest"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/mgoodric/security-atlas/connectors/1password/internal/opauth"
 )
 
-// Test tokens avoid the literal `ops_` prefix used by real 1Password
-// Service Account JWTs — GitGuardian's secret scanner flags any source
-// string matching that pattern, even in test files. The connector's
-// runtime behaviour does not depend on a specific prefix.
-func TestResolve_TokenFromOpts(t *testing.T) {
-	t.Setenv(opauth.EnvServiceAccountToken, "")
-	c, err := opauth.Resolve(opauth.ResolveOpts{Token: "test-service-account-token"})
+func setAll(t *testing.T, events, id, secret string) {
+	t.Helper()
+	t.Setenv(opauth.EnvEventsToken, events)
+	t.Setenv(opauth.EnvUsersClientID, id)
+	t.Setenv(opauth.EnvUsersClientSecret, secret)
+}
+
+func TestResolve_FromEnv(t *testing.T) {
+	setAll(t, " test-events-token ", "test-client-id", "test-client-secret")
+	c, err := opauth.Resolve()
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if c.Mode != opauth.ModeServiceAccount {
-		t.Fatalf("Mode = %q; want %q", c.Mode, opauth.ModeServiceAccount)
+	req, _ := http.NewRequest(http.MethodGet, "https://events.example.invalid", nil)
+	c.ApplyEvents(req)
+	if got := req.Header.Get("Authorization"); got != "Bearer test-events-token" {
+		t.Errorf("Authorization = %q; want trimmed events bearer", got)
+	}
+	if got := req.Header.Get("Accept"); got != "application/json" {
+		t.Errorf("Accept = %q", got)
+	}
+	tok, _ := http.NewRequest(http.MethodPost, "https://api.example.invalid/v1/oauth/token", nil)
+	c.ApplyUsersClient(tok)
+	id, secret, ok := tok.BasicAuth()
+	if !ok || id != "test-client-id" || secret != "test-client-secret" {
+		t.Errorf("BasicAuth = %q/%q/%v; want the client credentials", id, secret, ok)
 	}
 }
 
-func TestResolve_TokenFromEnv(t *testing.T) {
-	t.Setenv(opauth.EnvServiceAccountToken, "test-env-token")
-	c, err := opauth.Resolve(opauth.ResolveOpts{})
+func TestResolve_NamesEveryMissingVariable(t *testing.T) {
+	setAll(t, "", "test-client-id", "")
+	_, err := opauth.Resolve()
+	if err == nil {
+		t.Fatal("expected error when secrets are missing")
+	}
+	for _, v := range []string{opauth.EnvEventsToken, opauth.EnvUsersClientSecret} {
+		if !strings.Contains(err.Error(), v) {
+			t.Errorf("err %q does not name %s", err, v)
+		}
+	}
+	if strings.Contains(err.Error(), "test-client-id") {
+		t.Errorf("err %q leaks a value", err)
+	}
+}
+
+func TestCredentials_StringRedacts(t *testing.T) {
+	setAll(t, "test-events-secret-value", "test-client-id-value", "test-client-secret-value")
+	c, err := opauth.Resolve()
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if c.Mode != opauth.ModeServiceAccount {
-		t.Fatalf("Mode = %q; want service_account", c.Mode)
+	for _, verb := range []string{"%s", "%v", "%+v", "%#v"} {
+		out := fmt.Sprintf(verb, c)
+		for _, secret := range []string{"test-events-secret-value", "test-client-id-value", "test-client-secret-value"} {
+			if strings.Contains(out, secret) {
+				t.Errorf("%s leaks %q: %s", verb, secret, out)
+			}
+		}
+		if !strings.Contains(out, "redacted") {
+			t.Errorf("%s output lacks redaction marker: %s", verb, out)
+		}
 	}
 }
 
-func TestResolve_FailsOnMissingToken(t *testing.T) {
-	t.Setenv(opauth.EnvServiceAccountToken, "")
-	if _, err := opauth.Resolve(opauth.ResolveOpts{}); err == nil {
-		t.Fatal("expected error; got nil")
-	}
-}
-
-// Anti-criterion P0: Service Account tokens must never appear in any
-// String/format output. The credential type holds the bearer privately
-// and the String method redacts.
-func TestCredential_StringRedacts(t *testing.T) {
-	const secretValue = "test-redaction-input-AAAA"
-	c, err := opauth.Resolve(opauth.ResolveOpts{Token: secretValue})
+func mustURL(t *testing.T, s string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(s)
 	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+		t.Fatal(err)
 	}
-	s := c.String()
-	if strings.Contains(s, secretValue) {
-		t.Fatalf("Credential.String leaked token: %q", s)
+	return u
+}
+
+func TestCheckRedirect(t *testing.T) {
+	via := []*http.Request{{URL: mustURL(t, "https://events.example.test/api/v2/auth/introspect")}}
+	cases := map[string]struct {
+		to   string
+		want error
+	}{
+		"same origin":   {"https://events.example.test/other", nil},
+		"another host":  {"https://evil.example/api", opauth.ErrUnsafeRedirect},
+		"another port":  {"https://events.example.test:8443/api", opauth.ErrUnsafeRedirect},
+		"scheme change": {"http://events.example.test/api", opauth.ErrUnsafeRedirect},
 	}
-	if !strings.Contains(s, "<redacted") {
-		t.Fatalf("Credential.String missing redaction marker: %q", s)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := opauth.CheckRedirect(&http.Request{URL: mustURL(t, tc.to)}, via)
+			if tc.want == nil && err != nil {
+				t.Fatalf("err = %v; want nil", err)
+			}
+			if tc.want != nil && !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v; want %v", err, tc.want)
+			}
+		})
 	}
-	// Exercise the %v format verb to confirm fmt does NOT bypass the
-	// String() method and reach the bearer field via reflection.
-	if strings.Contains(fmt.Sprintf("%v", c), secretValue) {
-		t.Fatalf("Credential leaked token under %%v formatting")
+	long := make([]*http.Request, 10)
+	for i := range long {
+		long[i] = via[0]
+	}
+	if err := opauth.CheckRedirect(&http.Request{URL: via[0].URL}, long); err == nil {
+		t.Error("expected a stop after 10 redirects")
 	}
 }
 
-func TestApply_AddsHeaders(t *testing.T) {
-	c, err := opauth.Resolve(opauth.ResolveOpts{Token: "test-apply-token"})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	r := httptest.NewRequest("GET", "http://example/", nil)
-	c.Apply(r)
-	if got := r.Header.Get("Authorization"); got != "Bearer test-apply-token" {
-		t.Fatalf("Authorization = %q; want Bearer test-apply-token", got)
-	}
-	if got := r.Header.Get("Accept"); got != "application/json" {
-		t.Fatalf("Accept = %q; want application/json", got)
-	}
-}
-
-// Anti-criterion P0: documented scopes must be read-only and per-vault
-// only. Reject any keyword that implies write/manage/admin access.
+// Anti-criterion P0: documented scopes must be read-only. Reject any
+// keyword that implies write/manage/admin access, and the Users API's two
+// write scopes by name.
 func TestDocumentedScopes_NoWriteOrManageOrAdmin(t *testing.T) {
 	scopes := opauth.DocumentedScopes()
 	if len(scopes) == 0 {
@@ -96,7 +132,7 @@ func TestDocumentedScopes_NoWriteOrManageOrAdmin(t *testing.T) {
 			}
 		}
 		nameLower := strings.ToLower(sc.Name)
-		for _, banned := range []string{"write_items", "manage_vault", "admin"} {
+		for _, banned := range []string{"write_items", "manage_vault", "admin", "users.suspend", "users.reactivate"} {
 			if strings.Contains(nameLower, banned) {
 				t.Errorf("scope name %q contains banned scope identifier %q", sc.Name, banned)
 			}
@@ -105,15 +141,57 @@ func TestDocumentedScopes_NoWriteOrManageOrAdmin(t *testing.T) {
 }
 
 func TestDocumentedScopes_CoversOrgPolicyKind(t *testing.T) {
-	scopes := opauth.DocumentedScopes()
-	found := false
-	for _, s := range scopes {
-		if strings.Contains(s.Gates, "1password.org_policy.v1") {
-			found = true
-			break
+	for _, s := range opauth.DocumentedScopes() {
+		if !strings.Contains(s.Gates, "1password.org_policy.v2") {
+			t.Errorf("scope %q does not gate 1password.org_policy.v2: %q", s.Name, s.Gates)
 		}
 	}
-	if !found {
-		t.Error("no documented scope gates 1password.org_policy.v1")
+}
+
+// The base URLs decide where the credentials go, so only https and the
+// documented regional hosts pass, with nothing else in the URL.
+func TestCheckBaseURL(t *testing.T) {
+	check := map[string]func(string) error{"events": opauth.CheckEventsBaseURL, "users": opauth.CheckUsersBaseURL}
+	hosts := map[string][]string{"events": opauth.EventsHosts, "users": opauth.UsersHosts}
+	for api, hs := range hosts {
+		for _, h := range hs {
+			for _, u := range []string{"https://" + h, "https://" + h + "/"} {
+				if err := check[api](u); err != nil {
+					t.Errorf("%s %q: %v; want accepted", api, u, err)
+				}
+			}
+		}
+	}
+	bad := map[string]string{
+		"http":              "http://%s",
+		"foreign host":      "https://evil.example",
+		"lookalike suffix":  "https://%s.evil.example",
+		"subdomain":         "https://x.%s",
+		"userinfo":          "https://user@%s",
+		"userinfo redirect": "https://%s@evil.example",
+		"port":              "https://%s:8443",
+		"default port":      "https://%s:443",
+		"path":              "https://%s/v1",
+		"query":             "https://%s?x=1",
+		"empty query":       "https://%s?",
+		"fragment":          "https://%s#x",
+		"uppercase host":    "https://EVENTS.1PASSWORD.COM",
+		"no scheme":         "%s",
+		"empty":             "",
+	}
+	for name, pat := range bad {
+		for api, hs := range hosts {
+			u := pat
+			if strings.Contains(pat, "%s") {
+				u = fmt.Sprintf(pat, hs[0])
+			}
+			if err := check[api](u); err == nil {
+				t.Errorf("%s / %s: %q accepted", name, api, u)
+			}
+		}
+	}
+	// Each API's hosts are refused for the other API.
+	if opauth.CheckEventsBaseURL("https://api.1password.com") == nil || opauth.CheckUsersBaseURL("https://events.1password.com") == nil {
+		t.Error("an API's base URL accepted the other API's host")
 	}
 }

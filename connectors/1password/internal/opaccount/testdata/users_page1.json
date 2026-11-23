@@ -1,0 +1,21 @@
+{
+  "results": [
+    {
+      "id": "IR7VJHJ36JHINBFAD7V2T5MP3E",
+      "email": "wendy_appleseed@agilebits.com",
+      "display_name": "Wendy Appleseed",
+      "state": "ACTIVE",
+      "create_time": "2024-01-15T10:30:00Z",
+      "path": "accounts/M4E2SWNZAZFTRGQGDNS2E5A4MU/users/IR7VJHJ36JHINBFAD7V2T5MP3E"
+    },
+    {
+      "id": "56YE2TYN2VFYRLNSHKPW5NVT5E",
+      "email": "riley_smith@example.com",
+      "display_name": "Riley Smith",
+      "state": "SUSPENDED",
+      "create_time": "2024-03-20T09:15:00Z",
+      "path": "accounts/M4E2SWNZAZFTRGQGDNS2E5A4MU/users/56YE2TYN2VFYRLNSHKPW5NVT5E"
+    }
+  ],
+  "next_page_token": "CAIQAg"
+}
