@@ -64,3 +64,32 @@ The ticket's third item, the comment on `GetImportedPolicyForTakeover`,
 no longer applies on `main`. That query was replaced by
 `ListImportedPoliciesForTakeover`, which has no `LIMIT`, and its comment
 already describes what a concurrent run sees. Nothing was changed.
+
+### D6 — code fences and hard breaks are content (#2984)
+
+Follow-up from PR #2979. Two cases D1 normalised away change what a
+reader sees, so the comparison now keeps them:
+
+- **Fenced code blocks.** Between an opening fence (up to three spaces of
+  indent, then three or more backticks or tildes) and its closing fence
+  (the same character, at least as many, nothing after but whitespace),
+  lines are compared verbatim: trailing whitespace stays and blank-line
+  runs are not collapsed. A fence left unclosed runs to the end of the
+  body, as in CommonMark. Line endings are still normalised inside a
+  fence, and trailing newlines at the very end of the body are still
+  trimmed.
+- **Trailing two-space hard breaks.** A line ending in two or more spaces
+  (spaces only) is kept with exactly two, since any run of two or more
+  renders the same `<br>`. It is kept only where CommonMark renders a
+  break: not on an ATX heading, and not before a blank line or at the end
+  of the body. A run that ends in a tab or NBSP is not a hard break and
+  is stripped as before.
+
+Accepted limitations: the parse is line-local, not a CommonMark parser.
+A fence nested in a list item or a blockquote is not recognised as a
+fence, and trailing spaces on a setext underline, a table
+row or a thematic break are kept as a hard break. Both err toward
+reporting drift rather than hiding it.
+
+- **detection_tier_actual:** none.
+- **detection_tier_target:** unit.

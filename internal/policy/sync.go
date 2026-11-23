@@ -728,20 +728,96 @@ func validateSyncPage(p SyncPage) error {
 // line, runs of blank lines collapsed to one, and trailing newlines
 // trimmed. The connector's Confluence-to-Markdown conversion differs from
 // an export in exactly these ways, and none of them changes the content.
+// Two Markdown cases are left alone because they do change what renders
+// (#2984): lines inside a fenced code block keep their whitespace and
+// their blank lines, and a trailing run of two or more spaces that
+// CommonMark renders as a hard break is kept, as exactly two spaces.
 // Only the comparison uses it; every recorded hash is of the body as sent.
 func normalizeDriftBody(body string) string {
 	body = strings.ReplaceAll(body, "\r\n", "\n")
 	body = strings.ReplaceAll(body, "\r", "\n")
 	lines := strings.Split(body, "\n")
-	out := lines[:0]
-	for _, l := range lines {
-		l = strings.TrimRightFunc(l, unicode.IsSpace)
-		if l == "" && len(out) > 0 && out[len(out)-1] == "" {
+	out := make([]string, 0, len(lines))
+	var fence string // the opening marker while inside a fence
+	for i, l := range lines {
+		if fence != "" {
+			out = append(out, l)
+			if isClosingFence(l, fence) {
+				fence = ""
+			}
 			continue
 		}
-		out = append(out, l)
+		t := strings.TrimRightFunc(l, unicode.IsSpace)
+		if m := openingFence(t); m != "" {
+			fence = m
+			out = append(out, t)
+			continue
+		}
+		if t == "" {
+			if len(out) > 0 && out[len(out)-1] == "" {
+				continue
+			}
+			out = append(out, t)
+			continue
+		}
+		if isHardBreak(l, t, lines[i+1:]) {
+			t += "  "
+		}
+		out = append(out, t)
 	}
 	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+}
+
+// fenceIndent strips the up to three leading spaces a fence marker or an
+// ATX heading may carry. A fourth space makes the line an indented code
+// block instead, reported as false.
+func fenceIndent(l string) (string, bool) {
+	t := strings.TrimLeft(l, " ")
+	return t, len(l)-len(t) <= 3
+}
+
+// openingFence returns the marker (three or more backticks or tildes) a
+// line opens a fenced code block with, or "" when it opens none.
+func openingFence(l string) string {
+	t, ok := fenceIndent(l)
+	if !ok || len(t) < 3 || (t[0] != '`' && t[0] != '~') {
+		return ""
+	}
+	n := len(t) - len(strings.TrimLeft(t, t[:1]))
+	if n < 3 || (t[0] == '`' && strings.Contains(t[n:], "`")) {
+		return ""
+	}
+	return t[:n]
+}
+
+// isClosingFence reports whether a line closes the fence opened with
+// marker: the same character, at least as many of it, and nothing after
+// but whitespace.
+func isClosingFence(l, marker string) bool {
+	t, ok := fenceIndent(l)
+	if !ok {
+		return false
+	}
+	rest := strings.TrimLeft(t, marker[:1])
+	return len(t)-len(rest) >= len(marker) && strings.TrimRightFunc(rest, unicode.IsSpace) == ""
+}
+
+// isHardBreak reports whether line l, trimmed to t, ends in a CommonMark
+// hard break: two or more spaces and nothing else after the content, on a
+// line that is not an ATX heading and is followed by a non-blank line. A
+// break before a blank line or at the end of the body renders nothing.
+func isHardBreak(l, t string, rest []string) bool {
+	tail := l[len(t):]
+	if len(tail) < 2 || strings.Trim(tail, " ") != "" {
+		return false
+	}
+	if h, ok := fenceIndent(t); ok && strings.HasPrefix(h, "#") {
+		n := len(h) - len(strings.TrimLeft(h, "#"))
+		if n <= 6 && (n == len(h) || h[n] == ' ' || h[n] == '\t') {
+			return false
+		}
+	}
+	return len(rest) > 0 && strings.TrimSpace(rest[0]) != ""
 }
 
 // bodyDrifted reports whether a page body differs in content from the

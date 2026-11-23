@@ -19,6 +19,22 @@ func TestNormalizeDriftBody(t *testing.T) {
 		{"whitespace-only lines are blank", "a\n  \n\t\n\nb", "a\n\nb"},
 		{"trailing newlines", "a\n\n\n", "a"},
 		{"leading and inner spaces kept", "  - item  one", "  - item  one"},
+		{"fence keeps blank-line run", "a\n```\nx\n\n\ny\n```\n\n\nb", "a\n```\nx\n\n\ny\n```\n\nb"},
+		{"fence keeps trailing spaces", "```go\nx := 1  \t\n```", "```go\nx := 1  \t\n```"},
+		{"tilde fence", "~~~\nx \n\n\n~~~\ny ", "~~~\nx \n\n\n~~~\ny"},
+		{"fence closes only on its own marker", "```\nx \n~~~\ny \n```\nz ", "```\nx \n~~~\ny \n```\nz"},
+		{"closing fence at least as long", "````\nx \n```\ny \n````\nz ", "````\nx \n```\ny \n````\nz"},
+		{"indented fence up to three spaces", "   ```\nx \n   ```\ny ", "   ```\nx \n   ```\ny"},
+		{"four-space indent is not a fence", "    ```\nx \n\n\ny", "    ```\nx\n\ny"},
+		{"unclosed fence runs to end", "```\nx \n\n\n", "```\nx "},
+		{"crlf inside fence", "```\r\nx\r\n```", "```\nx\n```"},
+		{"hard break kept", "a  \nb", "a  \nb"},
+		{"longer hard break is two spaces", "a     \nb", "a  \nb"},
+		{"single trailing space is not a hard break", "a \nb", "a\nb"},
+		{"hard break before blank line is stripped", "a  \n\nb", "a\n\nb"},
+		{"hard break at end is stripped", "a\nb  ", "a\nb"},
+		{"heading trailing spaces stripped", "# T  \nb", "# T\nb"},
+		{"tab after spaces is not a hard break", "a  \t\nb", "a\nb"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,6 +60,33 @@ func TestBodyDrifted(t *testing.T) {
 		{"word spacing is content", "# Access Control\n\nAccess is  reviewed quarterly.\n", true},
 		{"indentation is content", "# Access Control\n\n    Access is reviewed quarterly.\n", true},
 		{"paragraph split is content", "# Access Control\n\nAccess is reviewed\nquarterly.\n", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := bodyDrifted(stored, tc.page); got != tc.drift {
+				t.Errorf("bodyDrifted(stored, %q) = %v; want %v", tc.page, got, tc.drift)
+			}
+		})
+	}
+}
+
+// TestBodyDriftedMarkdown pins #2984: inside a code fence whitespace is
+// content, and a trailing two-space hard break is content, while the same
+// changes outside a fence, or where no break renders, stay normalised.
+func TestBodyDriftedMarkdown(t *testing.T) {
+	t.Parallel()
+	const stored = "# Rotation\n\nKeys rotate yearly\nby the owner.\n\n```sh\nrotate --all\n\nverify\n```\n"
+	cases := []struct {
+		name  string
+		page  string
+		drift bool
+	}{
+		{"identical", stored, false},
+		{"whitespace outside fence", "# Rotation  \r\n\r\n\r\nKeys rotate yearly \r\nby the owner.\r\n\r\n\r\n```sh\r\nrotate --all\r\n\r\nverify\r\n```\r\n", false},
+		{"blank line added inside fence", "# Rotation\n\nKeys rotate yearly\nby the owner.\n\n```sh\nrotate --all\n\n\nverify\n```\n", true},
+		{"trailing space added inside fence", "# Rotation\n\nKeys rotate yearly\nby the owner.\n\n```sh\nrotate --all \n\nverify\n```\n", true},
+		{"hard break added", "# Rotation\n\nKeys rotate yearly  \nby the owner.\n\n```sh\nrotate --all\n\nverify\n```\n", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
