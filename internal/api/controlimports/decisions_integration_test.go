@@ -23,6 +23,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/controlimport"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
@@ -41,6 +42,7 @@ func decisionServer(t *testing.T, app *pgxpool.Pool, tenant string) decisionEnv 
 	t.Helper()
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
+	attachAuthz(t, srv, app)
 	tenantID := uuid.MustParse(tenant)
 	user := uuid.New()
 	person := testjwt.AdminFor(tenantID)
@@ -50,7 +52,10 @@ func decisionServer(t *testing.T, app *pgxpool.Pool, tenant string) decisionEnv 
 	// Issue the tokens first: the first one attaches the JWT validator the
 	// router is built with.
 	env := decisionEnv{
-		testEnv: testEnv{bearer: srv.IssueTestJWT(t, person)},
+		testEnv: testEnv{
+			bearer: srv.IssueTestJWT(t, person),
+			viewer: personBearer(t, dbtest.NewMigratePool(t), srv, tenant, authz.RoleViewer),
+		},
 		user:    user,
 		machine: srv.IssueTestJWT(t, machine),
 		nouser:  srv.IssueTestJWT(t, testjwt.AdminFor(tenantID)),
@@ -322,6 +327,37 @@ func TestApproveWithSearchedAnchor(t *testing.T) {
 	}
 	if implType != "manual_periodic" || !strings.Contains(appl, `"env"`) {
 		t.Errorf("control implementation_type=%q applicability=%s, want the approver's choices", implType, appl)
+	}
+}
+
+// #2971: decisionServer runs the authz engine. A viewer is refused at authz
+// on both decision verbs, and the row stays undecided: the person can still
+// approve it. Drop attachAuthz and this fails.
+func TestDecisionRefusesViewer(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	cat := seedCatalog(t, admin)
+	tenant := freshTenant(t, admin)
+	env := decisionServer(t, app, tenant)
+
+	b := stageFixture(t, env.testEnv, cat.framework)
+	row := rowByOrgID(t, b, "ORG-AC-02")
+
+	for verb, body := range map[string]map[string]any{
+		"approve": {"candidate_rank": 1},
+		"reject":  {"reason": "x"},
+	} {
+		status, raw := doPost(t, env.testEnv, env.viewer, decisionPath(b.ID, row.ID, verb), body)
+		if status != http.StatusForbidden || strings.TrimSpace(string(raw)) != `{"error":"forbidden"}` {
+			t.Errorf("viewer %s = %d %s, want 403 forbidden", verb, status, raw)
+		}
+	}
+	status, raw := doPost(t, env.testEnv, env.bearer, decisionPath(b.ID, row.ID, "approve"), map[string]any{"candidate_rank": 1})
+	if status != http.StatusOK {
+		t.Fatalf("approve after refusals = %d; body=%s", status, raw)
+	}
+	if d := decodeDecision(t, raw); d.Status != controlimport.RowStatusApproved {
+		t.Fatalf("status = %q, want approved", d.Status)
 	}
 }
 
