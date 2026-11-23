@@ -531,12 +531,18 @@ jobs:
           cache: true
       - name: Build atlas binary
         run: go build -o atlas ./cmd/atlas
+      # #2980 — atlas-cli rides in the same artifact so the Playwright
+      # demoseed spec runs it prebuilt instead of `go run` (up to 600 s).
+      - name: Build atlas-cli binary
+        run: go build -o atlas-cli ./cmd/atlas-cli
       - name: Upload atlas binary as workflow artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: atlas-binary
           retention-days: 7
-          path: atlas
+          path: |
+            atlas
+            atlas-cli
           if-no-files-found: error
 
   # ====================================================================
@@ -1929,6 +1935,7 @@ jobs:
       - name: Install prebuilt atlas binary
         run: |
           install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          install -m 0755 /tmp/atlas-bin/atlas-cli /usr/local/bin/atlas-cli
           atlas --version || true
       - name: Install web workspace
         working-directory: .
@@ -1970,6 +1977,9 @@ jobs:
           done
       - name: Run Playwright tests
         working-directory: web
+        env:
+          # #2980 — the demoseed spec runs this instead of `go run`.
+          ATLAS_CLI_BIN: /usr/local/bin/atlas-cli
         run: npx playwright test
       # #2080 — the route sweep's axe findings (serious + critical) are
       # REPORTED, not enforced: one JSON per route, uploaded on every run
