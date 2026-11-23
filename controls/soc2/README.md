@@ -1,6 +1,6 @@
 # SOC 2 stock control kit
 
-This directory contains the v1 stock SOC 2 control library — 64 SCF-anchored
+This directory contains the v1 stock SOC 2 control library — 65 SCF-anchored
 controls authored in the slice-009 bundle format. The kit ships with a fresh
 security-atlas deploy so the solo security leader can run their SOC 2 program
 out of the box without authoring controls from scratch.
@@ -57,12 +57,12 @@ upload time (`internal/control/validate.go::ValidateEvidenceKinds`).
 
 | Count | Implementation type | Notes                                                             |
 | ----- | ------------------- | ----------------------------------------------------------------- |
-| 26    | `automated`         | Rego or SQL queries over the ledger                               |
+| 27    | `automated`         | Rego or SQL queries over the ledger                               |
 | 8     | `semi_automated`    | Mixed — automated detection + manual attestation closeout         |
 | 11    | `manual_periodic`   | Owner uploads evidence on schedule (annual / quarterly / monthly) |
 | 19    | `manual_attested`   | Roleholder asserts state digitally on schedule                    |
 
-Total: **64** controls. TSC coverage: **61 / 61** crosswalked TSC codes
+Total: **65** controls. TSC coverage: **61 / 61** crosswalked TSC codes
 satisfied (100% of the SCF-crosswalkable universe; matches the slice 007
 crosswalk's mapping table, including the Privacy criteria #1753 added).
 `go run ./cmd/scripts/coverage-check` (`just lint-soc2-coverage`, and a CI
@@ -70,23 +70,23 @@ step in `Go · lint`) fails below 80%.
 
 ## TSC family breakdown
 
-| TSC family                      | Count  | Range                                |
-| ------------------------------- | ------ | ------------------------------------ |
-| CC1 — Control environment       | 5      | CC1.1, CC1.2, CC1.3, CC1.4, CC1.5    |
-| CC2 — Communication             | 3      | CC2.1, CC2.2, CC2.3                  |
-| CC3 — Risk assessment           | 4      | CC3.1, CC3.2, CC3.3, CC3.4           |
-| CC4 — Monitoring                | 2      | CC4.1, CC4.2                         |
-| CC5 — Control activities        | 3      | CC5.1, CC5.2, CC5.3                  |
-| CC6 — Logical & physical access | 11     | CC6.1–CC6.8 (CC6.3 and CC6.6 have 2) |
-| CC7 — System operations         | 6      | CC7.1, CC7.2, CC7.3, CC7.4, CC7.5    |
-| CC8 — Change management         | 2      | CC8.1 (CHG-02 + CHG-03)              |
-| CC9 — Risk mitigation           | 3      | CC9.1, CC9.2                         |
-| A1 — Availability               | 3      | A1.1, A1.2, A1.3                     |
-| C1 — Confidentiality            | 2      | C1.1, C1.2                           |
-| PI1 — Processing integrity      | 5      | PI1.1–PI1.5                          |
-| P1–P8 — Privacy                 | 13     | P1.1–P8.1 (see below)                |
-| No TSC criterion (see below)    | 1      | `network_segmentation_default_deny`  |
-| **Total**                       | **64** |                                      |
+| TSC family                      | Count  | Range                                   |
+| ------------------------------- | ------ | --------------------------------------- |
+| CC1 — Control environment       | 5      | CC1.1, CC1.2, CC1.3, CC1.4, CC1.5       |
+| CC2 — Communication             | 3      | CC2.1, CC2.2, CC2.3                     |
+| CC3 — Risk assessment           | 4      | CC3.1, CC3.2, CC3.3, CC3.4              |
+| CC4 — Monitoring                | 2      | CC4.1, CC4.2                            |
+| CC5 — Control activities        | 3      | CC5.1, CC5.2, CC5.3                     |
+| CC6 — Logical & physical access | 12     | CC6.1–CC6.8 (CC6.3, CC6.7: 3; CC6.6: 2) |
+| CC7 — System operations         | 6      | CC7.1, CC7.2, CC7.3, CC7.4, CC7.5       |
+| CC8 — Change management         | 2      | CC8.1 (CHG-02 + CHG-03)                 |
+| CC9 — Risk mitigation           | 3      | CC9.1, CC9.2                            |
+| A1 — Availability               | 3      | A1.1, A1.2, A1.3                        |
+| C1 — Confidentiality            | 2      | C1.1, C1.2                              |
+| PI1 — Processing integrity      | 5      | PI1.1–PI1.5                             |
+| P1–P8 — Privacy                 | 13     | P1.1–P8.1 (see below)                   |
+| No TSC criterion (see below)    | 1      | `network_segmentation_default_deny`     |
+| **Total**                       | **65** |                                         |
 
 Several Privacy bundles each satisfy two criteria through one SCF anchor:
 `soc2_p4_2_retention_schedule` (P4.2, P4.3), `soc2_p5_1_data_subject_requests`
