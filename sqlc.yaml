@@ -194,6 +194,8 @@ sql:
       - "migrations/sql/20261298000000_policy_audit_sync_drift.sql"
       # #2973: a routing cutover per late-routed kind.
       - "migrations/sql/20261304000000_evidence_routing_kind_cutover.sql"
+      # #3000: unreadable pages on synced policies.
+      - "migrations/sql/20261305000000_policy_sync_unreadable.sql"
     queries: "internal/db/queries"
     gen:
       go:

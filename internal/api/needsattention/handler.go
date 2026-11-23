@@ -397,8 +397,9 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 		}
 	}
 
-	// Bands 1, 3 (synced policies whose page is missing) and 6, and every
-	// item's owner.
+	// The failing, source_missing, source_unreadable (synced policies
+	// whose page is missing or unreadable) and ownership_gap bands, and
+	// every item's owner.
 	err = h.inTx(ctx, tenantID, func(tx pgx.Tx) error {
 		q := dbx.New(tx)
 		tid := pgtype.UUID{Bytes: tenantID, Valid: true}
@@ -408,6 +409,11 @@ func (h *Handler) collect(r *http.Request, cred credstore.Credential, tenantID u
 				return fmt.Errorf("list missing synced policies: %w", err)
 			}
 			items = append(items, MissingSourceItems(rows)...)
+			unreadable, err := q.ListUnreadableSyncedPolicies(ctx, tid)
+			if err != nil {
+				return fmt.Errorf("list unreadable synced policies: %w", err)
+			}
+			items = append(items, UnreadableSourceItems(unreadable)...)
 		}
 		if visible["control"] {
 			ctl, n, err := controlItems(ctx, tx, q, tid, now)
@@ -711,6 +717,27 @@ func MissingSourceItems(rows []dbx.ListMissingSyncedPoliciesRow) []Item {
 			Band: BandSourceMissing, Type: "policy", ID: id, Title: r.Title,
 			Link: links["policy"] + id, Action: "Restore source page",
 			Since: timePtr(r.SyncMissingSince),
+		}
+		if r.OwnerRole != "" {
+			it.Owner = &Owner{Role: r.OwnerRole}
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+// UnreadableSourceItems lists the published synced policies whose source
+// page the latest sync run carried as unreadable as band-4 items (#3000),
+// owned by the policy's owner role and dated from when a run first
+// carried the page unreadable.
+func UnreadableSourceItems(rows []dbx.ListUnreadableSyncedPoliciesRow) []Item {
+	out := make([]Item, 0, len(rows))
+	for _, r := range rows {
+		id := uuid.UUID(r.ID.Bytes).String()
+		it := Item{
+			Band: BandSourceUnreadable, Type: "policy", ID: id, Title: r.Title,
+			Link: links["policy"] + id, Action: "Fix source page",
+			Since: timePtr(r.SyncUnreadableSince),
 		}
 		if r.OwnerRole != "" {
 			it.Owner = &Owner{Role: r.OwnerRole}

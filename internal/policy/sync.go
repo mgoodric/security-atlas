@@ -46,6 +46,12 @@ const (
 	// is written to the policy beyond recording when it was first found
 	// missing; it stays published and acknowledgements continue.
 	SyncStatusMissing = "missing"
+	// SyncStatusUnreadable: the run carried the page as unreadable
+	// (#3000): it is still labelled, but the connector could not read its
+	// body. The page is present, so it is not missing. Nothing about its
+	// policy changes beyond recording the state and the pusher's reason;
+	// a page with no synced policy yet gets none.
+	SyncStatusUnreadable = "unreadable"
 )
 
 // ErrSyncEmptyRefused is returned by Sync for a push with no pages for a
@@ -79,6 +85,20 @@ type SyncPage struct {
 	PageID string
 	In     ImportInput
 }
+
+// SyncUnreadablePage is one page a sync run carries as unreadable
+// (#3000): the pusher could not read its body, so it sends the page's id
+// and a reason instead. Reason is already trimmed and bounded by the
+// caller.
+type SyncUnreadablePage struct {
+	PageID string
+	Title  string
+	Reason string
+}
+
+// syncUnreadableNewReason is appended to an unreadable result's reason
+// for a page that has no synced policy yet.
+const syncUnreadableNewReason = "no policy exists for this page yet, so none was created; it syncs once its body can be read"
 
 // SyncResult is the outcome for one page.
 type SyncResult struct {
@@ -135,12 +155,22 @@ type SyncReport struct {
 // (#2902). A run that leaves more than half of the source's published
 // synced policies missing carries a warning in the report.
 //
+// unreadable are pages the run carries without a body because the pusher
+// could not read it (#3000). Each is present, so its missing state is
+// cleared, and its published synced row records the reason and when the
+// page was first carried unreadable; its body, hash, properties, drift
+// and version are left alone. A page with no synced policy yet is
+// reported and gets none. Every row of the source whose page the run
+// does not carry unreadable loses any unreadable state. A page id carried
+// both readable and unreadable, or unreadable twice, is synced readable
+// (or once) and the extra entry skipped.
+//
 // invalid are pages the caller refused (a missing or invalid property);
 // they are reported as skipped and written nowhere. Unlike Import, valid
 // pages are written even when another page is skipped. Runs for one source
 // are serialised, so an overlapping run cannot create a page twice.
 // Everything runs in one transaction.
-func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, invalid []SyncResult, allowEmpty bool, keyID string) (SyncReport, error) {
+func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, unreadable []SyncUnreadablePage, invalid []SyncResult, allowEmpty bool, keyID string) (SyncReport, error) {
 	if keyID == "" {
 		return SyncReport{}, ErrCreatedByRequired
 	}
@@ -159,7 +189,7 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 		if err != nil {
 			return fmt.Errorf("sync: count source policies: %w", err)
 		}
-		if len(pages) == 0 && len(invalid) == 0 && synced > 0 && !allowEmpty {
+		if len(pages) == 0 && len(unreadable) == 0 && len(invalid) == 0 && synced > 0 && !allowEmpty {
 			return ErrSyncEmptyRefused
 		}
 		// Every page the run carries is present, valid or not: a page
@@ -168,13 +198,30 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 		for _, r := range invalid {
 			present = append(present, r.PageID)
 		}
+		readable := map[string]bool{}
 		for _, p := range pages {
 			present = append(present, p.PageID)
+			readable[p.PageID] = true
+		}
+		// The unreadable pages that apply: not also carried readable, and
+		// each once. Every other row of the source loses its unreadable
+		// state before the readable pages are synced.
+		var unreadableIDs []string
+		for _, u := range unreadable {
+			present = append(present, u.PageID)
+			if !readable[u.PageID] && !slices.Contains(unreadableIDs, u.PageID) {
+				unreadableIDs = append(unreadableIDs, u.PageID)
+			}
 		}
 		if err := q.ClearSyncedPolicyMissing(ctx, dbx.ClearSyncedPolicyMissingParams{
 			TenantID: pgUUID(tenantID), SyncSite: &src.Site, SyncSpace: &src.Space, PresentPageIds: present,
 		}); err != nil {
 			return fmt.Errorf("sync: clear missing: %w", err)
+		}
+		if err := q.ClearSyncedPoliciesUnreadable(ctx, dbx.ClearSyncedPoliciesUnreadableParams{
+			TenantID: pgUUID(tenantID), SyncSite: &src.Site, SyncSpace: &src.Space, UnreadablePageIds: append([]string{}, unreadableIDs...),
+		}); err != nil {
+			return fmt.Errorf("sync: clear unreadable: %w", err)
 		}
 		results := append([]SyncResult{}, invalid...)
 		seen := map[string]bool{}
@@ -248,6 +295,20 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 			}
 			results = append(results, res)
 		}
+		for _, u := range unreadable {
+			res := SyncResult{PageID: u.PageID, Title: u.Title}
+			if seen[u.PageID] || readable[u.PageID] {
+				res.Status, res.Reason = SyncStatusSkipped, fmt.Sprintf("page %q appears more than once in this push", u.PageID)
+				results = append(results, res)
+				continue
+			}
+			seen[u.PageID] = true
+			res, err := syncUnreadable(ctx, q, tenantID, src, u)
+			if err != nil {
+				return err
+			}
+			results = append(results, res)
+		}
 		missing, err := syncMarkMissing(ctx, q, tenantID, src, present)
 		if err != nil {
 			return err
@@ -264,6 +325,42 @@ func (s *Store) Sync(ctx context.Context, src SyncSource, pages []SyncPage, inva
 		return SyncReport{}, err
 	}
 	return report, nil
+}
+
+// syncUnreadable records one unreadable page (#3000) on its published
+// synced row: the pusher's reason, and when the page was first carried
+// unreadable. Nothing else is written. A page with no synced policy is
+// reported and gets none: there is no body to publish.
+func syncUnreadable(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, src SyncSource, u SyncUnreadablePage) (SyncResult, error) {
+	res := SyncResult{PageID: u.PageID, Title: u.Title, Status: SyncStatusUnreadable, Reason: u.Reason}
+	cur, err := q.GetSyncedPolicyByPage(ctx, dbx.GetSyncedPolicyByPageParams{
+		TenantID: pgUUID(tenantID), SyncSite: &src.Site, SyncSpace: &src.Space, SyncPageID: &u.PageID,
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		res.Reason = u.Reason + "; " + syncUnreadableNewReason
+		return res, nil
+	case err != nil:
+		return res, fmt.Errorf("sync: look up page %q: %w", u.PageID, err)
+	}
+	row := cur
+	// No row back means this reason is already recorded.
+	marked, err := q.SetSyncedPolicyUnreadable(ctx, dbx.SetSyncedPolicyUnreadableParams{
+		TenantID: pgUUID(tenantID), ID: cur.ID, SyncUnreadableReason: &u.Reason,
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return res, fmt.Errorf("sync: record unreadable page %q: %w", u.PageID, err)
+	default:
+		row = marked
+	}
+	pol := policyFromRow(row)
+	res.Policy = &pol
+	if res.Title == "" {
+		res.Title = row.Title
+	}
+	return res, nil
 }
 
 // syncSameVersion handles a page whose synced row already has its

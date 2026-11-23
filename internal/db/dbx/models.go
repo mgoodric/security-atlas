@@ -3078,6 +3078,8 @@ type Policy struct {
 	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
 	SyncPropertyDriftDetectedAt pgtype.Timestamptz `json:"sync_property_drift_detected_at"`
 	SyncPropertyDriftKeys       []string           `json:"sync_property_drift_keys"`
+	SyncUnreadableSince         pgtype.Timestamptz `json:"sync_unreadable_since"`
+	SyncUnreadableReason        *string            `json:"sync_unreadable_reason"`
 }
 
 type PolicyAcknowledgment struct {

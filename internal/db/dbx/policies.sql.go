@@ -21,7 +21,7 @@ SET status = 'approved',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'under_review'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type ApprovePolicyParams struct {
@@ -85,8 +85,45 @@ func (q *Queries) ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (P
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
+}
+
+const clearSyncedPoliciesUnreadable = `-- name: ClearSyncedPoliciesUnreadable :exec
+UPDATE policies
+SET sync_unreadable_since = NULL,
+    sync_unreadable_reason = NULL,
+    updated_at = now()
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = $2
+  AND sync_space = $3
+  AND NOT (sync_page_id = ANY($4::text[]))
+  AND sync_unreadable_since IS NOT NULL
+`
+
+type ClearSyncedPoliciesUnreadableParams struct {
+	TenantID          pgtype.UUID `json:"tenant_id"`
+	SyncSite          *string     `json:"sync_site"`
+	SyncSpace         *string     `json:"sync_space"`
+	UnreadablePageIds []string    `json:"unreadable_page_ids"`
+}
+
+// #3000 — every published synced row of this source whose page the run
+// did not carry unreadable (it was readable, or absent) loses any
+// unreadable state an earlier run recorded. Rows not marked are left
+// alone, so updated_at moves only on a change.
+func (q *Queries) ClearSyncedPoliciesUnreadable(ctx context.Context, arg ClearSyncedPoliciesUnreadableParams) error {
+	_, err := q.db.Exec(ctx, clearSyncedPoliciesUnreadable,
+		arg.TenantID,
+		arg.SyncSite,
+		arg.SyncSpace,
+		arg.UnreadablePageIds,
+	)
+	return err
 }
 
 const clearSyncedPolicyDrift = `-- name: ClearSyncedPolicyDrift :one
@@ -98,7 +135,7 @@ WHERE tenant_id = $1
   AND id = $2
   AND source_attribution = 'synced'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type ClearSyncedPolicyDriftParams struct {
@@ -154,6 +191,8 @@ func (q *Queries) ClearSyncedPolicyDrift(ctx context.Context, arg ClearSyncedPol
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -259,7 +298,7 @@ VALUES (
     $9, $10,
     'draft', $11, $12, COALESCE($13::text[], '{}')
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type CreatePolicyParams struct {
@@ -353,6 +392,8 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Pol
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -362,7 +403,7 @@ DELETE FROM policies
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type DeleteDraftPolicyParams struct {
@@ -421,6 +462,8 @@ func (q *Queries) DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyPa
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -457,7 +500,7 @@ func (q *Queries) GetAuthoredPolicyByTitle(ctx context.Context, arg GetAuthoredP
 }
 
 const getPolicyByID = `-- name: GetPolicyByID :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1 AND id = $2
 `
@@ -513,12 +556,14 @@ func (q *Queries) GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (P
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
 
 const getSyncedPolicyByPage = `-- name: GetSyncedPolicyByPage :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1
   AND source_attribution = 'synced'
@@ -588,6 +633,8 @@ func (q *Queries) GetSyncedPolicyByPage(ctx context.Context, arg GetSyncedPolicy
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -613,7 +660,7 @@ VALUES (
     $13, $14, $15,
     $12, now()
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type ImportPublishedPolicyParams struct {
@@ -701,6 +748,8 @@ func (q *Queries) ImportPublishedPolicy(ctx context.Context, arg ImportPublished
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -830,7 +879,7 @@ VALUES (
     $17, $18, $19, $20,
     $13, now()
 )
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type InsertSyncedPolicyParams struct {
@@ -932,12 +981,14 @@ func (q *Queries) InsertSyncedPolicy(ctx context.Context, arg InsertSyncedPolicy
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
 
 const listImportedPoliciesForTakeover = `-- name: ListImportedPoliciesForTakeover :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1
   AND source_attribution = 'imported'
@@ -1013,6 +1064,8 @@ func (q *Queries) ListImportedPoliciesForTakeover(ctx context.Context, arg ListI
 			&i.SyncMissingSince,
 			&i.SyncPropertyDriftDetectedAt,
 			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1069,7 +1122,7 @@ func (q *Queries) ListMissingSyncedPolicies(ctx context.Context, tenantID pgtype
 }
 
 const listPolicies = `-- name: ListPolicies :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -1129,6 +1182,8 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 			&i.SyncMissingSince,
 			&i.SyncPropertyDriftDetectedAt,
 			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1141,7 +1196,7 @@ func (q *Queries) ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Pol
 }
 
 const listPoliciesUnderReview = `-- name: ListPoliciesUnderReview :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1
   AND status = 'under_review'
@@ -1202,6 +1257,8 @@ func (q *Queries) ListPoliciesUnderReview(ctx context.Context, tenantID pgtype.U
 			&i.SyncMissingSince,
 			&i.SyncPropertyDriftDetectedAt,
 			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1265,6 +1322,7 @@ SELECT
     p.imported_by, p.imported_at, p.self_approved,
     p.sync_drift_detected_at, p.sync_drift_body_sha256,
     p.sync_missing_since,
+    p.sync_unreadable_since, p.sync_unreadable_reason,
     p.sync_property_drift_detected_at, p.sync_property_drift_keys,
     ac.ack_denominator,
     ac.ack_numerator
@@ -1313,6 +1371,8 @@ type ListPoliciesWithAckRateRow struct {
 	SyncDriftDetectedAt         pgtype.Timestamptz `json:"sync_drift_detected_at"`
 	SyncDriftBodySha256         *string            `json:"sync_drift_body_sha256"`
 	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
+	SyncUnreadableSince         pgtype.Timestamptz `json:"sync_unreadable_since"`
+	SyncUnreadableReason        *string            `json:"sync_unreadable_reason"`
 	SyncPropertyDriftDetectedAt pgtype.Timestamptz `json:"sync_property_drift_detected_at"`
 	SyncPropertyDriftKeys       []string           `json:"sync_property_drift_keys"`
 	AckDenominator              *int64             `json:"ack_denominator"`
@@ -1409,6 +1469,8 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 			&i.SyncDriftDetectedAt,
 			&i.SyncDriftBodySha256,
 			&i.SyncMissingSince,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
 			&i.SyncPropertyDriftDetectedAt,
 			&i.SyncPropertyDriftKeys,
 			&i.AckDenominator,
@@ -1486,18 +1548,18 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 const listPolicyVersionChain = `-- name: ListPolicyVersionChain :many
 WITH RECURSIVE chain AS (
     -- Anchor: the policy itself.
-    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+    SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
     FROM policies p0
     WHERE p0.tenant_id = $1 AND p0.id = $2
 
     UNION ALL
 
     -- Walk forward: any row whose predecessor_id is the current chain tip.
-    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at, p.historical_approver_name, p.historical_approved_at, p.source_url, p.imported_by, p.imported_at, p.self_approved, p.draft_editors, p.sync_site, p.sync_space, p.sync_page_id, p.synced_body_sha256, p.synced_by, p.synced_at, p.sync_drift_detected_at, p.sync_drift_body_sha256, p.sync_missing_since, p.sync_property_drift_detected_at, p.sync_property_drift_keys
+    SELECT p.id, p.tenant_id, p.title, p.version, p.effective_date, p.body_md, p.acknowledgment_required_roles, p.status, p.created_at, p.updated_at, p.predecessor_id, p.owner_role, p.approver_role, p.linked_control_ids, p.source_attribution, p.created_by, p.submitted_at, p.submitted_by, p.approved_at, p.approved_by, p.published_at, p.published_by, p.superseded_at, p.next_review_at, p.historical_approver_name, p.historical_approved_at, p.source_url, p.imported_by, p.imported_at, p.self_approved, p.draft_editors, p.sync_site, p.sync_space, p.sync_page_id, p.synced_body_sha256, p.synced_by, p.synced_at, p.sync_drift_detected_at, p.sync_drift_body_sha256, p.sync_missing_since, p.sync_property_drift_detected_at, p.sync_property_drift_keys, p.sync_unreadable_since, p.sync_unreadable_reason
     FROM policies p
     INNER JOIN chain c ON p.predecessor_id = c.id AND p.tenant_id = c.tenant_id
 )
-SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at, chain.historical_approver_name, chain.historical_approved_at, chain.source_url, chain.imported_by, chain.imported_at, chain.self_approved, chain.draft_editors, chain.sync_site, chain.sync_space, chain.sync_page_id, chain.synced_body_sha256, chain.synced_by, chain.synced_at, chain.sync_drift_detected_at, chain.sync_drift_body_sha256, chain.sync_missing_since, chain.sync_property_drift_detected_at, chain.sync_property_drift_keys
+SELECT chain.id, chain.tenant_id, chain.title, chain.version, chain.effective_date, chain.body_md, chain.acknowledgment_required_roles, chain.status, chain.created_at, chain.updated_at, chain.predecessor_id, chain.owner_role, chain.approver_role, chain.linked_control_ids, chain.source_attribution, chain.created_by, chain.submitted_at, chain.submitted_by, chain.approved_at, chain.approved_by, chain.published_at, chain.published_by, chain.superseded_at, chain.next_review_at, chain.historical_approver_name, chain.historical_approved_at, chain.source_url, chain.imported_by, chain.imported_at, chain.self_approved, chain.draft_editors, chain.sync_site, chain.sync_space, chain.sync_page_id, chain.synced_body_sha256, chain.synced_by, chain.synced_at, chain.sync_drift_detected_at, chain.sync_drift_body_sha256, chain.sync_missing_since, chain.sync_property_drift_detected_at, chain.sync_property_drift_keys, chain.sync_unreadable_since, chain.sync_unreadable_reason
 FROM chain
 ORDER BY chain.created_at ASC, chain.id ASC
 `
@@ -1550,6 +1612,8 @@ type ListPolicyVersionChainRow struct {
 	SyncMissingSince            pgtype.Timestamptz `json:"sync_missing_since"`
 	SyncPropertyDriftDetectedAt pgtype.Timestamptz `json:"sync_property_drift_detected_at"`
 	SyncPropertyDriftKeys       []string           `json:"sync_property_drift_keys"`
+	SyncUnreadableSince         pgtype.Timestamptz `json:"sync_unreadable_since"`
+	SyncUnreadableReason        *string            `json:"sync_unreadable_reason"`
 }
 
 // Returns the version chain for a policy id by walking predecessor_id.
@@ -1608,6 +1672,8 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 			&i.SyncMissingSince,
 			&i.SyncPropertyDriftDetectedAt,
 			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
 		); err != nil {
 			return nil, err
 		}
@@ -1620,7 +1686,7 @@ func (q *Queries) ListPolicyVersionChain(ctx context.Context, arg ListPolicyVers
 }
 
 const listSyncedPoliciesMissingFromSource = `-- name: ListSyncedPoliciesMissingFromSource :many
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 FROM policies
 WHERE tenant_id = $1
   AND source_attribution = 'synced'
@@ -1692,6 +1758,52 @@ func (q *Queries) ListSyncedPoliciesMissingFromSource(ctx context.Context, arg L
 			&i.SyncMissingSince,
 			&i.SyncPropertyDriftDetectedAt,
 			&i.SyncPropertyDriftKeys,
+			&i.SyncUnreadableSince,
+			&i.SyncUnreadableReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnreadableSyncedPolicies = `-- name: ListUnreadableSyncedPolicies :many
+SELECT id, title, owner_role, sync_unreadable_since
+FROM policies
+WHERE tenant_id = $1
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_unreadable_since IS NOT NULL
+ORDER BY sync_unreadable_since, id
+`
+
+type ListUnreadableSyncedPoliciesRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	Title               string             `json:"title"`
+	OwnerRole           string             `json:"owner_role"`
+	SyncUnreadableSince pgtype.Timestamptz `json:"sync_unreadable_since"`
+}
+
+// #3000 — the published synced policies whose page the latest sync run
+// carried as unreadable, for GET /v1/needs-attention.
+func (q *Queries) ListUnreadableSyncedPolicies(ctx context.Context, tenantID pgtype.UUID) ([]ListUnreadableSyncedPoliciesRow, error) {
+	rows, err := q.db.Query(ctx, listUnreadableSyncedPolicies, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnreadableSyncedPoliciesRow
+	for rows.Next() {
+		var i ListUnreadableSyncedPoliciesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.OwnerRole,
+			&i.SyncUnreadableSince,
 		); err != nil {
 			return nil, err
 		}
@@ -1829,7 +1941,7 @@ SET status = 'published',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'approved'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type PublishApprovedPolicyParams struct {
@@ -1898,6 +2010,8 @@ func (q *Queries) PublishApprovedPolicy(ctx context.Context, arg PublishApproved
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -1912,7 +2026,7 @@ WHERE tenant_id = $2
   AND source_attribution = 'synced'
   AND status = 'published'
   AND sync_drift_body_sha256 IS DISTINCT FROM $1
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SetSyncedPolicyDriftParams struct {
@@ -1975,6 +2089,8 @@ func (q *Queries) SetSyncedPolicyDrift(ctx context.Context, arg SetSyncedPolicyD
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -1992,7 +2108,7 @@ WHERE tenant_id = $2
   AND source_attribution = 'synced'
   AND status = 'published'
   AND sync_property_drift_keys IS DISTINCT FROM $1::text[]
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SetSyncedPolicyPropertyDriftParams struct {
@@ -2055,6 +2171,87 @@ func (q *Queries) SetSyncedPolicyPropertyDrift(ctx context.Context, arg SetSynce
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
+	)
+	return i, err
+}
+
+const setSyncedPolicyUnreadable = `-- name: SetSyncedPolicyUnreadable :one
+UPDATE policies
+SET sync_unreadable_since = COALESCE(sync_unreadable_since, now()),
+    sync_unreadable_reason = $1,
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_unreadable_reason IS DISTINCT FROM $1
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
+`
+
+type SetSyncedPolicyUnreadableParams struct {
+	SyncUnreadableReason *string     `json:"sync_unreadable_reason"`
+	TenantID             pgtype.UUID `json:"tenant_id"`
+	ID                   pgtype.UUID `json:"id"`
+}
+
+// #3000 — the run carried the page as unreadable: the connector could not
+// read its body. Records the pusher's reason; sync_unreadable_since keeps
+// the time the page was first carried unreadable. Nothing else on the
+// row changes: no body, hash, property, drift or version is written.
+//
+// A run that carries the same reason again writes nothing: the
+// IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+// query returns no row, which the caller reads as "already recorded".
+func (q *Queries) SetSyncedPolicyUnreadable(ctx context.Context, arg SetSyncedPolicyUnreadableParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, setSyncedPolicyUnreadable, arg.SyncUnreadableReason, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+		&i.SelfApproved,
+		&i.DraftEditors,
+		&i.SyncSite,
+		&i.SyncSpace,
+		&i.SyncPageID,
+		&i.SyncedBodySha256,
+		&i.SyncedBy,
+		&i.SyncedAt,
+		&i.SyncDriftDetectedAt,
+		&i.SyncDriftBodySha256,
+		&i.SyncMissingSince,
+		&i.SyncPropertyDriftDetectedAt,
+		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2070,7 +2267,7 @@ WHERE tenant_id = $1
   AND (status = 'draft'
        OR (status = 'under_review'
            AND (submitted_by LIKE 'jwt:%' OR submitted_by LIKE 'key\_%')))
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SubmitPolicyForReviewParams struct {
@@ -2130,6 +2327,8 @@ func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyFor
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2143,7 +2342,7 @@ WHERE tenant_id = $1
   AND id = $2
   AND source_attribution = 'imported'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SupersedeImportedPolicyParams struct {
@@ -2202,6 +2401,8 @@ func (q *Queries) SupersedeImportedPolicy(ctx context.Context, arg SupersedeImpo
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2214,7 +2415,7 @@ SET status = 'superseded',
 WHERE tenant_id = $1
   AND id = $2
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SupersedePolicyAtPublishParams struct {
@@ -2281,6 +2482,8 @@ func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePol
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2294,12 +2497,14 @@ SET status = 'superseded',
     sync_property_drift_detected_at = NULL,
     sync_property_drift_keys = NULL,
     sync_missing_since = NULL,
+    sync_unreadable_since = NULL,
+    sync_unreadable_reason = NULL,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
   AND source_attribution = 'synced'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type SupersedeSyncedPolicyParams struct {
@@ -2358,6 +2563,8 @@ func (q *Queries) SupersedeSyncedPolicy(ctx context.Context, arg SupersedeSynced
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2383,7 +2590,7 @@ WHERE tenant_id = $9
   AND id = $10
   AND source_attribution = 'imported'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type TakeOverImportedPolicyParams struct {
@@ -2466,6 +2673,8 @@ func (q *Queries) TakeOverImportedPolicy(ctx context.Context, arg TakeOverImport
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2486,7 +2695,7 @@ SET title = $1,
 WHERE tenant_id = $8
   AND id = $9
   AND status = 'draft'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type UpdateDraftPolicyParams struct {
@@ -2561,6 +2770,8 @@ func (q *Queries) UpdateDraftPolicy(ctx context.Context, arg UpdateDraftPolicyPa
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2572,7 +2783,7 @@ SET next_review_at = $1,
 WHERE tenant_id = $2
   AND id = $3
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type UpdatePolicyNextReviewAtParams struct {
@@ -2631,6 +2842,8 @@ func (q *Queries) UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicy
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }
@@ -2643,7 +2856,7 @@ WHERE tenant_id = $2
   AND id = $3
   AND source_attribution = 'synced'
   AND status = 'published'
-RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved, draft_editors, sync_site, sync_space, sync_page_id, synced_body_sha256, synced_by, synced_at, sync_drift_detected_at, sync_drift_body_sha256, sync_missing_since, sync_property_drift_detected_at, sync_property_drift_keys, sync_unreadable_since, sync_unreadable_reason
 `
 
 type UpdateSyncedPolicyLinksParams struct {
@@ -2702,6 +2915,8 @@ func (q *Queries) UpdateSyncedPolicyLinks(ctx context.Context, arg UpdateSyncedP
 		&i.SyncMissingSince,
 		&i.SyncPropertyDriftDetectedAt,
 		&i.SyncPropertyDriftKeys,
+		&i.SyncUnreadableSince,
+		&i.SyncUnreadableReason,
 	)
 	return i, err
 }

@@ -4130,7 +4130,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, controls inconclusive for 7 days or more, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134) */
+        /** GET /v1/needs-attention — the ranked needs-attention list (failing controls, approvals, synced policies whose source page is missing, synced policies whose source page the latest sync carried unreadable, controls inconclusive for 7 days or more, overdue, due within 14 days, ownership gaps); for=me or for=all (admins and GRC leads), paged (#2134) */
         get: operations["get-v1-needs-attention"];
         put?: never;
         post?: never;
@@ -4547,7 +4547,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body or property change without one drift (property drift names the changed keys), a page's first sync takes over a published imported policy with its title; per-page report (created, new_version, taken_over, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force), plus a warning when more than half of the source's policies are missing; an empty pages list for a source with published synced policies is refused 422 unless allow_empty is true (#2850, */
+        /** POST /v1/policies:sync — full-set push of policy pages from the Confluence policy connector; a policy-sync API key only, every other caller refused; new pages become published synced policies, a version bump the next version superseding the previous, a body or property change without one drift (property drift names the changed keys), a page's first sync takes over a published imported policy with its title; per-page report (created, new_version, taken_over, unchanged, drift, skipped with reason, missing for a previously synced page absent from the push, whose policy stays in force, unreadable for a page sent with unreadable set and an unreadable_reason in place of its body, which counts as present and leaves its policy unchanged), plus a warning when more than half of the source's policies are missing; an empty pages list for a source with published synced policies is refused 422 unless allow_empty is true (#2850, */
         post: operations["post-v1-policies_sync"];
         delete?: never;
         options?: never;

@@ -2,7 +2,7 @@
 // ranked list of what needs someone's attention, for the dashboard's
 // front door (#2072).
 //
-// Items come in seven bands, in this order:
+// Items come in eight bands, in this order:
 //
 //  1. failing: in-scope controls whose rolled-up state is fail;
 //  2. approval: records waiting for the caller's approval, read through
@@ -11,20 +11,25 @@
 //  3. source_missing: published synced policies whose page a policy sync
 //     run found absent, because it lost its label or was deleted (#2853).
 //     The policy stays in force; the item says the source has gone;
-//  4. inconclusive: in-scope controls whose rolled-up state has been
+//  4. source_unreadable: published synced policies whose page the latest
+//     policy sync run carried as unreadable, because the connector could
+//     not read its body (#3000). The page is still in its source and the
+//     policy unchanged; the item says the page needs fixing at source.
+//     Since is when a run first carried it so;
+//  5. inconclusive: in-scope controls whose rolled-up state has been
 //     inconclusive for at least InconclusiveDays (#2915), so a control
 //     with no evidence it can read is not left silent. Since is when the
 //     run began;
-//  5. overdue: policy, risk and vendor reviews, action plans and periodic
+//  6. overdue: policy, risk and vendor reviews, action plans and periodic
 //     control reviews the compliance calendar marks overdue;
-//  6. due_soon: the same calendar items, plus expiring exceptions, due
+//  7. due_soon: the same calendar items, plus expiring exceptions, due
 //     within DueSoonDays, and the caller's own policy acknowledgements
 //     (TypePolicyAck, #2587): a lapsed one is overdue, one never made is
 //     due soon until policy.AckGraceDays after the policy took effect and
 //     overdue after (#2736). They come from the ack store, not the
 //     calendar, whose ack lapse events are one per policy and day for
 //     many people;
-//  7. ownership_gap: in-scope controls with no assigned owner and open
+//  8. ownership_gap: in-scope controls with no assigned owner and open
 //     risks with no owner, listed for `for=all` only.
 //
 // Within a band the oldest item comes first (earliest due date, else
@@ -41,23 +46,24 @@ import (
 	"time"
 )
 
-// The seven bands, in rank order.
+// The eight bands, in rank order.
 const (
-	BandFailing       = "failing"
-	BandApproval      = "approval"
-	BandSourceMissing = "source_missing"
-	BandInconclusive  = "inconclusive"
-	BandOverdue       = "overdue"
-	BandDueSoon       = "due_soon"
-	BandOwnershipGap  = "ownership_gap"
+	BandFailing          = "failing"
+	BandApproval         = "approval"
+	BandSourceMissing    = "source_missing"
+	BandSourceUnreadable = "source_unreadable"
+	BandInconclusive     = "inconclusive"
+	BandOverdue          = "overdue"
+	BandDueSoon          = "due_soon"
+	BandOwnershipGap     = "ownership_gap"
 )
 
 // Bands lists the bands in rank order.
-var Bands = []string{BandFailing, BandApproval, BandSourceMissing, BandInconclusive, BandOverdue, BandDueSoon, BandOwnershipGap}
+var Bands = []string{BandFailing, BandApproval, BandSourceMissing, BandSourceUnreadable, BandInconclusive, BandOverdue, BandDueSoon, BandOwnershipGap}
 
 var bandRank = map[string]int{
-	BandFailing: 1, BandApproval: 2, BandSourceMissing: 3, BandInconclusive: 4,
-	BandOverdue: 5, BandDueSoon: 6, BandOwnershipGap: 7,
+	BandFailing: 1, BandApproval: 2, BandSourceMissing: 3, BandSourceUnreadable: 4,
+	BandInconclusive: 5, BandOverdue: 6, BandDueSoon: 7, BandOwnershipGap: 8,
 }
 
 // The two views.

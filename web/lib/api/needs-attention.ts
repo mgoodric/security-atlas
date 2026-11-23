@@ -12,6 +12,7 @@ export type NeedsAttentionBand =
   | "failing"
   | "approval"
   | "source_missing"
+  | "source_unreadable"
   | "inconclusive"
   | "overdue"
   | "due_soon"
@@ -82,6 +83,7 @@ const BAND_LABELS: Record<NeedsAttentionBand, string> = {
   failing: "Failing",
   approval: "Approval",
   source_missing: "Source missing",
+  source_unreadable: "Unreadable at source",
   inconclusive: "Inconclusive",
   overdue: "Overdue",
   due_soon: "Due soon",
