@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/aws.s3.bucket_tls_enforcement/1.0.0.json",
+  "x-evidence-kind": "aws.s3.bucket_tls_enforcement.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CRY-05"],
+  "title": "AWS S3 bucket TLS enforcement",
+  "description": "Per-bucket record of whether the bucket policy denies requests not sent over TLS, captured by the AWS connector from GetBucketPolicy (#2993). The record's result is the verdict. policy_present and denies_insecure_transport are present only when the connector read the policy or found the bucket has none; an unread bucket omits both and carries reason.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bucket_name"],
+  "properties": {
+    "bucket_name": { "type": "string", "minLength": 1 },
+    "policy_present": {
+      "type": "boolean",
+      "description": "False when GetBucketPolicy returned NoSuchBucketPolicy."
+    },
+    "denies_insecure_transport": {
+      "type": "boolean",
+      "description": "True when the policy has Deny statements for every principal and every S3 action, on the bucket and its objects, conditioned only on Bool aws:SecureTransport false. False when the policy is absent or has no such statements."
+    },
+    "account_id": { "type": "string" },
+    "region": { "type": "string" },
+    "reason": {
+      "type": "string",
+      "description": "Why the result is inconclusive: the AWS error from the region or policy lookup, or why the policy could not be parsed."
+    }
+  }
+}
