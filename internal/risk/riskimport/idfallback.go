@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -31,15 +32,111 @@ import (
 // and nothing is rejected for it. A column whose every value was used is
 // not listed among the batch's unmapped columns.
 
+//
+// The export's parent_risk_ids (#2957) follows the same rule, id by id:
+//
+//   - each id that is a risk of the uploading tenant is staged on the row,
+//     and the row's risk is linked under it at approval through
+//     risk.LinkChildrenTx (parentlink.go). Only when the row names no
+//     parent by organisation risk ID, which keeps the parent-risk-ID
+//     column the one a register written by hand follows;
+//   - an id that names no risk of the tenant stays in the unmapped value,
+//     which then holds only those ids.
+
 // ID fields. Like the others they are column-map keys.
 const (
-	FieldOwnerUserID = "owner_user_id"
-	FieldOrgUnitID   = "org_unit_id"
+	FieldOwnerUserID   = "owner_user_id"
+	FieldOrgUnitID     = "org_unit_id"
+	FieldParentRiskIDs = "parent_risk_ids"
 )
 
 // isIDField reports whether field's values are kept as unmapped until
 // staging resolves them.
-func isIDField(field string) bool { return field == FieldOwnerUserID || field == FieldOrgUnitID }
+func isIDField(field string) bool {
+	return field == FieldOwnerUserID || field == FieldOrgUnitID || field == FieldParentRiskIDs
+}
+
+// splitParentRiskIDs splits a parent_risk_ids cell on semicolons, as the
+// export joins them, dropping blanks.
+func splitParentRiskIDs(val string) []string {
+	var out []string
+	for _, p := range strings.Split(val, ";") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// resolveParentRiskIDs returns the refs that are the ids of risks of the
+// caller's tenant, keyed by the ref as written. The lookup is filtered on
+// the tenant as well as bound by RLS; another tenant's risk is not found.
+func (s *Store) resolveParentRiskIDs(ctx context.Context, refs []string) (map[string]uuid.UUID, error) {
+	out := map[string]uuid.UUID{}
+	byID := map[uuid.UUID][]string{}
+	var ids []uuid.UUID
+	for _, ref := range refs {
+		id, err := uuid.Parse(ref)
+		if err != nil {
+			continue
+		}
+		if _, seen := byID[id]; !seen {
+			ids = append(ids, id)
+		}
+		byID[id] = append(byID[id], ref)
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id FROM risks WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+		`, tenantID, ids)
+		if err != nil {
+			return fmt.Errorf("riskimport: resolve parent risk ids: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id uuid.UUID
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("riskimport: scan parent risk id: %w", err)
+			}
+			for _, ref := range byID[id] {
+				out[ref] = id
+			}
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// applyParentRiskIDs stages the row's parent_risk_ids that resolved, once
+// each, and leaves only the ids that did not in its unmapped value. A row
+// that names a parent by organisation risk ID stages none, and keeps the
+// cell unmapped as written.
+func applyParentRiskIDs(row *BatchRow, r StagedRisk, resolved map[string]uuid.UUID, key string) {
+	if len(r.ParentRiskIDRefs) == 0 || r.ParentRef != "" {
+		return
+	}
+	var left []string
+	seen := map[uuid.UUID]bool{}
+	for _, ref := range r.ParentRiskIDRefs {
+		id, ok := resolved[ref]
+		if !ok {
+			left = append(left, ref)
+			continue
+		}
+		if !seen[id] {
+			seen[id] = true
+			row.ParentRiskIDs = append(row.ParentRiskIDs, id.String())
+		}
+	}
+	if len(left) == 0 {
+		delete(row.Unmapped, key)
+	} else {
+		row.Unmapped[key] = strings.Join(left, ";")
+	}
+}
 
 // resolveOwnerUserIDs returns the refs that are the ids of active users of
 // the caller's tenant, keyed by the ref as written.

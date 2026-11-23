@@ -14,6 +14,7 @@ import {
   filterRows,
   flagLabel,
   mappedFields,
+  parentLinkText,
   rejectReasonLabel,
   reviewMode,
   rowHasUnmappedValue,
@@ -76,13 +77,45 @@ describe("batchProgress", () => {
       duplicate: 1,
       pending: 2,
       flagged: 2,
+      waiting: 0,
       notStaged: 2,
     });
+  });
+
+  it("counts approved rows waiting on a parent row (#2957)", () => {
+    const p = batchProgress(
+      batch([
+        row({
+          status: "approved",
+          parent_ref: "R-1",
+          parent_link_status: "waiting",
+        }),
+        row({
+          status: "approved",
+          parent_ref: "R-1",
+          parent_link_status: "linked",
+        }),
+        row({ status: "approved" }),
+      ]),
+    );
+    expect(p.waiting).toBe(1);
   });
 
   it("treats a null staged list as empty", () => {
     const b = { ...batch([]), staged: null };
     expect(batchProgress(b).pending).toBe(0);
+  });
+});
+
+describe("parentLinkText", () => {
+  it("names the export's parent risks when there is no parent ID (#2957)", () => {
+    const r = row({
+      parent_risk_ids: ["p1", "p2"],
+      parent_link_status: "linked",
+      parent_risk_id: "p1",
+    });
+    expect(parentLinkText(r)).toBe("p1, p2 (linked)");
+    expect(mappedFields(r)).toContainEqual(["Parent risks", "p1, p2 (linked)"]);
   });
 });
 
@@ -287,7 +320,7 @@ describe("row fields", () => {
     ]);
     expect(parent({ parent_link_status: "waiting" })).toEqual([
       "Parent risk ID",
-      "R-1 (waiting for its row)",
+      "R-1 (waiting for its import row to be decided)",
     ]);
     expect(parent({ parent_link_status: "linked" })).toEqual([
       "Parent risk ID",

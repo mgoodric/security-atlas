@@ -125,6 +125,11 @@ type StagedRisk struct {
 	// (idfallback.go).
 	OwnerUserIDRef string `json:"-"`
 	OrgUnitIDRef   string `json:"-"`
+	// ParentRiskIDRefs are the export's parent_risk_ids cell, split on
+	// semicolons as the export joins them. The cell is also kept in
+	// Unmapped until staging finds which ids are risks of the uploading
+	// tenant (idfallback.go, #2957).
+	ParentRiskIDRefs []string `json:"-"`
 	// ParentRef is the parent-risk-ID cell as written: the organisation
 	// risk ID of the risk this one rolls up to (parentlink.go).
 	ParentRef string            `json:"parent_ref,omitempty"`
@@ -233,8 +238,10 @@ var fieldAliases = map[string][]string{
 		"org_unit", "org unit", "org unit name", "org_unit_name", "organisation unit", "organization unit",
 	},
 	// The risk export's parent_risk_ids holds the parents' uuids in the
-	// exporting tenant, so it is deliberately not an alias: it stays
-	// unmapped.
+	// exporting tenant, so it is not a parent-risk-ID alias. It is an id
+	// field of its own: an id is used only when it names a risk of the
+	// uploading tenant, and kept unmapped otherwise (idfallback.go, #2957).
+	FieldParentRiskIDs: {"parent_risk_ids", "parent risk ids"},
 	FieldParentRef: {
 		"parent_ref", "parent ref", "parent risk id", "parent_risk_id", "parent risk", "parent",
 		"parent risk ref", "parent risk reference", "parent external ref", "parent_external_ref",
@@ -587,6 +594,12 @@ func rowToRisk(row []string, cols []column, methodology dbx.RiskMethodology, row
 			s.OrgUnit = val
 		case FieldParentRef:
 			s.ParentRef = val
+		case FieldParentRiskIDs:
+			if val == "" {
+				break
+			}
+			s.ParentRiskIDRefs = splitParentRiskIDs(val)
+			s.Unmapped[c.key] = val
 		case FieldOwnerUserID, FieldOrgUnitID:
 			if val == "" {
 				break
