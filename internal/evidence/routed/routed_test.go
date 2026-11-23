@@ -136,6 +136,33 @@ func TestPopulationKindsAtAnchorsOnTheEarlierOfCreatedAndFrozen(t *testing.T) {
 	}
 }
 
+// #2973 review: every routed kind resolves through Cutovers.For, given the
+// rows the migrations write (one per late kind). A kind routed from its
+// first record, such as one a later connector adds, needs no row and reads
+// the first cutover; only a kind in lateKinds reads its own.
+func TestEveryRoutedKindResolvesItsCutover(t *testing.T) {
+	t.Parallel()
+	first := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	late := first.Add(48 * time.Hour)
+	var rows []dbx.EvidenceRoutingKindCutover
+	for _, k := range lateKinds {
+		rows = append(rows, dbx.EvidenceRoutingKindCutover{EvidenceKind: k, CutAt: pgtype.Timestamptz{Time: late, Valid: true}})
+	}
+	c, err := cutoversFrom(first, rows)
+	if err != nil {
+		t.Fatalf("cutoversFrom with a row per late kind: %v", err)
+	}
+	for _, k := range Kinds() {
+		want := first
+		if slices.Contains(lateKinds, k) {
+			want = late
+		}
+		if got := c.For(k); got.IsZero() || !got.Equal(want) {
+			t.Errorf("For(%q) = %s, want %s", k, got, want)
+		}
+	}
+}
+
 // #2973: every late kind is routed, and Cutover refuses a late kind with no
 // row of its own rather than reading it at the first cutover.
 func TestLateKindsNeedTheirOwnCutover(t *testing.T) {
