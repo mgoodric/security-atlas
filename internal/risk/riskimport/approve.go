@@ -118,6 +118,9 @@ type lockedRow struct {
 	Level         dbx.RiskLevel
 	OrgUnitID     *uuid.UUID
 	ParentRef     string
+	// ParentRiskIDs are the parents the export's parent_risk_ids staged,
+	// used only when ParentRef is blank (#2957).
+	ParentRiskIDs []uuid.UUID
 	// UploaderUserID is the batch's uploading person, '' when none (#2881).
 	UploaderUserID string
 }
@@ -280,7 +283,7 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			}
 			// Nothing is created, so the row links nothing; rows waiting
 			// on it link under the risk it duplicates.
-			if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, rowID, row.RowNumber}); err != nil {
+			if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, row.BatchID, rowID, row.RowNumber}); err != nil {
 				return err
 			}
 			return finishDecision(ctx, tx, tenantID, out, "duplicate", "")
@@ -299,7 +302,7 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 			if err := recordDecision(ctx, tx, rowID, RowStatusRejected, in.Approver, "", reason); err != nil {
 				return err
 			}
-			if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, rowID, row.RowNumber}); err != nil {
+			if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, row.BatchID, rowID, row.RowNumber}); err != nil {
 				return err
 			}
 			return finishDecision(ctx, tx, tenantID, out, "reject", reason)
@@ -368,19 +371,20 @@ func (s *Store) approveRow(ctx context.Context, in ApproveInput, rowID string) (
 		// REPEATABLE READ, where the snapshot predates the lock and a
 		// child and its parent approved concurrently can each miss the
 		// other (parentlink.go).
-		if row.ParentRef != "" || row.ExternalRef != "" {
+		d := decision{in.Approver, row.BatchID, rowID, row.RowNumber}
+		if row.ParentRef != "" || len(row.ParentRiskIDs) > 0 || row.ExternalRef != "" {
 			if err := lockHierarchy(ctx, tx, tenantID); err != nil {
 				return err
 			}
 		}
-		if row.ParentRef != "" {
-			link, err := linkOwnParent(ctx, tx, tenantID, row.BatchID, decision{in.Approver, rowID, row.RowNumber}, created.ID, row.ParentRef)
-			if err != nil {
-				return err
-			}
+		link, linked, err := linkOwnParent(ctx, tx, tenantID, d, created.ID, row)
+		if err != nil {
+			return err
+		}
+		if linked {
 			out.ParentLinkStatus, out.ParentLinkError, out.ParentRiskID = link.Status, link.Error, link.ParentID
 		}
-		if err := settleWaiting(ctx, tx, tenantID, row.BatchID, row.ExternalRef, decision{in.Approver, rowID, row.RowNumber}); err != nil {
+		if err := settleWaiting(ctx, tx, tenantID, row.ExternalRef, d); err != nil {
 			return err
 		}
 		return finishDecision(ctx, tx, tenantID, out, "approve", "")
@@ -420,7 +424,7 @@ func (s *Store) RejectRow(ctx context.Context, in RejectRowInput) (RowDecision, 
 			return err
 		}
 		// Rows waiting on a rejected parent row fail their link.
-		if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, in.RowID, row.RowNumber}); err != nil {
+		if err := settleWaitingOn(ctx, tx, tenantID, row, decision{in.Approver, row.BatchID, in.RowID, row.RowNumber}); err != nil {
 			return err
 		}
 		return finishDecision(ctx, tx, tenantID, out, "reject", reason)
@@ -459,7 +463,7 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 		       r.category_value, r.theme_values, r.review_due, r.inherent_score::text, r.residual_score::text,
 		       b.methodology, r.status, r.treatment, r.acceptance_justification, r.proposed_until,
 		       r.instrument_reference, r.linked_control_ids, r.owner_user_id, r.owner_unlinked,
-		       COALESCE(r.level::text, ''), r.org_unit_id, r.parent_ref,
+		       COALESCE(r.level::text, ''), r.org_unit_id, r.parent_ref, r.parent_risk_ids,
 		       COALESCE(b.uploader_user_id::text, '')
 		FROM risk_import_rows r
 		JOIN risk_import_batches b ON b.tenant_id = r.tenant_id AND b.id = r.batch_id
@@ -468,7 +472,7 @@ func lockPendingRow(ctx context.Context, tx pgx.Tx, batchID, rowID string) (lock
 	`, rowID, batchID).Scan(&r.BatchID, &r.RowNumber, &r.ExternalRef, &r.Title, &r.Description,
 		&r.CategoryValue, &r.ThemeValues, &reviewDue, &inherent, &residual, &r.Methodology, &status, &r.Treatment, &r.Justification,
 		&proposedUntil, &r.Instrument, &r.ControlIDs, &r.OwnerUserID, &r.OwnerUnlinked,
-		&r.Level, &r.OrgUnitID, &r.ParentRef, &r.UploaderUserID)
+		&r.Level, &r.OrgUnitID, &r.ParentRef, &r.ParentRiskIDs, &r.UploaderUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return lockedRow{}, ErrRowNotFound
 	}
@@ -563,15 +567,25 @@ func finishDecision(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, d RowDec
 		nullable(d.RiskID), nullable(reason)); err != nil {
 		return fmt.Errorf("riskimport: write audit row: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE risk_import_batches
 		SET status = 'completed', updated_at = now()
 		WHERE id = $1::uuid AND status = 'staged'
 		  AND NOT EXISTS (SELECT 1 FROM risk_import_rows WHERE batch_id = $1::uuid AND status = 'pending')
-	`, d.BatchID); err != nil {
+	`, d.BatchID)
+	if err != nil {
 		return fmt.Errorf("riskimport: complete batch: %w", err)
 	}
-	return nil
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+	// The batch has just completed: a row still waiting on a parent no
+	// pending row carries would wait for ever, so it fails (#2957). Under
+	// the hierarchy lock, as every read that settles a link is.
+	if err := lockHierarchy(ctx, tx, tenantID); err != nil {
+		return err
+	}
+	return failStranded(ctx, tx, tenantID, decision{d.DecidedBy, d.BatchID, d.RowID, d.RowNumber})
 }
 
 // settleWaitingOn settles the links of the rows waiting on a row decided
@@ -584,5 +598,5 @@ func settleWaitingOn(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, row loc
 	if err := lockHierarchy(ctx, tx, tenantID); err != nil {
 		return err
 	}
-	return settleWaiting(ctx, tx, tenantID, row.BatchID, row.ExternalRef, d)
+	return settleWaiting(ctx, tx, tenantID, row.ExternalRef, d)
 }

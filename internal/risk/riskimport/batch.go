@@ -113,11 +113,16 @@ type BatchRow struct {
 	// ParentRiskID the parent a linked row was linked under (#2846). A
 	// failed link also flags the row parent_link_failed; the risk is
 	// imported either way.
-	ParentRef        string            `json:"parent_ref,omitempty"`
-	ParentLinkStatus string            `json:"parent_link_status"`
-	ParentLinkError  string            `json:"parent_link_error,omitempty"`
-	ParentRiskID     string            `json:"parent_risk_id,omitempty"`
-	Unmapped         map[string]string `json:"unmapped"`
+	ParentRef        string `json:"parent_ref,omitempty"`
+	ParentLinkStatus string `json:"parent_link_status"`
+	ParentLinkError  string `json:"parent_link_error,omitempty"`
+	ParentRiskID     string `json:"parent_risk_id,omitempty"`
+	// ParentRiskIDs are the risks of this tenant the export's
+	// parent_risk_ids cell named, staged only when ParentRef is blank. The
+	// row's risk is linked under each when it is approved (#2957); on a
+	// linked row ParentRiskID is the first of them.
+	ParentRiskIDs []string          `json:"parent_risk_ids,omitempty"`
+	Unmapped      map[string]string `json:"unmapped"`
 	// Flags are the row's review flags (Flag*), empty when none.
 	Flags     []string `json:"flags"`
 	Status    string   `json:"status"`
@@ -231,11 +236,12 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		placed = append(placed, r)
 		placements = append(placements, p)
 	}
-	var refs, owners, ownerIDRefs []string
+	var refs, owners, ownerIDRefs, parentIDRefs []string
 	for _, r := range placed {
 		refs = append(refs, r.ControlRefs...)
 		owners = append(owners, r.Owner)
 		ownerIDRefs = append(ownerIDRefs, r.OwnerUserIDRef)
+		parentIDRefs = append(parentIDRefs, r.ParentRiskIDRefs...)
 	}
 	controls, err := s.resolveControls(ctx, refs)
 	if err != nil {
@@ -246,6 +252,10 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		return Batch{}, err
 	}
 	ownerUsers, err := s.resolveOwnerUserIDs(ctx, ownerIDRefs)
+	if err != nil {
+		return Batch{}, err
+	}
+	parentRisks, err := s.resolveParentRiskIDs(ctx, parentIDRefs)
 	if err != nil {
 		return Batch{}, err
 	}
@@ -292,6 +302,7 @@ func (s *Store) Stage(ctx context.Context, in StageInput) (Batch, error) {
 		if _, ok := unitsByID[r.OrgUnitIDRef]; ok && r.OrgUnit == "" {
 			delete(row.Unmapped, parsed.idColumns[FieldOrgUnitID])
 		}
+		applyParentRiskIDs(&row, r, parentRisks, parsed.idColumns[FieldParentRiskIDs])
 		applyOwner(&row, r.Owner, ownerIDs)
 		row.Category, row.Themes, _ = targets.resolveRow(row.CategoryValue, row.ThemeValues)
 		b.Staged = append(b.Staged, row)
