@@ -83,7 +83,8 @@ reader sees, so the comparison now keeps them:
   renders the same `<br>`. It is kept only where CommonMark renders a
   break: not on an ATX heading, not before a blank line or at the end of
   the body, and not before a line that starts a new block (a heading,
-  blockquote, list item, fence, or a `-`/`=`/`*` line). A converter that
+  blockquote, fence, thematic break, setext underline, or a list item
+  that may interrupt a paragraph; #3014 below narrows this). A converter that
   pads every line, such as the #2910 integration fixture's `reflow`,
   therefore still reads as unchanged. A run that ends in a tab or NBSP is
   not a hard break and is stripped as before.
@@ -100,3 +101,49 @@ it.
   padding before list items reported as drift.
 - **detection_tier_target:** unit. `TestBodyDriftedConverterReflow` now
   pins that input without Postgres.
+
+#### D6 amendment — the block-start rule follows CommonMark (#3014)
+
+Follow-up from PR #3010. The first block-start rule was broader than
+CommonMark, so in four cases a real `<br>` change was normalised away.
+The rule now carries a small line state (is the last line paragraph
+text, and the content indent of the list item it sits in, if known) and
+applies CommonMark's interruption rules:
+
+- An ordered item interrupts a paragraph only when it starts at 1
+  (`1.`, `01)`). `text  \n2. foo` is a lazy continuation and keeps the
+  break. After a list item's own line, a less-indented ordered item at
+  any number starts a sibling item, so padded numbered lists still read
+  as unchanged.
+- An empty item (`*`, `+`, `1.`) never interrupts a paragraph; it ends
+  one only as a sibling item outside the paragraph's list item. A lone
+  `-` stays a setext underline.
+- A `=` line ends a paragraph only when the whole line is `=` and the
+  paragraph's containers still match; `text  \n=foo` keeps the break,
+  and so does `- item  \n===`, where the `===` is lazy text. `--` after a
+  list item is lazy text too, while `---` is a thematic break anywhere.
+  `___` is now recognised as a thematic break.
+- Trailing spaces on a setext underline or thematic break are no longer
+  kept, since only paragraph text carries a break.
+
+Where the state is unknown (a dedent out of a nested item, a paragraph
+after a blank line inside an item), every choice resolves toward keeping
+the break, so the comparison errs toward reporting drift.
+
+Accepted limitations, left out of #3014:
+
+- **Indented code blocks are not compared verbatim.** Trailing
+  whitespace and blank-line runs inside a four-space indented code block
+  are still normalised, so a change to only those is not reported.
+  Telling indented code from an indented list continuation needs the
+  full container parse; the converters emit fenced code, so this is
+  recorded rather than built.
+- **A `>` line always ends the paragraph before it.** Inside a
+  blockquote, `> a  \n> b` renders a break that is normalised away. The
+  rule does not strip quote markers to compare the quoted paragraph.
+
+- **detection_tier_actual:** manual_review. The reviewer of PR #3010
+  found the four cases by reading the rule against the spec.
+- **detection_tier_target:** unit. `TestNormalizeDriftBody` and
+  `TestBodyDriftedBlockStart` pin each case; every new case failed
+  against the previous rule.
