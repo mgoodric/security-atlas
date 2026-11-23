@@ -101,16 +101,18 @@ duplicate version.
 15 6 * * * /usr/local/bin/atlas-confluence run >> /var/log/atlas-confluence.log 2>&1
 ```
 
-| Exit | Meaning                                                                                                                                                                                                                                                                 |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | The push was accepted. The report says what happened to each page.                                                                                                                                                                                                      |
-| 1    | Nothing was pushed (a Confluence error, no labelled pages, no convertible body), or the platform refused the push. A `422` refusal of an empty push is printed as `platform refused an empty push`.                                                                     |
-| 3    | The push was accepted, but needs attention: more pages were `skipped by connector` than `--max-skipped` allows, or the platform returned a `warning:` line (for example, more than half of the source's policies missing from the push). The report is printed in full. |
+| Exit | Meaning                                                                                                                                                                                                                                                            |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0    | The push was accepted. The report says what happened to each page.                                                                                                                                                                                                 |
+| 1    | Nothing was pushed (a Confluence error, no labelled pages, no convertible body), or the platform refused the push. A `422` refusal of an empty push is printed as `platform refused an empty push`.                                                                |
+| 3    | The push was accepted, but needs attention: more pages were sent `unreadable` than `--max-skipped` allows, or the platform returned a `warning:` line (for example, more than half of the source's policies missing from the push). The report is printed in full. |
 
 Alert on any non-zero status. Exit 3 exists so that a converter regression
 that refuses many pages, but not all of them, does not exit 0 while the
-platform quietly marks those policies `missing`. `--max-skipped` (default 0) is how many converter skips a run tolerates before it exits 3; raise it
-only for a page you have accepted cannot be converted.
+platform quietly holds those pages `unreadable`, their policies frozen at
+the last body it could read. `--max-skipped` (default 0) is how many
+unconvertible pages a run tolerates before it exits 3; raise it only for a
+page you have accepted cannot be converted.
 
 ## The Page Properties template
 
@@ -152,22 +154,23 @@ One line per page, then the totals:
 page 101 "Access Control Policy": created version=1.0 policy=<id>
 page 102 "Incident Response Policy": unsupported macros: toc x1
 page 103 "Vendor Policy": skipped reason=missing required page property "effective_date"
+page 104 "Backup Policy": unreadable version=2.0 policy=<id> reason=body not converted: storagemd: body nested too deeply: limit 512
 warning: <a run-level note from the platform, if any>
-sync: created=1 new_version=0 taken_over=0 unchanged=0 drift=0 skipped=1 missing=0 skipped_by_connector=0
+sync: created=1 new_version=0 taken_over=0 unchanged=0 drift=0 skipped=1 missing=0 unreadable=1
 ```
 
-| Outcome                | Meaning                                                                                                                                                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `created`              | A new page became a published, synced policy. The page's approver and approval date are kept as the historical approver.                                                                                                                                                       |
-| `new_version`          | The page's `Version` changed. A new version was published and the previous one superseded (`predecessor=`), so staff are asked to acknowledge again.                                                                                                                           |
-| `taken_over`           | The page's first sync matched a published, imported policy by title. With the same version, the policy is now managed by the page. With a different version, the page's version became its next version.                                                                       |
-| `unchanged`            | Nothing changed since the last sync.                                                                                                                                                                                                                                           |
-| `drift`                | The body changed but `Version` did not. Nothing was written, and the policy shows the drift. Bump the version to publish the edit, or revert it.                                                                                                                               |
-| `skipped`              | The platform refused the page, with the reason: missing properties, a missing or invalid required property, an unknown key, an unrecognised audience, or an empty body. Nothing was written for that page.                                                                     |
-| `missing`              | A page synced before is not in this run: it lost its label, moved, or was deleted. The policy stays published, and gets a needs-attention item.                                                                                                                                |
-| `unsupported macros`   | Printed by the connector. These macros or elements have no Markdown form, so the synced text shows a visible marker where each one was. The page is still synced. Replace the macro, or accept the marker.                                                                     |
-| `skipped by connector` | Printed by the connector. The body could not be converted (unparseable, larger than 8 MiB, or nested more than 512 levels deep), so the page was left out of the push. If it was synced before, the platform reports it `missing`. More than `--max-skipped` of these exits 3. |
-| `warning:`             | Printed from the platform's `warnings`: a run-level note, such as more than half of the source's published synced policies missing from this push. Any warning exits 3.                                                                                                        |
+| Outcome              | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `created`            | A new page became a published, synced policy. The page's approver and approval date are kept as the historical approver.                                                                                                                                                                                                                                                                                                                                                       |
+| `new_version`        | The page's `Version` changed. A new version was published and the previous one superseded (`predecessor=`), so staff are asked to acknowledge again.                                                                                                                                                                                                                                                                                                                           |
+| `taken_over`         | The page's first sync matched a published, imported policy by title. With the same version, the policy is now managed by the page. With a different version, the page's version became its next version.                                                                                                                                                                                                                                                                       |
+| `unchanged`          | Nothing changed since the last sync.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `drift`              | The body changed but `Version` did not. Nothing was written, and the policy shows the drift. Bump the version to publish the edit, or revert it.                                                                                                                                                                                                                                                                                                                               |
+| `skipped`            | The platform refused the page, with the reason: missing properties, a missing or invalid required property, an unknown key, an unrecognised audience, or an empty body. Nothing was written for that page.                                                                                                                                                                                                                                                                     |
+| `missing`            | A page synced before is not in this run: it lost its label, moved, or was deleted. The policy stays published, and gets a needs-attention item.                                                                                                                                                                                                                                                                                                                                |
+| `unsupported macros` | Printed by the connector. These macros or elements have no Markdown form, so the synced text shows a visible marker where each one was. The page is still synced. Replace the macro, or accept the marker.                                                                                                                                                                                                                                                                     |
+| `unreadable`         | The connector could not convert the body (unparseable, larger than 8 MiB, or nested more than 512 levels deep), so it sent the page without one, with the converter's error as the reason. The page counts as present, so it is not reported `missing`, and its policy is unchanged: same body, version and drift. A synced policy gets a needs-attention item until the page converts again. A page with no policy yet gets none. More than `--max-skipped` of these exits 3. |
+| `warning:`           | Printed from the platform's `warnings`: a run-level note, such as more than half of the source's published synced policies missing from this push. Any warning exits 3.                                                                                                                                                                                                                                                                                                        |
 
 Synced policies are read-only in security-atlas. Edits happen in
 Confluence.
@@ -183,7 +186,7 @@ responses through `httptest` and stands an `httptest` server in for the
 platform endpoint. It covers a full set paginated over several responses,
 a page with no properties, unsupported macros, a Confluence error
 mid-read (no push, non-zero exit), a refused push, an empty set and an
-unconvertible body (exit 3, and exit 0 within `--max-skipped`), a platform
+unconvertible body (sent `unreadable`; exit 3, and exit 0 within `--max-skipped`), a platform
 warning (exit 3) and a 422 empty-push refusal.
 
 ### Live smoke run (not yet done)

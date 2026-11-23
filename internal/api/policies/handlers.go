@@ -193,9 +193,28 @@ type policyWire struct {
 	// found absent (#2853): it lost its label or was deleted. The policy
 	// stays in force.
 	SyncMissingSince *time.Time `json:"sync_missing_since,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	Warnings         []string   `json:"warnings,omitempty"`
+	// SyncUnreadable is set on a synced policy whose page the latest sync
+	// run carried as unreadable (#3000): still in its source, but its body
+	// could not be read. The policy is unchanged and stays in force.
+	SyncUnreadable *policySyncUnreadableWire `json:"sync_unreadable,omitempty"`
+	CreatedAt      time.Time                 `json:"created_at"`
+	UpdatedAt      time.Time                 `json:"updated_at"`
+	Warnings       []string                  `json:"warnings,omitempty"`
+}
+
+// policySyncUnreadableWire is a synced policy's unreadable state (#3000):
+// when a sync run first carried its page unreadable, and the pusher's
+// reason from the latest run.
+type policySyncUnreadableWire struct {
+	Since  time.Time `json:"since"`
+	Reason string    `json:"reason"`
+}
+
+func syncUnreadableWire(at *time.Time, reason *string) *policySyncUnreadableWire {
+	if at == nil || reason == nil {
+		return nil
+	}
+	return &policySyncUnreadableWire{Since: *at, Reason: *reason}
 }
 
 // policySyncDriftWire is a synced policy's drift (#2851): when a sync run
@@ -500,6 +519,7 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		SyncDrift:                   syncDriftWire(timestamptzPtr(r.SyncDriftDetectedAt), r.SyncDriftBodySha256),
 		SyncPropertyDrift:           syncPropertyDriftWire(timestamptzPtr(r.SyncPropertyDriftDetectedAt), r.SyncPropertyDriftKeys),
 		SyncMissingSince:            timestamptzPtr(r.SyncMissingSince),
+		SyncUnreadable:              syncUnreadableWire(timestamptzPtr(r.SyncUnreadableSince), r.SyncUnreadableReason),
 		CreatedAt:                   r.CreatedAt.Time,
 		UpdatedAt:                   r.UpdatedAt.Time,
 	}
@@ -1164,6 +1184,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		SyncDrift:                   syncDriftWire(p.SyncDriftDetectedAt, p.SyncDriftBodySHA256),
 		SyncPropertyDrift:           syncPropertyDriftWire(p.SyncPropertyDriftDetectedAt, p.SyncPropertyDriftKeys),
 		SyncMissingSince:            p.SyncMissingSince,
+		SyncUnreadable:              syncUnreadableWire(p.SyncUnreadableSince, p.SyncUnreadableReason),
 		CreatedAt:                   p.CreatedAt,
 		UpdatedAt:                   p.UpdatedAt,
 	}

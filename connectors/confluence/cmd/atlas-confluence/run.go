@@ -133,9 +133,9 @@ Exit status:
   0  the push was accepted
   1  nothing was pushed (a Confluence failure, no labelled pages, no
      convertible body), or the platform refused the push
-  3  the push was accepted, but more than --max-skipped pages were left
-     out because their body could not be converted, or the platform
-     returned a warning. Alert on it.
+  3  the push was accepted, but more than --max-skipped pages were sent
+     unreadable because their body could not be converted, or the
+     platform returned a warning. Alert on it.
 
 Nothing is pushed unless the whole labelled set was read.`,
 		SilenceUsage:  true,
@@ -192,7 +192,9 @@ func run(ctx context.Context, c config, hc *http.Client, out io.Writer) error {
 	}
 
 	req, notes := policysync.Build(policysync.Source{Site: site.String(), Space: c.space}, pages)
-	if len(req.Pages) == 0 {
+	// Unreadable pages alone are not pushed: a converter that refuses
+	// every body is a connector fault, not a source to report on.
+	if req.Readable() == 0 {
 		policysync.WriteReport(out, policysync.Report{}, notes)
 		return errors.New("no page body could be converted (nothing pushed)")
 	}
@@ -207,11 +209,11 @@ func run(ctx context.Context, c config, hc *http.Client, out io.Writer) error {
 // needsAttention turns an accepted push the scheduler should still alert
 // on into an ExitNeedsAttention error. A converter regression that
 // refuses many but not all pages would otherwise exit 0 while the
-// platform marks those policies missing.
+// platform holds those pages unreadable, their policies frozen.
 func needsAttention(maxSkipped, skipped, warnings int) error {
 	var why []string
 	if skipped > maxSkipped {
-		why = append(why, fmt.Sprintf("%d page(s) skipped by connector, more than --max-skipped=%d", skipped, maxSkipped))
+		why = append(why, fmt.Sprintf("%d page(s) not converted and sent unreadable, more than --max-skipped=%d", skipped, maxSkipped))
 	}
 	if warnings > 0 {
 		why = append(why, fmt.Sprintf("%d platform warning(s)", warnings))

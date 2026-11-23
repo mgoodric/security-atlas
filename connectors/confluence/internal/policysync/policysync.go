@@ -8,7 +8,9 @@
 // the platform, which owns the validation rules, reports it. The one
 // exception is a body the converter refuses (too large, nested too
 // deeply, unparseable): there is no Markdown to send, so the page is
-// reported here as skipped and left out of the push.
+// pushed as unreadable, with the converter's error as its reason and no
+// body or properties (#3000). The platform counts it present, so its
+// policy is not marked missing, and changes nothing else.
 package policysync
 
 import (
@@ -34,13 +36,17 @@ type Source struct {
 
 // PagePayload is one page in the push. Properties is nil (JSON null) for
 // a page with no Page Properties macro, which the platform reports as
-// "missing page properties".
+// "missing page properties". Unreadable marks a page whose body the
+// converter refused (#3000); it carries UnreadableReason and no body or
+// properties.
 type PagePayload struct {
-	ID         string         `json:"id"`
-	Title      string         `json:"title"`
-	URL        string         `json:"url"`
-	BodyMd     string         `json:"body_md"`
-	Properties map[string]any `json:"properties"`
+	ID               string         `json:"id"`
+	Title            string         `json:"title"`
+	URL              string         `json:"url"`
+	BodyMd           string         `json:"body_md"`
+	Properties       map[string]any `json:"properties"`
+	Unreadable       bool           `json:"unreadable,omitempty"`
+	UnreadableReason string         `json:"unreadable_reason,omitempty"`
 }
 
 // Request is the body of POST /v1/policies:sync.
@@ -56,7 +62,7 @@ type PageNote struct {
 	Title       string
 	Unsupported []storagemd.Unsupported
 	// ConvertErr is set when the body could not be converted; the page
-	// was left out of the push.
+	// was pushed as unreadable.
 	ConvertErr error
 }
 
@@ -131,6 +137,10 @@ func Build(src Source, pages []confluenceapi.Page) (Request, []PageNote) {
 		conv, err := storagemd.ConvertPage(p.Storage)
 		if err != nil {
 			notes = append(notes, PageNote{PageID: p.ID, Title: p.Title, ConvertErr: err})
+			req.Pages = append(req.Pages, PagePayload{
+				ID: p.ID, Title: p.Title, URL: p.URL,
+				Unreadable: true, UnreadableReason: unreadableReason(err),
+			})
 			continue
 		}
 		if len(conv.Unsupported) > 0 {
@@ -143,6 +153,22 @@ func Build(src Source, pages []confluenceapi.Page) (Request, []PageNote) {
 		req.Pages = append(req.Pages, pp)
 	}
 	return req, notes
+}
+
+// unreadableReason is an unreadable page's reason: the converter's error.
+func unreadableReason(err error) string {
+	return "body not converted: " + err.Error()
+}
+
+// Readable counts the pages of a push that carry a body.
+func (r Request) Readable() int {
+	n := 0
+	for _, p := range r.Pages {
+		if !p.Unreadable {
+			n++
+		}
+	}
+	return n
 }
 
 // Result is one line of the platform's report.
@@ -165,6 +191,7 @@ type Report struct {
 	Drift      int      `json:"drift"`
 	Skipped    int      `json:"skipped"`
 	Missing    int      `json:"missing"`
+	Unreadable int      `json:"unreadable"`
 	Results    []Result `json:"results"`
 	// Warnings are run-level notes from the platform, such as a run that
 	// leaves more than half of the source's policies missing (#2902).
@@ -236,8 +263,8 @@ func Push(ctx context.Context, hc *http.Client, platform *url.URL, key string, r
 	return rep, nil
 }
 
-// ConverterSkipped counts the pages the connector left out of the push
-// because their body could not be converted.
+// ConverterSkipped counts the pages whose body could not be converted,
+// which the connector pushed as unreadable.
 func ConverterSkipped(notes []PageNote) int {
 	n := 0
 	for _, note := range notes {
@@ -270,7 +297,8 @@ func WriteReport(w io.Writer, rep Report, notes []PageNote) {
 	}
 	for _, n := range notes {
 		if n.ConvertErr != nil {
-			_, _ = fmt.Fprintf(w, "page %s %q: skipped by connector reason=body not converted: %v\n", n.PageID, n.Title, n.ConvertErr)
+			// The platform's own line for the page, unreadable with this
+			// reason, is printed above.
 			continue
 		}
 		parts := make([]string, 0, len(n.Unsupported))
@@ -283,6 +311,6 @@ func WriteReport(w io.Writer, rep Report, notes []PageNote) {
 	for _, warn := range rep.Warnings {
 		_, _ = fmt.Fprintf(w, "warning: %s\n", warn)
 	}
-	_, _ = fmt.Fprintf(w, "sync: created=%d new_version=%d taken_over=%d unchanged=%d drift=%d skipped=%d missing=%d skipped_by_connector=%d\n",
-		rep.Created, rep.NewVersion, rep.TakenOver, rep.Unchanged, rep.Drift, rep.Skipped, rep.Missing, ConverterSkipped(notes))
+	_, _ = fmt.Fprintf(w, "sync: created=%d new_version=%d taken_over=%d unchanged=%d drift=%d skipped=%d missing=%d unreadable=%d\n",
+		rep.Created, rep.NewVersion, rep.TakenOver, rep.Unchanged, rep.Drift, rep.Skipped, rep.Missing, rep.Unreadable)
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
@@ -21,6 +22,10 @@ const (
 	maxSyncBodyBytes = maxImportBodyBytes
 	maxSyncPages     = maxImportFiles
 	maxSyncSourceLen = 500
+	// maxSyncUnreadableReasonLen bounds an unreadable page's reason, in
+	// characters (#3000); a longer one is cut short. The column's CHECK
+	// holds the same bound.
+	maxSyncUnreadableReasonLen = 500
 )
 
 // syncReq is one full-set push: every labelled page of one source.
@@ -46,6 +51,12 @@ type syncPageReq struct {
 	URL        string          `json:"url"`
 	BodyMd     string          `json:"body_md"`
 	Properties json.RawMessage `json:"properties"`
+	// Unreadable says the pusher could not read the page's body (#3000):
+	// the page is still labelled, so it is present, but it carries no
+	// body_md or properties, only UnreadableReason. Its policy is left as
+	// it is.
+	Unreadable       bool   `json:"unreadable"`
+	UnreadableReason string `json:"unreadable_reason"`
 }
 
 // syncProperties is the import's front-matter field set without title,
@@ -85,6 +96,9 @@ type syncResultWire struct {
 	// MissingSince is when a run first found a missing result's page
 	// absent (#2853).
 	MissingSince *time.Time `json:"missing_since,omitempty"`
+	// UnreadableSince is when a run first carried an unreadable result's
+	// page unreadable (#3000), unset when the page has no policy yet.
+	UnreadableSince *time.Time `json:"unreadable_since,omitempty"`
 }
 
 type syncRespWire struct {
@@ -95,6 +109,7 @@ type syncRespWire struct {
 	Drift      int              `json:"drift"`
 	Skipped    int              `json:"skipped"`
 	Missing    int              `json:"missing"`
+	Unreadable int              `json:"unreadable"`
 	Results    []syncResultWire `json:"results"`
 	Warnings   []string         `json:"warnings,omitempty"`
 }
@@ -109,7 +124,9 @@ type syncRespWire struct {
 // and a body or property change without one drift (#2851, #2877). A page's first sync takes over an
 // imported policy with its title (#2854). A previously synced page absent
 // from the push is reported missing and its policy left in force
-// (#2853); see policy.Store.Sync.
+// (#2853). A page sent with unreadable: true and a reason, because the
+// pusher could not read its body, is present and its policy unchanged;
+// the run records the reason on it (#3000). See policy.Store.Sync.
 //
 // Response: 200 with the per-page report and any run warnings. 400 when
 // the request itself is malformed (no source, too many pages); a bad page
@@ -149,8 +166,8 @@ func (h *Handler) SyncPolicies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pages, invalid := parseSyncPages(req.Pages)
-	report, err := h.store.Sync(ctx, src, pages, invalid, req.AllowEmpty, cred.ID)
+	pages, unreadable, invalid := parseSyncPages(req.Pages)
+	report, err := h.store.Sync(ctx, src, pages, unreadable, invalid, req.AllowEmpty, cred.ID)
 	if errors.Is(err, policy.ErrSyncEmptyRefused) {
 		httpresp.WriteError(w, http.StatusUnprocessableEntity,
 			"pages is empty but this source has published synced policies; an empty push would mark every one missing. Set allow_empty: true if the source is now empty")
@@ -164,9 +181,11 @@ func (h *Handler) SyncPolicies(w http.ResponseWriter, r *http.Request) {
 }
 
 // parseSyncPages validates every page with the import's rules, splitting
-// the pages into inputs for the store and skipped pages to report.
-func parseSyncPages(in []syncPageReq) ([]policy.SyncPage, []policy.SyncResult) {
+// the pages into inputs for the store, unreadable pages (#3000) and
+// skipped pages to report.
+func parseSyncPages(in []syncPageReq) ([]policy.SyncPage, []policy.SyncUnreadablePage, []policy.SyncResult) {
 	var pages []policy.SyncPage
+	var unreadable []policy.SyncUnreadablePage
 	var invalid []policy.SyncResult
 	for i, p := range in {
 		id := strings.TrimSpace(p.ID)
@@ -180,6 +199,19 @@ func parseSyncPages(in []syncPageReq) ([]policy.SyncPage, []policy.SyncResult) {
 		}
 		if id == "" {
 			skip("missing page id")
+			continue
+		}
+		if p.Unreadable {
+			reason, err := unreadablePage(p)
+			if err != nil {
+				skip(err.Error())
+				continue
+			}
+			unreadable = append(unreadable, policy.SyncUnreadablePage{PageID: id, Title: title, Reason: reason})
+			continue
+		}
+		if p.UnreadableReason != "" {
+			skip("unreadable_reason is set but unreadable is not; send unreadable: true for a page whose body could not be read")
 			continue
 		}
 		if strings.TrimSpace(p.URL) == "" {
@@ -215,7 +247,35 @@ func parseSyncPages(in []syncPageReq) ([]policy.SyncPage, []policy.SyncResult) {
 		}
 		pages = append(pages, policy.SyncPage{PageID: id, In: parsed})
 	}
-	return pages, invalid
+	return pages, unreadable, invalid
+}
+
+// unreadablePage checks an unreadable page (#3000) and returns its reason
+// as stored: control characters and runs of whitespace become one space,
+// invalid UTF-8 the replacement character, and a reason over
+// maxSyncUnreadableReasonLen characters is cut short with an ellipsis.
+// The reason is the pusher's text and is shown as text, never markup.
+func unreadablePage(p syncPageReq) (string, error) {
+	if p.BodyMd != "" {
+		return "", errors.New("an unreadable page carries no body_md; send the body, or unreadable: true without it")
+	}
+	if raw := bytes.TrimSpace(p.Properties); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		return "", errors.New("an unreadable page carries no properties")
+	}
+	reason := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(p.UnreadableReason, "\uFFFD"))
+	reason = strings.Join(strings.Fields(reason), " ")
+	if reason == "" {
+		return "", errors.New("an unreadable page needs unreadable_reason: why its body could not be read")
+	}
+	if r := []rune(reason); len(r) > maxSyncUnreadableReasonLen {
+		reason = strings.TrimRightFunc(string(r[:maxSyncUnreadableReasonLen-1]), unicode.IsSpace) + "\u2026"
+	}
+	return reason, nil
 }
 
 // decodeSyncProperties decodes one page's properties. An unknown key is
@@ -252,6 +312,9 @@ func wireFromSyncReport(r policy.SyncReport) syncRespWire {
 			if res.Status == policy.SyncStatusMissing {
 				rw.MissingSince = res.Policy.SyncMissingSince
 			}
+			if res.Status == policy.SyncStatusUnreadable {
+				rw.UnreadableSince = res.Policy.SyncUnreadableSince
+			}
 		}
 		switch res.Status {
 		case policy.SyncStatusCreated:
@@ -268,6 +331,8 @@ func wireFromSyncReport(r policy.SyncReport) syncRespWire {
 			out.Skipped++
 		case policy.SyncStatusMissing:
 			out.Missing++
+		case policy.SyncStatusUnreadable:
+			out.Unreadable++
 		}
 		out.Results = append(out.Results, rw)
 	}

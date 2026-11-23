@@ -37,5 +37,8 @@ describe("labels", () => {
     expect(needsAttentionTypeLabel("new_thing")).toBe("new thing");
     expect(needsAttentionBandLabel("ownership_gap")).toBe("No owner");
     expect(needsAttentionBandLabel("due_soon")).toBe("Due soon");
+    expect(needsAttentionBandLabel("source_unreadable")).toBe(
+      "Unreadable at source",
+    );
   });
 });

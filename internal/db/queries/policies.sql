@@ -149,6 +149,7 @@ SELECT
     p.imported_by, p.imported_at, p.self_approved,
     p.sync_drift_detected_at, p.sync_drift_body_sha256,
     p.sync_missing_since,
+    p.sync_unreadable_since, p.sync_unreadable_reason,
     p.sync_property_drift_detected_at, p.sync_property_drift_keys,
     ac.ack_denominator,
     ac.ack_numerator
@@ -464,6 +465,8 @@ SET status = 'superseded',
     sync_property_drift_detected_at = NULL,
     sync_property_drift_keys = NULL,
     sync_missing_since = NULL,
+    sync_unreadable_since = NULL,
+    sync_unreadable_reason = NULL,
     updated_at = now()
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = sqlc.arg('id')
@@ -613,6 +616,54 @@ WHERE tenant_id = sqlc.arg('tenant_id')
   AND status = 'published'
   AND sync_missing_since IS NOT NULL
 ORDER BY sync_missing_since, id;
+
+-- name: SetSyncedPolicyUnreadable :one
+-- #3000 — the run carried the page as unreadable: the connector could not
+-- read its body. Records the pusher's reason; sync_unreadable_since keeps
+-- the time the page was first carried unreadable. Nothing else on the
+-- row changes: no body, hash, property, drift or version is written.
+--
+-- A run that carries the same reason again writes nothing: the
+-- IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+-- query returns no row, which the caller reads as "already recorded".
+UPDATE policies
+SET sync_unreadable_since = COALESCE(sync_unreadable_since, now()),
+    sync_unreadable_reason = sqlc.arg('sync_unreadable_reason'),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_unreadable_reason IS DISTINCT FROM sqlc.arg('sync_unreadable_reason')
+RETURNING *;
+
+-- name: ClearSyncedPoliciesUnreadable :exec
+-- #3000 — every published synced row of this source whose page the run
+-- did not carry unreadable (it was readable, or absent) loses any
+-- unreadable state an earlier run recorded. Rows not marked are left
+-- alone, so updated_at moves only on a change.
+UPDATE policies
+SET sync_unreadable_since = NULL,
+    sync_unreadable_reason = NULL,
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_site = sqlc.arg('sync_site')
+  AND sync_space = sqlc.arg('sync_space')
+  AND NOT (sync_page_id = ANY(sqlc.arg('unreadable_page_ids')::text[]))
+  AND sync_unreadable_since IS NOT NULL;
+
+-- name: ListUnreadableSyncedPolicies :many
+-- #3000 — the published synced policies whose page the latest sync run
+-- carried as unreadable, for GET /v1/needs-attention.
+SELECT id, title, owner_role, sync_unreadable_since
+FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND source_attribution = 'synced'
+  AND status = 'published'
+  AND sync_unreadable_since IS NOT NULL
+ORDER BY sync_unreadable_since, id;
 
 -- name: ListImportedPoliciesForTakeover :many
 -- #2854 — on a page's first sync, every published imported policy in the

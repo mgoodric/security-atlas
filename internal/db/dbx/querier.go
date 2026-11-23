@@ -196,6 +196,11 @@ type Querier interface {
 	// the shipped manifest, so nothing is held back any more. The row named an
 	// earlier shipped manifest; without this it would be listed for good.
 	ClearStockControlHoldback(ctx context.Context, arg ClearStockControlHoldbackParams) error
+	// #3000 — every published synced row of this source whose page the run
+	// did not carry unreadable (it was readable, or absent) loses any
+	// unreadable state an earlier run recorded. Rows not marked are left
+	// alone, so updated_at moves only on a change.
+	ClearSyncedPoliciesUnreadable(ctx context.Context, arg ClearSyncedPoliciesUnreadableParams) error
 	// #2851 — the page's body matches the synced version again: the drift
 	// recorded on the row is cleared.
 	ClearSyncedPolicyDrift(ctx context.Context, arg ClearSyncedPolicyDriftParams) (Policy, error)
@@ -3590,6 +3595,9 @@ type Querier interface {
 	// row is how the handler knows the window held more and sets `truncated`,
 	// rather than dropping actors silently.
 	ListUnifiedAuditMachineActors(ctx context.Context, arg ListUnifiedAuditMachineActorsParams) ([]string, error)
+	// #3000 — the published synced policies whose page the latest sync run
+	// carried as unreadable, for GET /v1/needs-attention.
+	ListUnreadableSyncedPolicies(ctx context.Context, tenantID pgtype.UUID) ([]ListUnreadableSyncedPoliciesRow, error)
 	// The tested-under references ListAuditedUnderGaps cannot resolve (#2324):
 	// the system names no global framework with a current version, or the id
 	// names no requirement in that version. Typos and withdrawn codes land
@@ -4073,6 +4081,15 @@ type Querier interface {
 	// A run that sees the same keys again writes nothing: the IS DISTINCT
 	// FROM guard leaves the row alone and the query returns no row.
 	SetSyncedPolicyPropertyDrift(ctx context.Context, arg SetSyncedPolicyPropertyDriftParams) (Policy, error)
+	// #3000 — the run carried the page as unreadable: the connector could not
+	// read its body. Records the pusher's reason; sync_unreadable_since keeps
+	// the time the page was first carried unreadable. Nothing else on the
+	// row changes: no body, hash, property, drift or version is written.
+	//
+	// A run that carries the same reason again writes nothing: the
+	// IS DISTINCT FROM guard leaves the row (and updated_at) alone, and the
+	// query returns no row, which the caller reads as "already recorded".
+	SetSyncedPolicyUnreadable(ctx context.Context, arg SetSyncedPolicyUnreadableParams) (Policy, error)
 	// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
 	// ledger (AC-2, decisions log D2). Called after recording a review when the
 	// new review's reviewed_at is the most-recent on file. updated_at is bumped so
