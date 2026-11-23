@@ -47,7 +47,7 @@ import (
 
 // kinds is the closed list of routed connector kinds.
 var kinds = []string{
-	"1password.org_policy.v1",
+	"1password.org_policy.v2",
 	"aws.s3.bucket_encryption_state.v1",
 	"github.audit_event.v1",
 	"github.repo_protection.v1",
