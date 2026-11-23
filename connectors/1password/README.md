@@ -52,7 +52,7 @@ atlas-1password run \
 atlas-1password scopes
 ```
 
-For an account outside 1password.com, set both base URLs for its region: `--events-base-url https://events.1password.eu --users-base-url https://api.1password.eu`. The other regions are `.ca` and `ent.1password.com`.
+For an account outside 1password.com, set both base URLs for its region: `--events-base-url https://events.1password.eu --users-base-url https://api.1password.eu`. The other regions are `.ca` and `ent.1password.com`. Only those documented hosts, over `https`, with no port, path, query or userinfo, are accepted. Anything else stops the run before a credential is read.
 
 ## Idempotency
 

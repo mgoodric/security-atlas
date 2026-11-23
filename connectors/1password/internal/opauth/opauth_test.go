@@ -147,3 +147,51 @@ func TestDocumentedScopes_CoversOrgPolicyKind(t *testing.T) {
 		}
 	}
 }
+
+// The base URLs decide where the credentials go, so only https and the
+// documented regional hosts pass, with nothing else in the URL.
+func TestCheckBaseURL(t *testing.T) {
+	check := map[string]func(string) error{"events": opauth.CheckEventsBaseURL, "users": opauth.CheckUsersBaseURL}
+	hosts := map[string][]string{"events": opauth.EventsHosts, "users": opauth.UsersHosts}
+	for api, hs := range hosts {
+		for _, h := range hs {
+			for _, u := range []string{"https://" + h, "https://" + h + "/"} {
+				if err := check[api](u); err != nil {
+					t.Errorf("%s %q: %v; want accepted", api, u, err)
+				}
+			}
+		}
+	}
+	bad := map[string]string{
+		"http":              "http://%s",
+		"foreign host":      "https://evil.example",
+		"lookalike suffix":  "https://%s.evil.example",
+		"subdomain":         "https://x.%s",
+		"userinfo":          "https://user@%s",
+		"userinfo redirect": "https://%s@evil.example",
+		"port":              "https://%s:8443",
+		"default port":      "https://%s:443",
+		"path":              "https://%s/v1",
+		"query":             "https://%s?x=1",
+		"empty query":       "https://%s?",
+		"fragment":          "https://%s#x",
+		"uppercase host":    "https://EVENTS.1PASSWORD.COM",
+		"no scheme":         "%s",
+		"empty":             "",
+	}
+	for name, pat := range bad {
+		for api, hs := range hosts {
+			u := pat
+			if strings.Contains(pat, "%s") {
+				u = fmt.Sprintf(pat, hs[0])
+			}
+			if err := check[api](u); err == nil {
+				t.Errorf("%s / %s: %q accepted", name, api, u)
+			}
+		}
+	}
+	// Each API's hosts are refused for the other API.
+	if opauth.CheckEventsBaseURL("https://api.1password.com") == nil || opauth.CheckUsersBaseURL("https://events.1password.com") == nil {
+		t.Error("an API's base URL accepted the other API's host")
+	}
+}

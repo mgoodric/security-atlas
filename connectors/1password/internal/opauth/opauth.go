@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -104,6 +106,39 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 	}
 	if req.URL.Scheme != orig.Scheme {
 		return fmt.Errorf("%w: from %s to %s", ErrUnsafeRedirect, orig.Scheme, req.URL.Scheme)
+	}
+	return nil
+}
+
+// The documented regional hosts of each API: 1password.com, .ca, .eu and
+// ent.1password.com (www.1password.dev/events-api/reference/introspect.md
+// servers block; users-api/authorization.md "Authorization endpoints").
+var (
+	EventsHosts = []string{"events.1password.com", "events.1password.ca", "events.1password.eu", "events.ent.1password.com"}
+	UsersHosts  = []string{"api.1password.com", "api.1password.ca", "api.1password.eu", "api.ent.1password.com"}
+)
+
+// CheckEventsBaseURL refuses an Events API base URL that would send the
+// Events Reporting bearer anywhere but a documented Events host.
+func CheckEventsBaseURL(raw string) error { return checkBaseURL("--events-base-url", raw, EventsHosts) }
+
+// CheckUsersBaseURL refuses a Users API base URL that would send the OAuth
+// client secret anywhere but a documented Users API host.
+func CheckUsersBaseURL(raw string) error { return checkBaseURL("--users-base-url", raw, UsersHosts) }
+
+// checkBaseURL accepts only https://<host> or https://<host>/ with host an
+// exact match from hosts: no userinfo, port, path, query or fragment, so no
+// spelling of the flag can move the credential to another origin or onto
+// plain http (the same intent as the Datadog connector's CheckSite, #2986).
+func checkBaseURL(flag, raw string, hosts []string) error {
+	bad := fmt.Errorf("opauth: %s %q is not a 1Password API base URL (one of https://%s)", flag, raw, strings.Join(hosts, ", https://"))
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.Port() != "" ||
+		(u.Path != "" && u.Path != "/") || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return bad
+	}
+	if !slices.Contains(hosts, u.Host) {
+		return bad
 	}
 	return nil
 }

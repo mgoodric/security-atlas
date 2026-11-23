@@ -53,6 +53,15 @@ Accounts outside 1password.com set both base URLs for their region.`,
 			if f.environment == "" {
 				return errors.New("--environment is required")
 			}
+			// The base URLs decide where the Events bearer and the OAuth
+			// client secret are sent, so only documented 1Password hosts
+			// over https pass.
+			if err := opauth.CheckEventsBaseURL(f.eventsBaseURL); err != nil {
+				return err
+			}
+			if err := opauth.CheckUsersBaseURL(f.usersBaseURL); err != nil {
+				return err
+			}
 			return resolveCommon()
 		},
 		RunE: func(_ *cobra.Command, _ []string) error {

@@ -97,6 +97,19 @@ Two tests, `TestClient_RefusesRedirectToAnotherHost` and
 `TestDoRun_RefusesRedirectToAnotherHost`, assert that the other host
 receives no request. I ran both with the guard removed, and both fail.
 
+The two base URLs decide where the bearer and the client secret go, so
+`run` checks them before it reads any credential (review of #3004).
+`--events-base-url` must be exactly `https://` plus one of
+`events.1password.com`, `.ca`, `.eu` or `events.ent.1password.com`.
+`--users-base-url` must be the same with `api.` in place of `events.`.
+An optional trailing `/` is allowed. Userinfo, a port (even `:443`), a
+path, a query and a fragment are all refused, and so is the other API's
+host. This follows the Datadog connector's `CheckSite` (#2986). The
+hosts are the regional servers 1Password documents for each API. The
+check runs in `PreRunE`, so `doRun` stays testable against `httptest`
+servers. A 401 is not retried with a fresh token, because each run
+mints its own token, which lasts 900 seconds.
+
 `{account}` in the Users API path is the introspect `account_uuid`. The
 docs call the path value "a 26-character uppercase ID", and the 403 for a
 mismatch says "Account UUID does not match token". That is the basis for

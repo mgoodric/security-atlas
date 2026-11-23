@@ -299,6 +299,45 @@ func TestNewRunCmd_PreRunResolveCommonFails(t *testing.T) {
 	}
 }
 
+// TestNewRunCmd_PreRunRejectsUnsafeBaseURLs: the base URLs are checked at
+// flag resolution, before any credential is read or sent; the defaults and
+// other regions pass.
+func TestNewRunCmd_PreRunRejectsUnsafeBaseURLs(t *testing.T) {
+	cases := map[string]struct {
+		args    []string
+		wantErr string
+	}{
+		"events http":       {[]string{"--events-base-url", "http://events.1password.com"}, "--events-base-url"},
+		"events foreign":    {[]string{"--events-base-url", "https://evil.example"}, "--events-base-url"},
+		"users userinfo":    {[]string{"--users-base-url", "https://api.1password.com@evil.example"}, "--users-base-url"},
+		"users port":        {[]string{"--users-base-url", "https://api.1password.com:8443"}, "--users-base-url"},
+		"defaults":          {nil, ""},
+		"eu region":         {[]string{"--events-base-url", "https://events.1password.eu", "--users-base-url", "https://api.1password.eu"}, ""},
+		"enterprise region": {[]string{"--events-base-url", "https://events.ent.1password.com", "--users-base-url", "https://api.ent.1password.com"}, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			resetCommon(t)
+			common.endpoint = "127.0.0.1:1"
+			common.token = "test-bearer"
+			cmd := newRunCmd()
+			if err := cmd.ParseFlags(append([]string{"--environment", "prod"}, tc.args...)); err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			err := cmd.PreRunE(cmd, nil)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("PreRunE: %v; want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v; want %s refused", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 // TestNewScopesCmd_PrintsTabularRoster runs the scopes subcommand and
 // confirms it emits the expected tabwriter header plus at least one
 // row from opauth.DocumentedScopes().
