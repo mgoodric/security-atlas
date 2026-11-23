@@ -187,8 +187,8 @@ func run() error {
 
 	// Gate checks.
 	var gateFail []string
-	if bundleCount != 64 {
-		gateFail = append(gateFail, fmt.Sprintf("AC-1: expected 64 bundles, got %d", bundleCount))
+	if bundleCount != 65 {
+		gateFail = append(gateFail, fmt.Sprintf("AC-1: expected 65 bundles, got %d", bundleCount))
 	}
 	if automatedCount*2 < bundleCount {
 		gateFail = append(gateFail, fmt.Sprintf("AC-2: expected ≥%d automated, got %d", (bundleCount+1)/2, automatedCount))

@@ -156,7 +156,7 @@ func statementList(raw json.RawMessage) ([]map[string]any, error) {
 	}
 	var one map[string]any
 	if err := json.Unmarshal(raw, &one); err != nil {
-		return nil, fmt.Errorf("Statement is neither an object nor a list of objects: %w", err)
+		return nil, fmt.Errorf("policy Statement is neither an object nor a list of objects: %w", err)
 	}
 	return []map[string]any{one}, nil
 }
