@@ -147,9 +147,107 @@ export type RiskImportBatch = {
   category_values?: ValueMapping[] | null;
   theme_values?: ValueMapping[] | null;
   created_at: string;
+  // #3002: who closed the batch, when and why; set only on a closed one.
+  closed_by?: string;
+  closed_at?: string;
+  close_reason?: string;
   staged: BatchRow[] | null;
   rejected: RejectedRow[] | null;
 };
+
+// #3002: a batch is staged until its last pending row is decided
+// (completed) or an approver closes it (closed). There is no expiry.
+export type BatchStatus = "staged" | "completed" | "closed";
+
+export const BATCH_STATUS_LABELS: Record<BatchStatus, string> = {
+  staged: "Awaiting review",
+  completed: "Completed",
+  closed: "Closed",
+};
+
+export function batchStatusLabel(status: string): string {
+  return BATCH_STATUS_LABELS[status as BatchStatus] ?? status;
+}
+
+export function batchStatusVariant(status: string) {
+  switch (status) {
+    case "completed":
+      return "pass" as const;
+    case "closed":
+      return "secondary" as const;
+    default:
+      return "info" as const;
+  }
+}
+
+/** NO_EXPIRY_TEXT is what the import list says of expiry (#3002, D2). */
+export const NO_EXPIRY_TEXT =
+  "Imports do not expire. One stays open until every row is decided or an approver closes it.";
+
+/** RiskImportSummary is one row of GET /v1/risks/imports (#3002). */
+export type RiskImportSummary = {
+  id: string;
+  source_filename: string;
+  source_format: string;
+  methodology: string;
+  uploaded_by: string;
+  uploader_user_id?: string;
+  status: string;
+  total_rows: number;
+  staged_count: number;
+  rejected_count: number;
+  pending_count: number;
+  /** Its approved rows waiting on a pending parent row of any import. */
+  waiting_count: number;
+  /** Approved rows of any import waiting on its pending rows. */
+  children_waiting_count: number;
+  created_at: string;
+  closed_by?: string;
+  closed_at?: string;
+  close_reason?: string;
+};
+
+/** summaryCounts is the import list's counts line: pending rows, rows
+ *  waiting on a parent, and rows of any import waiting on this one. A zero
+ *  waiting count is left out. */
+export function summaryCounts(s: RiskImportSummary): string {
+  const parts = [`${s.pending_count} pending`];
+  if (s.waiting_count > 0) {
+    parts.push(`${s.waiting_count} waiting on a parent`);
+  }
+  if (s.children_waiting_count > 0) {
+    parts.push(
+      `${s.children_waiting_count} ${
+        s.children_waiting_count === 1 ? "row" : "rows"
+      } waiting on this import`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+/** canClose: the caller decides this batch and it is still staged. The
+ *  platform's close gate is the authority. */
+export function canClose(
+  batch: Pick<RiskImportBatch, "can_decide" | "status"> | undefined,
+): boolean {
+  return reviewMode(batch) === "decide" && batch?.status === "staged";
+}
+
+/** CloseResult is POST /v1/risks/imports/{id}/close's response. */
+export type CloseResult = {
+  batch_id: string;
+  status: string;
+  closed_by: string;
+  closed_at: string;
+  close_reason: string;
+  rejected: RowDecision[] | null;
+};
+
+/** closeMessage summarises a close for a toast. */
+export function closeMessage(r: { rejected: RowDecision[] | null }): string {
+  const n = r.rejected?.length ?? 0;
+  return `Closed the import; ${n} pending ${n === 1 ? "row" : "rows"} rejected`;
+}
 
 export type RowDecision = {
   batch_id: string;

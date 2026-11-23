@@ -16,6 +16,9 @@
 //    a value maps to nothing.
 // Then the batch review page, where an approver approves.
 //
+// Below the file step, the organisation's recent imports with their
+// pending and waiting counts (#3002).
+//
 // Caps, header detection, alias matching and every refusal are the
 // platform's; its error messages are shown inline.
 
@@ -46,7 +49,16 @@ import {
   uploadForm,
   valuesToMap,
 } from "@/lib/api/risk-import-upload";
-import type { RiskImportBatch, ValueMapping } from "@/lib/api/risk-imports";
+import { bffControlFetch } from "@/lib/api/_shared";
+import {
+  type RiskImportBatch,
+  type RiskImportSummary,
+  type ValueMapping,
+  NO_EXPIRY_TEXT,
+  batchStatusLabel,
+  batchStatusVariant,
+  summaryCounts,
+} from "@/lib/api/risk-imports";
 import { fetchRiskCategories } from "@/lib/api/risks";
 import type { RiskTheme } from "@/lib/api/risk-hierarchy";
 import {
@@ -66,6 +78,72 @@ async function fetchThemes(): Promise<RiskTheme[]> {
 
 function reviewPath(id: string): string {
   return `/risks/imports/${encodeURIComponent(id)}`;
+}
+
+// ImportList lists the organisation's recent imports (#3002), each with its
+// status, pending and waiting counts, so a batch nobody is finishing is
+// visible and an approver can open it and close it. Imports do not expire.
+function ImportList() {
+  const listQ = useQuery({
+    queryKey: ["risk-imports"],
+    queryFn: () =>
+      bffControlFetch<{ batches: RiskImportSummary[] | null }>(
+        "/api/risks/imports",
+      ),
+  });
+  const batches = listQ.data?.batches ?? [];
+  return (
+    <section className="mt-10 space-y-3" data-testid="risk-import-list">
+      <h2 className="text-sm font-medium">Recent imports</h2>
+      <p className="text-xs text-muted-foreground">{NO_EXPIRY_TEXT}</p>
+      {listQ.isError ? (
+        <Alert variant="destructive" data-testid="risk-import-list-error">
+          <AlertDescription>
+            Could not load the imports: {listQ.error.message}
+          </AlertDescription>
+        </Alert>
+      ) : batches.length === 0 && !listQ.isLoading ? (
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="risk-import-list-empty"
+        >
+          No imports yet.
+        </p>
+      ) : (
+        <ul className="divide-y rounded-lg border text-sm">
+          {batches.map((b) => (
+            <li
+              key={b.id}
+              className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+              data-testid="risk-import-list-row"
+              data-batch-id={b.id}
+              data-status={b.status}
+            >
+              <span>
+                <Link href={reviewPath(b.id)} className="underline">
+                  {b.source_filename}
+                </Link>{" "}
+                <span className="text-xs text-muted-foreground">
+                  staged {new Date(b.created_at).toLocaleDateString()}
+                </span>
+              </span>
+              <span className="flex flex-wrap items-center gap-2">
+                <span
+                  className="tabular-nums"
+                  data-testid="risk-import-list-counts"
+                >
+                  {summaryCounts(b)}
+                </span>
+                <Badge variant={batchStatusVariant(b.status)}>
+                  {batchStatusLabel(b.status)}
+                </Badge>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 // ValueStep maps the staged batch's category and theme values.
@@ -410,6 +488,8 @@ export default function RiskImportUploadPage() {
           onContinue={() => toReview(batch)}
         />
       ) : null}
+
+      {step === "file" ? <ImportList /> : null}
     </PageShell>
   );
 }
