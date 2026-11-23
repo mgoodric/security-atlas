@@ -273,6 +273,7 @@ const cc66MFABundle = "soc2_cc6_6_mfa_external_threats"
 // #2828: cc6_6 MFA on admin apps decides on each app's latest
 // okta.app_assignment.v1 payload (classification, sign_on_mfa_required),
 // not on the Okta connector's verdict, which is always inconclusive.
+// #2951: session_mfa_required, the global session policy, counts too.
 func TestCC66_EngineEvaluatesAdminAppMFAPayload(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -283,6 +284,7 @@ func TestCC66_EngineEvaluatesAdminAppMFAPayload(t *testing.T) {
 		id    string
 		class string // "" when unclassified
 		mfa   string // "on", "off", or "" for undecided
+		sess  string // the same, for session_mfa_required
 	}
 	payload := func(r rec) map[string]any {
 		p := map[string]any{
@@ -301,6 +303,11 @@ func TestCC66_EngineEvaluatesAdminAppMFAPayload(t *testing.T) {
 		} else {
 			p["sign_on_mfa_required"] = r.mfa == "on"
 		}
+		if r.sess == "" {
+			p["session_reason"] = "no active global session policy"
+		} else {
+			p["session_mfa_required"] = r.sess == "on"
+		}
 		return p
 	}
 	cases := []struct {
@@ -308,11 +315,13 @@ func TestCC66_EngineEvaluatesAdminAppMFAPayload(t *testing.T) {
 		records []rec
 		want    string
 	}{
-		{"admin and infrastructure require mfa", []rec{{"0oa1", "admin", "on"}, {"0oa2", "infrastructure", "on"}, {"0oa3", "standard", "off"}}, eval.ResultPass},
-		{"admin app allows 1fa", []rec{{"0oa1", "admin", "off"}, {"0oa2", "infrastructure", "on"}}, eval.ResultFail},
-		{"admin app undecided", []rec{{"0oa1", "admin", ""}}, eval.ResultInconclusive},
-		{"only standard apps", []rec{{"0oa3", "standard", "off"}}, eval.ResultInconclusive},
-		{"unclassified app allows 1fa", []rec{{"0oa1", "", "off"}}, eval.ResultInconclusive},
+		{"admin and infrastructure require mfa", []rec{{"0oa1", "admin", "on", "off"}, {"0oa2", "infrastructure", "on", "off"}, {"0oa3", "standard", "off", "off"}}, eval.ResultPass},
+		{"admin app allows 1fa", []rec{{"0oa1", "admin", "off", "off"}, {"0oa2", "infrastructure", "on", "off"}}, eval.ResultFail},
+		{"admin app undecided", []rec{{"0oa1", "admin", "", "off"}}, eval.ResultInconclusive},
+		{"only standard apps", []rec{{"0oa3", "standard", "off", "off"}}, eval.ResultInconclusive},
+		{"unclassified app allows 1fa", []rec{{"0oa1", "", "off", "off"}}, eval.ResultInconclusive},
+		{"admin app 1fa, session requires mfa", []rec{{"0oa1", "admin", "off", "on"}}, eval.ResultPass},
+		{"admin app 1fa, session undecided", []rec{{"0oa1", "admin", "off", ""}}, eval.ResultInconclusive},
 		{"no record", nil, eval.ResultInconclusive},
 	}
 	for _, tc := range cases {

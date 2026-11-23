@@ -46,6 +46,10 @@ func TestPull_SignOnMFAFromDocumentedShapes(t *testing.T) {
 	mux.HandleFunc("/api/v1/policies/rst1mfa/rules", counted("rst1mfa", serveFixture(t, "access_policy_rules_mfa.json")))
 	mux.HandleFunc("/api/v1/policies/rst2default/rules", counted("rst2default", serveFixture(t, "access_policy_rules_default.json")))
 	mux.HandleFunc("/api/v1/policies/rst3chain/rules", counted("rst3chain", serveFixture(t, "access_policy_rules_chain.json")))
+	mux.HandleFunc("/api/v1/policies/rst5chain1fa/rules", serveFixture(t, "access_policy_rules_chain_1fa.json"))
+	mux.HandleFunc("/api/v1/policies", serveSessionPolicies(t, "session_policies.json"))
+	mux.HandleFunc("/api/v1/groups", serveFixture(t, "groups_builtin.json"))
+	mux.HandleFunc("/api/v1/policies/00p1default/rules", serveFixture(t, "session_rules_default.json"))
 	mux.HandleFunc("/api/v1/policies/rst4gone/rules", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"errorCode":"E0000007"}`, http.StatusNotFound)
 	})
@@ -67,9 +71,10 @@ func TestPull_SignOnMFAFromDocumentedShapes(t *testing.T) {
 		{"0oa1admin", "rst1mfa", &yes, ""},
 		{"0oa2aws", "rst2default", &no, ""},
 		{"0oa3slack", "rst2default", &no, ""},
-		{"0oa4chain", "rst3chain", nil, "rul1chain verification method is not ASSURANCE"},
+		{"0oa4chain", "rst3chain", &yes, ""},
 		{"0oa5classic", "", nil, "_links.accessPolicy absent"},
 		{"0oa6broken", "rst4gone", nil, "HTTP 404"},
+		{"0oa7chain1fa", "rst5chain1fa", &no, ""},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("len = %d, want %d", len(got), len(want))
@@ -85,6 +90,10 @@ func TestPull_SignOnMFAFromDocumentedShapes(t *testing.T) {
 		if w.reason == "" && a.Reason != "" || !strings.Contains(a.Reason, w.reason) {
 			t.Errorf("%s: Reason = %q, want %q", w.id, a.Reason, w.reason)
 		}
+		// The default global session rule allows a session at one factor.
+		if !reflect.DeepEqual(a.SessionMFARequired, &no) || a.SessionReason != "" {
+			t.Errorf("%s: SessionMFARequired = %v (%q), want false", w.id, deref(a.SessionMFARequired), a.SessionReason)
+		}
 		if a.Classification != "" {
 			t.Errorf("%s: Pull classified the app %q; only Classify does", w.id, a.Classification)
 		}
@@ -94,11 +103,52 @@ func TestPull_SignOnMFAFromDocumentedShapes(t *testing.T) {
 	}
 }
 
+// serveSessionPolicies serves the OKTA_SIGN_ON policy list, and fails the
+// test for any other policy type.
+func serveSessionPolicies(t *testing.T, name string) http.HandlerFunc {
+	t.Helper()
+	h := serveFixture(t, name)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("type"); got != "OKTA_SIGN_ON" {
+			t.Errorf("policies type = %q, want OKTA_SIGN_ON", got)
+		}
+		h(w, r)
+	}
+}
+
 func deref(b *bool) any {
 	if b == nil {
 		return nil
 	}
 	return *b
+}
+
+// Authentication methods (AuthenticationMethod) for the chain cases.
+const (
+	pw    = `{"key":"okta_password","method":"password"}`
+	sq    = `{"key":"security_question","method":"security_question"}`
+	sms   = `{"key":"phone_number","method":"sms"}`
+	email = `{"key":"okta_email","method":"email"}`
+	ov    = `{"key":"okta_verify","method":"push"}`
+	ovUV  = `{"key":"okta_verify","method":"signed_nonce","userVerification":"REQUIRED"}`
+)
+
+// step builds one chain whose steps each offer one method, in order.
+func step(methods ...string) string {
+	out := ""
+	for i := len(methods) - 1; i >= 0; i-- {
+		next := ""
+		if out != "" {
+			next = `,"next":[` + out + `]`
+		}
+		out = `{"authenticationMethods":[` + methods[i] + `]` + next + `}`
+	}
+	return out
+}
+
+// chainRule is one active ALLOW rule with the given chains.
+func chainRule(chains string) string {
+	return `[{"id":"rc","status":"ACTIVE","actions":{"appSignOn":{"access":"ALLOW","verificationMethod":{"type":"AUTH_METHOD_CHAIN","chains":` + chains + `}}}}]`
 }
 
 // Edge cases of the rule decision, each served as one policy's rules.
@@ -120,6 +170,22 @@ func TestPull_SignOnMFARuleCases(t *testing.T) {
 		{"unknown access", `[{"id":"ru","status":"ACTIVE","actions":{"appSignOn":{"access":"CHALLENGE"}}}]`, nil, `access "CHALLENGE"`},
 		{"no active rule", `[{"id":"ri","status":"INACTIVE","actions":{"appSignOn":{"access":"DENY"}}}]`, nil, "no active rule"},
 		{"empty", `[]`, nil, "no active rule"},
+		// #2951: AUTH_METHOD_CHAIN rules.
+		{"chain password then sms", chainRule(`[` + step(pw, sms) + `]`), true, ""},
+		{"chain password only", chainRule(`[` + step(pw) + `]`), false, ""},
+		{"chain okta verify with user verification", chainRule(`[` + step(ovUV) + `]`), true, ""},
+		{"chain okta verify alone", chainRule(`[` + step(ov) + `]`), false, ""},
+		{"chain password then security question", chainRule(`[` + step(pw, sq) + `]`), false, ""},
+		{"chain email or password, then email", chainRule(`[{"authenticationMethods":[` + email + `,` + pw + `],"next":[{"authenticationMethods":[` + email + `]}]}]`), false, ""},
+		{"chain password, then sms or verify", chainRule(`[{"authenticationMethods":[` + pw + `],"next":[{"authenticationMethods":[` + sms + `,` + ov + `]}]}]`), true, ""},
+		{"chain three steps", chainRule(`[` + step(pw, sms, ov) + `]`), true, ""},
+		{"chain four steps", chainRule(`[` + step(pw, sms, ov, email) + `]`), nil, "more than 3 steps"},
+		{"chain duo", chainRule(`[` + step(pw, `{"key":"duo","method":"duo"}`) + `]`), nil, `authenticator "duo"`},
+		{"chain with no chains", chainRule(`[]`), nil, "no chains"},
+		{"chain step with no method", chainRule(`[{"authenticationMethods":[]}]`), nil, "no authentication method"},
+		{"chain two next steps", chainRule(`[{"authenticationMethods":[` + pw + `],"next":[{"authenticationMethods":[` + sms + `]},{"authenticationMethods":[` + ov + `]}]}]`), nil, "2 next steps"},
+		{"one-factor chain outranks unreadable chain", chainRule(`[` + step(pw, `{"key":"tac","method":"otp"}`) + `,` + step(pw) + `]`), false, ""},
+		{"unreadable chain beside a two-factor chain", chainRule(`[` + step(pw, `{"key":"external_idp","method":"idp"}`) + `,` + step(pw, sms) + `]`), nil, `authenticator "external_idp"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,6 +225,7 @@ func TestPull_UnrecognisedAccessPolicyHref(t *testing.T) {
 				_, _ = w.Write([]byte(`[{"id":"a1","label":"A","status":"ACTIVE","_links":{"accessPolicy":{"href":"` + href + `"}}}]`))
 			})
 			mux.HandleFunc("/api/v1/apps/a1/groups", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+			mux.HandleFunc("/api/v1/policies", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
 			mux.HandleFunc("/api/v1/policies/", func(w http.ResponseWriter, r *http.Request) {
 				t.Errorf("unexpected rules request %s", r.URL.Path)
 			})

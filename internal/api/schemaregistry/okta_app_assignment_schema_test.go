@@ -25,6 +25,15 @@ func TestOktaAppAssignment110_AdditiveOver100(t *testing.T) {
 	}
 }
 
+// #2951: 1.2.0 adds session_mfa_required and session_reason and stays
+// additive over 1.1.0.
+func TestOktaAppAssignment120_AdditiveOver110(t *testing.T) {
+	t.Parallel()
+	if err := CheckAdditiveOver(readAppAssignment(t, "1.1.0"), readAppAssignment(t, "1.2.0")); err != nil {
+		t.Fatalf("1.2.0 is not additive over 1.1.0: %v", err)
+	}
+}
+
 func TestOktaAppAssignment110_Validation(t *testing.T) {
 	t.Parallel()
 	reg, err := NewEmbedded(PlatformSchemasFS())
@@ -48,6 +57,12 @@ func TestOktaAppAssignment110_Validation(t *testing.T) {
 		{"empty_reason", "1.1.0", `{` + id + `,"reason":""}`, false},
 		{"v100_rejects_new_fields", "1.0.0", `{` + id + `,"classification":"admin"}`, false},
 		{"v100_payload_under_v100", "1.0.0", `{` + id + `,"sign_on_mode":"SAML_2_0","assigned_group_count":1}`, true},
+		{"v120_session_decided", "1.2.0", `{` + id + `,"classification":"admin","sign_on_policy_id":"rst1","sign_on_mfa_required":false,"session_mfa_required":true}`, true},
+		{"v120_session_undecided", "1.2.0", `{` + id + `,"session_reason":"no active global session policy"}`, true},
+		{"v120_v110_payload", "1.2.0", `{` + id + `,"classification":"admin","sign_on_mfa_required":true}`, true},
+		{"v120_session_not_boolean", "1.2.0", `{` + id + `,"session_mfa_required":"true"}`, false},
+		{"v120_empty_session_reason", "1.2.0", `{` + id + `,"session_reason":""}`, false},
+		{"v110_rejects_session_fields", "1.1.0", `{` + id + `,"session_mfa_required":true}`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
