@@ -89,6 +89,9 @@ func DefaultSeed() []KindVersion {
 		// #2831: 1.1.0 adds repository and findings (rule_id, severity,
 		// suppressed), which cc7_1 detection, pi1_2 and pi1_3 read.
 		{Kind: "sast.scan_result.v1", Version: "1.1.0"},
+		// #2973: 1.2.0 adds an optional cwe list per finding, which pi1_2
+		// and pi1_3 select by alongside rule_id.
+		{Kind: "sast.scan_result.v1", Version: "1.2.0"},
 		{Kind: "access_review.completion.v1", Version: "1.0.0"},
 		{Kind: "personnel_security.workflow.v1", Version: "1.0.0"},
 		{Kind: "manual.attestation.v1", Version: "1.0.0"},

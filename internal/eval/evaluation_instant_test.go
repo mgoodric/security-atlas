@@ -102,29 +102,70 @@ func TestQueryInstant(t *testing.T) {
 
 func TestSQLUnguardedTimestampCasts(t *testing.T) {
 	t.Parallel()
-	guard := func(f string) string {
-		return "payload->>'" + f + "' ~ '" + RFC3339Pattern + "' AND pg_input_is_valid(payload->>'" + f + "', 'timestamptz')"
+	guardOn := func(v string) string {
+		return v + " ~ '" + RFC3339Pattern + "' AND pg_input_is_valid(" + v + ", 'timestamptz')"
 	}
+	guard := func(f string) string { return guardOn("payload->>'" + f + "'") }
 	prefix := `payload->>'last_seen_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}'`
+	ls := "payload->>'last_seen_at'"
 	for _, tc := range []struct {
 		name string
 		expr string
 		want []string
 	}{
 		{"no cast", "SELECT bool_and(observed_at >= evaluated_at) FROM evidence", nil},
-		{"bare cast", "SELECT max((payload->>'last_seen_at')::timestamptz) FROM evidence", []string{"last_seen_at"}},
-		{"start-anchored prefix guard", "SELECT CASE WHEN " + prefix + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
-		{"regex without pg_input_is_valid", "SELECT CASE WHEN payload->>'last_seen_at' ~ '" + RFC3339Pattern + "' THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
-		{"pg_input_is_valid without regex", "SELECT CASE WHEN pg_input_is_valid(payload->>'last_seen_at', 'timestamptz') THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
+		{"bare cast", "SELECT max((payload->>'last_seen_at')::timestamptz) FROM evidence", []string{ls}},
+		{"start-anchored prefix guard", "SELECT CASE WHEN " + prefix + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{ls}},
+		{"regex without pg_input_is_valid", "SELECT CASE WHEN payload->>'last_seen_at' ~ '" + RFC3339Pattern + "' THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{ls}},
+		{"pg_input_is_valid without regex", "SELECT CASE WHEN pg_input_is_valid(payload->>'last_seen_at', 'timestamptz') THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{ls}},
 		{"full guard", "SELECT CASE WHEN " + guard("last_seen_at") + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", nil},
-		{"guard on another field", "SELECT CASE WHEN " + guard("created_at") + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{"last_seen_at"}},
-		{"date cast, spaced", "SELECT ( payload ->> 'due' ) :: DATE FROM evidence", []string{"due"}},
-		{"one guarded, one not", "SELECT CASE WHEN " + guard("a") + " THEN (payload->>'a')::timestamptz END, (payload->>'b')::timestamp FROM evidence", []string{"b"}},
+		{"guard on another field", "SELECT CASE WHEN " + guard("created_at") + " THEN (payload->>'last_seen_at')::timestamptz END FROM evidence", []string{ls}},
+		{"date cast, spaced", "SELECT ( payload ->> 'due' ) :: DATE FROM evidence", []string{"payload->>'due'"}},
+		{"one guarded, one not", "SELECT CASE WHEN " + guard("a") + " THEN (payload->>'a')::timestamptz END, (payload->>'b')::timestamp FROM evidence", []string{"payload->>'b'"}},
+
+		// #2973: the other conversion forms.
+		{"CAST AS", "SELECT max(CAST(payload->>'t' AS timestamptz)) FROM evidence", []string{"payload->>'t'"}},
+		{"CAST AS, guarded", "SELECT CASE WHEN " + guard("t") + " THEN CAST(payload->>'t' AS timestamptz) END FROM evidence", nil},
+		{"CAST to text is not a time cast", "SELECT CAST(payload->>'t' AS text) FROM evidence", nil},
+		{"to_timestamp", "SELECT to_timestamp(payload->>'t', 'YYYY-MM-DD') FROM evidence", []string{"payload->>'t'"}},
+		{"to_date", "SELECT to_date(payload->>'d', 'YYYY-MM-DD') FROM evidence", []string{"payload->>'d'"}},
+		{"chained cast", "SELECT (payload->>'t')::text::timestamptz FROM evidence", []string{"payload->>'t'"}},
+		{"double parens", "SELECT ((payload->>'t'))::date FROM evidence", []string{"payload->>'t'"}},
+		{"non-time cast", "SELECT (payload->>'n')::int FROM evidence", nil},
+		{"literal-only cast", "SELECT payload->>'t'::text FROM evidence", nil},
+		// Aliased, #>> and nested paths.
+		{"aliased", "SELECT (e.payload->>'t')::timestamptz FROM evidence AS e", []string{"e.payload->>'t'"}},
+		{"aliased, guarded on the alias", "SELECT CASE WHEN " + guardOn("e.payload->>'t'") + " THEN (e.payload->>'t')::timestamptz END FROM evidence AS e", nil},
+		{"aliased, guarded without the alias", "SELECT CASE WHEN " + guard("t") + " THEN (e.payload->>'t')::timestamptz END FROM evidence AS e", []string{"e.payload->>'t'"}},
+		{"#>> path", "SELECT (payload#>>'{a,b}')::timestamptz FROM evidence", []string{"payload#>>'{a,b}'"}},
+		{"#>> path, guarded", "SELECT CASE WHEN " + guardOn("payload #>> '{a,b}'") + " THEN (payload#>>'{a,b}')::timestamptz END FROM evidence", nil},
+		{"nested ->", "SELECT (payload->'a'->>'b')::timestamptz FROM evidence", []string{"payload->'a'->>'b'"}},
+		{"nested, guarded on the leaf only", "SELECT CASE WHEN " + guard("b") + " THEN (payload->'a'->>'b')::timestamptz END FROM evidence", []string{"payload->'a'->>'b'"}},
+		{"array index", "SELECT (payload->'xs'->0->>'t')::date FROM evidence", []string{"payload->'xs'->0->>'t'"}},
+		// Structure: a guard elsewhere does not cover a cast.
+		{"guard in another CASE", "SELECT CASE WHEN " + guard("t") + " THEN 1 END, (payload->>'t')::timestamptz FROM evidence", []string{"payload->>'t'"}},
+		{"cast in the ELSE branch", "SELECT CASE WHEN " + guard("t") + " THEN 1 ELSE (payload->>'t')::timestamptz END FROM evidence", []string{"payload->>'t'"}},
+		{"cast in a later WHEN", "SELECT CASE WHEN " + guard("t") + " THEN 1 WHEN true THEN (payload->>'t')::timestamptz END FROM evidence", []string{"payload->>'t'"}},
+		{"cast beside the guard in the condition", "SELECT CASE WHEN " + guard("t") + " AND (payload->>'t')::timestamptz > evaluated_at THEN 1 END FROM evidence", []string{"payload->>'t'"}},
+		{"guard in WHERE", "SELECT max((payload->>'t')::timestamptz) FROM evidence WHERE " + guard("t"), []string{"payload->>'t'"}},
+		{"guard OR-ed", "SELECT CASE WHEN payload->>'t' ~ '" + RFC3339Pattern + "' OR pg_input_is_valid(payload->>'t', 'timestamptz') THEN (payload->>'t')::timestamptz END FROM evidence", []string{"payload->>'t'"}},
+		{"guard negated", "SELECT CASE WHEN NOT (" + guard("t") + ") THEN (payload->>'t')::timestamptz END FROM evidence", []string{"payload->>'t'"}},
+		{"guard inside a nested CASE in the condition", "SELECT CASE WHEN CASE WHEN " + guard("t") + " THEN true END THEN (payload->>'t')::timestamptz END FROM evidence", []string{"payload->>'t'"}},
+		{"nested CASE under the guard", "SELECT CASE WHEN " + guard("t") + " THEN CASE WHEN (payload->>'t')::timestamptz <= evaluated_at THEN (payload->>'t')::timestamptz END END FROM evidence", nil},
+		{"guard text inside a string literal", "SELECT CASE WHEN 'x' = '" + strings.ReplaceAll(guard("t"), "'", "''") + "' THEN (payload->>'t')::timestamptz END FROM evidence", []string{"payload->>'t'"}},
+		{"guard in a comment", "SELECT CASE WHEN true /* " + guard("t") + " */ THEN (payload->>'t')::timestamptz END FROM evidence", []string{"payload->>'t'"}},
 	} {
-		got := SQLUnguardedTimestampCasts(tc.expr)
+		got, err := SQLUnguardedTimestampCasts(tc.expr)
+		if err != nil {
+			t.Errorf("%s: SQLUnguardedTimestampCasts error: %v", tc.name, err)
+			continue
+		}
 		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 			t.Errorf("%s: SQLUnguardedTimestampCasts = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+	if _, err := SQLUnguardedTimestampCasts("SELECT 'unterminated FROM evidence"); err == nil {
+		t.Error("unterminated literal: want an error, got nil")
 	}
 }
 
