@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/osquery.host_posture/1.4.0.json",
+  "x-evidence-kind": "osquery.host_posture.v1",
+  "x-semver": "1.4.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["END-03", "CFG-04"],
+  "title": "osquery host posture snapshot",
+  "description": "One endpoint's posture as reported by osquery / Fleet. v1.4 adds antimalware_definitions_updated_at, when the host's anti-malware definitions were last updated, with antimalware_definitions_source naming the operator's Fleet report it was read from (#2936). v1.3 adds capacity (disk_used_percent, memory_used_percent, cpu_p95_5m_percent), host_role, antimalware_protected and edr_healthy, each with a *_source when it comes from an operator-named Fleet label or policy, and makes every *_source present only alongside its value (dependentRequired). v1.2 added firewall_source and screen_lock_source. Fleet's Get host API has no firewall, screen-lock, memory-use, CPU-use, antimalware or EDR field, so a Fleet-sourced record carries firewall, screen lock, antimalware and EDR only when the operator names a Fleet policy for each, and never carries memory or CPU use. v1.1 added last_seen_at (the host's own last check-in, which observed_at is not) and reason. A posture field is present only when the connector read it: false means observed off, and an absent key means not read.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["host_uuid", "hostname"],
+  "properties": {
+    "host_uuid": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hostname": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "type": "string"
+    },
+    "os_version": {
+      "type": "string"
+    },
+    "disk_encryption_enabled": {
+      "type": "boolean",
+      "description": "Absent when the source did not report it. Fleet omits it when it does not know the status, and for Linux hosts reporting an unencrypted root volume."
+    },
+    "screen_lock_enabled": {
+      "type": "boolean",
+      "description": "Absent when the source did not report it. On a Fleet-sourced record, present only when the operator named a screen-lock Fleet policy and the host's result for it is pass (true) or fail (false); screen_lock_source names the policy."
+    },
+    "firewall_enabled": {
+      "type": "boolean",
+      "description": "Absent when the source did not report it. On a Fleet-sourced record, present only when the operator named a firewall Fleet policy and the host's result for it is pass (true) or fail (false); firewall_source names the policy."
+    },
+    "mdm_enrolled": {
+      "type": "boolean",
+      "description": "From Fleet's mdm.enrollment_status: true for \"On (...)\", false for \"Off\" or \"Pending\", absent otherwise."
+    },
+    "last_seen_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the host last checked in (Fleet's seen_time). The record's observed_at is when the connector pulled, and Fleet lists offline hosts too."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the result is what it is, e.g. which posture fields were not reported, or the Fleet error from the detail fetch."
+    },
+    "firewall_source": {
+      "type": "string",
+      "pattern": "^fleet_policy:.+$",
+      "description": "Where firewall_enabled was read from: fleet_policy:<policy name>. Present only alongside firewall_enabled."
+    },
+    "screen_lock_source": {
+      "type": "string",
+      "pattern": "^fleet_policy:.+$",
+      "description": "Where screen_lock_enabled was read from: fleet_policy:<policy name>. Present only alongside screen_lock_enabled."
+    },
+    "disk_used_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Percent of the host's disk in use, 0-100. From Fleet: 100 minus percent_disk_space_available. Absent when not read."
+    },
+    "memory_used_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Percent of the host's memory in use, 0-100, when it was read. Fleet's host API has no memory-use field, so a Fleet-sourced record never carries it. Absent when not read."
+    },
+    "cpu_p95_5m_percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "95th percentile of the host's CPU utilisation over the last 5 minutes, 0-100. Neither Fleet's host API nor a single osquery snapshot provides it, so the osquery connector never emits it; a pusher that samples CPU may. Absent when not read."
+    },
+    "host_role": {
+      "type": "string",
+      "enum": ["production"],
+      "description": "The host's role: production when the host carries the operator-named production Fleet label, which host_role_source names. Absent when the role was not read, including a host without the label."
+    },
+    "host_role_source": {
+      "type": "string",
+      "pattern": "^fleet_label:.+$",
+      "description": "Where host_role was read from: fleet_label:<label name>. Present only alongside host_role."
+    },
+    "antimalware_protected": {
+      "type": "boolean",
+      "description": "Anti-malware is active with current definitions, as the operator's named Fleet policy defines it: the policy's query holds the engine and the definitions-age bound. true for a pass, false for a fail, absent when not read. antimalware_source names the policy."
+    },
+    "antimalware_source": {
+      "type": "string",
+      "pattern": "^fleet_policy:.+$",
+      "description": "Where antimalware_protected was read from: fleet_policy:<policy name>. Present only alongside antimalware_protected."
+    },
+    "edr_healthy": {
+      "type": "boolean",
+      "description": "An EDR or behavioural detection agent is installed, running and healthy, as the operator's named Fleet policy defines it. true for a pass, false for a fail, absent when not read. edr_source names the policy."
+    },
+    "edr_source": {
+      "type": "string",
+      "pattern": "^fleet_policy:.+$",
+      "description": "Where edr_healthy was read from: fleet_policy:<policy name>. Present only alongside edr_healthy."
+    },
+    "antimalware_definitions_updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the host's anti-malware definitions were last updated, as the operator's named Fleet report reads it: one column of a saved osquery query whose per-host results Fleet stores. The value is only as good as that query. Absent when not read. antimalware_definitions_source names the report."
+    },
+    "antimalware_definitions_source": {
+      "type": "string",
+      "pattern": "^fleet_report:.+$",
+      "description": "Where antimalware_definitions_updated_at was read from: fleet_report:<report name>. Present only alongside antimalware_definitions_updated_at."
+    }
+  },
+  "dependentRequired": {
+    "firewall_source": ["firewall_enabled"],
+    "screen_lock_source": ["screen_lock_enabled"],
+    "host_role_source": ["host_role"],
+    "antimalware_source": ["antimalware_protected"],
+    "edr_source": ["edr_healthy"],
+    "antimalware_definitions_source": ["antimalware_definitions_updated_at"]
+  }
+}
