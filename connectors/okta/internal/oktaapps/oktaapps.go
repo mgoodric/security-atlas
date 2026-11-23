@@ -5,7 +5,12 @@
 //   - GET /api/v1/apps                            (list applications)
 //   - GET /api/v1/apps/{id}/groups                (groups assigned to app)
 //   - GET /api/v1/policies/{policyId}/rules       (rules of the app sign-in
-//     policy the app's _links.accessPolicy names, #2828)
+//     policy the app's _links.accessPolicy names, #2828, and of each global
+//     session policy, #2951)
+//   - GET /api/v1/policies?type=OKTA_SIGN_ON      (global session policies,
+//     #2951)
+//   - GET /api/v1/groups?search=type eq "BUILT_IN" (the Everyone group id,
+//     #2951)
 //
 // Output is descriptive: the evaluator (slice 015) interprets which app-
 // assignment pattern passes/fails per (control, scope). The connector
@@ -18,10 +23,17 @@
 // read 2026-11-21): ApplicationLinks.accessPolicy, AccessPolicyRule,
 // AccessPolicyRuleApplicationSignOn{,Access}, VerificationMethod,
 // AssuranceMethod and AssuranceMethodFactorMode.
+//
+// #2951 adds AUTH_METHOD_CHAIN rules (AuthenticationMethodChainMethod,
+// AuthenticationMethodChain, AuthenticationMethod; chain.go) and whether the
+// global session policy requires MFA (OktaSignOnPolicy,
+// OktaSignOnPolicyRule, OktaSignOnPolicyRuleSignonActions; session.go),
+// read 2026-11-22 from the same file.
 package oktaapps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,6 +45,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktaauth"
 	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktapage"
+	"github.com/mgoodric/security-atlas/connectors/okta/internal/oktapolicy"
 )
 
 // Assignment is one record the cmd layer turns into an evidence record.
@@ -54,8 +67,14 @@ type Assignment struct {
 	// Classify; empty when the operator classified no app.
 	Classification string
 	// Reason says why SignOnMFARequired is nil.
-	Reason     string
-	ObservedAt time.Time
+	Reason string
+	// SessionMFARequired is whether the org's global session policy
+	// requires MFA for every user (see sessionMFA). It is the same for
+	// every app of one pull; nil when undecided, and SessionReason says
+	// why.
+	SessionMFARequired *bool
+	SessionReason      string
+	ObservedAt         time.Time
 }
 
 // Classifications an app may carry.
@@ -106,6 +125,8 @@ type API interface {
 	ListApps(ctx context.Context) ([]rawApp, error)
 	ListAppGroups(ctx context.Context, appID string) ([]rawGroup, error)
 	ListPolicyRules(ctx context.Context, policyID string) ([]rawRule, error)
+	ListSessionPolicies(ctx context.Context) ([]rawSessionPolicy, error)
+	EveryoneGroupID(ctx context.Context) (string, error)
 }
 
 // Pull lists every app and reconciles its group assignments. Errors on a
@@ -124,6 +145,7 @@ func Pull(ctx context.Context, api API, now func() time.Time) ([]Assignment, err
 		return nil, fmt.Errorf("list apps: %w", err)
 	}
 	out := make([]Assignment, 0, len(apps))
+	session := sessionMFA(ctx, api)
 	// Many apps share one policy (a new app gets the default one), so each
 	// policy's rules are read once.
 	verdicts := map[string]mfaVerdict{}
@@ -154,6 +176,8 @@ func Pull(ctx context.Context, api API, now func() time.Time) ([]Assignment, err
 			Status:             normalizeStatus(a.Status),
 			AssignedGroupIDs:   ids,
 			AssignedGroupCount: len(ids),
+			SessionMFARequired: session.required,
+			SessionReason:      session.reason,
 			ObservedAt:         now(),
 		}
 		href := a.Links.AccessPolicy.Href
@@ -205,9 +229,12 @@ type mfaVerdict struct {
 // active rule is a path some sign-in can take, whatever its conditions, so
 // the policy requires MFA only when each active rule denies access or
 // allows it through an ASSURANCE method whose factorMode is 2FA. One
-// active rule allowing 1FA decides false. A rule whose method reads as
-// neither (AUTH_METHOD_CHAIN, ID_PROOFING, no factorMode, no appSignOn)
-// leaves the policy undecided, unless another rule decides false.
+// active rule allowing 1FA decides false. An AUTH_METHOD_CHAIN rule counts
+// as 2FA when every sign-in path through its chains presents two factor
+// classes, and as 1FA when one path presents a single class (chainsMFA,
+// #2951). A rule whose method reads as neither (ID_PROOFING, no
+// factorMode, no appSignOn, an unreadable chain) leaves the policy
+// undecided, unless another rule decides false.
 func signOnMFA(rules []rawRule) mfaVerdict {
 	no, yes := false, true
 	active, undecided := 0, ""
@@ -223,6 +250,13 @@ func signOnMFA(rules []rawRule) mfaVerdict {
 		case so.Access == "DENY":
 		case so.Access != "ALLOW":
 			undecided = fmt.Sprintf("rule %s has access %q", r.ID, so.Access)
+		case so.VerificationMethod != nil && so.VerificationMethod.Type == "AUTH_METHOD_CHAIN":
+			mfa, why := chainsMFA(r.ID, so.VerificationMethod.Chains)
+			if why != "" {
+				undecided = why
+			} else if !mfa {
+				return mfaVerdict{required: &no}
+			}
 		case so.VerificationMethod == nil || so.VerificationMethod.Type != "ASSURANCE":
 			undecided = fmt.Sprintf("rule %s verification method is not ASSURANCE", r.ID)
 		case so.VerificationMethod.FactorMode == "1FA":
@@ -267,18 +301,26 @@ type rawApp struct {
 	} `json:"_links"`
 }
 
-// rawRule is the part of an ACCESS_POLICY rule that signOnMFA reads.
+// rawRule is the part of a policy rule that signOnMFA (ACCESS_POLICY) and
+// sessionRules (SIGN_ON, #2951) read.
 type rawRule struct {
-	ID      string `json:"id"`
-	Status  string `json:"status"`
-	Actions struct {
+	ID         string          `json:"id"`
+	Status     string          `json:"status"`
+	Priority   *int            `json:"priority"`
+	Conditions json.RawMessage `json:"conditions"`
+	Actions    struct {
 		AppSignOn *struct {
 			Access             string `json:"access"`
 			VerificationMethod *struct {
-				Type       string `json:"type"`
-				FactorMode string `json:"factorMode"`
+				Type       string     `json:"type"`
+				FactorMode string     `json:"factorMode"`
+				Chains     []rawChain `json:"chains"`
 			} `json:"verificationMethod"`
 		} `json:"appSignOn"`
+		Signon *struct {
+			Access        string `json:"access"`
+			RequireFactor *bool  `json:"requireFactor"`
+		} `json:"signon"`
 	} `json:"actions"`
 }
 
@@ -333,6 +375,21 @@ func (c *Client) ListPolicyRules(ctx context.Context, policyID string) ([]rawRul
 		return nil, fmt.Errorf("policy rules: %w", err)
 	}
 	return out, nil
+}
+
+// ListSessionPolicies fetches every global session policy (#2951).
+func (c *Client) ListSessionPolicies(ctx context.Context) ([]rawSessionPolicy, error) {
+	out, err := oktapage.List[rawSessionPolicy](ctx, c.HTTP, c.BaseURL, c.Creds, "/api/v1/policies?type=OKTA_SIGN_ON")
+	if err != nil {
+		return nil, fmt.Errorf("global session policies: %w", err)
+	}
+	return out, nil
+}
+
+// EveryoneGroupID returns the id of the org's Everyone group, or "" when
+// the token cannot see it. It is the lookup okta.mfa_policy.v2 uses.
+func (c *Client) EveryoneGroupID(ctx context.Context) (string, error) {
+	return oktapolicy.NewClient(c.HTTP, c.BaseURL, c.Creds).EveryoneGroupID(ctx)
 }
 
 // APIError carries Okta REST error context.

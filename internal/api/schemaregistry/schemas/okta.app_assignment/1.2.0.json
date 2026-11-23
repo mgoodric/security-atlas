@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/okta.app_assignment/1.2.0.json",
+  "x-evidence-kind": "okta.app_assignment.v1",
+  "x-semver": "1.2.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-10"],
+  "title": "Okta application assignment state",
+  "description": "One record per Okta-registered application capturing which groups are entitled to access it, its classification, and whether its app sign-in policy requires MFA. Pulled on a schedule from /api/v1/apps, /api/v1/apps/{id}/groups, /api/v1/policies/{policyId}/rules and /api/v1/policies?type=OKTA_SIGN_ON. The platform evaluator decides pass/fail per (control, assignment) pair; the connector emits descriptive (INCONCLUSIVE) records. 1.1.0 (#2828) adds classification, sign_on_policy_id, sign_on_mfa_required and reason; a field the connector has no value for is omitted. 1.2.0 (#2951) decides AUTH_METHOD_CHAIN rules in sign_on_mfa_required and adds session_mfa_required and session_reason, from the org's global session policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["app_id", "app_name", "status", "assigned_group_ids"],
+  "properties": {
+    "app_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Okta application id (the OKTA assigned UUID-like identifier)."
+    },
+    "app_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable application name (Okta `label` or `name`)."
+    },
+    "sign_on_mode": {
+      "type": "string",
+      "description": "Okta sign-on mode (SAML_2_0, OPENID_CONNECT, BOOKMARK, SECURE_PASSWORD_STORE, AUTO_LOGIN, etc.)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ACTIVE", "INACTIVE", "DELETED"],
+      "description": "Lifecycle status of the application."
+    },
+    "assigned_group_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Group ids that are entitled to access the application."
+    },
+    "assigned_group_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cardinality of assigned_group_ids (denormalized for evaluator convenience)."
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["admin", "infrastructure", "standard"],
+      "description": "The operator's classification of the app, from the connector's --admin-apps and --infrastructure-apps app-id lists; every other app is standard. Omitted when the operator classified no app."
+    },
+    "sign_on_policy_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Id of the app sign-in policy (ACCESS_POLICY) the app's _links.accessPolicy names. Omitted when the app has none (a Classic Engine org, or an API service app with no policy assigned)."
+    },
+    "sign_on_mfa_required": {
+      "type": "boolean",
+      "description": "True when every active rule of the app sign-in policy denies access, or allows it with an ASSURANCE verification method whose factorMode is 2FA or an AUTH_METHOD_CHAIN whose every sign-in path presents two factor classes; false when an active rule allows 1FA or has a one-class chain path. Omitted when undecided, with reason saying why."
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why sign_on_mfa_required is omitted."
+    },
+    "session_mfa_required": {
+      "type": "boolean",
+      "description": "Whether the org's global session policy (OKTA_SIGN_ON) requires MFA for every user: true when every reachable active rule denies access or sets requireFactor; false when a reachable active rule allows a session without it. The same for every app of one connector run. Omitted when undecided, with session_reason saying why."
+    },
+    "session_reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why session_mfa_required is omitted."
+    }
+  }
+}

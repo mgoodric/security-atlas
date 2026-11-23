@@ -1,8 +1,8 @@
 [
   {
-    "id": "rul1chain",
+    "id": "rul7yut96gmsOzKAA1d6",
     "status": "ACTIVE",
-    "name": "Method chain",
+    "name": "Allow two authentication method chains",
     "priority": 0,
     "system": false,
     "conditions": null,
@@ -15,6 +15,22 @@
             {
               "authenticationMethods": [
                 { "key": "okta_password", "method": "password" }
+              ],
+              "next": [
+                {
+                  "authenticationMethods": [
+                    { "key": "phone_number", "method": "sms" }
+                  ]
+                }
+              ]
+            },
+            {
+              "authenticationMethods": [
+                {
+                  "key": "okta_verify",
+                  "method": "signed_nonce",
+                  "userVerification": "REQUIRED"
+                }
               ]
             }
           ]

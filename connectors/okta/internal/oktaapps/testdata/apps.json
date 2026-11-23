@@ -69,5 +69,17 @@
         "href": "https://example.okta.com/api/v1/policies/rst4gone"
       }
     }
+  },
+  {
+    "id": "0oa7chain1fa",
+    "name": "jira",
+    "label": "Jira",
+    "status": "ACTIVE",
+    "signOnMode": "SAML_2_0",
+    "_links": {
+      "accessPolicy": {
+        "href": "https://example.okta.com/api/v1/policies/rst5chain1fa"
+      }
+    }
   }
 ]
