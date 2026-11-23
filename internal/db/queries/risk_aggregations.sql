@@ -6,7 +6,9 @@ INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, rule_id, tenant_id
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (parent_risk_id, child_risk_id) DO NOTHING;
 
--- name: UnlinkRiskAggregation :exec
+-- name: UnlinkRiskAggregation :execrows
+-- #2961: reports rows removed, so the aggregation engine writes its
+-- child_unlinked row only for a link it actually dropped.
 DELETE FROM risk_aggregations
 WHERE tenant_id = $1 AND parent_risk_id = $2 AND child_risk_id = $3;
 

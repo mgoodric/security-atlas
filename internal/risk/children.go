@@ -373,6 +373,13 @@ func UnlinkChildTx(ctx context.Context, q *dbx.Queries, tenantID, parentID, chil
 	if audit.Actor == "" {
 		return fmt.Errorf("%w: actor is required", ErrTransitionInput)
 	}
+	// The hierarchy lock, as every link path takes it (#2961): an
+	// aggregation evaluation holds it while it reads a meta-risk's links
+	// and drops the stale ones, so an unlink here cannot remove a link the
+	// evaluation is about to drop and audit too.
+	if err := q.LockRiskHierarchy(ctx, pgUUID(tenantID)); err != nil {
+		return fmt.Errorf("lock risk hierarchy: %w", err)
+	}
 	n, err := q.DeleteRiskAggregationLink(ctx, dbx.DeleteRiskAggregationLinkParams{
 		TenantID:     pgUUID(tenantID),
 		ParentRiskID: pgUUID(parentID),

@@ -4179,7 +4179,9 @@ type Querier interface {
 	UnlinkDecisionException(ctx context.Context, arg UnlinkDecisionExceptionParams) error
 	UnlinkDecisionRisk(ctx context.Context, arg UnlinkDecisionRiskParams) error
 	UnlinkDecisionScopePredicate(ctx context.Context, arg UnlinkDecisionScopePredicateParams) error
-	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) error
+	// #2961: reports rows removed, so the aggregation engine writes its
+	// child_unlinked row only for a link it actually dropped.
+	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) (int64, error)
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
 	// Updates the editable fields + status in one statement. The DB transition
 	// trigger (action_plans_status_transition_trg) rejects an illegal status

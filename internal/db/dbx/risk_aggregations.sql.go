@@ -416,7 +416,7 @@ func (q *Queries) RiskAggregationReaches(ctx context.Context, arg RiskAggregatio
 	return reaches, err
 }
 
-const unlinkRiskAggregation = `-- name: UnlinkRiskAggregation :exec
+const unlinkRiskAggregation = `-- name: UnlinkRiskAggregation :execrows
 DELETE FROM risk_aggregations
 WHERE tenant_id = $1 AND parent_risk_id = $2 AND child_risk_id = $3
 `
@@ -427,7 +427,12 @@ type UnlinkRiskAggregationParams struct {
 	ChildRiskID  pgtype.UUID `json:"child_risk_id"`
 }
 
-func (q *Queries) UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) error {
-	_, err := q.db.Exec(ctx, unlinkRiskAggregation, arg.TenantID, arg.ParentRiskID, arg.ChildRiskID)
-	return err
+// #2961: reports rows removed, so the aggregation engine writes its
+// child_unlinked row only for a link it actually dropped.
+func (q *Queries) UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unlinkRiskAggregation, arg.TenantID, arg.ParentRiskID, arg.ChildRiskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

@@ -6,7 +6,7 @@ removes a `risk_aggregations` row now writes a `child_linked` or
 rows from the parent's trail, and no second row is written. This log does
 not block merge.
 
-- detection_tier_actual: manual_review
+- detection_tier_actual: manual_review (the gaps, and the D2 race in PR review)
 - detection_tier_target: integration
 
 (Reviewers of #2958 found these gaps and recorded them as its D5. No test
@@ -48,10 +48,31 @@ removes, and returns the links that remain, whatever their source.
 re-evaluation over the same window writes nothing. That matches #2958 D4.
 The skip doesn't change behavior, because `LinkRiskAggregation` was
 already `ON CONFLICT DO NOTHING`. A child already linked by hand or by
-another rule keeps that link's `rule_id`, as before. The evaluation holds
-the hierarchy lock and the meta-risk key lock, so the read can't go stale
-before the inserts. A meta-risk the evaluation has just created has no
-links, and all of its links are audited.
+another rule keeps that link's `rule_id`, as before. A meta-risk the
+evaluation has just created has no links, and all of its links are
+audited.
+
+The first version of this log said the read can't go stale because the
+evaluation holds the hierarchy lock and the meta-risk key lock. That
+was wrong. `UnlinkChildTx` took no hierarchy lock, so a person could
+unlink a rule-made link while an evaluation was dropping the same link
+as stale. The evaluation's `UnlinkRiskAggregation` then matched 0 rows,
+and the evaluation still wrote a `child_unlinked` row by the rule. The
+same link ended up with two unlink rows. Review of PR #3001 found this.
+There are two fixes:
+
+- `UnlinkChildTx` takes the hierarchy lock before its DELETE. Every path
+  that adds or removes a link now holds it: `LinkChildrenTx`,
+  `UnlinkChildTx`, a rule evaluation and a risk delete. So the
+  evaluation reads the links after the unlink commits.
+- `UnlinkRiskAggregation` is `:execrows`. The engine writes its
+  `child_unlinked` row only when the delete removed one row, so the audit
+  stays exact even if some future path unlinks without the lock.
+
+`TestEngine_ConcurrentUnlinkIsAuditedOnce_2961` holds an unlink open,
+starts an evaluation behind it, and asserts there is exactly one unlink
+row, by the person. Against the code without these fixes it fails with
+two rows.
 
 ## D3: `POST /v1/risks/aggregate` goes through `LinkChildrenTx`
 

@@ -17,8 +17,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 type ruleLinkRow struct {
@@ -137,4 +140,95 @@ func TestEngine_RuleLinksAreAudited_2961(t *testing.T) {
 	if n := childLinkCount(t, admin, tenant, meta); n != 2 {
 		t.Errorf("links after the child left = %d, want 2", n)
 	}
+}
+
+// A person unlinks a rule-made link while an evaluation is about to drop
+// the same link as stale. The link is removed once and audited once, by
+// the person: UnlinkChildTx holds the hierarchy lock the evaluation waits
+// on, so the evaluation reads the links after the unlink commits.
+func TestEngine_ConcurrentUnlinkIsAuditedOnce_2961(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+	store := aggrule.NewStore(app).WithClock(func() time.Time { return time.Now().Add(time.Hour) })
+
+	team := seedOrgUnit(t, admin, tenant, "team-1")
+	rule := createAndActivate(t, store, ctx, makeRule("ownership-2961-race", "ownership", 2, 1, 90, "max"))
+	var children []uuid.UUID
+	for range 3 {
+		children = append(children,
+			seedRisk(t, admin, tenant, "child", 3, 3, []string{"ownership"}, &team, rule.ActivatedAt.Add(time.Minute)))
+	}
+	evals, err := store.Evaluate(ctx, []string{"ownership"})
+	if err != nil || len(evals) != 1 || evals[0].MetaRiskID == nil {
+		t.Fatalf("first Evaluate: %v %v", evalOutcomes(evals), err)
+	}
+	meta := *evals[0].MetaRiskID
+	stale := children[2]
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE risks SET themes = '{}' WHERE tenant_id = $1 AND id = $2`, tenant, stale); err != nil {
+		t.Fatalf("drop theme: %v", err)
+	}
+
+	// The person's unlink, held open.
+	tx, err := app.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		t.Fatalf("apply tenant: %v", err)
+	}
+	const person = "user:race-2961"
+	if err := risk.UnlinkChildTx(ctx, dbx.New(tx), uuid.MustParse(tenant), meta, stale,
+		risk.HierarchyAudit{Actor: person}); err != nil {
+		t.Fatalf("UnlinkChildTx: %v", err)
+	}
+
+	// The evaluation starts while the unlink is open, and waits on it.
+	done := make(chan error, 1)
+	go func() {
+		_, err := store.Evaluate(ctx, []string{"ownership"})
+		done <- err
+	}()
+	waitForLockWaiter(t, admin)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit unlink: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("concurrent Evaluate: %v", err)
+	}
+
+	var unlinks []ruleLinkRow
+	for _, r := range ruleLinkRows(t, admin, tenant, meta) {
+		if r.Action == "child_unlinked" {
+			unlinks = append(unlinks, r)
+		}
+	}
+	if len(unlinks) != 1 || unlinks[0].Actor != person || unlinks[0].Child != stale.String() {
+		t.Fatalf("child_unlinked rows = %+v, want one of %s by %s", unlinks, stale, person)
+	}
+}
+
+// waitForLockWaiter waits until some session is blocked on a lock, so the
+// evaluation is known to be queued behind the open unlink. It gives up
+// after 10s and lets the test go on, where a missing wait shows as a
+// wrong row count rather than a hang.
+func waitForLockWaiter(t *testing.T, admin *pgxpool.Pool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int
+		if err := admin.QueryRow(context.Background(), `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n); err != nil {
+			t.Fatalf("pg_stat_activity: %v", err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Log("no lock waiter seen within 10s")
 }

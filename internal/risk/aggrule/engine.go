@@ -87,7 +87,7 @@ type metaRiskWriter interface {
 	CreateAggregateRisk(ctx context.Context, arg dbx.CreateAggregateRiskParams) (dbx.Risk, error)
 	UpdateMetaRiskInherentScore(ctx context.Context, arg dbx.UpdateMetaRiskInherentScoreParams) (dbx.Risk, error)
 	LinkRiskAggregation(ctx context.Context, arg dbx.LinkRiskAggregationParams) error
-	UnlinkRiskAggregation(ctx context.Context, arg dbx.UnlinkRiskAggregationParams) error
+	UnlinkRiskAggregation(ctx context.Context, arg dbx.UnlinkRiskAggregationParams) (int64, error)
 	WriteAggregationRuleEvaluation(ctx context.Context, arg dbx.WriteAggregationRuleEvaluationParams) (dbx.AggregationRuleEvaluation, error)
 	// the `created` audit row of a new meta-risk (#2835) and the
 	// child_linked / child_unlinked rows of its links (#2961)
@@ -544,18 +544,26 @@ func (e *Engine) unlinkStaleChildren(ctx context.Context, tenantID, metaRiskID, 
 		if _, ok := keep[childID]; ok {
 			continue
 		}
-		if err := e.w.UnlinkRiskAggregation(ctx, dbx.UnlinkRiskAggregationParams{
+		n, err := e.w.UnlinkRiskAggregation(ctx, dbx.UnlinkRiskAggregationParams{
 			TenantID:     pgUUID(tenantID),
 			ParentRiskID: pgUUID(metaRiskID),
 			ChildRiskID:  l.ChildRiskID,
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, fmt.Errorf("aggrule: unlink child %s from meta-risk %s: %w", childID, metaRiskID, err)
+		}
+		delete(linked, childID)
+		// No row removed: the link is already gone, and whoever removed it
+		// wrote its child_unlinked row. The hierarchy lock every unlink
+		// takes makes this unreachable today; the count keeps the audit
+		// exact if a path ever unlinks without it.
+		if n == 0 {
+			continue
 		}
 		if err := risk.RecordChildUnlinkedTx(ctx, e.w, tenantID, metaRiskID, childID,
 			risk.HierarchyAudit{Actor: RuleActor(ruleID)}); err != nil {
 			return nil, fmt.Errorf("aggrule: audit unlink of child %s from meta-risk %s: %w", childID, metaRiskID, err)
 		}
-		delete(linked, childID)
 	}
 	return linked, nil
 }
@@ -565,8 +573,9 @@ func (e *Engine) unlinkStaleChildren(ctx context.Context, tenantID, metaRiskID, 
 // NOTHING so re-linking on a window update is a harmless no-op. A child
 // not in linked (the meta-risk's links before this call) writes one
 // child_linked row on the meta-risk, by the rule (#2961); a re-link writes
-// none. The evaluation holds the hierarchy and meta-risk key locks, so
-// linked cannot go stale before the inserts.
+// none. The evaluation holds the hierarchy lock, which every path that
+// adds or removes a link takes (LinkChildrenTx, UnlinkChildTx, a risk
+// delete), so linked cannot go stale before the inserts.
 func (e *Engine) linkChildren(ctx context.Context, tenantID, metaRiskID, ruleID uuid.UUID, childIDs []uuid.UUID, linked map[uuid.UUID]bool) error {
 	for _, childID := range childIDs {
 		if linked[childID] {
