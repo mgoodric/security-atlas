@@ -49,6 +49,7 @@ import (
 var kinds = []string{
 	"1password.org_policy.v2",
 	"aws.s3.bucket_encryption_state.v1",
+	"aws.s3.bucket_tls_enforcement.v1",
 	"github.audit_event.v1",
 	"github.repo_protection.v1",
 	"github.repo_protection.v2",

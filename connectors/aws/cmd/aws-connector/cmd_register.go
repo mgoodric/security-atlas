@@ -31,7 +31,7 @@ func newRegisterCmd() *cobra.Command {
 				Name:              ConnectorName,
 				Version:           connectorVersion(),
 				InstanceId:        uuid.NewString(),
-				SupportedKinds:    []string{SupportedKind},
+				SupportedKinds:    SupportedKinds,
 				ProfilesSupported: []string{"push"},
 			})
 			if err != nil {

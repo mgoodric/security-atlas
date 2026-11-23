@@ -19,13 +19,24 @@ import (
 // build time; falls back to "dev" when the binary isn't tagged.
 const ConnectorName = "aws-connector"
 
-// SupportedKind is the single evidence kind slice 004 emits. Additional
-// kinds (ec2.security_group_state.v1, etc.) come with later AWS slices.
+// SupportedKind is the evidence kind slice 004 emits, and the default for
+// `run --kind`.
 const SupportedKind = "aws.s3.bucket_encryption_state.v1"
 
-// SchemaVersion is the registered schema every record's payload follows.
-// 1.1.0 adds kms_key_id and reason to 1.0.0 (#2815).
+// SchemaVersion is the registered schema every SupportedKind record's
+// payload follows. 1.1.0 adds kms_key_id and reason to 1.0.0 (#2815).
 const SchemaVersion = "1.1.0"
+
+// TLSKind reports whether each bucket's policy denies requests not sent
+// over TLS (#2993). TLSSchemaVersion is its registered schema.
+const (
+	TLSKind          = "aws.s3.bucket_tls_enforcement.v1"
+	TLSSchemaVersion = "1.0.0"
+)
+
+// SupportedKinds is every kind `run --kind` accepts and `register`
+// announces.
+var SupportedKinds = []string{SupportedKind, TLSKind}
 
 // commonFlags is the persistent set every subcommand needs.
 var common struct {
