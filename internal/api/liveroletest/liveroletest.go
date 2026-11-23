@@ -50,10 +50,18 @@ func Attach(t *testing.T, srv *api.Server, app *pgxpool.Pool) {
 // sign-in's does; the gates count the live rows, not the claim.
 func Bearer(t *testing.T, srv *api.Server, tenant string, roles ...string) string {
 	t.Helper()
+	_, bearer := Person(t, srv, tenant, roles...)
+	return bearer
+}
+
+// Person is Bearer for a test that also needs the seeded user's id, to
+// assert on an actor column or to name the user in a request.
+func Person(t *testing.T, srv *api.Server, tenant string, roles ...string) (uuid.UUID, string) {
+	t.Helper()
 	user := seedUser(t, tenant, roles...)
 	claims := testjwt.OwnerFor(uuid.MustParse(tenant), roles)
 	claims.Subject = "user:" + user.String()
-	return srv.IssueTestJWT(t, claims)
+	return user, srv.IssueTestJWT(t, claims)
 }
 
 // seedUser inserts an active users row in tenant holding roles, removed

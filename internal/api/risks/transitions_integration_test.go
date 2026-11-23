@@ -30,6 +30,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/api/liveroletest"
 	"github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
@@ -41,22 +42,27 @@ import (
 // proposes, and the approver. Both are approvers by role, so the approval
 // rule, not the role check, is what refuses the owner's own approval.
 type transitionEnv struct {
-	admin      *pgxpool.Pool
-	app        *pgxpool.Pool
-	tenant     string
-	server     *httptest.Server
-	owner      uuid.UUID
-	approver   uuid.UUID
-	ownerJWT   string
-	apprJWT    string
-	nonApprJWT string
+	admin    *pgxpool.Pool
+	app      *pgxpool.Pool
+	tenant   string
+	server   *httptest.Server
+	owner    uuid.UUID
+	approver uuid.UUID
+	ownerJWT string
+	apprJWT  string
+	// grcJWT is a person holding the live grc_engineer role: an approver
+	// for risk transitions (IsTenantApprover), not an admin.
+	grcJWT string
 	// srv mints further JWTs for the tenant (#2107).
 	srv *api.Server
 }
 
-// newTransitionEnv builds the risk transition test server. configure runs
-// before the handler is built, so a test can attach the authz engine.
-func newTransitionEnv(t *testing.T, configure ...func(srv *api.Server, app *pgxpool.Pool)) transitionEnv {
+// newTransitionEnv builds the risk transition test server with the authz
+// engine attached, so every request is authorized as it is live (#3008).
+// The owner and approver are people holding a live admin grant; before
+// #3008 they were SuperAdmin claims and the grc_engineer a role claim
+// with no user behind it, which passed only while no engine ran.
+func newTransitionEnv(t *testing.T) transitionEnv {
 	t.Helper()
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -70,20 +76,22 @@ func newTransitionEnv(t *testing.T, configure ...func(srv *api.Server, app *pgxp
 	)
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
+	liveroletest.Attach(t, srv, app)
 	env := transitionEnv{admin: admin, app: app, tenant: tenant, srv: srv}
 	env.owner = seedTransitionUser(t, admin, tenant, "owner")
 	env.approver = seedTransitionUser(t, admin, tenant, "approver")
 	jwtFor := func(u uuid.UUID) string {
-		claims := testjwt.AdminFor(uuid.MustParse(tenant))
+		if _, err := admin.Exec(context.Background(),
+			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, 'admin', 'risks-3008')`,
+			tenant, u.String()); err != nil {
+			t.Fatalf("grant admin: %v", err)
+		}
+		claims := testjwt.OwnerFor(uuid.MustParse(tenant), []string{"admin"})
 		claims.Subject = "user:" + u.String()
 		return srv.IssueTestJWT(t, claims)
 	}
 	env.ownerJWT, env.apprJWT = jwtFor(env.owner), jwtFor(env.approver)
-	// A grc_engineer without the approver flag.
-	env.nonApprJWT = srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"grc_engineer"}))
-	for _, c := range configure {
-		c(srv, app)
-	}
+	env.grcJWT = liveroletest.Bearer(t, srv, tenant, "grc_engineer")
 	h := srv.HTTPHandlerForTests()
 	if h == nil {
 		t.Fatal("HTTPHandlerForTests returned nil")
@@ -573,17 +581,33 @@ func TestTransition_ChangeTreatment(t *testing.T) {
 	}
 }
 
-// TestTransition_ApproverRoleRequired: a non-approver cannot approve,
-// reject or revoke.
+// TestTransition_ApproverRoleRequired: a non-approver by live role cannot
+// approve, reject or revoke, and the viewer's refusal comes from the authz
+// engine itself, so dropping it from newTransitionEnv fails this test.
+// Each transition gets a body it accepts, so the 403 cannot stand in for
+// a 400. grc_engineer is an approver here (IsTenantApprover, #2664); this
+// test used one, and it was refused only because its role was a JWT claim
+// with no user_roles row behind it (#3008).
 func TestTransition_ApproverRoleRequired(t *testing.T) {
 	env := newTransitionEnv(t)
 	id := env.newRisk(t)
 	env.step(t, id, "acceptance/propose", env.ownerJWT, proposal(), http.StatusOK)
 
-	ownerOnly := env.nonApprJWT
-	for _, tr := range []string{"acceptance/approve", "acceptance/reject", "acceptance/revoke"} {
-		env.step(t, id, tr, ownerOnly, map[string]any{"accepted_until": future(30), "reason": "x"}, http.StatusForbidden)
+	bodies := map[string]map[string]any{
+		"acceptance/approve": {"accepted_until": future(30)},
+		"acceptance/reject":  {"reason": "x"},
+		"acceptance/revoke":  {"reason": "x"},
 	}
+	for _, role := range []string{"control_owner", "viewer"} {
+		bearer := liveroletest.Bearer(t, env.srv, env.tenant, role)
+		for tr, body := range bodies {
+			got := env.step(t, id, tr, bearer, body, http.StatusForbidden)
+			if role == "viewer" && got["error"] != "forbidden" {
+				t.Errorf("viewer %s: body %v, want the authz engine's {\"error\":\"forbidden\"}", tr, got)
+			}
+		}
+	}
+	env.step(t, id, "acceptance/approve", env.apprJWT, bodies["acceptance/approve"], http.StatusOK)
 }
 
 // fileTreatmentProposal files an update_risk_treatment MCP proposal and
