@@ -166,6 +166,9 @@ type Report struct {
 	Skipped    int      `json:"skipped"`
 	Missing    int      `json:"missing"`
 	Results    []Result `json:"results"`
+	// Warnings are run-level notes from the platform, such as a run that
+	// leaves more than half of the source's policies missing (#2902).
+	Warnings []string `json:"warnings"`
 }
 
 // SyncPath is the platform's policy sync endpoint.
@@ -174,9 +177,27 @@ const SyncPath = "/v1/policies:sync"
 // maxErrorBody is how much of an error response is quoted in the error.
 const maxErrorBody = 1024
 
+// PushError is a push the platform answered with anything but 200.
+// Message is the platform's {"error": ...} text when the body carries
+// one, else the start of the body.
+type PushError struct {
+	Status  int
+	Message string
+}
+
+func (e *PushError) Error() string {
+	if e.Status == http.StatusUnprocessableEntity {
+		// The platform refuses an empty push for a source that has synced
+		// policies (#2902). The connector refuses an empty set before it
+		// pushes, so reaching this means the two disagree.
+		return fmt.Sprintf("push sync: platform refused an empty push (HTTP 422): %s", e.Message)
+	}
+	return fmt.Sprintf("push sync: HTTP %d: %s", e.Status, e.Message)
+}
+
 // Push sends the full set in one request, authenticated with the
-// policy-sync key, and returns the report. Any answer but 200 is an
-// error.
+// policy-sync key, and returns the report. Any answer but 200 is a
+// *PushError.
 func Push(ctx context.Context, hc *http.Client, platform *url.URL, key string, req Request) (Report, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -199,7 +220,14 @@ func Push(ctx context.Context, hc *http.Client, platform *url.URL, key string, r
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-		return Report{}, fmt.Errorf("push sync: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		msg := strings.TrimSpace(string(snippet))
+		var body struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(snippet, &body) == nil && strings.TrimSpace(body.Error) != "" {
+			msg = strings.TrimSpace(body.Error)
+		}
+		return Report{}, &PushError{Status: resp.StatusCode, Message: msg}
 	}
 	var rep Report
 	if err := json.NewDecoder(resp.Body).Decode(&rep); err != nil {
@@ -208,8 +236,21 @@ func Push(ctx context.Context, hc *http.Client, platform *url.URL, key string, r
 	return rep, nil
 }
 
+// ConverterSkipped counts the pages the connector left out of the push
+// because their body could not be converted.
+func ConverterSkipped(notes []PageNote) int {
+	n := 0
+	for _, note := range notes {
+		if note.ConvertErr != nil {
+			n++
+		}
+	}
+	return n
+}
+
 // WriteReport writes the run's report: one line per platform result,
-// then the connector's own notes, then the totals.
+// then the connector's own notes, then the platform's warnings, then the
+// totals.
 func WriteReport(w io.Writer, rep Report, notes []PageNote) {
 	for _, r := range rep.Results {
 		line := fmt.Sprintf("page %s %q: %s", r.PageID, r.Title, r.Status)
@@ -227,10 +268,8 @@ func WriteReport(w io.Writer, rep Report, notes []PageNote) {
 		}
 		_, _ = fmt.Fprintln(w, line)
 	}
-	converterSkipped := 0
 	for _, n := range notes {
 		if n.ConvertErr != nil {
-			converterSkipped++
 			_, _ = fmt.Fprintf(w, "page %s %q: skipped by connector reason=body not converted: %v\n", n.PageID, n.Title, n.ConvertErr)
 			continue
 		}
@@ -241,6 +280,9 @@ func WriteReport(w io.Writer, rep Report, notes []PageNote) {
 		sort.Strings(parts)
 		_, _ = fmt.Fprintf(w, "page %s %q: unsupported macros: %s\n", n.PageID, n.Title, strings.Join(parts, ", "))
 	}
+	for _, warn := range rep.Warnings {
+		_, _ = fmt.Fprintf(w, "warning: %s\n", warn)
+	}
 	_, _ = fmt.Fprintf(w, "sync: created=%d new_version=%d taken_over=%d unchanged=%d drift=%d skipped=%d missing=%d skipped_by_connector=%d\n",
-		rep.Created, rep.NewVersion, rep.TakenOver, rep.Unchanged, rep.Drift, rep.Skipped, rep.Missing, converterSkipped)
+		rep.Created, rep.NewVersion, rep.TakenOver, rep.Unchanged, rep.Drift, rep.Skipped, rep.Missing, ConverterSkipped(notes))
 }
