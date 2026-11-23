@@ -152,7 +152,25 @@ func TestCreatedAudit_ManualAggregate_2835(t *testing.T) {
 	}
 	id := riskField(t, body, "id").(string)
 
-	checkCreated(t, env.rawAuditRows(t, id), env.approver.String(), map[string]any{
+	// The parent's trail also holds a child_linked row per child (#2961),
+	// written in the same transaction, so the order among them is not
+	// fixed.
+	var created []map[string]any
+	linked := 0
+	for _, r := range env.rawAuditRows(t, id) {
+		switch r["action"] {
+		case "created":
+			created = append(created, r)
+		case "child_linked":
+			linked++
+		default:
+			t.Errorf("unexpected audit row %v", r)
+		}
+	}
+	if linked != 2 {
+		t.Errorf("child_linked rows = %d, want 2", linked)
+	}
+	checkCreated(t, created, env.approver.String(), map[string]any{
 		"title":         "Aggregated parent",
 		"category_id":   riskField(t, body, "category_id"),
 		"treatment":     "untreated",

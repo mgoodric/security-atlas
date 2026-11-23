@@ -113,6 +113,18 @@ export function historyActionLabel(action: string): string {
   }
 }
 
+/**
+ * The label of one entry. A hierarchy row read from a parent's trail
+ * (#2961, `parent_risk_id` set) is about this risk as the child.
+ */
+export function historyEntryLabel(entry: RiskAuditEntry): string {
+  if (entry.parent_risk_id) {
+    if (entry.action === "child_linked") return "Linked under a parent risk";
+    if (entry.action === "child_unlinked") return "Unlinked from a parent risk";
+  }
+  return historyActionLabel(entry.action);
+}
+
 /** One value as History shows it. */
 export function formatHistoryValue(field: string, v: unknown): string {
   if (v === null || v === undefined || v === "") return "none";
@@ -168,6 +180,19 @@ export function historyChanges(entry: RiskAuditEntry): HistoryChange[] {
   });
   const out: HistoryChange[] = [];
   for (const k of keys) {
+    // #2961: on a child's History the parent's row names the child, which
+    // is this risk; the line that matters is the parent it moved under or
+    // out of.
+    if (entry.parent_risk_id && k === "child_risk_id") {
+      const linked = entry.action === "child_linked";
+      out.push({
+        field: "Parent risk",
+        before: linked ? "none" : entry.parent_risk_id,
+        after: linked ? entry.parent_risk_id : "none",
+        ref: "risk",
+      });
+      continue;
+    }
     const b = formatHistoryValue(k, before[k]);
     const a = formatHistoryValue(k, after[k]);
     if (a === b) continue;

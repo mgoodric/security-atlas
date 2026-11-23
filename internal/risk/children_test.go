@@ -199,3 +199,50 @@ func TestChildAuditStates(t *testing.T) {
 		t.Fatal("childAuditStates mutated the caller's Detail")
 	}
 }
+
+// recordingAuditWriter captures the risk_audit_log rows a writer is given.
+type recordingAuditWriter struct {
+	rows []dbx.InsertRiskAuditLogParams
+}
+
+func (w *recordingAuditWriter) InsertRiskAuditLog(_ context.Context, arg dbx.InsertRiskAuditLogParams) error {
+	w.rows = append(w.rows, arg)
+	return nil
+}
+
+// RecordChildLinkedTx / RecordChildUnlinkedTx are the one writer of the
+// hierarchy rows, shared with the aggregation engine (#2961): the row is on
+// the parent, by the actor, with the action and child state; an empty
+// actor writes nothing.
+func TestRecordChildLinkRows(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	tenant, parent, child := uuid.New(), uuid.New(), uuid.New()
+	w := &recordingAuditWriter{}
+	audit := HierarchyAudit{Actor: "system:aggregation-rule:r1"}
+	if err := RecordChildLinkedTx(ctx, w, tenant, parent, child, audit); err != nil {
+		t.Fatalf("linked: %v", err)
+	}
+	if err := RecordChildUnlinkedTx(ctx, w, tenant, parent, child, audit); err != nil {
+		t.Fatalf("unlinked: %v", err)
+	}
+	if err := RecordChildLinkedTx(ctx, w, tenant, parent, child, HierarchyAudit{}); !errors.Is(err, ErrTransitionInput) {
+		t.Fatalf("empty actor err = %v, want ErrTransitionInput", err)
+	}
+	if len(w.rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(w.rows))
+	}
+	for i, want := range []string{ActionChildLinked, ActionChildUnlinked} {
+		r := w.rows[i]
+		if r.ActionType != want || r.Actor != audit.Actor ||
+			uuid.UUID(r.RiskID.Bytes) != parent || uuid.UUID(r.TenantID.Bytes) != tenant {
+			t.Errorf("row %d = %+v, want %s on the parent by %s", i, r, want, audit.Actor)
+		}
+	}
+	if got := string(w.rows[0].AfterState); got != `{"child_risk_id":"`+child.String()+`"}` {
+		t.Errorf("linked after = %s", got)
+	}
+	if got := string(w.rows[1].BeforeState); got != `{"child_risk_id":"`+child.String()+`"}` {
+		t.Errorf("unlinked before = %s", got)
+	}
+}

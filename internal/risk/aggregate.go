@@ -26,8 +26,10 @@
 //     If a parent with that key already exists for the tenant, returns it
 //     unchanged.
 //  6. Unions every child's themes into the parent's themes array.
-//  7. Inserts the parent risk and one risk_aggregations row per child
-//     (rule_id = NULL for manual).
+//  7. Inserts the parent risk and links each child through LinkChildrenTx
+//     (rule_id = NULL for manual): each child's level must be below the
+//     parent's, at most MaxChildrenPerLink children, and each link writes
+//     a child_linked row on the parent by the caller (#2961).
 //
 // GET /v1/risks/{id}/aggregation re-aggregates the current children live
 // and returns the recomputed severity. AC-9 calls this endpoint after
@@ -110,6 +112,12 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 
 	var result AggregateResult
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		// The hierarchy lock first (#2961), as every link path takes it:
+		// LinkChildrenTx below re-enters it, and taking it before any row
+		// write keeps the lock order of #2953.
+		if err := q.LockRiskHierarchy(ctx, pgUUID(tenantID)); err != nil {
+			return fmt.Errorf("lock risk hierarchy: %w", err)
+		}
 		// AC-7 idempotency: if a parent with this key already exists,
 		// return it. Re-aggregating the same (title, child_set) is a
 		// no-op.
@@ -241,20 +249,16 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 			return fmt.Errorf("create aggregate parent risk: %w", err)
 		}
 
-		// Link each child via risk_aggregations (rule_id=NULL for manual).
-		for _, childID := range dedupedChildren {
-			if err := q.LinkRiskAggregation(ctx, dbx.LinkRiskAggregationParams{
-				ParentRiskID: pgUUID(parentID),
-				ChildRiskID:  pgUUID(childID),
-				RuleID:       pgtype.UUID{}, // NULL — manual
-				TenantID:     pgUUID(tenantID),
-			}); err != nil {
-				return fmt.Errorf("link aggregation child %s: %w", childID, err)
-			}
-		}
-
 		parent := riskFromRow(row)
 		if err := RecordCreatedTx(ctx, q, tenantID, parent.ID, in.Actor, createdStateOf(parent)); err != nil {
+			return err
+		}
+		// Link the children by hand (rule_id NULL) through the same path
+		// as POST /v1/risks/{id}/children (#2961): its level rule and cap
+		// apply, and each link writes a child_linked row by the caller
+		// after the parent's created row.
+		if _, err := LinkChildrenTx(ctx, q, tenantID, parentID, dedupedChildren,
+			HierarchyAudit{Actor: in.Actor}); err != nil {
 			return err
 		}
 		parent.LinkedControlIDs = []uuid.UUID{}
