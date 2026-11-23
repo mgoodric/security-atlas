@@ -167,7 +167,7 @@ func validateSQLEvidenceQuery(expr string) error {
 // foreclose cross-tenant / non-evidence reach (P0-495-2).
 func evalSQLQuery(ctx context.Context, tx pgx.Tx, expr string, records []inWindowRecord, evaluatedAt time.Time) (string, error) {
 	if err := validateSQLEvidenceQuery(expr); err != nil {
-		return "", err
+		return "", unevaluable(err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, sqlStatementTimeout)
@@ -230,7 +230,7 @@ func evalSQLQuery(ctx context.Context, tx pgx.Tx, expr string, records []inWindo
 			return "", fmt.Errorf("%w: scan row: %v", ErrSQLQuery, err)
 		}
 		if len(vals) != 1 {
-			return "", fmt.Errorf("%w: query must SELECT exactly one column, got %d", ErrSQLQuery, len(vals))
+			return "", unevaluable(fmt.Errorf("%w: query must SELECT exactly one column, got %d", ErrSQLQuery, len(vals)))
 		}
 		res, err := classifySQLValue(vals[0])
 		if err != nil {
@@ -540,12 +540,12 @@ func classifySQLValue(v interface{}) (string, error) {
 		case ResultPass, ResultFail, ResultNA, ResultInconclusive:
 			return t, nil
 		default:
-			return "", fmt.Errorf("%w: result %q is not one of pass|fail|na|inconclusive (or a boolean)", ErrSQLQuery, t)
+			return "", unevaluable(fmt.Errorf("%w: result %q is not one of pass|fail|na|inconclusive (or a boolean)", ErrSQLQuery, t))
 		}
 	case nil:
-		return "", fmt.Errorf("%w: result column is NULL", ErrSQLQuery)
+		return "", unevaluable(fmt.Errorf("%w: result column is NULL", ErrSQLQuery))
 	default:
-		return "", fmt.Errorf("%w: result column is %T, want text result or boolean", ErrSQLQuery, v)
+		return "", unevaluable(fmt.Errorf("%w: result column is %T, want text result or boolean", ErrSQLQuery, v))
 	}
 }
 

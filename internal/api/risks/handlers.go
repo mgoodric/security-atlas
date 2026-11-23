@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -791,8 +792,39 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if in.Fields.InherentScore != nil || in.Fields.Methodology != nil {
+		updated = h.recomputeResidual(ctx, updated)
+	}
 	w.Header().Set("ETag", riskETag(updated.UpdatedAt))
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(updated)})
+}
+
+// recomputeResidual re-derives and persists the residual of a risk whose
+// inherent score or methodology a PATCH just changed (#3005). The residual
+// subscriber recomputes only on a control event, so without this a risk
+// whose score was fixed would keep a stale (or no) residual until the next
+// evidence for one of its controls. No risk-change event exists to publish,
+// so this runs inline, as the link endpoint does. It runs only for a risk
+// with linked controls, the risks the subscriber would recompute: with none,
+// the residual the update itself wrote (a FAIR risk's inherent exposure, or
+// pending) stays as it is. The update has committed:
+// a failed recompute is logged and the PATCH still succeeds, and the next
+// control event retries it. On success the risk is re-read, because the
+// residual write moves updated_at and the ETag must match it.
+func (h *Handler) recomputeResidual(ctx context.Context, rk risk.Risk) risk.Risk {
+	if h.deriver == nil || len(rk.LinkedControlIDs) == 0 {
+		return rk
+	}
+	if _, err := h.deriver.DeriveAndPersist(ctx, rk.ID, false); err != nil {
+		slog.WarnContext(ctx, "patch risk: recompute residual", "risk_id", rk.ID.String(), "err", err)
+		return rk
+	}
+	fresh, err := h.store.Get(ctx, rk.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "patch risk: re-read after residual recompute", "risk_id", rk.ID.String(), "err", err)
+		return rk
+	}
+	return fresh
 }
 
 // writeExternalRefTaken is the 409 for an organisation risk ID another

@@ -32,6 +32,9 @@ func (m *fakeMsg) Headers() nats.Header             { return m.headers }
 func (m *fakeMsg) Ack() error                       { m.acks++; return nil }
 func (m *fakeMsg) NakWithDelay(time.Duration) error { m.naks++; return nil }
 func (m *fakeMsg) Term() error                      { m.terms++; return nil }
+func (m *fakeMsg) Metadata() (*jetstream.MsgMetadata, error) {
+	return nil, errors.New("fakeMsg: no metadata")
+}
 func (m *fakeMsg) settled() (acks, naks, terms int) { return m.acks, m.naks, m.terms }
 func newFakeMsg(t *testing.T, tenant, control uuid.UUID) *fakeMsg {
 	t.Helper()

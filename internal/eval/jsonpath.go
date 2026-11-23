@@ -62,7 +62,7 @@ const jsonPathEvalTimeout = 5 * time.Second
 // is inconclusive, not a silent pass.
 func evalJSONPathQuery(ctx context.Context, expr string, records []inWindowRecord) (string, error) {
 	if expr == "" {
-		return "", fmt.Errorf("%w: expression is empty", ErrJSONPathQuery)
+		return "", unevaluable(fmt.Errorf("%w: expression is empty", ErrJSONPathQuery))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, jsonPathEvalTimeout)
@@ -71,7 +71,7 @@ func evalJSONPathQuery(ctx context.Context, expr string, records []inWindowRecor
 	// Compile once; reuse across every record (complexity bound — AC-5).
 	eval, err := jsonpath.New(expr)
 	if err != nil {
-		return "", fmt.Errorf("%w: compile %q: %v", ErrJSONPathQuery, expr, err)
+		return "", unevaluable(fmt.Errorf("%w: compile %q: %v", ErrJSONPathQuery, expr, err))
 	}
 
 	if len(records) == 0 {

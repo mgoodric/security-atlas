@@ -118,12 +118,17 @@ var defaultRegoCache = regocache.New()
 // audit F-OPA-1.
 func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord, evaluatedAt time.Time) (string, error) {
 	if policy == "" {
-		return "", fmt.Errorf("%w: policy is empty", ErrRegoQuery)
+		return "", unevaluable(fmt.Errorf("%w: policy is empty", ErrRegoQuery))
 	}
 
 	q, err := defaultRegoCache.GetOrPrepare(ctx, policy, evalSandboxCapabilities(), regoQuery, evidenceQueryModuleName)
 	if err != nil {
-		return "", fmt.Errorf("%w: compile: %v", ErrRegoQuery, err)
+		err = fmt.Errorf("%w: compile: %v", ErrRegoQuery, err)
+		if ctx.Err() != nil {
+			// Preparing was cut short, not refused: a retry may compile.
+			return "", err
+		}
+		return "", unevaluable(err)
 	}
 
 	inRecs := make([]regoInputRecord, len(records))
@@ -137,17 +142,17 @@ func evalRegoQuery(ctx context.Context, policy string, records []inWindowRecord,
 		return "", fmt.Errorf("%w: eval: %v", ErrRegoQuery, err)
 	}
 	if len(rs) == 0 || len(rs[0].Expressions) == 0 {
-		return "", fmt.Errorf("%w: policy did not assign `result`", ErrRegoQuery)
+		return "", unevaluable(fmt.Errorf("%w: policy did not assign `result`", ErrRegoQuery))
 	}
 
 	s, ok := rs[0].Expressions[0].Value.(string)
 	if !ok {
-		return "", fmt.Errorf("%w: result is %T, want a string", ErrRegoQuery, rs[0].Expressions[0].Value)
+		return "", unevaluable(fmt.Errorf("%w: result is %T, want a string", ErrRegoQuery, rs[0].Expressions[0].Value))
 	}
 	switch s {
 	case ResultPass, ResultFail, ResultNA, ResultInconclusive:
 		return s, nil
 	default:
-		return "", fmt.Errorf("%w: result %q is not one of pass|fail|na|inconclusive", ErrRegoQuery, s)
+		return "", unevaluable(fmt.Errorf("%w: result %q is not one of pass|fail|na|inconclusive", ErrRegoQuery, s))
 	}
 }
