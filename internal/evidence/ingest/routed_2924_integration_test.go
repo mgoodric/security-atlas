@@ -262,7 +262,7 @@ func TestRouted2924_PushRules(t *testing.T) {
 	svc, _, _ := boot(t)
 
 	if _, _, err := svc.Process(context.Background(),
-		record(t, func(r *evidencev1.EvidenceRecord) { r.ControlId = "" }),
+		boundRecord(t, func(r *evidencev1.EvidenceRecord) { r.ControlId = "" }),
 		mkCred(tenantA, nil, "")); !errors.Is(err, ingest.ErrMissingField) {
 		t.Errorf("bound kind with no control_id: err=%v, want ErrMissingField", err)
 	}

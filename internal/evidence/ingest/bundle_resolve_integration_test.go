@@ -59,7 +59,7 @@ func TestPushBundleIDResolvesToControl(t *testing.T) {
 	seedBundleControl(t, admin, tenantB, bundleID)
 
 	receipt, _, err := svc.Process(context.Background(),
-		record(t, func(r *evidencev1.EvidenceRecord) { r.ControlId = bundleID }),
+		boundRecord(t, func(r *evidencev1.EvidenceRecord) { r.ControlId = bundleID }),
 		mkCred(tenantA, nil, ""))
 	if err != nil {
 		t.Fatalf("Process: %v", err)
@@ -100,7 +100,7 @@ func TestPushBundleIDPrefersActiveOverSuperseded(t *testing.T) {
 	})
 
 	receipt, _, err := svc.Process(context.Background(),
-		record(t, func(r *evidencev1.EvidenceRecord) { r.ControlId = bundleID }),
+		boundRecord(t, func(r *evidencev1.EvidenceRecord) { r.ControlId = bundleID }),
 		mkCred(tenantA, nil, ""))
 	if err != nil {
 		t.Fatalf("Process: %v", err)

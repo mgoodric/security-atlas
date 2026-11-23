@@ -8,25 +8,28 @@ description: |
   authorisation, IDOR and privilege-escalation patterns.
 
   What runs today: a SQL query over the payloads of `sast.scan_result.v1`
-  records at schema 1.1.0, one per scan. No bundled connector emits that
-  kind: the pusher (a CI job running `atlas-cli evidence push`, or the
-  adopter's own scanner) sends each scan with its `repository` and its
-  `findings`, each finding with a `severity`, a `rule_id` and whether it
-  is `suppressed`. The query takes each repository's latest in-window
-  scan, keyed by `repository`; scans without a `repository` are left out.
-  That scan may have no unsuppressed finding whose `rule_id` is one of
-  the four authorisation rules: `authz.missing_check`, `authz.idor`,
-  `authz.privilege_escalation` and `authz.broken_object_level`. These are
-  platform rule ids, so the pusher maps its scanner's rules onto them; a
-  finding under any other rule id is not read. A finding counts as
-  suppressed only when `suppressed` is true.
+  records at schema 1.1.0 or 1.2.0, one per scan. No bundled connector
+  emits that kind: the pusher (a CI job running `atlas-cli evidence push`,
+  or the adopter's own scanner) sends each scan once, with its
+  `repository` and its `findings`, each finding with a `severity`, a
+  `rule_id`, whether it is `suppressed` and, from 1.2.0, its `cwe` ids.
+  The query takes each repository's latest in-window scan, keyed by
+  `repository`; scans without a `repository` are left out. That scan may
+  have no unsuppressed authorisation finding: one whose `rule_id` is
+  `authz.missing_check`, `authz.idor`, `authz.privilege_escalation` or
+  `authz.broken_object_level`, or whose `cwe` lists CWE-269, CWE-639 or
+  CWE-862. Both match exactly. The rule ids are platform ids, so a pusher
+  that sends no CWEs maps its scanner's rules onto them; a finding
+  matching neither is not read. A finding counts as suppressed only when
+  `suppressed` is true.
 
   One repository whose latest scan has an unsuppressed authorisation
   finding fails the control, whatever the other repositories report. A
   scan with no `findings` array (a 1.0.0 record, or a pusher that sent
   only `findings_count`) leaves the control inconclusive unless another
-  repository fails it, and so does an unsuppressed finding with no
-  string `rule_id`. An empty `findings` array is a clean scan. With no
+  repository fails it, and so does an unsuppressed finding that is not
+  selected but has no string `rule_id`, or a `cwe` that is not a list.
+  An empty `findings` array is a clean scan. With no
   scan that names a repository, the control is inconclusive. When two
   scans of one repository tie on `observed_at`, the worse verdict
   decides. The pusher's per-record verdict is not used.
@@ -69,13 +72,16 @@ evidence_queries:
                               CASE
                                 WHEN jsonb_typeof(finding) IS DISTINCT FROM 'object' THEN 1
                                 WHEN finding->'suppressed' = 'true'::jsonb THEN 2
+                                WHEN finding->>'rule_id' IN ('authz.missing_check',
+                                                             'authz.idor',
+                                                             'authz.privilege_escalation',
+                                                             'authz.broken_object_level') THEN 0
+                                WHEN jsonb_typeof(finding->'cwe') = 'array'
+                                     AND finding->'cwe' ?| ARRAY['CWE-269', 'CWE-639', 'CWE-862'] THEN 0
+                                -- Not selected, but it may be: a rule id that is not a
+                                -- string, or a cwe that is not a list.
                                 WHEN jsonb_typeof(finding->'rule_id') IS DISTINCT FROM 'string' THEN 1
-                                -- Each rule id is written as two concatenated halves: the static
-                                -- guard reads any dotted word as a schema-qualified name
-                                WHEN finding->>'rule_id' IN ('authz' || '.missing_check',
-                                                             'authz' || '.idor',
-                                                             'authz' || '.privilege_escalation',
-                                                             'authz' || '.broken_object_level') THEN 0
+                                WHEN finding ? 'cwe' AND jsonb_typeof(finding->'cwe') IS DISTINCT FROM 'array' THEN 1
                                 ELSE 2
                               END), 2)
                      FROM jsonb_array_elements(
