@@ -71,11 +71,13 @@ transform to evidence records, and push to the platform.
 
 Okta scopes required (least-privilege, Read-only Administrator):
   - okta.policies.read  (gates okta.mfa_policy.v2, and the app sign-in
-                         policy rules behind sign_on_mfa_required in
-                         okta.app_assignment.v1)
+                         and global session policies behind
+                         sign_on_mfa_required and session_mfa_required
+                         in okta.app_assignment.v1)
   - okta.apps.read      (gates okta.app_assignment.v1)
   - okta.groups.read    (gates okta.app_assignment.v1, and the Everyone
-                         group lookup for okta.mfa_policy.v2)
+                         group lookup for okta.mfa_policy.v2 and
+                         session_mfa_required)
   - okta.users.read     (gates okta.user_lifecycle.v1)
 
 Auth: set OKTA_API_TOKEN in the process environment. The --token flag
@@ -266,6 +268,14 @@ func buildAppAssignmentRecord(a oktaapps.Assignment, org, env, controlID string)
 	if a.Reason != "" {
 		pm["reason"] = a.Reason
 	}
+	// #2951 (1.2.0): the org's global session policy verdict, the same
+	// rule of omission.
+	if a.SessionMFARequired != nil {
+		pm["session_mfa_required"] = *a.SessionMFARequired
+	}
+	if a.SessionReason != "" {
+		pm["session_reason"] = a.SessionReason
+	}
 	payload, err := structpb.NewStruct(pm)
 	if err != nil {
 		return nil, err
@@ -273,7 +283,7 @@ func buildAppAssignmentRecord(a oktaapps.Assignment, org, env, controlID string)
 	return &evidencev1.EvidenceRecord{
 		IdempotencyKey: idem.AppAssignmentKey(a.AppID, now),
 		EvidenceKind:   "okta.app_assignment.v1",
-		SchemaVersion:  "1.1.0",
+		SchemaVersion:  "1.2.0",
 		ControlId:      controlID,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "org", Values: []string{org}},

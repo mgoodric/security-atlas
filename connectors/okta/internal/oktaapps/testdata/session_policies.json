@@ -1,0 +1,20 @@
+[
+  {
+    "type": "OKTA_SIGN_ON",
+    "id": "00p1default",
+    "status": "ACTIVE",
+    "name": "Policy name",
+    "description": "Policy description",
+    "priority": 1,
+    "system": true,
+    "conditions": {
+      "people": {
+        "groups": {
+          "include": ["00g1everyone"]
+        }
+      }
+    },
+    "created": "2024-04-25T17:35:02.000Z",
+    "lastUpdated": "2024-04-25T17:35:02.000Z"
+  }
+]

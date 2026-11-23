@@ -1,0 +1,33 @@
+[
+  {
+    "id": "0prh1sd28q5sXGW08697",
+    "status": "ACTIVE",
+    "name": "Test rule",
+    "priority": 0,
+    "created": "2024-04-25T17:35:02.000Z",
+    "lastUpdated": "2024-04-25T17:35:02.000Z",
+    "system": false,
+    "conditions": {
+      "people": { "users": { "exclude": [] } },
+      "network": { "connection": "ANYWHERE" },
+      "risk": { "behaviors": [] },
+      "riskScore": { "level": "ANY" },
+      "identityProvider": { "provider": "ANY" }
+    },
+    "actions": {
+      "signon": {
+        "requireFactor": true,
+        "factorPromptMode": "ALWAYS",
+        "factorLifetime": 15,
+        "access": "ALLOW",
+        "primaryFactor": "PASSWORD_IDP_ANY_FACTOR",
+        "session": {
+          "maxSessionIdleMinutes": 720,
+          "maxSessionLifetimeMinutes": 0,
+          "usePersistentCookie": false
+        }
+      }
+    },
+    "type": "SIGN_ON"
+  }
+]
