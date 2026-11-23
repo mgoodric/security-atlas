@@ -85,15 +85,15 @@ func mustURL(t *testing.T, s string) *url.URL {
 }
 
 func TestCheckRedirect(t *testing.T) {
-	via := []*http.Request{{URL: mustURL(t, "https://events.1password.com/api/v2/auth/introspect")}}
+	via := []*http.Request{{URL: mustURL(t, "https://events.example.test/api/v2/auth/introspect")}}
 	cases := map[string]struct {
 		to   string
 		want error
 	}{
-		"same origin":   {"https://events.1password.com/other", nil},
+		"same origin":   {"https://events.example.test/other", nil},
 		"another host":  {"https://evil.example/api", opauth.ErrUnsafeRedirect},
-		"another port":  {"https://events.1password.com:8443/api", opauth.ErrUnsafeRedirect},
-		"scheme change": {"http://events.1password.com/api", opauth.ErrUnsafeRedirect},
+		"another port":  {"https://events.example.test:8443/api", opauth.ErrUnsafeRedirect},
+		"scheme change": {"http://events.example.test/api", opauth.ErrUnsafeRedirect},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
