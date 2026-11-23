@@ -18,18 +18,38 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 const pgErrUniqueViolation = "23505"
 
+// EvidenceCredentialID is the system credential the store ingests
+// training-completion evidence under.
+const EvidenceCredentialID = "security_awareness_training"
+
+// CC14ControlRef is the stock bundle the completion evidence names. Ingest
+// resolves it to the tenant's active control when the SOC 2 kit is
+// imported (#2100); otherwise it stays a free-form control_ref.
+const CC14ControlRef = "soc2_cc1_4_competence_training"
+
 type Store struct {
-	pool  *pgxpool.Pool
-	clock func() time.Time
+	pool   *pgxpool.Pool
+	clock  func() time.Time
+	ingest *ingest.Service
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, clock: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithIngest makes s write completion evidence through svc. A store
+// without one fails Complete and ImportCompletionsCSV with
+// ingest.ErrUnavailable rather than dropping the evidence (#2941).
+func (s *Store) WithIngest(svc *ingest.Service) *Store {
+	s.ingest = ingest.ForDomainWriter(svc)
+	return s
 }
 
 func (s *Store) WithClock(fn func() time.Time) *Store {
@@ -135,17 +155,78 @@ RETURNING id, campaign_id, person_id, due_at, assigned_at, completed_at, complet
 	return out, translateErr(err)
 }
 
-func (s *Store) Complete(ctx context.Context, in CompleteInput) (AssignmentDetail, error) {
-	if in.AssignmentID == uuid.Nil || in.CompletedAt.IsZero() || !validCompletionSource(in.Source) {
+// Complete records the assignment's completion and, in the same
+// transaction, writes its completion evidence to the ledger through ingest
+// and stores the record's id on the assignment (#2941). actorID attributes
+// the evidence. Completing again at the same instant is idempotent: the
+// stored evidence is kept, or written when the assignment has none.
+func (s *Store) Complete(ctx context.Context, in CompleteInput, actorID string) (AssignmentDetail, error) {
+	if in.AssignmentID == uuid.Nil || in.CompletedAt.IsZero() || !validCompletionSource(in.Source) || strings.TrimSpace(actorID) == "" {
+		return AssignmentDetail{}, ErrInvalidInput
+	}
+	if completedInFuture(in.CompletedAt, s.clock()) {
 		return AssignmentDetail{}, ErrInvalidInput
 	}
 	var out AssignmentDetail
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 		var err error
 		out, err = completeAssignment(ctx, tx, tenantID, in)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.ensureCompletionEvidence(ctx, tx, tenantID, &out, actorID)
 	})
 	return out, translateErr(err)
+}
+
+// ensureCompletionEvidence writes detail's completion evidence through
+// ingest.Service.ProcessInTx in the caller's transaction, so it is
+// schema-validated, kind-scoped and audited, and commits only with the
+// completion itself; then it stores the record id on the assignment. An
+// assignment that already holds evidence for this completed_at is left as
+// it is.
+//
+// observed_at is the instant the platform records the completion, not
+// completed_at: a completion older than ingest's 24-hour skew window would
+// otherwise be refused. completed_at stays in the payload, which is what
+// cc1_4 reads (decisions log D1).
+func (s *Store) ensureCompletionEvidence(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, detail *AssignmentDetail, actorID string) error {
+	if detail.EvidenceRecordID != nil {
+		var current bool
+		if err := tx.QueryRow(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM evidence_records
+    WHERE tenant_id = $1 AND id = $2 AND payload->>'completed_at' = $3
+)`, tenantID, *detail.EvidenceRecordID, detail.CompletedAt.UTC().Format(time.RFC3339Nano)).Scan(&current); err != nil {
+			return fmt.Errorf("securityawareness: check evidence: %w", err)
+		}
+		if current {
+			return nil
+		}
+	}
+	rec, err := BuildCompletionEvidence(*detail, actorID, s.clock())
+	if err != nil {
+		return err
+	}
+	cred := ingest.SystemCredential(EvidenceCredentialID, tenantID.String(), EvidenceKindTrainingCompletion)
+	receipt, _, err := s.ingest.ProcessInTx(ctx, tx, rec, cred, ingest.LedgerOptions{
+		FreshnessClass: dbx.EvidenceFreshnessClassAnnual,
+	})
+	if err != nil {
+		return fmt.Errorf("securityawareness: ingest evidence: %w", err)
+	}
+	evidenceID, err := uuid.Parse(receipt.RecordID)
+	if err != nil {
+		return fmt.Errorf("securityawareness: parse evidence id: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE security_training_assignments
+SET evidence_record_id = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2`, tenantID, detail.ID, evidenceID); err != nil {
+		return fmt.Errorf("securityawareness: store evidence id: %w", err)
+	}
+	detail.EvidenceRecordID = &evidenceID
+	return nil
 }
 
 // completeAssignment is the tx-level core of Complete, shared with the CSV
@@ -165,25 +246,6 @@ RETURNING id, campaign_id, person_id, due_at, assigned_at, completed_at, complet
 		return AssignmentDetail{}, err
 	}
 	return out, nil
-}
-
-func (s *Store) SetEvidenceRecordID(ctx context.Context, assignmentID, evidenceRecordID uuid.UUID) error {
-	if assignmentID == uuid.Nil || evidenceRecordID == uuid.Nil {
-		return ErrInvalidInput
-	}
-	return translateErr(s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
-		tag, err := tx.Exec(ctx, `
-UPDATE security_training_assignments
-SET evidence_record_id = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2`, tenantID, assignmentID, evidenceRecordID)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
-		}
-		return nil
-	}))
 }
 
 func (s *Store) RecordPhishing(ctx context.Context, in PhishingInput) (PhishingResult, error) {
@@ -354,8 +416,12 @@ ORDER BY a.due_at ASC, a.id ASC`, tenantID, from.UTC(), to.UTC(), asOf.UTC())
 	return out, translateErr(err)
 }
 
-func BuildCompletionEvidence(detail AssignmentDetail, actorID string) (*evidencev1.EvidenceRecord, error) {
-	if detail.ID == uuid.Nil || detail.CompletedAt == nil || detail.CompletionSource == nil {
+// BuildCompletionEvidence builds the completion's ledger record, observed at
+// observedAt: the instant the platform records it (see
+// ensureCompletionEvidence). The completion's own instant is the payload's
+// completed_at.
+func BuildCompletionEvidence(detail AssignmentDetail, actorID string, observedAt time.Time) (*evidencev1.EvidenceRecord, error) {
+	if detail.ID == uuid.Nil || detail.CompletedAt == nil || detail.CompletionSource == nil || observedAt.IsZero() {
 		return nil, ErrInvalidInput
 	}
 	payload := map[string]any{
@@ -379,13 +445,13 @@ func BuildCompletionEvidence(detail AssignmentDetail, actorID string) (*evidence
 		IdempotencyKey: trainingEvidenceKey(detail.ID, *detail.CompletedAt),
 		EvidenceKind:   EvidenceKindTrainingCompletion,
 		SchemaVersion:  EvidenceVersionTraining,
-		ControlId:      "soc2_cc1_4_competence_training",
+		ControlId:      CC14ControlRef,
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "scf_anchor", Values: []string{"SAT-04"}},
 			{Key: "framework_controls", Values: []string{"SOC2:CC1.4", "ISO27001:A.6.3"}},
 			{Key: "metric", Values: []string{MetricTrainingCompletionRate}},
 		},
-		ObservedAt: timestamppb.New(detail.CompletedAt.UTC()),
+		ObservedAt: timestamppb.New(observedAt.UTC()),
 		Result:     evidencev1.Result_RESULT_PASS,
 		Payload:    ps,
 		SourceAttribution: &evidencev1.SourceAttribution{
@@ -404,6 +470,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.
 	if err != nil {
 		return fmt.Errorf("securityawareness: parse tenant id: %w", err)
 	}
+	ctx, audit := ingest.WithAuditOutbox(ctx)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("securityawareness: begin tx: %w", err)
@@ -418,6 +485,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("securityawareness: commit: %w", err)
 	}
+	audit.Flush(ctx)
 	return nil
 }
 
@@ -534,8 +602,21 @@ func timePtrUTC(v *time.Time) *time.Time {
 	return &t
 }
 
+// MaxCompletedAtLead is how far after the recording instant a completed_at
+// may fall. It allows for clock skew, the same hour cc1_4 allows before it
+// treats a completed_at as unreadable. Past it the completion is refused: a
+// typo such as 2027 would otherwise be stored as a current completion.
+const MaxCompletedAtLead = time.Hour
+
+func completedInFuture(completedAt, now time.Time) bool {
+	return completedAt.After(now.Add(MaxCompletedAtLead))
+}
+
+// trainingEvidenceKey keys one completion of one assignment at its exact
+// instant, so re-completing at another instant the same day is a new record
+// rather than an idempotency mismatch.
 func trainingEvidenceKey(assignmentID uuid.UUID, completedAt time.Time) string {
-	sum := sha256.Sum256([]byte("security_awareness.training_completion|" + assignmentID.String() + "|" + completedAt.UTC().Format("2006-01-02")))
+	sum := sha256.Sum256([]byte("security_awareness.training_completion|" + assignmentID.String() + "|" + completedAt.UTC().Format(time.RFC3339Nano)))
 	return hex.EncodeToString(sum[:])
 }
 
