@@ -804,20 +804,50 @@ func isClosingFence(l, marker string) bool {
 
 // isHardBreak reports whether line l, trimmed to t, ends in a CommonMark
 // hard break: two or more spaces and nothing else after the content, on a
-// line that is not an ATX heading and is followed by a non-blank line. A
-// break before a blank line or at the end of the body renders nothing.
+// line that is not an ATX heading, followed by a line that continues the
+// same block. A break before a blank line, before a line that starts a new
+// block, or at the end of the body renders nothing.
 func isHardBreak(l, t string, rest []string) bool {
 	tail := l[len(t):]
-	if len(tail) < 2 || strings.Trim(tail, " ") != "" {
+	if len(tail) < 2 || strings.Trim(tail, " ") != "" || isATXHeading(t) {
 		return false
 	}
-	if h, ok := fenceIndent(t); ok && strings.HasPrefix(h, "#") {
-		n := len(h) - len(strings.TrimLeft(h, "#"))
-		if n <= 6 && (n == len(h) || h[n] == ' ' || h[n] == '\t') {
-			return false
-		}
+	return len(rest) > 0 && strings.TrimSpace(rest[0]) != "" && !startsBlock(rest[0])
+}
+
+// isATXHeading reports whether a line is a `#` to `######` heading.
+func isATXHeading(l string) bool {
+	h, ok := fenceIndent(l)
+	if !ok || !strings.HasPrefix(h, "#") {
+		return false
 	}
-	return len(rest) > 0 && strings.TrimSpace(rest[0]) != ""
+	n := len(h) - len(strings.TrimLeft(h, "#"))
+	return n <= 6 && (n == len(h) || h[n] == ' ' || h[n] == '\t')
+}
+
+// startsBlock reports whether a line begins a block that ends the one
+// before it: a heading, a blockquote, a list item, a fence, or a `-`/`=`
+// line (a setext underline or a thematic break). Any of these closes the
+// paragraph, so trailing spaces on the line before render no break.
+func startsBlock(l string) bool {
+	t, ok := fenceIndent(l)
+	if !ok || t == "" {
+		return false
+	}
+	switch t[0] {
+	case '#':
+		return isATXHeading(t)
+	case '>', '=':
+		return true
+	case '-', '*', '+':
+		return len(t) == 1 || t[1] == ' ' || t[1] == '\t' ||
+			(t[0] != '+' && strings.Trim(t, string(t[0])+" \t") == "")
+	case '`', '~':
+		return openingFence(t) != ""
+	}
+	n := len(t) - len(strings.TrimLeft(t, "0123456789"))
+	return n >= 1 && n <= 9 && n < len(t) && (t[n] == '.' || t[n] == ')') &&
+		(n+1 == len(t) || t[n+1] == ' ' || t[n+1] == '\t')
 }
 
 // bodyDrifted reports whether a page body differs in content from the

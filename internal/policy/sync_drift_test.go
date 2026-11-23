@@ -2,7 +2,10 @@
 // whitespace normalisation. No Postgres, no build tag (slice-353 Q-2).
 package policy
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeDriftBody(t *testing.T) {
 	t.Parallel()
@@ -35,6 +38,13 @@ func TestNormalizeDriftBody(t *testing.T) {
 		{"hard break at end is stripped", "a\nb  ", "a\nb"},
 		{"heading trailing spaces stripped", "# T  \nb", "# T\nb"},
 		{"tab after spaces is not a hard break", "a  \t\nb", "a\nb"},
+		{"no break before a list item", "- one  \n- two  \n* three  \n+ four  \n1. five  \n2) six", "- one\n- two\n* three\n+ four\n1. five\n2) six"},
+		{"no break before a heading or quote", "a  \n## b\nc  \n> d", "a\n## b\nc\n> d"},
+		{"no break before a fence", "a  \n```\nx\n```", "a\n```\nx\n```"},
+		{"no break before setext or rule", "a  \n===\nb  \n---\nc  \n***", "a\n===\nb\n---\nc\n***"},
+		{"hard break in a list item continuation", "- one  \n  two", "- one  \n  two"},
+		{"hyphenated word continues the paragraph", "a  \n-b", "a  \n-b"},
+		{"number without marker continues", "a  \n2026 was", "a  \n2026 was"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,5 +105,18 @@ func TestBodyDriftedMarkdown(t *testing.T) {
 				t.Errorf("bodyDrifted(stored, %q) = %v; want %v", tc.page, got, tc.drift)
 			}
 		})
+	}
+}
+
+// TestBodyDriftedConverterReflow mirrors the reflow fixture in
+// internal/api/policies/sync_drift_2910_integration_test.go: every line
+// gains "  \r\n" and blank runs grow. None of those trailing spaces sits
+// where CommonMark renders a break, so it is still not drift (#2984).
+func TestBodyDriftedConverterReflow(t *testing.T) {
+	t.Parallel()
+	const body = "# Vendor Policy\n\nVendors are reviewed yearly.\n\n- Tier 1: annual\n- Tier 2: biennial"
+	page := strings.ReplaceAll(strings.ReplaceAll(body, "\n\n", "\n\n\n"), "\n", "  \r\n") + "\r\n\r\n"
+	if bodyDrifted(body, page) {
+		t.Errorf("bodyDrifted(%q, %q) = true; want false", body, page)
 	}
 }
