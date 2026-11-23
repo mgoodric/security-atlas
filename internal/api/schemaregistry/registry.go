@@ -113,6 +113,10 @@ func DefaultSeed() []KindVersion {
 		// policy requires MFA (sign_on_policy_id, sign_on_mfa_required,
 		// reason).
 		{Kind: "okta.app_assignment.v1", Version: "1.1.0"},
+		// #2951: 1.2.0 adds session_mfa_required + session_reason, from the
+		// global session policy; sign_on_mfa_required now decides
+		// AUTH_METHOD_CHAIN rules.
+		{Kind: "okta.app_assignment.v1", Version: "1.2.0"},
 		{Kind: "okta.user_lifecycle.v1", Version: "1.0.0"},
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},

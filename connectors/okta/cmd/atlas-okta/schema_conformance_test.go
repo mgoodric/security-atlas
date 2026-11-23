@@ -72,10 +72,11 @@ func TestBuildMFAPolicyRecord_PayloadConformsToV2(t *testing.T) {
 	}
 }
 
-// #2828: every shape buildAppAssignmentRecord emits at 1.1.0 passes the
-// registry's validator: classified or not, MFA decided either way or
-// undecided with a reason, with or without a sign-in policy.
-func TestBuildAppAssignmentRecord_PayloadConformsTo110(t *testing.T) {
+// #2828: every shape buildAppAssignmentRecord emits passes the registry's
+// validator: classified or not, MFA decided either way or undecided with a
+// reason, with or without a sign-in policy. #2951 moved it to 1.2.0, which
+// adds the global session policy verdict.
+func TestBuildAppAssignmentRecord_PayloadConformsTo120(t *testing.T) {
 	t.Parallel()
 	reg, err := schemaregistry.NewEmbedded(schemaregistry.PlatformSchemasFS())
 	if err != nil {
@@ -92,12 +93,15 @@ func TestBuildAppAssignmentRecord_PayloadConformsTo110(t *testing.T) {
 	cases := map[string]func(a *oktaapps.Assignment){
 		"admin_mfa": func(a *oktaapps.Assignment) {
 			a.Classification, a.SignOnPolicyID, a.SignOnMFARequired = oktaapps.ClassAdmin, "rst1", &yes
+			a.SessionMFARequired = &no
 		},
 		"infrastructure_1fa": func(a *oktaapps.Assignment) {
 			a.Classification, a.SignOnPolicyID, a.SignOnMFARequired = oktaapps.ClassInfrastructure, "rst2", &no
+			a.SessionMFARequired = &yes
 		},
 		"standard_undecided": func(a *oktaapps.Assignment) {
 			a.Classification, a.SignOnPolicyID, a.Reason = oktaapps.ClassStandard, "rst3", "rule r1 verification method is not ASSURANCE"
+			a.SessionReason = "global session policies: HTTP 403"
 		},
 		"unclassified_no_policy_no_groups": func(a *oktaapps.Assignment) {
 			a.AssignedGroupIDs, a.AssignedGroupCount, a.SignOnMode = nil, 0, ""
@@ -113,8 +117,8 @@ func TestBuildAppAssignmentRecord_PayloadConformsTo110(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildAppAssignmentRecord: %v", err)
 			}
-			if rec.GetEvidenceKind() != "okta.app_assignment.v1" || rec.GetSchemaVersion() != "1.1.0" {
-				t.Fatalf("kind/version = %s/%s; want okta.app_assignment.v1/1.1.0", rec.GetEvidenceKind(), rec.GetSchemaVersion())
+			if rec.GetEvidenceKind() != "okta.app_assignment.v1" || rec.GetSchemaVersion() != "1.2.0" {
+				t.Fatalf("kind/version = %s/%s; want okta.app_assignment.v1/1.2.0", rec.GetEvidenceKind(), rec.GetSchemaVersion())
 			}
 			body, err := protojson.Marshal(rec.GetPayload())
 			if err != nil {
@@ -126,6 +130,12 @@ func TestBuildAppAssignmentRecord_PayloadConformsTo110(t *testing.T) {
 			p := rec.GetPayload().AsMap()
 			if _, ok := p["sign_on_mfa_required"]; ok != (a.SignOnMFARequired != nil) {
 				t.Errorf("sign_on_mfa_required present = %v, want %v", ok, a.SignOnMFARequired != nil)
+			}
+			if _, ok := p["session_mfa_required"]; ok != (a.SessionMFARequired != nil) {
+				t.Errorf("session_mfa_required present = %v, want %v", ok, a.SessionMFARequired != nil)
+			}
+			if _, ok := p["session_reason"]; ok != (a.SessionReason != "") {
+				t.Errorf("session_reason present = %v, want %v", ok, a.SessionReason != "")
 			}
 			if _, ok := p["classification"]; ok != (a.Classification != "") {
 				t.Errorf("classification present = %v, want %v", ok, a.Classification != "")

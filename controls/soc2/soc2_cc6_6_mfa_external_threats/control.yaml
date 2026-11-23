@@ -16,28 +16,47 @@ description: |
   The operator classifies apps on the connector (`--admin-apps`,
   `--infrastructure-apps`, lists of Okta app ids), and every other app is
   then `standard`, which the query skips, as it skips an app that is not
-  ACTIVE. The connector sets `sign_on_mfa_required` from the app's app
-  sign-in policy (the policy its `_links.accessPolicy` names): true when
-  every active rule denies access or allows it with an assurance method
-  whose factor mode is 2FA, false when any active rule allows 1FA,
-  whatever that rule's conditions.
+  ACTIVE.
 
-  One admin or infrastructure app without MFA fails the control, whatever
-  the other apps report, and so does a mistyped field. An app whose
-  `sign_on_mfa_required` is omitted (no app sign-in policy, as in a
-  Classic Engine org; a rule using an authentication method chain; rules
-  the connector could not read) leaves the control inconclusive unless
-  another app fails it. An app with no `classification` (the operator
+  An app requires MFA when either of two policies does, and the record
+  says which. `sign_on_mfa_required` is the app's own app sign-in policy
+  (the policy its `_links.accessPolicy` names): true when every active
+  rule denies access or allows it with an assurance method whose factor
+  mode is 2FA, or with an authentication method chain whose every path
+  takes factors of two classes (knowledge, possession, or a possession
+  factor that demands a PIN or biometric); false when any active rule
+  allows 1FA or a single-class chain path, whatever that rule's
+  conditions. `session_mfa_required` is the org's global session policy,
+  which every sign-in passes before any app: true when every reachable
+  active rule denies access or requires a factor, false when a reachable
+  rule allows a session without one. A rule after a catch-all rule of the
+  same policy is unreachable, and so is every policy after one whose only
+  condition includes the Everyone group, with no group or user excluded,
+  and that has an active catch-all rule; any other rule counts as
+  reachable.
+
+  One admin or infrastructure app for which both say false fails the
+  control, whatever the other apps report, and so does a mistyped field.
+  An app for which neither says true and one is omitted (no app sign-in
+  policy, as in a Classic Engine org; an identity-proofing rule, or a
+  chain using an authenticator whose factor class depends on its set-up,
+  such as Duo or an external IdP; policies the connector could not read;
+  a record from a connector older than #2951, which does not read the
+  global session policy) leaves the control inconclusive unless another
+  app fails it. An app with no `classification` (the operator
   classified no app, or a 1.0.0 record from a connector older than #2828)
   may be admin: it passes only if it requires MFA, and is otherwise
   inconclusive. With no app in scope, the control is inconclusive. When
   two records for one app tie on `observed_at`, the worse verdict decides.
   The connector's per-record verdict is not used.
 
-  Not checked: MFA required by the global session policy rather than the
-  app sign-in policy does not count, so an app that relies on it fails.
-  Whether an app is internet-facing is not read; the operator's
-  classification stands in for it. Only the records the control receives
+  Not checked: group membership. The global session verdict is for the
+  whole org, so a reachable rule that lets some users establish a session
+  with one factor counts against every app, even one those users are not
+  assigned to; requiring 2FA in that app's own sign-in policy passes it.
+  How long a factor is remembered (`factorPromptMode`, `reauthenticateIn`)
+  is not read. Whether an app is internet-facing is not read; the
+  operator's classification stands in for it. Only the records the control receives
   are checked: an app the connector did not report is not seen.
 
 scf_anchor_id: IAC-37
@@ -51,7 +70,7 @@ evidence_queries:
   - id: mfa_enforced_on_admin_apps
     language: sql
     evidence_kind: okta.app_assignment.v1
-    description: "Every active admin or infrastructure Okta app's latest record shows its app sign-in policy requires MFA"
+    description: "Every active admin or infrastructure Okta app's latest record shows its app sign-in policy or the global session policy requires MFA"
     expression: |
       SELECT CASE
                WHEN count(*) FILTER (WHERE in_scope) = 0 THEN 'inconclusive'
@@ -78,8 +97,14 @@ evidence_queries:
                    coalesce(payload->>'status' = 'ACTIVE', false)
                      AND payload->'classification' IS DISTINCT FROM '"standard"'::jsonb AS in_scope,
                    CASE
-                     WHEN payload->'sign_on_mfa_required' IS NULL THEN 1
-                     WHEN payload->'sign_on_mfa_required' = 'true'::jsonb THEN 2
+                     WHEN payload->'sign_on_mfa_required' IS NOT NULL
+                          AND jsonb_typeof(payload->'sign_on_mfa_required') <> 'boolean' THEN 0
+                     WHEN payload->'session_mfa_required' IS NOT NULL
+                          AND jsonb_typeof(payload->'session_mfa_required') <> 'boolean' THEN 0
+                     WHEN payload->'sign_on_mfa_required' = 'true'::jsonb
+                          OR payload->'session_mfa_required' = 'true'::jsonb THEN 2
+                     WHEN payload->'sign_on_mfa_required' IS NULL
+                          OR payload->'session_mfa_required' IS NULL THEN 1
                      ELSE 0
                    END AS mfa
             FROM evidence
