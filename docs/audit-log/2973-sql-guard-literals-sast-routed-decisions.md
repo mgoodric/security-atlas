@@ -148,7 +148,7 @@ set: the `scf:` rows would have appeared in it, and `routed.Within` would
 have closed its `control_ref` leg for sast. Both change a frozen period
 (invariant 10).
 
-- **Migration `20261302000000`** adds `evidence_routing_kind_cutover`
+- **Migration `20261304000000`** adds `evidence_routing_kind_cutover`
   (`evidence_kind` PK, `cut_at` default `now()`), seeded with sast. Global,
   no RLS, `SELECT` to `atlas_app`, the same shape as the first cutover.
 - **`routed.Cutovers`** holds the first cutover and the late kinds' own
@@ -172,8 +172,8 @@ have closed its `control_ref` leg for sast. Both change a frozen period
   bundle's `atlas-migrate` step runs right before `atlas` serves. The
   controlled-upgrade path in `docs-site/docs/upgrade.md` stops `atlas`
   first and now says to freeze nothing between its migrate and start steps.
-  The migration was renumbered twice (`…300` → `…301` → `…302`) to stay
-  above #3001 and #3011.
+  The migration was renumbered three times (`…300` → `…301` → `…302` → `…304`) to stay
+  above #3001, #3011 and #3013.
 
 ## D6 — Supersedes two stock bundles
 
