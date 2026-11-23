@@ -1,6 +1,6 @@
 bundle_schema_version: "1"
 bundle_id: soc2_cc6_7_encryption_in_transit
-title: "Data is encrypted in transit; storage encryption-at-rest enforced"
+title: "S3 buckets enforce default encryption at rest"
 description: |
   Data moves, and leaves, only by approved paths and to approved
   recipients (TSC CC6.7). The auditor-tested manifestation has two prongs:
@@ -8,8 +8,9 @@ description: |
   encryption-at-rest enforcement on data-bearing stores. This bundle
   covers prong (b) with AWS S3 bucket encryption; prong (a) is covered by
   deployment-level controls outside this bundle (load balancer and CDN
-  config). NOTE: this scoping is a judgment call; see the review log for
-  the alternative.
+  config), and no platform check collects in-transit evidence yet
+  (#2993). The bundle id still says "in transit": renaming it would leave
+  the old control active beside the new one (#2950).
 
   What runs today: a SQL query over the payloads of the AWS connector's
   `aws.s3.bucket_encryption_state.v1` records, one per bucket per
