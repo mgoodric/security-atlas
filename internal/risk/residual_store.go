@@ -38,6 +38,14 @@ import (
 // inherent and the operator is told why.
 const WarningNoControlsLinked = "no_controls_linked"
 
+// ErrUnderivable marks a deterministic derive failure: the risk row itself
+// cannot yield a residual (a malformed non-empty inherent_score, or a
+// methodology with no scalar score). Retrying reads the same row and fails
+// the same way, so the residual subscriber terms the message instead of
+// redelivering it (#2964). Transient DB and connection errors are never
+// wrapped with it.
+var ErrUnderivable = errors.New("risk: residual underivable")
+
 // effectivenessEngine is the slice-012 surface the deriver depends on. Declared
 // as an interface so the deriver is unit-testable and decoupled from
 // eval.Engine's concrete type. *eval.Engine satisfies it.
@@ -144,7 +152,7 @@ func (d *ResidualDeriver) Derive(ctx context.Context, riskID uuid.UUID, recomput
 	if !unscored {
 		inherent, err = inherentScalar(methodology, inherentJSON)
 		if err != nil {
-			return ResidualResult{}, fmt.Errorf("risk %s inherent_score: %w", riskID, err)
+			return ResidualResult{}, fmt.Errorf("%w: risk %s inherent_score: %w", ErrUnderivable, riskID, err)
 		}
 	}
 
