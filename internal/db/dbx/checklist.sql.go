@@ -333,9 +333,9 @@ SELECT
     EXISTS (
         SELECT 1 FROM evidence_records e
         WHERE e.tenant_id = c.tenant_id
-          AND (e.control_id = c.id OR e.control_ref = c.id::text
+          AND (e.control_id = c.id OR (e.control_ref = c.id::text AND (e.evidence_kind IS NULL OR e.evidence_kind <> ALL($2::text[])))
               OR (e.control_id IS NULL
-                  AND e.evidence_kind = ANY($2::text[])
+                  AND e.evidence_kind = ANY($3::text[])
                   AND c.evidence_queries @> jsonb_build_array(
                         jsonb_build_object('evidence_kind', e.evidence_kind))))
     ) AS has_evidence
@@ -347,6 +347,7 @@ ORDER BY c.control_family ASC, c.title ASC, c.id ASC
 
 type ListInScopeControlsForChecklistParams struct {
 	TenantID     pgtype.UUID `json:"tenant_id"`
+	RoutedKinds  []string    `json:"routed_kinds"`
 	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
@@ -380,7 +381,7 @@ type ListInScopeControlsForChecklistRow struct {
 // declare. RLS scopes the read to the tenant; the WHERE tenant_id clause is
 // belt-and-suspenders. Ordered for stable rendering.
 func (q *Queries) ListInScopeControlsForChecklist(ctx context.Context, arg ListInScopeControlsForChecklistParams) ([]ListInScopeControlsForChecklistRow, error) {
-	rows, err := q.db.Query(ctx, listInScopeControlsForChecklist, arg.TenantID, arg.UnboundKinds)
+	rows, err := q.db.Query(ctx, listInScopeControlsForChecklist, arg.TenantID, arg.RoutedKinds, arg.UnboundKinds)
 	if err != nil {
 		return nil, err
 	}

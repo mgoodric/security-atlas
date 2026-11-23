@@ -135,6 +135,7 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 		// via a window column, and caps to MaxControlsPerSummary for the corpus.
 		rows, err := q.ListActiveControlsForPortfolio(ctx, dbx.ListActiveControlsForPortfolioParams{
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 			TenantID:     pgUUID(tenantID),
 			Limit:        int32(MaxControlsPerSummary),
 			Family:       family,
@@ -159,6 +160,7 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 
 			total, err := q.CountEvidenceRecordsByControl(ctx, dbx.CountEvidenceRecordsByControlParams{
 				UnboundKinds: routed.ControlFreeKinds(),
+				RoutedKinds:  routed.Kinds(),
 				TenantID:     pgUUID(tenantID),
 				ControlID:    pgUUID(ctrlID),
 				ControlRef:   ctrlID.String(),
@@ -170,6 +172,7 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 
 			recs, err := q.ListEvidenceRecordsByControl(ctx, dbx.ListEvidenceRecordsByControlParams{
 				UnboundKinds: routed.ControlFreeKinds(),
+				RoutedKinds:  routed.Kinds(),
 				TenantID:     pgUUID(tenantID),
 				ControlID:    pgUUID(ctrlID),
 				ControlRef:   ctrlID.String(),

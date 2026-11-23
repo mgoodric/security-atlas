@@ -15,9 +15,9 @@ const countEvidenceRecordsByControl = `-- name: CountEvidenceRecordsByControl :o
 SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
        OR (control_id IS NULL
-           AND evidence_kind = ANY($4::text[])
+           AND evidence_kind = ANY($5::text[])
            AND EXISTS (SELECT 1 FROM controls uc
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
@@ -28,6 +28,7 @@ type CountEvidenceRecordsByControlParams struct {
 	TenantID     pgtype.UUID `json:"tenant_id"`
 	ControlID    pgtype.UUID `json:"control_id"`
 	ControlRef   string      `json:"control_ref"`
+	RoutedKinds  []string    `json:"routed_kinds"`
 	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
@@ -40,6 +41,7 @@ func (q *Queries) CountEvidenceRecordsByControl(ctx context.Context, arg CountEv
 		arg.TenantID,
 		arg.ControlID,
 		arg.ControlRef,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 	)
 	var count int64
@@ -51,14 +53,14 @@ const countEvidenceRecordsByControlBeforeHorizon = `-- name: CountEvidenceRecord
 SELECT count(*)
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($4::text[])))
        OR (control_id IS NULL
-           AND evidence_kind = ANY($4::text[])
+           AND evidence_kind = ANY($5::text[])
            AND EXISTS (SELECT 1 FROM controls uc
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
-  AND observed_at <= COALESCE($5::timestamptz,
+  AND observed_at <= COALESCE($6::timestamptz,
                               'infinity'::timestamptz)
 `
 
@@ -66,6 +68,7 @@ type CountEvidenceRecordsByControlBeforeHorizonParams struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	ControlID    pgtype.UUID        `json:"control_id"`
 	ControlRef   string             `json:"control_ref"`
+	RoutedKinds  []string           `json:"routed_kinds"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
 }
@@ -80,6 +83,7 @@ func (q *Queries) CountEvidenceRecordsByControlBeforeHorizon(ctx context.Context
 		arg.TenantID,
 		arg.ControlID,
 		arg.ControlRef,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 		arg.FrozenAt,
 	)
@@ -506,9 +510,9 @@ const listEvidenceRecordsByControl = `-- name: ListEvidenceRecordsByControl :man
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($6::text[])))
        OR (control_id IS NULL
-           AND evidence_kind = ANY($6::text[])
+           AND evidence_kind = ANY($7::text[])
            AND EXISTS (SELECT 1 FROM controls uc
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
@@ -523,6 +527,7 @@ type ListEvidenceRecordsByControlParams struct {
 	ControlRef   string      `json:"control_ref"`
 	Limit        int32       `json:"limit"`
 	Offset       int32       `json:"offset"`
+	RoutedKinds  []string    `json:"routed_kinds"`
 	UnboundKinds []string    `json:"unbound_kinds"`
 }
 
@@ -539,6 +544,7 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 		arg.ControlRef,
 		arg.Limit,
 		arg.Offset,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 	)
 	if err != nil {
@@ -588,14 +594,14 @@ const listEvidenceRecordsByControlBeforeHorizon = `-- name: ListEvidenceRecordsB
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE evidence_records.tenant_id = $1
-  AND (control_id = $2 OR control_ref = $3
+  AND (control_id = $2 OR (control_ref = $3 AND (evidence_kind IS NULL OR evidence_kind <> ALL($6::text[])))
        OR (control_id IS NULL
-           AND evidence_kind = ANY($6::text[])
+           AND evidence_kind = ANY($7::text[])
            AND EXISTS (SELECT 1 FROM controls uc
                        WHERE uc.tenant_id = evidence_records.tenant_id AND uc.id = $2
                          AND uc.evidence_queries @> jsonb_build_array(
                                jsonb_build_object('evidence_kind', evidence_records.evidence_kind)))))
-  AND observed_at <= COALESCE($7::timestamptz,
+  AND observed_at <= COALESCE($8::timestamptz,
                               'infinity'::timestamptz)
 ORDER BY observed_at DESC
 LIMIT $4 OFFSET $5
@@ -607,6 +613,7 @@ type ListEvidenceRecordsByControlBeforeHorizonParams struct {
 	ControlRef   string             `json:"control_ref"`
 	Limit        int32              `json:"limit"`
 	Offset       int32              `json:"offset"`
+	RoutedKinds  []string           `json:"routed_kinds"`
 	UnboundKinds []string           `json:"unbound_kinds"`
 	FrozenAt     pgtype.Timestamptz `json:"frozen_at"`
 }
@@ -630,6 +637,7 @@ func (q *Queries) ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context,
 		arg.ControlRef,
 		arg.Limit,
 		arg.Offset,
+		arg.RoutedKinds,
 		arg.UnboundKinds,
 		arg.FrozenAt,
 	)

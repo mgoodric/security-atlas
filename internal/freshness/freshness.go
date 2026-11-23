@@ -89,6 +89,7 @@ func (s *Store) Refresh(ctx context.Context) (int, error) {
 		rows, err := q.ListControlsWithLatestEvidence(ctx, dbx.ListControlsWithLatestEvidenceParams{
 			TenantID:     pgUUID(tenantID),
 			UnboundKinds: routed.ControlFreeKinds(),
+			RoutedKinds:  routed.Kinds(),
 		})
 		if err != nil {
 			return fmt.Errorf("list controls with latest evidence: %w", err)
